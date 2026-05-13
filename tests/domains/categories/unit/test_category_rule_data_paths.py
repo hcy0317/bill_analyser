@@ -3,92 +3,23 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from typing import Any, cast
+from typing import Any
 
-import pytest
-from flask import Flask
-
-from bill_analyser.api.routes import category_rules as category_rules_module
+from bill_analyser.core.default_category_seed import ensure_default_category_seed
 from tests.user_cleanup_support import register_test_user_for_cleanup
-
-category_rules_module = cast("Any", category_rules_module)
-
-
-@pytest.fixture(name="rules_route_app")
-def rules_route_app_fixture() -> Flask:
-    """Create a tiny Flask app for direct rules route tests."""
-    app = Flask(__name__)
-    app.config["TESTING"] = True
-    return app
-
-
-class FakeReloadEngine:
-    """Category engine stub that records cache invalidation and reloads."""
-
-    def __init__(self, name: str) -> None:
-        self.name = name
-        self.invalidate_calls = 0
-        self.load_calls: list[tuple[Any, int]] = []
-
-    def invalidate_cache(self) -> None:
-        self.invalidate_calls += 1
-
-    async def load_rules_from_db(self, database: Any, user_id: int = 1) -> None:
-        self.load_calls.append((database, user_id))
-
-
-class FakeBillServiceWithEngine:
-    """BillService stub exposing its category engine."""
-
-    def __init__(self, category_engine: FakeReloadEngine) -> None:
-        self.category_engine = category_engine
-
-
-def _unwrap_all(func: Any) -> Any:
-    first = getattr(func, "__wrapped__", None)
-    if first is None:
-        return func
-
-    second = getattr(first, "__wrapped__", None)
-    return second or first
 
 
 def _run(coroutine: Any) -> Any:
-    """Run an async DB helper from route-level sync tests."""
+    """Run an async DB helper from sync tests."""
     return asyncio.run(coroutine)
 
 
-def test_category_rule_reload_refreshes_bill_service_engine_when_distinct(
-    rules_route_app: Flask,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Rule edits must refresh the import-preview BillService engine, not only the app-global engine."""
-    db = object()
-    global_engine = FakeReloadEngine("global")
-    bill_service_engine = FakeReloadEngine("bill-service")
-    bill_service = FakeBillServiceWithEngine(bill_service_engine)
-
-    monkeypatch.setattr(category_rules_module, "_run_async", _run)
-
-    with rules_route_app.app_context():
-        rules_route_app.config["BILL_SERVICE_INSTANCE"] = bill_service
-        category_rules_module._reload_engine(global_engine, db, user_id=42)
-
-    assert global_engine.invalidate_calls == 1
-    assert global_engine.load_calls == [(db, 42)]
-    assert bill_service_engine.invalidate_calls == 1
-    assert bill_service_engine.load_calls == [(db, 42)]
-
-
-def test_category_rules_migrate_route_is_authenticated_idempotent_and_user_scoped(
+def test_category_rule_migration_is_idempotent_and_user_scoped(
     client: Any,
     auth_context: dict[str, Any],
     db_instance: Any,
 ) -> None:
-    """Migrating legacy keywords should be repeat-safe and scoped to the current user."""
-    unauthorized = client.post("/api/category-rules/migrate")
-    assert unauthorized.status_code == 401
-
+    """Legacy keywords still migrate through the canonical DB helper after Flask route deletion."""
     suffix = f"{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
     user_id = int(auth_context["user"]["id"])
 
@@ -178,12 +109,10 @@ def test_category_rules_migrate_route_is_authenticated_idempotent_and_user_scope
     )
     assert other_category_id is not None
 
-    headers = auth_context["headers"]
-    response = client.post("/api/category-rules/migrate", headers=headers)
-    assert response.status_code == 200, response.get_data(as_text=True)
-    payload = response.get_json() or {}
-    assert payload["success"] is True
-    assert payload["data"] == {"migrated": 3, "skipped": 0}
+    assert _run(db_instance.migrate_keywords_to_rules(user_id=user_id)) == {
+        "migrated": 3,
+        "skipped": 0,
+    }
 
     migrated_rules = _run(
         db_instance.get_category_rules(
@@ -234,37 +163,17 @@ def test_category_rules_migrate_route_is_authenticated_idempotent_and_user_scope
 
     migrated_rule_id = migrated_rules[0]["id"]
     assert _run(db_instance.delete_category_rule(migrated_rule_id, user_id=user_id)) is True
+    assert _run(db_instance.migrate_keywords_to_rules(user_id=user_id)) == {
+        "migrated": 1,
+        "skipped": 2,
+    }
+    assert _run(db_instance.migrate_keywords_to_rules(user_id=user_id)) == {
+        "migrated": 0,
+        "skipped": 3,
+    }
 
-    recreate_response = client.post("/api/category-rules/migrate", headers=headers)
-    assert recreate_response.status_code == 200, recreate_response.get_data(as_text=True)
-    recreate_payload = recreate_response.get_json() or {}
-    assert recreate_payload["success"] is True
-    assert recreate_payload["data"] == {"migrated": 1, "skipped": 2}
-    recreated_rules = _run(
-        db_instance.get_category_rules(
-            user_id=user_id,
-            category_id=migrated_category_id,
-            enabled_only=False,
-        )
-    )
-    assert [rule["rule_expression"] for rule in recreated_rules] == [
-        "OR={星巴克,咖啡}+AND={早餐}+NOT={退款}",
-    ]
-
-    repeat_response = client.post("/api/category-rules/migrate", headers=headers)
-    assert repeat_response.status_code == 200, repeat_response.get_data(as_text=True)
-    repeat_payload = repeat_response.get_json() or {}
-    assert repeat_payload["success"] is True
-    assert repeat_payload["data"] == {"migrated": 0, "skipped": 3}
-
-    engine_rules = client.application.config["CATEGORY_ENGINE_INSTANCE"].rules
-    assert any(
-        rule.get("main") == f"迁移测试{suffix}"
-        and rule.get("sub") == "咖啡"
-        and rule.get("keywords") == "OR={星巴克,咖啡}+AND={早餐}+NOT={退款}"
-        for rule in engine_rules
-    )
     engine = client.application.config["CATEGORY_ENGINE_INSTANCE"]
+    _run(engine.load_rules_from_db(db_instance, user_id=user_id))
     assert engine.match_category(
         {
             "counterparty": "商户A,咖啡+拿铁{热}|杯",
@@ -275,7 +184,7 @@ def test_category_rules_migrate_route_is_authenticated_idempotent_and_user_scope
     ) == (f"特殊字符迁移测试{suffix}", "完整字面量")
 
 
-def test_category_rules_migrate_route_imports_investment_settings_as_rule_expression(
+def test_category_rule_migration_imports_investment_settings_as_rule_expression(
     client: Any,
     auth_context: dict[str, Any],
     db_instance: Any,
@@ -283,7 +192,6 @@ def test_category_rules_migrate_route_imports_investment_settings_as_rule_expres
     """Investment recognition settings should migrate into canonical category rules."""
     suffix = f"{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
     user_id = int(auth_context["user"]["id"])
-    headers = auth_context["headers"]
 
     investment_category_id = _run(
         db_instance.create_category(
@@ -309,11 +217,10 @@ def test_category_rules_migrate_route_imports_investment_settings_as_rule_expres
     )
     assert updated_settings is not None
 
-    response = client.post("/api/category-rules/migrate", headers=headers)
-    assert response.status_code == 200, response.get_data(as_text=True)
-    payload = response.get_json() or {}
-    assert payload["success"] is True
-    assert payload["data"] == {"migrated": 1, "skipped": 0}
+    assert _run(db_instance.migrate_keywords_to_rules(user_id=user_id)) == {
+        "migrated": 1,
+        "skipped": 0,
+    }
 
     investment_rules = _run(
         db_instance.get_category_rules(
@@ -330,6 +237,7 @@ def test_category_rules_migrate_route_imports_investment_settings_as_rule_expres
     ]
 
     engine = client.application.config["CATEGORY_ENGINE_INSTANCE"]
+    _run(engine.load_rules_from_db(db_instance, user_id=user_id))
     assert engine.match_category(
         {
             "counterparty": "蚂蚁财富",
@@ -347,21 +255,17 @@ def test_category_rules_migrate_route_imports_investment_settings_as_rule_expres
         }
     ) == (None, None)
 
-    repeat_response = client.post("/api/category-rules/migrate", headers=headers)
-    assert repeat_response.status_code == 200, repeat_response.get_data(as_text=True)
-    repeat_payload = repeat_response.get_json() or {}
-    assert repeat_payload["success"] is True
-    assert repeat_payload["data"] == {"migrated": 0, "skipped": 1}
+    assert _run(db_instance.migrate_keywords_to_rules(user_id=user_id)) == {
+        "migrated": 0,
+        "skipped": 1,
+    }
 
 
-def test_category_rules_defaults_route_seeds_daily_categories_and_rules(
+def test_category_rule_default_seed_is_idempotent_after_registration(
     client: Any,
     db_instance: Any,
 ) -> None:
-    """Daily defaults should be present after registration and remain route-idempotent."""
-    unauthorized = client.post("/api/category-rules/defaults")
-    assert unauthorized.status_code == 401
-
+    """Daily defaults remain present and idempotent through the canonical seed helper."""
     suffix = f"{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
     username = f"test_defaults_{suffix}"
     password = "Test123456!"
@@ -384,33 +288,18 @@ def test_category_rules_defaults_route_seeds_daily_categories_and_rules(
     assert register_response.status_code in (200, 201), register_response.get_data(as_text=True)
     register_test_user_for_cleanup(db_instance, username)
 
-    login_response = client.post(
-        "/api/auth/login",
-        json={"loginName": username, "password": password},
-    )
-    assert login_response.status_code == 200, login_response.get_data(as_text=True)
-    token = (login_response.get_json() or {}).get("result", {}).get("token")
-    assert token
-    headers = {"Authorization": f"Bearer {token}"}
     user = _run(db_instance.get_user_by_username(username))
     user_id = int(user["id"])
 
-    response = client.post("/api/category-rules/defaults", headers=headers)
-    assert response.status_code == 200, response.get_data(as_text=True)
-    payload = response.get_json() or {}
-    assert payload["success"] is True
-    assert payload["data"]["categories"]["created"] == 0
-    assert payload["data"]["categories"]["skipped"] >= 80
-    assert payload["data"]["rules"]["created"] == 0
-    assert payload["data"]["rules"]["skipped"] >= 30
-    assert payload["data"]["rules"]["missingCategories"] == 0
+    result = _run(ensure_default_category_seed(db_instance, user_id=user_id))
+    assert result["categories"]["created"] == 0
+    assert result["categories"]["skipped"] >= 80
+    assert result["rules"]["created"] == 0
+    assert result["rules"]["skipped"] >= 30
+    assert result["rules"]["missingCategories"] == 0
 
-    food_delivery = _run(
-        db_instance.get_category_by_name("餐饮", "外卖", user_id=user_id)
-    )
-    salary = _run(
-        db_instance.get_category_by_name("工作收入", "工资", user_id=user_id)
-    )
+    food_delivery = _run(db_instance.get_category_by_name("餐饮", "外卖", user_id=user_id))
+    salary = _run(db_instance.get_category_by_name("工作收入", "工资", user_id=user_id))
     transfer = _run(
         db_instance.get_category_by_name("账户互转", "信用卡还款", user_id=user_id)
     )
@@ -428,6 +317,7 @@ def test_category_rules_defaults_route_seeds_daily_categories_and_rules(
     assert [rule["name"] for rule in delivery_rules] == ["default:餐饮/外卖"]
 
     engine = client.application.config["CATEGORY_ENGINE_INSTANCE"]
+    _run(engine.load_rules_from_db(db_instance, user_id=user_id))
     assert engine.match_category(
         {
             "counterparty": "美团外卖",
@@ -445,10 +335,7 @@ def test_category_rules_defaults_route_seeds_daily_categories_and_rules(
         }
     ) == ("工作收入", "工资")
 
-    repeat_response = client.post("/api/category-rules/defaults", headers=headers)
-    assert repeat_response.status_code == 200, repeat_response.get_data(as_text=True)
-    repeat_payload = repeat_response.get_json() or {}
-    assert repeat_payload["success"] is True
-    assert repeat_payload["data"]["categories"]["created"] == 0
-    assert repeat_payload["data"]["rules"]["created"] == 0
-    assert repeat_payload["data"]["rules"]["missingCategories"] == 0
+    repeat_result = _run(ensure_default_category_seed(db_instance, user_id=user_id))
+    assert repeat_result["categories"]["created"] == 0
+    assert repeat_result["rules"]["created"] == 0
+    assert repeat_result["rules"]["missingCategories"] == 0

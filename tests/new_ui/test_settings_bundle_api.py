@@ -88,6 +88,36 @@ def _create_template(
     return response.get_json()["result"]
 
 
+def _create_category_rule_via_db(
+    client,
+    auth_headers,
+    *,
+    category_id: int,
+    name: str,
+) -> int:
+    """Create a category rule directly after the Flask category-rules route shell is removed."""
+    from bill_analyser.api.app import db
+
+    user_id = _get_current_user_id(client, auth_headers)
+
+    async def _create() -> int:
+        rule_id = await db.create_category_rule(
+            {
+                "category_id": category_id,
+                "name": name,
+                "priority": 5,
+                "rule_expression": "OR={pytest-settings-bundle}",
+                "regex_enabled": False,
+                "enabled": True,
+            },
+            user_id=user_id,
+        )
+        assert rule_id is not None
+        return int(rule_id)
+
+    return asyncio.run(_create())
+
+
 def test_settings_bundle_export_redacts_llm_and_contains_requested_sections(client):
     suffix = int(time.time() * 1000)
     auth_headers = _build_isolated_auth_headers(client, "test_settings_bundle_export")
@@ -112,19 +142,12 @@ def test_settings_bundle_export_redacts_llm_and_contains_requested_sections(clie
         category_id=str(category["id"]),
         tag_id=str(tag["id"]),
     )
-    rule_response = client.post(
-        "/api/category-rules/",
-        headers=auth_headers,
-        json={
-            "category_id": int(category["id"]),
-            "name": f"bundle-rule-{suffix}",
-            "priority": 5,
-            "rule_expression": "OR={pytest-settings-bundle}",
-            "regex_enabled": False,
-            "enabled": True,
-        },
+    _create_category_rule_via_db(
+        client,
+        auth_headers,
+        category_id=int(category["id"]),
+        name=f"bundle-rule-{suffix}",
     )
-    assert rule_response.status_code == 201, rule_response.get_data(as_text=True)
     secret = "sk-settings-bundle-secret-should-not-export"
     llm_response = client.post(
         "/api/llm/configs",

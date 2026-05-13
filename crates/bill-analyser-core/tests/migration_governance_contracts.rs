@@ -65,12 +65,12 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(!rust_owned.contains(&("POST", "/api/accounts/{account_id}/transactions/clear")));
     assert!(!rust_owned.contains(&("GET", "/api/categories/rules")));
     assert!(!rust_owned.contains(&("PUT", "/api/categories/rules")));
-    assert!(rust_owned.contains(&("GET", "/api/category-rules/")));
-    assert!(rust_owned.contains(&("POST", "/api/category-rules/")));
-    assert!(rust_owned.contains(&("PUT", "/api/category-rules/{rule_id}")));
-    assert!(rust_owned.contains(&("DELETE", "/api/category-rules/{rule_id}")));
-    assert!(rust_owned.contains(&("POST", "/api/category-rules/{rule_id}/test")));
-    assert!(rust_owned.contains(&("POST", "/api/category-rules/reorder")));
+    assert!(!rust_owned.contains(&("GET", "/api/category-rules/")));
+    assert!(!rust_owned.contains(&("POST", "/api/category-rules/")));
+    assert!(!rust_owned.contains(&("PUT", "/api/category-rules/{rule_id}")));
+    assert!(!rust_owned.contains(&("DELETE", "/api/category-rules/{rule_id}")));
+    assert!(!rust_owned.contains(&("POST", "/api/category-rules/{rule_id}/test")));
+    assert!(!rust_owned.contains(&("POST", "/api/category-rules/reorder")));
     assert!(!rust_owned.contains(&("GET", "/api/rules/overview")));
     assert!(!rust_owned.contains(&("GET", "/api/settings/encryption/status")));
     let python_deleted_routes: Vec<_> = endpoints_by_owner(MigrationState::PythonDeleted)
@@ -92,6 +92,14 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     );
     assert!(python_deleted_routes.contains(&("GET", "/api/categories/rules")));
     assert!(python_deleted_routes.contains(&("PUT", "/api/categories/rules")));
+    assert!(python_deleted_routes.contains(&("GET", "/api/category-rules/")));
+    assert!(python_deleted_routes.contains(&("POST", "/api/category-rules/")));
+    assert!(python_deleted_routes.contains(&("PUT", "/api/category-rules/{rule_id}")));
+    assert!(python_deleted_routes.contains(&("DELETE", "/api/category-rules/{rule_id}")));
+    assert!(python_deleted_routes.contains(&("POST", "/api/category-rules/{rule_id}/test")));
+    assert!(python_deleted_routes.contains(&("POST", "/api/category-rules/defaults")));
+    assert!(python_deleted_routes.contains(&("POST", "/api/category-rules/migrate")));
+    assert!(python_deleted_routes.contains(&("POST", "/api/category-rules/reorder")));
     assert!(python_deleted_routes.contains(&("GET", "/api/rules/overview")));
     assert!(python_deleted_routes.contains(&("GET", "/api/settings/encryption/status")));
     assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
@@ -397,12 +405,11 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_proxy_remainder(
             .iter()
             .find(|entry| entry.endpoint == endpoint)
             .unwrap_or_else(|| panic!("taxonomy category-rules route is present: {endpoint}"));
-        assert_eq!(entry.state, MigrationState::RustOwnedVerified);
+        assert_eq!(entry.state, MigrationState::PythonDeleted);
         assert_eq!(entry.handler, RouteHandlerId::TaxonomyRuntime);
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessData);
-        assert!(entry
-            .unsupported_behavior
-            .contains("category-rule list/create/update/delete/reorder/defaults/migrate/test"));
+        assert!(entry.deletion_blockers.is_empty());
+        assert_eq!(entry.decision_required, DecisionRequired::None);
     }
 }
 
@@ -458,6 +465,14 @@ fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
             ("GET", "/api/categories/statistics"),
             ("GET", "/api/categories/tree"),
             ("POST", "/api/categories/update-all"),
+            ("GET", "/api/category-rules/"),
+            ("POST", "/api/category-rules/"),
+            ("DELETE", "/api/category-rules/{rule_id}"),
+            ("PUT", "/api/category-rules/{rule_id}"),
+            ("POST", "/api/category-rules/{rule_id}/test"),
+            ("POST", "/api/category-rules/defaults"),
+            ("POST", "/api/category-rules/migrate"),
+            ("POST", "/api/category-rules/reorder"),
             ("GET", "/api/rules/overview"),
             ("GET", "/api/settings/encryption/status")
         ]

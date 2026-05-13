@@ -19,7 +19,6 @@ from bill_analyser.api.routes import (
     backup,
     bills,
     budgets,
-    category_rules,
     insights,
     learning,
     llm,
@@ -145,7 +144,6 @@ def create_app():  # pylint: disable=too-many-statements
 
     # 注册其他业务蓝图
     flask_app.register_blueprint(bills.bp, url_prefix="/api/bills")
-    flask_app.register_blueprint(category_rules.bp, url_prefix="/api/category-rules")
     flask_app.register_blueprint(statistics.bp, url_prefix="/api/statistics")
     flask_app.register_blueprint(tags.bp, url_prefix="/api/tags")
     flask_app.register_blueprint(templates.bp, url_prefix="/api/templates")

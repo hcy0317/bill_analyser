@@ -71,7 +71,6 @@ ROUTE_DOMAIN_BY_SEGMENT = {
 
 ROUTE_DOMAIN_BY_FILE = {
     "calendar.py": "recurring-calendar",
-    "category_rules.py": "classification-rules",
     "encryption.py": "auth-security",
     "insights.py": "statistics-reporting",
     "learning.py": "ai-learning-llm",

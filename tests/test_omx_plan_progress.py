@@ -29,14 +29,14 @@ def test_mark_slice_persists_pr_and_merge_commit(tmp_path: Path) -> None:
         title="delete Flask categories route shell",
         pr="68",
         merge_commit="039518433",
-        next_slice="category_rules.py",
+        next_slice="tags.py",
     )
     omx_plan_progress.write_state(state_path, state)
 
     persisted = json.loads(state_path.read_text(encoding="utf-8"))
     assert persisted["completed_prs"] == ["68"]
     assert persisted["last_merged_commit"] == "039518433"
-    assert persisted["next_slice"] == "category_rules.py"
+    assert persisted["next_slice"] == "tags.py"
     assert persisted["plan_progress"]["phases"]["P4"]["slices"][0]["pr"] == "68"
 
 
