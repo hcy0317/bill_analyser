@@ -79,7 +79,6 @@ ROUTE_DOMAIN_BY_FILE = {
     "recurring.py": "recurring-calendar",
     "request_context_helpers.py": "api-runtime-shell",
     "settings_bundle.py": "settings-bundle",
-    "tags.py": "tags-templates",
     "templates.py": "tags-templates",
 }
 

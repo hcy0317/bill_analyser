@@ -39,74 +39,21 @@ def _auth_headers_fixture(client):
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_tag_rest_lifecycle(client, auth_headers):
-    """标签 CRUD 与排序应全部走 REST 接口。"""
-    create_response = client.post("/api/tags/", json={
-        "name": "REST标签A",
-        "color": "#FF0000",
-        "icon": "1"
-    }, headers=auth_headers)
-    assert create_response.status_code == 201
-    create_data = create_response.get_json()
-    assert create_data["success"] is True
-    assert create_data["result"]["name"] == "REST标签A"
-    tag_id = create_data["result"]["id"]
-
-    second_response = client.post("/api/tags/", json={
-        "name": "REST标签B",
-        "color": "#00FF00",
-        "icon": "2"
-    }, headers=auth_headers)
-    assert second_response.status_code == 201
-    second_tag_id = second_response.get_json()["result"]["id"]
-    assert second_tag_id
-
-    update_response = client.put(f"/api/tags/{tag_id}", json={
-        "id": str(tag_id),
-        "name": "REST标签A-已更新"
-    }, headers=auth_headers)
-    assert update_response.status_code == 200
-    update_data = update_response.get_json()
-    assert update_data["success"] is True
-    assert update_data["result"]["name"] == "REST标签A-已更新"
-
-    hide_response = client.put(f"/api/tags/{tag_id}", json={
-        "id": str(tag_id),
-        "hidden": True
-    }, headers=auth_headers)
-    assert hide_response.status_code == 200
-    hide_data = hide_response.get_json()
-    assert hide_data["success"] is True
-    assert hide_data["result"]["hidden"] in [True, 1]
-
-    move_response = client.put("/api/tags/display-orders", json={
-        "newDisplayOrders": [
-            {"id": str(tag_id), "displayOrder": 2},
-            {"id": str(second_tag_id), "displayOrder": 1}
-        ]
-    }, headers=auth_headers)
-    assert move_response.status_code == 200
-    move_data = move_response.get_json()
-    assert move_data["success"] is True
-    assert move_data["result"] is True
-
-    batch_response = client.post("/api/tags/batch", json={
-        "tags": [
-            {"name": "REST批量标签1"},
-            {"name": "REST批量标签2"}
-        ],
-        "skipExists": True
-    }, headers=auth_headers)
-    assert batch_response.status_code == 201
-    batch_data = batch_response.get_json()
-    assert batch_data["success"] is True
-    assert len(batch_data["result"]) == 2
-
-    delete_response = client.delete(f"/api/tags/{tag_id}", headers=auth_headers)
-    assert delete_response.status_code == 200
-    delete_data = delete_response.get_json()
-    assert delete_data["success"] is True
-    assert delete_data["result"] is True
+def test_tag_rest_routes_removed_from_flask_sidecar(client, auth_headers):
+    """标签 REST 主链已由 Rust runtime 接管，不再注册 Flask sidecar 蓝图。"""
+    assert client.get("/api/tags/", headers=auth_headers).status_code == 404
+    assert client.post("/api/tags/", json={"name": "REST标签A"}, headers=auth_headers).status_code in (404, 405)
+    assert client.put("/api/tags/1", json={"name": "REST标签A-已更新"}, headers=auth_headers).status_code in (404, 405)
+    assert client.delete("/api/tags/1", headers=auth_headers).status_code in (404, 405)
+    assert client.post("/api/tags/batch", json={"tags": [{"name": "批量"}]}, headers=auth_headers).status_code in (
+        404,
+        405,
+    )
+    assert client.put(
+        "/api/tags/display-orders",
+        json={"newDisplayOrders": [{"id": "1", "displayOrder": 1}]},
+        headers=auth_headers,
+    ).status_code in (404, 405)
 
 
 def test_legacy_account_bulk_action_routes_removed(client, auth_headers):

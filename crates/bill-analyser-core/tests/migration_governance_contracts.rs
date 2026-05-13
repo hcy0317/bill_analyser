@@ -102,6 +102,13 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(python_deleted_routes.contains(&("POST", "/api/category-rules/reorder")));
     assert!(python_deleted_routes.contains(&("GET", "/api/rules/overview")));
     assert!(python_deleted_routes.contains(&("GET", "/api/settings/encryption/status")));
+    assert!(python_deleted_routes.contains(&("GET", "/api/tags/")));
+    assert!(python_deleted_routes.contains(&("POST", "/api/tags/")));
+    assert!(python_deleted_routes.contains(&("GET", "/api/tags/{tag_id}")));
+    assert!(python_deleted_routes.contains(&("PUT", "/api/tags/{tag_id}")));
+    assert!(python_deleted_routes.contains(&("DELETE", "/api/tags/{tag_id}")));
+    assert!(python_deleted_routes.contains(&("POST", "/api/tags/batch")));
+    assert!(python_deleted_routes.contains(&("PUT", "/api/tags/display-orders")));
     assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
     assert!(rust_owned.contains(&("GET", "/api/ml/receipt-recognition/config")));
     assert!(!rust_owned.contains(&("GET", "/api/learning/rules")));
@@ -279,12 +286,11 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_proxy_remainder(
             .iter()
             .find(|entry| entry.endpoint == endpoint)
             .unwrap_or_else(|| panic!("taxonomy tag route is present: {endpoint}"));
-        assert_eq!(entry.state, MigrationState::RustOwnedVerified);
+        assert_eq!(entry.state, MigrationState::PythonDeleted);
         assert_eq!(entry.handler, RouteHandlerId::TaxonomyRuntime);
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
-        assert!(entry
-            .unsupported_behavior
-            .contains("tag CRUD/display-order/batch-create"));
+        assert!(entry.deletion_blockers.is_empty());
+        assert_eq!(entry.decision_required, DecisionRequired::None);
     }
 
     for endpoint in [
@@ -474,7 +480,14 @@ fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
             ("POST", "/api/category-rules/migrate"),
             ("POST", "/api/category-rules/reorder"),
             ("GET", "/api/rules/overview"),
-            ("GET", "/api/settings/encryption/status")
+            ("GET", "/api/settings/encryption/status"),
+            ("GET", "/api/tags/"),
+            ("POST", "/api/tags/"),
+            ("DELETE", "/api/tags/{tag_id}"),
+            ("GET", "/api/tags/{tag_id}"),
+            ("PUT", "/api/tags/{tag_id}"),
+            ("POST", "/api/tags/batch"),
+            ("PUT", "/api/tags/display-orders")
         ]
     );
     assert!(endpoints_by_owner(MigrationState::Planned).is_empty());

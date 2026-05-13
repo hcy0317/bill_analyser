@@ -38,13 +38,20 @@ def _create_account(client, auth_headers, *, name: str) -> dict[str, Any]:
 
 
 def _create_tag(client, auth_headers, *, name: str) -> dict[str, Any]:
-    response = client.post(
-        "/api/tags/",
-        headers=auth_headers,
-        json={"name": name, "color": "#11aa33", "icon": "tag", "hidden": False},
-    )
-    assert response.status_code == 201, response.get_data(as_text=True)
-    return response.get_json()["result"]
+    from bill_analyser.api.app import db
+
+    user_id = _get_current_user_id(client, auth_headers)
+
+    async def _create() -> dict[str, Any]:
+        tag_id = await db.create_tag(
+            {"name": name, "color": "#11aa33", "icon": "tag", "hidden": False},
+            user_id=user_id,
+        )
+        tag = await db.get_tag_by_id(tag_id, user_id=user_id)
+        assert tag is not None
+        return tag
+
+    return asyncio.run(_create())
 
 
 def _create_template(
