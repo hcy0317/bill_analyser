@@ -31,7 +31,7 @@
 - 模板域已完成契约梳理，但被重新评估为非低风险域：
   - 该域已完成首轮收口：前端模板调用统一走 REST，后端补齐 `templateType` 过滤、双表 DTO 映射、隐藏/排序与 `user_id` 收口；
   - 模板 rewrite 映射、`templates.bp_v1` 注册与实现均已移除；
-  - 模板域当前保留 REST 主链路；普通文件库上的模板主数据 CRUD/排序/DTO 读取经 Database facade 进入 Rust `bill_taxonomy_bridge`，settings bundle taxonomy sections 的 normalization、导出 DTO 和模板引用解析也通过 Rust helper；route envelope、`:memory:`、SQLCipher、recurring 匹配/绑定、settings bundle 最终导入事务、category-rule/LLM/OCR sections、suggestion/import 写路径仍由 Python 维护。
+  - 模板域当前保留 REST 主链路；普通文件库上的模板主数据 CRUD/排序/DTO 读取经 Rust taxonomy runtime / `bill_taxonomy_bridge` 处理，settings bundle taxonomy sections 的 normalization、导出 DTO、模板引用解析与最终导入事务也通过 Rust helper/runtime；Rust HTTP 保持既有 route envelope，`:memory:`、SQLCipher、recurring 匹配/绑定与 suggestion/import 写路径仍由 Python 维护。
 - 预算域主链已完成 REST 收口：
   - 前端 `services.ts` 已将列表/详情/创建/更新/删除/执行统计/预测/导入导出统一切换到 `/api/budgets/*`；
   - 服务层新增预算 REST ↔ 前端旧结构兼容映射，避免直接重写 `budget store` 与页面；
@@ -44,8 +44,8 @@
 - 设置包域使用 REST 主链提供统一 JSON 导入导出：
   - `import_db_runtime` 下 `GET /api/settings/bundle/export` 由 Rust taxonomy runtime 导出账户、交易分类、交易标签、交易模板、定时交易、分类识别规则、LLM 配置骨架与 OCR 配置，保持 JSON attachment 响应与 LLM API Key 脱敏；
   - `POST /api/settings/bundle/import/preview` 做 dry-run 预览，不写入目标库；
-  - `POST /api/settings/bundle/import` 按稳定键 merge/upsert，完成跨域 ID 重映射并刷新分类引擎；
-  - `GET|POST /api/settings/bundle/sections/<section_key>/export` 由 Rust taxonomy runtime 提供单 section JSON 导出；`POST /api/settings/bundle/sections/<section_key>/import/preview`、`POST /api/settings/bundle/sections/<section_key>/import` 仍由 Python 为账户、分类、标签、模板、定时交易、分类识别规则、LLM 配置和 OCR 配置页面提供 section 导入；section 导入只写当前 section，分类与分类识别导入后刷新分类引擎；
+  - `POST /api/settings/bundle/import` 按稳定键 merge/upsert，完成跨域 ID 重映射，不依赖 Python service reload；
+  - `GET|POST /api/settings/bundle/sections/<section_key>/export` 由 Rust taxonomy runtime 提供单 section JSON 导出；`POST /api/settings/bundle/sections/<section_key>/import/preview`、`POST /api/settings/bundle/sections/<section_key>/import` 也由 Rust 为账户、分类、标签、模板、定时交易、分类识别规则、LLM 配置和 OCR 配置页面提供 section 导入；section 导入只写当前 section，preview 使用 rollback-only 事务；
   - `llmConfigs` 与 `ocrConfig` 的单 section 导出必须使用 `POST /sections/<section_key>/export` 并携带当前登录密码；Rust 导出不包含 API Key 明文，导入后不自动激活。
 - 账单/分类/账户路由层已完成一轮适配器收敛：
   - `bills/` 已拆分基础上下文与 adapter 上下文，非转换型路由不再默认构造交易适配器；
@@ -62,6 +62,6 @@
   - Rust-owned：`GET /api/statistics/category-statistics`、`GET /api/statistics/category-statistics/trends`、`GET /api/statistics/asset-trends`、`GET /api/statistics/category-pie`、`GET /api/statistics/top-merchants`、`GET /api/statistics/amounts`；
   - Python-proxied：`GET /api/statistics/overview`、`GET /api/statistics/trends`、`GET /api/statistics/comparison`、`GET /api/statistics/category`、`GET /api/statistics/trend`、`GET /api/statistics/exchange-rates`、`PUT/DELETE /api/statistics/exchange-rates/custom*`；
   - 统计读取路径直接读 `bills/accounts/categories`，保持 `user_id` 隔离、timestamp/year-month/all-mode 范围解析、关键词过滤、资产趋势 365 天边界、category/amounts 响应分单位，以及 category-pie/top-merchants 响应元单位。
-- 分类主数据 REST URL、状态码与响应 envelope 保持 Flask 外壳不变；`import_db_runtime` 下 Rust HTTP taxonomy runtime 直接接管普通文件 SQLite 库的分类 list/tree/flat/all/get/create/update/delete/batch/move/import/export master-data 持久化，并保持 default seed 的批量 ensure 语义；`GET /api/categories/statistics` 也由 Rust 读取当前用户账单并返回旧树形统计结果；`:memory:`、SQLCipher 和设置包分类 import/upsert 仍由 Python 路径处理。
-- 分类规则列表 `GET /api/category-rules/`、创建/更新/删除 `POST /api/category-rules/`、`PUT|DELETE /api/category-rules/<rule_id>`、重排 `POST /api/category-rules/reorder`、默认种子 `POST /api/category-rules/defaults`、旧关键词迁移 `POST /api/category-rules/migrate`、无写副作用的 `POST /api/category-rules/<rule_id>/test`、规则中心概览 `GET /api/rules/overview` 与设置包导出 `GET /api/settings/bundle/export`、`GET|POST /api/settings/bundle/sections/<section_key>/export` 已由 Rust taxonomy runtime 读写普通应用 SQLite，保留 Flask-compatible envelope、当前用户隔离、分类规则筛选、默认分类/规则幂等补齐、legacy keywords/investment settings 到 canonical 规则的幂等迁移、规则表达式测试响应、规则计数、JSON attachment、LLM API Key 脱敏和敏感 section 当前密码校验；legacy `GET|PUT /api/categories/rules` config/cache、settings bundle import/preview、engine reload 和 legacy 分类规则配置仍在 Python `CategoryEngine` / `KeywordMatcher` 内完成。
+- 分类主数据 REST URL、状态码与响应 envelope 保持 Flask 外壳不变；`import_db_runtime` 下 Rust HTTP taxonomy runtime 直接接管普通文件 SQLite 库的分类 list/tree/flat/all/get/create/update/delete/batch/move/import/export master-data 持久化，并保持 default seed 的批量 ensure 语义；`GET /api/categories/statistics` 也由 Rust 读取当前用户账单并返回旧树形统计结果；`:memory:` 与 SQLCipher 仍由 Python 路径处理。
+- 分类规则列表 `GET /api/category-rules/`、创建/更新/删除 `POST /api/category-rules/`、`PUT|DELETE /api/category-rules/<rule_id>`、重排 `POST /api/category-rules/reorder`、默认种子 `POST /api/category-rules/defaults`、旧关键词迁移 `POST /api/category-rules/migrate`、无写副作用的 `POST /api/category-rules/<rule_id>/test`、规则中心概览 `GET /api/rules/overview` 与设置包导入/预览/导出路由已由 Rust taxonomy runtime 读写普通应用 SQLite，保留 Flask-compatible envelope、当前用户隔离、分类规则筛选、默认分类/规则幂等补齐、legacy keywords/investment settings 到 canonical 规则的幂等迁移、规则表达式测试响应、规则计数、JSON attachment、LLM API Key 脱敏、敏感 section 当前密码校验、导入 preview rollback、跨 section upsert、LLM masked secret 保留与 OCR app_settings 写入；legacy `GET|PUT /api/categories/rules` config/cache 和 legacy 分类规则配置仍在 Python `CategoryEngine` / `KeywordMatcher` 内完成。
 - 主要 REST route 文件当前按同名 package 组织：`bills/`、`auth/`、`statistics/`、`accounts/`、`categories/`、`budgets/`、`backup/`、`matching/`、`llm/` 均保留原 `bp` 导出与 URL/method 契约，内部按 CRUD、查询、导入、候选、配置、用户数据等功能域拆分。

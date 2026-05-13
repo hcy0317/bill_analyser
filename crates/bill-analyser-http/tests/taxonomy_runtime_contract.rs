@@ -2787,9 +2787,16 @@ async fn taxonomy_settings_bundle_export_runtime_serves_raw_bundle_and_sensitive
     assert!(TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS
         .iter()
         .any(|route| { route == &("POST", "/api/settings/bundle/sections/{section_key}/export") }));
-    assert!(TAXONOMY_SETTINGS_BUNDLE_PROXIED_ROUTE_PATTERNS
+    assert!(TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/settings/bundle/import")));
+    assert!(TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/settings/bundle/import/preview")));
+    assert!(TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/settings/bundle/sections/{section_key}/import")));
+    assert!(TAXONOMY_SETTINGS_BUNDLE_PROXIED_ROUTE_PATTERNS.is_empty());
 
     let fixture = RuntimeFixture::new()?;
     let app = runtime_router(&fixture);
@@ -2937,6 +2944,393 @@ async fn taxonomy_settings_bundle_export_runtime_serves_raw_bundle_and_sensitive
     assert_eq!(
         read_json(no_db_response).await["error"],
         "Rust taxonomy settings bundle export DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn taxonomy_settings_bundle_import_runtime_previews_and_upserts_sections(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    let app = runtime_router(&fixture);
+    let bundle = json!({
+        "schemaVersion": 1,
+        "sections": {
+            "accounts": [{
+                "externalRef": "account:source",
+                "name": "导入账户",
+                "type": 1,
+                "currency": "CNY",
+                "balance": 10.25,
+                "initialBalance": 10.25,
+                "aliases": ["import-alias"]
+            }],
+            "transactionCategories": [{
+                "externalRef": "category:coffee",
+                "type": 3,
+                "mainCategory": "导入分类",
+                "subCategory": "咖啡",
+                "priority": 3
+            }],
+            "transactionTags": [{
+                "externalRef": "tag:work",
+                "name": "导入标签",
+                "color": "#224466",
+                "icon": "tag"
+            }],
+            "transactionTemplates": [{
+                "name": "导入模板",
+                "templateType": 1,
+                "type": 3,
+                "categoryRef": "category:coffee",
+                "sourceAccountRef": "account:source",
+                "sourceAmount": 66,
+                "tagRefs": ["tag:work"]
+            }],
+            "scheduledTransactions": [{
+                "name": "导入定时模板",
+                "templateType": 2,
+                "type": 3,
+                "categoryRef": "category:coffee",
+                "sourceAccountRef": "account:source",
+                "sourceAmount": 88,
+                "scheduledFrequencyType": 2,
+                "scheduledFrequency": "1",
+                "scheduledStartDate": "2026-07-01",
+                "tagRefs": ["tag:work"]
+            }],
+            "categoryRecognitionRules": [{
+                "categoryRef": "category:coffee",
+                "name": "导入规则",
+                "priority": 2,
+                "ruleExpression": "OR={settings-bundle-import}",
+                "regexEnabled": false,
+                "enabled": true
+            }],
+            "llmConfigs": [{
+                "name": "导入 LLM",
+                "provider": "openai",
+                "model": "gpt-imported",
+                "apiKey": "sk-imported-secret",
+                "baseUrl": "https://example.test/v1",
+                "advancedSettings": {"reasoning_depth": "medium"},
+                "isActive": true
+            }],
+            "ocrConfig": [{
+                "externalRef": "ocrConfig:receipt-recognition",
+                "provider": "cloud_stub",
+                "lang": "eng"
+            }]
+        }
+    });
+
+    let preview_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/settings/bundle/import/preview",
+            bundle.clone(),
+        ))
+        .await?;
+    assert_eq!(preview_response.status(), StatusCode::OK);
+    let preview = read_json(preview_response).await;
+    assert_eq!(preview["success"], true);
+    assert_eq!(preview["result"]["dryRun"], true);
+    assert_eq!(preview["result"]["sections"]["accounts"]["created"], 1);
+    assert_eq!(
+        row_count_by_name(&fixture.db_path, "accounts", "导入账户")?,
+        0
+    );
+
+    let import_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/settings/bundle/import",
+            bundle.clone(),
+        ))
+        .await?;
+    assert_eq!(import_response.status(), StatusCode::OK);
+    let imported = read_json(import_response).await;
+    assert_eq!(imported["result"]["dryRun"], false);
+    assert_eq!(
+        imported["result"]["sections"]["categoryRecognitionRules"]["created"],
+        1
+    );
+    assert_eq!(imported["result"]["sections"]["ocrConfig"]["updated"], 1);
+    assert_eq!(
+        account_balance_by_name(&fixture.db_path, "导入账户")?,
+        10.25
+    );
+    assert_eq!(
+        bill_template_amount_by_name(&fixture.db_path, "导入模板")?,
+        66.0
+    );
+    assert_eq!(
+        recurring_template_start_by_name(&fixture.db_path, "导入定时模板")?,
+        "2026-07-01"
+    );
+    assert_eq!(
+        llm_config_by_name(&fixture.db_path, "导入 LLM")?,
+        (
+            "gpt-imported".to_string(),
+            "sk-imported-secret".to_string(),
+            0
+        )
+    );
+    assert_eq!(
+        app_setting_value(&fixture.db_path, "receipt_ocr_config")?,
+        "{\"lang\":\"eng\",\"provider\":\"cloud_stub\"}"
+    );
+
+    let second_import = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/settings/bundle/import",
+            bundle,
+        ))
+        .await?;
+    assert_eq!(second_import.status(), StatusCode::OK);
+    let second = read_json(second_import).await;
+    assert_eq!(second["result"]["sections"]["accounts"]["updated"], 1);
+    assert_eq!(second["result"]["sections"]["accounts"]["created"], 0);
+
+    let section_bundle = json!({
+        "schemaVersion": 1,
+        "sections": {
+            "accounts": [{"name": "section-ignored-account", "type": 1}],
+            "transactionTags": [{"externalRef": "tag:section", "name": "section-only-tag"}]
+        }
+    });
+    let section_preview = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/settings/bundle/sections/transactionTags/import/preview",
+            section_bundle.clone(),
+        ))
+        .await?;
+    assert_eq!(section_preview.status(), StatusCode::OK);
+    let section_preview_body = read_json(section_preview).await;
+    assert_eq!(
+        section_preview_body["result"]["sections"]["transactionTags"]["created"],
+        1
+    );
+    assert_eq!(
+        section_preview_body["result"]["sections"]["accounts"]["created"],
+        0
+    );
+
+    let section_import = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/settings/bundle/sections/transactionTags/import",
+            section_bundle,
+        ))
+        .await?;
+    assert_eq!(section_import.status(), StatusCode::OK);
+    assert_eq!(
+        row_count_by_name(&fixture.db_path, "accounts", "section-ignored-account")?,
+        0
+    );
+    assert_eq!(
+        row_count_by_name(&fixture.db_path, "tags", "section-only-tag")?,
+        1
+    );
+
+    for uri in [
+        "/api/settings/bundle/sections/notASection/import",
+        "/api/settings/bundle/sections/notASection/import/preview",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(json_request(Method::POST, uri, json!({"schemaVersion": 1})))
+            .await?;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{uri}");
+    }
+
+    for uri in [
+        "/api/settings/bundle/import",
+        "/api/settings/bundle/import/preview",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(json_request(
+                Method::POST,
+                uri,
+                json!({"schemaVersion": "1", "sections": {"accounts": []}}),
+            ))
+            .await?;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{uri}");
+        assert!(
+            read_json(response).await["error"]
+                .as_str()
+                .expect("error")
+                .contains("Unsupported settings bundle schemaVersion"),
+            "{uri}"
+        );
+    }
+
+    let invalid_json = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/settings/bundle/import",
+            Body::from("{"),
+        ))
+        .await?;
+    assert_eq!(invalid_json.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_json).await["error"],
+        "Invalid JSON bundle"
+    );
+
+    let no_db_app = runtime_router_without_db(&fixture);
+    let no_db_response = no_db_app
+        .oneshot(json_request(
+            Method::POST,
+            "/api/settings/bundle/import",
+            json!({"schemaVersion": 1, "sections": {"accounts": []}}),
+        ))
+        .await?;
+    assert_eq!(no_db_response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        read_json(no_db_response).await["error"],
+        "Rust taxonomy settings bundle import DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn taxonomy_settings_bundle_import_runtime_preserves_llm_and_ref_collision_semantics(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    let app = runtime_router(&fixture);
+
+    let llm_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/settings/bundle/import",
+            json!({
+                "schemaVersion": 1,
+                "sections": {
+                    "llmConfigs": [{
+                        "name": "主 LLM",
+                        "provider": "openai",
+                        "model": "gpt-updated",
+                        "apiKey": "",
+                        "baseUrl": "https://updated.test/v1",
+                        "advancedSettings": {"reasoning_depth": "high"}
+                    }, {
+                        "name": "duplicate LLM",
+                        "provider": "openai",
+                        "model": "gpt-first",
+                        "apiKey": "sk-first",
+                        "baseUrl": "https://first.test/v1"
+                    }, {
+                        "name": "duplicate LLM",
+                        "provider": "openai",
+                        "model": "gpt-second",
+                        "apiKey": "",
+                        "baseUrl": "https://second.test/v1"
+                    }]
+                }
+            }),
+        ))
+        .await?;
+    assert_eq!(llm_response.status(), StatusCode::OK);
+    let llm_body = read_json(llm_response).await;
+    assert_eq!(llm_body["result"]["sections"]["llmConfigs"]["updated"], 2);
+    assert_eq!(llm_body["result"]["sections"]["llmConfigs"]["created"], 1);
+    assert_eq!(
+        llm_config_by_name(&fixture.db_path, "主 LLM")?,
+        ("gpt-updated".to_string(), "secret-key".to_string(), 1)
+    );
+    assert_eq!(
+        llm_config_by_name(&fixture.db_path, "duplicate LLM")?,
+        ("gpt-second".to_string(), "sk-first".to_string(), 0)
+    );
+
+    let collision_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/settings/bundle/import",
+            json!({
+                "schemaVersion": 1,
+                "sections": {
+                    "transactionTemplates": [{
+                        "name": "external-ref-template",
+                        "templateType": 1,
+                        "type": 3,
+                        "categoryRef": "category:31",
+                        "sourceAccountRef": "account:10",
+                        "sourceAmount": 7.5,
+                        "tagRefs": ["tag:20"]
+                    }, {
+                        "name": "legacy-id-template",
+                        "templateType": 1,
+                        "type": 3,
+                        "categoryId": 31,
+                        "sourceAccountId": 10,
+                        "sourceAmount": 9.5,
+                        "tagIds": [20]
+                    }],
+                    "categoryRecognitionRules": [{
+                        "categoryRef": "category:31",
+                        "name": "external-ref-rule",
+                        "priority": 1,
+                        "ruleExpression": "OR={external-ref}",
+                        "enabled": true
+                    }, {
+                        "categoryId": 31,
+                        "name": "legacy-id-rule",
+                        "priority": 1,
+                        "ruleExpression": "OR={legacy-id}",
+                        "enabled": true
+                    }]
+                }
+            }),
+        ))
+        .await?;
+    assert_eq!(collision_response.status(), StatusCode::OK);
+    let collision = read_json(collision_response).await;
+    assert_eq!(
+        collision["result"]["sections"]["transactionTemplates"]["created"],
+        1
+    );
+    assert_eq!(
+        collision["result"]["sections"]["transactionTemplates"]["skipped"],
+        1
+    );
+    assert_eq!(
+        collision["result"]["sections"]["categoryRecognitionRules"]["created"],
+        1
+    );
+    assert_eq!(
+        collision["result"]["sections"]["categoryRecognitionRules"]["skipped"],
+        1
+    );
+    assert_eq!(
+        row_count_by_name(&fixture.db_path, "bill_templates", "external-ref-template")?,
+        0
+    );
+    assert_eq!(
+        row_count_by_name(&fixture.db_path, "bill_templates", "legacy-id-template")?,
+        1
+    );
+    assert_eq!(
+        row_count_by_name(&fixture.db_path, "category_rules", "external-ref-rule")?,
+        0
+    );
+    assert_eq!(
+        row_count_by_name(&fixture.db_path, "category_rules", "legacy-id-rule")?,
+        1
     );
 
     Ok(())
@@ -4234,7 +4628,10 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             api_key TEXT,
             base_url TEXT,
             advanced_settings TEXT,
-            is_active INTEGER DEFAULT 0
+            is_active INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT 'now',
+            updated_at TEXT DEFAULT 'now',
+            UNIQUE(user_id, name)
         );
         CREATE TABLE app_settings (
             key TEXT PRIMARY KEY,
@@ -4396,6 +4793,67 @@ async fn read_json(response: axum::response::Response) -> Value {
         .await
         .expect("body bytes");
     serde_json::from_slice(&bytes).expect("json body")
+}
+
+fn row_count_by_name(path: &Path, table_name: &str, name: &str) -> Result<i64, Box<dyn Error>> {
+    assert!(
+        matches!(
+            table_name,
+            "accounts" | "tags" | "bill_templates" | "category_rules"
+        ),
+        "unexpected test table name"
+    );
+    Ok(Connection::open(path)?.query_row(
+        &format!("SELECT COUNT(*) FROM {table_name} WHERE user_id = 42 AND name = ?1"),
+        [name],
+        |row| row.get::<_, i64>(0),
+    )?)
+}
+
+fn account_balance_by_name(path: &Path, name: &str) -> Result<f64, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT balance FROM accounts WHERE user_id = 42 AND name = ?1",
+        [name],
+        |row| row.get::<_, f64>(0),
+    )?)
+}
+
+fn bill_template_amount_by_name(path: &Path, name: &str) -> Result<f64, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT amount FROM bill_templates WHERE user_id = 42 AND name = ?1",
+        [name],
+        |row| row.get::<_, f64>(0),
+    )?)
+}
+
+fn recurring_template_start_by_name(path: &Path, name: &str) -> Result<String, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT start_date FROM recurring_bills WHERE user_id = 42 AND name = ?1",
+        [name],
+        |row| row.get::<_, String>(0),
+    )?)
+}
+
+fn llm_config_by_name(path: &Path, name: &str) -> Result<(String, String, i64), Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT model, api_key, is_active FROM llm_configs WHERE user_id = 42 AND name = ?1",
+        [name],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        },
+    )?)
+}
+
+fn app_setting_value(path: &Path, key: &str) -> Result<String, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT value FROM app_settings WHERE key = ?1",
+        [key],
+        |row| row.get::<_, String>(0),
+    )?)
 }
 
 fn account_balance(path: &Path, account_id: i64) -> Result<f64, Box<dyn Error>> {

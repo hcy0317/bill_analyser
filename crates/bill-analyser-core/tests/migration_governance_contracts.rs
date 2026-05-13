@@ -179,11 +179,6 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
 fn live_python_sidecar_routes_are_manifested_for_import_db_runtime_proxy() {
     for (method, pattern, domain) in [
         ("GET", "/api/categories/rules", "taxonomy-rules-settings"),
-        (
-            "POST",
-            "/api/settings/bundle/import",
-            "taxonomy-rules-settings",
-        ),
         ("GET", "/api/llm/config", "ai-learning-llm"),
         (
             "POST",
@@ -222,7 +217,7 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
         assert!(entry
             .unsupported_behavior
-            .contains("settings bundle export routes are Rust-owned"));
+            .contains("settings bundle import/preview/export routes are Rust-owned"));
     }
 
     for endpoint in [
@@ -274,7 +269,7 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
         assert!(entry
             .unsupported_behavior
-            .contains("category master-data/statistics/update-all, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, and settings bundle export routes are Rust-owned"));
+            .contains("category master-data/statistics/update-all, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, and settings bundle import/preview/export routes are Rust-owned"));
         assert!(entry
             .deletion_blockers
             .contains(&"templates_category_rules_settings_parity"));
@@ -297,7 +292,7 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
         assert!(entry
             .unsupported_behavior
-            .contains("settings bundle export routes are Rust-owned"));
+            .contains("settings bundle import/preview/export routes are Rust-owned"));
     }
 
     for endpoint in [
@@ -596,7 +591,12 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         .iter()
         .find(|entry| entry.endpoint == "POST /api/settings/bundle/import")
         .expect("settings bundle import route is present");
-    assert_eq!(settings_import.state, MigrationState::PythonProxied);
+    assert_eq!(settings_import.state, MigrationState::RustOwnedVerified);
+    assert_eq!(
+        settings_import.envelope,
+        ResponseEnvelopeFamily::FlaskSuccessResult
+    );
+    assert_eq!(settings_import.handler, RouteHandlerId::TaxonomyRuntime);
 
     let bills_export = manifest
         .iter()

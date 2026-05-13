@@ -471,7 +471,6 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
         (Method::OPTIONS, "/api/auth/register"),
         (Method::GET, "/api/categories/rules"),
         (Method::PUT, "/api/categories/rules"),
-        (Method::POST, "/api/settings/bundle/import"),
         (Method::GET, "/api/llm/config"),
         (Method::POST, "/api/matching/candidates/session/12/accept"),
     ] {
@@ -493,6 +492,20 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
             "{path}"
         );
     }
+
+    let settings_import_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/settings/bundle/import")
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(settings_import_response.status(), StatusCode::UNAUTHORIZED);
 
     let unknown_response = app
         .clone()

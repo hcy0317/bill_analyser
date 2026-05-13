@@ -1,11 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use chrono::Utc;
+use rusqlite::types::Value as SqlValue;
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transaction};
 use serde_json::{json, Map, Value};
 
 use crate::{DbError, DbResult};
 
 const SETTINGS_BUNDLE_SCHEMA_VERSION: i64 = 1;
 const LOCAL_REF_NAMESPACE: &str = "__local_settings_bundle_id__";
+const OCR_CONFIG_SETTING_KEY: &str = "receipt_ocr_config";
 const SECTION_KEYS: [&str; 8] = [
     "accounts",
     "transactionCategories",
@@ -16,6 +20,75 @@ const SECTION_KEYS: [&str; 8] = [
     "llmConfigs",
     "ocrConfig",
 ];
+
+#[derive(Debug, Clone, Copy, Default)]
+struct SectionCounts {
+    created: i64,
+    updated: i64,
+    skipped: i64,
+}
+
+#[derive(Debug, Default)]
+struct ImportSections {
+    sections: BTreeMap<String, SectionCounts>,
+}
+
+impl ImportSections {
+    fn new() -> Self {
+        Self {
+            sections: SECTION_KEYS
+                .into_iter()
+                .map(|section| (section.to_string(), SectionCounts::default()))
+                .collect(),
+        }
+    }
+
+    fn get_mut(&mut self, section: &str) -> &mut SectionCounts {
+        self.sections.entry(section.to_string()).or_default()
+    }
+
+    fn into_value(self) -> Value {
+        Value::Object(
+            self.sections
+                .into_iter()
+                .map(|(section, counts)| {
+                    (
+                        section,
+                        json!({
+                            "created": counts.created,
+                            "updated": counts.updated,
+                            "skipped": counts.skipped,
+                        }),
+                    )
+                })
+                .collect(),
+        )
+    }
+}
+
+#[derive(Debug, Default)]
+struct ExistingAccounts {
+    by_id: BTreeMap<i64, (String, i64)>,
+    by_key: BTreeMap<(String, i64), i64>,
+}
+
+#[derive(Debug, Default)]
+struct ExistingCategories {
+    by_id: BTreeMap<i64, (String, String)>,
+    by_key: BTreeMap<(String, String), i64>,
+}
+
+#[derive(Debug, Default)]
+struct ExistingTags {
+    by_id: BTreeMap<i64, String>,
+    by_name: BTreeMap<String, i64>,
+}
+
+#[derive(Debug, Clone)]
+struct ExistingLlmConfig {
+    id: i64,
+    api_key: String,
+}
 
 pub fn normalize_settings_bundle_sections(bundle: &Value) -> DbResult<Value> {
     let bundle_object = bundle.as_object().ok_or_else(|| {
@@ -229,6 +302,1083 @@ pub fn resolve_template_payload(payload: &Value) -> Value {
         "warnings": warnings,
         "unresolved": unresolved,
     })
+}
+
+pub fn import_settings_bundle(
+    connection: &mut Connection,
+    bundle: &Value,
+    user_id: i64,
+    dry_run: bool,
+) -> DbResult<Value> {
+    let sections = normalize_settings_bundle_sections(bundle)?;
+    let transaction = connection.transaction()?;
+    let mut result_sections = ImportSections::new();
+    let mut warnings = Vec::new();
+
+    let account_ref_map = import_settings_accounts(
+        &transaction,
+        section_items(&sections, "accounts"),
+        user_id,
+        &mut result_sections,
+        &mut warnings,
+    )?;
+    let category_ref_map = import_settings_categories(
+        &transaction,
+        section_items(&sections, "transactionCategories"),
+        user_id,
+        &mut result_sections,
+        &mut warnings,
+    )?;
+    let tag_ref_map = import_settings_tags(
+        &transaction,
+        section_items(&sections, "transactionTags"),
+        user_id,
+        &mut result_sections,
+        &mut warnings,
+    )?;
+    import_settings_templates(
+        &transaction,
+        section_items(&sections, "transactionTemplates"),
+        user_id,
+        1,
+        &mut result_sections,
+        &mut warnings,
+        &account_ref_map,
+        &category_ref_map,
+        &tag_ref_map,
+    )?;
+    import_settings_templates(
+        &transaction,
+        section_items(&sections, "scheduledTransactions"),
+        user_id,
+        2,
+        &mut result_sections,
+        &mut warnings,
+        &account_ref_map,
+        &category_ref_map,
+        &tag_ref_map,
+    )?;
+    import_settings_category_rules(
+        &transaction,
+        section_items(&sections, "categoryRecognitionRules"),
+        user_id,
+        &mut result_sections,
+        &mut warnings,
+        &category_ref_map,
+    )?;
+    import_settings_llm_configs(
+        &transaction,
+        section_items(&sections, "llmConfigs"),
+        user_id,
+        &mut result_sections,
+    )?;
+    import_settings_ocr_config(
+        &transaction,
+        section_items(&sections, "ocrConfig"),
+        &mut result_sections,
+    )?;
+
+    if dry_run {
+        transaction.rollback()?;
+    } else {
+        transaction.commit()?;
+    }
+
+    Ok(json!({
+        "dryRun": dry_run,
+        "schemaVersion": SETTINGS_BUNDLE_SCHEMA_VERSION,
+        "sections": result_sections.into_value(),
+        "warnings": warnings,
+    }))
+}
+
+fn section_items<'payload>(sections: &'payload Value, section: &str) -> &'payload [Value] {
+    sections
+        .get(section)
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+}
+
+fn import_settings_accounts(
+    transaction: &Transaction<'_>,
+    accounts: &[Value],
+    user_id: i64,
+    result: &mut ImportSections,
+    warnings: &mut Vec<String>,
+) -> DbResult<BTreeMap<String, i64>> {
+    let mut existing = load_existing_accounts(transaction, user_id)?;
+    let mut ref_map = existing
+        .by_id
+        .keys()
+        .map(|account_id| (local_id_ref("account", *account_id), *account_id))
+        .collect::<BTreeMap<_, _>>();
+    ref_map.extend(
+        existing
+            .by_id
+            .iter()
+            .filter(|(_, (name, _))| !name.is_empty())
+            .map(|(account_id, (name, _))| (format!("accountName:{name}"), *account_id)),
+    );
+
+    let mut pending = accounts.iter().collect::<Vec<_>>();
+    for _ in 0..=pending.len() {
+        let mut next_pending = Vec::new();
+        let mut progressed = false;
+        for item in pending {
+            let parent_ref = safe_text(get_any(item, &["parentRef", "parent_ref"]), "");
+            if !parent_ref.is_empty() && !ref_map.contains_key(&parent_ref) {
+                next_pending.push(item);
+                continue;
+            }
+            if let Some(account_id) = upsert_settings_account(
+                transaction,
+                item,
+                user_id,
+                result.get_mut("accounts"),
+                &mut existing,
+                &ref_map,
+                warnings,
+            )? {
+                add_account_refs(&mut ref_map, item, account_id);
+                progressed = true;
+            }
+        }
+        pending = next_pending;
+        if pending.is_empty() || !progressed {
+            break;
+        }
+    }
+
+    for item in pending {
+        warnings.push(format!(
+            "Account parent not found; imported as root: {}",
+            safe_text(item.get("name"), "")
+        ));
+        let mut root_item = item.as_object().cloned().unwrap_or_default();
+        root_item.insert("parentRef".to_string(), Value::String(String::new()));
+        if let Some(account_id) = upsert_settings_account(
+            transaction,
+            &Value::Object(root_item),
+            user_id,
+            result.get_mut("accounts"),
+            &mut existing,
+            &ref_map,
+            warnings,
+        )? {
+            add_account_refs(&mut ref_map, item, account_id);
+        }
+    }
+
+    Ok(ref_map)
+}
+
+fn add_account_refs(ref_map: &mut BTreeMap<String, i64>, item: &Value, account_id: i64) {
+    let account_ref = external_ref(item, "account");
+    if !account_ref.is_empty() {
+        ref_map.insert(account_ref, account_id);
+    }
+    let name = safe_text(item.get("name"), "");
+    if !name.is_empty() {
+        ref_map.insert(format!("accountName:{name}"), account_id);
+    }
+}
+
+fn load_existing_accounts(
+    transaction: &Transaction<'_>,
+    user_id: i64,
+) -> DbResult<ExistingAccounts> {
+    let mut statement =
+        transaction.prepare("SELECT id, name, parent_id FROM accounts WHERE user_id = ?1")?;
+    let rows = statement.query_map(params![user_id], |row| {
+        Ok((
+            row.get::<_, i64>("id")?,
+            row.get::<_, Option<String>>("name")?.unwrap_or_default(),
+            row.get::<_, Option<i64>>("parent_id")?.unwrap_or(0),
+        ))
+    })?;
+    let mut existing = ExistingAccounts::default();
+    for row in rows {
+        let (account_id, name, parent_id) = row?;
+        existing.by_id.insert(account_id, (name.clone(), parent_id));
+        existing.by_key.insert((name, parent_id), account_id);
+    }
+    Ok(existing)
+}
+
+fn upsert_settings_account(
+    transaction: &Transaction<'_>,
+    item: &Value,
+    user_id: i64,
+    section: &mut SectionCounts,
+    existing: &mut ExistingAccounts,
+    ref_map: &BTreeMap<String, i64>,
+    warnings: &mut Vec<String>,
+) -> DbResult<Option<i64>> {
+    let name = safe_text(item.get("name"), "");
+    if name.is_empty() {
+        section.skipped += 1;
+        warnings.push("Skipped account without name".to_string());
+        return Ok(None);
+    }
+
+    let normalized = normalize_account_import(&json!({
+        "item": item,
+        "ref_map": ref_map,
+    }));
+    let parent_id = safe_int(normalized.get("parent_id"), 0);
+    let now = utc_now_iso();
+    let values = account_import_sql_values(&normalized, &now, user_id)?;
+
+    if let Some(account_id) = existing.by_key.get(&(name.clone(), parent_id)).copied() {
+        let mut update_values = account_update_sql_values(&normalized)?;
+        update_values.push(SqlValue::Text(now));
+        update_values.push(SqlValue::Integer(account_id));
+        update_values.push(SqlValue::Integer(user_id));
+        transaction.execute(
+            "UPDATE accounts
+             SET type = ?, category = ?, currency = ?, icon = ?, color = ?,
+                 balance = ?, initial_balance = ?, hidden = ?, display_order = ?,
+                 comment = ?, aliases = ?, updated_at = ?
+             WHERE id = ? AND user_id = ?",
+            params_from_iter(update_values),
+        )?;
+        section.updated += 1;
+        return Ok(Some(account_id));
+    }
+
+    transaction.execute(
+        "INSERT INTO accounts (
+            user_id, name, type, category, currency, icon, color, balance,
+            initial_balance, hidden, display_order, comment, aliases,
+            parent_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        params_from_iter(values),
+    )?;
+    let account_id = transaction.last_insert_rowid();
+    existing.by_id.insert(account_id, (name.clone(), parent_id));
+    existing.by_key.insert((name, parent_id), account_id);
+    section.created += 1;
+    Ok(Some(account_id))
+}
+
+fn account_import_sql_values(
+    normalized: &Value,
+    now: &str,
+    user_id: i64,
+) -> DbResult<Vec<SqlValue>> {
+    let mut values = vec![SqlValue::Integer(user_id)];
+    values.push(sql_value_or_null(normalized.get("name"))?);
+    values.extend(account_update_sql_values(normalized)?);
+    values.push(SqlValue::Integer(safe_int(normalized.get("parent_id"), 0)));
+    values.push(SqlValue::Text(now.to_string()));
+    values.push(SqlValue::Text(now.to_string()));
+    Ok(values)
+}
+
+fn account_update_sql_values(normalized: &Value) -> DbResult<Vec<SqlValue>> {
+    Ok(vec![
+        SqlValue::Integer(safe_int(normalized.get("type"), 1)),
+        sql_value_or_null(normalized.get("category"))?,
+        SqlValue::Text(safe_text(normalized.get("currency"), "CNY")),
+        SqlValue::Text(safe_text(normalized.get("icon"), "")),
+        SqlValue::Text(safe_text(normalized.get("color"), "")),
+        SqlValue::Real(safe_float(normalized.get("balance"), 0.0)),
+        SqlValue::Real(safe_float(normalized.get("initial_balance"), 0.0)),
+        SqlValue::Integer(safe_int(normalized.get("hidden"), 0)),
+        SqlValue::Integer(safe_int(normalized.get("display_order"), 0)),
+        SqlValue::Text(safe_text(normalized.get("comment"), "")),
+        SqlValue::Text(safe_text(normalized.get("aliases"), "[]")),
+    ])
+}
+
+fn import_settings_categories(
+    transaction: &Transaction<'_>,
+    categories: &[Value],
+    user_id: i64,
+    result: &mut ImportSections,
+    warnings: &mut Vec<String>,
+) -> DbResult<BTreeMap<String, i64>> {
+    let mut existing = load_existing_categories(transaction, user_id)?;
+    let mut ref_map = existing
+        .by_id
+        .keys()
+        .map(|category_id| (local_id_ref("category", *category_id), *category_id))
+        .collect::<BTreeMap<_, _>>();
+    ref_map.extend(
+        existing
+            .by_id
+            .iter()
+            .filter_map(|(category_id, (main, sub))| {
+                let name = category_name(main, sub);
+                (!name.is_empty()).then(|| (format!("categoryName:{name}"), *category_id))
+            }),
+    );
+
+    for item in categories {
+        if let Some(category_id) = upsert_settings_category(
+            transaction,
+            item,
+            user_id,
+            result.get_mut("transactionCategories"),
+            &mut existing,
+            warnings,
+        )? {
+            let category_ref = external_ref(item, "category");
+            if !category_ref.is_empty() {
+                ref_map.insert(category_ref, category_id);
+            }
+            let main = safe_text(get_any(item, &["mainCategory", "main_category"]), "");
+            let sub = safe_text(get_any(item, &["subCategory", "sub_category"]), "");
+            let name = category_name(&main, &sub);
+            if !name.is_empty() {
+                ref_map.insert(format!("categoryName:{name}"), category_id);
+            }
+        }
+    }
+
+    Ok(ref_map)
+}
+
+fn load_existing_categories(
+    transaction: &Transaction<'_>,
+    user_id: i64,
+) -> DbResult<ExistingCategories> {
+    let mut statement = transaction
+        .prepare("SELECT id, main_category, sub_category FROM categories WHERE user_id = ?1")?;
+    let rows = statement.query_map(params![user_id], |row| {
+        Ok((
+            row.get::<_, i64>("id")?,
+            row.get::<_, Option<String>>("main_category")?
+                .unwrap_or_default(),
+            row.get::<_, Option<String>>("sub_category")?
+                .unwrap_or_default(),
+        ))
+    })?;
+    let mut existing = ExistingCategories::default();
+    for row in rows {
+        let (category_id, main, sub) = row?;
+        existing
+            .by_id
+            .insert(category_id, (main.clone(), sub.clone()));
+        existing.by_key.insert((main, sub), category_id);
+    }
+    Ok(existing)
+}
+
+fn upsert_settings_category(
+    transaction: &Transaction<'_>,
+    item: &Value,
+    user_id: i64,
+    section: &mut SectionCounts,
+    existing: &mut ExistingCategories,
+    warnings: &mut Vec<String>,
+) -> DbResult<Option<i64>> {
+    let normalized = normalize_category_import(&json!({ "item": item }));
+    let main = safe_text(normalized.get("main_category"), "");
+    let sub = safe_text(normalized.get("sub_category"), "");
+    if main.is_empty() {
+        section.skipped += 1;
+        warnings.push("Skipped category without mainCategory".to_string());
+        return Ok(None);
+    }
+    let values = category_update_sql_values(&normalized);
+    if let Some(category_id) = existing.by_key.get(&(main.clone(), sub.clone())).copied() {
+        let mut update_values = values;
+        update_values.push(SqlValue::Integer(category_id));
+        update_values.push(SqlValue::Integer(user_id));
+        transaction.execute(
+            "UPDATE categories
+             SET type = ?, description = ?, priority = ?, keywords = ?,
+                 hidden = ?, icon = ?, color = ?
+             WHERE id = ? AND user_id = ?",
+            params_from_iter(update_values),
+        )?;
+        section.updated += 1;
+        return Ok(Some(category_id));
+    }
+
+    let now = utc_now_iso();
+    let mut insert_values = vec![
+        SqlValue::Integer(user_id),
+        SqlValue::Integer(safe_int(normalized.get("type"), 3)),
+        SqlValue::Text(main.clone()),
+        SqlValue::Text(sub.clone()),
+        SqlValue::Text(safe_text(normalized.get("description"), "")),
+        SqlValue::Integer(safe_int(normalized.get("priority"), 0)),
+        SqlValue::Text(safe_text(normalized.get("keywords"), "")),
+        SqlValue::Integer(safe_int(normalized.get("hidden"), 0)),
+        SqlValue::Text(safe_text(normalized.get("icon"), "")),
+        SqlValue::Text(safe_text(normalized.get("color"), "")),
+        SqlValue::Text(now.clone()),
+    ];
+    transaction.execute(
+        "INSERT INTO categories (
+            user_id, type, main_category, sub_category, description,
+            priority, keywords, hidden, icon, color, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        params_from_iter(insert_values.drain(..)),
+    )?;
+    let category_id = transaction.last_insert_rowid();
+    existing
+        .by_id
+        .insert(category_id, (main.clone(), sub.clone()));
+    existing.by_key.insert((main, sub), category_id);
+    section.created += 1;
+    Ok(Some(category_id))
+}
+
+fn category_update_sql_values(normalized: &Value) -> Vec<SqlValue> {
+    vec![
+        SqlValue::Integer(safe_int(normalized.get("type"), 3)),
+        SqlValue::Text(safe_text(normalized.get("description"), "")),
+        SqlValue::Integer(safe_int(normalized.get("priority"), 0)),
+        SqlValue::Text(safe_text(normalized.get("keywords"), "")),
+        SqlValue::Integer(safe_int(normalized.get("hidden"), 0)),
+        SqlValue::Text(safe_text(normalized.get("icon"), "")),
+        SqlValue::Text(safe_text(normalized.get("color"), "")),
+    ]
+}
+
+fn import_settings_tags(
+    transaction: &Transaction<'_>,
+    tags: &[Value],
+    user_id: i64,
+    result: &mut ImportSections,
+    warnings: &mut Vec<String>,
+) -> DbResult<BTreeMap<String, i64>> {
+    let mut existing = load_existing_tags(transaction, user_id)?;
+    let mut ref_map = existing
+        .by_id
+        .keys()
+        .map(|tag_id| (local_id_ref("tag", *tag_id), *tag_id))
+        .collect::<BTreeMap<_, _>>();
+    ref_map.extend(
+        existing
+            .by_id
+            .iter()
+            .filter(|(_, name)| !name.is_empty())
+            .map(|(tag_id, name)| (format!("tagName:{name}"), *tag_id)),
+    );
+
+    for item in tags {
+        if let Some(tag_id) = upsert_settings_tag(
+            transaction,
+            item,
+            user_id,
+            result.get_mut("transactionTags"),
+            &mut existing,
+            warnings,
+        )? {
+            let tag_ref = external_ref(item, "tag");
+            if !tag_ref.is_empty() {
+                ref_map.insert(tag_ref, tag_id);
+            }
+            let name = safe_text(item.get("name"), "");
+            if !name.is_empty() {
+                ref_map.insert(format!("tagName:{name}"), tag_id);
+            }
+        }
+    }
+
+    Ok(ref_map)
+}
+
+fn load_existing_tags(transaction: &Transaction<'_>, user_id: i64) -> DbResult<ExistingTags> {
+    let mut statement =
+        transaction.prepare("SELECT id, name FROM tags WHERE user_id = ?1 ORDER BY id")?;
+    let rows = statement.query_map(params![user_id], |row| {
+        Ok((
+            row.get::<_, i64>("id")?,
+            row.get::<_, Option<String>>("name")?.unwrap_or_default(),
+        ))
+    })?;
+    let mut existing = ExistingTags::default();
+    for row in rows {
+        let (tag_id, name) = row?;
+        existing.by_id.insert(tag_id, name.clone());
+        existing.by_name.insert(name, tag_id);
+    }
+    Ok(existing)
+}
+
+fn upsert_settings_tag(
+    transaction: &Transaction<'_>,
+    item: &Value,
+    user_id: i64,
+    section: &mut SectionCounts,
+    existing: &mut ExistingTags,
+    warnings: &mut Vec<String>,
+) -> DbResult<Option<i64>> {
+    let normalized = normalize_tag_import(&json!({ "item": item }));
+    let name = safe_text(normalized.get("name"), "");
+    if name.is_empty() {
+        section.skipped += 1;
+        warnings.push("Skipped tag without name".to_string());
+        return Ok(None);
+    }
+    let now = utc_now_iso();
+    let values = tag_update_sql_values(&normalized, &now);
+    if let Some(tag_id) = existing.by_name.get(&name).copied() {
+        let mut update_values = values;
+        update_values.push(SqlValue::Integer(tag_id));
+        update_values.push(SqlValue::Integer(user_id));
+        transaction.execute(
+            "UPDATE tags
+             SET color = ?, icon = ?, display_order = ?, hidden = ?, updated_at = ?
+             WHERE id = ? AND user_id = ?",
+            params_from_iter(update_values),
+        )?;
+        section.updated += 1;
+        return Ok(Some(tag_id));
+    }
+
+    let mut insert_values = vec![SqlValue::Integer(user_id), SqlValue::Text(name.clone())];
+    insert_values.extend(tag_update_sql_values(&normalized, &now));
+    insert_values.push(SqlValue::Text(now));
+    transaction.execute(
+        "INSERT INTO tags (
+            user_id, name, color, icon, display_order, hidden, updated_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        params_from_iter(insert_values),
+    )?;
+    let tag_id = transaction.last_insert_rowid();
+    existing.by_id.insert(tag_id, name.clone());
+    existing.by_name.insert(name, tag_id);
+    section.created += 1;
+    Ok(Some(tag_id))
+}
+
+fn tag_update_sql_values(normalized: &Value, now: &str) -> Vec<SqlValue> {
+    vec![
+        SqlValue::Text(safe_text(normalized.get("color"), "")),
+        SqlValue::Text(safe_text(normalized.get("icon"), "")),
+        SqlValue::Integer(safe_int(normalized.get("display_order"), 0)),
+        SqlValue::Integer(safe_int(normalized.get("hidden"), 0)),
+        SqlValue::Text(now.to_string()),
+    ]
+}
+
+#[allow(clippy::too_many_arguments)]
+fn import_settings_templates(
+    transaction: &Transaction<'_>,
+    templates: &[Value],
+    user_id: i64,
+    template_type: i64,
+    result: &mut ImportSections,
+    warnings: &mut Vec<String>,
+    account_ref_map: &BTreeMap<String, i64>,
+    category_ref_map: &BTreeMap<String, i64>,
+    tag_ref_map: &BTreeMap<String, i64>,
+) -> DbResult<()> {
+    let section_key = if template_type == 2 {
+        "scheduledTransactions"
+    } else {
+        "transactionTemplates"
+    };
+    let mut existing = load_existing_template_names(transaction, user_id, template_type)?;
+
+    for item in templates {
+        upsert_settings_template(
+            transaction,
+            item,
+            user_id,
+            template_type,
+            result.get_mut(section_key),
+            &mut existing,
+            warnings,
+            account_ref_map,
+            category_ref_map,
+            tag_ref_map,
+        )?;
+    }
+
+    Ok(())
+}
+
+fn load_existing_template_names(
+    transaction: &Transaction<'_>,
+    user_id: i64,
+    template_type: i64,
+) -> DbResult<BTreeMap<String, i64>> {
+    let table_name = template_table_name(template_type);
+    let mut statement = transaction.prepare(&format!(
+        "SELECT id, name FROM {table_name} WHERE user_id = ?1"
+    ))?;
+    let rows = statement.query_map(params![user_id], |row| {
+        Ok((
+            row.get::<_, Option<String>>("name")?.unwrap_or_default(),
+            row.get::<_, i64>("id")?,
+        ))
+    })?;
+    rows.collect::<Result<BTreeMap<_, _>, _>>()
+        .map_err(DbError::from)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn upsert_settings_template(
+    transaction: &Transaction<'_>,
+    item: &Value,
+    user_id: i64,
+    template_type: i64,
+    section: &mut SectionCounts,
+    existing: &mut BTreeMap<String, i64>,
+    warnings: &mut Vec<String>,
+    account_ref_map: &BTreeMap<String, i64>,
+    category_ref_map: &BTreeMap<String, i64>,
+    tag_ref_map: &BTreeMap<String, i64>,
+) -> DbResult<()> {
+    let name = safe_text(item.get("name"), "");
+    if name.is_empty() {
+        section.skipped += 1;
+        warnings.push("Skipped template without name".to_string());
+        return Ok(());
+    }
+
+    let resolved = resolve_template_payload(&json!({
+        "item": item,
+        "account_ref_map": account_ref_map,
+        "category_ref_map": category_ref_map,
+        "tag_ref_map": tag_ref_map,
+    }));
+    if let Some(resolved_warnings) = resolved.get("warnings").and_then(Value::as_array) {
+        warnings.extend(
+            resolved_warnings
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToString::to_string),
+        );
+    }
+    if resolved
+        .get("unresolved")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        section.skipped += 1;
+        return Ok(());
+    }
+    let payload = resolved.get("payload").unwrap_or(&Value::Null);
+    let table_name = template_table_name(template_type);
+    let now = utc_now_iso();
+
+    if let Some(template_id) = existing.get(&name).copied() {
+        let mut update_values = template_update_values(payload, template_type);
+        update_values.push(SqlValue::Text(now));
+        update_values.push(SqlValue::Integer(template_id));
+        update_values.push(SqlValue::Integer(user_id));
+        let assignments = if template_type == 2 {
+            "description = ?, type = ?, category = ?, amount = ?, account = ?,
+             counterparty = ?, destination_amount = ?, hide_amount = ?, tag = ?,
+             comment = ?, display_order = ?, hidden = ?, utc_offset = ?,
+             frequency = ?, scheduled_frequency_type = ?, start_date = ?, end_date = ?,
+             next_date = ?, enabled = ?, auto_create = ?, updated_at = ?"
+        } else {
+            "description = ?, type = ?, category = ?, amount = ?, account = ?,
+             counterparty = ?, destination_amount = ?, hide_amount = ?, tag = ?,
+             comment = ?, display_order = ?, hidden = ?, utc_offset = ?, updated_at = ?"
+        };
+        transaction.execute(
+            &format!("UPDATE {table_name} SET {assignments} WHERE id = ? AND user_id = ?"),
+            params_from_iter(update_values),
+        )?;
+        section.updated += 1;
+        return Ok(());
+    }
+
+    if template_type == 2 {
+        let mut insert_values = vec![
+            SqlValue::Integer(user_id),
+            SqlValue::Null,
+            SqlValue::Text(name.clone()),
+        ];
+        insert_values.extend(template_update_values(payload, template_type));
+        insert_values.push(SqlValue::Text(now.clone()));
+        insert_values.push(SqlValue::Text(now));
+        transaction.execute(
+            "INSERT INTO recurring_bills (
+                user_id, template_id, name, description, type, category,
+                amount, account, counterparty, destination_amount, hide_amount,
+                tag, comment, display_order, hidden, utc_offset, frequency,
+                scheduled_frequency_type, start_date, end_date, next_date,
+                enabled, auto_create, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params_from_iter(insert_values),
+        )?;
+    } else {
+        let mut insert_values = vec![SqlValue::Integer(user_id), SqlValue::Text(name.clone())];
+        insert_values.extend(template_update_values(payload, template_type));
+        insert_values.push(SqlValue::Integer(0));
+        insert_values.push(SqlValue::Text(now.clone()));
+        insert_values.push(SqlValue::Text(now));
+        transaction.execute(
+            "INSERT INTO bill_templates (
+                user_id, name, description, type, category, amount, account,
+                counterparty, destination_amount, hide_amount, tag, comment,
+                display_order, hidden, utc_offset, is_favorite, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params_from_iter(insert_values),
+        )?;
+    }
+    let template_id = transaction.last_insert_rowid();
+    existing.insert(name, template_id);
+    section.created += 1;
+    Ok(())
+}
+
+fn template_table_name(template_type: i64) -> &'static str {
+    if template_type == 2 {
+        "recurring_bills"
+    } else {
+        "bill_templates"
+    }
+}
+
+fn template_update_values(payload: &Value, template_type: i64) -> Vec<SqlValue> {
+    let mut values = vec![
+        SqlValue::Text(safe_text(payload.get("description"), "")),
+        SqlValue::Integer(safe_int(payload.get("type"), 3)),
+        SqlValue::Text(safe_text(payload.get("category"), "")),
+        SqlValue::Real(safe_float(payload.get("amount"), 0.0)),
+        SqlValue::Text(safe_text(payload.get("account"), "0")),
+        SqlValue::Text(safe_text(payload.get("counterparty"), "0")),
+        SqlValue::Real(safe_float(payload.get("destination_amount"), 0.0)),
+        SqlValue::Integer(safe_int(payload.get("hide_amount"), 0)),
+        SqlValue::Text(safe_text(payload.get("tag"), "")),
+        SqlValue::Text(safe_text(payload.get("comment"), "")),
+        SqlValue::Integer(safe_int(payload.get("display_order"), 0)),
+        SqlValue::Integer(safe_int(payload.get("hidden"), 0)),
+        SqlValue::Integer(safe_int(payload.get("utc_offset"), 0)),
+    ];
+    if template_type == 2 {
+        values.extend([
+            SqlValue::Text(safe_text(payload.get("frequency"), "")),
+            SqlValue::Integer(safe_int(payload.get("scheduled_frequency_type"), 0)),
+            SqlValue::Text(safe_text(payload.get("start_date"), "")),
+            SqlValue::Text(safe_text(payload.get("end_date"), "")),
+            SqlValue::Text(safe_text(payload.get("next_date"), "")),
+            SqlValue::Integer(safe_int(payload.get("enabled"), 1)),
+            SqlValue::Integer(safe_int(payload.get("auto_create"), 0)),
+        ]);
+    }
+    values
+}
+
+fn import_settings_category_rules(
+    transaction: &Transaction<'_>,
+    rules: &[Value],
+    user_id: i64,
+    result: &mut ImportSections,
+    warnings: &mut Vec<String>,
+    category_ref_map: &BTreeMap<String, i64>,
+) -> DbResult<()> {
+    let mut existing = load_existing_category_rules(transaction, user_id)?;
+
+    for item in rules {
+        let category_id = resolve_settings_category_id(item, category_ref_map).unwrap_or(0);
+        let rule_expression = safe_text(get_any(item, &["ruleExpression", "rule_expression"]), "");
+        let section = result.get_mut("categoryRecognitionRules");
+        if category_id == 0 || rule_expression.is_empty() {
+            section.skipped += 1;
+            warnings
+                .push("Skipped category rule with missing category or ruleExpression".to_string());
+            continue;
+        }
+        let name = safe_text(item.get("name"), "");
+        let priority = safe_int(item.get("priority"), 100);
+        let regex_enabled = i64::from(safe_bool(get_any(item, &["regexEnabled", "regex_enabled"])));
+        let enabled = i64::from(safe_bool_with_default(item.get("enabled"), true));
+        let now = utc_now_iso();
+        let key = (category_id, rule_expression.clone(), name.clone());
+
+        if let Some(rule_id) = existing.get(&key).copied() {
+            transaction.execute(
+                "UPDATE category_rules
+                 SET category_id = ?, name = ?, priority = ?, rule_expression = ?,
+                     regex_enabled = ?, enabled = ?, updated_at = ?
+                 WHERE id = ? AND user_id = ?",
+                params![
+                    category_id,
+                    name,
+                    priority,
+                    rule_expression,
+                    regex_enabled,
+                    enabled,
+                    now,
+                    rule_id,
+                    user_id
+                ],
+            )?;
+            section.updated += 1;
+            continue;
+        }
+
+        transaction.execute(
+            "INSERT INTO category_rules (
+                user_id, category_id, name, priority, rule_expression,
+                regex_enabled, enabled, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                user_id,
+                category_id,
+                name,
+                priority,
+                rule_expression,
+                regex_enabled,
+                enabled,
+                now,
+                now
+            ],
+        )?;
+        existing.insert(key, transaction.last_insert_rowid());
+        section.created += 1;
+    }
+
+    Ok(())
+}
+
+fn load_existing_category_rules(
+    transaction: &Transaction<'_>,
+    user_id: i64,
+) -> DbResult<BTreeMap<(i64, String, String), i64>> {
+    let mut statement = transaction.prepare(
+        "SELECT id, category_id, rule_expression, name FROM category_rules WHERE user_id = ?1",
+    )?;
+    let rows = statement.query_map(params![user_id], |row| {
+        Ok((
+            (
+                row.get::<_, Option<i64>>("category_id")?.unwrap_or(0),
+                row.get::<_, Option<String>>("rule_expression")?
+                    .unwrap_or_default(),
+                row.get::<_, Option<String>>("name")?.unwrap_or_default(),
+            ),
+            row.get::<_, i64>("id")?,
+        ))
+    })?;
+    rows.collect::<Result<BTreeMap<_, _>, _>>()
+        .map_err(DbError::from)
+}
+
+fn resolve_settings_category_id(
+    item: &Value,
+    category_ref_map: &BTreeMap<String, i64>,
+) -> Option<i64> {
+    let category_ref = safe_text(get_any(item, &["categoryRef", "category_ref"]), "");
+    if let Some(category_id) = category_ref_map.get(&category_ref).copied() {
+        return Some(category_id);
+    }
+    let category_id = safe_int(get_any(item, &["categoryId", "category_id"]), 0);
+    if let Some(category_id) = category_ref_map
+        .get(&local_id_ref("category", category_id))
+        .copied()
+    {
+        return Some(category_id);
+    }
+    let category_name_value = get_any(item, &["categoryName", "category_name"]);
+    let mut main = safe_text(get_any(item, &["mainCategory", "main_category"]), "");
+    let mut sub = safe_text(get_any(item, &["subCategory", "sub_category"]), "");
+    if main.is_empty() && sub.is_empty() {
+        (main, sub) = split_category_name(category_name_value);
+    }
+    let full_name = category_name(&main, &sub);
+    category_ref_map
+        .get(&format!("categoryName:{full_name}"))
+        .copied()
+}
+
+fn import_settings_llm_configs(
+    transaction: &Transaction<'_>,
+    configs: &[Value],
+    user_id: i64,
+    result: &mut ImportSections,
+) -> DbResult<()> {
+    let mut existing = load_existing_llm_configs(transaction, user_id)?;
+    let has_timestamps = table_has_column(transaction, "llm_configs", "updated_at")?;
+    for item in configs {
+        let name = safe_text(item.get("name"), "");
+        let section = result.get_mut("llmConfigs");
+        if name.is_empty() {
+            section.skipped += 1;
+            continue;
+        }
+        let provider = safe_text(item.get("provider"), "openai");
+        let model = safe_text(item.get("model"), "");
+        let incoming_secret = safe_text(get_any(item, &["apiKey", "api_key"]), "");
+        let base_url = safe_text(get_any(item, &["baseUrl", "base_url"]), "");
+        let advanced_settings =
+            dump_json_object(get_any(item, &["advancedSettings", "advanced_settings"]));
+        let now = utc_now_iso();
+
+        if let Some(row) = existing.get(&name).cloned() {
+            let api_key = if is_masked_secret(&incoming_secret) {
+                row.api_key
+            } else {
+                incoming_secret
+            };
+            if has_timestamps {
+                transaction.execute(
+                    "UPDATE llm_configs
+                     SET provider = ?, model = ?, api_key = ?, base_url = ?,
+                         advanced_settings = ?, updated_at = ?
+                     WHERE id = ? AND user_id = ?",
+                    params![
+                        provider,
+                        model,
+                        api_key,
+                        base_url,
+                        advanced_settings,
+                        now,
+                        row.id,
+                        user_id
+                    ],
+                )?;
+            } else {
+                transaction.execute(
+                    "UPDATE llm_configs
+                     SET provider = ?, model = ?, api_key = ?, base_url = ?,
+                         advanced_settings = ?
+                     WHERE id = ? AND user_id = ?",
+                    params![
+                        provider,
+                        model,
+                        api_key,
+                        base_url,
+                        advanced_settings,
+                        row.id,
+                        user_id
+                    ],
+                )?;
+            }
+            existing.insert(
+                name,
+                ExistingLlmConfig {
+                    id: row.id,
+                    api_key,
+                },
+            );
+            section.updated += 1;
+            continue;
+        }
+
+        let stored_secret = if is_masked_secret(&incoming_secret) {
+            String::new()
+        } else {
+            incoming_secret
+        };
+        if has_timestamps {
+            transaction.execute(
+                "INSERT INTO llm_configs (
+                    user_id, name, provider, model, api_key, base_url,
+                    advanced_settings, is_active, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+                params![
+                    user_id,
+                    name,
+                    provider,
+                    model,
+                    stored_secret,
+                    base_url,
+                    advanced_settings,
+                    now,
+                    now
+                ],
+            )?;
+        } else {
+            transaction.execute(
+                "INSERT INTO llm_configs (
+                    user_id, name, provider, model, api_key, base_url,
+                    advanced_settings, is_active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+                params![
+                    user_id,
+                    name,
+                    provider,
+                    model,
+                    stored_secret,
+                    base_url,
+                    advanced_settings
+                ],
+            )?;
+        }
+        existing.insert(
+            name,
+            ExistingLlmConfig {
+                id: transaction.last_insert_rowid(),
+                api_key: stored_secret,
+            },
+        );
+        section.created += 1;
+    }
+
+    Ok(())
+}
+
+fn load_existing_llm_configs(
+    transaction: &Transaction<'_>,
+    user_id: i64,
+) -> DbResult<BTreeMap<String, ExistingLlmConfig>> {
+    let mut statement =
+        transaction.prepare("SELECT id, name, api_key FROM llm_configs WHERE user_id = ?1")?;
+    let rows = statement.query_map(params![user_id], |row| {
+        Ok((
+            row.get::<_, Option<String>>("name")?.unwrap_or_default(),
+            ExistingLlmConfig {
+                id: row.get::<_, i64>("id")?,
+                api_key: row.get::<_, Option<String>>("api_key")?.unwrap_or_default(),
+            },
+        ))
+    })?;
+    rows.collect::<Result<BTreeMap<_, _>, _>>()
+        .map_err(DbError::from)
+}
+
+fn import_settings_ocr_config(
+    transaction: &Transaction<'_>,
+    configs: &[Value],
+    result: &mut ImportSections,
+) -> DbResult<()> {
+    if configs.is_empty() {
+        return Ok(());
+    }
+    let normalized = normalize_ocr_config(&json!({
+        "provider": safe_text(configs[0].get("provider"), "disabled"),
+        "lang": safe_text(configs[0].get("lang"), "chi_sim+eng"),
+    }));
+    let now = utc_now_iso();
+    let existing = transaction
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            params![OCR_CONFIG_SETTING_KEY],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten();
+    transaction.execute(
+        "INSERT INTO app_settings (
+            key, value, value_type, description, is_encrypted, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            value_type = excluded.value_type,
+            description = excluded.description,
+            is_encrypted = excluded.is_encrypted,
+            updated_at = excluded.updated_at",
+        params![
+            OCR_CONFIG_SETTING_KEY,
+            normalized.to_string(),
+            "json",
+            "Receipt OCR runtime configuration",
+            0,
+            now,
+            now
+        ],
+    )?;
+    let section = result.get_mut("ocrConfig");
+    if existing.is_some() {
+        section.updated += 1;
+    } else {
+        section.created += 1;
+    }
+    Ok(())
 }
 
 fn required_array<'payload>(payload: &'payload Value, key: &str) -> DbResult<&'payload Vec<Value>> {
@@ -743,6 +1893,119 @@ fn json_to_python_like_string(value: &Value) -> String {
         Value::Number(number) => number.to_string(),
         Value::Array(_) | Value::Object(_) => value.to_string(),
     }
+}
+
+fn external_ref(item: &Value, prefix: &str) -> String {
+    let explicit = safe_text(get_any(item, &["externalRef", "external_ref"]), "");
+    if !explicit.is_empty() {
+        if explicit.starts_with(&format!("{LOCAL_REF_NAMESPACE}:")) {
+            return String::new();
+        }
+        return explicit;
+    }
+    let item_id = safe_text(get_any(item, &["id", "sourceId", "source_id"]), "");
+    if item_id.is_empty() {
+        String::new()
+    } else {
+        format!("{prefix}:{item_id}")
+    }
+}
+
+fn category_name(main: &str, sub: &str) -> String {
+    [main, sub]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn sql_value_or_null(value: Option<&Value>) -> DbResult<SqlValue> {
+    Ok(match value {
+        Some(Value::Null) | None => SqlValue::Null,
+        Some(Value::String(text)) => SqlValue::Text(text.clone()),
+        Some(Value::Bool(flag)) => SqlValue::Integer(i64::from(*flag)),
+        Some(Value::Number(number)) => {
+            if let Some(value) = number.as_i64() {
+                SqlValue::Integer(value)
+            } else if let Some(value) = number.as_u64().and_then(|value| i64::try_from(value).ok())
+            {
+                SqlValue::Integer(value)
+            } else if let Some(value) = number.as_f64() {
+                SqlValue::Real(value)
+            } else {
+                SqlValue::Null
+            }
+        }
+        Some(value @ (Value::Array(_) | Value::Object(_))) => SqlValue::Text(
+            serde_json::to_string(value)
+                .map_err(|error| DbError::InvalidOperation(error.to_string()))?,
+        ),
+    })
+}
+
+fn dump_json_object(value: Option<&Value>) -> String {
+    let loaded = match value {
+        Some(Value::String(text)) => {
+            serde_json::from_str::<Value>(text).unwrap_or_else(|_| json!({}))
+        }
+        Some(Value::Object(object)) => Value::Object(object.clone()),
+        _ => json!({}),
+    };
+    let object = loaded
+        .as_object()
+        .cloned()
+        .map(Value::Object)
+        .unwrap_or_else(|| json!({}));
+    serde_json::to_string(&object).unwrap_or_else(|_| "{}".to_string())
+}
+
+fn is_masked_secret(value: &str) -> bool {
+    matches!(value.trim(), "" | "********" | "redacted" | "<redacted>")
+}
+
+fn normalize_ocr_config(raw_value: &Value) -> Value {
+    let provider = raw_value
+        .get("provider")
+        .map(|value| safe_text(Some(value), "disabled").to_ascii_lowercase())
+        .filter(|value| matches!(value.as_str(), "disabled" | "tesseract" | "cloud_stub"))
+        .unwrap_or_else(|| "disabled".to_string());
+    let lang = raw_value
+        .get("lang")
+        .map(|value| safe_text(Some(value), "chi_sim+eng"))
+        .filter(|value| {
+            !value.is_empty()
+                && value.len() <= 64
+                && value
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '+' | '.' | '-'))
+        })
+        .unwrap_or_else(|| "chi_sim+eng".to_string());
+    json!({
+        "provider": provider,
+        "lang": lang,
+    })
+}
+
+fn table_has_column(
+    transaction: &Transaction<'_>,
+    table_name: &str,
+    column_name: &str,
+) -> DbResult<bool> {
+    let mut statement = transaction.prepare(&format!("PRAGMA table_info({table_name})"))?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for row in rows {
+        if row? == column_name {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn utc_now_iso() -> String {
+    Utc::now()
+        .naive_utc()
+        .format("%Y-%m-%dT%H:%M:%S%.f")
+        .to_string()
 }
 
 #[cfg(test)]

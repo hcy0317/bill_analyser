@@ -1870,16 +1870,26 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         notes:
             "Rust taxonomy settings-bundle export runtime returns the current user's unified JSON settings bundle with redacted LLM secrets.",
     },
-    python_proxy_route!(
-        "POST",
-        "/api/settings/bundle/import",
-        "taxonomy-rules-settings"
-    ),
-    python_proxy_route!(
-        "POST",
-        "/api/settings/bundle/import/preview",
-        "taxonomy-rules-settings"
-    ),
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/settings/bundle/import",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust taxonomy settings-bundle import runtime applies one transaction of current-user upserts across accounts, categories, tags, templates, rules, LLM config skeletons, and OCR config.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/settings/bundle/import/preview",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust taxonomy settings-bundle preview runtime runs the same cross-section upsert flow inside a rollback-only transaction.",
+    },
     EndpointOwnership {
         method: "GET",
         pattern: "/api/settings/bundle/sections/{section_key}/export",
@@ -1900,16 +1910,26 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         notes:
             "Rust taxonomy settings-bundle export runtime validates the current password before exporting sensitive LLM/OCR sections.",
     },
-    python_proxy_route!(
-        "POST",
-        "/api/settings/bundle/sections/{section_key}/import",
-        "taxonomy-rules-settings"
-    ),
-    python_proxy_route!(
-        "POST",
-        "/api/settings/bundle/sections/{section_key}/import/preview",
-        "taxonomy-rules-settings"
-    ),
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/settings/bundle/sections/{section_key}/import",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust taxonomy settings-bundle section import wraps the requested section only before running current-user upsert semantics.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/settings/bundle/sections/{section_key}/import/preview",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust taxonomy settings-bundle section preview wraps the requested section only and rolls back all writes.",
+    },
     python_proxy_route!(
         "GET",
         "/api/settings/encryption/status",
@@ -2834,7 +2854,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, and settings bundle export routes are Rust-owned. Legacy /api/categories/rules config/cache and settings bundle import/preview routes remain Python-proxied until the rest of P4 ports runtime handlers.",
+            "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, and settings bundle import/preview/export routes are Rust-owned. Legacy /api/categories/rules config/cache remains Python-proxied until the rest of P4 ports runtime handlers.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
@@ -3276,7 +3296,7 @@ fn route_contract_details(
         deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-                "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, and settings bundle export routes are Rust-owned; legacy /api/categories/rules config/cache and settings bundle import/preview routes remain Python-owned until the rest of P4 is ported.",
+                "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, and settings bundle import/preview/export routes are Rust-owned; legacy /api/categories/rules config/cache remains Python-owned until the rest of P4 is ported.",
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
             transition_evidence: DB_RUNTIME_EVIDENCE,
