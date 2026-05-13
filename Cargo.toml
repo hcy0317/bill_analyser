@@ -3,6 +3,7 @@ members = [
     "crates/bill-analyser-core",
     "crates/bill-analyser-db",
     "crates/bill-analyser-http",
+    "crates/bill-analyser-parsers",
 ]
 resolver = "2"
 

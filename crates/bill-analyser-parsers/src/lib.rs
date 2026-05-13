@@ -5,7 +5,7 @@ use serde::ser::Error as SerError;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
-use crate::primitives::{normalize_bill_date_text, Money};
+use bill_analyser_core::{normalize_bill_date_text, Money};
 
 const DESCRIPTION_FIELDS: &[&str] = &[
     "description",

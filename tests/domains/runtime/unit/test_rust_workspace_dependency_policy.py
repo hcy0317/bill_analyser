@@ -13,7 +13,12 @@ def test_workspace_dependency_policy_matches_current_crate_graph() -> None:
 
     assert graph == {
         "bill-analyser-core": set(),
-        "bill-analyser-db": {"bill-analyser-core"},
-        "bill-analyser-http": {"bill-analyser-core", "bill-analyser-db"},
+        "bill-analyser-db": {"bill-analyser-core", "bill-analyser-parsers"},
+        "bill-analyser-http": {
+            "bill-analyser-core",
+            "bill-analyser-db",
+            "bill-analyser-parsers",
+        },
+        "bill-analyser-parsers": {"bill-analyser-core"},
     }
     assert not problems

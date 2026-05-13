@@ -8,8 +8,13 @@ from pathlib import Path
 
 EXPECTED_INTERNAL_GRAPH = {
     "bill-analyser-core": set(),
-    "bill-analyser-db": {"bill-analyser-core"},
-    "bill-analyser-http": {"bill-analyser-core", "bill-analyser-db"},
+    "bill-analyser-db": {"bill-analyser-core", "bill-analyser-parsers"},
+    "bill-analyser-http": {
+        "bill-analyser-core",
+        "bill-analyser-db",
+        "bill-analyser-parsers",
+    },
+    "bill-analyser-parsers": {"bill-analyser-core"},
 }
 
 

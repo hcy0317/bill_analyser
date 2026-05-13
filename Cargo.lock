@@ -155,6 +155,7 @@ name = "bill-analyser-db"
 version = "0.1.0"
 dependencies = [
  "bill-analyser-core",
+ "bill-analyser-parsers",
  "chrono",
  "md5",
  "rusqlite",
@@ -174,6 +175,7 @@ dependencies = [
  "bcrypt",
  "bill-analyser-core",
  "bill-analyser-db",
+ "bill-analyser-parsers",
  "bytes",
  "chrono",
  "csv",
@@ -190,6 +192,15 @@ dependencies = [
  "thiserror",
  "tokio",
  "tower",
+]
+
+[[package]]
+name = "bill-analyser-parsers"
+version = "0.1.0"
+dependencies = [
+ "bill-analyser-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

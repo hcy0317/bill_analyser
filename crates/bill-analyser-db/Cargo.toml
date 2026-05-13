@@ -12,6 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 bill-analyser-core = { path = "../bill-analyser-core" }
+bill-analyser-parsers = { path = "../bill-analyser-parsers" }
 chrono.workspace = true
 md5.workspace = true
 rusqlite.workspace = true

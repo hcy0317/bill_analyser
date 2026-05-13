@@ -157,13 +157,13 @@ def audit_early_phases(repo_root: Path) -> list[PhaseAudit]:
     p6_gaps: list[str] = []
     if not exists("crates/bill-analyser-parsers"):
         p6_gaps.append("missing pure parser crate `crates/bill-analyser-parsers` required by P6")
-    if not exists("crates/bill-analyser-core/tests/fixtures/parser_golden_contracts.json"):
+    if not exists("crates/bill-analyser-parsers/tests/fixtures/parser_golden_contracts.json"):
         p6_gaps.append("missing parser golden fixture ledger")
     audits.append(
         PhaseAudit(
             "P6",
             "completed" if not p6_gaps else "blocked",
-            ("crates/bill-analyser-core/src/parsers.rs", "crates/bill-analyser-core/tests/parser_contracts.rs"),
+            ("crates/bill-analyser-parsers/src/lib.rs", "crates/bill-analyser-parsers/tests/parser_contracts.rs"),
             tuple(p6_gaps),
         )
     )

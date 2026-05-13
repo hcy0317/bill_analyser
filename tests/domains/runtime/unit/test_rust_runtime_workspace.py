@@ -21,6 +21,7 @@ def test_rust_workspace_declares_internal_runtime_crates() -> None:
         "crates/bill-analyser-core",
         "crates/bill-analyser-db",
         "crates/bill-analyser-http",
+        "crates/bill-analyser-parsers",
     ]
 
 
@@ -42,6 +43,22 @@ def test_http_crate_declares_rust_primary_proxy_runtime() -> None:
     assert "axum" in manifest["dependencies"]
     assert "reqwest" in manifest["dependencies"]
     assert "pyo3" not in manifest.get("dependencies", {})
+
+
+def test_parser_crate_declares_pure_parser_contract_boundary() -> None:
+    manifest = _load_toml("crates/bill-analyser-parsers/Cargo.toml")
+
+    assert manifest["package"]["name"] == "bill-analyser-parsers"
+    assert manifest["lib"]["name"] == "bill_analyser_parsers"
+    assert manifest["package"]["publish"] is False
+    assert set(manifest["dependencies"]) == {
+        "bill-analyser-core",
+        "serde",
+        "serde_json",
+    }
+    assert "pyo3" not in manifest.get("dependencies", {})
+    assert "rusqlite" not in manifest.get("dependencies", {})
+    assert "axum" not in manifest.get("dependencies", {})
 
 
 def test_architecture_docs_record_rust_primary_http_and_import_runtime_gates() -> None:

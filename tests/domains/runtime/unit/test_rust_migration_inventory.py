@@ -24,7 +24,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert inventory.summary["rust_backend_files"] == 101
     assert "crates/bill-analyser-core/src/ai_ocr_llm.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/lib.rs" in inventory.rust_files
-    assert "crates/bill-analyser-core/src/parsers.rs" in inventory.rust_files
+    assert "crates/bill-analyser-parsers/src/lib.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/smart_dedup.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/import_learning.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/import_pipeline.rs" in inventory.rust_files
@@ -43,7 +43,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert "crates/bill-analyser-core/tests/migration_governance_contracts.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/bin/bill_category_rule_bridge.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/category_rules/mod.rs" in inventory.rust_files
-    assert "crates/bill-analyser-core/tests/parser_contracts.rs" in inventory.rust_files
+    assert "crates/bill-analyser-parsers/tests/parser_contracts.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/tests/smart_dedup_contracts.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/tests/statistics_contracts.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/tests/ops_contracts.rs" in inventory.rust_files
@@ -178,7 +178,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
         in first_render
     )
     assert "- crates/bill-analyser-core/src/lib.rs" in first_render
-    assert "- crates/bill-analyser-core/src/parsers.rs" in first_render
+    assert "- crates/bill-analyser-parsers/src/lib.rs" in first_render
     assert "- crates/bill-analyser-core/src/smart_dedup.rs" in first_render
     assert "- crates/bill-analyser-core/src/import_learning.rs" in first_render
     assert "- crates/bill-analyser-core/src/import_pipeline.rs" in first_render
@@ -191,7 +191,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
     assert "- crates/bill-analyser-core/src/bin/bill_category_rule_bridge.rs" in first_render
     assert "- crates/bill-analyser-core/src/bin/bill_migration_manifest.rs" in first_render
     assert "- crates/bill-analyser-core/src/category_rules/mod.rs" in first_render
-    assert "- crates/bill-analyser-core/tests/parser_contracts.rs" in first_render
+    assert "- crates/bill-analyser-parsers/tests/parser_contracts.rs" in first_render
     assert "- crates/bill-analyser-core/tests/smart_dedup_contracts.rs" in first_render
     assert "- crates/bill-analyser-core/tests/import_learning_contracts.rs" in first_render
     assert "- crates/bill-analyser-core/tests/import_pipeline_contracts.rs" in first_render

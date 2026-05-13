@@ -1,4 +1,4 @@
-use bill_analyser_core::{
+use bill_analyser_parsers::{
     aggregate_description, build_parser_tags, normalize_amount_text, normalize_parser_tags,
     normalize_transaction_type, parser_registry, parser_source_label, post_process_raw_bills,
     resolve_parser_tags, serialize_parser_tags, RawBill, StandardBill,

@@ -376,7 +376,6 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 - crates/bill-analyser-core/src/matching.rs
 - crates/bill-analyser-core/src/migration_governance.rs
 - crates/bill-analyser-core/src/ops.rs
-- crates/bill-analyser-core/src/parsers.rs
 - crates/bill-analyser-core/src/primitives/auth.rs
 - crates/bill-analyser-core/src/primitives/currency.rs
 - crates/bill-analyser-core/src/primitives/date_time.rs
@@ -399,7 +398,6 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 - crates/bill-analyser-core/tests/matching_contracts.rs
 - crates/bill-analyser-core/tests/migration_governance_contracts.rs
 - crates/bill-analyser-core/tests/ops_contracts.rs
-- crates/bill-analyser-core/tests/parser_contracts.rs
 - crates/bill-analyser-core/tests/response_contract.rs
 - crates/bill-analyser-core/tests/runtime_contract.rs
 - crates/bill-analyser-core/tests/shared_primitives.rs
@@ -458,6 +456,8 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 - crates/bill-analyser-http/tests/proxy_contract.rs
 - crates/bill-analyser-http/tests/statistics_runtime_contract.rs
 - crates/bill-analyser-http/tests/taxonomy_runtime_contract.rs
+- crates/bill-analyser-parsers/src/lib.rs
+- crates/bill-analyser-parsers/tests/parser_contracts.rs
 
 ## Verified Dead Baseline
 

@@ -1,0 +1,19 @@
+[package]
+name = "bill-analyser-parsers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pure bill parser contracts and parser-output normalization for Bill Analyser."
+publish = false
+
+[lib]
+name = "bill_analyser_parsers"
+path = "src/lib.rs"
+
+[dependencies]
+bill-analyser-core = { path = "../bill-analyser-core" }
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

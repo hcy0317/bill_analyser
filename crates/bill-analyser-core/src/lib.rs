@@ -14,7 +14,6 @@ pub mod import_pipeline;
 pub mod matching;
 pub mod migration_governance;
 pub mod ops;
-pub mod parsers;
 pub mod primitives;
 pub mod response;
 pub mod runtime;
@@ -134,11 +133,6 @@ pub use ops::{
     BACKUP_DEFAULT_RETENTION_COUNT, BACKUP_DEFAULT_RETENTION_DAYS, BACKUP_ENCRYPTED_SUFFIX,
     BACKUP_PREFIX, BACKUP_ZIP_SUFFIX, DEFAULT_BACKUP_SYNC_PREFIX, DEFAULT_SQLCIPHER_KDF_ITER,
     DEFAULT_SQLCIPHER_PAGE_SIZE, SUPPORTED_SYNC_PROVIDERS, VALID_REPORT_EXPORT_FORMATS,
-};
-pub use parsers::{
-    aggregate_description, build_parser_tags, normalize_amount_text, normalize_parser_tags,
-    normalize_transaction_type, parser_registry, parser_source_label, post_process_raw_bills,
-    resolve_parser_tags, serialize_parser_tags, ParserInfo, RawBill, StandardBill,
 };
 pub use primitives::{
     normalize_bill_date_text, parse_bill_datetime, AuthContext, BillDateTime, CurrencyCode,

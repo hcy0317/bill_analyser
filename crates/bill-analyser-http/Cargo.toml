@@ -14,6 +14,7 @@ path = "src/lib.rs"
 axum.workspace = true
 bill-analyser-core = { path = "../bill-analyser-core" }
 bill-analyser-db = { path = "../bill-analyser-db" }
+bill-analyser-parsers = { path = "../bill-analyser-parsers" }
 base64.workspace = true
 bcrypt.workspace = true
 bytes.workspace = true

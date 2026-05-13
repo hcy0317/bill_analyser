@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, error::Error};
 
-use bill_analyser_core::{post_process_raw_bills, RawBill, SmartDeduplicationEngine, UserId};
+use bill_analyser_core::{SmartDeduplicationEngine, UserId};
 use bill_analyser_db::{
     apply_preview_learning_decision, apply_preview_llm_recommendation,
     apply_preview_transfer_decision, batch_update_preview_classification,
@@ -22,6 +22,7 @@ use bill_analyser_db::{
     ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate, ImportSessionDraft,
     ImportSessionStatusUpdate, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
+use bill_analyser_parsers::{post_process_raw_bills, RawBill};
 use serde_json::json;
 
 fn runtime_for(path: &std::path::Path) -> Result<SqliteRuntime, Box<dyn Error>> {

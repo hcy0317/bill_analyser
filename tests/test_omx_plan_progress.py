@@ -46,7 +46,7 @@ def test_early_phase_audit_reports_known_parser_and_auth_gaps() -> None:
     assert audits["P0"].status == "completed"
     assert audits["P1"].status == "completed"
     assert audits["P2"].status == "completed"
-    assert audits["P6"].status == "blocked"
-    assert any("crates/bill-analyser-parsers" in gap for gap in audits["P6"].gaps)
+    assert audits["P6"].status == "completed"
+    assert audits["P6"].gaps == ()
     assert audits["P3"].status == "blocked"
     assert any("OAuth" in gap for gap in audits["P3"].gaps)

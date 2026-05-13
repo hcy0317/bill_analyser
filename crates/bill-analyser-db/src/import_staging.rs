@@ -1,6 +1,5 @@
-use bill_analyser_core::{
-    normalize_bill_date_text, serialize_parser_tags, DedupBill, Money, StandardBill, UserId,
-};
+use bill_analyser_core::{normalize_bill_date_text, DedupBill, Money, UserId};
+use bill_analyser_parsers::{serialize_parser_tags, StandardBill};
 use chrono::Utc;
 use rusqlite::ffi::{SQLITE_CONSTRAINT_PRIMARYKEY, SQLITE_CONSTRAINT_UNIQUE};
 use rusqlite::{params, types::Value as SqlValue, Connection, ErrorCode, OptionalExtension};

@@ -58,6 +58,7 @@
 - 已有解析器：`wechat.py`、`alipay.py`、`icbc.py`、`abc.py`、`ccb.py`、`cmbc.py`
 - 工厂入口：`factory.py`（自动识别并分发）
 - `ParserBase` 当前除标准账单字段外，还会生成扁平 `parser_tags` 标签数组；解析器标签的规范化、推断与 JSON 序列化契约由中性 `import_contracts/parser_tags.py` 提供，`parsers/parser_tags.py` 仅保留公共兼容导出；三阶段导入临时表分别通过 `bills_parser_template.parser_tags_json` 与 `bills_preview.preview_parser_tags_json` 持久化这些解析器元标签
+- Rust `crates/bill-analyser-parsers` 当前拥有 parser registry metadata、`RawBill`/`StandardBill`、parser output normalization、`parser_tags` JSON 序列化与 golden fixture 合同；`bill-analyser-db` 和 `bill-analyser-http` 直接消费该 crate，`bill-analyser-core` 不再导出 parser 类型
 - 历史 `parsers_old/` 目录与 `*_parser.py` / `csv_parser.py` / `excel_parser.py` 兼容 shim 已移除；运行态仅保留当前工厂与现行解析器实现
 - 外部脚本如果仍引用旧 shim 导入路径，应迁移到 `factory.py` 或对应的现行 parser 模块
 - 标准解析样本统一放在 `tests/fixtures/import_samples/`，供 parser 单测与真实样本回归复用
