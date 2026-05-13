@@ -29,7 +29,6 @@ from bill_analyser.api.routes import (
     networth,
     recurring,
     receipt_ocr,
-    rules,
     settings_bundle,
     statistics,
     tags,
@@ -161,7 +160,6 @@ def create_app():  # pylint: disable=too-many-statements
     flask_app.register_blueprint(recurring.bp, url_prefix="/api/recurring")
     flask_app.register_blueprint(calendar_routes.bp, url_prefix="/api/calendar")
     flask_app.register_blueprint(networth.bp, url_prefix="/api/networth")
-    flask_app.register_blueprint(rules.bp, url_prefix="/api/rules")
     flask_app.register_blueprint(insights.bp, url_prefix="/api/insights")
     flask_app.register_blueprint(llm.bp, url_prefix="/api/llm")
     flask_app.register_blueprint(receipt_ocr.bp, url_prefix="/api/ml")

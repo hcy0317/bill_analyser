@@ -4,7 +4,7 @@
 - `auth/`：认证同名 package；按 session、registration/password、profile/external-auth、tokens、2FA、step-up、user-data 等功能域拆分，`auth.bp` 和既有 route URL/method 保持稳定
 - `bills/`：账单同名 package；按 CRUD/pictures、通用导入解析、导入配置、导入学习、reconciliation、v2 session/preview/decision 等功能域拆分，`bills.bp` 和 `/api/bills/*` 契约保持稳定
 - `matching/`：matching 同名 package；导入会话级 matching candidate 投影、preview family generic accept/reject、历史正式账单后配对与 pair 列表接口，以及规则中心 investment pairing settings 的 canonical REST 读写接口
-- `rules.py`：规则中心 legacy 兼容聚合口；默认 `import_db_runtime` 下 `GET /api/rules/overview` 已由 Rust taxonomy runtime 汇总 learning rules、启用的 category rule count 与 recurring rules，不再把 legacy `category_keywords` 作为运行时总览来源
+- `GET /api/rules/overview` 的规则中心 legacy 兼容聚合口已由 Rust taxonomy runtime 汇总 learning rules、启用的 category rule count 与 recurring rules，旧 Flask `rules.py` route shell 已删除，不再把 legacy `category_keywords` 作为运行时总览来源
 - `accounts/`：账户同名 package；账户 CRUD、余额同步、显示顺序与账户交易迁移/清空接口
 - `categories/`：分类同名 package；分类列表/树、创建更新删除、移动、统计、导入导出与规则维护接口
 - `category_rules.py`：分类规则的 canonical CRUD / migrate / defaults / test 接口；默认 `import_db_runtime` 下 `GET|POST /api/category-rules/`、`PUT|DELETE /api/category-rules/{rule_id}`、`POST /api/category-rules/reorder`、`POST /api/category-rules/defaults`、`POST /api/category-rules/migrate`、`POST /api/category-rules/{rule_id}/test`、legacy `GET|PUT /api/categories/rules` config/cache 与规则中心 `GET /api/rules/overview` 已由 Rust taxonomy runtime 读取或写入普通应用 SQLite；category rules 是当前分类规则体系的正式入口，`POST /api/category-rules/defaults` 会幂等补齐内置日常分类和分类识别规则
