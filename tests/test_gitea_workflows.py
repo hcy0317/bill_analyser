@@ -94,15 +94,27 @@ def test_ci_workflow_enforces_backend_rust_and_frontend_coverage_gates() -> None
     assert 'uses: https://github.com/actions/cache@v4' in text
     assert '~/.cargo/registry/index' in text
     assert '~/.cargo/registry/cache' in text
-    assert '~/.cargo/registry/src' in text
+    assert re.search(r'(?m)^            ~/.cargo/registry/src$', text) is None
     assert '~/.cargo/git/db' in text
     assert '~/.cargo/bin/cargo-llvm-cov' in text
-    assert 'target' in text
-    assert "key: ${{ runner.os }}-cargo-stable-${{ hashFiles('Cargo.lock') }}" in text
-    assert 'Clean Rust coverage artifacts before cache save' in text
-    assert 'rm -rf target/llvm-cov-target target/llvm-cov-*-target' in text
-    assert 'rm -f workspace.lcov' in text
+    assert re.search(r'(?m)^            target$', text) is None
+    assert "key: ${{ runner.os }}-cargo-slim-v1-stable-${{ hashFiles('Cargo.lock') }}" in text
+    assert '${{ runner.os }}-cargo-slim-v1-stable-' in text
+    assert 'Trim backend caches before cache save' in text
+    assert text.index('Run Rust coverage') < text.index('Run pytest coverage')
+    assert text.index('Run pytest coverage') < text.index('Trim backend caches before cache save')
+    assert 'cache_size_mb()' in text
+    assert 'rm -rf target' in text
+    assert 'rm -f workspace.lcov coverage.json .coverage .coverage.*' in text
+    assert 'cargo_cache_mb=' in text
+    assert 'cache_size_mb ~/.cargo/registry ~/.cargo/git ~/.cargo/bin/cargo-llvm-cov' in text
+    assert 'rm -rf ~/.cargo/registry/src ~/.cargo/git/checkouts' in text
+    assert 'rm -rf ~/.cargo/registry/cache ~/.cargo/git/db' in text
     assert '~/.cache/pip' in text
+    assert "key: ${{ runner.os }}-pip-slim-v1-${{ hashFiles('pyproject.toml', 'uv.lock', '.python-version') }}" in text
+    assert '${{ runner.os }}-pip-slim-v1-' in text
+    assert 'pip_cache_mb=' in text
+    assert 'python -m pip cache purge || rm -rf ~/.cache/pip' in text
     assert 'cargo install cargo-llvm-cov --locked' in text
     assert 'if ! command -v cargo-llvm-cov >/dev/null 2>&1; then' in text
     assert 'cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90' in text
@@ -111,6 +123,18 @@ def test_ci_workflow_enforces_backend_rust_and_frontend_coverage_gates() -> None
         in text
     )
     assert 'pytest-xdist' in text
-    assert 'cache: npm' in text
-    assert 'cache-dependency-path: src/web/package-lock.json' in text
+    assert 'Restore npm cache' in text
+    assert 'path: ~/.npm' in text
+    assert "key: ${{ runner.os }}-npm-slim-v1-${{ hashFiles('src/web/package-lock.json') }}" in text
+    assert '${{ runner.os }}-npm-slim-v1-' in text
+    assert 'cache: npm' not in text
+    assert 'cache-dependency-path: src/web/package-lock.json' not in text
     assert 'npm run test:coverage' in text
+    assert 'Trim frontend caches before cache save' in text
+    assert text.index('npm run test:coverage') < text.index('npm run build')
+    assert text.index('npm run build') < text.index('Trim frontend caches before cache save')
+    assert 'rm -rf node_modules coverage dist' in text
+    assert 'npm cache verify || true' in text
+    assert 'npm_cache_mb=' in text
+    assert 'if [ -e "$npm_cache_dir" ]; then' in text
+    assert 'npm cache clean --force' in text

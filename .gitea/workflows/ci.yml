@@ -86,23 +86,21 @@ jobs:
           path: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
-            ~/.cargo/registry/src
             ~/.cargo/git/db
             ~/.cargo/bin/cargo-llvm-cov
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
-            target
-          key: ${{ runner.os }}-cargo-stable-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-slim-v1-stable-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-stable-
+            ${{ runner.os }}-cargo-slim-v1-stable-
 
       - name: Restore pip cache
         uses: https://github.com/actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml', 'uv.lock', '.python-version') }}
+          key: ${{ runner.os }}-pip-slim-v1-${{ hashFiles('pyproject.toml', 'uv.lock', '.python-version') }}
           restore-keys: |
-            ${{ runner.os }}-pip-
+            ${{ runner.os }}-pip-slim-v1-
 
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
@@ -138,14 +136,39 @@ jobs:
       - name: Run Rust coverage
         run: cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90
 
-      - name: Clean Rust coverage artifacts before cache save
-        if: always()
-        run: |
-          rm -rf target/llvm-cov-target target/llvm-cov-*-target
-          rm -f workspace.lcov
-
       - name: Run pytest coverage
         run: python -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v -n auto --dist loadfile
+
+      - name: Trim backend caches before cache save
+        if: always()
+        run: |
+          cache_size_mb() {
+            total=0
+            for cache_path in "$@"; do
+              if [ -e "$cache_path" ]; then
+                size="$(du -sm "$cache_path" | awk '{print $1 + 0}')"
+                total=$((total + size))
+              fi
+            done
+            echo "$total"
+          }
+
+          rm -rf target
+          rm -f workspace.lcov coverage.json .coverage .coverage.*
+
+          cargo_cache_mb="$(cache_size_mb ~/.cargo/registry ~/.cargo/git ~/.cargo/bin/cargo-llvm-cov)"
+          if [ "$cargo_cache_mb" -gt 450 ]; then
+            rm -rf ~/.cargo/registry/src ~/.cargo/git/checkouts
+          fi
+          cargo_cache_mb="$(cache_size_mb ~/.cargo/registry ~/.cargo/git ~/.cargo/bin/cargo-llvm-cov)"
+          if [ "$cargo_cache_mb" -gt 450 ]; then
+            rm -rf ~/.cargo/registry/cache ~/.cargo/git/db
+          fi
+
+          pip_cache_mb="$(cache_size_mb ~/.cache/pip)"
+          if [ "$pip_cache_mb" -gt 300 ]; then
+            python -m pip cache purge || rm -rf ~/.cache/pip
+          fi
 
   frontend-ci:
     name: frontend-ci
@@ -158,8 +181,14 @@ jobs:
         uses: https://github.com/actions/setup-node@v4
         with:
           node-version: '22'
-          cache: npm
-          cache-dependency-path: src/web/package-lock.json
+
+      - name: Restore npm cache
+        uses: https://github.com/actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-slim-v1-${{ hashFiles('src/web/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-slim-v1-
 
       - name: Install dependencies
         working-directory: src/web
@@ -176,6 +205,21 @@ jobs:
       - name: Build frontend
         working-directory: src/web
         run: npm run build
+
+      - name: Trim frontend caches before cache save
+        if: always()
+        working-directory: src/web
+        run: |
+          rm -rf node_modules coverage dist
+          npm cache verify || true
+          npm_cache_dir="$(npm config get cache)"
+          npm_cache_mb=0
+          if [ -e "$npm_cache_dir" ]; then
+            npm_cache_mb="$(du -sm "$npm_cache_dir" | awk '{print $1 + 0}')"
+          fi
+          if [ "$npm_cache_mb" -gt 300 ]; then
+            npm cache clean --force
+          fi
 
   agent-stack-health:
     name: agent-stack-health
