@@ -1,8 +1,11 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+    collections::BTreeSet,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use chrono::{TimeZone, Utc};
 use rusqlite::types::{Value as SqlValue, ValueRef};
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row, Transaction};
 use serde_json::{Map, Number, Value};
 
 use crate::{run_transaction, DbError, DbResult};
@@ -13,6 +16,20 @@ pub type AccountRecord = Map<String, Value>;
 pub struct AccountDisplayOrder {
     pub account_id: i64,
     pub display_order: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountTransactionsMoveResult {
+    pub success: bool,
+    pub message: String,
+    pub moved_count: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountTransactionsClearResult {
+    pub success: bool,
+    pub message: String,
+    pub deleted_count: i64,
 }
 
 pub struct AccountsRepository<'conn> {
@@ -218,6 +235,261 @@ impl<'conn> AccountsRepository<'conn> {
         })?;
         Ok(true)
     }
+
+    pub fn move_all_transactions(
+        &mut self,
+        from_account_id: i64,
+        to_account_id: i64,
+        user_id: i64,
+    ) -> DbResult<AccountTransactionsMoveResult> {
+        if from_account_id == to_account_id {
+            return Ok(account_move_failure(
+                "Source and target accounts must be different",
+            ));
+        }
+
+        run_transaction(self.connection, |transaction| {
+            if !account_exists_in_transaction(transaction, from_account_id, user_id)? {
+                return Ok(account_move_failure("Source account not found"));
+            }
+            if !account_exists_in_transaction(transaction, to_account_id, user_id)? {
+                return Ok(account_move_failure("Target account not found"));
+            }
+
+            let now = utc_now_iso();
+            let mut moved_count = 0_i64;
+            if table_exists(transaction, "bills")? {
+                moved_count += row_count_to_i64(transaction.execute(
+                    "UPDATE bills
+                     SET source_account_id = ?1, updated_at = ?2
+                     WHERE user_id = ?3 AND source_account_id = ?4",
+                    params![to_account_id, now, user_id, from_account_id],
+                )?);
+                moved_count += row_count_to_i64(transaction.execute(
+                    "UPDATE bills
+                     SET destination_account_id = ?1, updated_at = ?2
+                     WHERE user_id = ?3 AND destination_account_id = ?4",
+                    params![to_account_id, now, user_id, from_account_id],
+                )?);
+            }
+            if table_exists(transaction, "account_transfers")? {
+                moved_count += row_count_to_i64(transaction.execute(
+                    "UPDATE account_transfers
+                     SET from_account_id = ?1
+                     WHERE user_id = ?2 AND from_account_id = ?3",
+                    params![to_account_id, user_id, from_account_id],
+                )?);
+                moved_count += row_count_to_i64(transaction.execute(
+                    "UPDATE account_transfers
+                     SET to_account_id = ?1
+                     WHERE user_id = ?2 AND to_account_id = ?3",
+                    params![to_account_id, user_id, from_account_id],
+                )?);
+            }
+
+            Ok(AccountTransactionsMoveResult {
+                success: true,
+                message: "Transactions moved successfully".to_string(),
+                moved_count,
+            })
+        })
+    }
+
+    pub fn delete_all_transactions_by_account(
+        &mut self,
+        account_id: i64,
+        user_id: i64,
+    ) -> DbResult<AccountTransactionsClearResult> {
+        run_transaction(self.connection, |transaction| {
+            if !account_exists_in_transaction(transaction, account_id, user_id)? {
+                return Ok(account_clear_failure("Account not found"));
+            }
+
+            let bill_ids = list_account_bill_ids(transaction, user_id, account_id)?;
+            let mut deleted_bill_count = 0_i64;
+            if !bill_ids.is_empty() {
+                delete_bill_side_effects(transaction, user_id, &bill_ids)?;
+                delete_bill_tags(transaction, &bill_ids)?;
+                let placeholders = placeholders(bill_ids.len());
+                let mut sql_params = bill_ids
+                    .iter()
+                    .copied()
+                    .map(SqlValue::Integer)
+                    .collect::<Vec<_>>();
+                sql_params.push(SqlValue::Integer(user_id));
+                deleted_bill_count = row_count_to_i64(transaction.execute(
+                    &format!("DELETE FROM bills WHERE id IN ({placeholders}) AND user_id = ?"),
+                    params_from_iter(sql_params),
+                )?);
+            }
+
+            let deleted_transfer_count = if table_exists(transaction, "account_transfers")? {
+                row_count_to_i64(transaction.execute(
+                    "DELETE FROM account_transfers
+                     WHERE user_id = ?1 AND (from_account_id = ?2 OR to_account_id = ?2)",
+                    params![user_id, account_id],
+                )?)
+            } else {
+                0
+            };
+
+            Ok(AccountTransactionsClearResult {
+                success: true,
+                message: "Transactions deleted successfully".to_string(),
+                deleted_count: deleted_bill_count + deleted_transfer_count,
+            })
+        })
+    }
+}
+
+fn account_move_failure(message: &str) -> AccountTransactionsMoveResult {
+    AccountTransactionsMoveResult {
+        success: false,
+        message: message.to_string(),
+        moved_count: 0,
+    }
+}
+
+fn account_clear_failure(message: &str) -> AccountTransactionsClearResult {
+    AccountTransactionsClearResult {
+        success: false,
+        message: message.to_string(),
+        deleted_count: 0,
+    }
+}
+
+fn account_exists_in_transaction(
+    transaction: &Transaction<'_>,
+    account_id: i64,
+    user_id: i64,
+) -> DbResult<bool> {
+    Ok(transaction.query_row(
+        "SELECT COUNT(*) > 0 FROM accounts WHERE id = ?1 AND user_id = ?2",
+        params![account_id, user_id],
+        |row| row.get::<_, bool>(0),
+    )?)
+}
+
+fn list_account_bill_ids(
+    transaction: &Transaction<'_>,
+    user_id: i64,
+    account_id: i64,
+) -> DbResult<Vec<i64>> {
+    if !table_exists(transaction, "bills")? {
+        return Ok(Vec::new());
+    }
+    let mut statement = transaction.prepare(
+        "SELECT id
+         FROM bills
+         WHERE user_id = ?1 AND (source_account_id = ?2 OR destination_account_id = ?2)",
+    )?;
+    let rows = statement.query_map(params![user_id, account_id], |row| row.get::<_, i64>(0))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+fn delete_bill_side_effects(
+    transaction: &Transaction<'_>,
+    user_id: i64,
+    bill_ids: &[i64],
+) -> DbResult<()> {
+    let bill_ids = normalize_ids(bill_ids);
+    if bill_ids.is_empty() {
+        return Ok(());
+    }
+    delete_pair_table_by_pair_columns(transaction, user_id, &bill_ids, "bill_pair_links")?;
+    delete_pair_table_by_pair_columns(
+        transaction,
+        user_id,
+        &bill_ids,
+        "bill_transfer_pair_suppressions",
+    )?;
+    delete_pair_table_by_pair_columns(
+        transaction,
+        user_id,
+        &bill_ids,
+        "bill_investment_pair_suppressions",
+    )?;
+    if table_exists(transaction, "bill_learning_rule_suppressions")? {
+        let placeholders = placeholders(bill_ids.len());
+        let mut sql_params = vec![SqlValue::Integer(user_id)];
+        sql_params.extend(bill_ids.iter().copied().map(SqlValue::Integer));
+        transaction.execute(
+            &format!(
+                "DELETE FROM bill_learning_rule_suppressions
+                 WHERE user_id = ? AND bill_id IN ({placeholders})"
+            ),
+            params_from_iter(sql_params),
+        )?;
+    }
+    Ok(())
+}
+
+fn delete_pair_table_by_pair_columns(
+    transaction: &Transaction<'_>,
+    user_id: i64,
+    bill_ids: &[i64],
+    table_name: &str,
+) -> DbResult<()> {
+    if !table_exists(transaction, table_name)? {
+        return Ok(());
+    }
+    let placeholders = placeholders(bill_ids.len());
+    let mut sql_params = vec![SqlValue::Integer(user_id)];
+    sql_params.extend(bill_ids.iter().copied().map(SqlValue::Integer));
+    sql_params.extend(bill_ids.iter().copied().map(SqlValue::Integer));
+    transaction.execute(
+        &format!(
+            "DELETE FROM {table_name}
+             WHERE user_id = ?
+               AND (left_bill_id IN ({placeholders}) OR right_bill_id IN ({placeholders}))"
+        ),
+        params_from_iter(sql_params),
+    )?;
+    Ok(())
+}
+
+fn delete_bill_tags(transaction: &Transaction<'_>, bill_ids: &[i64]) -> DbResult<()> {
+    let bill_ids = normalize_ids(bill_ids);
+    if bill_ids.is_empty() || !table_exists(transaction, "bill_tags")? {
+        return Ok(());
+    }
+    let placeholders = placeholders(bill_ids.len());
+    let sql_params = bill_ids
+        .iter()
+        .copied()
+        .map(SqlValue::Integer)
+        .collect::<Vec<_>>();
+    transaction.execute(
+        &format!("DELETE FROM bill_tags WHERE bill_id IN ({placeholders})"),
+        params_from_iter(sql_params),
+    )?;
+    Ok(())
+}
+
+fn table_exists(transaction: &Transaction<'_>, table_name: &str) -> DbResult<bool> {
+    Ok(transaction.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        params![table_name],
+        |row| row.get::<_, i64>(0),
+    )? == 1)
+}
+
+fn placeholders(count: usize) -> String {
+    vec!["?"; count].join(",")
+}
+
+fn normalize_ids(values: &[i64]) -> Vec<i64> {
+    values
+        .iter()
+        .copied()
+        .filter(|value| *value > 0)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn row_count_to_i64(value: usize) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
 }
 
 pub fn open_accounts_connection(db_path: &str) -> DbResult<Connection> {

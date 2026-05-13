@@ -8,7 +8,7 @@ use axum::{
         HeaderMap, StatusCode,
     },
     response::{IntoResponse, Response},
-    routing::{get, put},
+    routing::{get, post, put},
     Json, Router,
 };
 use bill_analyser_core::{category_rules::match_rule_expression, UserId};
@@ -64,12 +64,11 @@ pub const TAXONOMY_ACCOUNT_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("DELETE", "/api/accounts/{account_id}"),
     ("PUT", "/api/accounts/display-orders"),
     ("POST", "/api/accounts/sync-balances"),
-];
-
-pub const TAXONOMY_ACCOUNT_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/accounts/{account_id}/transactions/clear"),
     ("POST", "/api/accounts/{account_id}/transactions/move"),
 ];
+
+pub const TAXONOMY_ACCOUNT_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
 
 pub const TAXONOMY_TAG_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/tags"),
@@ -199,7 +198,15 @@ pub fn taxonomy_runtime_router() -> Router<ProxyState> {
         )
         .route(
             "/api/accounts/sync-balances",
-            axum::routing::post(sync_account_balances_handler),
+            post(sync_account_balances_handler),
+        )
+        .route(
+            "/api/accounts/:account_id/transactions/move",
+            post(move_account_transactions_handler),
+        )
+        .route(
+            "/api/accounts/:account_id/transactions/clear",
+            post(clear_account_transactions_handler),
         )
         .route(
             "/api/accounts/:account_id",
@@ -561,6 +568,230 @@ async fn sync_account_balances_handler(
             StatusCode::OK,
             format_sync_account_balances_response(result),
         ),
+        Err(_) => db_error_response(),
+    }
+}
+
+async fn move_account_transactions_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Path(account_id): Path<i64>,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = match parse_json_body(body) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let Some(to_account_value) = body.get("toAccountId") else {
+        return bad_request("toAccountId is required");
+    };
+    let Some(to_account_id) = value_as_i64(to_account_value) else {
+        return bad_request("Account IDs must be valid integers");
+    };
+    if account_id == to_account_id {
+        return bad_request("Source and target accounts must be different");
+    }
+    let password = string_or_default(body.get("password"), "");
+    if password.trim().is_empty() {
+        return bad_request("password is required");
+    }
+
+    let mut runtime = match open_runtime(&state, "taxonomy accounts") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let user_id_value = db_user_id(user_id);
+
+    let password_valid = match verify_sensitive_account_operation_password(
+        runtime.connection(),
+        user_id_value,
+        password.trim(),
+    ) {
+        Ok(value) => value,
+        Err(_) => return db_error_response(),
+    };
+    if !password_valid {
+        create_account_audit_log_best_effort(
+            runtime.connection(),
+            AccountAuditLogDraft {
+                operation_type: "move_transactions",
+                target_id: account_id,
+                details: json!({
+                    "from_account_id": account_id,
+                    "to_account_id": to_account_id,
+                }),
+                affected_count: 0,
+                status: "failed",
+                error_message: Some("Invalid password".to_string()),
+                ip_address: audit_ip_address(&headers),
+                user_agent: audit_user_agent(&headers),
+            },
+        );
+        return error_response(StatusCode::UNAUTHORIZED, "Invalid password");
+    }
+
+    let result = {
+        let mut repository = AccountsRepository::new(runtime.connection_mut());
+        repository.move_all_transactions(account_id, to_account_id, user_id_value)
+    };
+    match result {
+        Ok(result) if result.success => {
+            if sync_all_account_balances(runtime.connection_mut(), user_id).is_err() {
+                return db_error_response();
+            }
+            create_account_audit_log_best_effort(
+                runtime.connection(),
+                AccountAuditLogDraft {
+                    operation_type: "move_transactions",
+                    target_id: account_id,
+                    details: json!({
+                        "from_account_id": account_id,
+                        "to_account_id": to_account_id,
+                        "moved_count": result.moved_count,
+                    }),
+                    affected_count: result.moved_count,
+                    status: "success",
+                    error_message: None,
+                    ip_address: audit_ip_address(&headers),
+                    user_agent: audit_user_agent(&headers),
+                },
+            );
+            json_response(
+                StatusCode::OK,
+                json!({
+                    "success": true,
+                    "result": true,
+                    "moved_count": result.moved_count,
+                }),
+            )
+        }
+        Ok(result) => {
+            create_account_audit_log_best_effort(
+                runtime.connection(),
+                AccountAuditLogDraft {
+                    operation_type: "move_transactions",
+                    target_id: account_id,
+                    details: json!({
+                        "from_account_id": account_id,
+                        "to_account_id": to_account_id,
+                    }),
+                    affected_count: 0,
+                    status: "failed",
+                    error_message: Some(result.message.clone()),
+                    ip_address: audit_ip_address(&headers),
+                    user_agent: audit_user_agent(&headers),
+                },
+            );
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, result.message)
+        }
+        Err(_) => db_error_response(),
+    }
+}
+
+async fn clear_account_transactions_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Path(account_id): Path<i64>,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = match parse_json_body(body) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let password = string_or_default(body.get("password"), "");
+    if password.trim().is_empty() {
+        return bad_request("password is required");
+    }
+
+    let mut runtime = match open_runtime(&state, "taxonomy accounts") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let user_id_value = db_user_id(user_id);
+
+    let password_valid = match verify_sensitive_account_operation_password(
+        runtime.connection(),
+        user_id_value,
+        password.trim(),
+    ) {
+        Ok(value) => value,
+        Err(_) => return db_error_response(),
+    };
+    if !password_valid {
+        create_account_audit_log_best_effort(
+            runtime.connection(),
+            AccountAuditLogDraft {
+                operation_type: "delete_transactions",
+                target_id: account_id,
+                details: json!({ "account_id": account_id }),
+                affected_count: 0,
+                status: "failed",
+                error_message: Some("Invalid password".to_string()),
+                ip_address: audit_ip_address(&headers),
+                user_agent: audit_user_agent(&headers),
+            },
+        );
+        return error_response(StatusCode::UNAUTHORIZED, "Invalid password");
+    }
+
+    let result = {
+        let mut repository = AccountsRepository::new(runtime.connection_mut());
+        repository.delete_all_transactions_by_account(account_id, user_id_value)
+    };
+    match result {
+        Ok(result) if result.success => {
+            if sync_all_account_balances(runtime.connection_mut(), user_id).is_err() {
+                return db_error_response();
+            }
+            create_account_audit_log_best_effort(
+                runtime.connection(),
+                AccountAuditLogDraft {
+                    operation_type: "delete_transactions",
+                    target_id: account_id,
+                    details: json!({
+                        "account_id": account_id,
+                        "deleted_count": result.deleted_count,
+                    }),
+                    affected_count: result.deleted_count,
+                    status: "success",
+                    error_message: None,
+                    ip_address: audit_ip_address(&headers),
+                    user_agent: audit_user_agent(&headers),
+                },
+            );
+            json_response(
+                StatusCode::OK,
+                json!({
+                    "success": true,
+                    "result": true,
+                    "deleted_count": result.deleted_count,
+                }),
+            )
+        }
+        Ok(result) => {
+            create_account_audit_log_best_effort(
+                runtime.connection(),
+                AccountAuditLogDraft {
+                    operation_type: "delete_transactions",
+                    target_id: account_id,
+                    details: json!({ "account_id": account_id }),
+                    affected_count: 0,
+                    status: "failed",
+                    error_message: Some(result.message.clone()),
+                    ip_address: audit_ip_address(&headers),
+                    user_agent: audit_user_agent(&headers),
+                },
+            );
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, result.message)
+        }
         Err(_) => db_error_response(),
     }
 }
@@ -3281,6 +3512,124 @@ fn verify_sensitive_export_password(
     Ok(password_hash
         .filter(|value| !value.is_empty())
         .is_some_and(|hash| bcrypt::verify(password, &hash).unwrap_or(false)))
+}
+
+struct AccountAuditLogDraft {
+    operation_type: &'static str,
+    target_id: i64,
+    details: Value,
+    affected_count: i64,
+    status: &'static str,
+    error_message: Option<String>,
+    ip_address: String,
+    user_agent: String,
+}
+
+fn verify_sensitive_account_operation_password(
+    connection: &Connection,
+    user_id: i64,
+    password: &str,
+) -> rusqlite::Result<bool> {
+    if password.is_empty() {
+        return Ok(false);
+    }
+    match verify_sensitive_export_password(connection, user_id, password) {
+        Ok(true) => return Ok(true),
+        Ok(false) | Err(rusqlite::Error::QueryReturnedNoRows) => {}
+        Err(error) => return Err(error),
+    }
+
+    if let Some(env_password) = std::env::var("BILL_ANALYSER_OPERATION_PASSWORD")
+        .ok()
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(password == env_password);
+    }
+
+    if !sqlite_table_exists(connection, "app_settings")? {
+        return Ok(true);
+    }
+    let stored_password = connection
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            params!["operation_password"],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten();
+    Ok(
+        match stored_password.as_deref().filter(|value| !value.is_empty()) {
+            Some(value) => password == value,
+            None => true,
+        },
+    )
+}
+
+fn create_account_audit_log_best_effort(connection: &Connection, draft: AccountAuditLogDraft) {
+    let now = Utc::now()
+        .naive_utc()
+        .format("%Y-%m-%dT%H:%M:%S%.6f")
+        .to_string();
+    let _ = connection.execute(
+        r#"
+        INSERT INTO audit_logs (
+            operation_type, operation_target, target_id, details,
+            affected_count, ip_address, user_agent, session_id,
+            status, error_message, created_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        "#,
+        (
+            draft.operation_type,
+            "account",
+            draft.target_id,
+            draft.details.to_string(),
+            draft.affected_count,
+            draft.ip_address,
+            draft.user_agent,
+            Option::<String>::None,
+            draft.status,
+            draft.error_message,
+            now,
+        ),
+    );
+}
+
+fn audit_ip_address(headers: &HeaderMap) -> String {
+    header_string(headers, "x-forwarded-for")
+        .split(',')
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            let value = header_string(headers, "x-real-ip");
+            if value.is_empty() {
+                None
+            } else {
+                Some(value)
+            }
+        })
+        .unwrap_or_default()
+}
+
+fn audit_user_agent(headers: &HeaderMap) -> String {
+    header_string(headers, "user-agent")
+}
+
+fn header_string(headers: &HeaderMap, name: &str) -> String {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn sqlite_table_exists(connection: &Connection, table_name: &str) -> rusqlite::Result<bool> {
+    Ok(connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        params![table_name],
+        |row| row.get::<_, i64>(0),
+    )? == 1)
 }
 
 fn optional_json_body(body: Bytes) -> Option<Value> {

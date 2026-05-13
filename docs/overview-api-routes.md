@@ -21,7 +21,7 @@
   - 子账户删除统一通过 `DELETE /api/accounts/<id>`
   - `POST /api/accounts/<id>/transactions/move` 支持账户间批量迁移交易
   - `POST /api/accounts/<id>/transactions/clear` 支持按账户清空交易
-  - 账户主数据 REST URL、状态码与响应 envelope 保持 Flask 外壳不变；`import_db_runtime` 下账户 list/get/create/update/delete/subAccounts/display-order 路由由 Rust HTTP taxonomy runtime 直接接管，并显式处理前端分与 SQLite 元的金额转换；余额同步由 Rust 账户运行时按账单重算；账户交易批量动作仍由 Python 账户操作路径处理。
+  - 账户主数据 REST URL、状态码与响应 envelope 保持 Flask 外壳不变；`import_db_runtime` 下账户 list/get/create/update/delete/subAccounts/display-order、余额同步与账户交易 move/clear 路由由 Rust HTTP taxonomy runtime 直接接管，并显式处理前端分与 SQLite 元的金额转换；交易迁移/清空会验证当前密码或操作密码回退，按当前用户更新/删除账单、转账与账单副作用，重新同步账户余额并 best-effort 写入账户审计日志。
 - 标签域首批 legacy action 已收口到 REST：
   - `PUT /api/tags/<id>` 同时承担内容更新与 `hidden` 可见性更新
   - `POST /api/tags/batch` 支持批量创建

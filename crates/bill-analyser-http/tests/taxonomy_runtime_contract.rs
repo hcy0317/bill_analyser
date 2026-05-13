@@ -35,9 +35,18 @@ async fn taxonomy_accounts_runtime_serves_crud_and_frontend_contract() -> Result
     assert!(TAXONOMY_ACCOUNT_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/accounts/sync-balances")));
-    assert!(TAXONOMY_ACCOUNT_PROXIED_ROUTE_PATTERNS
+    assert!(TAXONOMY_ACCOUNT_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/accounts/{account_id}/transactions/move")));
+    assert!(TAXONOMY_ACCOUNT_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/accounts/{account_id}/transactions/clear")));
+    assert!(TAXONOMY_ACCOUNT_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .all(|route| route != &("POST", "/api/accounts/{account_id}/transactions/move")));
+    assert!(TAXONOMY_ACCOUNT_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .all(|route| route != &("POST", "/api/accounts/{account_id}/transactions/clear")));
     assert!(TAXONOMY_ACCOUNT_PROXIED_ROUTE_PATTERNS
         .iter()
         .all(|route| route != &("POST", "/api/accounts/sync-balances")));
@@ -181,6 +190,23 @@ async fn taxonomy_accounts_runtime_validates_payloads_and_user_scope() -> Result
         )
         .await?;
     assert_eq!(unauth_sync_response.status(), StatusCode::UNAUTHORIZED);
+
+    for uri in [
+        "/api/accounts/10/transactions/move",
+        "/api/accounts/10/transactions/clear",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))?,
+            )
+            .await?;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{uri}");
+    }
 
     let missing_create = app
         .clone()
@@ -342,6 +368,7 @@ async fn taxonomy_account_sync_balances_recalculates_current_user_accounts(
     let app = runtime_router(&fixture);
 
     let response = app
+        .clone()
         .oneshot(authed_request(
             Method::POST,
             "/api/accounts/sync-balances",
@@ -366,6 +393,266 @@ async fn taxonomy_account_sync_balances_recalculates_current_user_accounts(
     assert_eq!(account_balance(&fixture.db_path, 10)?, 17.34);
     assert_eq!(account_balance(&fixture.db_path, 11)?, 0.50);
     assert_eq!(account_balance(&fixture.db_path, 99)?, 99.0);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn taxonomy_account_transaction_actions_move_clear_and_audit() -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    let connection = Connection::open(&fixture.db_path)?;
+    connection.execute(
+        "INSERT INTO bills(
+            id, user_id, type, amount, date, counterparty, description,
+            source_account_id, destination_account_id, destination_amount,
+            main_category, sub_category, created_at, updated_at
+        )
+        VALUES
+            (200, 42, '支出', -20.0, '2026-01-20', '超市', '源账户支出', 10, 0, 0, '', '', 'now', 'now'),
+            (201, 42, '收入', 5.0, '2026-01-21', '退款', '目标账户收入', 0, 10, 5.0, '', '', 'now', 'now'),
+            (202, 77, '支出', -99.0, '2026-01-22', '其他', '其他用户账单', 99, 0, 0, '', '', 'now', 'now')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO account_transfers(id, user_id, from_account_id, to_account_id, from_amount, to_amount, created_at)
+         VALUES
+            (300, 42, 10, 11, 20.0, 20.0, 'now'),
+            (301, 42, 11, 10, 5.0, 5.0, 'now'),
+            (302, 77, 99, 10, 99.0, 99.0, 'now')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO bill_tags(bill_id, tag_id, created_at)
+         VALUES (200, 20, 'now'), (201, 21, 'now'), (202, 98, 'now')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO bill_pair_links(user_id, left_bill_id, right_bill_id)
+         VALUES (42, 200, 201), (77, 202, 202)",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO bill_transfer_pair_suppressions(user_id, left_bill_id, right_bill_id)
+         VALUES (42, 200, 201)",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO bill_investment_pair_suppressions(user_id, left_bill_id, right_bill_id)
+         VALUES (42, 200, 201)",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO bill_learning_rule_suppressions(user_id, bill_id)
+         VALUES (42, 200)",
+        [],
+    )?;
+    drop(connection);
+
+    let app = runtime_router(&fixture);
+
+    let missing_target_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/accounts/10/transactions/move",
+            json!({"password": "correct horse battery staple"}),
+        ))
+        .await?;
+    assert_eq!(missing_target_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(missing_target_response).await["error"],
+        "toAccountId is required"
+    );
+
+    let invalid_target_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/accounts/10/transactions/move",
+            json!({"toAccountId": "abc", "password": "correct horse battery staple"}),
+        ))
+        .await?;
+    assert_eq!(invalid_target_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_target_response).await["error"],
+        "Account IDs must be valid integers"
+    );
+
+    let same_account_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/accounts/10/transactions/move",
+            json!({"toAccountId": 10, "password": "correct horse battery staple"}),
+        ))
+        .await?;
+    assert_eq!(same_account_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(same_account_response).await["error"],
+        "Source and target accounts must be different"
+    );
+
+    let missing_move_password_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/accounts/10/transactions/move",
+            json!({"toAccountId": 11}),
+        ))
+        .await?;
+    assert_eq!(
+        missing_move_password_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(missing_move_password_response).await["error"],
+        "password is required"
+    );
+
+    for uri in [
+        "/api/accounts/10/transactions/move",
+        "/api/accounts/10/transactions/clear",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(authed_request(Method::POST, uri, Body::from("{")))
+            .await?;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{uri}");
+        assert_eq!(read_json(response).await["error"], "Invalid JSON");
+    }
+
+    let invalid_password_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/accounts/10/transactions/move",
+            json!({"toAccountId": 11, "password": "wrong-password"}),
+        ))
+        .await?;
+    assert_eq!(invalid_password_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        read_json(invalid_password_response).await["error"],
+        "Invalid password"
+    );
+    assert_eq!(
+        audit_log_count(&fixture.db_path, "move_transactions", "failed")?,
+        1
+    );
+
+    let missing_source_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/accounts/404/transactions/move",
+            json!({"toAccountId": 11, "password": "correct horse battery staple"}),
+        ))
+        .await?;
+    assert_eq!(
+        missing_source_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    assert_eq!(
+        read_json(missing_source_response).await["error"],
+        "Source account not found"
+    );
+
+    let move_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/accounts/10/transactions/move",
+            json!({"toAccountId": "11", "password": "correct horse battery staple"}),
+        ))
+        .await?;
+    assert_eq!(move_response.status(), StatusCode::OK);
+    let move_body = read_json(move_response).await;
+    assert_eq!(move_body["success"], true);
+    assert_eq!(move_body["result"], true);
+    assert_eq!(move_body["moved_count"], 4);
+    assert_eq!(bill_account_links(&fixture.db_path, 200)?, (11, 0));
+    assert_eq!(bill_account_links(&fixture.db_path, 201)?, (0, 11));
+    assert_eq!(account_transfer_links(&fixture.db_path, 300)?, (11, 11));
+    assert_eq!(account_transfer_links(&fixture.db_path, 301)?, (11, 11));
+    assert_eq!(
+        audit_log_count(&fixture.db_path, "move_transactions", "success")?,
+        1
+    );
+
+    let invalid_clear_password_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/accounts/11/transactions/clear",
+            json!({"password": "wrong-password"}),
+        ))
+        .await?;
+    assert_eq!(
+        invalid_clear_password_response.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        read_json(invalid_clear_password_response).await["error"],
+        "Invalid password"
+    );
+
+    let missing_clear_password_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/accounts/11/transactions/clear",
+            json!({}),
+        ))
+        .await?;
+    assert_eq!(
+        missing_clear_password_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(missing_clear_password_response).await["error"],
+        "password is required"
+    );
+
+    let missing_clear_account_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/accounts/404/transactions/clear",
+            json!({"password": "correct horse battery staple"}),
+        ))
+        .await?;
+    assert_eq!(
+        missing_clear_account_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    assert_eq!(
+        read_json(missing_clear_account_response).await["error"],
+        "Account not found"
+    );
+
+    let clear_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/accounts/11/transactions/clear",
+            json!({"password": "correct horse battery staple"}),
+        ))
+        .await?;
+    assert_eq!(clear_response.status(), StatusCode::OK);
+    let clear_body = read_json(clear_response).await;
+    assert_eq!(clear_body["success"], true);
+    assert_eq!(clear_body["result"], true);
+    assert_eq!(clear_body["deleted_count"], 4);
+    assert!(!bill_exists(&fixture.db_path, 200)?);
+    assert!(!bill_exists(&fixture.db_path, 201)?);
+    assert!(bill_exists(&fixture.db_path, 202)?);
+    assert_eq!(bill_tag_count(&fixture.db_path, 200)?, 0);
+    assert_eq!(bill_pair_link_count(&fixture.db_path, 42)?, 0);
+    assert_eq!(account_transfer_count(&fixture.db_path, 42)?, 0);
+    assert_eq!(account_transfer_count(&fixture.db_path, 77)?, 1);
+    assert_eq!(
+        audit_log_count(&fixture.db_path, "delete_transactions", "success")?,
+        1
+    );
 
     Ok(())
 }
@@ -489,6 +776,7 @@ async fn taxonomy_accounts_runtime_reports_config_errors_before_db_work(
     assert_eq!(display_response.status(), StatusCode::SERVICE_UNAVAILABLE);
 
     let sync_response = app
+        .clone()
         .oneshot(authed_request(
             Method::POST,
             "/api/accounts/sync-balances",
@@ -501,6 +789,25 @@ async fn taxonomy_accounts_runtime_reports_config_errors_before_db_work(
         "Rust taxonomy accounts DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH"
     );
 
+    let move_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/accounts/10/transactions/move",
+            json!({"toAccountId": 11, "password": "correct horse battery staple"}),
+        ))
+        .await?;
+    assert_eq!(move_response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let clear_response = app
+        .oneshot(json_request(
+            Method::POST,
+            "/api/accounts/10/transactions/clear",
+            json!({"password": "correct horse battery staple"}),
+        ))
+        .await?;
+    assert_eq!(clear_response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
     Ok(())
 }
 
@@ -512,6 +819,7 @@ async fn taxonomy_account_sync_balances_reports_db_errors_for_missing_schema(
     let app = runtime_router(&fixture);
 
     let response = app
+        .clone()
         .oneshot(authed_request(
             Method::POST,
             "/api/accounts/sync-balances",
@@ -521,6 +829,62 @@ async fn taxonomy_account_sync_balances_reports_db_errors_for_missing_schema(
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(
         read_json(response).await["error"],
+        "Rust taxonomy accounts route runtime DB error"
+    );
+
+    let move_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/accounts/10/transactions/move",
+            json!({"toAccountId": 11, "password": "correct horse battery staple"}),
+        ))
+        .await?;
+    assert_eq!(move_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    let clear_response = app
+        .oneshot(json_request(
+            Method::POST,
+            "/api/accounts/10/transactions/clear",
+            json!({"password": "correct horse battery staple"}),
+        ))
+        .await?;
+    assert_eq!(clear_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn taxonomy_account_transaction_actions_report_password_lookup_db_errors(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    Connection::open(&fixture.db_path)?.execute("DROP TABLE users", [])?;
+    let app = runtime_router(&fixture);
+
+    let move_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/accounts/10/transactions/move",
+            json!({"toAccountId": 11, "password": "correct horse battery staple"}),
+        ))
+        .await?;
+    assert_eq!(move_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        read_json(move_response).await["error"],
+        "Rust taxonomy accounts route runtime DB error"
+    );
+
+    let clear_response = app
+        .oneshot(json_request(
+            Method::POST,
+            "/api/accounts/10/transactions/clear",
+            json!({"password": "correct horse battery staple"}),
+        ))
+        .await?;
+    assert_eq!(clear_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        read_json(clear_response).await["error"],
         "Rust taxonomy accounts route runtime DB error"
     );
 
@@ -3239,6 +3603,57 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             created_from_recurring INTEGER,
             import_history_id INTEGER
         );
+        CREATE TABLE bill_tags (
+            bill_id INTEGER NOT NULL,
+            tag_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE account_transfers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            from_account_id INTEGER NOT NULL,
+            to_account_id INTEGER NOT NULL,
+            from_amount REAL DEFAULT 0,
+            to_amount REAL DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE bill_pair_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            left_bill_id INTEGER NOT NULL,
+            right_bill_id INTEGER NOT NULL
+        );
+        CREATE TABLE bill_transfer_pair_suppressions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            left_bill_id INTEGER NOT NULL,
+            right_bill_id INTEGER NOT NULL
+        );
+        CREATE TABLE bill_investment_pair_suppressions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            left_bill_id INTEGER NOT NULL,
+            right_bill_id INTEGER NOT NULL
+        );
+        CREATE TABLE bill_learning_rule_suppressions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            bill_id INTEGER NOT NULL
+        );
+        CREATE TABLE audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operation_type TEXT NOT NULL,
+            operation_target TEXT NOT NULL,
+            target_id INTEGER,
+            details TEXT,
+            affected_count INTEGER DEFAULT 0,
+            ip_address TEXT,
+            user_agent TEXT,
+            session_id TEXT,
+            status TEXT,
+            error_message TEXT,
+            created_at TEXT
+        );
         CREATE TABLE llm_configs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL DEFAULT 1,
@@ -3376,7 +3791,9 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
         )
         VALUES
             ('receipt_ocr_config', '{\"provider\":\"cloud_stub\",\"lang\":\"eng\"}', 'json',
-             'Receipt OCR runtime configuration', 0, 'now', 'now')",
+             'Receipt OCR runtime configuration', 0, 'now', 'now'),
+            ('operation_password', 'operation-secret', 'string',
+             'Sensitive operation fallback password', 0, 'now', 'now')",
         [],
     )?;
     Ok(())
@@ -3489,5 +3906,65 @@ fn bill_category_pair(path: &Path, bill_id: i64) -> Result<(String, String), Box
         "SELECT COALESCE(main_category, ''), COALESCE(sub_category, '') FROM bills WHERE id = ?1",
         [bill_id],
         |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    )?)
+}
+
+fn bill_account_links(path: &Path, bill_id: i64) -> Result<(i64, i64), Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT source_account_id, destination_account_id FROM bills WHERE id = ?1",
+        [bill_id],
+        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+    )?)
+}
+
+fn account_transfer_links(path: &Path, transfer_id: i64) -> Result<(i64, i64), Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT from_account_id, to_account_id FROM account_transfers WHERE id = ?1",
+        [transfer_id],
+        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+    )?)
+}
+
+fn bill_exists(path: &Path, bill_id: i64) -> Result<bool, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT COUNT(*) > 0 FROM bills WHERE id = ?1",
+        [bill_id],
+        |row| row.get::<_, bool>(0),
+    )?)
+}
+
+fn bill_tag_count(path: &Path, bill_id: i64) -> Result<i64, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT COUNT(*) FROM bill_tags WHERE bill_id = ?1",
+        [bill_id],
+        |row| row.get::<_, i64>(0),
+    )?)
+}
+
+fn bill_pair_link_count(path: &Path, user_id: i64) -> Result<i64, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT
+            (SELECT COUNT(*) FROM bill_pair_links WHERE user_id = ?1)
+          + (SELECT COUNT(*) FROM bill_transfer_pair_suppressions WHERE user_id = ?1)
+          + (SELECT COUNT(*) FROM bill_investment_pair_suppressions WHERE user_id = ?1)
+          + (SELECT COUNT(*) FROM bill_learning_rule_suppressions WHERE user_id = ?1)",
+        [user_id],
+        |row| row.get::<_, i64>(0),
+    )?)
+}
+
+fn account_transfer_count(path: &Path, user_id: i64) -> Result<i64, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT COUNT(*) FROM account_transfers WHERE user_id = ?1",
+        [user_id],
+        |row| row.get::<_, i64>(0),
+    )?)
+}
+
+fn audit_log_count(path: &Path, operation_type: &str, status: &str) -> Result<i64, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT COUNT(*) FROM audit_logs WHERE operation_type = ?1 AND status = ?2",
+        [operation_type, status],
+        |row| row.get::<_, i64>(0),
     )?)
 }

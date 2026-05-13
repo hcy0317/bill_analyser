@@ -468,8 +468,6 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
     assert_eq!(login_preflight_body["path"], "/api/auth/login");
 
     for (method, path) in [
-        (Method::POST, "/api/accounts/123/transactions/move"),
-        (Method::POST, "/api/accounts/123/transactions/clear"),
         (Method::OPTIONS, "/api/auth/register"),
         (Method::GET, "/api/categories/rules"),
         (Method::PUT, "/api/categories/rules"),

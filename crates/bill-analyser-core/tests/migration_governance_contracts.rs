@@ -58,6 +58,8 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("GET", "/api/templates/")));
     assert!(rust_owned.contains(&("PUT", "/api/templates/display-orders")));
     assert!(rust_owned.contains(&("POST", "/api/accounts/sync-balances")));
+    assert!(rust_owned.contains(&("POST", "/api/accounts/{account_id}/transactions/move")));
+    assert!(rust_owned.contains(&("POST", "/api/accounts/{account_id}/transactions/clear")));
     assert!(rust_owned.contains(&("GET", "/api/category-rules/")));
     assert!(rust_owned.contains(&("POST", "/api/category-rules/{rule_id}/test")));
     assert!(rust_owned.contains(&("GET", "/api/rules/overview")));
@@ -172,11 +174,6 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
 #[test]
 fn live_python_sidecar_routes_are_manifested_for_import_db_runtime_proxy() {
     for (method, pattern, domain) in [
-        (
-            "POST",
-            "/api/accounts/{account_id}/transactions/move",
-            "taxonomy-rules-settings",
-        ),
         ("GET", "/api/categories/rules", "taxonomy-rules-settings"),
         (
             "POST",
@@ -209,6 +206,8 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         "DELETE /api/accounts/{account_id}",
         "PUT /api/accounts/display-orders",
         "POST /api/accounts/sync-balances",
+        "POST /api/accounts/{account_id}/transactions/clear",
+        "POST /api/accounts/{account_id}/transactions/move",
     ] {
         let entry = manifest
             .iter()
@@ -275,9 +274,6 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         assert!(entry
             .deletion_blockers
             .contains(&"templates_category_rules_settings_parity"));
-        assert!(entry
-            .deletion_blockers
-            .contains(&"account_transaction_operations_parity"));
     }
 
     for endpoint in [
@@ -318,8 +314,6 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
     }
 
     for (method, pattern) in [
-        ("POST", "/api/accounts/{account_id}/transactions/clear"),
-        ("POST", "/api/accounts/{account_id}/transactions/move"),
         ("GET", "/api/categories/rules"),
         ("PUT", "/api/categories/rules"),
         ("POST", "/api/category-rules/"),

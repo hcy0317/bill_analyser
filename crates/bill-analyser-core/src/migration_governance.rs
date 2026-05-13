@@ -1445,16 +1445,24 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust taxonomy accounts runtime updates account fields and direct subaccount sets using the authenticated user scope.",
     },
-    python_proxy_route!(
-        "POST",
-        "/api/accounts/{account_id}/transactions/clear",
-        "taxonomy-rules-settings"
-    ),
-    python_proxy_route!(
-        "POST",
-        "/api/accounts/{account_id}/transactions/move",
-        "taxonomy-rules-settings"
-    ),
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/accounts/{account_id}/transactions/clear",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy accounts runtime verifies the current password or operation password fallback, deletes authenticated-user account-linked bills/transfers and side effects, syncs balances, and records account audit metadata.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/accounts/{account_id}/transactions/move",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy accounts runtime verifies the current password or operation password fallback, moves authenticated-user account-linked bills/transfers, syncs balances, and records account audit metadata.",
+    },
     EndpointOwnership {
         method: "PUT",
         pattern: "/api/accounts/display-orders",
@@ -2333,10 +2341,7 @@ const AUTH_TOKEN_DELETION_BLOCKERS: &[&str] = &[
     "profile_user_data_parity",
     "2fa_oauth_parity",
 ];
-const TAXONOMY_DELETION_BLOCKERS: &[&str] = &[
-    "templates_category_rules_settings_parity",
-    "account_transaction_operations_parity",
-];
+const TAXONOMY_DELETION_BLOCKERS: &[&str] = &["templates_category_rules_settings_parity"];
 const IMPORT_DELETION_BLOCKERS: &[&str] = &[
     "rust_route_runtime",
     "db_write_semantics",
@@ -2801,7 +2806,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Account CRUD/display-order/balance sync, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, category-rule list/test, rule overview, templates, and settings bundle export routes are Rust-owned. Account transaction move/clear, category rule mutations, and settings bundle import/preview routes remain Python-proxied until the rest of P4 ports runtime handlers.",
+            "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, category-rule list/test, rule overview, templates, and settings bundle export routes are Rust-owned. Category rule mutations and settings bundle import/preview routes remain Python-proxied until the rest of P4 ports runtime handlers.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
@@ -3243,7 +3248,7 @@ fn route_contract_details(
         deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-                "Account CRUD/display-order/balance sync, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, category-rule list/test, rule overview, templates, and settings bundle export routes are Rust-owned; account transaction move/clear, category rule mutations, and settings bundle import/preview routes remain Python-owned until the rest of P4 is ported.",
+                "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, category-rule list/test, rule overview, templates, and settings bundle export routes are Rust-owned; category rule mutations and settings bundle import/preview routes remain Python-owned until the rest of P4 is ported.",
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
             transition_evidence: DB_RUNTIME_EVIDENCE,
