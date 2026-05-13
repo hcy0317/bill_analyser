@@ -513,19 +513,19 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "PUT",
         pattern: "/api/bills/batch/update",
         domain: "bills-crud",
-        state: MigrationState::RustOwnedVerified,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills_crud_runtime owns batch update route.",
+        notes: "Rust bills_crud_runtime owns batch update route; the old Flask bills/category_actions.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "DELETE",
         pattern: "/api/bills/batch/delete",
         domain: "bills-crud",
-        state: MigrationState::RustOwnedVerified,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills_crud_runtime owns batch delete route.",
+        notes: "Rust bills_crud_runtime owns batch delete route; the old Flask bills/category_actions.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -594,19 +594,19 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/category/quick-add-keyword",
         domain: "bills-category-actions",
-        state: MigrationState::RustOwnedVerified,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills category-actions runtime appends category keywords with the Flask-compatible quick-add envelope.",
+        notes: "Rust bills category-actions runtime appends category keywords with the Flask-compatible quick-add envelope; the old Flask bills/category_actions.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "POST",
         pattern: "/api/bills/category/refresh",
         domain: "bills-category-actions",
-        state: MigrationState::RustOwnedVerified,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills category-actions runtime refreshes bill categories through canonical category_rules matching.",
+        notes: "Rust bills category-actions runtime refreshes bill categories through canonical category_rules matching; the old Flask bills/category_actions.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -2565,7 +2565,6 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "bills-crud-adjacent",
         python_owner_files: &[
             "src/bill_analyser/api/routes/bills/reconciliation.py",
-            "src/bill_analyser/api/routes/bills/category_actions.py",
             "src/bill_analyser/api/routes/bills/support.py",
         ],
         rust_owner_files: &[
@@ -2615,10 +2614,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
     },
     DomainGovernancePolicy {
         domain: "bills-category-actions",
-        python_owner_files: &[
-            "src/bill_analyser/api/routes/bills/category_actions.py",
-            "src/bill_analyser/core/category_engine/matcher.py",
-        ],
+        python_owner_files: &["src/bill_analyser/core/category_engine/matcher.py"],
         rust_owner_files: &[
             "crates/bill-analyser-http/src/bill_routes.rs",
             "crates/bill-analyser-core/src/category_rules/mod.rs",

@@ -28,8 +28,6 @@ from . import import_learning as _import_learning
 from .import_learning import *  # noqa: F403
 from . import import_config as _import_config
 from .import_config import *  # noqa: F403
-from . import category_actions as _category_actions
-from .category_actions import *  # noqa: F403
 from . import parse_import as _parse_import
 from .parse_import import *  # noqa: F403
 from . import reconciliation as _reconciliation
@@ -53,7 +51,6 @@ _COMPAT_MODULES = (
     _import_legacy,
     _import_learning,
     _import_config,
-    _category_actions,
     _parse_import,
     _reconciliation,
     _v2_pipeline,

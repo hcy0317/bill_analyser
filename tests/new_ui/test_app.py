@@ -113,6 +113,21 @@ class TestAPIBlueprints:
         response = client.get("/api/settings/bundle/export")
         assert response.status_code == 404
 
+    def test_bills_category_actions_removed_from_flask_sidecar(self, client):
+        """账单分类动作和批量改删已由 Rust runtime 接管，不再注册 Flask sidecar route shell。"""
+        cases = [
+            ("post", "/api/bills/category/quick-add-keyword"),
+            ("post", "/api/bills/category/refresh"),
+            ("put", "/api/bills/batch/update"),
+            ("delete", "/api/bills/batch/delete"),
+        ]
+
+        for method, url in cases:
+            response = getattr(client, method)(url, json={})
+            assert response.status_code in (404, 405), (
+                f"{method.upper()} {url} should not be registered in Flask sidecar"
+            )
+
     def test_statistics_blueprint_registered(self, client):
         """测试statistics蓝图已注册"""
         response = client.get("/api/statistics/overview")

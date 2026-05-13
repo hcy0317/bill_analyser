@@ -22,8 +22,6 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("POST", "/api/bills/import/v2/parse")));
     assert!(rust_owned.contains(&("GET", "/api/bills")));
     assert!(rust_owned.contains(&("POST", "/api/bills/batch")));
-    assert!(rust_owned.contains(&("PUT", "/api/bills/batch/update")));
-    assert!(rust_owned.contains(&("DELETE", "/api/bills/batch/delete")));
     assert!(rust_owned.contains(&("GET", "/api/budgets/")));
     assert!(rust_owned.contains(&("POST", "/api/budgets/")));
     assert!(rust_owned.contains(&("GET", "/api/budgets/export")));
@@ -193,8 +191,6 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
         ("GET", "/api/bills/{bill_id}/recurring-candidates"),
         ("PUT", "/api/bills/{bill_id}/recurring-match"),
         ("DELETE", "/api/bills/{bill_id}/recurring-match"),
-        ("POST", "/api/bills/category/quick-add-keyword"),
-        ("POST", "/api/bills/category/refresh"),
     ] {
         let endpoint = find_endpoint_ownership(method, pattern).unwrap_or_else(|| {
             panic!("missing Rust-owned bills adjacent endpoint {method} {pattern}")
@@ -202,6 +198,21 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
         assert_eq!(endpoint.state, MigrationState::RustOwnedVerified);
         assert!(!endpoint.is_python_runtime_owner());
         assert!(!endpoint.is_import_deletion_blocked());
+    }
+
+    for (method, pattern) in [
+        ("PUT", "/api/bills/batch/update"),
+        ("DELETE", "/api/bills/batch/delete"),
+        ("POST", "/api/bills/category/quick-add-keyword"),
+        ("POST", "/api/bills/category/refresh"),
+    ] {
+        let endpoint = find_endpoint_ownership(method, pattern).unwrap_or_else(|| {
+            panic!("missing Python-deleted bills category/batch endpoint {method} {pattern}")
+        });
+        assert_eq!(endpoint.state, MigrationState::PythonDeleted);
+        assert!(!endpoint.is_python_runtime_owner());
+        assert!(!endpoint.is_import_deletion_blocked());
+        assert!(endpoint.notes.contains("category_actions.py"));
     }
 
     let receipt_recognition = find_endpoint_ownership("POST", "/api/ml/receipt-recognition")
@@ -460,6 +471,10 @@ fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
     assert_eq!(
         python_deleted,
         vec![
+            ("PUT", "/api/bills/batch/update"),
+            ("DELETE", "/api/bills/batch/delete"),
+            ("POST", "/api/bills/category/quick-add-keyword"),
+            ("POST", "/api/bills/category/refresh"),
             ("GET", "/api/accounts/"),
             ("POST", "/api/accounts/"),
             ("DELETE", "/api/accounts/{account_id}"),

@@ -996,7 +996,7 @@ def test_bills_preview_confirm_keyword_refresh_and_batch_routes_cover_lightweigh
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """预览、确认导入、分类刷新和批量操作路由应覆盖主要轻量分支。"""
+    """预览和确认导入路由应覆盖主要轻量分支。"""
     db = FakeBillsDB()
     service = FakeBillsService()
     loop = FakeLoop()
@@ -1006,10 +1006,6 @@ def test_bills_preview_confirm_keyword_refresh_and_batch_routes_cover_lightweigh
 
     preview_route = _unwrap_all(bills_module.preview_import_file)
     confirm_route = _unwrap_all(bills_module.confirm_import)
-    quick_add_route = _unwrap_all(bills_module.quick_add_category_keyword)
-    refresh_route = _unwrap_all(bills_module.refresh_bill_categories)
-    batch_update_route = _unwrap_all(bills_module.batch_update_bills)
-    batch_delete_route = _unwrap_all(bills_module.batch_delete_bills)
 
     with bills_route_app.test_request_context("/api/bills/import/preview", method="POST", data={}):
         response, status = _unwrap_response(preview_route())
@@ -1114,167 +1110,6 @@ def test_bills_preview_confirm_keyword_refresh_and_batch_routes_cover_lightweigh
         response, status = _unwrap_response(confirm_route())
         assert status == 500
         assert response.get_json()["error"] == "confirm boom"
-
-    with bills_route_app.test_request_context(
-        "/api/bills/category/quick-add-keyword",
-        method="POST",
-        data="null",
-        content_type="application/json",
-    ):
-        response, status = _unwrap_response(quick_add_route())
-        assert status == 400
-        assert response.get_json()["error"] == "Request body is required"
-
-    with bills_route_app.test_request_context(
-        "/api/bills/category/quick-add-keyword",
-        method="POST",
-        json={"main_category": "餐饮"},
-    ):
-        response, status = _unwrap_response(quick_add_route())
-        assert status == 400
-        assert response.get_json()["error"] == "main_category and keyword are required"
-
-    service.quick_add_result = True
-    with bills_route_app.test_request_context(
-        "/api/bills/category/quick-add-keyword",
-        method="POST",
-        json={"main_category": "餐饮", "sub_category": "早餐", "keyword": "美团"},
-    ):
-        _set_request_user_id(4)
-        payload = quick_add_route().get_json() or {}
-        assert payload == {"success": True, "message": "Keyword added successfully"}
-        assert service.keyword_calls[-1] == ("餐饮", "早餐", "美团", 4)
-
-    service.quick_add_result = False
-    with bills_route_app.test_request_context(
-        "/api/bills/category/quick-add-keyword",
-        method="POST",
-        json={"main_category": "餐饮", "keyword": "美团"},
-    ):
-        _set_request_user_id()
-        response, status = _unwrap_response(quick_add_route())
-        assert status == 400
-        assert response.get_json()["error"] == "Failed to add keyword"
-
-    async def _raise_quick_add_error(*_args: Any, **_kwargs: Any) -> bool:
-        raise RuntimeError("keyword boom")
-
-    monkeypatch.setattr(service, "add_category_keyword", _raise_quick_add_error)
-    with bills_route_app.test_request_context(
-        "/api/bills/category/quick-add-keyword",
-        method="POST",
-        json={"main_category": "餐饮", "keyword": "美团"},
-    ):
-        _set_request_user_id()
-        response, status = _unwrap_response(quick_add_route())
-        assert status == 500
-        assert response.get_json()["error"] == "keyword boom"
-
-    service.refresh_result = {"success": True, "categorized": 5}
-    with bills_route_app.test_request_context(
-        "/api/bills/category/refresh",
-        method="POST",
-        json={"bill_ids": [1, 2]},
-    ):
-        _set_request_user_id(8)
-        payload = refresh_route().get_json() or {}
-        assert payload["success"] is True
-        assert payload["result"]["categorized"] == 5
-        assert service.refresh_calls[-1] == ([1, 2], 8)
-
-    async def _raise_refresh_error(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-        raise RuntimeError("refresh boom")
-
-    monkeypatch.setattr(service, "refresh_category_for_bills", _raise_refresh_error)
-    with bills_route_app.test_request_context(
-        "/api/bills/category/refresh",
-        method="POST",
-        json={"bill_ids": [1]},
-    ):
-        _set_request_user_id()
-        response, status = _unwrap_response(refresh_route())
-        assert status == 500
-        assert response.get_json()["error"] == "refresh boom"
-
-    with bills_route_app.test_request_context("/api/bills/batch/update", method="PUT", json={}):
-        _set_request_user_id()
-        response, status = _unwrap_response(batch_update_route())
-        assert status == 400
-        assert response.get_json()["error"] == "ids and updates are required"
-
-    with bills_route_app.test_request_context(
-        "/api/bills/batch/update",
-        method="PUT",
-        json={"ids": [1], "updates": {"user_id": 999}},
-    ):
-        _set_request_user_id()
-        response, status = _unwrap_response(batch_update_route())
-        assert status == 400
-        assert response.get_json()["error"] == "unsupported update fields: user_id"
-
-    with bills_route_app.test_request_context(
-        "/api/bills/batch/update",
-        method="PUT",
-        json={"ids": [1, 2], "updates": {"description": "updated"}},
-    ):
-        _set_request_user_id()
-        payload = batch_update_route().get_json() or {}
-        assert payload["success"] is True
-        assert payload["result"]["updated_count"] == 2
-        assert payload["result"]["failed_count"] == 0
-        assert payload["result"]["failed_ids"] == []
-
-    async def _raise_batch_update_error(*_args: Any, **_kwargs: Any) -> int:
-        raise RuntimeError("batch update boom")
-
-    monkeypatch.setattr(db, "batch_update_bills", _raise_batch_update_error)
-    with bills_route_app.test_request_context(
-        "/api/bills/batch/update",
-        method="PUT",
-        json={"ids": [1], "updates": {"description": "updated"}},
-    ):
-        _set_request_user_id()
-        response, status = _unwrap_response(batch_update_route())
-        assert status == 500
-        assert response.get_json()["error"] == "batch update boom"
-
-    with bills_route_app.test_request_context("/api/bills/batch/delete", method="DELETE", json={}):
-        _set_request_user_id()
-        response, status = _unwrap_response(batch_delete_route())
-        assert status == 400
-        assert response.get_json()["error"] == "ids are required"
-
-    db.bill_lookup = {
-        1: {"source_account_id": 11, "destination_account_id": 22},
-        2: RuntimeError("lookup boom"),
-        3: {"source_account_id": 33, "destination_account_id": 0},
-    }
-    db.raise_sync_for = {22}
-    with bills_route_app.test_request_context(
-        "/api/bills/batch/delete",
-        method="DELETE",
-        json={"ids": [1, 2, 3]},
-    ):
-        _set_request_user_id()
-        payload = batch_delete_route().get_json() or {}
-        assert payload["success"] is True
-        assert payload["result"]["deleted_count"] == 2
-        assert db.deleted_bill_ids == [1, 2, 3]
-        assert sorted(db.synced_accounts) == [11, 33]
-
-    async def _raise_batch_delete_error(*_args: Any, **_kwargs: Any) -> int:
-        raise RuntimeError("batch delete boom")
-
-    monkeypatch.setattr(db, "batch_delete_bills", _raise_batch_delete_error)
-    with bills_route_app.test_request_context(
-        "/api/bills/batch/delete",
-        method="DELETE",
-        json={"ids": [1]},
-    ):
-        _set_request_user_id()
-        response, status = _unwrap_response(batch_delete_route())
-        assert status == 500
-        assert response.get_json()["error"] == "batch delete boom"
 
 
 def test_parse_import_file_covers_early_validation_branches(

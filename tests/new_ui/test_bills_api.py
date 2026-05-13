@@ -2214,88 +2214,23 @@ class TestBillsAPI:
         else:
             pytest.skip("数据库中没有账单数据")
 
-    def test_batch_delete(self, client, auth_headers):
-        """测试批量删除账单"""
-        # 获取一些账单ID
-        list_response = client.get("/api/bills/?page_size=2", headers=auth_headers)
-        list_data = json.loads(list_response.data)
-
-        if len(list_data["result"]["items"]) >= 2:
-            ids = [item["id"] for item in list_data["result"]["items"][:2]]
-
-            response = client.delete(
-                "/api/bills/batch/delete",
-                data=json.dumps({"ids": ids}),
-                content_type="application/json",
-                headers=auth_headers
-            )
-
-            assert response.status_code == 200
-            data = json.loads(response.data)
-            assert data["success"] is True
-            assert "deleted_count" in data["result"]
-        else:
-            pytest.skip("账单数量不足以进行批量删除测试")
-
-    def test_batch_update_respects_user_scope_and_returns_failure_stats(self, client):
-        """批量更新应尊重 user_id 隔离，并返回失败统计。"""
-        primary_headers = _build_isolated_auth_headers(client, "test_bills_batch_update_primary")
-        secondary_headers = _build_isolated_auth_headers(client, "test_bills_batch_update_secondary")
-        primary_user_id = _get_current_user_id(client, primary_headers)
-        secondary_user_id = _get_current_user_id(client, secondary_headers)
-
-        primary_account = _ensure_test_account(client, primary_headers)
-        primary_category = _ensure_test_expense_category(client, primary_headers)
-        secondary_account = _ensure_test_account(client, secondary_headers)
-        secondary_category = _ensure_test_expense_category(client, secondary_headers)
-
-        unique_suffix = int(time.time() * 1000)
-        updated_comment = f"pytest batch update success {unique_suffix}"
-        primary_original_comment = f"pytest batch update self {unique_suffix}"
-        secondary_original_comment = f"pytest batch update other {unique_suffix}"
-
-        primary_bill = _create_test_bill_for_recurring(
-            client,
-            primary_headers,
-            account_id=primary_account["id"],
-            category_id=primary_category["id"],
-            amount_cents=1234,
-            bill_time_ms=int(datetime.now().timestamp() * 1000),
-            comment=primary_original_comment
-        )
-        secondary_bill = _create_test_bill_for_recurring(
-            client,
-            secondary_headers,
-            account_id=secondary_account["id"],
-            category_id=secondary_category["id"],
-            amount_cents=2345,
-            bill_time_ms=int(datetime.now().timestamp() * 1000) + 60000,
-            comment=secondary_original_comment
-        )
-
-        response = client.put(
+    def test_batch_update_delete_removed_from_flask_sidecar(self, client, auth_headers):
+        """批量更新/删除已由 Rust bills runtime 接管，不再注册 Flask sidecar route shell。"""
+        update_response = client.put(
             "/api/bills/batch/update",
-            data=json.dumps({
-                "ids": [primary_bill["id"], secondary_bill["id"]],
-                "updates": {"description": updated_comment}
-            }),
+            data=json.dumps({"ids": [1], "updates": {"description": "updated"}}),
             content_type="application/json",
-            headers=primary_headers
+            headers=auth_headers,
+        )
+        delete_response = client.delete(
+            "/api/bills/batch/delete",
+            data=json.dumps({"ids": [1]}),
+            content_type="application/json",
+            headers=auth_headers,
         )
 
-        assert response.status_code == 200
-        data = response.get_json()
-        assert data["success"] is True
-        assert data["result"]["updated_count"] == 1
-        assert data["result"]["failed_count"] == 1
-        assert [int(item) for item in data["result"]["failed_ids"]] == [int(secondary_bill["id"])]
-
-        updated_primary_bill = _find_bill_by_comment(updated_comment, user_id=primary_user_id)
-        untouched_secondary_bill = _find_bill_by_comment(secondary_original_comment, user_id=secondary_user_id)
-        assert updated_primary_bill is not None
-        assert str(updated_primary_bill["id"]) == str(primary_bill["id"])
-        assert untouched_secondary_bill is not None
-        assert str(untouched_secondary_bill["id"]) == str(secondary_bill["id"])
+        assert update_response.status_code in (404, 405)
+        assert delete_response.status_code in (404, 405)
 
     def test_export_bills_csv(self, client, auth_headers):
         """测试导出CSV格式"""
@@ -2357,17 +2292,17 @@ class TestBillsAPIValidation:
             assert data.get("success") is False
 
     def test_batch_update_rejects_protected_fields(self, client, auth_headers):
-        """测试批量更新拒绝受保护字段。"""
+        """批量更新 Flask route shell 已删除，受保护字段校验由 Rust runtime 覆盖。"""
         response = client.put(
             "/api/bills/batch/update",
             data=json.dumps({"ids": [1], "updates": {"user_id": 999}}),
             content_type="application/json",
             headers=auth_headers
         )
-        assert response.status_code == 400
+        assert response.status_code in (404, 405)
         data = json.loads(response.data)
         assert data["success"] is False
-        assert data["error"] == "unsupported update fields: user_id"
+        assert data["error"] in {"Not Found", "Method Not Allowed"}
 
     def test_batch_create_empty_transactions(self, client, auth_headers):
         """测试批量创建传空列表。"""
