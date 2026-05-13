@@ -58,6 +58,34 @@ def _create_account_via_db(client, auth_headers, payload):
     return asyncio.run(_create())
 
 
+def _create_category_via_db(client, auth_headers, payload):
+    """Create a category directly in the DB after the Flask categories route shell is removed."""
+    from bill_analyser.api.adapters.category_adapter import CategoryAdapter
+    from bill_analyser.api.app import db
+
+    adapter = CategoryAdapter()
+    user_id = _get_current_user_id(client, auth_headers)
+
+    async def _create():
+        backend_payload = {
+            "main_category": payload.get("name", ""),
+            "sub_category": "",
+            "description": payload.get("comment", ""),
+            "priority": payload.get("displayOrder", 0),
+            "keywords": payload.get("keywords", ""),
+            "type": payload.get("type", 3),
+            "hidden": not payload.get("visible", True),
+            "icon": payload.get("icon", ""),
+            "color": payload.get("color", ""),
+        }
+        category_id = await db.create_category(backend_payload, user_id=user_id)
+        category = await db.get_category_by_id(category_id, user_id=user_id)
+        assert category is not None
+        return adapter.backend_to_frontend(category)
+
+    return asyncio.run(_create())
+
+
 def _ensure_test_account(client, auth_headers):
     """确保存在可用账户。"""
     from bill_analyser.api.adapters.account_adapter import AccountAdapter
@@ -91,15 +119,22 @@ def _ensure_test_account(client, auth_headers):
 
 def _ensure_test_expense_category(client, auth_headers):
     """确保存在可用支出分类。"""
-    category_response = client.get("/api/categories/", headers=auth_headers)
-    assert category_response.status_code == 200
-    category_data = json.loads(category_response.data)
-    category = _pick_first_expense_category(category_data.get("result") or {})
+    from bill_analyser.api.adapters.category_adapter import CategoryAdapter
+    from bill_analyser.api.app import db
+
+    adapter = CategoryAdapter()
+    user_id = _get_current_user_id(client, auth_headers)
+
+    async def _list_categories():
+        categories = await db.get_all_categories(user_id=user_id)
+        return adapter.format_list_response(categories or []).get("result") or {}
+
+    category = _pick_first_expense_category(asyncio.run(_list_categories()))
 
     if category:
         return category
 
-    create_response = client.post("/api/categories/", json={
+    return _create_category_via_db(client, auth_headers, {
         "name": "pytest批量分类",
         "parentId": "0",
         "type": 3,
@@ -107,9 +142,7 @@ def _ensure_test_expense_category(client, auth_headers):
         "displayOrder": 0,
         "visible": True,
         "keywords": ""
-    }, headers=auth_headers)
-    assert create_response.status_code == 200 or create_response.status_code == 201
-    return create_response.get_json()["result"]
+    })
 
 
 def _build_isolated_auth_headers(client, prefix: str) -> dict[str, str]:

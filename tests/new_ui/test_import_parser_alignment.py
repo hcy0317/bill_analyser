@@ -18,7 +18,7 @@ from bill_analyser.api.routes.bills import (
     _trim_generic_import_rows_to_header,
 )
 from bill_analyser.parsers.factory import ParserFactory
-from tests.new_ui.test_bills_api import _create_account_via_db
+from tests.new_ui.test_bills_api import _create_account_via_db, _create_category_via_db
 from tests.real_sample_support import discover_parser_comparison_cases
 from tests.user_cleanup_support import register_test_user_for_cleanup
 
@@ -232,9 +232,10 @@ def _ensure_alignment_category(client, auth_headers, *, family: str, keywords: l
     category_type = 3 if transaction_type not in (2, 5) else transaction_type
     normalized_keywords = [str(keyword or "").strip() for keyword in keywords if str(keyword or "").strip()]
     keyword_payload = ",".join(dict.fromkeys(normalized_keywords))
-    response = client.post(
-        "/api/categories/",
-        json={
+    _create_category_via_db(
+        client,
+        auth_headers,
+        {
             "name": f"pytest对齐{family}",
             "parentId": "0",
             "type": category_type,
@@ -243,9 +244,7 @@ def _ensure_alignment_category(client, auth_headers, *, family: str, keywords: l
             "visible": True,
             "keywords": keyword_payload,
         },
-        headers=auth_headers,
     )
-    assert response.status_code in (200, 201), response.get_data(as_text=True)
 
 
 def _ensure_alignment_account(client, auth_headers, *, family: str, aliases: list[str]) -> None:

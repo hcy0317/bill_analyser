@@ -62,20 +62,6 @@
       "hard_limit": 120,
       "reason": "legacy oversized function; refactor slices must shrink or remove this exception"
     },
-    "src/bill_analyser/api/routes/categories/collection.py:create_category": {
-      "path": "src/bill_analyser/api/routes/categories/collection.py",
-      "qualname": "create_category",
-      "line_count": 175,
-      "hard_limit": 120,
-      "reason": "legacy oversized function; refactor slices must shrink or remove this exception"
-    },
-    "src/bill_analyser/api/routes/categories/mutations.py:update_category": {
-      "path": "src/bill_analyser/api/routes/categories/mutations.py",
-      "qualname": "update_category",
-      "line_count": 277,
-      "hard_limit": 120,
-      "reason": "legacy oversized function; refactor slices must shrink or remove this exception"
-    },
     "src/bill_analyser/api/routes/insights.py:get_anomalies": {
       "path": "src/bill_analyser/api/routes/insights.py",
       "qualname": "get_anomalies",

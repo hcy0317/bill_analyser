@@ -63,8 +63,8 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(!rust_owned.contains(&("POST", "/api/accounts/sync-balances")));
     assert!(!rust_owned.contains(&("POST", "/api/accounts/{account_id}/transactions/move")));
     assert!(!rust_owned.contains(&("POST", "/api/accounts/{account_id}/transactions/clear")));
-    assert!(rust_owned.contains(&("GET", "/api/categories/rules")));
-    assert!(rust_owned.contains(&("PUT", "/api/categories/rules")));
+    assert!(!rust_owned.contains(&("GET", "/api/categories/rules")));
+    assert!(!rust_owned.contains(&("PUT", "/api/categories/rules")));
     assert!(rust_owned.contains(&("GET", "/api/category-rules/")));
     assert!(rust_owned.contains(&("POST", "/api/category-rules/")));
     assert!(rust_owned.contains(&("PUT", "/api/category-rules/{rule_id}")));
@@ -90,6 +90,8 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(
         python_deleted_routes.contains(&("POST", "/api/accounts/{account_id}/transactions/move"))
     );
+    assert!(python_deleted_routes.contains(&("GET", "/api/categories/rules")));
+    assert!(python_deleted_routes.contains(&("PUT", "/api/categories/rules")));
     assert!(python_deleted_routes.contains(&("GET", "/api/rules/overview")));
     assert!(python_deleted_routes.contains(&("GET", "/api/settings/encryption/status")));
     assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
@@ -302,15 +304,11 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_proxy_remainder(
             .iter()
             .find(|entry| entry.endpoint == endpoint)
             .unwrap_or_else(|| panic!("taxonomy category route is present: {endpoint}"));
-        assert_eq!(entry.state, MigrationState::RustOwnedVerified);
+        assert_eq!(entry.state, MigrationState::PythonDeleted);
         assert_eq!(entry.handler, RouteHandlerId::TaxonomyRuntime);
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
-        assert!(entry
-            .unsupported_behavior
-            .contains("category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, settings bundle import/preview/export, and settings encryption status routes are Rust-owned"));
-        assert!(entry
-            .deletion_blockers
-            .contains(&"templates_category_rules_settings_parity"));
+        assert!(entry.deletion_blockers.is_empty());
+        assert_eq!(entry.decision_required, DecisionRequired::None);
     }
 
     for endpoint in [
@@ -441,6 +439,25 @@ fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
             ("POST", "/api/accounts/{account_id}/transactions/move"),
             ("PUT", "/api/accounts/display-orders"),
             ("POST", "/api/accounts/sync-balances"),
+            ("GET", "/api/categories"),
+            ("POST", "/api/categories"),
+            ("GET", "/api/categories/"),
+            ("POST", "/api/categories/"),
+            ("DELETE", "/api/categories/{category_id}"),
+            ("GET", "/api/categories/{category_id}"),
+            ("PUT", "/api/categories/{category_id}"),
+            ("GET", "/api/categories/all"),
+            ("PUT", "/api/categories/all"),
+            ("POST", "/api/categories/batch"),
+            ("GET", "/api/categories/export"),
+            ("GET", "/api/categories/flat"),
+            ("POST", "/api/categories/import"),
+            ("POST", "/api/categories/move"),
+            ("GET", "/api/categories/rules"),
+            ("PUT", "/api/categories/rules"),
+            ("GET", "/api/categories/statistics"),
+            ("GET", "/api/categories/tree"),
+            ("POST", "/api/categories/update-all"),
             ("GET", "/api/rules/overview"),
             ("GET", "/api/settings/encryption/status")
         ]

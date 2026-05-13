@@ -88,10 +88,10 @@ class TestAPIBlueprints:
         # 应该返回200或其他有效响应，而不是404
         assert response.status_code != 404
 
-    def test_categories_blueprint_registered(self, client):
-        """测试categories蓝图已注册"""
+    def test_categories_blueprint_removed_from_flask_sidecar(self, client):
+        """分类 REST 主链已由 Rust runtime 接管，不再注册 Flask sidecar 蓝图。"""
         response = client.get("/api/categories/")
-        assert response.status_code != 404
+        assert response.status_code == 404
 
     def test_statistics_blueprint_registered(self, client):
         """测试statistics蓝图已注册"""
