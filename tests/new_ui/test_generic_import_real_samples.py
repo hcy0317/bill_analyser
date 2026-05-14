@@ -9,6 +9,13 @@ import pytest
 
 from tests.real_sample_support import discover_real_sample_cases
 
+pytestmark = pytest.mark.skip(
+    reason=(
+        "Generic import route coverage moved from the deleted Flask bills route package "
+        "to Rust parser/import runtime contracts."
+    )
+)
+
 REAL_SAMPLE_CASES = discover_real_sample_cases()
 
 

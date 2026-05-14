@@ -19,7 +19,7 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
 
     assert!(rust_owned.contains(&("GET", "/api/health")));
     assert!(rust_owned.contains(&("GET", "/api/runtime")));
-    assert!(rust_owned.contains(&("POST", "/api/bills/import/v2/parse")));
+    assert!(!rust_owned.contains(&("POST", "/api/bills/import/v2/parse")));
     assert!(!rust_owned.contains(&("GET", "/api/bills")));
     assert!(!rust_owned.contains(&("POST", "/api/bills/batch")));
     assert!(!rust_owned.contains(&("GET", "/api/budgets/")));
@@ -121,6 +121,60 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(python_deleted_routes.contains(&("DELETE", "/api/templates/{template_id}")));
     assert!(python_deleted_routes.contains(&("PUT", "/api/templates/display-orders")));
     for (method, pattern) in [
+        ("POST", "/api/bills/import/v2/parse"),
+        ("POST", "/api/bills/import/v2/parse_generic"),
+        ("POST", "/api/bills/import/v2/dedup"),
+        ("POST", "/api/bills/import/v2/confirm"),
+        ("GET", "/api/bills/import/v2/session/{session_id}"),
+        ("DELETE", "/api/bills/import/v2/session/{session_id}"),
+        ("GET", "/api/bills/import/v2/preview/{session_id}"),
+        ("GET", "/api/bills/import/v2/preview/{session_id}/index"),
+        ("PUT", "/api/bills/import/v2/preview/{session_id}/update"),
+        ("POST", "/api/bills/import/v2/reclassify/{session_id}"),
+        (
+            "GET",
+            "/api/bills/import/v2/preview-item/{preview_id}/recurring-candidates",
+        ),
+        (
+            "PUT",
+            "/api/bills/import/v2/preview-item/{preview_id}/recurring-match",
+        ),
+        (
+            "DELETE",
+            "/api/bills/import/v2/preview-item/{preview_id}/recurring-match",
+        ),
+        (
+            "POST",
+            "/api/bills/import/v2/preview-item/{preview_id}/transfer-decision",
+        ),
+        (
+            "POST",
+            "/api/bills/import/v2/learning/{session_id}/suggestions",
+        ),
+        (
+            "GET",
+            "/api/bills/import/v2/learning/{session_id}/suggestions",
+        ),
+        ("POST", "/api/bills/import/v2/learning/{session_id}/promote"),
+        ("POST", "/api/bills/import/preview"),
+        ("POST", "/api/bills/import/confirm"),
+        ("POST", "/api/bills/import/batch"),
+        ("POST", "/api/bills/parse_import"),
+        ("POST", "/api/bills/import/upload"),
+        ("GET", "/api/bills/import/parsers"),
+        ("POST", "/api/bills/import/reclassify"),
+        ("GET", "/api/bills/import/configs"),
+        ("POST", "/api/bills/import/configs"),
+        ("POST", "/api/bills/import/configs/match"),
+        ("POST", "/api/bills/import/configs/suggest"),
+        ("DELETE", "/api/bills/import/configs/{config_id}"),
+        ("GET", "/api/bills/import/learning-rules"),
+        ("PUT", "/api/bills/import/learning-rules/{rule_id}"),
+        ("DELETE", "/api/bills/import/learning-rules/{rule_id}"),
+    ] {
+        assert!(python_deleted_routes.contains(&(method, pattern)));
+    }
+    for (method, pattern) in [
         ("GET", "/api/bills"),
         ("GET", "/api/bills/"),
         ("POST", "/api/bills"),
@@ -209,12 +263,9 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
 }
 
 #[test]
-fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_still_gate_blocked() {
+fn bills_import_routes_are_python_deleted_and_provider_routes_remain_proxied() {
     let blocked_routes = import_deletion_blocked_endpoints();
-    assert!(!blocked_routes.is_empty());
-    assert!(blocked_routes.iter().all(|endpoint| {
-        endpoint.state == MigrationState::RustOwnedVerified && endpoint.is_import_deletion_blocked()
-    }));
+    assert!(blocked_routes.is_empty());
 
     for (method, pattern) in [
         ("POST", "/api/bills/import/v2/parse"),
@@ -223,14 +274,23 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
             "POST",
             "/api/bills/import/v2/preview-item/{preview_id}/transfer-decision",
         ),
+    ] {
+        let endpoint = find_endpoint_ownership(method, pattern)
+            .unwrap_or_else(|| panic!("missing endpoint ownership for {method} {pattern}"));
+        assert_eq!(endpoint.state, MigrationState::PythonDeleted);
+        assert!(!endpoint.is_python_runtime_owner());
+        assert!(!endpoint.is_import_deletion_blocked());
+    }
+
+    for (method, pattern) in [
         ("POST", "/api/llm/preview-recommend/accept"),
         ("GET", "/api/ml/receipt-recognition/config"),
     ] {
         let endpoint = find_endpoint_ownership(method, pattern)
-            .unwrap_or_else(|| panic!("missing endpoint ownership for {method} {pattern}"));
+            .unwrap_or_else(|| panic!("missing adjacent Rust endpoint {method} {pattern}"));
         assert_eq!(endpoint.state, MigrationState::RustOwnedVerified);
         assert!(!endpoint.is_python_runtime_owner());
-        assert!(endpoint.is_import_deletion_blocked());
+        assert!(!endpoint.is_import_deletion_blocked());
     }
 
     for (method, pattern) in [
@@ -576,6 +636,56 @@ fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
             ("GET", "/api/statistics/exchange-rates"),
             ("PUT", "/api/statistics/exchange-rates/custom"),
             ("DELETE", "/api/statistics/exchange-rates/custom/{currency}"),
+            ("POST", "/api/bills/import/v2/parse"),
+            ("POST", "/api/bills/import/v2/parse_generic"),
+            ("POST", "/api/bills/import/v2/dedup"),
+            ("POST", "/api/bills/import/v2/confirm"),
+            ("GET", "/api/bills/import/v2/session/{session_id}"),
+            ("DELETE", "/api/bills/import/v2/session/{session_id}"),
+            ("GET", "/api/bills/import/v2/preview/{session_id}"),
+            ("GET", "/api/bills/import/v2/preview/{session_id}/index"),
+            ("PUT", "/api/bills/import/v2/preview/{session_id}/update"),
+            ("POST", "/api/bills/import/v2/reclassify/{session_id}"),
+            (
+                "GET",
+                "/api/bills/import/v2/preview-item/{preview_id}/recurring-candidates",
+            ),
+            (
+                "PUT",
+                "/api/bills/import/v2/preview-item/{preview_id}/recurring-match",
+            ),
+            (
+                "DELETE",
+                "/api/bills/import/v2/preview-item/{preview_id}/recurring-match",
+            ),
+            (
+                "POST",
+                "/api/bills/import/v2/preview-item/{preview_id}/transfer-decision",
+            ),
+            (
+                "POST",
+                "/api/bills/import/v2/learning/{session_id}/suggestions",
+            ),
+            (
+                "GET",
+                "/api/bills/import/v2/learning/{session_id}/suggestions",
+            ),
+            ("POST", "/api/bills/import/v2/learning/{session_id}/promote",),
+            ("POST", "/api/bills/import/preview"),
+            ("POST", "/api/bills/import/confirm"),
+            ("POST", "/api/bills/import/batch"),
+            ("POST", "/api/bills/parse_import"),
+            ("POST", "/api/bills/import/upload"),
+            ("GET", "/api/bills/import/parsers"),
+            ("POST", "/api/bills/import/reclassify"),
+            ("GET", "/api/bills/import/configs"),
+            ("POST", "/api/bills/import/configs"),
+            ("POST", "/api/bills/import/configs/match"),
+            ("POST", "/api/bills/import/configs/suggest"),
+            ("DELETE", "/api/bills/import/configs/{config_id}"),
+            ("GET", "/api/bills/import/learning-rules"),
+            ("PUT", "/api/bills/import/learning-rules/{rule_id}"),
+            ("DELETE", "/api/bills/import/learning-rules/{rule_id}"),
             ("GET", "/api/accounts/"),
             ("POST", "/api/accounts/"),
             ("DELETE", "/api/accounts/{account_id}"),
@@ -685,9 +795,7 @@ fn import_deletion_gate_requires_runtime_db_frontend_coverage_and_reference_evid
         full_coverage: true,
         no_residual_references: true,
     }));
-    assert!(import_deletion_blocked_endpoints()
-        .iter()
-        .all(|endpoint| endpoint.state == MigrationState::RustOwnedVerified));
+    assert!(import_deletion_blocked_endpoints().is_empty());
 }
 
 #[test]
@@ -833,7 +941,7 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         .iter()
         .find(|entry| entry.endpoint == "POST /api/bills/import/v2/parse")
         .expect("expanded manifest keeps import route");
-    assert_eq!(import_runtime.state, MigrationState::RustOwnedVerified);
+    assert_eq!(import_runtime.state, MigrationState::PythonDeleted);
     assert_eq!(import_runtime.domain_policy_ref, "bills-import");
     assert_eq!(import_runtime.handler, RouteHandlerId::ImportDbRuntime);
     assert!(import_runtime
@@ -855,10 +963,7 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         .find(|entry| entry.endpoint == "GET /api/ml/receipt-recognition/config")
         .expect("ocr config route is present");
     assert_eq!(ocr_config.decision_required, DecisionRequired::None);
-    assert!(ocr_config.deletion_blockers.contains(&"rust_route_runtime"));
-    assert!(!ocr_config
-        .deletion_blockers
-        .contains(&"provider_execution_parity"));
+    assert!(ocr_config.deletion_blockers.is_empty());
 
     let ocr_provider = manifest
         .iter()

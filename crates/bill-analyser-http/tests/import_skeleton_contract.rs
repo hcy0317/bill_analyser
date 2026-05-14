@@ -14,17 +14,15 @@ use tokio::net::TcpListener;
 use tower::ServiceExt;
 
 #[test]
-fn import_skeleton_registry_covers_all_deletion_blocked_governance_routes() {
-    let expected = import_deletion_blocked_endpoints()
-        .into_iter()
-        .map(|endpoint| (endpoint.method, endpoint.pattern))
-        .collect::<BTreeSet<_>>();
+fn import_skeleton_registry_no_longer_drives_import_deletion_blockers() {
+    assert!(import_deletion_blocked_endpoints().is_empty());
+
     let actual = IMPORT_SKELETON_ROUTE_PATTERNS
         .iter()
         .copied()
         .collect::<BTreeSet<_>>();
 
-    assert_eq!(actual, expected);
+    assert!(actual.contains(&("POST", "/api/bills/import/v2/parse")));
     assert!(actual.contains(&("POST", "/api/llm/preview-recommend/accept")));
     assert!(!actual.contains(&("POST", "/api/llm/rule-synthesis")));
 }

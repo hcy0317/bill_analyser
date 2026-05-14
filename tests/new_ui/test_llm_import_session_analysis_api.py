@@ -382,14 +382,21 @@ def _seed_rule_synthesis_knowledge_pack(
 
 
 def _get_preview_item_from_page(client, auth_headers, *, session_id: str, preview_id: int) -> dict[str, Any]:
-    response = client.get(
-        f"/api/bills/import/v2/preview/{session_id}?page=1&page_size=20",
-        headers=auth_headers,
-    )
-    assert response.status_code == 200, response.get_data(as_text=True)
-    payload = response.get_json()
-    assert payload["success"] is True
-    preview_rows = payload["data"]["preview"]
+    current_user_id = _get_current_user_id(client, auth_headers)
+
+    from bill_analyser.api import app as api_app
+
+    async def _fetch() -> list[dict[str, Any]]:
+        assert api_app.bill_service is not None
+        page = await api_app.bill_service.get_import_preview_page(
+            session_id,
+            user_id=current_user_id,
+            page=1,
+            page_size=20,
+        )
+        return page["preview"]
+
+    preview_rows = asyncio.run(_fetch())
     return next(row for row in preview_rows if int(row["id"]) == int(preview_id))
 
 

@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from bill_analyser.core import settings_bundle_rust_bridge
+from bill_analyser.core.db import Database
 from bill_analyser.core.database.settings_bundle.accounts_categories_tags import (
     SettingsBundleAccountsCategoriesTagsMixin,
 )
@@ -37,6 +38,22 @@ class _TemplateFallbackHarness(
     SettingsBundleResolutionMixin,
 ):
     """Minimal settings-bundle composition for template fallback helpers."""
+
+
+async def _create_user(db: Database, username: str) -> int:
+    return await db.create_user(
+        {
+            "username": username,
+            "email": f"{username}@example.com",
+            "password_hash": "pytest-hash",
+            "nickname": username,
+            "language": "zh_Hans",
+            "default_currency": "CNY",
+            "first_day_of_week": 1,
+            "is_active": 1,
+            "email_verified": 1,
+        }
+    )
 
 
 def test_settings_bundle_rust_bridge_wrappers_validate_result_shapes(
@@ -335,6 +352,149 @@ def test_settings_bundle_mixins_fall_back_when_rust_bridge_is_unavailable(
     assert payload["tag"] == "2"
     assert unresolved is True
     assert warnings == ["Skipped template Rent with unresolved category reference"]
+
+
+@pytest.mark.asyncio
+async def test_settings_bundle_python_fallback_import_export_round_trip(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Fallback Python settings-bundle path remains covered after Rust route cutover."""
+
+    def _unavailable(*_args: Any, **_kwargs: Any) -> None:
+        raise settings_bundle_rust_bridge.SettingsBundleRustBridgeUnavailable("missing")
+
+    for name in [
+        "normalize_sections",
+        "export_taxonomy_sections",
+        "normalize_account_import",
+        "normalize_category_import",
+        "normalize_tag_import",
+        "resolve_template_payload",
+    ]:
+        monkeypatch.setattr(settings_bundle_rust_bridge, name, _unavailable)
+
+    db = Database(str(tmp_path / "settings_bundle_fallback.db"))
+    await db.init_db()
+    try:
+        user_id = await _create_user(db, "settings_bundle_fallback_user")
+        bundle = {
+            "schemaVersion": 1,
+            "sections": {
+                "accounts": [
+                    {
+                        "externalRef": "account:cash",
+                        "name": "Cash",
+                        "type": 1,
+                        "currency": "CNY",
+                        "initialBalance": 12.5,
+                        "aliases": ["Wallet"],
+                    },
+                    {
+                        "externalRef": "account:child",
+                        "name": "Cash Child",
+                        "type": 2,
+                        "parentRef": "account:cash",
+                        "hidden": True,
+                    },
+                    {"name": "", "externalRef": "account:skip"},
+                ],
+                "transactionCategories": [
+                    {
+                        "externalRef": "category:food",
+                        "type": 3,
+                        "mainCategory": "餐饮",
+                        "subCategory": "咖啡",
+                        "keywords": ["coffee", "latte"],
+                        "hidden": False,
+                    },
+                    {"externalRef": "category:skip", "mainCategory": ""},
+                ],
+                "transactionTags": [
+                    {
+                        "externalRef": "tag:work",
+                        "name": "Work",
+                        "color": "#336699",
+                        "displayOrder": 2,
+                    },
+                    {"name": ""},
+                ],
+                "transactionTemplates": [
+                    {
+                        "name": "Coffee template",
+                        "sourceAmount": 32.5,
+                        "type": 3,
+                        "categoryRef": "category:food",
+                        "sourceAccountRef": "account:cash",
+                        "tagRefs": ["tag:work"],
+                        "comment": "morning coffee",
+                    },
+                    {"name": "", "sourceAmount": 1},
+                ],
+                "scheduledTransactions": [
+                    {
+                        "name": "Monthly coffee",
+                        "sourceAmount": 88,
+                        "type": 3,
+                        "categoryRef": "category:food",
+                        "sourceAccountRef": "account:cash",
+                        "scheduledFrequency": "1",
+                        "scheduledFrequencyType": 2,
+                        "scheduledStartDate": "2026-01-01",
+                        "autoCreate": True,
+                    }
+                ],
+                "categoryRecognitionRules": [
+                    {
+                        "name": "Coffee rule",
+                        "categoryRef": "category:food",
+                        "ruleExpression": "counterparty contains Coffee",
+                        "regexEnabled": False,
+                    },
+                    {"name": "Skipped rule", "ruleExpression": ""},
+                ],
+                "llmConfigs": [
+                    {
+                        "name": "OpenAI",
+                        "provider": "openai",
+                        "model": "gpt-test",
+                        "apiKey": "sk-test",
+                        "baseUrl": "https://example.test",
+                        "advancedSettings": {"temperature": 0.1},
+                    },
+                    {"provider": "openai"},
+                ],
+                "ocrConfig": [{"provider": "disabled", "lang": "eng"}],
+            },
+        }
+
+        preview = await db.preview_import_user_settings_bundle(bundle, user_id=user_id)
+        assert preview["dryRun"] is True
+        assert preview["sections"]["accounts"]["created"] == 2
+        assert preview["sections"]["transactionTemplates"]["created"] == 1
+        assert preview["sections"]["categoryRecognitionRules"]["skipped"] == 1
+
+        imported = await db.import_user_settings_bundle(bundle, user_id=user_id)
+        assert imported["dryRun"] is False
+        assert imported["sections"]["accounts"]["created"] == 2
+        assert imported["sections"]["llmConfigs"]["created"] == 1
+        assert imported["sections"]["ocrConfig"]["created"] == 1
+
+        updated = await db.import_user_settings_bundle(bundle, user_id=user_id)
+        assert updated["sections"]["accounts"]["updated"] == 2
+        assert updated["sections"]["llmConfigs"]["updated"] == 1
+        assert updated["sections"]["ocrConfig"]["updated"] == 1
+
+        exported = await db.export_user_settings_bundle(user_id=user_id)
+        sections = exported["sections"]
+        assert any(item["name"] == "Cash" for item in sections["accounts"])
+        assert any(item["name"] == "Coffee template" for item in sections["transactionTemplates"])
+        assert any(item["name"] == "Coffee rule" for item in sections["categoryRecognitionRules"])
+        assert sections["llmConfigs"][0]["apiKey"] == ""
+        assert sections["llmConfigs"][0]["hasApiKey"] is True
+        assert sections["ocrConfig"][0]["provider"] == "disabled"
+    finally:
+        await db.close()
 
 
 def test_settings_bundle_rust_bridge_command_resolution(

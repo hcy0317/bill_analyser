@@ -146,7 +146,7 @@ S9d wires JSON parse -> parse_generic -> dedup -> confirm and frontend FormData 
 
 ## S9e Bills and Transactions CRUD Runtime
 
-S9e makes Rust the runtime owner for core bills/transactions CRUD routes in `import_db_runtime`, including `GET/POST /api/bills`, by-month/get aliases, single update/delete, legacy modify/delete, and batch create/update/delete. Recurring candidates/match, reconciliation statements, and category action helpers are Rust-owned after S14b-S14d. Python bills CRUD/import deletion remains blocked because residual route, frontend, test, and docs references still exist.
+S9e makes Rust the runtime owner for core bills/transactions CRUD routes in `import_db_runtime`, including `GET/POST /api/bills`, by-month/get aliases, single update/delete, legacy modify/delete, and batch create/update/delete. Recurring candidates/match, reconciliation statements, and category action helpers are Rust-owned after S14b-S14d. The old Flask bills CRUD and import route shells are deleted; remaining Python core import services stay preserved for later matching/provider/global-learning cutovers.
 
 ## S9f Transaction Picture Runtime
 

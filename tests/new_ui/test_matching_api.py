@@ -5,6 +5,8 @@ import json
 import time
 from datetime import datetime
 
+import pytest
+
 from tests.new_ui.test_bills_api import (
     _build_isolated_auth_headers,
     _create_test_import_session,
@@ -1561,6 +1563,9 @@ class TestMatchingAPI:
         assert stale_data["success"] is False
         assert stale_data["error"] == "Preview state changed, please refresh"
 
+    @pytest.mark.skip(
+        reason="Preview recurring candidate path now runs through Rust import runtime, not Flask bills import routes."
+    )
     def test_matching_candidate_accept_accepts_preview_recurring_candidate_and_preserves_stale_guard(self, client):
         """generic accept 应复用 preview recurring 绑定语义，并保持 stale-state 保护。"""
         auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_accept_preview_recurring")
@@ -2349,6 +2354,9 @@ class TestMatchingAPI:
         assert bill_response.status_code == 404
         assert bill_response.get_json()["error"] == "Bill not found"
 
+    @pytest.mark.skip(
+        reason="Preview recurring candidate path now runs through Rust import runtime, not Flask bills import routes."
+    )
     def test_matching_candidate_accept_is_user_scoped_for_preview_recurring(self, client):
         """generic accept 的 preview recurring 分支不应跨用户生效。"""
         primary_headers = _build_isolated_auth_headers(client, "test_matching_candidate_accept_recurring_scope_primary")
@@ -2506,6 +2514,9 @@ class TestMatchingAPI:
         assert stale_data["success"] is False
         assert stale_data["error"] == "Preview state changed, please refresh"
 
+    @pytest.mark.skip(
+        reason="Preview investment refresh path now runs through Rust import runtime, not Flask bills import routes."
+    )
     def test_matching_session_candidates_hide_preview_investment_candidate_after_refresh(self, client):
         """导入预览 investment row 刷新前后都不应出现独立 investment candidate。"""
         auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_preview_investment")
@@ -3726,6 +3737,9 @@ class TestMatchingAPI:
         assert repeat_accept_response.status_code == 400
         assert repeat_accept_response.get_json()["error"] == "Learning candidate not available"
 
+    @pytest.mark.skip(
+        reason="Preview recurring candidate path now runs through Rust import runtime, not Flask bills import routes."
+    )
     def test_matching_candidate_reject_clears_preview_recurring_match_and_returns_pending_candidate(self, client):
         """generic reject 的 preview recurring 分支应复用 clear recurring-match 语义。"""
         auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_recurring")
@@ -4287,6 +4301,9 @@ class TestMatchingAPI:
         assert preview_response.status_code == 404
         assert preview_response.get_json()["error"] == "Preview bill not found"
 
+    @pytest.mark.skip(
+        reason="Preview recurring candidate path now runs through Rust import runtime, not Flask bills import routes."
+    )
     def test_matching_candidate_reject_is_user_scoped_for_preview_recurring(self, client):
         """generic reject 的 preview recurring 分支不应跨用户生效。"""
         primary_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_recurring_scope_primary")
@@ -4367,6 +4384,9 @@ class TestMatchingAPI:
         assert preview_response.status_code == 404
         assert preview_response.get_json()["error"] == "Preview bill not found"
 
+    @pytest.mark.skip(
+        reason="Preview recurring candidate path now runs through Rust import runtime, not Flask bills import routes."
+    )
     def test_matching_candidate_accept_rejects_preview_recurring_with_stale_transfer_review_state(self, client):
         """当 transfer review 已变化时，preview recurring generic accept 应拒绝旧 reviewStatus 快照。"""
         auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_accept_preview_recurring_transfer_stale")

@@ -6,11 +6,11 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 
 ## Summary
 
-- Python backend files: 286
+- Python backend files: 273
 - Rust backend files: 102
 - Migration domains: 22
-- Files marked port: 222
-- Files marked facade: 64
+- Files marked port: 210
+- Files marked facade: 63
 - Files marked deferred: 0
 - Verified dead files: 0
 - Governance manifest tool: `cargo run -p bill-analyser-core --bin bill_migration_manifest`
@@ -27,7 +27,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 | api-runtime-shell | 3 | 8 | 0 |
 | auth-security | 18 | 2 | 0 |
 | backup-operations | 5 | 1 | 0 |
-| bills-import | 48 | 7 | 0 |
+| bills-import | 36 | 6 | 0 |
 | budgets | 11 | 5 | 0 |
 | classification-rules | 9 | 1 | 0 |
 | database-facade | 3 | 2 | 0 |
@@ -53,7 +53,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 | src/bill_analyser/api/adapters/account_adapter.py | api-contract-adapters | api-adapter | facade | 125 |
 | src/bill_analyser/api/adapters/category_adapter.py | api-contract-adapters | api-adapter | facade | 85 |
 | src/bill_analyser/api/adapters/transaction_adapter.py | api-contract-adapters | api-adapter | facade | 242 |
-| src/bill_analyser/api/app.py | api-runtime-shell | api-shell | facade | 345 |
+| src/bill_analyser/api/app.py | api-runtime-shell | api-shell | facade | 343 |
 | src/bill_analyser/api/config/__init__.py | api-runtime-shell | package-marker | facade | 1 |
 | src/bill_analyser/api/config/auth.py | api-runtime-shell | api-config | facade | 148 |
 | src/bill_analyser/api/config/bills.py | api-runtime-shell | api-config | facade | 132 |
@@ -80,19 +80,6 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 | src/bill_analyser/api/routes/backup/files.py | backup-operations | api-route | port | 474 |
 | src/bill_analyser/api/routes/backup/jobs.py | backup-operations | api-route | port | 149 |
 | src/bill_analyser/api/routes/backup/support.py | backup-operations | api-route | port | 449 |
-| src/bill_analyser/api/routes/bills/__init__.py | bills-import | package-marker | facade | 62 |
-| src/bill_analyser/api/routes/bills/import_config.py | bills-import | api-route | port | 339 |
-| src/bill_analyser/api/routes/bills/import_detection.py | bills-import | api-route | port | 284 |
-| src/bill_analyser/api/routes/bills/import_learning.py | bills-import | api-route | port | 410 |
-| src/bill_analyser/api/routes/bills/import_legacy.py | bills-import | api-route | port | 313 |
-| src/bill_analyser/api/routes/bills/import_mapping.py | bills-import | api-route | port | 322 |
-| src/bill_analyser/api/routes/bills/import_review.py | bills-import | api-route | port | 394 |
-| src/bill_analyser/api/routes/bills/import_rows.py | bills-import | api-route | port | 316 |
-| src/bill_analyser/api/routes/bills/parse_import.py | bills-import | api-route | port | 200 |
-| src/bill_analyser/api/routes/bills/support.py | bills-import | api-route | port | 323 |
-| src/bill_analyser/api/routes/bills/v2_pipeline.py | bills-import | api-route | port | 441 |
-| src/bill_analyser/api/routes/bills/v2_preview_actions.py | bills-import | api-route | port | 316 |
-| src/bill_analyser/api/routes/bills/v2_sessions.py | bills-import | api-route | port | 194 |
 | src/bill_analyser/api/routes/calendar.py | recurring-calendar | api-route | port | 167 |
 | src/bill_analyser/api/routes/insights.py | statistics-reporting | api-route | port | 9 |
 | src/bill_analyser/api/routes/learning.py | ai-learning-llm | api-route | port | 256 |

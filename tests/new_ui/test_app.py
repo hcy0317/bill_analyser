@@ -82,11 +82,10 @@ class TestApp:
 class TestAPIBlueprints:
     """测试API蓝图注册"""
 
-    def test_bills_blueprint_registered(self, client):
-        """测试bills import sidecar 蓝图仍保留"""
+    def test_bills_blueprint_removed_from_flask_sidecar(self, client):
+        """账单 import route shell 已由 Rust runtime 接管，不再注册 Flask sidecar。"""
         response = client.get("/api/bills/import/parsers")
-        # 应该返回200或其他有效响应，而不是404
-        assert response.status_code != 404
+        assert response.status_code in (404, 405)
 
     def test_categories_blueprint_removed_from_flask_sidecar(self, client):
         """分类 REST 主链已由 Rust runtime 接管，不再注册 Flask sidecar 蓝图。"""
@@ -162,8 +161,8 @@ class TestErrorHandling:
             content_type="application/json",
             headers=auth_headers
         )
-        # 应该返回400或500，而不是崩溃
-        assert response.status_code in (400, 415, 500)
+        # 删除 Flask bills route shell 后，Flask 层不再解析此 JSON。
+        assert response.status_code in (404, 405)
 
     def test_method_not_allowed(self, client):
         """测试不允许的HTTP方法"""

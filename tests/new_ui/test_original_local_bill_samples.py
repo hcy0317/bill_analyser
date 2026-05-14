@@ -44,6 +44,9 @@ def test_local_original_bill_files_detect_and_parse_with_dedicated_parser(case):
 
 
 @pytest.mark.skipif(not LOCAL_ORIGINAL_BILL_CASES, reason='未发现本地 bills/ 原始账单样本')
+@pytest.mark.skip(
+    reason="Flask parse_import route was deleted; dedicated parser coverage remains below Rust/Python parser contracts."
+)
 @pytest.mark.parametrize('case', LOCAL_ORIGINAL_BILL_CASES, ids=[case['id'] for case in LOCAL_ORIGINAL_BILL_CASES])
 def test_local_original_bill_files_complete_auto_parse_import_route(client, auth_headers, case):
     """每类本地原始账单都应能走通 parse_import 自动识别链路。"""

@@ -12,6 +12,13 @@ from openpyxl import Workbook
 
 from tests.user_cleanup_support import register_test_user_for_cleanup
 
+pytestmark = pytest.mark.skip(
+    reason=(
+        "Flask bills route package was deleted; /api/bills and /api/bills/import* "
+        "runtime coverage now lives in Rust HTTP contracts."
+    )
+)
+
 
 def _pick_first_account(account_items):
     """递归获取第一个可用账户。"""

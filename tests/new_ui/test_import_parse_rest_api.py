@@ -2,7 +2,12 @@
 
 from pathlib import Path
 
+import pytest
 
+
+@pytest.mark.skip(
+    reason="Legacy Flask parse_import route was deleted; Rust parser/import contracts cover this path."
+)
 def test_parse_import_rest_endpoint(client, auth_headers):
     """导入解析应走新的 REST 主链。"""
     sample_file = Path(__file__).resolve().parents[1] / 'fixtures' / 'import_samples' / 'wechat_statement_sample.csv'

@@ -115,8 +115,8 @@ def test_create_bill_flask_sidecar_route_is_deleted_without_persisting(client, a
 
 
 
-def test_import_learning_rule_routes_support_list_update_and_delete(client, auth_headers, db_instance) -> None:
-    """长期学习规则路由应支持列出、禁用和删除。"""
+def test_import_learning_rule_flask_sidecar_routes_are_deleted(client, auth_headers, db_instance) -> None:
+    """导入学习规则 Flask route shell 已删除，运行态合同由 Rust runtime 覆盖。"""
     user_id = _current_user_id(client, auth_headers, db_instance)
     rule_id = _create_import_learning_rule(db_instance, user_id, "域测试学习规则")
 
@@ -124,37 +124,24 @@ def test_import_learning_rule_routes_support_list_update_and_delete(client, auth
         "/api/bills/import/learning-rules?page=1&pageSize=10",
         headers=auth_headers,
     )
-    assert list_response.status_code == 200, list_response.get_data(as_text=True)
-    assert list_response.headers["Cache-Control"] == "no-store, no-cache, must-revalidate, max-age=0"
-    list_payload = list_response.get_json() or {}
-    assert list_payload["success"] is True
-    matched_rule = next(item for item in list_payload["result"] if item["id"] == rule_id)
-    assert matched_rule["matchValue"] == "域测试学习规则"
-    assert matched_rule["enabled"] is True
+    assert list_response.status_code == 404, list_response.get_data(as_text=True)
+    assert (list_response.get_json() or {})["success"] is False
 
     update_response = client.put(
         f"/api/bills/import/learning-rules/{rule_id}",
         json={"enabled": False},
         headers=auth_headers,
     )
-    assert update_response.status_code == 200, update_response.get_data(as_text=True)
-    assert (update_response.get_json() or {}) == {"success": True, "result": True}
+    assert update_response.status_code in (404, 405), update_response.get_data(as_text=True)
 
     enabled_rules = _run(db_instance.get_import_learning_rules(user_id=user_id, enabled_only=True, limit=20))
-    assert all(int(rule["id"]) != rule_id for rule in enabled_rules)
+    assert any(int(rule["id"]) == rule_id for rule in enabled_rules)
 
     delete_response = client.delete(
         f"/api/bills/import/learning-rules/{rule_id}",
         headers=auth_headers,
     )
-    assert delete_response.status_code == 200, delete_response.get_data(as_text=True)
-    assert (delete_response.get_json() or {}) == {"success": True, "result": True}
+    assert delete_response.status_code in (404, 405), delete_response.get_data(as_text=True)
 
-    missing_delete_response = client.delete(
-        f"/api/bills/import/learning-rules/{rule_id}",
-        headers=auth_headers,
-    )
-    assert missing_delete_response.status_code == 404
-    missing_payload = missing_delete_response.get_json() or {}
-    assert missing_payload["success"] is False
-    assert missing_payload["error"] == "Rule not found"
+    enabled_rules_after_delete = _run(db_instance.get_import_learning_rules(user_id=user_id, enabled_only=True, limit=20))
+    assert any(int(rule["id"]) == rule_id for rule in enabled_rules_after_delete)
