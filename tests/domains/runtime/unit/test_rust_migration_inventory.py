@@ -21,7 +21,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert len(expected_python_paths) == 272
     assert inventory.summary["python_backend_files"] == 272
     assert tuple(record.path for record in inventory.python_files) == expected_python_paths
-    assert inventory.summary["rust_backend_files"] == 102
+    assert inventory.summary["rust_backend_files"] == 104
     assert "crates/bill-analyser-core/src/ai_ocr_llm.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/lib.rs" in inventory.rust_files
     assert "crates/bill-analyser-parsers/src/dedicated.rs" in inventory.rust_files
@@ -55,6 +55,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert "crates/bill-analyser-db/src/bills.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/budgets.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/import_staging.rs" in inventory.rust_files
+    assert "crates/bill-analyser-db/src/llm.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/statistics.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/taxonomy/category_rules.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/user_data.rs" in inventory.rust_files
@@ -64,6 +65,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert "crates/bill-analyser-db/tests/auth_two_factor_recovery.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/tests/bills_runtime.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/tests/budgets_runtime.rs" in inventory.rust_files
+    assert "crates/bill-analyser-db/tests/llm_runtime.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/tests/taxonomy_bridge_cli.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/src/auth.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/src/auth_routes.rs" in inventory.rust_files
@@ -167,7 +169,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
     assert first_render == second_render
     assert "# Rust Backend Migration Inventory" in first_render
     assert "- Python backend files: 272" in first_render
-    assert "- Rust backend files: 102" in first_render
+    assert "- Rust backend files: 104" in first_render
     assert "- Verified dead files: 0" in first_render
     assert "Route/domain cutover state lives separately in the Rust governance manifest" in first_render
     assert "Governance manifest tool: `cargo run -p bill-analyser-core --bin bill_migration_manifest`" in first_render
@@ -254,6 +256,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
     assert "- crates/bill-analyser-db/src/bills.rs" in first_render
     assert "- crates/bill-analyser-db/src/budgets.rs" in first_render
     assert "- crates/bill-analyser-db/src/import_staging.rs" in first_render
+    assert "- crates/bill-analyser-db/src/llm.rs" in first_render
     assert "- crates/bill-analyser-db/src/statistics.rs" in first_render
     assert "- crates/bill-analyser-db/src/taxonomy/category_rules.rs" in first_render
     assert "- crates/bill-analyser-db/src/user_data.rs" in first_render
@@ -263,6 +266,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
     assert "- crates/bill-analyser-db/tests/auth_two_factor_recovery.rs" in first_render
     assert "- crates/bill-analyser-db/tests/bills_runtime.rs" in first_render
     assert "- crates/bill-analyser-db/tests/budgets_runtime.rs" in first_render
+    assert "- crates/bill-analyser-db/tests/llm_runtime.rs" in first_render
     assert "- crates/bill-analyser-db/tests/taxonomy_bridge_cli.rs" in first_render
     assert "- crates/bill-analyser-http/src/auth.rs" in first_render
     assert "- crates/bill-analyser-http/src/auth_routes.rs" in first_render

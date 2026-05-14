@@ -345,6 +345,17 @@ fn bills_import_routes_are_python_deleted_and_provider_routes_remain_proxied() {
     }
 
     for (method, pattern) in [
+        ("GET", "/api/llm/config"),
+        ("POST", "/api/llm/config"),
+        ("GET", "/api/llm/configs"),
+        ("POST", "/api/llm/configs"),
+        ("PUT", "/api/llm/configs/{config_id}"),
+        ("DELETE", "/api/llm/configs/{config_id}"),
+        ("POST", "/api/llm/configs/{config_id}/activate"),
+        ("GET", "/api/llm/candidates"),
+        ("GET", "/api/llm/candidates/{candidate_id}"),
+        ("POST", "/api/llm/candidates/{candidate_id}/accept"),
+        ("POST", "/api/llm/candidates/{candidate_id}/reject"),
         ("GET", "/api/learning/suggestions"),
         ("POST", "/api/learning/suggestions/generate"),
         ("POST", "/api/learning/suggestions/{suggestion_id}/accept"),
@@ -387,7 +398,7 @@ fn bills_import_routes_are_python_deleted_and_provider_routes_remain_proxied() {
 #[test]
 fn live_python_sidecar_routes_are_manifested_for_import_db_runtime_proxy() {
     for (method, pattern, domain) in [
-        ("GET", "/api/llm/config", "ai-learning-llm"),
+        ("POST", "/api/llm/preview-recommend", "ai-learning-llm"),
         (
             "POST",
             "/api/matching/candidates/{*candidate_id}/accept",

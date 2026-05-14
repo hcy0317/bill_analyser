@@ -45,11 +45,11 @@ async fn import_db_runtime_reports_primary_http_import_runtime() -> Result<(), B
     let runtime_body = read_json(runtime).await;
     assert_eq!(
         runtime_body["runtime_boundary"],
-        "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+auth-login-register-token-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
+        "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+ai-llm-config-candidates-runtime+auth-login-register-token-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
     );
     assert_eq!(
         runtime_body["business_migration"],
-        "import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
+        "import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+ai-llm-config-candidates-runtime+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
     );
     assert_eq!(runtime_body["api_takeover"], true);
 
@@ -1528,6 +1528,351 @@ async fn import_db_runtime_handles_llm_review_decisions_and_memory() -> Result<(
 }
 
 #[tokio::test]
+async fn import_db_runtime_owns_llm_configs_and_candidates() -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new().await?;
+    seed_llm_runtime_tables(fixture.db_path())?;
+    let app = runtime_router(&fixture);
+
+    let default_config = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/llm/config")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(default_config.status(), StatusCode::OK);
+    let default_body = read_json(default_config).await;
+    assert_eq!(default_body["success"], true);
+    assert_eq!(default_body["data"]["enabled"], false);
+    assert!(default_body["data"]["available_providers"]
+        .as_array()
+        .expect("providers")
+        .iter()
+        .any(|item| item == "openai"));
+
+    let update_runtime = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/llm/config")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "enabled": true,
+                        "provider": "openai_compatible",
+                        "provider_config": {
+                            "model": "runtime-model",
+                            "api_key": "runtime-secret"
+                        },
+                        "advanced_settings": {
+                            "reasoning_depth": "medium",
+                            "temperature": 0.4
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(update_runtime.status(), StatusCode::OK);
+    let update_body = read_json(update_runtime).await;
+    assert_eq!(update_body["data"]["enabled"], true);
+    assert_eq!(update_body["data"]["model"], "runtime-model");
+    assert!(update_body["data"].get("available_providers").is_none());
+
+    let stored_runtime = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/llm/config")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(
+        read_json(stored_runtime).await["data"]["model"],
+        "runtime-model"
+    );
+
+    let created = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/llm/configs")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "primary",
+                        "provider": "openai",
+                        "model": "saved-model",
+                        "api_key": "saved-secret",
+                        "base_url": "https://api.example.test",
+                        "advanced_settings": {"reasoning_depth": "high"},
+                        "is_active": true
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(created.status(), StatusCode::OK);
+    let created_body = read_json(created).await;
+    assert_eq!(created_body["data"]["api_key"], "********");
+    assert_eq!(created_body["data"]["has_api_key"], true);
+    let config_id = created_body["data"]["id"].as_i64().expect("config id");
+
+    let active_config = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/llm/config")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(
+        read_json(active_config).await["data"]["model"],
+        "saved-model"
+    );
+
+    let updated_config = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::PUT)
+                .uri(format!("/api/llm/configs/{config_id}"))
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"api_key": "********", "model": "saved-model-v2"}).to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(updated_config.status(), StatusCode::OK);
+    let updated_body = read_json(updated_config).await;
+    assert_eq!(updated_body["data"]["model"], "saved-model-v2");
+    assert_eq!(updated_body["data"]["has_api_key"], true);
+
+    let candidates = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/llm/candidates?status=pending&type=rule_synthesis")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(candidates.status(), StatusCode::OK);
+    let candidates_body = read_json(candidates).await;
+    assert_eq!(candidates_body["success"], true);
+    assert_eq!(candidates_body["total"], 1);
+    let candidate_id = candidates_body["data"][0]["id"]
+        .as_i64()
+        .expect("candidate id");
+
+    let accepted = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/llm/candidates/{candidate_id}/accept"))
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(accepted.status(), StatusCode::OK);
+    let accepted_body = read_json(accepted).await;
+    assert_eq!(accepted_body["data"]["status"], "accepted");
+    assert!(accepted_body["data"]["created_rule_id"].as_i64().is_some());
+
+    let rejected = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/llm/candidates/2/reject")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(rejected.status(), StatusCode::OK);
+    assert_eq!(read_json(rejected).await["data"]["rejected"], true);
+    Ok(())
+}
+
+#[tokio::test]
+async fn import_db_runtime_covers_llm_config_and_candidate_edges() -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new().await?;
+    seed_llm_runtime_tables(fixture.db_path())?;
+    let app = runtime_router(&fixture);
+
+    let empty_runtime_update =
+        trusted_json_route(&app, Method::POST, "/api/llm/config", None, 42).await;
+    assert_eq!(empty_runtime_update.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(empty_runtime_update).await["error"],
+        "No data provided"
+    );
+
+    let invalid_runtime_update = trusted_json_route(
+        &app,
+        Method::POST,
+        "/api/llm/config",
+        Some("{not-json".to_string()),
+        42,
+    )
+    .await;
+    assert_eq!(invalid_runtime_update.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_runtime_update).await["error"],
+        "Invalid JSON request"
+    );
+
+    let missing_name = trusted_json_route(&app, Method::POST, "/api/llm/configs", None, 42).await;
+    assert_eq!(missing_name.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(read_json(missing_name).await["error"], "name is required");
+
+    let fallback_config = trusted_json_route(
+        &app,
+        Method::POST,
+        "/api/llm/configs",
+        Some(json!({"name": "fallback"}).to_string()),
+        42,
+    )
+    .await;
+    assert_eq!(fallback_config.status(), StatusCode::OK);
+    let fallback_body = read_json(fallback_config).await;
+    assert_eq!(fallback_body["data"]["provider"], "openai");
+    assert_eq!(fallback_body["data"]["model"], "");
+    assert_eq!(fallback_body["data"]["has_api_key"], false);
+    let fallback_id = fallback_body["data"]["id"]
+        .as_i64()
+        .expect("fallback config id");
+
+    let listed = trusted_json_route(&app, Method::GET, "/api/llm/configs", None, 42).await;
+    assert_eq!(listed.status(), StatusCode::OK);
+    let listed_body = read_json(listed).await;
+    assert_eq!(listed_body["data"].as_array().expect("configs").len(), 1);
+
+    let activate_missing = trusted_json_route(
+        &app,
+        Method::POST,
+        "/api/llm/configs/9999/activate",
+        None,
+        42,
+    )
+    .await;
+    assert_eq!(activate_missing.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        read_json(activate_missing).await["error"],
+        "config_not_found"
+    );
+
+    let activate_fallback = trusted_json_route(
+        &app,
+        Method::POST,
+        format!("/api/llm/configs/{fallback_id}/activate"),
+        None,
+        42,
+    )
+    .await;
+    assert_eq!(activate_fallback.status(), StatusCode::OK);
+
+    let update_missing = trusted_json_route(
+        &app,
+        Method::PUT,
+        "/api/llm/configs/9999",
+        Some(json!({"api_key": "real-secret"}).to_string()),
+        42,
+    )
+    .await;
+    assert_eq!(update_missing.status(), StatusCode::NOT_FOUND);
+    assert_eq!(read_json(update_missing).await["error"], "config_not_found");
+
+    let candidate_detail =
+        trusted_json_route(&app, Method::GET, "/api/llm/candidates/1", None, 42).await;
+    assert_eq!(candidate_detail.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(candidate_detail).await["data"]["suggested_sub_category"],
+        "咖啡"
+    );
+
+    let missing_candidate =
+        trusted_json_route(&app, Method::GET, "/api/llm/candidates/9999", None, 42).await;
+    assert_eq!(missing_candidate.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        read_json(missing_candidate).await["error"],
+        "Candidate 9999 not found"
+    );
+
+    let missing_accept = trusted_json_route(
+        &app,
+        Method::POST,
+        "/api/llm/candidates/9999/accept",
+        None,
+        42,
+    )
+    .await;
+    assert_eq!(missing_accept.status(), StatusCode::NOT_FOUND);
+
+    let missing_reject = trusted_json_route(
+        &app,
+        Method::POST,
+        "/api/llm/candidates/9999/reject",
+        None,
+        42,
+    )
+    .await;
+    assert_eq!(missing_reject.status(), StatusCode::NOT_FOUND);
+
+    let deleted = trusted_json_route(
+        &app,
+        Method::DELETE,
+        format!("/api/llm/configs/{fallback_id}"),
+        None,
+        42,
+    )
+    .await;
+    assert_eq!(deleted.status(), StatusCode::OK);
+
+    let delete_missing =
+        trusted_json_route(&app, Method::DELETE, "/api/llm/configs/9999", None, 42).await;
+    assert_eq!(delete_missing.status(), StatusCode::NOT_FOUND);
+    assert_eq!(read_json(delete_missing).await["error"], "config_not_found");
+    Ok(())
+}
+
+#[tokio::test]
 async fn import_db_runtime_serves_preview_index_and_legacy_parser_catalog(
 ) -> Result<(), Box<dyn Error>> {
     let fixture = RuntimeFixture::new().await?;
@@ -2643,6 +2988,55 @@ fn seed_import_session(path: &Path, session_id: &str) -> Result<(), Box<dyn Erro
     Ok(())
 }
 
+fn seed_llm_runtime_tables(path: &Path) -> Result<(), Box<dyn Error>> {
+    let runtime = runtime_for(path)?;
+    seed_users(&runtime, &[42, 77])?;
+    bill_analyser_db::init_llm_runtime_schema(runtime.connection())?;
+    runtime.connection().execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            main_category TEXT NOT NULL,
+            sub_category TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS category_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            category_id INTEGER NOT NULL,
+            name TEXT NOT NULL DEFAULT '',
+            priority INTEGER NOT NULL DEFAULT 100,
+            rule_expression TEXT NOT NULL,
+            regex_enabled INTEGER DEFAULT 0,
+            enabled INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        ",
+    )?;
+    runtime.connection().execute(
+        "INSERT INTO categories(user_id, main_category, sub_category) VALUES (42, '餐饮', '咖啡')",
+        [],
+    )?;
+    runtime.connection().execute(
+        "INSERT INTO llm_candidates(
+            id, user_id, type, source_bill_ids, suggested_main_category, suggested_sub_category,
+            suggested_rule_expression, confidence, llm_provider, llm_model, llm_response_raw, status
+         )
+         VALUES (1, 42, 'rule_synthesis', '[1]', '餐饮', '咖啡', 'OR={咖啡}', 0.91, 'openai', 'gpt', '{}', 'pending')",
+        [],
+    )?;
+    runtime.connection().execute(
+        "INSERT INTO llm_candidates(
+            id, user_id, type, source_bill_ids, suggested_main_category, suggested_sub_category,
+            suggested_rule_expression, confidence, llm_provider, llm_model, llm_response_raw, status
+         )
+         VALUES (2, 42, 'classification', '[2]', '交通', '打车', '', 0.7, 'openai', 'gpt', '{}', 'pending')",
+        [],
+    )?;
+    Ok(())
+}
+
 fn preview_rows(path: &Path, session_id: &str) -> Result<Vec<ImportPreviewRow>, Box<dyn Error>> {
     let runtime = runtime_for(path)?;
     init_import_staging_schema(runtime.connection())?;
@@ -3132,4 +3526,26 @@ async fn read_json(response: axum::response::Response) -> Value {
         .await
         .expect("body bytes");
     serde_json::from_slice(&bytes).expect("json body")
+}
+
+async fn trusted_json_route(
+    app: &Router,
+    method: Method,
+    uri: impl AsRef<str>,
+    body: Option<String>,
+    user_id: i64,
+) -> axum::response::Response {
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method(method)
+                .uri(uri.as_ref())
+                .header("x-user-id", user_id.to_string())
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(body.map_or_else(Body::empty, Body::from))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response")
 }

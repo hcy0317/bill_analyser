@@ -1,7 +1,8 @@
 use std::{
+    collections::HashMap,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     time::Duration,
 };
@@ -17,6 +18,7 @@ use bill_analyser_core::{
 };
 use bytes::Bytes;
 use serde::Serialize;
+use serde_json::Value;
 
 use crate::config::{HttpShellConfig, ImportRouteMode};
 
@@ -38,6 +40,7 @@ pub struct ProxyState {
     pub config: HttpShellConfig,
     client: reqwest::Client,
     request_counter: Arc<AtomicU64>,
+    llm_runtime_configs: Arc<Mutex<HashMap<i64, Value>>>,
 }
 
 impl ProxyState {
@@ -47,7 +50,27 @@ impl ProxyState {
             config,
             client,
             request_counter: Arc::new(AtomicU64::new(1)),
+            llm_runtime_configs: Arc::new(Mutex::new(HashMap::new())),
         })
+    }
+
+    pub fn get_llm_runtime_config(&self, user_id: i64) -> Option<Value> {
+        self.llm_runtime_configs
+            .lock()
+            .ok()
+            .and_then(|configs| configs.get(&user_id).cloned())
+    }
+
+    pub fn set_llm_runtime_config(&self, user_id: i64, config: Value) {
+        if let Ok(mut configs) = self.llm_runtime_configs.lock() {
+            configs.insert(user_id, config);
+        }
+    }
+
+    pub fn clear_llm_runtime_config(&self, user_id: i64) {
+        if let Ok(mut configs) = self.llm_runtime_configs.lock() {
+            configs.remove(&user_id);
+        }
     }
 
     fn next_request_id(&self) -> HeaderValue {

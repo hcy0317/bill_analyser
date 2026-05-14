@@ -25,6 +25,7 @@ EXCLUDED_RUST_DIRS = {
     ".git",
     ".mypy_cache",
     ".omx",
+    ".tmp",
     ".pytest_cache",
     ".ruff_cache",
     ".venv",

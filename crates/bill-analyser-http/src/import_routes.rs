@@ -13,35 +13,40 @@ use axum::{
 };
 use bill_analyser_core::{
     build_composite_match_features, build_import_preview_filter_index_item,
-    build_ocr_config_success_response, build_unknown_ocr_provider_response,
-    can_delete_python_import_paths, coerce_preview_selected_value, composite_hash_from_features,
+    build_llm_candidate_list_response, build_llm_candidate_reject_response,
+    build_llm_config_get_response, build_ocr_config_success_response,
+    build_unknown_ocr_provider_response, can_delete_python_import_paths,
+    coerce_preview_selected_value, composite_hash_from_features, copy_runtime_llm_config,
     import_preview_index_success, import_preview_page_success,
     import_session_cancel_missing_response, import_session_cancel_success_response,
     import_session_not_found_response, import_session_success, import_stage_confirm_success,
     import_stage_dedup_success, import_stage_parse_success, import_v2_data_response,
-    import_v2_error_response, preview_state_conflict_response, AiRouteResponse,
-    ImportDeletionEvidence, ImportPreviewIndexData, ImportPreviewPageData, ImportSessionSummary,
-    ImportStageConfirmData, ImportStageDedupData, ImportStageParseData, ImportV2RouteResponse,
-    SmartDeduplicationEngine, UserId,
+    import_v2_error_response, preview_state_conflict_response, safe_llm_config_payload,
+    AiRouteResponse, ImportDeletionEvidence, ImportPreviewIndexData, ImportPreviewPageData,
+    ImportSessionSummary, ImportStageConfirmData, ImportStageDedupData, ImportStageParseData,
+    ImportV2RouteResponse, SmartDeduplicationEngine, UserId,
 };
 use bill_analyser_db::{
-    apply_preview_transfer_decision, calculate_import_bill_hash, clear_session_data,
-    confirm_preview_to_bills, dedup_bills_from_parser_templates, get_app_setting,
-    get_import_annotation_samples, get_import_session, get_llm_memory_events,
-    get_preview_bill_by_id, get_preview_by_session, get_preview_page_by_session,
-    get_unprocessed_templates_for_dedup, init_app_settings_schema, init_import_staging_schema,
-    insert_preview_bills_batch, load_ocr_config_setting,
+    accept_llm_candidate, activate_llm_config, apply_preview_transfer_decision,
+    calculate_import_bill_hash, clear_session_data, confirm_preview_to_bills, count_llm_candidates,
+    create_llm_config, dedup_bills_from_parser_templates, delete_llm_config,
+    effective_llm_config_from_saved, get_app_setting, get_import_annotation_samples,
+    get_import_session, get_llm_memory_events, get_preview_bill_by_id, get_preview_by_session,
+    get_preview_page_by_session, get_unprocessed_templates_for_dedup, init_app_settings_schema,
+    init_import_staging_schema, init_llm_runtime_schema, insert_preview_bills_batch,
+    list_llm_candidates, list_llm_configs, load_ocr_config_setting,
     parser_template_drafts_from_standard_bills, preview_drafts_from_dedup_bills,
-    replace_preview_selection_with_patches, reset_session_preview_selection,
+    reject_llm_candidate, replace_preview_selection_with_patches, reset_session_preview_selection,
     review_preview_llm_recommendation, save_import_annotation_samples, set_app_setting,
     stage_import_parser_templates, store_ocr_config_setting, update_import_session_status,
-    update_parser_template_status, update_preview_bill, update_preview_bills_batch,
-    update_preview_recurring_match_decision, update_preview_selection, AppSettingDraft,
-    ImportAnnotationSampleDraft, ImportPreviewDecision, ImportPreviewDecisionResult,
-    ImportPreviewExpectedState, ImportPreviewLlmDecisionResult, ImportPreviewLlmReviewRequest,
-    ImportPreviewLlmSuggestion, ImportPreviewPatch, ImportPreviewPatchField,
-    ImportPreviewPatchValue, ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate,
-    ImportPreviewRow, ImportSessionDraft, ImportSessionStatusUpdate, SqliteConnectionConfig,
+    update_llm_config, update_parser_template_status, update_preview_bill,
+    update_preview_bills_batch, update_preview_recurring_match_decision, update_preview_selection,
+    AppSettingDraft, ImportAnnotationSampleDraft, ImportPreviewDecision,
+    ImportPreviewDecisionResult, ImportPreviewExpectedState, ImportPreviewLlmDecisionResult,
+    ImportPreviewLlmReviewRequest, ImportPreviewLlmSuggestion, ImportPreviewPatch,
+    ImportPreviewPatchField, ImportPreviewPatchValue, ImportPreviewRecurringCandidate,
+    ImportPreviewRecurringMatchUpdate, ImportPreviewRow, ImportSessionDraft,
+    ImportSessionStatusUpdate, LlmConfigDraft, LlmConfigUpdate, SqliteConnectionConfig,
     SqliteDbPath, SqliteRuntime,
 };
 use bill_analyser_parsers::{
@@ -122,6 +127,17 @@ pub const IMPORT_SKELETON_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/llm/preview-recommend/accept"),
     ("POST", "/api/llm/preview-recommend/reject"),
     ("GET", "/api/llm/memory"),
+    ("GET", "/api/llm/config"),
+    ("POST", "/api/llm/config"),
+    ("GET", "/api/llm/configs"),
+    ("POST", "/api/llm/configs"),
+    ("PUT", "/api/llm/configs/{config_id}"),
+    ("DELETE", "/api/llm/configs/{config_id}"),
+    ("POST", "/api/llm/configs/{config_id}/activate"),
+    ("GET", "/api/llm/candidates"),
+    ("GET", "/api/llm/candidates/{candidate_id}"),
+    ("POST", "/api/llm/candidates/{candidate_id}/accept"),
+    ("POST", "/api/llm/candidates/{candidate_id}/reject"),
     ("GET", "/api/ml/receipt-recognition/config"),
     ("PUT", "/api/ml/receipt-recognition/config"),
 ];
@@ -215,6 +231,35 @@ pub fn import_skeleton_router() -> Router<ProxyState> {
             post(not_yet_owned_handler),
         )
         .route("/api/llm/memory", get(not_yet_owned_handler))
+        .route(
+            "/api/llm/config",
+            get(not_yet_owned_handler).post(not_yet_owned_handler),
+        )
+        .route(
+            "/api/llm/configs",
+            get(not_yet_owned_handler).post(not_yet_owned_handler),
+        )
+        .route(
+            "/api/llm/configs/:config_id",
+            put(not_yet_owned_handler).delete(not_yet_owned_handler),
+        )
+        .route(
+            "/api/llm/configs/:config_id/activate",
+            post(not_yet_owned_handler),
+        )
+        .route("/api/llm/candidates", get(not_yet_owned_handler))
+        .route(
+            "/api/llm/candidates/:candidate_id",
+            get(not_yet_owned_handler),
+        )
+        .route(
+            "/api/llm/candidates/:candidate_id/accept",
+            post(not_yet_owned_handler),
+        )
+        .route(
+            "/api/llm/candidates/:candidate_id/reject",
+            post(not_yet_owned_handler),
+        )
         .route(
             "/api/ml/receipt-recognition/config",
             get(not_yet_owned_handler).put(not_yet_owned_handler),
@@ -343,6 +388,38 @@ pub fn import_runtime_router() -> Router<ProxyState> {
             post(llm_preview_recommend_reject_runtime_handler),
         )
         .route("/api/llm/memory", get(llm_memory_runtime_handler))
+        .route(
+            "/api/llm/config",
+            get(llm_config_get_runtime_handler).post(llm_config_post_runtime_handler),
+        )
+        .route(
+            "/api/llm/configs",
+            get(llm_configs_list_runtime_handler).post(llm_configs_create_runtime_handler),
+        )
+        .route(
+            "/api/llm/configs/:config_id",
+            put(llm_config_update_runtime_handler).delete(llm_config_delete_runtime_handler),
+        )
+        .route(
+            "/api/llm/configs/:config_id/activate",
+            post(llm_config_activate_runtime_handler),
+        )
+        .route(
+            "/api/llm/candidates",
+            get(llm_candidates_list_runtime_handler),
+        )
+        .route(
+            "/api/llm/candidates/:candidate_id",
+            get(llm_candidate_get_runtime_handler),
+        )
+        .route(
+            "/api/llm/candidates/:candidate_id/accept",
+            post(llm_candidate_accept_runtime_handler),
+        )
+        .route(
+            "/api/llm/candidates/:candidate_id/reject",
+            post(llm_candidate_reject_runtime_handler),
+        )
         .route(
             "/api/ml/receipt-recognition/config",
             get(ocr_config_get_runtime_handler).put(ocr_config_put_runtime_handler),
@@ -2014,6 +2091,430 @@ pub async fn llm_memory_runtime_handler(
     }
 }
 
+pub async fn llm_config_get_runtime_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let user_id_value = match user_id_i64_value(user_id) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(runtime) => runtime,
+        Err(response) => return route_response(response),
+    };
+    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
+        return route_response(response);
+    }
+    let config = match state
+        .get_llm_runtime_config(user_id_value)
+        .map(Ok)
+        .unwrap_or_else(|| effective_llm_config_from_saved(runtime.connection(), user_id_value))
+    {
+        Ok(config) => config,
+        Err(error) => return route_response(db_error_response(error)),
+    };
+    ai_route_response(build_llm_config_get_response(&config))
+}
+
+pub async fn llm_config_post_runtime_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let user_id_value = match user_id_i64_value(user_id) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let payload = match json_body_or_empty(&body) {
+        Ok(payload) => payload,
+        Err(response) => return route_response(response),
+    };
+    let Some(object) = payload.as_object().filter(|object| !object.is_empty()) else {
+        return route_response(ImportV2RouteResponse {
+            status_code: 400,
+            body: json!({"success": false, "error": "No data provided"}),
+        });
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(runtime) => runtime,
+        Err(response) => return route_response(response),
+    };
+    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
+        return route_response(response);
+    }
+    let base_config = match state
+        .get_llm_runtime_config(user_id_value)
+        .map(Ok)
+        .unwrap_or_else(|| effective_llm_config_from_saved(runtime.connection(), user_id_value))
+    {
+        Ok(config) => config,
+        Err(error) => return route_response(db_error_response(error)),
+    };
+    let updated = update_runtime_llm_config_payload(&base_config, object);
+    state.set_llm_runtime_config(user_id_value, updated.clone());
+    route_response(ImportV2RouteResponse {
+        status_code: 200,
+        body: json!({"success": true, "data": llm_runtime_config_response_data(&updated, false)}),
+    })
+}
+
+pub async fn llm_configs_list_runtime_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let user_id_value = match user_id_i64_value(user_id) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(runtime) => runtime,
+        Err(response) => return route_response(response),
+    };
+    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
+        return route_response(response);
+    }
+    match list_llm_configs(runtime.connection(), user_id_value) {
+        Ok(configs) => route_response(ImportV2RouteResponse {
+            status_code: 200,
+            body: json!({
+                "success": true,
+                "data": configs.iter().map(safe_llm_config_payload).collect::<Vec<_>>(),
+            }),
+        }),
+        Err(error) => route_response(db_error_response(error)),
+    }
+}
+
+pub async fn llm_configs_create_runtime_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let user_id_value = match user_id_i64_value(user_id) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let payload = match json_body_or_empty(&body) {
+        Ok(payload) => payload,
+        Err(response) => return route_response(response),
+    };
+    let object = payload.as_object().cloned().unwrap_or_default();
+    let name = text_from_map(&object, "name").trim().to_string();
+    if name.is_empty() {
+        return route_response(ImportV2RouteResponse {
+            status_code: 400,
+            body: json!({"success": false, "error": "name is required"}),
+        });
+    }
+    let runtime = match open_runtime(&state) {
+        Ok(runtime) => runtime,
+        Err(response) => return route_response(response),
+    };
+    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
+        return route_response(response);
+    }
+    let draft = LlmConfigDraft {
+        name,
+        provider: text_from_map_or(&object, "provider", "openai"),
+        model: text_from_map_or(&object, "model", ""),
+        api_key: text_from_map_or(&object, "api_key", ""),
+        base_url: text_from_map_or(&object, "base_url", ""),
+        advanced_settings: object
+            .get("advanced_settings")
+            .cloned()
+            .unwrap_or_else(|| json!({})),
+        is_active: object
+            .get("is_active")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    };
+    match create_llm_config(runtime.connection(), user_id_value, &draft) {
+        Ok(config) => {
+            if config.get("is_active").and_then(Value::as_i64).unwrap_or(0) != 0 {
+                state.clear_llm_runtime_config(user_id_value);
+            }
+            route_response(ImportV2RouteResponse {
+                status_code: 200,
+                body: json!({"success": true, "data": safe_llm_config_payload(&config)}),
+            })
+        }
+        Err(error) => route_response(db_error_response(error)),
+    }
+}
+
+pub async fn llm_config_update_runtime_handler(
+    State(state): State<ProxyState>,
+    Path(config_id): Path<i64>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let user_id_value = match user_id_i64_value(user_id) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let payload = match json_body_or_empty(&body) {
+        Ok(payload) => payload,
+        Err(response) => return route_response(response),
+    };
+    let object = payload.as_object().cloned().unwrap_or_default();
+    let runtime = match open_runtime(&state) {
+        Ok(runtime) => runtime,
+        Err(response) => return route_response(response),
+    };
+    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
+        return route_response(response);
+    }
+    match update_llm_config(
+        runtime.connection(),
+        config_id,
+        user_id_value,
+        &llm_config_update_from_map(&object),
+    ) {
+        Ok(Some(config)) => {
+            if config.get("is_active").and_then(Value::as_i64).unwrap_or(0) != 0 {
+                state.clear_llm_runtime_config(user_id_value);
+            }
+            route_response(ImportV2RouteResponse {
+                status_code: 200,
+                body: json!({"success": true, "data": safe_llm_config_payload(&config)}),
+            })
+        }
+        Ok(None) => route_response(llm_not_found_response("config_not_found")),
+        Err(error) => route_response(db_error_response(error)),
+    }
+}
+
+pub async fn llm_config_delete_runtime_handler(
+    State(state): State<ProxyState>,
+    Path(config_id): Path<i64>,
+    headers: HeaderMap,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let user_id_value = match user_id_i64_value(user_id) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(runtime) => runtime,
+        Err(response) => return route_response(response),
+    };
+    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
+        return route_response(response);
+    }
+    match delete_llm_config(runtime.connection(), config_id, user_id_value) {
+        Ok(true) => route_response(ImportV2RouteResponse {
+            status_code: 200,
+            body: json!({"success": true}),
+        }),
+        Ok(false) => route_response(llm_not_found_response("config_not_found")),
+        Err(error) => route_response(db_error_response(error)),
+    }
+}
+
+pub async fn llm_config_activate_runtime_handler(
+    State(state): State<ProxyState>,
+    Path(config_id): Path<i64>,
+    headers: HeaderMap,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let user_id_value = match user_id_i64_value(user_id) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(runtime) => runtime,
+        Err(response) => return route_response(response),
+    };
+    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
+        return route_response(response);
+    }
+    match activate_llm_config(runtime.connection(), config_id, user_id_value) {
+        Ok(true) => {
+            state.clear_llm_runtime_config(user_id_value);
+            route_response(ImportV2RouteResponse {
+                status_code: 200,
+                body: json!({"success": true}),
+            })
+        }
+        Ok(false) => route_response(llm_not_found_response("config_not_found")),
+        Err(error) => route_response(db_error_response(error)),
+    }
+}
+
+pub async fn llm_candidates_list_runtime_handler(
+    State(state): State<ProxyState>,
+    Query(query): Query<LlmCandidatesQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let user_id_value = match user_id_i64_value(user_id) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(runtime) => runtime,
+        Err(response) => return route_response(response),
+    };
+    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
+        return route_response(response);
+    }
+    let limit = query.limit.unwrap_or(50);
+    let offset = query.offset.unwrap_or(0);
+    let candidates = match list_llm_candidates(
+        runtime.connection(),
+        user_id_value,
+        query.status.as_deref(),
+        query.r#type.as_deref(),
+        limit,
+        offset,
+    ) {
+        Ok(candidates) => candidates,
+        Err(error) => return route_response(db_error_response(error)),
+    };
+    match count_llm_candidates(
+        runtime.connection(),
+        user_id_value,
+        query.status.as_deref(),
+        query.r#type.as_deref(),
+    ) {
+        Ok(total) => route_response(ImportV2RouteResponse {
+            status_code: 200,
+            body: build_llm_candidate_list_response(candidates, total),
+        }),
+        Err(error) => route_response(db_error_response(error)),
+    }
+}
+
+pub async fn llm_candidate_get_runtime_handler(
+    State(state): State<ProxyState>,
+    Path(candidate_id): Path<i64>,
+    headers: HeaderMap,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let user_id_value = match user_id_i64_value(user_id) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(runtime) => runtime,
+        Err(response) => return route_response(response),
+    };
+    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
+        return route_response(response);
+    }
+    match bill_analyser_db::get_llm_candidate_by_id(
+        runtime.connection(),
+        candidate_id,
+        user_id_value,
+    ) {
+        Ok(Some(candidate)) => route_response(ImportV2RouteResponse {
+            status_code: 200,
+            body: json!({"success": true, "data": candidate}),
+        }),
+        Ok(None) => route_response(llm_not_found_response(&format!(
+            "Candidate {candidate_id} not found"
+        ))),
+        Err(error) => route_response(db_error_response(error)),
+    }
+}
+
+pub async fn llm_candidate_accept_runtime_handler(
+    State(state): State<ProxyState>,
+    Path(candidate_id): Path<i64>,
+    headers: HeaderMap,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let user_id_value = match user_id_i64_value(user_id) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(runtime) => runtime,
+        Err(response) => return route_response(response),
+    };
+    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
+        return route_response(response);
+    }
+    match accept_llm_candidate(runtime.connection(), candidate_id, user_id_value) {
+        Ok(Some(result)) => route_response(ImportV2RouteResponse {
+            status_code: 200,
+            body: json!({"success": true, "data": result}),
+        }),
+        Ok(None) => route_response(llm_not_found_response(&format!(
+            "Candidate {candidate_id} not found"
+        ))),
+        Err(error) => route_response(db_error_response(error)),
+    }
+}
+
+pub async fn llm_candidate_reject_runtime_handler(
+    State(state): State<ProxyState>,
+    Path(candidate_id): Path<i64>,
+    headers: HeaderMap,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let user_id_value = match user_id_i64_value(user_id) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(runtime) => runtime,
+        Err(response) => return route_response(response),
+    };
+    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
+        return route_response(response);
+    }
+    match reject_llm_candidate(runtime.connection(), candidate_id, user_id_value) {
+        Ok(Some(rejected)) => route_response(ImportV2RouteResponse {
+            status_code: 200,
+            body: build_llm_candidate_reject_response(rejected),
+        }),
+        Ok(None) => route_response(llm_not_found_response(&format!(
+            "Candidate {candidate_id} not found"
+        ))),
+        Err(error) => route_response(db_error_response(error)),
+    }
+}
+
 pub async fn ocr_config_get_runtime_handler(
     State(state): State<ProxyState>,
     headers: HeaderMap,
@@ -2882,6 +3383,123 @@ fn first_text_from_object(object: &Map<String, Value>, keys: &[&str]) -> Option<
         .and_then(value_to_text)
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn json_body_or_empty(body: &[u8]) -> Result<Value, ImportV2RouteResponse> {
+    if body.is_empty() {
+        return Ok(json!({}));
+    }
+    serde_json::from_slice::<Value>(body)
+        .map_err(|_| import_v2_error_response(400, "Invalid JSON request"))
+}
+
+fn text_from_map(object: &Map<String, Value>, key: &str) -> String {
+    object.get(key).and_then(value_to_text).unwrap_or_default()
+}
+
+fn text_from_map_or(object: &Map<String, Value>, key: &str, default: &str) -> String {
+    let text = text_from_map(object, key);
+    if text.trim().is_empty() {
+        default.to_string()
+    } else {
+        text
+    }
+}
+
+fn update_runtime_llm_config_payload(base_config: &Value, object: &Map<String, Value>) -> Value {
+    let mut config = copy_runtime_llm_config(base_config)
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+    if let Some(enabled) = object.get("enabled").and_then(Value::as_bool) {
+        config.insert("enabled".to_string(), json!(enabled));
+    }
+    if let Some(provider) = object.get("provider").and_then(Value::as_str) {
+        config.insert("provider".to_string(), json!(provider));
+    }
+    if let Some(provider_config) = object.get("provider_config").and_then(Value::as_object) {
+        config.insert(
+            "provider_config".to_string(),
+            Value::Object(provider_config.clone()),
+        );
+    }
+    if let Some(advanced_settings) = object.get("advanced_settings") {
+        config.insert("advanced_settings".to_string(), advanced_settings.clone());
+    }
+    copy_runtime_llm_config(&Value::Object(config))
+}
+
+fn llm_runtime_config_response_data(config: &Value, include_available_providers: bool) -> Value {
+    let copied = copy_runtime_llm_config(config);
+    let object = copied.as_object();
+    let provider_config = object
+        .and_then(|item| item.get("provider_config"))
+        .and_then(Value::as_object);
+    let mut response = Map::new();
+    response.insert(
+        "enabled".to_string(),
+        json!(object
+            .and_then(|item| item.get("enabled"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)),
+    );
+    response.insert(
+        "provider".to_string(),
+        json!(object
+            .and_then(|item| item.get("provider"))
+            .and_then(Value::as_str)
+            .unwrap_or("openai")),
+    );
+    response.insert(
+        "model".to_string(),
+        json!(provider_config
+            .and_then(|item| item.get("model"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()),
+    );
+    response.insert(
+        "advanced_settings".to_string(),
+        copied
+            .get("advanced_settings")
+            .cloned()
+            .unwrap_or_else(|| json!({})),
+    );
+    if include_available_providers {
+        response.insert(
+            "available_providers".to_string(),
+            build_llm_config_get_response(config).body["data"]["available_providers"].clone(),
+        );
+    }
+    Value::Object(response)
+}
+
+fn llm_config_update_from_map(object: &Map<String, Value>) -> LlmConfigUpdate {
+    let api_key = object
+        .get("api_key")
+        .and_then(value_to_text)
+        .and_then(|value| {
+            if value == "********" {
+                None
+            } else {
+                Some(value)
+            }
+        });
+    LlmConfigUpdate {
+        name: object.get("name").and_then(value_to_text),
+        provider: object.get("provider").and_then(value_to_text),
+        model: object.get("model").and_then(value_to_text),
+        api_key,
+        base_url: object.get("base_url").and_then(value_to_text),
+        advanced_settings: object.get("advanced_settings").cloned(),
+        is_active: object.get("is_active").and_then(Value::as_bool),
+    }
+}
+
+fn llm_not_found_response(message: &str) -> ImportV2RouteResponse {
+    ImportV2RouteResponse {
+        status_code: 404,
+        body: json!({"success": false, "error": message}),
+    }
 }
 
 fn parse_multipart_form_data(
@@ -5144,9 +5762,8 @@ fn load_learning_suggestions(
                 learning_suggestion_row_to_value,
             )
             .map_err(db_error_response)?;
-        return rows
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(db_error_response);
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(db_error_response)
     } else {
         let mut statement = connection
             .prepare(
@@ -6685,6 +7302,10 @@ fn init_ocr_runtime_schema(runtime: &SqliteRuntime) -> Result<(), ImportV2RouteR
     init_app_settings_schema(runtime.connection()).map_err(db_error_response)
 }
 
+fn init_llm_config_runtime_schema(runtime: &SqliteRuntime) -> Result<(), ImportV2RouteResponse> {
+    init_llm_runtime_schema(runtime.connection()).map_err(db_error_response)
+}
+
 fn user_id_from_headers(
     headers: &HeaderMap,
     config: &HttpShellConfig,
@@ -6775,4 +7396,12 @@ pub struct LlmMemoryQuery {
     event_type: Option<String>,
     limit: Option<usize>,
     offset: Option<usize>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct LlmCandidatesQuery {
+    status: Option<String>,
+    r#type: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
 }

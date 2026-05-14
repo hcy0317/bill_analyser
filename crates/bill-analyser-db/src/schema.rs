@@ -281,6 +281,8 @@ const USER_SCOPED_TABLES: &[&str] = &[
     "recurring_bills",
     "import_configs",
     "import_history",
+    "llm_candidates",
+    "llm_configs",
     "user_exchange_rates",
 ];
 
@@ -535,6 +537,38 @@ fn create_core_tables(connection: &Connection) -> DbResult<()> {
             UNIQUE(user_id, from_currency, to_currency, effective_date),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
+
+        CREATE TABLE IF NOT EXISTS llm_candidates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            type TEXT NOT NULL DEFAULT 'classification',
+            source_bill_ids TEXT,
+            suggested_main_category TEXT,
+            suggested_sub_category TEXT,
+            suggested_rule_expression TEXT,
+            confidence REAL DEFAULT 0.0,
+            llm_provider TEXT,
+            llm_model TEXT,
+            llm_response_raw TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            reviewed_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS llm_configs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            name TEXT NOT NULL,
+            provider TEXT NOT NULL DEFAULT 'openai',
+            model TEXT NOT NULL DEFAULT '',
+            api_key TEXT DEFAULT '',
+            base_url TEXT DEFAULT '',
+            advanced_settings TEXT NOT NULL DEFAULT '{}',
+            is_active INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            UNIQUE(user_id, name)
+        );
         ",
     )?;
     Ok(())
@@ -600,6 +634,10 @@ fn create_core_indexes(connection: &Connection) -> DbResult<()> {
         CREATE INDEX IF NOT EXISTS idx_exchange_rates_date
             ON user_exchange_rates(effective_date DESC);
         CREATE INDEX IF NOT EXISTS idx_user_exchange_rates_user_id ON user_exchange_rates(user_id);
+        CREATE INDEX IF NOT EXISTS idx_llm_candidates_user_status
+            ON llm_candidates(user_id, status);
+        CREATE INDEX IF NOT EXISTS idx_llm_configs_user_active
+            ON llm_configs(user_id, is_active);
         CREATE INDEX IF NOT EXISTS idx_user_external_auths_user ON user_external_auths(user_id);
         CREATE INDEX IF NOT EXISTS idx_user_external_auths_type ON user_external_auths(external_auth_type);
         ",
