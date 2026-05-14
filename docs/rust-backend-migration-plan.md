@@ -162,7 +162,7 @@ S10 switches the local startup boundary from Python-primary to Rust-primary HTTP
 
 ## S13e Budget CRUD Runtime
 
-S13e makes Rust the runtime owner for budget CRUD/export routes in `import_db_runtime`: `GET/POST /api/budgets`, `GET/PUT/DELETE /api/budgets/{id}`, and `GET /api/budgets/export`. Follow-up budget runtime slices S13f-S13i now also own execution, forecast, history/snapshot, and import. Python budget deletion remains blocked because no-residual-reference evidence has not passed.
+S13e makes Rust the runtime owner for budget CRUD/export routes in `import_db_runtime`: `GET/POST /api/budgets`, `GET/PUT/DELETE /api/budgets/{id}`, and `GET /api/budgets/export`. Follow-up budget runtime slices S13f-S13i now also own execution, forecast, history/snapshot, and import; the old Flask `budgets/` route package is deleted.
 
 ## S13f Budget Execution Runtime
 
@@ -178,7 +178,7 @@ S13h makes Rust the runtime owner for `GET /api/budgets/history` and `POST /api/
 
 ## S13i Budget Import Runtime
 
-S13i makes Rust the runtime owner for `POST /api/budgets/import` in `import_db_runtime`. The Rust path preserves Flask-compatible array payload validation, required `period_type/amount/start_date/category` checks, invalid item error messages, single-transaction import, per-row `error_details`, and upsert-by-`name + user_id` writes with Python-compatible default `period_type`, `alert_threshold`, and `enabled` handling. No route in the budget route set remains Python-proxied, but Python budget deletion remains blocked until residual Python/frontend/test/docs references are cleared and full gates pass.
+S13i makes Rust the runtime owner for `POST /api/budgets/import` in `import_db_runtime`. The Rust path preserves Flask-compatible array payload validation, required `period_type/amount/start_date/category` checks, invalid item error messages, single-transaction import, per-row `error_details`, and upsert-by-`name + user_id` writes with Python-compatible default `period_type`, `alert_threshold`, and `enabled` handling. No route in the budget route set remains Python-proxied; the old Flask `budgets/` route package is deleted after residual Python/test/docs references were cleared and full gates passed.
 
 ## S14a Statistics Read Runtime
 
@@ -226,4 +226,4 @@ S15c.7 makes Rust the runtime owner for `GET /api/settings/encryption/status` in
 
 ## Deletion Gate
 
-Python import route disabling/deletion is blocked unless all five evidence gates pass together: Rust route runtime, DB write semantics, frontend import flow, full coverage, and no residual references. Current import and budget runtime slices pass the Rust route/runtime and DB evidence for their owned endpoints, but deletion stays blocked where residual Python route imports, frontend calls, tests, or docs still reference the Python path.
+Python import route disabling/deletion is blocked unless all five evidence gates pass together: Rust route runtime, DB write semantics, frontend import flow, full coverage, and no residual references. Budget route deletion has passed its residual-reference and coverage gates, so `/api/budgets*` is `PythonDeleted` and no longer part of this blocker; remaining deletion blockers apply to import paths and other Python-owned domains that still have live sidecar routes or residual references.

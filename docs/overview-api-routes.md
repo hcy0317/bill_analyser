@@ -5,7 +5,6 @@
   - `/api/bills`
   - `/api/matching`
   - `/api/statistics`
-  - `/api/budgets`
   - `/api/backup`
 - 小票识图入口由 `api/routes/receipt_ocr.py` 提供并在 `app.py` 注册：`POST /api/ml/receipt-recognition` 与 `GET/PUT /api/ml/receipt-recognition/config`；运行时复用 `core/ai/ocr` 下配置的 OCR provider，并在 OCR 文本层对支付宝 / 微信支付截图抽取金额、时间、商户/备注和 `payment_platform`。该域的 Rust `ai_ocr_llm` 合同层只固定配置、错误 envelope 与解析规则，不接管 Flask route 或 provider 调用。
 
@@ -31,9 +30,9 @@
   - 前端 `services.ts` 已将列表/详情/创建/更新/删除/执行统计/预测/导入导出统一切换到 `/api/budgets/*`；
   - 服务层新增预算 REST ↔ 前端旧结构兼容映射，避免直接重写 `budget store` 与页面；
   - `db.py` 已为预算 `forecast/import/export` 补齐 `user_id` 隔离；
-  - `app.py` 已移除 `budgets.bp_v1` 注册；
-  - `src/bill_analyser/api/routes/budgets.py` 内预算旧 `bp_v1` 实现已完成物理删除；
-  - 已补 `tests/new_ui/test_budgets_rest_api.py` 覆盖 REST 主链与 legacy 404 回归。
+  - `app.py` 已移除预算蓝图注册；
+  - `src/bill_analyser/api/routes/budgets/` 旧 Flask route package 已完成物理删除；
+  - 预算 REST 主链运行时合同已迁移到 Rust `crates/bill-analyser-http/tests/budget_runtime_contract.rs`；`tests/new_ui/test_budgets_rest_api.py` 现在只覆盖 Flask sidecar route shell 已删除与 legacy 404 回归。
 - 账户域历史 rewrite 与旧 `/get` `/modify` `/hide` `/delete` `/move` 兼容路由已移除。
 - 标签域 `bp_v1` 注册与全部 v1 兼容实现已移除。
 - 设置包域使用 REST 主链提供统一 JSON 导入导出：
@@ -52,7 +51,7 @@
   - CRUD 响应保持前端交易 DTO 与 Flask-compatible `success/result` envelope，frontend cents 与 DB yuan 的转换在 Rust adapter 边界完成；交易图片上传/未使用清理由 Rust 使用 `BILL_ANALYSER_UPLOADS_DIR`（默认 `data/uploads`）保存和删除文件，响应保持 `pictureId/originalUrl` data URL 合同；账单导出由 Rust 生成带 BOM 的 CSV 或 XLSX 文件，保留旧文件名、空结果错误和公式型文本转义；recurring candidates/match 由 Rust 读取 `recurring_bills` 并维护 `bills.created_from_recurring` 与 `recurring_bills.next_date`；reconciliation statements 由 Rust 按账户、日期、分类、类型和关键词筛选账单，返回期初/期末余额、流入/流出、净流和带逐笔余额轨迹的交易列表；category quick actions 由 Rust 追加分类关键词并基于 canonical `category_rules` 刷新账单分类。
 - Rust 主 HTTP 服务在 `import_db_runtime` 模式下也接管预算 CRUD/export/execution/forecast/history/snapshot/import 入口：
   - Rust-owned：`GET/POST /api/budgets`、`GET/POST /api/budgets/`、`GET/PUT/DELETE /api/budgets/<id>`、`GET /api/budgets/export`、`GET /api/budgets/execution`、`GET /api/budgets/forecast`、`GET /api/budgets/history`、`POST /api/budgets/history/snapshot`、`POST /api/budgets/import`；
-  - Python-proxied：无预算 route set 内剩余代理项；
+  - Python-proxied：无预算 route set 内剩余代理项；旧 Flask `budgets/` route package 已删除，Flask sidecar 不再注册 `/api/budgets` 蓝图；
   - 预算金额继续使用 Python 既有 yuan-style numeric 合同，Rust DB 写入保持 `user_id` 隔离、父子预算自动上卷、旧 `categories.type=1` 支出归一；execution 只读聚合保持用户隔离、日期窗口交集、账户/标签过滤、`abs(sum(amount))`；forecast 只读聚合保持历史窗口扩展、period grouping、当前周期花费、预算 primary/sub-total 映射、backtest MAPE；history/snapshot 保持 canonical `filter_summary`、精确快照优先、on-demand fallback、`budget_history` replacement 写入；import 保持 Flask-compatible array payload 校验、按 `name + user_id` upsert、单事务提交和逐项 `error_details` 计数 envelope。
 - Rust 主 HTTP 服务在 `import_db_runtime` 模式下接管无外部 provider 依赖的统计读取入口：
   - Rust-owned：`GET /api/statistics/category-statistics`、`GET /api/statistics/category-statistics/trends`、`GET /api/statistics/asset-trends`、`GET /api/statistics/category-pie`、`GET /api/statistics/top-merchants`、`GET /api/statistics/amounts`；
@@ -62,4 +61,4 @@
 - 分类主数据 REST URL、状态码与响应 envelope 保持兼容；`import_db_runtime` 下 Rust HTTP taxonomy runtime 直接接管普通文件 SQLite 库的分类 list/tree/flat/all/get/create/update/delete/batch/move/import/export master-data 持久化，旧 Flask `categories/` route package 已删除，并保持 default seed 的批量 ensure 语义；`GET /api/categories/statistics` 也由 Rust 读取当前用户账单并返回旧树形统计结果；`:memory:` 与 SQLCipher 仍由 Python 路径处理。
 - 分类规则列表 `GET /api/category-rules/`、创建/更新/删除 `POST /api/category-rules/`、`PUT|DELETE /api/category-rules/<rule_id>`、重排 `POST /api/category-rules/reorder`、默认种子 `POST /api/category-rules/defaults`、旧关键词迁移 `POST /api/category-rules/migrate`、无写副作用的 `POST /api/category-rules/<rule_id>/test`、legacy `GET|PUT /api/categories/rules` config/cache、规则中心概览 `GET /api/rules/overview` 与设置包导入/预览/导出路由已由 Rust taxonomy runtime 读写普通应用 SQLite，旧 Flask `category_rules.py` 与 `settings_bundle.py` route shell 已删除；保留 Flask-compatible envelope、当前用户隔离、分类规则筛选、默认分类/规则幂等补齐、legacy keywords/investment settings 到 canonical 规则的幂等迁移、规则表达式测试响应、规则计数、legacy rules payload 的用户隔离 `app_settings` cache、JSON attachment、LLM API Key 脱敏、敏感 section 当前密码校验、导入 preview rollback、跨 section upsert、LLM masked secret 保留与 OCR app_settings 写入。
 - 设置加密状态 `GET /api/settings/encryption/status` 已由 Rust taxonomy/settings runtime 直接响应，无鉴权，返回 Flask-compatible `success/data` SQLCipher 状态投影；当前 Rust SQLite runtime 未启用 SQLCipher provider，因此该状态会报告 `sqlcipher_available=false` 与 `encrypted=false`，真实 SQLCipher 连接/迁移仍由后续 ops 切面处理。
-- 主要 Python REST route 文件当前按同名 package 组织：`bills/`、`auth/`、`statistics/`、`budgets/`、`backup/`、`matching/`、`llm/` 均保留原 `bp` 导出与 URL/method 契约；账户、分类、分类规则、标签、模板与设置包 REST 主链由 Rust taxonomy runtime 提供，不再保留 Flask `accounts/` / `categories/` route package、`category_rules.py`、`tags.py`、`templates.py` 或 `settings_bundle.py` route shell；账单 CRUD/list/export/pictures/recurring、legacy modify/delete、批量更新/删除、账户对账单与分类 quick actions 也不再保留 Flask `bills/crud_prepare.py`、`bills/crud_create_update.py`、`bills/crud_query.py`、`bills/category_actions.py` 或 `bills/reconciliation.py` route shell，剩余 Python bills route package 聚焦 import sidecar。
+- 主要 Python REST route 文件当前按同名 package 组织：`bills/`、`auth/`、`statistics/`、`backup/`、`matching/`、`llm/` 均保留原 `bp` 导出与 URL/method 契约；账户、分类、分类规则、标签、模板、设置包与预算 REST 主链由 Rust runtime 提供，不再保留 Flask `accounts/` / `categories/` / `budgets/` route package、`category_rules.py`、`tags.py`、`templates.py` 或 `settings_bundle.py` route shell；账单 CRUD/list/export/pictures/recurring、legacy modify/delete、批量更新/删除、账户对账单与分类 quick actions 也不再保留 Flask `bills/crud_prepare.py`、`bills/crud_create_update.py`、`bills/crud_query.py`、`bills/category_actions.py` 或 `bills/reconciliation.py` route shell，剩余 Python bills route package 聚焦 import sidecar。

@@ -22,14 +22,8 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("POST", "/api/bills/import/v2/parse")));
     assert!(!rust_owned.contains(&("GET", "/api/bills")));
     assert!(!rust_owned.contains(&("POST", "/api/bills/batch")));
-    assert!(rust_owned.contains(&("GET", "/api/budgets/")));
-    assert!(rust_owned.contains(&("POST", "/api/budgets/")));
-    assert!(rust_owned.contains(&("GET", "/api/budgets/export")));
-    assert!(rust_owned.contains(&("GET", "/api/budgets/execution")));
-    assert!(rust_owned.contains(&("GET", "/api/budgets/forecast")));
-    assert!(rust_owned.contains(&("GET", "/api/budgets/history")));
-    assert!(rust_owned.contains(&("POST", "/api/budgets/history/snapshot")));
-    assert!(rust_owned.contains(&("POST", "/api/budgets/import")));
+    assert!(!rust_owned.contains(&("GET", "/api/budgets/")));
+    assert!(!rust_owned.contains(&("POST", "/api/budgets/import")));
     assert!(rust_owned.contains(&("GET", "/api/statistics/category-statistics")));
     assert!(rust_owned.contains(&("GET", "/api/statistics/category-statistics/trends")));
     assert!(rust_owned.contains(&("GET", "/api/statistics/asset-trends")));
@@ -143,6 +137,23 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
         ("GET", "/api/bills/{bill_id}/recurring-candidates"),
         ("PUT", "/api/bills/{bill_id}/recurring-match"),
         ("DELETE", "/api/bills/{bill_id}/recurring-match"),
+    ] {
+        assert!(python_deleted_routes.contains(&(method, pattern)));
+    }
+    for (method, pattern) in [
+        ("GET", "/api/budgets"),
+        ("GET", "/api/budgets/"),
+        ("POST", "/api/budgets"),
+        ("POST", "/api/budgets/"),
+        ("GET", "/api/budgets/{budget_id}"),
+        ("PUT", "/api/budgets/{budget_id}"),
+        ("DELETE", "/api/budgets/{budget_id}"),
+        ("GET", "/api/budgets/export"),
+        ("GET", "/api/budgets/execution"),
+        ("GET", "/api/budgets/forecast"),
+        ("GET", "/api/budgets/history"),
+        ("POST", "/api/budgets/history/snapshot"),
+        ("POST", "/api/budgets/import"),
     ] {
         assert!(python_deleted_routes.contains(&(method, pattern)));
     }
@@ -515,6 +526,19 @@ fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
             ("DELETE", "/api/bills/{bill_id}/recurring-match"),
             ("POST", "/api/bills/category/quick-add-keyword"),
             ("POST", "/api/bills/category/refresh"),
+            ("GET", "/api/budgets"),
+            ("GET", "/api/budgets/"),
+            ("POST", "/api/budgets"),
+            ("POST", "/api/budgets/"),
+            ("GET", "/api/budgets/{budget_id}"),
+            ("PUT", "/api/budgets/{budget_id}"),
+            ("DELETE", "/api/budgets/{budget_id}"),
+            ("GET", "/api/budgets/export"),
+            ("GET", "/api/budgets/execution"),
+            ("GET", "/api/budgets/forecast"),
+            ("GET", "/api/budgets/history"),
+            ("POST", "/api/budgets/history/snapshot"),
+            ("POST", "/api/budgets/import"),
             ("GET", "/api/accounts/"),
             ("POST", "/api/accounts/"),
             ("DELETE", "/api/accounts/{account_id}"),
@@ -873,6 +897,37 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         assert_eq!(entry.decision_required, DecisionRequired::None);
     }
 
+    for endpoint in [
+        "GET /api/budgets",
+        "GET /api/budgets/",
+        "POST /api/budgets",
+        "POST /api/budgets/",
+        "GET /api/budgets/{budget_id}",
+        "PUT /api/budgets/{budget_id}",
+        "DELETE /api/budgets/{budget_id}",
+        "GET /api/budgets/export",
+        "GET /api/budgets/execution",
+        "GET /api/budgets/forecast",
+        "GET /api/budgets/history",
+        "POST /api/budgets/history/snapshot",
+        "POST /api/budgets/import",
+    ] {
+        let entry = manifest
+            .iter()
+            .find(|entry| entry.endpoint == endpoint)
+            .unwrap_or_else(|| panic!("budget route is present: {endpoint}"));
+        assert_eq!(entry.state, MigrationState::PythonDeleted);
+        assert!(matches!(
+            entry.handler,
+            RouteHandlerId::BudgetsCrudRuntime
+                | RouteHandlerId::BudgetsAnalysisRuntime
+                | RouteHandlerId::BudgetsHistoryRuntime
+                | RouteHandlerId::BudgetsImportRuntime
+        ));
+        assert!(entry.deletion_blockers.is_empty());
+        assert_eq!(entry.decision_required, DecisionRequired::None);
+    }
+
     let recurring_match = manifest
         .iter()
         .find(|entry| entry.endpoint == "DELETE /api/bills/{bill_id}/recurring-match")
@@ -1125,6 +1180,21 @@ fn domain_policies_record_provider_and_deletion_blockers() {
     assert!(taxonomy
         .unsupported_behavior
         .contains("all old Flask taxonomy route shells have been removed"));
+
+    for domain in [
+        "budgets-crud",
+        "budgets-analysis",
+        "budgets-history",
+        "budgets-import",
+    ] {
+        let policy = find_domain_policy(domain).expect("budget domain policy exists");
+        assert_eq!(policy.decision_required, DecisionRequired::None);
+        assert!(policy.python_owner_files.is_empty(), "{domain}");
+        assert!(policy.deletion_blockers.is_empty(), "{domain}");
+        assert!(policy
+            .unsupported_behavior
+            .contains("old Flask budgets route package has been removed"));
+    }
 
     let database_schema_writer = database_schema_db_writer_policy();
     assert!(database_schema_writer
