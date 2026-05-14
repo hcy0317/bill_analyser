@@ -277,6 +277,20 @@ pub struct StatisticsTrendPoint {
     pub net: f64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatisticsAnalyzerPeriodRange {
+    pub start_date: String,
+    pub end_date: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StatisticsAnalyzerTrendBucket {
+    pub period: String,
+    pub income: f64,
+    pub expense: f64,
+    pub net: f64,
+}
+
 pub fn parse_statistics_timestamp_range(
     start_raw: Option<&str>,
     end_raw: Option<&str>,
@@ -860,6 +874,198 @@ pub fn build_statistics_trend_response(analyzer_result: &Value) -> Value {
     json!({"success": true, "data": build_statistics_trend_points(analyzer_result)})
 }
 
+pub fn statistics_analyzer_period_range(
+    period: &str,
+    today: NaiveDate,
+) -> StatisticsAnalyzerPeriodRange {
+    let start = match period {
+        "month" => first_day(today.year(), today.month()),
+        "quarter" => {
+            let start_month = ((today.month() - 1) / 3) * 3 + 1;
+            first_day(today.year(), start_month)
+        }
+        "year" => first_day(today.year(), 1),
+        _ => today - Duration::days(30),
+    };
+    let end = match period {
+        "month" => add_months(start, 1),
+        "quarter" => add_months(start, 3),
+        "year" => first_day(today.year() + 1, 1),
+        _ => today,
+    };
+    StatisticsAnalyzerPeriodRange {
+        start_date: format_date(start),
+        end_date: format_date(end),
+    }
+}
+
+pub fn build_statistics_analyzer_report(
+    period: &str,
+    range: &StatisticsAnalyzerPeriodRange,
+    bills: &[StatisticsBillInput],
+    generated_at: &str,
+) -> Value {
+    if bills.is_empty() {
+        return empty_statistics_analyzer_report(generated_at);
+    }
+
+    json!({
+        "period": period,
+        "start_date": range.start_date,
+        "end_date": range.end_date,
+        "total_records": bills.len(),
+        "summary": statistics_analyzer_summary(bills),
+        "by_category": statistics_analyzer_by_category(bills),
+        "by_type": statistics_analyzer_by_type(bills),
+        "trend": statistics_analyzer_report_trend(bills, period),
+        "top_expenses": statistics_analyzer_top_bills(bills, "支出", 10, true),
+        "top_income": statistics_analyzer_top_bills(bills, "收入", 10, false),
+        "generated_at": generated_at,
+    })
+}
+
+pub fn build_statistics_analyzer_trends_result(
+    period: &str,
+    category: Option<&str>,
+    buckets: &[StatisticsAnalyzerTrendBucket],
+) -> Value {
+    json!({
+        "trends": buckets,
+        "period": period,
+        "category": category,
+    })
+}
+
+pub fn build_statistics_analyzer_trend_bucket(
+    period: &str,
+    bills: &[StatisticsBillInput],
+) -> StatisticsAnalyzerTrendBucket {
+    let income_cents = bills
+        .iter()
+        .filter(|bill| is_income_type(&bill.bill_type))
+        .map(|bill| yuan_to_cents_lossy(&bill.amount_yuan))
+        .sum::<i64>();
+    let expense_cents = bills
+        .iter()
+        .filter(|bill| is_expense_type(&bill.bill_type))
+        .map(|bill| yuan_to_cents_lossy(&bill.amount_yuan))
+        .sum::<i64>();
+    let income = round_money(cents_to_yuan(income_cents));
+    let expense = round_money(cents_to_yuan(expense_cents));
+    StatisticsAnalyzerTrendBucket {
+        period: period.to_string(),
+        income,
+        expense,
+        net: round_money(income - expense),
+    }
+}
+
+pub fn build_statistics_analyzer_comparison_result(
+    period: &str,
+    compare_type: &str,
+    bills: &[StatisticsBillInput],
+) -> Value {
+    let comparison = if compare_type == "category" {
+        let mut categories: BTreeMap<String, (i64, i64, usize)> = BTreeMap::new();
+        for bill in bills {
+            let entry = categories
+                .entry(main_category_or_uncategorized(bill))
+                .or_insert((0, 0, 0));
+            if is_income_type(&bill.bill_type) {
+                entry.0 += yuan_to_cents_lossy(&bill.amount_yuan);
+            } else if is_expense_type(&bill.bill_type) {
+                entry.1 += yuan_to_cents_lossy(&bill.amount_yuan);
+            }
+            entry.2 += 1;
+        }
+        let mut rows = categories
+            .into_iter()
+            .map(|(name, (income_cents, expense_cents, count))| {
+                let income = round_money(cents_to_yuan(income_cents));
+                let expense = round_money(cents_to_yuan(expense_cents));
+                json!({
+                    "name": name,
+                    "income": income,
+                    "expense": expense,
+                    "count": count,
+                    "net": round_money(income - expense),
+                })
+            })
+            .collect::<Vec<_>>();
+        rows.sort_by(|left, right| {
+            let left_expense = left.get("expense").and_then(Value::as_f64).unwrap_or(0.0);
+            let right_expense = right.get("expense").and_then(Value::as_f64).unwrap_or(0.0);
+            right_expense
+                .partial_cmp(&left_expense)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        rows
+    } else {
+        Vec::new()
+    };
+
+    json!({
+        "comparison": comparison,
+        "period": period,
+        "compare_type": compare_type,
+    })
+}
+
+pub fn build_statistics_analyzer_category_result(
+    period: &str,
+    main_category: Option<&str>,
+    bills: &[StatisticsBillInput],
+) -> Value {
+    let mut sub_categories: BTreeMap<String, (i64, usize)> = BTreeMap::new();
+    let mut total_cents = 0_i64;
+    for bill in bills.iter().filter(|bill| is_expense_type(&bill.bill_type)) {
+        let amount = yuan_to_cents_lossy(&bill.amount_yuan);
+        let entry = sub_categories
+            .entry(if bill.sub_category.is_empty() {
+                "其他".to_string()
+            } else {
+                bill.sub_category.clone()
+            })
+            .or_insert((0, 0));
+        entry.0 += amount;
+        entry.1 += 1;
+        total_cents += amount;
+    }
+
+    let mut rows = sub_categories
+        .into_iter()
+        .map(|(sub_category, (amount_cents, count))| {
+            let amount = round_money(cents_to_yuan(amount_cents));
+            let percentage = if total_cents > 0 {
+                round_money((amount_cents as f64 / total_cents as f64) * 100.0)
+            } else {
+                0.0
+            };
+            json!({
+                "sub_category": sub_category,
+                "amount": amount,
+                "count": count,
+                "percentage": percentage,
+                "avg_amount": if count > 0 { round_money(amount / count as f64) } else { 0.0 },
+            })
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| {
+        let left_amount = left.get("amount").and_then(Value::as_f64).unwrap_or(0.0);
+        let right_amount = right.get("amount").and_then(Value::as_f64).unwrap_or(0.0);
+        right_amount
+            .partial_cmp(&left_amount)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    json!({
+        "main_category": main_category,
+        "period": period,
+        "total_amount": round_money(cents_to_yuan(total_cents)),
+        "sub_categories": rows,
+    })
+}
+
 pub fn exchange_rate_provider_options() -> BTreeMap<String, ExchangeRateProviderOption> {
     BTreeMap::from([
         (
@@ -1225,6 +1431,190 @@ pub fn build_statistics_report_chart_plan(report: &Value) -> Vec<String> {
         chart_ids.push("dashboard".to_string());
     }
     chart_ids
+}
+
+fn empty_statistics_analyzer_report(generated_at: &str) -> Value {
+    json!({
+        "period": "",
+        "start_date": "",
+        "end_date": "",
+        "total_records": 0,
+        "summary": {"total_income": 0, "total_expense": 0, "net_income": 0},
+        "by_category": {},
+        "by_type": {},
+        "trend": [],
+        "top_expenses": [],
+        "top_income": [],
+        "generated_at": generated_at,
+    })
+}
+
+fn statistics_analyzer_summary(bills: &[StatisticsBillInput]) -> Value {
+    let total_income = cents_to_yuan(
+        bills
+            .iter()
+            .filter(|bill| is_income_type(&bill.bill_type))
+            .map(|bill| yuan_to_cents_lossy(&bill.amount_yuan))
+            .sum(),
+    );
+    let total_expense = cents_to_yuan(
+        bills
+            .iter()
+            .filter(|bill| is_expense_type(&bill.bill_type))
+            .map(|bill| yuan_to_cents_lossy(&bill.amount_yuan))
+            .sum(),
+    );
+    json!({
+        "total_income": total_income,
+        "total_expense": total_expense,
+        "net_income": total_income - total_expense,
+    })
+}
+
+type AnalyzerSubCategoryTotals = BTreeMap<String, (usize, i64)>;
+type AnalyzerCategoryTotals = BTreeMap<String, (usize, i64, AnalyzerSubCategoryTotals)>;
+
+fn statistics_analyzer_by_category(bills: &[StatisticsBillInput]) -> Value {
+    let mut categories: AnalyzerCategoryTotals = BTreeMap::new();
+    for bill in bills {
+        let amount = yuan_to_cents_lossy(&bill.amount_yuan);
+        let entry = categories
+            .entry(bill.main_category.clone())
+            .or_insert((0, 0, BTreeMap::new()));
+        entry.0 += 1;
+        entry.1 += amount;
+        let sub_entry = entry.2.entry(bill.sub_category.clone()).or_insert((0, 0));
+        sub_entry.0 += 1;
+        sub_entry.1 += amount;
+    }
+
+    let mut result = serde_json::Map::new();
+    for (category, (count, total_cents, sub_categories)) in categories {
+        let mut sub_result = serde_json::Map::new();
+        for (sub_category, (sub_count, sub_total_cents)) in sub_categories {
+            sub_result.insert(
+                sub_category,
+                json!({
+                    "count": sub_count,
+                    "total": cents_to_yuan(sub_total_cents),
+                }),
+            );
+        }
+        result.insert(
+            category,
+            json!({
+                "count": count,
+                "total": cents_to_yuan(total_cents),
+                "average": if count > 0 { cents_to_yuan(total_cents) / count as f64 } else { 0.0 },
+                "sub_categories": sub_result,
+            }),
+        );
+    }
+    Value::Object(result)
+}
+
+fn statistics_analyzer_by_type(bills: &[StatisticsBillInput]) -> Value {
+    let mut by_type: BTreeMap<String, (usize, i64)> = BTreeMap::new();
+    for bill in bills {
+        let entry = by_type.entry(bill.bill_type.clone()).or_insert((0, 0));
+        entry.0 += 1;
+        entry.1 += yuan_to_cents_lossy(&bill.amount_yuan);
+    }
+    let mut result = serde_json::Map::new();
+    for (bill_type, (count, total_cents)) in by_type {
+        result.insert(
+            bill_type,
+            json!({
+                "count": count,
+                "total": cents_to_yuan(total_cents),
+                "average": if count > 0 { cents_to_yuan(total_cents) / count as f64 } else { 0.0 },
+            }),
+        );
+    }
+    Value::Object(result)
+}
+
+fn statistics_analyzer_report_trend(bills: &[StatisticsBillInput], period: &str) -> Vec<Value> {
+    let mut buckets: BTreeMap<String, (i64, i64)> = BTreeMap::new();
+    for bill in bills {
+        let Some(date) = parse_bill_date_prefix(&bill.date) else {
+            continue;
+        };
+        let bucket_date = match period {
+            "quarter" => {
+                let days_until_sunday = 6_i64 - i64::from(date.weekday().num_days_from_monday());
+                date + Duration::days(days_until_sunday)
+            }
+            "year" => last_day_of_month(date.year(), date.month()).unwrap_or(date),
+            _ => date,
+        };
+        let entry = buckets.entry(format_date(bucket_date)).or_insert((0, 0));
+        if is_income_type(&bill.bill_type) {
+            entry.0 += yuan_to_cents_lossy(&bill.amount_yuan);
+        } else if is_expense_type(&bill.bill_type) {
+            entry.1 += yuan_to_cents_lossy(&bill.amount_yuan);
+        }
+    }
+    buckets
+        .into_iter()
+        .map(|(date, (income_cents, expense_cents))| {
+            let income = cents_to_yuan(income_cents);
+            let expense = cents_to_yuan(expense_cents);
+            json!({
+                "date": date,
+                "income": income,
+                "expense": expense,
+                "net": income - expense,
+            })
+        })
+        .collect()
+}
+
+fn statistics_analyzer_top_bills(
+    bills: &[StatisticsBillInput],
+    bill_type: &str,
+    limit: usize,
+    include_category: bool,
+) -> Vec<Value> {
+    let mut rows = bills
+        .iter()
+        .filter(|bill| bill.bill_type == bill_type)
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| {
+        yuan_to_cents_lossy(&right.amount_yuan).cmp(&yuan_to_cents_lossy(&left.amount_yuan))
+    });
+    rows.into_iter()
+        .take(limit)
+        .map(|bill| {
+            let mut item = serde_json::Map::from_iter([
+                (
+                    "date".to_string(),
+                    json!(bill.date.chars().take(10).collect::<String>()),
+                ),
+                (
+                    "amount".to_string(),
+                    json!(cents_to_yuan(yuan_to_cents_lossy(&bill.amount_yuan))),
+                ),
+                ("counterparty".to_string(), json!(bill.counterparty)),
+                ("description".to_string(), json!(bill.description)),
+            ]);
+            if include_category {
+                item.insert("category".to_string(), json!(bill.main_category));
+            }
+            Value::Object(item)
+        })
+        .collect()
+}
+
+fn first_day(year: i32, month: u32) -> NaiveDate {
+    NaiveDate::from_ymd_opt(year, month, 1).expect("valid first day")
+}
+
+fn add_months(date: NaiveDate, months: u32) -> NaiveDate {
+    let zero_based = date.month0() + months;
+    let year = date.year() + (zero_based / 12) as i32;
+    let month = (zero_based % 12) + 1;
+    first_day(year, month)
 }
 
 fn parse_i64_text(text: &str, error: &str) -> Result<i64, StatisticsContractError> {

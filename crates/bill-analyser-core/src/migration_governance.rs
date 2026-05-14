@@ -82,9 +82,9 @@ pub enum RouteHandlerId {
     )]
     StatisticsReadRuntime,
     #[serde(
-        rename = "crates/bill-analyser-http/src/statistics_routes.rs::python_proxy_passthrough_statistics_analyzer"
+        rename = "crates/bill-analyser-http/src/statistics_routes.rs::statistics_analyzer_runtime"
     )]
-    StatisticsAnalyzerProxyPassthrough,
+    StatisticsAnalyzerRuntime,
     #[serde(
         rename = "crates/bill-analyser-http/src/statistics_routes.rs::statistics_exchange_runtime"
     )]
@@ -139,8 +139,8 @@ impl RouteHandlerId {
             Self::StatisticsReadRuntime => {
                 "crates/bill-analyser-http/src/statistics_routes.rs::statistics_read_runtime"
             }
-            Self::StatisticsAnalyzerProxyPassthrough => {
-                "crates/bill-analyser-http/src/statistics_routes.rs::python_proxy_passthrough_statistics_analyzer"
+            Self::StatisticsAnalyzerRuntime => {
+                "crates/bill-analyser-http/src/statistics_routes.rs::statistics_analyzer_runtime"
             }
             Self::StatisticsExchangeRuntime => {
                 "crates/bill-analyser-http/src/statistics_routes.rs::statistics_exchange_runtime"
@@ -783,46 +783,46 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/statistics/overview",
         domain: "statistics-analyzer",
-        state: MigrationState::PythonProxied,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Analyzer overview remains Python-proxied until the full Analyzer report runtime is Rust-owned.",
+        notes: "Rust statistics_analyzer_runtime owns Analyzer overview report projection; the old Flask Analyzer route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
         pattern: "/api/statistics/trends",
         domain: "statistics-analyzer",
-        state: MigrationState::PythonProxied,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Analyzer trends remain Python-proxied until the full Analyzer trend runtime is Rust-owned.",
+        notes: "Rust statistics_analyzer_runtime owns Analyzer monthly/yearly trend projection; the old Flask Analyzer route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
         pattern: "/api/statistics/comparison",
         domain: "statistics-analyzer",
-        state: MigrationState::PythonProxied,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Analyzer comparison remains Python-proxied until the full Analyzer comparison runtime is Rust-owned.",
+        notes: "Rust statistics_analyzer_runtime owns Analyzer category comparison projection; the old Flask Analyzer route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
         pattern: "/api/statistics/category",
         domain: "statistics-analyzer",
-        state: MigrationState::PythonProxied,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Analyzer category route remains Python-proxied until the full Analyzer category runtime is Rust-owned.",
+        notes: "Rust statistics_analyzer_runtime owns Analyzer category drilldown projection; the old Flask Analyzer route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
         pattern: "/api/statistics/trend",
         domain: "statistics-analyzer",
-        state: MigrationState::PythonProxied,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Analyzer trend alias remains Python-proxied until the full Analyzer trend runtime is Rust-owned.",
+        notes: "Rust statistics_analyzer_runtime owns Analyzer trend alias projection; the old Flask Analyzer route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -2739,7 +2739,6 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
     DomainGovernancePolicy {
         domain: "statistics-analyzer",
         python_owner_files: &[
-            "src/bill_analyser/api/routes/statistics/basic.py",
             "src/bill_analyser/api/routes/insights.py",
             "src/bill_analyser/api/routes/networth.py",
             "src/bill_analyser/core/analyzer.py",
@@ -2755,10 +2754,10 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
         coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
-        deletion_blockers: &["overview_parity", "trend_projection_parity"],
+        deletion_blockers: &["report_chart_generation", "insights_networth_adjacent_routes"],
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Overview, trends, comparison, category, and trend analyzer endpoints remain Python-proxied.",
+            "The old Flask statistics Analyzer route shell has been removed; report chart generation plus insights/networth adjacent routes still use Python until their later P10/P8 slices.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: FULL_ROUTE_EVIDENCE_NO_FIXTURE,
@@ -3206,7 +3205,7 @@ fn route_handler_for_domain(domain: &str) -> RouteHandlerId {
         "budgets-history" => RouteHandlerId::BudgetsHistoryRuntime,
         "budgets-import" => RouteHandlerId::BudgetsImportRuntime,
         "statistics-read" => RouteHandlerId::StatisticsReadRuntime,
-        "statistics-analyzer" => RouteHandlerId::StatisticsAnalyzerProxyPassthrough,
+        "statistics-analyzer" => RouteHandlerId::StatisticsAnalyzerRuntime,
         "statistics-exchange" => RouteHandlerId::StatisticsExchangeRuntime,
         "taxonomy-rules-settings" => RouteHandlerId::TaxonomyRuntime,
         "auth-security-user-data" | "matching-recurring-calendar-networth" | "backup-ops" => {

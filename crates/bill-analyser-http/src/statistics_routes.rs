@@ -8,8 +8,9 @@ use axum::{
     Json, Router,
 };
 use bill_analyser_core::statistics::{
-    build_builtin_fallback_exchange_rates, build_provider_candidate_order,
-    build_provider_exchange_rates_result, build_user_custom_exchange_rates_result,
+    build_builtin_fallback_exchange_rates, build_overview_result_from_report,
+    build_provider_candidate_order, build_provider_exchange_rates_result,
+    build_statistics_trend_response, build_user_custom_exchange_rates_result,
     convert_cny_quote_map_to_rates, convert_provider_base_currency, exchange_rate_provider_options,
     normalize_chinese_currency_name, normalize_requested_exchange_rate_provider,
     parse_statistics_timestamp_range, parse_statistics_year_month_range,
@@ -22,9 +23,11 @@ use bill_analyser_db::{
     delete_user_custom_exchange_rate, find_statistics_all_date_range,
     get_statistics_user_default_currency, list_user_custom_exchange_rates,
     query_asset_trends_payload, query_category_pie_payload, query_category_statistics_payload,
-    query_category_trends_payload, query_top_merchants_payload, query_transaction_amount_period,
-    upsert_user_custom_exchange_rate, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
-    StatisticsBillFilters,
+    query_category_trends_payload, query_statistics_analyzer_category_payload,
+    query_statistics_analyzer_comparison_payload, query_statistics_analyzer_report_payload,
+    query_statistics_analyzer_trends_payload, query_top_merchants_payload,
+    query_transaction_amount_period, upsert_user_custom_exchange_rate, SqliteConnectionConfig,
+    SqliteDbPath, SqliteRuntime, StatisticsBillFilters,
 };
 use chrono::{Datelike, Local, NaiveDate, TimeZone};
 use serde::Deserialize;
@@ -43,18 +46,17 @@ pub const STATISTICS_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/statistics/category-pie"),
     ("GET", "/api/statistics/top-merchants"),
     ("GET", "/api/statistics/amounts"),
-    ("GET", "/api/statistics/exchange-rates"),
-    ("PUT", "/api/statistics/exchange-rates/custom"),
-    ("DELETE", "/api/statistics/exchange-rates/custom/{currency}"),
-];
-
-pub const STATISTICS_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/statistics/overview"),
     ("GET", "/api/statistics/trends"),
     ("GET", "/api/statistics/comparison"),
     ("GET", "/api/statistics/category"),
     ("GET", "/api/statistics/trend"),
+    ("GET", "/api/statistics/exchange-rates"),
+    ("PUT", "/api/statistics/exchange-rates/custom"),
+    ("DELETE", "/api/statistics/exchange-rates/custom/{currency}"),
 ];
+
+pub const STATISTICS_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
 
 pub fn statistics_runtime_router() -> Router<ProxyState> {
     Router::new()
@@ -70,6 +72,14 @@ pub fn statistics_runtime_router() -> Router<ProxyState> {
         .route("/api/statistics/category-pie", get(category_pie_handler))
         .route("/api/statistics/top-merchants", get(top_merchants_handler))
         .route("/api/statistics/amounts", get(transaction_amounts_handler))
+        .route("/api/statistics/overview", get(analyzer_overview_handler))
+        .route("/api/statistics/trends", get(analyzer_trends_handler))
+        .route(
+            "/api/statistics/comparison",
+            get(analyzer_comparison_handler),
+        )
+        .route("/api/statistics/category", get(analyzer_category_handler))
+        .route("/api/statistics/trend", get(analyzer_trend_handler))
         .route(
             "/api/statistics/exchange-rates",
             get(exchange_rates_handler),
@@ -115,6 +125,16 @@ struct BasicStatisticsQuery {
     limit: Option<String>,
     query: Option<String>,
     periods: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct AnalyzerStatisticsQuery {
+    period: Option<String>,
+    category: Option<String>,
+    #[serde(rename = "type")]
+    compare_type: Option<String>,
+    main_category: Option<String>,
+    granularity: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -355,6 +375,132 @@ async fn transaction_amounts_handler(
         results.insert(period_name, result);
     }
     success_result(StatusCode::OK, json!(results))
+}
+
+async fn analyzer_overview_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Query(query): Query<AnalyzerStatisticsQuery>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let period = analyzer_period(query.period.as_deref());
+    match query_statistics_analyzer_report_payload(runtime.connection(), user_id, &period) {
+        Ok(report) => success_result(StatusCode::OK, build_overview_result_from_report(&report)),
+        Err(_) => db_error_response(),
+    }
+}
+
+async fn analyzer_trends_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Query(query): Query<AnalyzerStatisticsQuery>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let period = analyzer_period(query.period.as_deref());
+    match query_statistics_analyzer_trends_payload(
+        runtime.connection(),
+        user_id,
+        &period,
+        query.category.as_deref(),
+    ) {
+        Ok(result) => success_result(StatusCode::OK, result),
+        Err(_) => db_error_response(),
+    }
+}
+
+async fn analyzer_comparison_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Query(query): Query<AnalyzerStatisticsQuery>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let period = analyzer_period(query.period.as_deref());
+    let compare_type = query
+        .compare_type
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("category")
+        .to_string();
+    match query_statistics_analyzer_comparison_payload(
+        runtime.connection(),
+        user_id,
+        &period,
+        &compare_type,
+    ) {
+        Ok(result) => success_result(StatusCode::OK, result),
+        Err(_) => db_error_response(),
+    }
+}
+
+async fn analyzer_category_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Query(query): Query<AnalyzerStatisticsQuery>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let period = analyzer_period(query.period.as_deref());
+    match query_statistics_analyzer_category_payload(
+        runtime.connection(),
+        user_id,
+        &period,
+        query.main_category.as_deref(),
+    ) {
+        Ok(result) => success_data(StatusCode::OK, result),
+        Err(_) => db_error_response(),
+    }
+}
+
+async fn analyzer_trend_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Query(query): Query<AnalyzerStatisticsQuery>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let period = analyzer_period(query.granularity.as_deref());
+    match query_statistics_analyzer_trends_payload(
+        runtime.connection(),
+        user_id,
+        &period,
+        query.category.as_deref(),
+    ) {
+        Ok(result) => json_response(StatusCode::OK, build_statistics_trend_response(&result)),
+        Err(_) => db_error_response(),
+    }
 }
 
 async fn exchange_rates_handler(
@@ -1200,4 +1346,12 @@ fn non_empty_string(value: Option<&String>) -> Option<String> {
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
+}
+
+fn analyzer_period(value: Option<&str>) -> String {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("month")
+        .to_string()
 }

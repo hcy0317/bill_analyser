@@ -31,6 +31,11 @@ async fn statistics_read_runtime_serves_owned_routes_and_reads_db() -> Result<()
         ("GET", "/api/statistics/category-pie"),
         ("GET", "/api/statistics/top-merchants"),
         ("GET", "/api/statistics/amounts"),
+        ("GET", "/api/statistics/overview"),
+        ("GET", "/api/statistics/trends"),
+        ("GET", "/api/statistics/comparison"),
+        ("GET", "/api/statistics/category"),
+        ("GET", "/api/statistics/trend"),
     ] {
         assert!(STATISTICS_ROUTE_PATTERNS.iter().any(|item| item == &route));
     }
@@ -367,10 +372,7 @@ async fn statistics_runtime_covers_error_edges_auth_and_proxy_boundaries(
     ] {
         assert!(STATISTICS_ROUTE_PATTERNS.iter().any(|item| item == &route));
     }
-    let proxied_route = ("GET", "/api/statistics/overview");
-    assert!(STATISTICS_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .any(|item| item == &proxied_route));
+    assert!(STATISTICS_PROXIED_ROUTE_PATTERNS.is_empty());
     assert!(!STATISTICS_PROXIED_ROUTE_PATTERNS
         .iter()
         .any(|item| item == &("GET", "/api/statistics/exchange-rates")));
@@ -459,17 +461,85 @@ async fn statistics_runtime_covers_error_edges_auth_and_proxy_boundaries(
     assert_eq!(delete_response.status(), StatusCode::OK);
     assert_eq!(read_json(delete_response).await["result"], true);
 
-    let proxied_response = app
+    let overview_response = app
+        .clone()
         .oneshot(authed_request(
             Method::GET,
-            "/api/statistics/overview?period=month",
+            "/api/statistics/overview?period=year",
             Body::empty(),
         ))
         .await?;
-    assert_eq!(proxied_response.status(), StatusCode::OK);
-    let proxied_body = read_json(proxied_response).await;
-    assert_eq!(proxied_body["runtime"], "python-sidecar");
-    assert_eq!(proxied_body["path"], "/api/statistics/overview");
+    assert_eq!(overview_response.status(), StatusCode::OK);
+    let overview_body = read_json(overview_response).await;
+    assert_eq!(overview_body["success"], true);
+    assert_eq!(overview_body["result"]["total_income"], 100.0);
+    assert_eq!(overview_body["result"]["total_expense"], 21.34);
+    assert_eq!(overview_body["result"]["bill_count"], 3);
+
+    let trends_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/statistics/trends?period=month&category=%E9%A4%90%E9%A5%AE",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(trends_response.status(), StatusCode::OK);
+    let trends_body = read_json(trends_response).await;
+    assert_eq!(trends_body["success"], true);
+    assert_eq!(trends_body["result"]["period"], "month");
+    assert_eq!(trends_body["result"]["category"], "餐饮");
+    assert!(trends_body["result"]["trends"]
+        .as_array()
+        .expect("trend buckets")
+        .iter()
+        .any(|bucket| bucket["expense"] == -12.34));
+
+    let comparison_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/statistics/comparison?period=year&type=category",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(comparison_response.status(), StatusCode::OK);
+    let comparison_body = read_json(comparison_response).await;
+    assert_eq!(comparison_body["success"], true);
+    assert!(comparison_body["result"]["comparison"]
+        .as_array()
+        .expect("comparison rows")
+        .iter()
+        .any(|row| row["name"] == "餐饮" && row["count"] == 2));
+
+    let category_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/statistics/category?period=year&main_category=%E9%A4%90%E9%A5%AE",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(category_response.status(), StatusCode::OK);
+    let category_body = read_json(category_response).await;
+    assert_eq!(category_body["success"], true);
+    assert_eq!(category_body["data"]["main_category"], "餐饮");
+    assert_eq!(
+        category_body["data"]["sub_categories"][0]["sub_category"],
+        "午餐"
+    );
+
+    let trend_response = app
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/statistics/trend?granularity=month",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(trend_response.status(), StatusCode::OK);
+    let trend_body = read_json(trend_response).await;
+    assert_eq!(trend_body["success"], true);
+    assert!(trend_body["data"].as_array().expect("trend data").len() >= 12);
 
     Ok(())
 }

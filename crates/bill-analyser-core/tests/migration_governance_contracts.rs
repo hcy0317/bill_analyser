@@ -164,6 +164,11 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
         ("GET", "/api/statistics/category-pie"),
         ("GET", "/api/statistics/top-merchants"),
         ("GET", "/api/statistics/amounts"),
+        ("GET", "/api/statistics/overview"),
+        ("GET", "/api/statistics/trends"),
+        ("GET", "/api/statistics/comparison"),
+        ("GET", "/api/statistics/category"),
+        ("GET", "/api/statistics/trend"),
         ("GET", "/api/statistics/exchange-rates"),
         ("PUT", "/api/statistics/exchange-rates/custom"),
         ("DELETE", "/api/statistics/exchange-rates/custom/{currency}"),
@@ -267,11 +272,6 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
     assert!(!receipt_recognition.is_import_deletion_blocked());
 
     for (method, pattern) in [
-        ("GET", "/api/statistics/overview"),
-        ("GET", "/api/statistics/trends"),
-        ("GET", "/api/statistics/comparison"),
-        ("GET", "/api/statistics/category"),
-        ("GET", "/api/statistics/trend"),
         ("POST", "/api/llm/preview-recommend"),
         ("POST", "/api/llm/analyze-transactions"),
         ("POST", "/api/llm/rule-synthesis"),
@@ -293,6 +293,11 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
     }
 
     for (method, pattern) in [
+        ("GET", "/api/statistics/overview"),
+        ("GET", "/api/statistics/trends"),
+        ("GET", "/api/statistics/comparison"),
+        ("GET", "/api/statistics/category"),
+        ("GET", "/api/statistics/trend"),
         ("GET", "/api/statistics/exchange-rates"),
         ("PUT", "/api/statistics/exchange-rates/custom"),
         ("DELETE", "/api/statistics/exchange-rates/custom/{currency}"),
@@ -303,9 +308,8 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
         assert_eq!(endpoint.state, MigrationState::PythonDeleted);
         assert!(!endpoint.is_python_runtime_owner());
         assert!(!endpoint.is_import_deletion_blocked());
-        assert!(endpoint
-            .notes
-            .contains("Flask exchange route shell is deleted"));
+        assert!(endpoint.notes.contains("Flask"));
+        assert!(endpoint.notes.contains("route shell is deleted"));
     }
 }
 
@@ -562,6 +566,11 @@ fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
             ("GET", "/api/statistics/category-pie"),
             ("GET", "/api/statistics/top-merchants"),
             ("GET", "/api/statistics/amounts"),
+            ("GET", "/api/statistics/overview"),
+            ("GET", "/api/statistics/trends"),
+            ("GET", "/api/statistics/comparison"),
+            ("GET", "/api/statistics/category"),
+            ("GET", "/api/statistics/trend"),
             ("GET", "/api/statistics/exchange-rates"),
             ("PUT", "/api/statistics/exchange-rates/custom"),
             ("DELETE", "/api/statistics/exchange-rates/custom/{currency}"),

@@ -145,10 +145,10 @@ class TestAPIBlueprints:
                 f"{method.upper()} {url} should not be registered in Flask sidecar"
             )
 
-    def test_statistics_blueprint_registered(self, client):
-        """测试statistics蓝图已注册"""
+    def test_statistics_analyzer_removed_from_flask_sidecar(self, client):
+        """统计 Analyzer 路由已由 Rust runtime 接管，不再注册 Flask sidecar。"""
         response = client.get("/api/statistics/overview")
-        assert response.status_code != 404
+        assert response.status_code == 404
 
 
 class TestErrorHandling:

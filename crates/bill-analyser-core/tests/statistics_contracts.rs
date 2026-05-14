@@ -7,16 +7,19 @@ use bill_analyser_core::statistics::{
     build_category_trend_statistics, build_insight_anomaly_summary, build_net_worth_snapshot,
     build_net_worth_snapshot_response, build_overview_result_from_report,
     build_provider_candidate_order, build_provider_exchange_rates_result,
-    build_statistics_report_chart_plan, build_statistics_trend_response, build_top_merchants_data,
+    build_statistics_analyzer_category_result, build_statistics_analyzer_comparison_result,
+    build_statistics_analyzer_report, build_statistics_analyzer_trend_bucket,
+    build_statistics_analyzer_trends_result, build_statistics_report_chart_plan,
+    build_statistics_trend_response, build_top_merchants_data,
     build_transaction_amount_period_result, build_transaction_amounts_response,
     build_user_custom_exchange_rates_result, convert_cny_quote_map_to_rates,
     convert_provider_base_currency, exchange_rate_provider_options, extract_numeric_values,
     normalize_chinese_currency_name, normalize_requested_exchange_rate_provider,
     parse_statistics_timestamp_range, parse_statistics_year_month_range,
-    parse_transaction_amount_period_query, validate_asset_trends_span, AssetTrendDay,
-    CategoryStatisticItem, RecurringRuleInput, StatisticsAccountInput, StatisticsBillInput,
-    StatisticsCategoryInput, StatisticsTimestampRange, StatisticsYearMonthRangeMode,
-    UserCustomExchangeRateInput,
+    parse_transaction_amount_period_query, statistics_analyzer_period_range,
+    validate_asset_trends_span, AssetTrendDay, CategoryStatisticItem, RecurringRuleInput,
+    StatisticsAccountInput, StatisticsBillInput, StatisticsCategoryInput, StatisticsTimestampRange,
+    StatisticsYearMonthRangeMode, UserCustomExchangeRateInput,
 };
 use chrono::NaiveDate;
 use serde_json::{json, Value};
@@ -475,6 +478,38 @@ fn networth_calendar_insights_and_chart_shapes_remain_python_compatible() {
             "comparison",
             "dashboard"
         ]
+    );
+
+    let analyzer_range = statistics_analyzer_period_range("month", date("2026-03-15"));
+    assert_eq!(analyzer_range.start_date, "2026-03-01");
+    assert_eq!(analyzer_range.end_date, "2026-04-01");
+    let analyzer_bills = vec![
+        bill(20, "2026-03-01T08:00:00", "支出", "-12.34"),
+        bill(21, "2026-03-02T08:00:00", "收入", "100.00"),
+    ];
+    let analyzer_report =
+        build_statistics_analyzer_report("month", &analyzer_range, &analyzer_bills, "now");
+    assert_eq!(analyzer_report["summary"]["total_income"], 100.0);
+    assert_eq!(analyzer_report["summary"]["total_expense"], -12.34);
+    assert_eq!(analyzer_report["by_category"]["餐饮"]["count"], 2);
+    assert_eq!(analyzer_report["top_expenses"][0]["category"], "餐饮");
+
+    let bucket = build_statistics_analyzer_trend_bucket("2026-03", &analyzer_bills);
+    assert_eq!(bucket.income, 100.0);
+    assert_eq!(bucket.expense, -12.34);
+    assert_eq!(
+        build_statistics_analyzer_trends_result("month", Some("餐饮"), &[bucket])["category"],
+        "餐饮"
+    );
+    assert_eq!(
+        build_statistics_analyzer_comparison_result("month", "category", &analyzer_bills)
+            ["comparison"][0]["count"],
+        2
+    );
+    assert_eq!(
+        build_statistics_analyzer_category_result("month", Some("餐饮"), &analyzer_bills)
+            ["sub_categories"][0]["percentage"],
+        0.0
     );
 }
 

@@ -3,12 +3,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use bill_analyser_core::statistics::{
     build_asset_trend_legend, build_asset_trends, build_category_pie_data,
     build_category_statistics_items, build_category_trend_statistics, build_net_worth_snapshot,
-    build_top_merchants_data, build_transaction_amount_period_result, NameValueStatisticItem,
-    StatisticsAccountInput, StatisticsBillInput, StatisticsCategoryInput, StatisticsYearMonthRange,
+    build_statistics_analyzer_category_result, build_statistics_analyzer_comparison_result,
+    build_statistics_analyzer_report, build_statistics_analyzer_trend_bucket,
+    build_statistics_analyzer_trends_result, build_top_merchants_data,
+    build_transaction_amount_period_result, statistics_analyzer_period_range,
+    NameValueStatisticItem, StatisticsAccountInput, StatisticsAnalyzerTrendBucket,
+    StatisticsBillInput, StatisticsCategoryInput, StatisticsYearMonthRange,
     TopMerchantStatisticItem, TransactionAmountPeriodResult, UserCustomExchangeRateInput,
 };
 use bill_analyser_core::UserId;
-use chrono::{NaiveDate, SecondsFormat};
+use chrono::{Datelike, Duration, Local, NaiveDate, SecondsFormat};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -122,6 +126,107 @@ pub fn query_transaction_amount_period(
     let bills = load_statistics_bills(connection, user_id, &filters)?;
     Ok(build_transaction_amount_period_result(
         start_time, end_time, &bills,
+    ))
+}
+
+pub fn query_statistics_analyzer_report_payload(
+    connection: &Connection,
+    user_id: UserId,
+    period: &str,
+) -> DbResult<Value> {
+    let user_id = UserScope::new(user_id).bind_value()?;
+    let today = Local::now().date_naive();
+    let range = statistics_analyzer_period_range(period, today);
+    let filters = StatisticsBillFilters {
+        start_date: Some(range.start_date.clone()),
+        end_date: Some(range.end_date.clone()),
+        ..StatisticsBillFilters::default()
+    };
+    let bills = load_statistics_bills(connection, user_id, &filters)?;
+    let generated_at = Local::now().naive_local().to_string();
+    Ok(build_statistics_analyzer_report(
+        period,
+        &range,
+        &bills,
+        &generated_at,
+    ))
+}
+
+pub fn query_statistics_analyzer_trends_payload(
+    connection: &Connection,
+    user_id: UserId,
+    period: &str,
+    category: Option<&str>,
+) -> DbResult<Value> {
+    let user_id = UserScope::new(user_id).bind_value()?;
+    let today = Local::now().date_naive();
+    let mut buckets = Vec::<StatisticsAnalyzerTrendBucket>::new();
+    for offset in (1..=12).rev() {
+        let Some((period_key, start_date, end_date)) =
+            analyzer_trend_period_window(period, today, offset)
+        else {
+            continue;
+        };
+        let filters = StatisticsBillFilters {
+            start_date: Some(start_date.to_string()),
+            end_date: Some(end_date.to_string()),
+            ..StatisticsBillFilters::default()
+        };
+        let mut bills = load_statistics_bills(connection, user_id, &filters)?;
+        if let Some(category) = category.filter(|value| !value.trim().is_empty()) {
+            bills.retain(|bill| bill.main_category == category);
+        }
+        buckets.push(build_statistics_analyzer_trend_bucket(&period_key, &bills));
+    }
+    Ok(build_statistics_analyzer_trends_result(
+        period, category, &buckets,
+    ))
+}
+
+pub fn query_statistics_analyzer_comparison_payload(
+    connection: &Connection,
+    user_id: UserId,
+    period: &str,
+    compare_type: &str,
+) -> DbResult<Value> {
+    let user_id = UserScope::new(user_id).bind_value()?;
+    let today = Local::now().date_naive();
+    let range = statistics_analyzer_period_range(period, today);
+    let filters = StatisticsBillFilters {
+        start_date: Some(range.start_date),
+        end_date: Some(range.end_date),
+        ..StatisticsBillFilters::default()
+    };
+    let bills = load_statistics_bills(connection, user_id, &filters)?;
+    Ok(build_statistics_analyzer_comparison_result(
+        period,
+        compare_type,
+        &bills,
+    ))
+}
+
+pub fn query_statistics_analyzer_category_payload(
+    connection: &Connection,
+    user_id: UserId,
+    period: &str,
+    main_category: Option<&str>,
+) -> DbResult<Value> {
+    let user_id = UserScope::new(user_id).bind_value()?;
+    let today = Local::now().date_naive();
+    let range = statistics_analyzer_period_range(period, today);
+    let filters = StatisticsBillFilters {
+        start_date: Some(range.start_date),
+        end_date: Some(range.end_date),
+        ..StatisticsBillFilters::default()
+    };
+    let mut bills = load_statistics_bills(connection, user_id, &filters)?;
+    if let Some(main_category) = main_category.filter(|value| !value.trim().is_empty()) {
+        bills.retain(|bill| bill.main_category == main_category);
+    }
+    Ok(build_statistics_analyzer_category_result(
+        period,
+        main_category,
+        &bills,
     ))
 }
 
@@ -287,6 +392,39 @@ pub fn find_statistics_all_date_range(
         start_date,
         end_date,
     }))
+}
+
+fn analyzer_trend_period_window(
+    period: &str,
+    today: NaiveDate,
+    offset: i64,
+) -> Option<(String, NaiveDate, NaiveDate)> {
+    match period {
+        "month" => {
+            let target = today - Duration::days(30 * offset);
+            let start = first_day(target.year(), target.month())?;
+            let end = add_months(start, 1)? - Duration::days(1);
+            Some((format!("{}-{:02}", start.year(), start.month()), start, end))
+        }
+        "year" => {
+            let year = today.year() - offset as i32;
+            let start = first_day(year, 1)?;
+            let end = first_day(year, 12)?.with_day(31)?;
+            Some((format!("{year:04}"), start, end))
+        }
+        _ => None,
+    }
+}
+
+fn first_day(year: i32, month: u32) -> Option<NaiveDate> {
+    NaiveDate::from_ymd_opt(year, month, 1)
+}
+
+fn add_months(date: NaiveDate, months: u32) -> Option<NaiveDate> {
+    let zero_based = date.month0() + months;
+    let year = date.year() + (zero_based / 12) as i32;
+    let month = (zero_based % 12) + 1;
+    first_day(year, month)
 }
 
 fn load_statistics_bills(

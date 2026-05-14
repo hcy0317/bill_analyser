@@ -434,7 +434,7 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
         ImportRouteMode::ImportDbRuntime,
     );
 
-    let proxied_response = app
+    let owned_analyzer_response = app
         .clone()
         .oneshot(
             Request::builder()
@@ -445,11 +445,7 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
         )
         .await
         .expect("response");
-    assert_eq!(proxied_response.status(), StatusCode::OK);
-    assert_eq!(
-        read_json(proxied_response).await["path"],
-        "/api/statistics/overview"
-    );
+    assert_eq!(owned_analyzer_response.status(), StatusCode::UNAUTHORIZED);
 
     let login_preflight_response = app
         .clone()

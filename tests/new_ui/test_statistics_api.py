@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
-from datetime import datetime, timedelta
 
 import pytest
 
@@ -61,74 +59,8 @@ def auth_headers(client):
     return {"Authorization": f"Bearer {token}"}
 
 
-class TestStatisticsAnalyzerSidecar:
-    """仍由 Python Analyzer sidecar 承载的统计路由。"""
-
-    def test_get_overview(self, client, auth_headers):
-        """测试获取总览统计"""
-        response = client.get("/api/statistics/overview", headers=auth_headers)
-        assert response.status_code == 200
-
-        data = json.loads(response.data)
-        assert data["success"] is True
-        assert "result" in data
-
-        stats = data["result"]
-        assert "total_income" in stats
-        assert "total_expense" in stats
-        assert "net_income" in stats
-        assert "bill_count" in stats
-        assert isinstance(stats["bill_count"], int)
-
-    def test_get_overview_with_date_range(self, client, auth_headers):
-        """测试带日期范围的总览统计"""
-        end_date = datetime.now().strftime("%Y-%m-%d")
-        start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-
-        response = client.get(
-            f"/api/statistics/overview?start_date={start_date}&end_date={end_date}",
-            headers=auth_headers,
-        )
-        assert response.status_code == 200
-        assert (response.get_json() or {})["success"] is True
-
-    @pytest.mark.parametrize("granularity", ["month", "week", "day"])
-    def test_get_trend(self, client, auth_headers, granularity):
-        """测试趋势 Analyzer 代理路由。"""
-        response = client.get(
-            f"/api/statistics/trend?granularity={granularity}",
-            headers=auth_headers,
-        )
-        assert response.status_code == 200
-
-        data = json.loads(response.data)
-        assert data["success"] is True
-        assert isinstance(data["data"], list)
-
-    def test_overview_consistency(self, client, auth_headers):
-        """测试总览统计的一致性"""
-        response = client.get("/api/statistics/overview", headers=auth_headers)
-        data = json.loads(response.data)
-
-        stats = data["result"]
-        expected_net = round(stats["total_income"] - stats["total_expense"], 2)
-        assert stats["net_income"] == expected_net
-
-    @pytest.mark.timeout(5)
-    def test_overview_performance(self, client, auth_headers):
-        """测试总览统计响应时间（应在5秒内）"""
-        response = client.get("/api/statistics/overview", headers=auth_headers)
-        assert response.status_code == 200
-
-    @pytest.mark.timeout(5)
-    def test_trend_performance(self, client, auth_headers):
-        """测试趋势统计响应时间（应在5秒内）"""
-        response = client.get("/api/statistics/trend", headers=auth_headers)
-        assert response.status_code == 200
-
-
 class TestRustOwnedStatisticsSidecarDeletion:
-    """已由 Rust 接管的统计读取路由不再注册 Flask sidecar。"""
+    """已由 Rust 接管的统计路由不再注册 Flask sidecar。"""
 
     @pytest.mark.parametrize(
         "method,path",
@@ -139,9 +71,14 @@ class TestRustOwnedStatisticsSidecarDeletion:
             ("get", "/api/statistics/category-pie"),
             ("get", "/api/statistics/top-merchants"),
             ("get", "/api/statistics/amounts"),
+            ("get", "/api/statistics/overview"),
+            ("get", "/api/statistics/trends"),
+            ("get", "/api/statistics/comparison"),
+            ("get", "/api/statistics/category"),
+            ("get", "/api/statistics/trend"),
         ],
     )
-    def test_rust_owned_read_routes_removed_from_sidecar(
+    def test_rust_owned_routes_removed_from_sidecar(
         self,
         client,
         auth_headers,
