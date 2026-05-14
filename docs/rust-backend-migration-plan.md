@@ -142,7 +142,7 @@ S9c wires preview-item transfer/recurring decisions, session learning bypass/pro
 
 ## S9d Import Parse, Dedup, Confirm, and Frontend Upload Runtime Wiring
 
-S9d wires JSON parse -> parse_generic -> dedup -> confirm and frontend FormData upload parsing through Rust, while parser-specific Excel/XLSX/provider generation remains proxied where not yet migrated. The S9d HTTP tests cover JSON parse -> parse_generic -> dedup -> confirm DB writes.
+S9d wires JSON parse -> parse_generic -> dedup -> confirm and frontend FormData upload parsing through Rust; current Rust parser runtime also handles dedicated CSV/XLS/XLSX/HTML-xls uploads for migrated parser families. Provider generation remains proxied where not yet migrated. The S9d HTTP tests cover JSON parse -> parse_generic -> dedup -> confirm DB writes.
 
 ## S9e Bills and Transactions CRUD Runtime
 

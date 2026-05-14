@@ -740,6 +740,69 @@ async fn import_db_runtime_accepts_frontend_multipart_parse_upload() -> Result<(
 }
 
 #[tokio::test]
+async fn import_db_runtime_parses_dedicated_xlsx_upload_without_python_proxy(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new().await?;
+    let runtime = runtime_for(fixture.db_path())?;
+    seed_users(&runtime, &[42])?;
+    let app = runtime_router(&fixture);
+    let sample_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/import_samples/abc_statement_sample.xlsx");
+    let sample = std::fs::read(sample_path)?;
+    let boundary = "rust-import-dedicated-xlsx-boundary";
+    let body = multipart_body_bytes(
+        boundary,
+        &[("parser_type", "auto")],
+        &[(
+            "files",
+            "abc_statement_sample.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            &sample,
+        )],
+    );
+
+    let parse = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/parse")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(parse.status(), StatusCode::OK);
+    let parse_body = read_json(parse).await;
+    assert_eq!(parse_body["success"], true);
+    assert_eq!(parse_body["data"]["parsed_count"], 2);
+    assert_eq!(
+        parse_body["data"]["unmatched_files"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(parse_body["data"]["files"][0]["parser_id"], "abc");
+    let session_id = parse_body["data"]["session_id"]
+        .as_str()
+        .expect("session id");
+
+    let db_runtime = runtime_for(fixture.db_path())?;
+    init_import_staging_schema(db_runtime.connection())?;
+    let templates =
+        get_parser_templates_by_session(db_runtime.connection(), session_id, user_id(42), None)?;
+    assert_eq!(templates.len(), 2);
+    assert_eq!(templates[0].parser_id, "abc");
+    Ok(())
+}
+
+#[tokio::test]
 async fn import_db_runtime_previews_temp_file_and_parses_column_mapping(
 ) -> Result<(), Box<dyn Error>> {
     let fixture = RuntimeFixture::new().await?;
@@ -2835,6 +2898,34 @@ fn multipart_body(
             .as_bytes(),
         );
         body.extend_from_slice(value.as_bytes());
+        body.extend_from_slice(b"\r\n");
+    }
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    body
+}
+
+fn multipart_body_bytes(
+    boundary: &str,
+    fields: &[(&str, &str)],
+    files: &[(&str, &str, &str, &[u8])],
+) -> Vec<u8> {
+    let mut body = Vec::new();
+    for (name, value) in fields {
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
+            )
+            .as_bytes(),
+        );
+    }
+    for (name, filename, content_type, value) in files {
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\nContent-Type: {content_type}\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(value);
         body.extend_from_slice(b"\r\n");
     }
     body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());

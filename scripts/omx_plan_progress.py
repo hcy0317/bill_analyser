@@ -156,7 +156,7 @@ def audit_early_phases(repo_root: Path) -> list[PhaseAudit]:
 
     p6_gaps: list[str] = []
     if not exists("crates/bill-analyser-parsers"):
-        p6_gaps.append("missing pure parser crate `crates/bill-analyser-parsers` required by P6")
+        p6_gaps.append("missing parser runtime crate `crates/bill-analyser-parsers` required by P6")
     if not exists("crates/bill-analyser-parsers/tests/fixtures/parser_golden_contracts.json"):
         p6_gaps.append("missing parser golden fixture ledger")
     audits.append(

@@ -636,6 +636,10 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
         parser_standard_flow_issues: list[str] = []
 
         required_skill_markers = (
+            "crates/bill-analyser-parsers/src/lib.rs",
+            "crates/bill-analyser-parsers/tests/parser_contracts.rs",
+            "crates/bill-analyser-http/tests/import_runtime_contract.rs",
+            "parse_dedicated_import_bytes",
             "src/bill_analyser/parsers/factory.py",
             "src/bill_analyser/parsers/base.py",
             "tests/test_parser_base_factory.py",
@@ -645,6 +649,9 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
         )
         required_doc_markers = (
             PARSER_STANDARD_FLOW_SKILL_PATH,
+            "crates/bill-analyser-parsers/src/lib.rs",
+            "crates/bill-analyser-parsers/tests/parser_contracts.rs",
+            "crates/bill-analyser-http/tests/import_runtime_contract.rs",
             "src/bill_analyser/parsers/factory.py",
             "src/bill_analyser/parsers/base.py",
             "tests/test_parser_base_factory.py",
@@ -673,7 +680,8 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
         else:
             normalized_entry_row = _normalize_markdown_table_match_text(parser_standard_flow_entry_row)
             required_entry_fragments = (
-                (("新增 parser workflow",), "新增 parser workflow"),
+                (("新增 Rust parser workflow", "新增 parser workflow"), "新增 Rust parser workflow"),
+                (("Rust parser-first",), "Rust parser-first"),
                 (("ParserFactory",), "ParserFactory"),
                 (("新增解析器", "新增 parser"), "新增解析器/新增 parser"),
                 (("不要拿它代替",), "不要拿它代替"),
@@ -700,7 +708,7 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
                     "fail",
                     "专用 parser 标准流程资产已存在，但还没有形成稳定的 skill + doc + AI workflow 契约闭环。",
                     parser_standard_flow_issues,
-                    "让 shared skill、流程文档和 AI workflow 入口同时绑定 ParserFactory / StandardBill / import alignment 触点。",
+                    "让 shared skill、流程文档和 AI workflow 入口同时绑定 Rust parser-first / ParserFactory / StandardBill / import alignment 触点。",
                 )
             )
         else:
@@ -712,7 +720,7 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
                     "专用 parser 标准流程已形成 skill + doc + AI workflow 入口闭环。",
                     [
                         *parser_standard_flow_paths.keys(),
-                        "contract=ParserFactory/StandardBill/tests/test_parser_base_factory.py/tests/new_ui/test_import_parser_alignment.py",
+                        "contract=Rust parser-first/ParserFactory/StandardBill/crates/bill-analyser-parsers/tests/parser_contracts.rs/tests/new_ui/test_import_parser_alignment.py",
                     ],
                 )
             )

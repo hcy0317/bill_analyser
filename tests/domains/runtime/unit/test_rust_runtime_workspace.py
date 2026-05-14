@@ -45,7 +45,7 @@ def test_http_crate_declares_rust_primary_proxy_runtime() -> None:
     assert "pyo3" not in manifest.get("dependencies", {})
 
 
-def test_parser_crate_declares_pure_parser_contract_boundary() -> None:
+def test_parser_crate_declares_parser_runtime_boundary() -> None:
     manifest = _load_toml("crates/bill-analyser-parsers/Cargo.toml")
 
     assert manifest["package"]["name"] == "bill-analyser-parsers"
@@ -53,12 +53,18 @@ def test_parser_crate_declares_pure_parser_contract_boundary() -> None:
     assert manifest["package"]["publish"] is False
     assert set(manifest["dependencies"]) == {
         "bill-analyser-core",
+        "calamine",
+        "csv",
+        "encoding_rs",
+        "regex",
         "serde",
         "serde_json",
     }
     assert "pyo3" not in manifest.get("dependencies", {})
     assert "rusqlite" not in manifest.get("dependencies", {})
     assert "axum" not in manifest.get("dependencies", {})
+    assert "bill-analyser-db" not in manifest.get("dependencies", {})
+    assert "bill-analyser-http" not in manifest.get("dependencies", {})
 
 
 def test_architecture_docs_record_rust_primary_http_and_import_runtime_gates() -> None:
@@ -80,7 +86,7 @@ def test_architecture_docs_record_rust_primary_http_and_import_runtime_gates() -
     assert "分类规则列表 `GET /api/category-rules/`、创建/更新/删除/重排/defaults/migrate、测试 `POST /api/category-rules/{rule_id}/test`、规则中心概览 `GET /api/rules/overview`、批量重分类 `POST /api/categories/update-all`、legacy `GET|PUT /api/categories/rules` config/cache 与设置包导入/预览/导出当前由 Rust taxonomy runtime" in architecture
     assert "旧 Flask `category_rules.py` route shell 已删除" in architecture
     assert "同时把真实 LLM/OCR provider 生成与全局 Learning Center suggestion/rules 决策标为 Python-proxied，OAuth2 provider exchange 在当前 workspace build 中是 Rust-owned disabled-safe/not-implemented 合同" in architecture
-    assert "显式 `import_db_runtime` 已能用 Rust 处理 import v2 JSON parse/parse_generic/dedup/confirm、前端 FormData CSV 上传解析、未匹配文件 temp preview 与列映射 parse_generic、session/preview 读取清理、preview update/reclassify 显式 DB 更新、preview-item transfer/recurring 决策、learning 会话预览旁路、LLM accept/reject/memory 事件、OCR config app_settings、账单 CRUD、交易图片上传/未使用清理、账单 CSV/XLSX 导出、账单 recurring candidates/match、账户对账单、账单分类 quick actions、账户 CRUD/display-order/余额同步/交易迁移清空、标签 CRUD/display-order/batch-create、分类主数据与 `GET /api/categories/statistics`/`POST /api/categories/update-all`、legacy `GET|PUT /api/categories/rules` config/cache、分类规则创建/更新/删除/重排/defaults/migrate、设置包导入/预览/导出、预算 CRUD/export/execution/forecast/history/import，以及 category statistics/trends、asset trends、category pie、top merchants、amounts 与 Analyzer overview/trends/comparison/category/trend 统计读取与 exchange-rate provider/custom-rate runtime" in architecture
+    assert "显式 `import_db_runtime` 已能用 Rust 处理 import v2 JSON parse/parse_generic/dedup/confirm、前端 FormData CSV/XLS/XLSX/HTML-xls 上传专用 parser 检测解析、未匹配文件 temp preview 与列映射 parse_generic、session/preview 读取清理、preview update/reclassify 显式 DB 更新、preview-item transfer/recurring 决策、learning 会话预览旁路、LLM accept/reject/memory 事件、OCR config app_settings、账单 CRUD、交易图片上传/未使用清理、账单 CSV/XLSX 导出、账单 recurring candidates/match、账户对账单、账单分类 quick actions、账户 CRUD/display-order/余额同步/交易迁移清空、标签 CRUD/display-order/batch-create、分类主数据与 `GET /api/categories/statistics`/`POST /api/categories/update-all`、legacy `GET|PUT /api/categories/rules` config/cache、分类规则创建/更新/删除/重排/defaults/migrate、设置包导入/预览/导出、预算 CRUD/export/execution/forecast/history/import，以及 category statistics/trends、asset trends、category pie、top merchants、amounts 与 Analyzer overview/trends/comparison/category/trend 统计读取与 exchange-rate provider/custom-rate runtime" in architecture
     assert "Rust DB writer policy 为 `RustDomainOwned`" in architecture
     assert "Rust import DB runtime 可校验前端 Bearer access token" in architecture
     assert "S1 Rust Runtime Shell" in migration_plan
@@ -132,7 +138,7 @@ def test_architecture_docs_record_rust_primary_http_and_import_runtime_gates() -
     assert "可用前端 Bearer access token 校验 HS256/HS384/HS512 HMAC JWT" in project_overview
     assert "Rust 路由、DB 写入语义、前端导入流程、全量 coverage、无残留引用五项证据未同时通过前，Python import 删除仍阻塞" in project_overview
     assert "preview update/reclassify、preview-item transfer/recurring/learning decision、learning promotion、preview LLM recommendation/memory event、OCR config app_settings、annotation sample upsert/read" in architecture
-    assert "当前通过显式 `import_db_runtime` 暴露 import v2 JSON parse/parse_generic/dedup/confirm、前端 FormData CSV 上传解析、未匹配文件 temp preview 与列映射 parse_generic、session/preview 读取清理、preview update/reclassify 显式 DB 更新、preview-item transfer/recurring 决策、learning 会话预览旁路与 promotion、LLM accept/reject/memory 事件、OCR config app_settings、账单 CRUD、交易图片上传/未使用清理、账单 CSV/XLSX 导出、账单 recurring candidates/match、账户对账单、账单分类 quick actions、账户 CRUD/display-order/余额同步/交易迁移清空、标签 CRUD/display-order/batch-create、分类主数据、分类账单统计、批量重分类、legacy 分类规则 config/cache、分类规则创建/更新/删除/重排/defaults/migrate、设置包导入/预览/导出、模板 CRUD/display-order、预算 CRUD/export/execution/forecast/history/import、统计读取、Analyzer 统计与汇率 REST；对应 Flask sidecar read/exchange/Analyzer route shell 已删除" in architecture
+    assert "当前通过显式 `import_db_runtime` 暴露 import v2 JSON parse/parse_generic/dedup/confirm、前端 FormData CSV/XLS/XLSX/HTML-xls 上传专用 parser 检测解析、未匹配文件 temp preview 与列映射 parse_generic、session/preview 读取清理、preview update/reclassify 显式 DB 更新、preview-item transfer/recurring 决策、learning 会话预览旁路与 promotion、LLM accept/reject/memory 事件、OCR config app_settings、账单 CRUD、交易图片上传/未使用清理、账单 CSV/XLSX 导出、账单 recurring candidates/match、账户对账单、账单分类 quick actions、账户 CRUD/display-order/余额同步/交易迁移清空、标签 CRUD/display-order/batch-create、分类主数据、分类账单统计、批量重分类、legacy 分类规则 config/cache、分类规则创建/更新/删除/重排/defaults/migrate、设置包导入/预览/导出、模板 CRUD/display-order、预算 CRUD/export/execution/forecast/history/import、统计读取、Analyzer 统计与汇率 REST；对应 Flask sidecar read/exchange/Analyzer route shell 已删除" in architecture
     assert "The S9b HTTP tests cover single preview-row edit persistence" in migration_plan
     assert "The S9c HTTP tests cover transfer accept projection" in migration_plan
     assert "The S9d HTTP tests cover JSON parse -> parse_generic -> dedup -> confirm DB writes" in migration_plan

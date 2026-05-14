@@ -13,6 +13,10 @@
 
 新增或调整 parser 前，先阅读这些真实落点：
 
+- `crates/bill-analyser-parsers/src/lib.rs`
+- `crates/bill-analyser-parsers/tests/parser_contracts.rs`
+- `crates/bill-analyser-http/src/import_routes.rs`
+- `crates/bill-analyser-http/tests/import_runtime_contract.rs`
 - `src/bill_analyser/parsers/factory.py`
 - `src/bill_analyser/parsers/base.py`
 - `tests/test_parser_base_factory.py`
@@ -24,12 +28,15 @@
 
 新增 parser 最常见的问题不是“解析不出来”，而是：
 
-- `can_parse()` 过宽，误伤相邻 parser
+- Rust 检测条件过宽，误伤相邻 parser
+- Python `can_parse()` 过宽，导致迁移期 sidecar 与 Rust 行为不一致
 - 输出字段看起来能跑，但和 `StandardBill` 契约不一致
 - 只写了正例，没有写负例和歧义例
 - 新 parser 能 parse，却和导入预览链不对齐
 
 所以这份流程强调：**先定边界，再写 parser，再证明它不会误伤别人。**
+
+当前浏览器上传的 parser-first 运行时在 Rust：`crates/bill-analyser-parsers` 提供专用 parser，`crates/bill-analyser-http` 调用 Rust parser-first 路径。Python `src/bill_analyser/parsers/**` 仍用于迁移期 sidecar parity、历史实现和对照测试；不要把 Python parser 当作新的 parser-first 主运行路径。
 
 ## 开始前先确认
 
@@ -62,7 +69,9 @@
 
 这条流程默认只处理：
 
-- `src/bill_analyser/parsers/**`
+- `crates/bill-analyser-parsers/**`
+- 必要的 `crates/bill-analyser-http/**` parser-first 接入点
+- 迁移期 Python parity 文件 `src/bill_analyser/parsers/**`
 - parser 回归测试
 - parser 流程文档
 
@@ -76,24 +85,25 @@
 
 ## 标准实施步骤
 
-1. 选择一个最相近的现有 parser 作为对照
-2. 先实现或收紧 `can_parse()`
-3. 再实现或收紧 `parse()`
-4. 通过 `src/bill_analyser/parsers/base.py` 中的 helper 与 `post_process()` 对齐标准输出
-5. 在 `src/bill_analyser/parsers/factory.py` 注册到 `PARSER_CLASS_REGISTRY`
-6. 重新检查 `ParserFactory` 顺序是否安全
+1. 选择一个最相近的现有 Rust parser 作为对照
+2. 先实现或收紧 Rust 检测逻辑，补相邻 parser 负例
+3. 再实现或收紧 Rust 解析逻辑，并通过 `post_process_raw_bills()` 对齐标准输出
+4. 只有 HTTP 上传入口行为需要变化时，才调整 `crates/bill-analyser-http/src/import_routes.rs`
+5. 如本切片也影响 Python sidecar parity，再同步 `can_parse()` / `parse()` / `PARSER_CLASS_REGISTRY`
+6. 重新检查 Rust 检测顺序；如触及 Python，再检查 `ParserFactory` 顺序
 7. 补最小测试矩阵
 8. 最后再更新文档和样本说明
 
 ## 检测冲突与优先级检查
 
-Bill Analyser 的 parser 是按 `ParserFactory` 顺序逐个试探的，所以“能 parse 成功”还不够。
+Bill Analyser 的 parser-first 上传路径按 Rust 专用 parser 顺序逐个试探；迁移期 Python sidecar 仍按 `ParserFactory` 顺序逐个试探。所以“能 parse 成功”还不够。
 
 最小要求：
 
 - 目标样本能命中目标 parser
 - 最近邻 parser 必须拒绝该样本
-- `ParserFactory.detect_parser()` 返回目标 `PARSER_ID`
+- Rust `parse_dedicated_import_bytes()` 返回目标 `PARSER_ID`
+- Python parity 在本切片范围内时，`ParserFactory.detect_parser()` 返回目标 `PARSER_ID`
 - 如需调整 `PARSER_CLASS_REGISTRY` 顺序，必须能说明原因
 
 如果一条改动会放宽检测条件，就必须新增对应负例，避免把别的 parser 吃进去。
@@ -110,6 +120,8 @@ Bill Analyser 的 parser 是按 `ParserFactory` 顺序逐个试探的，所以�
 
 相关契约回归以这些文件为准：
 
+- `crates/bill-analyser-parsers/tests/parser_contracts.rs`
+- `crates/bill-analyser-http/tests/import_runtime_contract.rs`
 - `tests/test_parser_base_factory.py`
 - `tests/new_ui/test_import_parser_alignment.py`
 
@@ -144,8 +156,9 @@ Bill Analyser 的 parser 是按 `ParserFactory` 顺序逐个试探的，所以�
    - 最可能冲突的 parser 应拒绝该样本
 
 3. **Factory/契约回归**
+   - `crates/bill-analyser-parsers/tests/parser_contracts.rs`
    - `tests/test_parser_base_factory.py`
-   - 确认 `ParserFactory` 和 `StandardBill` 契约不漂移
+   - 确认 Rust parser、迁移期 Python `ParserFactory` 和 `StandardBill` 契约不漂移
 
 4. **导入预览/对齐回归**
    - `tests/new_ui/test_import_parser_alignment.py`
@@ -195,6 +208,10 @@ Bill Analyser 的 parser 是按 `ParserFactory` 顺序逐个试探的，所以�
 - `./.venv/Scripts/python.exe -m pytest tests/test_parser_base_factory.py -v`
 - `./.venv/Scripts/python.exe -m pytest tests/test_<parser>.py -v`
 - `./.venv/Scripts/python.exe -m pytest tests/new_ui/test_import_parser_alignment.py -v`
+- `cargo test -p bill-analyser-parsers`
+- `cargo test -p bill-analyser-http --test import_runtime_contract`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90`
 
 如果这轮改动进入了 `src/bill_analyser/**` 运行时代码，最终验收仍应补：
 

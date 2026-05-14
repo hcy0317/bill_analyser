@@ -1,10 +1,11 @@
 use bill_analyser_parsers::{
     aggregate_description, build_parser_tags, normalize_amount_text, normalize_parser_tags,
-    normalize_transaction_type, parser_registry, parser_source_label, post_process_raw_bills,
-    resolve_parser_tags, serialize_parser_tags, RawBill, StandardBill,
+    normalize_transaction_type, parse_dedicated_import_bytes, parser_registry, parser_source_label,
+    post_process_raw_bills, resolve_parser_tags, serialize_parser_tags, RawBill, StandardBill,
 };
 use serde::Deserialize;
 use serde_json::json;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize)]
 struct ParserGoldenCase {
@@ -240,4 +241,50 @@ fn post_process_skips_missing_dates_and_zero_amounts() {
     );
 
     assert!(processed.is_empty());
+}
+
+#[test]
+fn dedicated_rust_parsers_detect_and_parse_repository_fixtures() {
+    let cases = [
+        ("wechat_statement_sample.csv", "wechat", 7),
+        ("wechat_statement_sample.xlsx", "wechat", 2),
+        ("alipay_statement_sample.csv", "alipay", 6),
+        ("icbc_statement_sample.csv", "icbc", 2),
+        ("icbc_statement_sample.xlsx", "icbc", 2),
+        ("cmbc_statement_sample.csv", "cmbc", 2),
+        ("cmbc_statement_sample.xls", "cmbc", 2),
+        ("abc_statement_sample.csv", "abc", 2),
+        ("abc_statement_sample.xlsx", "abc", 2),
+        ("ccb_statement_sample.xlsx", "ccb", 2),
+    ];
+
+    for (filename, parser_id, expected_count) in cases {
+        let bytes = std::fs::read(import_sample_path(filename)).expect("fixture reads");
+        let parsed = parse_dedicated_import_bytes(filename, &bytes, "auto")
+            .unwrap_or_else(|| panic!("{filename} should match a dedicated Rust parser"));
+
+        assert_eq!(parsed.parser_id, parser_id, "{filename}");
+        assert_eq!(parsed.bills.len(), expected_count, "{filename}");
+        assert!(
+            parsed
+                .bills
+                .iter()
+                .any(|bill| !bill.date.trim().is_empty() && bill.amount.to_cents() != 0),
+            "{filename}"
+        );
+    }
+}
+
+#[test]
+fn dedicated_rust_parser_rejects_generic_csv_fixture() {
+    let filename = "generic_statement_sample.csv";
+    let bytes = std::fs::read(import_sample_path(filename)).expect("fixture reads");
+
+    assert!(parse_dedicated_import_bytes(filename, &bytes, "auto").is_none());
+}
+
+fn import_sample_path(filename: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/import_samples")
+        .join(filename)
 }

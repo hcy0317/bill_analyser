@@ -21,9 +21,10 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert len(expected_python_paths) == 286
     assert inventory.summary["python_backend_files"] == 286
     assert tuple(record.path for record in inventory.python_files) == expected_python_paths
-    assert inventory.summary["rust_backend_files"] == 101
+    assert inventory.summary["rust_backend_files"] == 102
     assert "crates/bill-analyser-core/src/ai_ocr_llm.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/lib.rs" in inventory.rust_files
+    assert "crates/bill-analyser-parsers/src/dedicated.rs" in inventory.rust_files
     assert "crates/bill-analyser-parsers/src/lib.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/smart_dedup.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/import_learning.rs" in inventory.rust_files
@@ -163,7 +164,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
     assert first_render == second_render
     assert "# Rust Backend Migration Inventory" in first_render
     assert "- Python backend files: 286" in first_render
-    assert "- Rust backend files: 101" in first_render
+    assert "- Rust backend files: 102" in first_render
     assert "- Verified dead files: 0" in first_render
     assert "Route/domain cutover state lives separately in the Rust governance manifest" in first_render
     assert "Governance manifest tool: `cargo run -p bill-analyser-core --bin bill_migration_manifest`" in first_render
@@ -216,6 +217,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
         in first_render
     )
     assert "- crates/bill-analyser-core/src/lib.rs" in first_render
+    assert "- crates/bill-analyser-parsers/src/dedicated.rs" in first_render
     assert "- crates/bill-analyser-parsers/src/lib.rs" in first_render
     assert "- crates/bill-analyser-core/src/smart_dedup.rs" in first_render
     assert "- crates/bill-analyser-core/src/import_learning.rs" in first_render

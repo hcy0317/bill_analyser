@@ -7,6 +7,10 @@ use serde_json::Value;
 
 use bill_analyser_core::{normalize_bill_date_text, Money};
 
+mod dedicated;
+
+pub use dedicated::{parse_dedicated_import_bytes, DedicatedParseResult};
+
 const DESCRIPTION_FIELDS: &[&str] = &[
     "description",
     "counterparty",

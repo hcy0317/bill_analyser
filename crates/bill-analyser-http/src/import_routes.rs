@@ -43,7 +43,9 @@ use bill_analyser_db::{
     ImportPreviewRow, ImportSessionDraft, ImportSessionStatusUpdate, SqliteConnectionConfig,
     SqliteDbPath, SqliteRuntime,
 };
-use bill_analyser_parsers::{post_process_raw_bills, RawBill, StandardBill};
+use bill_analyser_parsers::{
+    parse_dedicated_import_bytes, post_process_raw_bills, RawBill, StandardBill,
+};
 use bytes::Bytes;
 use chrono::Utc;
 use encoding_rs::GBK;
@@ -449,10 +451,6 @@ pub async fn legacy_parse_import_runtime_handler(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let user_id = match user_id_from_headers(&headers, &state.config) {
-        Ok(user_id) => user_id,
-        Err(response) => return route_response(response),
-    };
     let content_type = content_type_from_headers(&headers);
     if !content_type
         .to_ascii_lowercase()
@@ -463,6 +461,10 @@ pub async fn legacy_parse_import_runtime_handler(
             "Unsupported parse_import content type",
         ));
     }
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
     let form = match parse_multipart_form_data(&content_type, &body) {
         Ok(form) => form,
         Err(response) => return route_response(response),
@@ -499,10 +501,6 @@ pub async fn legacy_import_upload_runtime_handler(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let user_id = match user_id_from_headers(&headers, &state.config) {
-        Ok(user_id) => user_id,
-        Err(response) => return route_response(response),
-    };
     let content_type = content_type_from_headers(&headers);
     if !content_type
         .to_ascii_lowercase()
@@ -513,6 +511,10 @@ pub async fn legacy_import_upload_runtime_handler(
             "Unsupported import upload content type",
         ));
     }
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
     let form = match parse_multipart_form_data(&content_type, &body) {
         Ok(form) => form,
         Err(response) => return route_response(response),
@@ -2179,21 +2181,23 @@ fn import_parse_multipart_runtime_response(
             .clone()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "import-file.csv".to_string());
-        let decoded_text = decode_import_text(&part.body);
-        let parser_id =
-            resolve_import_file_parser_id(&requested_parser, &original_name, &decoded_text);
-        let parsed = parse_standard_bills_from_csv_text(&decoded_text, &parser_id, true);
-        if !parsed.bills.is_empty() {
-            first_detected_parser_id.get_or_insert_with(|| parser_id.clone());
+        let parsed = parse_dedicated_import_bytes(&original_name, &part.body, &requested_parser);
+        if let Some(parsed) = parsed.filter(|parsed| !parsed.bills.is_empty()) {
+            first_detected_parser_id.get_or_insert_with(|| parsed.parser_id.clone());
             let parsed_count = parsed.bills.len();
-            standard_bills.extend(parsed.bills);
             files.push(json!({
                 "filename": original_name,
-                "parser_id": parser_id,
+                "parser_id": parsed.parser_id,
                 "parsed_count": parsed_count,
                 "delimiter": delimiter_to_response(parsed.delimiter),
             }));
+            standard_bills.extend(parsed.bills);
         } else {
+            let unmatched_parser_id = if requested_parser == "auto" {
+                "rust-import"
+            } else {
+                requested_parser.as_str()
+            };
             let temp_path = match save_unmatched_import_file(
                 user_id,
                 &session_id,
@@ -2209,8 +2213,8 @@ fn import_parse_multipart_runtime_response(
                 "filename": original_name,
                 "temp_path": temp_path,
                 "tempPath": temp_path,
-                "parser_id": parser_id,
-                "reason": "No Rust parser matched the uploaded file",
+                "parser_id": unmatched_parser_id,
+                "reason": "No dedicated Rust parser matched the uploaded file",
             }));
         }
     }
@@ -2468,7 +2472,6 @@ impl MultipartForm {
 #[derive(Debug, Default)]
 struct ParsedCsvBills {
     bills: Vec<StandardBill>,
-    delimiter: Option<char>,
 }
 
 #[derive(Debug, Default)]
@@ -2682,7 +2685,6 @@ fn parse_standard_bills_from_csv_text(
     }
     ParsedCsvBills {
         bills: post_process_raw_bills(parser_id, &raw_bills),
-        delimiter: Some(delimiter),
     }
 }
 
@@ -3166,15 +3168,24 @@ fn parse_legacy_import_file(
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "auto".to_string());
-    let text = decode_import_text(body);
-    let detected_parser_type =
-        resolve_import_file_parser_id("auto", filename, &text).replace("rust-import", "");
     let force_generic = matches!(
         requested_file_type.as_str(),
         "generic" | "csv" | "xlsx" | "xls" | "txt"
     );
     let use_column_mapping = first_value(&object, &["columnMapping", "column_mapping"])
         .is_some_and(mapping_value_is_present);
+    let dedicated_parsed = if force_generic || use_column_mapping {
+        None
+    } else {
+        parse_dedicated_import_bytes(filename, body, &requested_file_type)
+    };
+    let text = decode_import_text(body);
+    let detected_parser_type = dedicated_parsed
+        .as_ref()
+        .map(|parsed| parsed.parser_id.clone())
+        .unwrap_or_else(|| {
+            resolve_import_file_parser_id("auto", filename, &text).replace("rust-import", "")
+        });
     let (parser_type, bills) = if force_generic || use_column_mapping {
         let bills = if use_column_mapping {
             standard_bills_from_column_mapped_text(&object, &text)?
@@ -3182,6 +3193,8 @@ fn parse_legacy_import_file(
             parse_standard_bills_from_csv_text(&text, "generic", true).bills
         };
         ("generic".to_string(), bills)
+    } else if let Some(parsed) = dedicated_parsed {
+        (parsed.parser_id, parsed.bills)
     } else {
         let parser_id = if requested_file_type == "auto" {
             if detected_parser_type.is_empty() {

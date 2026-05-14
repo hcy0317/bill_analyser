@@ -12,6 +12,10 @@ path = "src/lib.rs"
 
 [dependencies]
 bill-analyser-core = { path = "../bill-analyser-core" }
+calamine.workspace = true
+csv.workspace = true
+encoding_rs.workspace = true
+regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

@@ -56,7 +56,8 @@ def test_ai_workflow_doc_lists_parser_standard_flow_in_entry_table() -> None:
 
     assert matching_rows, "AI_WORKFLOW must list add-parser-standard-flow in the entry table"
     row = matching_rows[0]
-    assert "新增 parser workflow" in row
+    assert "新增 Rust parser workflow" in row
+    assert "Rust parser-first" in row
     assert "ParserFactory" in row
     assert "新增解析器" in row or "新增 parser" in row
     assert "不要拿它代替" in row

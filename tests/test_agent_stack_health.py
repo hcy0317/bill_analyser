@@ -90,6 +90,10 @@ def _build_minimal_parser_standard_flow_fake_repo(
         repo_root / ".agents" / "skills" / "add-parser-standard-flow" / "SKILL.md",
         "\n".join(
             (
+                "crates/bill-analyser-parsers/src/lib.rs",
+                "crates/bill-analyser-parsers/tests/parser_contracts.rs",
+                "crates/bill-analyser-http/tests/import_runtime_contract.rs",
+                "parse_dedicated_import_bytes",
                 "src/bill_analyser/parsers/factory.py",
                 "src/bill_analyser/parsers/base.py",
                 "tests/test_parser_base_factory.py",
@@ -105,6 +109,9 @@ def _build_minimal_parser_standard_flow_fake_repo(
             "\n".join(
                 (
                     ".agents/skills/add-parser-standard-flow/SKILL.md",
+                    "crates/bill-analyser-parsers/src/lib.rs",
+                    "crates/bill-analyser-parsers/tests/parser_contracts.rs",
+                    "crates/bill-analyser-http/tests/import_runtime_contract.rs",
                     "src/bill_analyser/parsers/factory.py",
                     "src/bill_analyser/parsers/base.py",
                     "tests/test_parser_base_factory.py",
@@ -403,6 +410,10 @@ def test_parser_standard_flow_skill_and_doc_define_repo_specific_parser_contract
     doc_text = doc_path.read_text(encoding="utf-8")
 
     for expected in (
+        "crates/bill-analyser-parsers/src/lib.rs",
+        "crates/bill-analyser-parsers/tests/parser_contracts.rs",
+        "crates/bill-analyser-http/tests/import_runtime_contract.rs",
+        "parse_dedicated_import_bytes",
         "src/bill_analyser/parsers/factory.py",
         "src/bill_analyser/parsers/base.py",
         "tests/test_parser_base_factory.py",
@@ -414,6 +425,9 @@ def test_parser_standard_flow_skill_and_doc_define_repo_specific_parser_contract
 
     for expected in (
         ".agents/skills/add-parser-standard-flow/SKILL.md",
+        "crates/bill-analyser-parsers/src/lib.rs",
+        "crates/bill-analyser-parsers/tests/parser_contracts.rs",
+        "crates/bill-analyser-http/tests/import_runtime_contract.rs",
         "src/bill_analyser/parsers/factory.py",
         "src/bill_analyser/parsers/base.py",
         "tests/test_parser_base_factory.py",
@@ -440,7 +454,10 @@ def test_repo_parser_standard_flow_check_is_exposed_in_payload_text_and_doctor()
     assert ".agents/skills/add-parser-standard-flow/SKILL.md" in parser_check["evidence"]
     assert "docs/parsers/add-parser-standard-flow.md" in parser_check["evidence"]
     assert "docs/AI_WORKFLOW.md" in parser_check["evidence"]
-    assert any("ParserFactory" in item and "StandardBill" in item for item in parser_check["evidence"])
+    assert any(
+        "Rust parser-first" in item and "ParserFactory" in item and "StandardBill" in item
+        for item in parser_check["evidence"]
+    )
 
     assert "repo.parser-standard-flow" in text_result.stdout
     assert "parser 标准流程" in text_result.stdout
@@ -455,7 +472,7 @@ def test_repo_parser_standard_flow_check_fails_when_assets_are_missing(tmp_path:
         ai_workflow_text=(
             "| 入口 | 默认用途 | 什么时候用 | 什么时候别用 |\n"
             "|---|---|---|---|\n"
-            "| `add-parser-standard-flow` skill | 新增 parser workflow | 新增解析器、收紧 `ParserFactory` 检测、补 parser 对齐回归时 | 不要拿它代替通用导入调试或 API/DB 变更流程 |\n"
+            "| `add-parser-standard-flow` skill | 新增 Rust parser workflow | 新增解析器、收紧 Rust parser-first / `ParserFactory` parity 检测、补 parser 对齐回归时 | 不要拿它代替通用导入调试或 API/DB 变更流程 |\n"
         ),
         include_parser_doc=False,
     )
