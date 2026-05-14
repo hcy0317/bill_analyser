@@ -23,17 +23,21 @@ pub mod statistics;
 pub use adapters::{account, api, category, transaction};
 pub use ai_ocr_llm::{
     build_llm_analysis_response, build_llm_candidate_list_response,
-    build_llm_candidate_reject_response, build_llm_config_get_response,
-    build_llm_contract_error_response, build_llm_preview_recommend_response,
-    build_ocr_config_response_payload, build_ocr_config_success_response, build_ocr_error_response,
+    build_llm_candidate_reject_response, build_llm_classification_prompt,
+    build_llm_config_get_response, build_llm_contract_error_response,
+    build_llm_import_preview_recommendation_prompt, build_llm_preview_recommend_response,
+    build_llm_provider_config, build_llm_rule_expression_synthesis_prompt,
+    build_llm_rule_induction_prompt, build_ocr_config_response_payload,
+    build_ocr_config_success_response, build_ocr_error_response,
     build_ocr_recognition_success_response, build_runtime_llm_config_from_saved_config,
     build_unknown_ocr_provider_response, copy_runtime_llm_config, llm_available_providers,
     llm_review_endpoint_requires_live_provider, normalize_llm_advanced_settings,
     normalize_llm_provider_name, normalize_ocr_config, ocr_available_providers_with_disabled,
-    ocr_error_http_status, parse_payment_screenshot_text, safe_llm_config_payload, AiRouteResponse,
+    ocr_error_http_status, parse_llm_json_array_response, parse_payment_screenshot_text,
+    render_llm_prompt_template, safe_llm_config_payload, AiRouteResponse,
     LlmProviderConfigContract, OcrConfigContract, OcrProviderTextResult,
-    PaymentScreenshotParseContract, LLM_AVAILABLE_PROVIDERS, OCR_AVAILABLE_PROVIDERS,
-    OCR_DEFAULT_LANG, OCR_DISABLED_PROVIDER_NAME,
+    PaymentScreenshotParseContract, LLM_AVAILABLE_PROVIDERS, LLM_SYSTEM_PROMPT,
+    OCR_AVAILABLE_PROVIDERS, OCR_DEFAULT_LANG, OCR_DISABLED_PROVIDER_NAME,
 };
 pub use error::{ErrorCode, RuntimeError};
 pub use import_learning::{

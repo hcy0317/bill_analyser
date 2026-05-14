@@ -1,9 +1,9 @@
-use std::{env, error::Error, fs, net::SocketAddr, path::Path, time::Duration};
+use std::{env, error::Error, ffi::OsString, fs, net::SocketAddr, path::Path, time::Duration};
 
 use axum::{
     body::{to_bytes, Body},
     http::{Method, Request, StatusCode},
-    routing::{get, post, put},
+    routing::post,
     Router,
 };
 use base64::{engine::general_purpose, Engine as _};
@@ -27,6 +27,31 @@ use tower::ServiceExt;
 
 const TEST_AUTH_SECRET: &str = "rust-import-test-secret";
 static OCR_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+static LLM_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+struct EnvVarRestore {
+    name: &'static str,
+    value: Option<OsString>,
+}
+
+impl EnvVarRestore {
+    fn capture(name: &'static str) -> Self {
+        Self {
+            name,
+            value: env::var_os(name),
+        }
+    }
+}
+
+impl Drop for EnvVarRestore {
+    fn drop(&mut self) {
+        if let Some(value) = &self.value {
+            env::set_var(self.name, value);
+        } else {
+            env::remove_var(self.name);
+        }
+    }
+}
 
 #[tokio::test]
 async fn import_db_runtime_reports_primary_http_import_runtime() -> Result<(), Box<dyn Error>> {
@@ -46,11 +71,11 @@ async fn import_db_runtime_reports_primary_http_import_runtime() -> Result<(), B
     let runtime_body = read_json(runtime).await;
     assert_eq!(
         runtime_body["runtime_boundary"],
-        "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+ai-llm-config-candidates-runtime+ai-ocr-recognition-runtime+auth-login-register-token-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
+        "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+ai-llm-config-candidates-runtime+ai-llm-provider-generation-runtime+ai-ocr-recognition-runtime+auth-login-register-token-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
     );
     assert_eq!(
         runtime_body["business_migration"],
-        "import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+ai-llm-config-candidates-runtime+ai-ocr-recognition-runtime+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
+        "import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+ai-llm-config-candidates-runtime+ai-llm-provider-generation-runtime+ai-ocr-recognition-runtime+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
     );
     assert_eq!(runtime_body["api_takeover"], true);
 
@@ -804,39 +829,312 @@ async fn import_db_runtime_owns_receipt_ocr_recognition_tesseract_process_edges(
 }
 
 #[tokio::test]
-async fn import_db_runtime_proxies_provider_generation_routes_to_python_sidecar(
-) -> Result<(), Box<dyn Error>> {
-    let (upstream, server) = provider_generation_upstream().await?;
-    let fixture = RuntimeFixture::new_with_upstream(upstream)?;
+async fn import_db_runtime_owns_llm_provider_generation_routes() -> Result<(), Box<dyn Error>> {
+    let _env_guard = LLM_ENV_LOCK.lock().await;
+    let _allowlist_restore = EnvVarRestore::capture("BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST");
+    let (provider_base_url, server) = llm_openai_provider_upstream().await?;
+    env::set_var("BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST", &provider_base_url);
+    let fixture = RuntimeFixture::new_with_upstream(unavailable_upstream().await)?;
+    seed_import_session(fixture.db_path(), "session-a")?;
+    seed_llm_provider_generation_data(fixture.db_path())?;
     let app = runtime_router(&fixture);
 
-    for (uri, route) in [
-        ("/api/llm/preview-recommend", "llm-preview-recommend"),
-        ("/api/llm/analyze-transactions", "llm-analyze-transactions"),
-        ("/api/llm/rule-synthesis", "llm-rule-synthesis"),
-    ] {
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method(Method::POST)
-                    .uri(uri)
-                    .header("content-type", "application/json")
-                    .body(Body::from("{}"))
-                    .expect("request builds"),
-            )
-            .await
-            .expect("response");
+    let config = trusted_json_route(
+        &app,
+        Method::POST,
+        "/api/llm/config",
+        Some(
+            json!({
+                "enabled": true,
+                "provider": "openai_compatible",
+                "provider_config": {
+                    "api_key": "test-key",
+                    "base_url": format!("{provider_base_url}/v1"),
+                    "model": "fake-model"
+                }
+            })
+            .to_string(),
+        ),
+        42,
+    )
+    .await;
+    assert_eq!(config.status(), StatusCode::OK);
 
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = read_json(response).await;
-        assert_eq!(body["success"], true);
-        assert_eq!(body["runtime"], "python-sidecar");
-        assert_eq!(body["route"], route);
-    }
+    let invalid_analyze_ids = trusted_json_route(
+        &app,
+        Method::POST,
+        "/api/llm/analyze-transactions",
+        Some(json!({"bill_ids": "1"}).to_string()),
+        42,
+    )
+    .await;
+    assert_eq!(invalid_analyze_ids.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_analyze_ids).await["code"],
+        "INVALID_REQUEST"
+    );
+
+    let empty_analyze_selection = trusted_json_route(
+        &app,
+        Method::POST,
+        "/api/llm/analyze-transactions",
+        Some(json!({"bill_ids": []}).to_string()),
+        42,
+    )
+    .await;
+    assert_eq!(empty_analyze_selection.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(empty_analyze_selection).await["data"]["candidates_created"],
+        0
+    );
+    let oversized_preview_ids = (1..=21).collect::<Vec<_>>();
+    let preview_ids_too_large_with_update = trusted_json_route(
+        &app,
+        Method::POST,
+        "/api/llm/preview-recommend",
+        Some(
+            json!({
+                "session_id": "session-a",
+                "preview_ids": oversized_preview_ids,
+                "preview_updates": [{
+                    "id": 1,
+                    "preview_main_category": "不应保存",
+                    "preview_sub_category": "不应保存"
+                }]
+            })
+            .to_string(),
+        ),
+        42,
+    )
+    .await;
+    assert_eq!(
+        preview_ids_too_large_with_update.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        read_json(preview_ids_too_large_with_update).await["code"],
+        "PREVIEW_SELECTION_TOO_LARGE"
+    );
+    assert_eq!(
+        preview_rows(fixture.db_path(), "session-a")?[0].preview_main_category,
+        "餐饮"
+    );
+
+    let oversized_preview_updates = (0..21)
+        .map(|_| {
+            json!({
+                "id": 1,
+                "preview_main_category": "不应保存",
+                "preview_sub_category": "不应保存"
+            })
+        })
+        .collect::<Vec<_>>();
+    let too_many_preview_updates = trusted_json_route(
+        &app,
+        Method::POST,
+        "/api/llm/preview-recommend",
+        Some(
+            json!({
+                "session_id": "session-a",
+                "preview_updates": oversized_preview_updates
+            })
+            .to_string(),
+        ),
+        42,
+    )
+    .await;
+    assert_eq!(
+        too_many_preview_updates.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        read_json(too_many_preview_updates).await["code"],
+        "PREVIEW_SELECTION_TOO_LARGE"
+    );
+    assert_eq!(
+        preview_rows(fixture.db_path(), "session-a")?[0].preview_main_category,
+        "餐饮"
+    );
+
+    let preview = trusted_json_route(
+        &app,
+        Method::POST,
+        "/api/llm/preview-recommend",
+        Some(json!({"session_id": "session-a", "preview_ids": [1]}).to_string()),
+        42,
+    )
+    .await;
+    assert_eq!(preview.status(), StatusCode::OK);
+    let preview_body = read_json(preview).await;
+    assert_eq!(preview_body["success"], true);
+    assert_eq!(preview_body["data"]["session_id"], "session-a");
+    assert_eq!(preview_body["data"]["count"], 1);
+    assert_eq!(preview_body["data"]["suggestions"][0]["preview_id"], 1);
+    assert_eq!(preview_body["runtime"], Value::Null);
+
+    let analyze = trusted_json_route(
+        &app,
+        Method::POST,
+        "/api/llm/analyze-transactions",
+        Some(json!({}).to_string()),
+        42,
+    )
+    .await;
+    assert_eq!(analyze.status(), StatusCode::OK);
+    let analyze_body = read_json(analyze).await;
+    assert_eq!(analyze_body["success"], true);
+    assert_eq!(analyze_body["data"]["mode"], "persisted_uncategorized");
+    assert_eq!(analyze_body["data"]["candidates_created"], 1);
+    assert_eq!(
+        analyze_body["data"]["candidates"][0]["type"],
+        "classification"
+    );
+
+    let session_analyze = trusted_json_route(
+        &app,
+        Method::POST,
+        "/api/llm/analyze-transactions",
+        Some(
+            json!({
+                "session_id": "session-a",
+                "preview_updates": [{
+                    "id": 2,
+                    "preview_main_category": "餐饮",
+                    "preview_sub_category": "午餐",
+                    "preview_description": "canteen lunch"
+                }]
+            })
+            .to_string(),
+        ),
+        42,
+    )
+    .await;
+    assert_eq!(session_analyze.status(), StatusCode::OK);
+    let session_analyze_body = read_json(session_analyze).await;
+    assert_eq!(session_analyze_body["success"], true);
+    assert_eq!(session_analyze_body["data"]["mode"], "import_session");
+    assert_eq!(session_analyze_body["data"]["session_id"], "session-a");
+    assert_eq!(session_analyze_body["data"]["candidates_created"], 1);
+    assert_eq!(
+        session_analyze_body["data"]["candidates"][0]["type"],
+        "rule_induction"
+    );
+
+    let synthesis = trusted_json_route(
+        &app,
+        Method::POST,
+        "/api/llm/rule-synthesis",
+        Some(json!({"limit": 1}).to_string()),
+        42,
+    )
+    .await;
+    assert_eq!(synthesis.status(), StatusCode::OK);
+    let synthesis_body = read_json(synthesis).await;
+    assert_eq!(synthesis_body["success"], true);
+    assert_eq!(synthesis_body["data"]["candidates_created"], 1);
+    assert_eq!(
+        synthesis_body["data"]["candidates"][0]["type"],
+        "rule_synthesis"
+    );
+
+    let claude_config = trusted_json_route(
+        &app,
+        Method::POST,
+        "/api/llm/config",
+        Some(
+            json!({
+                "enabled": true,
+                "provider": "anthropic",
+                "provider_config": {
+                    "api_key": "anthropic-test-key",
+                    "base_url": provider_base_url.clone(),
+                    "model": "claude-test"
+                },
+                "advanced_settings": {
+                    "system_prompt": "domain system"
+                }
+            })
+            .to_string(),
+        ),
+        42,
+    )
+    .await;
+    assert_eq!(claude_config.status(), StatusCode::OK);
+    let claude_analyze = trusted_json_route(
+        &app,
+        Method::POST,
+        "/api/llm/analyze-transactions",
+        Some(json!({"bill_ids": [1]}).to_string()),
+        42,
+    )
+    .await;
+    assert_eq!(claude_analyze.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(claude_analyze).await["data"]["candidates"][0]["llm_provider"],
+        "claude"
+    );
+
+    let ollama_config = trusted_json_route(
+        &app,
+        Method::POST,
+        "/api/llm/config",
+        Some(
+            json!({
+                "enabled": true,
+                "provider": "ollama",
+                "provider_config": {
+                    "base_url": provider_base_url.clone(),
+                    "model": "llama-test"
+                }
+            })
+            .to_string(),
+        ),
+        42,
+    )
+    .await;
+    assert_eq!(ollama_config.status(), StatusCode::OK);
+    let ollama_preview = trusted_json_route(
+        &app,
+        Method::POST,
+        "/api/llm/preview-recommend",
+        Some(json!({"session_id": "session-a", "preview_ids": [1]}).to_string()),
+        42,
+    )
+    .await;
+    assert_eq!(ollama_preview.status(), StatusCode::OK);
+    assert_eq!(read_json(ollama_preview).await["data"]["count"], 1);
 
     server.abort();
     let _ = server.await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn llm_rule_synthesis_skips_provider_without_learning_evidence() -> Result<(), Box<dyn Error>>
+{
+    let fixture = RuntimeFixture::new_with_upstream(unavailable_upstream().await)?;
+    seed_llm_provider_categories_only(fixture.db_path())?;
+    let app = runtime_router(&fixture);
+
+    let synthesis = trusted_json_route(
+        &app,
+        Method::POST,
+        "/api/llm/rule-synthesis",
+        Some(json!({"limit": 1}).to_string()),
+        42,
+    )
+    .await;
+    assert_eq!(synthesis.status(), StatusCode::OK);
+    let synthesis_body = read_json(synthesis).await;
+    assert_eq!(synthesis_body["success"], true);
+    assert_eq!(synthesis_body["data"]["mode"], "rule_synthesis");
+    assert_eq!(synthesis_body["data"]["candidates_created"], 0);
+    assert_eq!(synthesis_body["total"], 0);
+    assert!(
+        synthesis_body["data"]["knowledge_summary_pack"]["existing_categories"]
+            .as_array()
+            .is_some_and(|values| !values.is_empty())
+    );
     Ok(())
 }
 
@@ -2185,6 +2483,22 @@ async fn import_db_runtime_covers_llm_config_and_candidate_edges() -> Result<(),
         read_json(candidate_detail).await["data"]["suggested_sub_category"],
         "咖啡"
     );
+    let clamped_candidates = trusted_json_route(
+        &app,
+        Method::GET,
+        "/api/llm/candidates?limit=100000&offset=-20",
+        None,
+        42,
+    )
+    .await;
+    assert_eq!(clamped_candidates.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(clamped_candidates).await["data"]
+            .as_array()
+            .expect("candidate list")
+            .len(),
+        2
+    );
 
     let missing_candidate =
         trusted_json_route(&app, Method::GET, "/api/llm/candidates/9999", None, 42).await;
@@ -3371,6 +3685,19 @@ fn seed_llm_runtime_tables(path: &Path) -> Result<(), Box<dyn Error>> {
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS import_learning_concept_stats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            concept_key TEXT NOT NULL,
+            concept_type TEXT NOT NULL,
+            sample_count INTEGER NOT NULL DEFAULT 0,
+            accepted_count INTEGER NOT NULL DEFAULT 0,
+            rejected_count INTEGER NOT NULL DEFAULT 0,
+            auto_applied_count INTEGER NOT NULL DEFAULT 0,
+            rollback_count INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, concept_key, concept_type)
+        );
         ",
     )?;
     runtime.connection().execute(
@@ -3394,6 +3721,137 @@ fn seed_llm_runtime_tables(path: &Path) -> Result<(), Box<dyn Error>> {
         [],
     )?;
     Ok(())
+}
+
+fn seed_llm_provider_generation_data(path: &Path) -> Result<(), Box<dyn Error>> {
+    let runtime = runtime_for(path)?;
+    seed_users(&runtime, &[42])?;
+    bill_analyser_db::init_llm_runtime_schema(runtime.connection())?;
+    init_bills_schema(&runtime)?;
+    runtime.connection().execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            main_category TEXT NOT NULL,
+            sub_category TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS category_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            category_id INTEGER NOT NULL,
+            name TEXT NOT NULL DEFAULT '',
+            priority INTEGER NOT NULL DEFAULT 100,
+            rule_expression TEXT NOT NULL,
+            regex_enabled INTEGER DEFAULT 0,
+            enabled INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS import_learning_concept_stats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            concept_key TEXT NOT NULL,
+            concept_type TEXT NOT NULL,
+            sample_count INTEGER NOT NULL DEFAULT 0,
+            accepted_count INTEGER NOT NULL DEFAULT 0,
+            rejected_count INTEGER NOT NULL DEFAULT 0,
+            auto_applied_count INTEGER NOT NULL DEFAULT 0,
+            rollback_count INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, concept_key, concept_type)
+        );
+        CREATE TABLE IF NOT EXISTS import_learning_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            match_type TEXT NOT NULL,
+            match_value TEXT NOT NULL,
+            normalized_match_value TEXT NOT NULL,
+            learned_type TEXT,
+            learned_category_id INTEGER,
+            learned_source_account_id INTEGER,
+            learned_destination_account_id INTEGER,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            source_session_id TEXT,
+            source_preview_id INTEGER,
+            parser_id TEXT,
+            composite_match_hash TEXT,
+            match_features_json TEXT,
+            applied_count INTEGER NOT NULL DEFAULT 0,
+            last_applied_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, match_type, normalized_match_value)
+        );
+        ",
+    )?;
+    let category_id = seed_llm_provider_category_row(&runtime)?;
+    runtime.connection().execute(
+        "INSERT INTO accounts(user_id, name) VALUES (42, '现金')",
+        [],
+    )?;
+    runtime.connection().execute(
+        "
+        INSERT INTO import_learning_rules(
+            user_id, match_type, match_value, normalized_match_value, learned_type,
+            learned_category_id, enabled, match_features_json, applied_count,
+            created_at, updated_at
+        )
+        VALUES (
+            42, 'merchant', 'cafe', 'cafe', '支出',
+            ?1, 1, '{\"parser_id\":\"wechat\"}', 3,
+            '2026-05-14T00:00:00Z', '2026-05-14T00:00:00Z'
+        )
+        ",
+        [category_id],
+    )?;
+    runtime.connection().execute(
+        "INSERT INTO import_learning_concept_stats(
+            user_id, concept_key, concept_type, sample_count, accepted_count,
+            rejected_count, auto_applied_count, rollback_count, updated_at
+         )
+         VALUES (42, 'rule:1', 'rule', 3, 2, 0, 1, 0, '2026-05-14T00:00:00Z')",
+        [],
+    )?;
+    runtime.connection().execute(
+        "INSERT INTO bills(
+            user_id, date, type, amount, counterparty, description, payment_method,
+            main_category, sub_category, hash, created_at, updated_at
+         )
+         VALUES (42, '2026-05-03', '支出', 18.5, 'cafe', 'latte', 'cash', '', '', 'llm-bill-1', '2026-05-03', '2026-05-03')",
+        [],
+    )?;
+    Ok(())
+}
+
+fn seed_llm_provider_categories_only(path: &Path) -> Result<(), Box<dyn Error>> {
+    let runtime = runtime_for(path)?;
+    seed_users(&runtime, &[42])?;
+    runtime.connection().execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            main_category TEXT NOT NULL,
+            sub_category TEXT NOT NULL
+        );
+        ",
+    )?;
+    let _ = seed_llm_provider_category_row(&runtime)?;
+    Ok(())
+}
+
+fn seed_llm_provider_category_row(runtime: &SqliteRuntime) -> Result<i64, Box<dyn Error>> {
+    runtime.connection().execute(
+        "INSERT INTO categories(user_id, main_category, sub_category) VALUES (42, '餐饮', '咖啡')",
+        [],
+    )?;
+    Ok(runtime.connection().last_insert_rowid())
 }
 
 fn preview_rows(path: &Path, session_id: &str) -> Result<Vec<ImportPreviewRow>, Box<dyn Error>> {
@@ -3629,158 +4087,50 @@ async fn unavailable_upstream() -> String {
     format!("http://{addr}")
 }
 
-async fn provider_generation_upstream(
+async fn llm_openai_provider_upstream(
 ) -> Result<(String, tokio::task::JoinHandle<()>), Box<dyn Error>> {
-    let app = Router::new()
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(|axum::Json(payload): axum::Json<Value>| async move {
+            let prompt = llm_openai_prompt(&payload);
+            let content = llm_fake_content_for_prompt(&prompt);
+            (
+                StatusCode::OK,
+                axum::Json(json!({
+                    "choices": [{"message": {"content": content}}],
+                    "usage": {"total_tokens": 7},
+                })),
+            )
+        }),
+    );
+    let app = app
         .route(
-            "/api/llm/preview-recommend",
-            post(|| async {
+            "/messages",
+            post(|axum::Json(payload): axum::Json<Value>| async move {
+                let prompt = llm_openai_prompt(&payload);
+                let content = llm_fake_content_for_prompt(&prompt);
                 (
                     StatusCode::OK,
                     axum::Json(json!({
-                        "success": true,
-                        "runtime": "python-sidecar",
-                        "route": "llm-preview-recommend",
+                        "content": [{"type": "text", "text": content}],
+                        "usage": {"input_tokens": 3, "output_tokens": 4},
                     })),
                 )
             }),
         )
         .route(
-            "/api/llm/analyze-transactions",
-            post(|| async {
+            "/api/generate",
+            post(|axum::Json(payload): axum::Json<Value>| async move {
+                let prompt = payload
+                    .get("prompt")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let content = llm_fake_content_for_prompt(prompt);
                 (
                     StatusCode::OK,
                     axum::Json(json!({
-                        "success": true,
-                        "runtime": "python-sidecar",
-                        "route": "llm-analyze-transactions",
-                    })),
-                )
-            }),
-        )
-        .route(
-            "/api/llm/rule-synthesis",
-            post(|| async {
-                (
-                    StatusCode::OK,
-                    axum::Json(json!({
-                        "success": true,
-                        "runtime": "python-sidecar",
-                        "route": "llm-rule-synthesis",
-                    })),
-                )
-            }),
-        )
-        .route(
-            "/api/learning/suggestions/generate",
-            post(|| async {
-                (
-                    StatusCode::OK,
-                    axum::Json(json!({
-                        "success": true,
-                        "runtime": "python-sidecar",
-                        "route": "learning-suggestions-generate",
-                    })),
-                )
-            }),
-        )
-        .route(
-            "/api/learning/suggestions",
-            get(|| async {
-                (
-                    StatusCode::OK,
-                    axum::Json(json!({
-                        "success": true,
-                        "runtime": "python-sidecar",
-                        "route": "learning-suggestions-list",
-                    })),
-                )
-            }),
-        )
-        .route(
-            "/api/learning/suggestions/:suggestion_id/accept",
-            post(|| async {
-                (
-                    StatusCode::OK,
-                    axum::Json(json!({
-                        "success": true,
-                        "runtime": "python-sidecar",
-                        "route": "learning-suggestion-accept",
-                    })),
-                )
-            }),
-        )
-        .route(
-            "/api/learning/suggestions/batch-accept",
-            post(|| async {
-                (
-                    StatusCode::OK,
-                    axum::Json(json!({
-                        "success": true,
-                        "runtime": "python-sidecar",
-                        "route": "learning-suggestions-batch-accept",
-                    })),
-                )
-            }),
-        )
-        .route(
-            "/api/learning/suggestions/:suggestion_id/reject",
-            post(|| async {
-                (
-                    StatusCode::OK,
-                    axum::Json(json!({
-                        "success": true,
-                        "runtime": "python-sidecar",
-                        "route": "learning-suggestion-reject",
-                    })),
-                )
-            }),
-        )
-        .route(
-            "/api/learning/rules",
-            get(|| async {
-                (
-                    StatusCode::OK,
-                    axum::Json(json!({
-                        "success": true,
-                        "runtime": "python-sidecar",
-                        "route": "learning-rules-list",
-                    })),
-                )
-            }),
-        )
-        .route(
-            "/api/learning/rules/:rule_id/toggle",
-            put(|| async {
-                (
-                    StatusCode::OK,
-                    axum::Json(json!({
-                        "success": true,
-                        "runtime": "python-sidecar",
-                        "route": "learning-rule-toggle",
-                    })),
-                )
-            }),
-        )
-        .route(
-            "/api/learning/rules/:rule_id",
-            put(|| async {
-                (
-                    StatusCode::OK,
-                    axum::Json(json!({
-                        "success": true,
-                        "runtime": "python-sidecar",
-                        "route": "learning-rule-update",
-                    })),
-                )
-            })
-            .delete(|| async {
-                (
-                    StatusCode::OK,
-                    axum::Json(json!({
-                        "success": true,
-                        "runtime": "python-sidecar",
-                        "route": "learning-rule-delete",
+                        "response": content,
+                        "done": true,
                     })),
                 )
             }),
@@ -3793,6 +4143,29 @@ async fn provider_generation_upstream(
             .expect("provider generation upstream");
     });
     Ok((format!("http://{addr}"), handle))
+}
+
+fn llm_openai_prompt(payload: &Value) -> String {
+    payload
+        .get("messages")
+        .and_then(Value::as_array)
+        .and_then(|messages| messages.last())
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn llm_fake_content_for_prompt(prompt: &str) -> &'static str {
+    if prompt.contains("KnowledgeSummaryPack") {
+        r#"[{"rule_name":"无效分类","suggested_main_category":"不存在","suggested_sub_category":"咖啡","rule_expression":"OR={咖啡}","confidence":0.2,"reason":"invalid category"},{"rule_name":"无效语法","suggested_main_category":"餐饮","suggested_sub_category":"咖啡","rule_expression":"(OR={broken}","confidence":0.2,"reason":"invalid expression"},{"rule_name":"咖啡规则","suggested_main_category":"餐饮","suggested_sub_category":"咖啡","rule_expression":" OR={咖啡} ","confidence":0.88,"reason":"稳定咖啡证据"}]"#
+    } else if prompt.contains("关键词匹配规则") || prompt.contains("已被归类") {
+        r#"[{"rule_name":"午餐规则","rule_expression":"OR={canteen,lunch}","confidence":0.82,"explanation":"午餐样本稳定"}]"#
+    } else if prompt.contains("preview_id=") {
+        r#"[{"preview_id":1,"suggested_main_category":"餐饮","suggested_sub_category":"咖啡","suggested_source_account":"现金","suggested_destination_account":"","confidence":0.91,"reason":"商户和描述匹配咖啡"}]"#
+    } else {
+        r#"[{"bill_id":1,"suggested_main_category":"餐饮","suggested_sub_category":"咖啡","confidence":0.87}]"#
+    }
 }
 
 fn sample_path(pattern: &str) -> String {

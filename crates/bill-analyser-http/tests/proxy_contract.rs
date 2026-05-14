@@ -465,7 +465,7 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
 
     for (method, path) in [
         (Method::OPTIONS, "/api/auth/register"),
-        (Method::POST, "/api/llm/preview-recommend"),
+        (Method::POST, "/api/llm/induce-rules"),
         (Method::POST, "/api/matching/candidates/session/12/accept"),
     ] {
         let response = app

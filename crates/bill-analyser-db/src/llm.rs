@@ -30,6 +30,20 @@ pub struct LlmConfigUpdate {
     pub is_active: Option<bool>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct LlmCandidateDraft {
+    pub user_id: i64,
+    pub candidate_type: String,
+    pub source_bill_ids: Vec<i64>,
+    pub suggested_main_category: String,
+    pub suggested_sub_category: String,
+    pub suggested_rule_expression: String,
+    pub confidence: f64,
+    pub llm_provider: String,
+    pub llm_model: String,
+    pub llm_response_raw: String,
+}
+
 pub fn init_llm_runtime_schema(connection: &Connection) -> DbResult<()> {
     connection.execute_batch(
         "
@@ -296,6 +310,43 @@ pub fn get_llm_candidate_by_id(
         .map_err(Into::into)
 }
 
+pub fn create_llm_candidate(connection: &Connection, draft: &LlmCandidateDraft) -> DbResult<Value> {
+    let source_bill_ids = Value::Array(
+        draft
+            .source_bill_ids
+            .iter()
+            .copied()
+            .map(Value::from)
+            .collect(),
+    )
+    .to_string();
+    connection.execute(
+        "INSERT INTO llm_candidates (
+            user_id, type, source_bill_ids, suggested_main_category,
+            suggested_sub_category, suggested_rule_expression, confidence,
+            llm_provider, llm_model, llm_response_raw, status, created_at
+         )
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending', ?11)",
+        params![
+            draft.user_id,
+            draft.candidate_type,
+            source_bill_ids,
+            draft.suggested_main_category,
+            draft.suggested_sub_category,
+            draft.suggested_rule_expression,
+            draft.confidence,
+            draft.llm_provider,
+            draft.llm_model,
+            draft.llm_response_raw,
+            now_text(),
+        ],
+    )?;
+    let candidate_id = connection.last_insert_rowid();
+    get_llm_candidate_by_id(connection, candidate_id, draft.user_id)?.ok_or_else(|| {
+        DbError::InvalidOperation("created llm candidate could not be reloaded".to_string())
+    })
+}
+
 pub fn update_llm_candidate_status(
     connection: &Connection,
     candidate_id: i64,
@@ -432,6 +483,12 @@ fn create_rule_for_llm_candidate(
 ) -> DbResult<Option<i64>> {
     let main_category = text_field(candidate, "suggested_main_category");
     let sub_category = text_field(candidate, "suggested_sub_category");
+    let rule_expression = text_field(candidate, "suggested_rule_expression");
+    if bill_analyser_core::category_rules::compile_rule_expression(rule_expression.trim(), false)
+        .is_empty
+    {
+        return Ok(None);
+    }
     let category_id = connection
         .query_row(
             "SELECT id FROM categories WHERE user_id = ?1 AND main_category = ?2 AND sub_category = ?3",
@@ -442,6 +499,17 @@ fn create_rule_for_llm_candidate(
     let Some(category_id) = category_id else {
         return Ok(None);
     };
+    let rule_duplicate = connection
+        .query_row(
+            "SELECT 1 FROM category_rules WHERE user_id = ?1 AND category_id = ?2 AND rule_expression = ?3 LIMIT 1",
+            params![user_id, category_id, rule_expression.trim()],
+            |_| Ok(true),
+        )
+        .optional()?
+        .unwrap_or(false);
+    if rule_duplicate {
+        return Ok(None);
+    }
     let candidate_type = text_field(candidate, "type");
     let name_prefix = if candidate_type == "rule_synthesis" {
         "LLM synthesized"
@@ -458,7 +526,7 @@ fn create_rule_for_llm_candidate(
             user_id,
             category_id,
             format!("{name_prefix}: {main_category}/{sub_category}"),
-            text_field(candidate, "suggested_rule_expression"),
+            rule_expression.trim(),
             now_text(),
         ],
     )?;

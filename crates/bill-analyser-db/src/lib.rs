@@ -98,11 +98,12 @@ pub use import_staging::{
     LlmMemoryEventDraft, LlmMemoryEventRow,
 };
 pub use llm::{
-    accept_llm_candidate, activate_llm_config, count_llm_candidates, create_llm_config,
-    default_llm_runtime_config, delete_llm_config, effective_llm_config_from_saved,
-    get_active_llm_config, get_llm_candidate_by_id, init_llm_runtime_schema, list_llm_candidates,
-    list_llm_configs, reject_llm_candidate, update_llm_candidate_status, update_llm_config,
-    LlmConfigDraft, LlmConfigUpdate,
+    accept_llm_candidate, activate_llm_config, count_llm_candidates, create_llm_candidate,
+    create_llm_config, default_llm_runtime_config, delete_llm_config,
+    effective_llm_config_from_saved, get_active_llm_config, get_llm_candidate_by_id,
+    init_llm_runtime_schema, list_llm_candidates, list_llm_configs, reject_llm_candidate,
+    update_llm_candidate_status, update_llm_config, LlmCandidateDraft, LlmConfigDraft,
+    LlmConfigUpdate,
 };
 pub use path::SqliteDbPath;
 pub use schema::{

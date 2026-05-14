@@ -1049,6 +1049,7 @@ fn preview_llm_recommendation_applies_reviews_and_records_memory_events(
         confidence: 0.91,
         reason: "merchant pattern".to_string(),
     };
+    let long_prompt = "prompt ".repeat(4_000);
     let applied = apply_preview_llm_recommendation(
         runtime.connection_mut(),
         ImportPreviewLlmApplyRequest {
@@ -1056,7 +1057,7 @@ fn preview_llm_recommendation_applies_reviews_and_records_memory_events(
             preview_id: preview.id,
             user_id: user_id(42),
             suggestion: &suggestion,
-            prompt_text: Some("prompt text"),
+            prompt_text: Some(&long_prompt),
             llm_provider: Some("openai"),
             llm_model: Some("gpt-test"),
         },
@@ -1164,6 +1165,7 @@ fn preview_llm_recommendation_applies_reviews_and_records_memory_events(
     );
     assert_eq!(events[2].event_type, "recommendation");
     assert_eq!(events[2].llm_provider.as_deref(), Some("openai"));
+    assert!(events[2].prompt_text.as_deref().expect("prompt text").len() <= 16_384);
     assert_eq!(
         events[2].snapshot_after.as_ref().unwrap()["preview_main_category"],
         "餐饮"

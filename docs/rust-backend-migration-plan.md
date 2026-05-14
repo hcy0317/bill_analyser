@@ -142,7 +142,11 @@ S9c wires preview-item transfer/recurring decisions, session learning bypass/pro
 
 ## P11a Global Learning Center Runtime
 
-P11a makes Rust the runtime owner for global Learning Center suggestion and rule routes in `import_db_runtime`: `GET /api/learning/suggestions`, `POST /api/learning/suggestions/generate`, suggestion accept/batch-accept/reject, `GET /api/learning/rules`, rule toggle/update/delete. The Rust path reads durable `import_learning_corpus_samples`, mines deterministic composite suggestions, materializes accepted suggestions into `import_learning_rules`, records feedback events, preserves current-user scope and Flask-compatible `success/data` envelopes, and deletes the old Flask `learning.py` route shell. Live LLM provider generation remains proxied through `POST /api/llm/preview-recommend`, `POST /api/llm/analyze-transactions`, and `POST /api/llm/rule-synthesis`.
+P11a makes Rust the runtime owner for global Learning Center suggestion and rule routes in `import_db_runtime`: `GET /api/learning/suggestions`, `POST /api/learning/suggestions/generate`, suggestion accept/batch-accept/reject, `GET /api/learning/rules`, rule toggle/update/delete. The Rust path reads durable `import_learning_corpus_samples`, mines deterministic composite suggestions, materializes accepted suggestions into `import_learning_rules`, records feedback events, preserves current-user scope and Flask-compatible `success/data` envelopes, and deletes the old Flask `learning.py` route shell.
+
+## P11 Provider Execution Runtime
+
+P11 provider execution makes Rust the runtime owner for live LLM provider generation in `import_db_runtime`: `POST /api/llm/preview-recommend`, `POST /api/llm/analyze-transactions`, and `POST /api/llm/rule-synthesis`. The Rust path reuses the user-scoped runtime/saved LLM config precedence, supports OpenAI-compatible, Claude, Ollama, provider aliases, Azure endpoint validation, explicit Base URL allowlist/SSRF checks, advanced prompt settings, JSON-array parsing, bounded provider responses, user-scoped rate limits, current-user account ID resolution for preview recommendations, classification/rule-induction candidate creation, no-evidence rule-synthesis early return, and rule-synthesis candidate validation before writing `llm_candidates`.
 
 ## S9d Import Parse, Dedup, Confirm, and Frontend Upload Runtime Wiring
 

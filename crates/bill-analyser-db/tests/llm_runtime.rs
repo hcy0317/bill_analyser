@@ -1,13 +1,14 @@
 use std::time::Duration;
 
 use bill_analyser_db::{
-    accept_llm_candidate, activate_llm_config, count_llm_candidates, create_llm_config,
-    default_llm_runtime_config, delete_llm_config, effective_llm_config_from_saved,
-    get_active_llm_config, get_llm_candidate_by_id, init_llm_runtime_schema, list_llm_candidates,
-    list_llm_configs, reject_llm_candidate, update_llm_candidate_status, update_llm_config,
-    LlmConfigDraft, LlmConfigUpdate, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
+    accept_llm_candidate, activate_llm_config, count_llm_candidates, create_llm_candidate,
+    create_llm_config, default_llm_runtime_config, delete_llm_config,
+    effective_llm_config_from_saved, get_active_llm_config, get_llm_candidate_by_id,
+    init_llm_runtime_schema, list_llm_candidates, list_llm_configs, reject_llm_candidate,
+    update_llm_candidate_status, update_llm_config, LlmCandidateDraft, LlmConfigDraft,
+    LlmConfigUpdate, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
-use rusqlite::params;
+use rusqlite::{params, Connection};
 use serde_json::json;
 
 #[test]
@@ -101,6 +102,18 @@ fn llm_runtime_persists_configs_and_candidates_with_review_decisions(
         accept_llm_candidate(runtime.connection(), candidate_id, 42)?.expect("accepted candidate");
     assert_eq!(accepted["status"], "accepted");
     assert!(accepted["created_rule_id"].as_i64().is_some());
+    let duplicate_rule_id =
+        seed_rule_candidate_with_expression(&runtime, 42, "餐饮", "咖啡", " OR={咖啡} ")?;
+    let duplicate_rule = accept_llm_candidate(runtime.connection(), duplicate_rule_id, 42)?
+        .expect("duplicate rule candidate");
+    assert_eq!(duplicate_rule["status"], "accepted");
+    assert!(duplicate_rule.get("created_rule_id").is_none());
+    let invalid_rule_id =
+        seed_rule_candidate_with_expression(&runtime, 42, "餐饮", "咖啡", "(OR={broken}")?;
+    let invalid_rule =
+        accept_llm_candidate(runtime.connection(), invalid_rule_id, 42)?.expect("invalid rule");
+    assert_eq!(invalid_rule["status"], "accepted");
+    assert!(invalid_rule.get("created_rule_id").is_none());
 
     let rejected_id = seed_plain_candidate(&runtime, 42)?;
     assert_eq!(
@@ -265,6 +278,42 @@ fn llm_runtime_handles_legacy_schema_and_edge_decisions() -> Result<(), Box<dyn 
     Ok(())
 }
 
+#[test]
+fn llm_candidate_creation_reports_schema_and_reload_errors(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let missing_schema = Connection::open_in_memory()?;
+    assert!(create_llm_candidate(&missing_schema, &candidate_draft(42)).is_err());
+
+    let with_trigger = Connection::open_in_memory()?;
+    init_llm_runtime_schema(&with_trigger)?;
+    with_trigger.execute_batch(
+        "
+        CREATE TRIGGER delete_llm_candidate_after_insert
+        AFTER INSERT ON llm_candidates
+        BEGIN
+            DELETE FROM llm_candidates WHERE id = NEW.id;
+        END;
+        ",
+    )?;
+    assert!(create_llm_candidate(&with_trigger, &candidate_draft(42)).is_err());
+    Ok(())
+}
+
+fn candidate_draft(user_id: i64) -> LlmCandidateDraft {
+    LlmCandidateDraft {
+        user_id,
+        candidate_type: "classification".to_string(),
+        source_bill_ids: vec![1, 2],
+        suggested_main_category: "餐饮".to_string(),
+        suggested_sub_category: "咖啡".to_string(),
+        suggested_rule_expression: String::new(),
+        confidence: 0.8,
+        llm_provider: "openai".to_string(),
+        llm_model: "gpt".to_string(),
+        llm_response_raw: "{}".to_string(),
+    }
+}
+
 fn seed_rule_tables(runtime: &SqliteRuntime) -> rusqlite::Result<()> {
     runtime.connection().execute_batch(
         "
@@ -305,13 +354,23 @@ fn seed_rule_candidate_for_category(
     main_category: &str,
     sub_category: &str,
 ) -> rusqlite::Result<i64> {
+    seed_rule_candidate_with_expression(runtime, user_id, main_category, sub_category, "OR={咖啡}")
+}
+
+fn seed_rule_candidate_with_expression(
+    runtime: &SqliteRuntime,
+    user_id: i64,
+    main_category: &str,
+    sub_category: &str,
+    expression: &str,
+) -> rusqlite::Result<i64> {
     runtime.connection().execute(
         "INSERT INTO llm_candidates(
             user_id, type, source_bill_ids, suggested_main_category, suggested_sub_category,
             suggested_rule_expression, confidence, llm_provider, llm_model, llm_response_raw, status
          )
-         VALUES (?1, 'rule_synthesis', '[1,2]', ?2, ?3, 'OR={咖啡}', 0.91, 'openai', 'gpt', '{}', 'pending')",
-        params![user_id, main_category, sub_category],
+         VALUES (?1, 'rule_synthesis', '[1,2]', ?2, ?3, ?4, 0.91, 'openai', 'gpt', '{}', 'pending')",
+        params![user_id, main_category, sub_category, expression],
     )?;
     Ok(runtime.connection().last_insert_rowid())
 }

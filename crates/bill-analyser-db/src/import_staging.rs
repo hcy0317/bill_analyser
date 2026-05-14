@@ -8,6 +8,8 @@ use serde_json::Value;
 
 use crate::{run_transaction, DbError, DbResult};
 
+const LLM_MEMORY_PROMPT_TEXT_MAX_BYTES: usize = 16_384;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportSessionDraft {
     pub session_id: String,
@@ -1675,7 +1677,7 @@ pub fn apply_preview_llm_recommendation(
                 preview_id: Some(preview_id),
                 event_type: "recommendation".to_string(),
                 decision: None,
-                prompt_text: prompt_text.map(str::to_string),
+                prompt_text: prompt_text.map(truncated_llm_memory_prompt_text),
                 llm_response_raw: Some(llm_suggestion_payload(suggestion).to_string()),
                 llm_provider: llm_provider.map(str::to_string),
                 llm_model: llm_model.map(str::to_string),
@@ -2795,6 +2797,17 @@ fn build_llm_feedback_payload(
         "previous_preview": previous_preview,
         "applied_preview": applied_preview,
     })
+}
+
+fn truncated_llm_memory_prompt_text(prompt_text: &str) -> String {
+    if prompt_text.len() <= LLM_MEMORY_PROMPT_TEXT_MAX_BYTES {
+        return prompt_text.to_string();
+    }
+    prompt_text
+        .char_indices()
+        .take_while(|(index, _)| *index < LLM_MEMORY_PROMPT_TEXT_MAX_BYTES)
+        .map(|(_, ch)| ch)
+        .collect()
 }
 
 fn llm_suggestion_payload(suggestion: &ImportPreviewLlmSuggestion) -> Value {

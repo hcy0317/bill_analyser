@@ -235,9 +235,9 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("GET", "/api/ml/receipt-recognition/config")));
     assert!(rust_owned.contains(&("GET", "/api/learning/rules")));
     assert!(rust_owned.contains(&("GET", "/api/learning/suggestions")));
-    assert!(!rust_owned.contains(&("POST", "/api/llm/preview-recommend")));
-    assert!(!rust_owned.contains(&("POST", "/api/llm/analyze-transactions")));
-    assert!(!rust_owned.contains(&("POST", "/api/llm/rule-synthesis")));
+    assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend")));
+    assert!(rust_owned.contains(&("POST", "/api/llm/analyze-transactions")));
+    assert!(rust_owned.contains(&("POST", "/api/llm/rule-synthesis")));
 
     let matrix = rust_http_shell_ownership_matrix();
     assert!(matrix
@@ -263,7 +263,7 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
 }
 
 #[test]
-fn bills_import_routes_are_python_deleted_and_provider_routes_remain_proxied() {
+fn bills_import_routes_are_python_deleted_and_provider_routes_are_rust_owned() {
     let blocked_routes = import_deletion_blocked_endpoints();
     assert!(blocked_routes.is_empty());
 
@@ -339,8 +339,8 @@ fn bills_import_routes_are_python_deleted_and_provider_routes_remain_proxied() {
     ] {
         let endpoint = find_endpoint_ownership(method, pattern)
             .unwrap_or_else(|| panic!("missing provider-owned endpoint {method} {pattern}"));
-        assert_eq!(endpoint.state, MigrationState::PythonProxied);
-        assert!(endpoint.is_python_runtime_owner());
+        assert_eq!(endpoint.state, MigrationState::RustOwnedVerified);
+        assert!(!endpoint.is_python_runtime_owner());
         assert!(!endpoint.is_import_deletion_blocked());
     }
 
@@ -398,7 +398,7 @@ fn bills_import_routes_are_python_deleted_and_provider_routes_remain_proxied() {
 #[test]
 fn live_python_sidecar_routes_are_manifested_for_import_db_runtime_proxy() {
     for (method, pattern, domain) in [
-        ("POST", "/api/llm/preview-recommend", "ai-learning-llm"),
+        ("POST", "/api/llm/induce-rules", "ai-learning-llm"),
         (
             "POST",
             "/api/matching/candidates/{*candidate_id}/accept",

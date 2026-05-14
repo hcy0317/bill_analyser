@@ -1,17 +1,44 @@
 use bill_analyser_core::ai_ocr_llm::{
     build_llm_analysis_response, build_llm_candidate_list_response,
-    build_llm_candidate_reject_response, build_llm_config_get_response,
-    build_llm_contract_error_response, build_llm_preview_recommend_response,
-    build_llm_provider_config, build_ocr_config_response_payload,
+    build_llm_candidate_reject_response, build_llm_classification_prompt,
+    build_llm_config_get_response, build_llm_contract_error_response,
+    build_llm_import_preview_recommendation_prompt, build_llm_preview_recommend_response,
+    build_llm_provider_config, build_llm_rule_expression_synthesis_prompt,
+    build_llm_rule_induction_prompt, build_ocr_config_response_payload,
     build_ocr_config_success_response, build_ocr_error_response,
     build_ocr_recognition_success_response, build_runtime_llm_config_from_saved_config,
     build_unknown_ocr_provider_response, copy_runtime_llm_config, llm_available_providers,
     llm_review_endpoint_requires_live_provider, normalize_llm_advanced_settings,
     normalize_llm_provider_name, normalize_ocr_config, ocr_available_providers_with_disabled,
-    ocr_error_http_status, parse_payment_screenshot_text, safe_llm_config_payload,
-    OcrProviderTextResult,
+    ocr_error_http_status, parse_llm_json_array_response, parse_payment_screenshot_text,
+    render_llm_prompt_template, safe_llm_config_payload, OcrProviderTextResult,
 };
 use serde_json::{json, Value};
+use std::env;
+
+struct EnvVarRestore {
+    name: &'static str,
+    value: Option<String>,
+}
+
+impl EnvVarRestore {
+    fn capture(name: &'static str) -> Self {
+        Self {
+            name,
+            value: env::var(name).ok(),
+        }
+    }
+}
+
+impl Drop for EnvVarRestore {
+    fn drop(&mut self) {
+        if let Some(value) = &self.value {
+            env::set_var(self.name, value);
+        } else {
+            env::remove_var(self.name);
+        }
+    }
+}
 
 #[test]
 fn ocr_config_and_disabled_safe_errors_match_receipt_routes() {
@@ -204,7 +231,22 @@ fn llm_provider_alias_defaults_match_python_factory() {
         assert_eq!(config.model, model);
     }
 
-    let custom = build_llm_provider_config(
+    let default_openai_compatible = build_llm_provider_config(
+        "openai_compatible",
+        Some(&json!({
+            "api_key": "secret",
+            "base_url": "",
+            "model": "custom-chat",
+        })),
+    )
+    .expect("default custom-compatible endpoint");
+    assert_eq!(
+        default_openai_compatible.base_url,
+        "https://api.openai.com/v1"
+    );
+    assert_eq!(default_openai_compatible.model, "custom-chat");
+    assert_eq!(default_openai_compatible.provider_name, "openai_compatible");
+    assert!(build_llm_provider_config(
         "openai_compatible",
         Some(&json!({
             "api_key": "secret",
@@ -212,10 +254,66 @@ fn llm_provider_alias_defaults_match_python_factory() {
             "model": "custom-chat",
         })),
     )
-    .expect("custom endpoint");
-    assert_eq!(custom.base_url, "https://llm.example.test/v1");
-    assert_eq!(custom.model, "custom-chat");
-    assert_eq!(custom.provider_name, "openai_compatible");
+    .is_err());
+    assert!(build_llm_provider_config(
+        "openai",
+        Some(&json!({
+            "api_key": "secret",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "model": "gpt-test",
+        })),
+    )
+    .is_err());
+    let _allowlist_restore = EnvVarRestore::capture("BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST");
+    env::set_var("BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST", "llm.example.test");
+    assert!(build_llm_provider_config(
+        "openai_compatible",
+        Some(&json!({
+            "api_key": "secret",
+            "base_url": "https://llm.example.test/v1",
+            "model": "custom-chat",
+        })),
+    )
+    .is_err());
+    env::set_var(
+        "BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST",
+        "http://llm.example.test",
+    );
+    assert!(build_llm_provider_config(
+        "openai_compatible",
+        Some(&json!({
+            "api_key": "secret",
+            "base_url": "http://llm.example.test/v1",
+            "model": "custom-chat",
+        })),
+    )
+    .is_err());
+    env::set_var(
+        "BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST",
+        "https://llm.example.test",
+    );
+    assert!(build_llm_provider_config(
+        "openai_compatible",
+        Some(&json!({
+            "api_key": "secret",
+            "base_url": "https://llm.example.test/v1",
+            "model": "custom-chat",
+        })),
+    )
+    .is_ok());
+    env::set_var(
+        "BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST",
+        "http://127.0.0.1:11434",
+    );
+    assert!(build_llm_provider_config(
+        "openai_compatible",
+        Some(&json!({
+            "api_key": "secret",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "model": "custom-chat",
+        })),
+    )
+    .is_ok());
     assert!(build_llm_provider_config("azure", None).is_err());
     assert!(build_llm_provider_config("azure", Some(&json!({"base_url": ""}))).is_err());
     let azure = build_llm_provider_config(
@@ -515,4 +613,93 @@ fn llm_preview_and_candidate_review_route_envelopes_preserve_live_provider_bound
 
     let uncategorized = build_llm_analysis_response(Vec::<Value>::new(), &json!({}));
     assert_eq!(uncategorized["data"]["mode"], "persisted_uncategorized");
+}
+
+#[test]
+fn llm_provider_generation_prompt_and_json_array_contracts_are_stable() {
+    let transactions = vec![
+        json!({
+            "id": 1,
+            "date": "2026-05-01",
+            "amount": 18.5,
+            "counterparty": "cafe",
+            "description": {"raw": "latte"},
+            "payment_method": true,
+            "type": "支出",
+        }),
+        json!({"id": 2, "description": null}),
+    ];
+    let classification_prompt = build_llm_classification_prompt(&transactions);
+    assert!(classification_prompt.contains("id=1"));
+    assert!(classification_prompt.contains("payment_method=\"true\""));
+    assert!(classification_prompt.contains("description=\"{\"raw\":\"latte\"}\""));
+
+    let rule_prompt = build_llm_rule_induction_prompt("餐饮/咖啡", &transactions);
+    assert!(rule_prompt.contains("已被归类为「餐饮/咖啡」"));
+    assert!(rule_prompt.contains("OR={关键词1,关键词2}"));
+
+    let preview_prompt = build_llm_import_preview_recommendation_prompt(
+        &transactions,
+        &["餐饮/咖啡".to_string()],
+        &["现金".to_string()],
+        &[
+            json!({
+                "decision": "accept",
+                "suggested_main_category": "餐饮",
+                "suggested_sub_category": "咖啡",
+                "description_hint": "latte",
+            }),
+            json!({"decision": "", "suggested_main_category": "ignored"}),
+        ],
+    );
+    assert!(preview_prompt.contains("已有分类体系"));
+    assert!(preview_prompt.contains("已有账户"));
+    assert!(preview_prompt.contains("历史记忆"));
+
+    let preview_prompt_without_context =
+        build_llm_import_preview_recommendation_prompt(&transactions, &[], &[], &[]);
+    assert!(!preview_prompt_without_context.contains("已有分类体系"));
+    assert!(!preview_prompt_without_context.contains("历史记忆（你过去"));
+
+    let prompt = build_llm_rule_expression_synthesis_prompt(
+        &json!({
+            "knowledge_summary_version": "a6-rule-synthesis-v1",
+            "existing_categories": [{"path": "餐饮/咖啡"}],
+        }),
+        3,
+    );
+    assert!(prompt.contains("KnowledgeSummaryPack"));
+    assert!(prompt.contains("最多输出 3 条候选"));
+    assert!(prompt.contains("只返回 JSON"));
+
+    let rendered = render_llm_prompt_template(
+        "base={default_prompt}\njson={transactions_json}\ntext={transactions_text}\ncat={category_name}",
+        "默认提示",
+        &transactions,
+        "餐饮/咖啡",
+    );
+    assert!(rendered.contains("base=默认提示"));
+    assert!(rendered.contains("cat=餐饮/咖啡"));
+    assert!(rendered.contains("\"id\":1"));
+    assert_eq!(
+        render_llm_prompt_template("", "默认提示", &transactions, ""),
+        "默认提示"
+    );
+
+    let parsed =
+        parse_llm_json_array_response("```json\n[{\"rule_expression\":\"OR={咖啡}\"}]\n```")
+            .expect("json fence parses");
+    assert_eq!(parsed[0]["rule_expression"], "OR={咖啡}");
+
+    let prefixed = parse_llm_json_array_response(
+        "结果如下：[{\"bill_id\":1,\"suggested_main_category\":\"餐饮\"}]",
+    )
+    .expect("prefixed json parses");
+    assert_eq!(prefixed[0]["bill_id"], 1);
+
+    let unfenced =
+        parse_llm_json_array_response("```\n[{\"id\":7}]").expect("unterminated fence body parses");
+    assert_eq!(unfenced[0]["id"], 7);
+    assert!(parse_llm_json_array_response("```json").is_err());
+    assert!(parse_llm_json_array_response("not json").is_err());
 }

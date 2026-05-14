@@ -14,46 +14,50 @@ use axum::{
 use bill_analyser_core::{
     build_composite_match_features, build_import_preview_filter_index_item,
     build_llm_candidate_list_response, build_llm_candidate_reject_response,
-    build_llm_config_get_response, build_ocr_config_success_response, build_ocr_error_response,
+    build_llm_classification_prompt, build_llm_config_get_response,
+    build_llm_contract_error_response, build_llm_import_preview_recommendation_prompt,
+    build_llm_provider_config, build_llm_rule_expression_synthesis_prompt,
+    build_llm_rule_induction_prompt, build_ocr_config_success_response, build_ocr_error_response,
     build_ocr_recognition_success_response, build_unknown_ocr_provider_response,
     can_delete_python_import_paths, coerce_preview_selected_value, composite_hash_from_features,
     copy_runtime_llm_config, import_preview_index_success, import_preview_page_success,
     import_session_cancel_missing_response, import_session_cancel_success_response,
     import_session_not_found_response, import_session_success, import_stage_confirm_success,
     import_stage_dedup_success, import_stage_parse_success, import_v2_data_response,
-    import_v2_error_response, preview_state_conflict_response, safe_llm_config_payload,
-    AiRouteResponse, ImportDeletionEvidence, ImportPreviewIndexData, ImportPreviewPageData,
-    ImportSessionSummary, ImportStageConfirmData, ImportStageDedupData, ImportStageParseData,
-    ImportV2RouteResponse, OcrConfigContract, OcrProviderTextResult, SmartDeduplicationEngine,
-    UserId, OCR_DISABLED_PROVIDER_NAME,
+    import_v2_error_response, parse_llm_json_array_response, preview_state_conflict_response,
+    render_llm_prompt_template, safe_llm_config_payload, AiRouteResponse, ImportDeletionEvidence,
+    ImportPreviewIndexData, ImportPreviewPageData, ImportSessionSummary, ImportStageConfirmData,
+    ImportStageDedupData, ImportStageParseData, ImportV2RouteResponse, LlmProviderConfigContract,
+    OcrConfigContract, OcrProviderTextResult, SmartDeduplicationEngine, UserId, LLM_SYSTEM_PROMPT,
+    OCR_DISABLED_PROVIDER_NAME,
 };
 use bill_analyser_db::{
-    accept_llm_candidate, activate_llm_config, apply_preview_transfer_decision,
-    calculate_import_bill_hash, clear_session_data, confirm_preview_to_bills, count_llm_candidates,
-    create_llm_config, dedup_bills_from_parser_templates, delete_llm_config,
-    effective_llm_config_from_saved, get_app_setting, get_import_annotation_samples,
-    get_import_session, get_llm_memory_events, get_preview_bill_by_id, get_preview_by_session,
-    get_preview_page_by_session, get_unprocessed_templates_for_dedup, init_app_settings_schema,
-    init_import_staging_schema, init_llm_runtime_schema, insert_preview_bills_batch,
-    list_llm_candidates, list_llm_configs, load_ocr_config_setting,
-    parser_template_drafts_from_standard_bills, preview_drafts_from_dedup_bills,
-    reject_llm_candidate, replace_preview_selection_with_patches, reset_session_preview_selection,
-    review_preview_llm_recommendation, save_import_annotation_samples, set_app_setting,
-    stage_import_parser_templates, store_ocr_config_setting, update_import_session_status,
-    update_llm_config, update_parser_template_status, update_preview_bill,
-    update_preview_bills_batch, update_preview_recurring_match_decision, update_preview_selection,
-    AppSettingDraft, ImportAnnotationSampleDraft, ImportPreviewDecision,
-    ImportPreviewDecisionResult, ImportPreviewExpectedState, ImportPreviewLlmDecisionResult,
-    ImportPreviewLlmReviewRequest, ImportPreviewLlmSuggestion, ImportPreviewPatch,
-    ImportPreviewPatchField, ImportPreviewPatchValue, ImportPreviewRecurringCandidate,
-    ImportPreviewRecurringMatchUpdate, ImportPreviewRow, ImportSessionDraft,
-    ImportSessionStatusUpdate, LlmConfigDraft, LlmConfigUpdate, SqliteConnectionConfig,
-    SqliteDbPath, SqliteRuntime,
+    accept_llm_candidate, activate_llm_config, apply_preview_llm_recommendation,
+    apply_preview_transfer_decision, calculate_import_bill_hash, clear_session_data,
+    confirm_preview_to_bills, count_llm_candidates, create_llm_candidate, create_llm_config,
+    dedup_bills_from_parser_templates, delete_llm_config, effective_llm_config_from_saved,
+    get_app_setting, get_import_annotation_samples, get_import_session, get_llm_memory_events,
+    get_preview_bill_by_id, get_preview_by_session, get_preview_page_by_session,
+    get_unprocessed_templates_for_dedup, init_app_settings_schema, init_import_staging_schema,
+    init_llm_runtime_schema, insert_preview_bills_batch, list_llm_candidates, list_llm_configs,
+    load_ocr_config_setting, parser_template_drafts_from_standard_bills,
+    preview_drafts_from_dedup_bills, reject_llm_candidate, replace_preview_selection_with_patches,
+    reset_session_preview_selection, review_preview_llm_recommendation,
+    save_import_annotation_samples, set_app_setting, stage_import_parser_templates,
+    store_ocr_config_setting, update_import_session_status, update_llm_config,
+    update_parser_template_status, update_preview_bill, update_preview_bills_batch,
+    update_preview_recurring_match_decision, update_preview_selection, AppSettingDraft,
+    ImportAnnotationSampleDraft, ImportPreviewDecision, ImportPreviewDecisionResult,
+    ImportPreviewExpectedState, ImportPreviewLlmDecisionResult, ImportPreviewLlmReviewRequest,
+    ImportPreviewLlmSuggestion, ImportPreviewPatch, ImportPreviewPatchField,
+    ImportPreviewPatchValue, ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate,
+    ImportPreviewRow, ImportSessionDraft, ImportSessionStatusUpdate, LlmCandidateDraft,
+    LlmConfigDraft, LlmConfigUpdate, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
 use bill_analyser_parsers::{
     parse_dedicated_import_bytes, post_process_raw_bills, RawBill, StandardBill,
 };
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use chrono::Utc;
 use encoding_rs::GBK;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -71,6 +75,7 @@ use std::{
     },
     time::{Duration as StdDuration, Instant, SystemTime, UNIX_EPOCH},
 };
+use tokio::time::sleep;
 
 use crate::{auth::resolve_user_id_from_headers, config::HttpShellConfig, proxy::ProxyState};
 
@@ -80,6 +85,13 @@ const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
 static IMPORT_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 static OCR_REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
 static OCR_RATE_LIMIT_BUCKETS: OnceLock<Mutex<HashMap<i64, VecDeque<Instant>>>> = OnceLock::new();
+static LLM_RATE_LIMIT_BUCKETS: OnceLock<Mutex<HashMap<i64, VecDeque<Instant>>>> = OnceLock::new();
+const LLM_PROVIDER_RESPONSE_MAX_BYTES: usize = 1_048_576;
+const LLM_CANDIDATE_RAW_RESPONSE_MAX_BYTES: usize = 16_384;
+const LLM_RULE_INDUCTION_MAX_CANDIDATES_PER_GROUP: usize = 5;
+const LLM_RULE_SYNTHESIS_MAX_GROUPS: usize = 8;
+const LLM_RULE_SYNTHESIS_MAX_EVIDENCE_PER_GROUP: usize = 4;
+const IMPORT_LEARNING_MODEL_KEY: &str = "import-learning-dual-head";
 
 pub const IMPORT_SKELETON_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/bills/import/v2/parse"),
@@ -388,6 +400,10 @@ pub fn import_runtime_router() -> Router<ProxyState> {
                 .delete(import_learning_rule_delete_runtime_handler),
         )
         .route(
+            "/api/llm/preview-recommend",
+            post(llm_preview_recommend_runtime_handler),
+        )
+        .route(
             "/api/llm/preview-recommend/accept",
             post(llm_preview_recommend_accept_runtime_handler),
         )
@@ -427,6 +443,14 @@ pub fn import_runtime_router() -> Router<ProxyState> {
         .route(
             "/api/llm/candidates/:candidate_id/reject",
             post(llm_candidate_reject_runtime_handler),
+        )
+        .route(
+            "/api/llm/analyze-transactions",
+            post(llm_analyze_transactions_runtime_handler),
+        )
+        .route(
+            "/api/llm/rule-synthesis",
+            post(llm_rule_synthesis_runtime_handler),
         )
         .route(
             "/api/ml/receipt-recognition/config",
@@ -1939,6 +1963,2044 @@ pub async fn import_learning_rule_delete_runtime_handler(
     }
 }
 
+pub async fn llm_preview_recommend_runtime_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let user_id_value = match user_id_i64_value(user_id) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let payload = match json_body_or_empty(&body) {
+        Ok(payload) => payload,
+        Err(response) => return route_response(response),
+    };
+    let object = match payload_object(&payload) {
+        Ok(object) => object,
+        Err(response) => return route_response(response),
+    };
+    let Some(session_id) = first_text_from_object(object, &["session_id", "sessionId"]) else {
+        return route_response(llm_contract_error_response(
+            "session_id is required",
+            "INVALID_REQUEST",
+            400,
+        ));
+    };
+    let limit = match llm_limit_from_object(object, 20, 20) {
+        Ok(limit) => limit,
+        Err(response) => return route_response(response),
+    };
+
+    let prepared = {
+        let mut runtime = match open_runtime(&state) {
+            Ok(runtime) => runtime,
+            Err(response) => return route_response(response),
+        };
+        if let Err(response) = init_import_runtime_schema(&runtime) {
+            return route_response(response);
+        }
+        if let Err(response) = init_llm_config_runtime_schema(&runtime) {
+            return route_response(response);
+        }
+        if let Err(response) = ensure_import_session_exists(&runtime, &session_id, user_id) {
+            return route_response(response);
+        }
+        if let Err(response) = validate_llm_preview_selection_limits(&payload, limit) {
+            return route_response(response);
+        }
+        let patches = match preview_patches_from_payload(&payload, limit) {
+            Ok(patches) => patches,
+            Err(response) => return route_response(response),
+        };
+        if !patches.is_empty() {
+            if let Err(error) =
+                update_preview_bills_batch(runtime.connection_mut(), &session_id, user_id, &patches)
+            {
+                return route_response(db_error_response(error));
+            }
+        }
+        let rows = match selected_preview_rows_for_llm(
+            runtime.connection(),
+            &payload,
+            &session_id,
+            user_id,
+            limit,
+        ) {
+            Ok(rows) => rows,
+            Err(response) => return route_response(response),
+        };
+        if rows.is_empty() {
+            return route_response(llm_contract_error_response(
+                "No preview rows selected",
+                "PREVIEW_SELECTION_EMPTY",
+                400,
+            ));
+        }
+        let config = match effective_llm_runtime_config(&state, &runtime, user_id_value) {
+            Ok(config) => config,
+            Err(response) => return route_response(response),
+        };
+        let provider = match llm_provider_context_from_config(&config) {
+            Ok(provider) => provider,
+            Err(response) => return route_response(response),
+        };
+        let categories = match load_existing_category_paths(runtime.connection(), user_id_value) {
+            Ok(categories) => categories,
+            Err(response) => return route_response(response),
+        };
+        let accounts = match load_existing_account_names(runtime.connection(), user_id_value) {
+            Ok(accounts) => accounts,
+            Err(response) => return route_response(response),
+        };
+        let account_ids = match load_account_id_map(runtime.connection(), user_id_value) {
+            Ok(accounts) => accounts,
+            Err(response) => return route_response(response),
+        };
+        let memory_context = match load_llm_memory_prompt_context(runtime.connection(), user_id) {
+            Ok(memory) => memory,
+            Err(response) => return route_response(response),
+        };
+        let transactions = rows
+            .iter()
+            .map(preview_row_prompt_value)
+            .collect::<Vec<_>>();
+        let prompt = build_llm_import_preview_recommendation_prompt(
+            &transactions,
+            &categories,
+            &accounts,
+            &memory_context,
+        );
+        LlmPreviewPrepared {
+            session_id,
+            provider,
+            prompt,
+            selected_preview_ids: rows.iter().map(|row| row.id).collect(),
+            account_ids,
+        }
+    };
+
+    if let Err(response) = reserve_llm_rate_limit(user_id_value, 1) {
+        return route_response(response);
+    }
+    let provider_response =
+        match execute_llm_provider_request(&state, &prepared.provider, &prepared.prompt).await {
+            Ok(response) => response,
+            Err(response) => return route_response(response),
+        };
+    let raw_suggestions = match parse_llm_json_array_response(&provider_response.content) {
+        Ok(values) => values,
+        Err(error) => {
+            return route_response(llm_contract_error_response(
+                &error,
+                "LLM_PROVIDER_UNAVAILABLE",
+                503,
+            ));
+        }
+    };
+    let selected_ids = prepared
+        .selected_preview_ids
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let mut runtime = match open_runtime(&state) {
+        Ok(runtime) => runtime,
+        Err(response) => return route_response(response),
+    };
+    if let Err(response) = init_import_runtime_schema(&runtime) {
+        return route_response(response);
+    }
+    let mut suggestions = Vec::new();
+    let mut seen_preview_ids = BTreeSet::new();
+    for value in raw_suggestions {
+        let preview_id = preview_id_from_llm_value(&value);
+        if preview_id <= 0
+            || !selected_ids.contains(&preview_id)
+            || !seen_preview_ids.insert(preview_id)
+        {
+            continue;
+        }
+        let suggestion_value = fill_llm_suggestion_account_ids(value, &prepared.account_ids);
+        let Some(suggestion) = llm_suggestion_from_value(&suggestion_value) else {
+            continue;
+        };
+        let result = match apply_preview_llm_recommendation(
+            runtime.connection_mut(),
+            bill_analyser_db::ImportPreviewLlmApplyRequest {
+                session_id: &prepared.session_id,
+                preview_id,
+                user_id,
+                suggestion: &suggestion,
+                prompt_text: Some(&prepared.prompt),
+                llm_provider: Some(&provider_response.provider),
+                llm_model: Some(&provider_response.model),
+            },
+        ) {
+            Ok(result) => result,
+            Err(error) => return route_response(db_error_response(error)),
+        };
+        if let Some(value) = llm_preview_recommendation_item(result, preview_id) {
+            suggestions.push(value);
+        }
+        if suggestions.len() >= selected_ids.len() {
+            break;
+        }
+    }
+    route_response(ImportV2RouteResponse {
+        status_code: 200,
+        body: bill_analyser_core::build_llm_preview_recommend_response(
+            &prepared.session_id,
+            suggestions,
+        ),
+    })
+}
+
+pub async fn llm_analyze_transactions_runtime_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let user_id_value = match user_id_i64_value(user_id) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let payload = match json_body_or_empty(&body) {
+        Ok(payload) => payload,
+        Err(response) => return route_response(response),
+    };
+    let object = match payload_object(&payload) {
+        Ok(object) => object,
+        Err(_) => {
+            return route_response(ImportV2RouteResponse {
+                status_code: 400,
+                body: json!({"success": false, "error": "Invalid request"}),
+            });
+        }
+    };
+    let limit = match llm_limit_from_object(object, 20, 20) {
+        Ok(limit) => limit,
+        Err(response) => return route_response(response),
+    };
+    let session_id = first_text_from_object(object, &["session_id", "sessionId"]);
+    let bill_ids = match limited_id_list_field_from_object(object, &["bill_ids", "billIds"], limit)
+    {
+        Ok(ids) => ids,
+        Err(response) => return route_response(response),
+    };
+
+    let prepared = {
+        let mut runtime = match open_runtime(&state) {
+            Ok(runtime) => runtime,
+            Err(response) => return route_response(response),
+        };
+        if let Err(response) = init_import_runtime_schema(&runtime) {
+            return route_response(response);
+        }
+        if let Err(response) = init_llm_config_runtime_schema(&runtime) {
+            return route_response(response);
+        }
+        let config = match effective_llm_runtime_config(&state, &runtime, user_id_value) {
+            Ok(config) => config,
+            Err(response) => return route_response(response),
+        };
+        let provider = match llm_provider_context_from_config(&config) {
+            Ok(provider) => provider,
+            Err(response) => return route_response(response),
+        };
+        if let Some(session_id) = session_id.as_deref() {
+            if let Err(response) = ensure_import_session_exists(&runtime, session_id, user_id) {
+                return route_response(response);
+            }
+            if let Err(response) = validate_llm_preview_selection_limits(&payload, limit) {
+                return route_response(response);
+            }
+            let patches = match preview_patches_from_payload(&payload, limit) {
+                Ok(patches) => patches,
+                Err(response) => return route_response(response),
+            };
+            if !patches.is_empty() {
+                if let Err(error) = update_preview_bills_batch(
+                    runtime.connection_mut(),
+                    session_id,
+                    user_id,
+                    &patches,
+                ) {
+                    return route_response(db_error_response(error));
+                }
+            }
+            let rows = match selected_preview_rows_for_llm(
+                runtime.connection(),
+                &payload,
+                session_id,
+                user_id,
+                limit,
+            ) {
+                Ok(rows) => rows,
+                Err(response) => return route_response(response),
+            };
+            let groups = match rule_induction_groups(rows) {
+                Ok(groups) => groups,
+                Err(response) => return route_response(response),
+            };
+            let template = llm_advanced_prompt_template(&config, "rule_prompt_template");
+            LlmAnalyzePrepared::ImportSession {
+                provider,
+                session_id: session_id.to_string(),
+                groups,
+                rule_prompt_template: template,
+            }
+        } else {
+            if let Err(response) = init_legacy_bills_runtime_schema(&runtime) {
+                return route_response(response);
+            }
+            let transactions = match load_persisted_bill_prompt_values(
+                runtime.connection(),
+                user_id_value,
+                bill_ids.as_deref(),
+                limit,
+            ) {
+                Ok(transactions) => transactions,
+                Err(response) => return route_response(response),
+            };
+            let template = llm_advanced_prompt_template(&config, "classification_prompt_template");
+            LlmAnalyzePrepared::Persisted {
+                provider,
+                transactions,
+                bill_ids,
+                classification_prompt_template: template,
+            }
+        }
+    };
+
+    let slots = prepared.provider_call_count();
+    if let Err(response) = reserve_llm_rate_limit(user_id_value, slots) {
+        return route_response(response);
+    }
+    let mut candidates = Vec::new();
+    match prepared {
+        LlmAnalyzePrepared::ImportSession {
+            provider,
+            session_id,
+            groups,
+            rule_prompt_template,
+        } => {
+            for group in groups {
+                let default_prompt =
+                    build_llm_rule_induction_prompt(&group.category_name, &group.transactions);
+                let prompt = render_llm_prompt_template(
+                    &rule_prompt_template,
+                    &default_prompt,
+                    &group.transactions,
+                    &group.category_name,
+                );
+                let provider_response =
+                    match execute_llm_provider_request(&state, &provider, &prompt).await {
+                        Ok(response) => response,
+                        Err(response) => return route_response(response),
+                    };
+                let parsed = match parse_llm_json_array_response(&provider_response.content) {
+                    Ok(values) => values,
+                    Err(error) => {
+                        return route_response(llm_contract_error_response(
+                            &error,
+                            "LLM_PROVIDER_UNAVAILABLE",
+                            503,
+                        ));
+                    }
+                };
+                let runtime = match open_runtime(&state) {
+                    Ok(runtime) => runtime,
+                    Err(response) => return route_response(response),
+                };
+                if let Err(response) = init_llm_config_runtime_schema(&runtime) {
+                    return route_response(response);
+                }
+                let mut seen_expressions = BTreeSet::new();
+                let mut group_candidate_count = 0usize;
+                for value in parsed {
+                    let expression = rule_expression_from_llm_value(&value);
+                    if !valid_rule_expression(&expression)
+                        || !seen_expressions.insert(expression.trim().to_string())
+                    {
+                        continue;
+                    }
+                    if match rule_candidate_duplicate(
+                        runtime.connection(),
+                        user_id_value,
+                        &group.main_category,
+                        &group.sub_category,
+                        &expression,
+                    ) {
+                        Ok(duplicate) => duplicate,
+                        Err(response) => return route_response(response),
+                    } {
+                        continue;
+                    }
+                    let candidate = match create_llm_candidate(
+                        runtime.connection(),
+                        &LlmCandidateDraft {
+                            user_id: user_id_value,
+                            candidate_type: "rule_induction".to_string(),
+                            source_bill_ids: group.source_ids.clone(),
+                            suggested_main_category: group.main_category.clone(),
+                            suggested_sub_category: group.sub_category.clone(),
+                            suggested_rule_expression: expression,
+                            confidence: confidence_from_value(&value),
+                            llm_provider: provider_response.provider.clone(),
+                            llm_model: provider_response.model.clone(),
+                            llm_response_raw: llm_candidate_raw_response(&value),
+                        },
+                    ) {
+                        Ok(candidate) => candidate,
+                        Err(error) => return route_response(db_error_response(error)),
+                    };
+                    candidates.push(candidate);
+                    group_candidate_count += 1;
+                    if group_candidate_count >= LLM_RULE_INDUCTION_MAX_CANDIDATES_PER_GROUP {
+                        break;
+                    }
+                }
+            }
+            route_response(ImportV2RouteResponse {
+                status_code: 200,
+                body: bill_analyser_core::build_llm_analysis_response(
+                    candidates,
+                    &json!({"session_id": session_id}),
+                ),
+            })
+        }
+        LlmAnalyzePrepared::Persisted {
+            provider,
+            transactions,
+            bill_ids,
+            classification_prompt_template,
+        } => {
+            if transactions.is_empty() {
+                return route_response(ImportV2RouteResponse {
+                    status_code: 200,
+                    body: bill_analyser_core::build_llm_analysis_response(
+                        Vec::new(),
+                        &json!({"bill_ids": bill_ids}),
+                    ),
+                });
+            }
+            let default_prompt = build_llm_classification_prompt(&transactions);
+            let prompt = render_llm_prompt_template(
+                &classification_prompt_template,
+                &default_prompt,
+                &transactions,
+                "",
+            );
+            let provider_response =
+                match execute_llm_provider_request(&state, &provider, &prompt).await {
+                    Ok(response) => response,
+                    Err(response) => return route_response(response),
+                };
+            let parsed = match parse_llm_json_array_response(&provider_response.content) {
+                Ok(values) => values,
+                Err(error) => {
+                    return route_response(llm_contract_error_response(
+                        &error,
+                        "LLM_PROVIDER_UNAVAILABLE",
+                        503,
+                    ));
+                }
+            };
+            let selected_ids = transactions
+                .iter()
+                .filter_map(|value| value.get("id").and_then(Value::as_i64))
+                .collect::<BTreeSet<_>>();
+            let runtime = match open_runtime(&state) {
+                Ok(runtime) => runtime,
+                Err(response) => return route_response(response),
+            };
+            if let Err(response) = init_llm_config_runtime_schema(&runtime) {
+                return route_response(response);
+            }
+            let mut seen_bill_ids = BTreeSet::new();
+            for value in parsed {
+                let bill_id = value
+                    .as_object()
+                    .and_then(|object| first_value(object, &["bill_id", "billId", "id"]))
+                    .and_then(value_to_i64)
+                    .unwrap_or_default();
+                if bill_id <= 0
+                    || !selected_ids.contains(&bill_id)
+                    || !seen_bill_ids.insert(bill_id)
+                {
+                    continue;
+                }
+                let candidate = match create_llm_candidate(
+                    runtime.connection(),
+                    &LlmCandidateDraft {
+                        user_id: user_id_value,
+                        candidate_type: "classification".to_string(),
+                        source_bill_ids: vec![bill_id],
+                        suggested_main_category: main_category_from_llm_value(&value),
+                        suggested_sub_category: sub_category_from_llm_value(&value),
+                        suggested_rule_expression: String::new(),
+                        confidence: confidence_from_value(&value),
+                        llm_provider: provider_response.provider.clone(),
+                        llm_model: provider_response.model.clone(),
+                        llm_response_raw: llm_candidate_raw_response(&value),
+                    },
+                ) {
+                    Ok(candidate) => candidate,
+                    Err(error) => return route_response(db_error_response(error)),
+                };
+                candidates.push(candidate);
+                if candidates.len() >= selected_ids.len() {
+                    break;
+                }
+            }
+            route_response(ImportV2RouteResponse {
+                status_code: 200,
+                body: bill_analyser_core::build_llm_analysis_response(
+                    candidates,
+                    &json!({"bill_ids": bill_ids}),
+                ),
+            })
+        }
+    }
+}
+
+pub async fn llm_rule_synthesis_runtime_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let user_id_value = match user_id_i64_value(user_id) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let payload = match json_body_or_empty(&body) {
+        Ok(payload) => payload,
+        Err(response) => return route_response(response),
+    };
+    let object = match payload_object(&payload) {
+        Ok(object) => object,
+        Err(_) => {
+            return route_response(ImportV2RouteResponse {
+                status_code: 400,
+                body: json!({"success": false, "error": "Invalid request"}),
+            });
+        }
+    };
+    let limit = match llm_limit_from_object(object, 8, 20) {
+        Ok(limit) => limit,
+        Err(response) => return route_response(response),
+    };
+    let prepared = {
+        let runtime = match open_runtime(&state) {
+            Ok(runtime) => runtime,
+            Err(response) => return route_response(response),
+        };
+        if let Err(response) = init_import_runtime_schema(&runtime) {
+            return route_response(response);
+        }
+        if let Err(response) = init_global_learning_runtime_schema(&runtime) {
+            return route_response(response);
+        }
+        if let Err(response) = init_llm_config_runtime_schema(&runtime) {
+            return route_response(response);
+        }
+        let categories = match load_existing_category_values(runtime.connection(), user_id_value) {
+            Ok(categories) => categories,
+            Err(response) => return route_response(response),
+        };
+        let knowledge_pack =
+            match build_rule_synthesis_knowledge_pack(runtime.connection(), user_id, &categories) {
+                Ok(pack) => pack,
+                Err(response) => return route_response(response),
+            };
+        if categories.is_empty() || !rule_synthesis_has_learning_evidence(&knowledge_pack) {
+            return route_response(rule_synthesis_empty_response(knowledge_pack));
+        }
+        let config = match effective_llm_runtime_config(&state, &runtime, user_id_value) {
+            Ok(config) => config,
+            Err(response) => return route_response(response),
+        };
+        let provider = match llm_provider_context_from_config(&config) {
+            Ok(provider) => provider,
+            Err(response) => return route_response(response),
+        };
+        LlmRuleSynthesisPrepared {
+            provider,
+            knowledge_pack,
+            categories,
+            limit,
+        }
+    };
+    if let Err(response) = reserve_llm_rate_limit(user_id_value, 1) {
+        return route_response(response);
+    }
+    let prompt =
+        build_llm_rule_expression_synthesis_prompt(&prepared.knowledge_pack, prepared.limit);
+    let provider_response =
+        match execute_llm_provider_request(&state, &prepared.provider, &prompt).await {
+            Ok(response) => response,
+            Err(response) => return route_response(response),
+        };
+    let parsed = match parse_llm_json_array_response(&provider_response.content) {
+        Ok(values) => values,
+        Err(error) => {
+            return route_response(llm_contract_error_response(
+                &error,
+                "LLM_PROVIDER_UNAVAILABLE",
+                503,
+            ));
+        }
+    };
+    let category_paths = prepared
+        .categories
+        .iter()
+        .filter_map(|value| value.get("path").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>();
+    let runtime = match open_runtime(&state) {
+        Ok(runtime) => runtime,
+        Err(response) => return route_response(response),
+    };
+    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
+        return route_response(response);
+    }
+    let mut candidates = Vec::new();
+    for value in parsed {
+        let main_category = main_category_from_llm_value(&value);
+        let sub_category = sub_category_from_llm_value(&value);
+        let category_path = category_path(&main_category, &sub_category);
+        if !category_paths.contains(&category_path) {
+            continue;
+        }
+        let expression = rule_expression_from_llm_value(&value);
+        if !valid_rule_expression(&expression) {
+            continue;
+        }
+        if match rule_candidate_duplicate(
+            runtime.connection(),
+            user_id_value,
+            &main_category,
+            &sub_category,
+            &expression,
+        ) {
+            Ok(duplicate) => duplicate,
+            Err(response) => return route_response(response),
+        } {
+            continue;
+        }
+        let candidate = match create_llm_candidate(
+            runtime.connection(),
+            &LlmCandidateDraft {
+                user_id: user_id_value,
+                candidate_type: "rule_synthesis".to_string(),
+                source_bill_ids: Vec::new(),
+                suggested_main_category: main_category,
+                suggested_sub_category: sub_category,
+                suggested_rule_expression: expression,
+                confidence: confidence_from_value(&value),
+                llm_provider: provider_response.provider.clone(),
+                llm_model: provider_response.model.clone(),
+                llm_response_raw: llm_candidate_raw_response(&value),
+            },
+        ) {
+            Ok(candidate) => candidate,
+            Err(error) => return route_response(db_error_response(error)),
+        };
+        candidates.push(candidate);
+        if candidates.len() >= prepared.limit {
+            break;
+        }
+    }
+    route_response(ImportV2RouteResponse {
+        status_code: 200,
+        body: json!({
+            "success": true,
+            "data": {
+                "mode": "rule_synthesis",
+                "knowledge_summary_pack": prepared.knowledge_pack,
+                "candidates_created": candidates.len(),
+                "candidates": candidates,
+            },
+            "total": candidates.len(),
+        }),
+    })
+}
+
+#[derive(Debug, Clone)]
+struct LlmProviderRequestContext {
+    config: LlmProviderConfigContract,
+    api_key: String,
+    system_prompt: String,
+    temperature: f64,
+    max_tokens: i64,
+    reasoning_depth: String,
+}
+
+#[derive(Debug, Clone)]
+struct LlmProviderRuntimeResponse {
+    content: String,
+    model: String,
+    provider: String,
+}
+
+#[derive(Debug)]
+struct LlmPreviewPrepared {
+    session_id: String,
+    provider: LlmProviderRequestContext,
+    prompt: String,
+    selected_preview_ids: Vec<i64>,
+    account_ids: BTreeMap<String, i64>,
+}
+
+#[derive(Debug, Clone)]
+struct RuleInductionGroup {
+    category_name: String,
+    main_category: String,
+    sub_category: String,
+    source_ids: Vec<i64>,
+    transactions: Vec<Value>,
+}
+
+#[derive(Debug)]
+enum LlmAnalyzePrepared {
+    ImportSession {
+        provider: LlmProviderRequestContext,
+        session_id: String,
+        groups: Vec<RuleInductionGroup>,
+        rule_prompt_template: String,
+    },
+    Persisted {
+        provider: LlmProviderRequestContext,
+        transactions: Vec<Value>,
+        bill_ids: Option<Vec<i64>>,
+        classification_prompt_template: String,
+    },
+}
+
+impl LlmAnalyzePrepared {
+    fn provider_call_count(&self) -> usize {
+        match self {
+            Self::ImportSession { groups, .. } => groups.len(),
+            Self::Persisted { transactions, .. } => usize::from(!transactions.is_empty()),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct LlmRuleSynthesisPrepared {
+    provider: LlmProviderRequestContext,
+    knowledge_pack: Value,
+    categories: Vec<Value>,
+    limit: usize,
+}
+
+fn llm_contract_error_response(
+    message: &str,
+    code: &str,
+    status_code: u16,
+) -> ImportV2RouteResponse {
+    let response = build_llm_contract_error_response(message, code, status_code);
+    ImportV2RouteResponse {
+        status_code: response.status_code,
+        body: response.body,
+    }
+}
+
+fn rule_synthesis_empty_response(knowledge_pack: Value) -> ImportV2RouteResponse {
+    ImportV2RouteResponse {
+        status_code: 200,
+        body: json!({
+            "success": true,
+            "data": {
+                "mode": "rule_synthesis",
+                "knowledge_summary_pack": knowledge_pack,
+                "candidates_created": 0,
+                "candidates": [],
+            },
+            "total": 0,
+        }),
+    }
+}
+
+fn rule_synthesis_has_learning_evidence(knowledge_pack: &Value) -> bool {
+    knowledge_pack
+        .get("categories")
+        .and_then(Value::as_array)
+        .is_some_and(|values| !values.is_empty())
+}
+
+fn llm_limit_from_object(
+    object: &Map<String, Value>,
+    default_limit: usize,
+    max_limit: usize,
+) -> Result<usize, ImportV2RouteResponse> {
+    let raw_limit = first_value(object, &["limit"])
+        .and_then(value_to_i64)
+        .unwrap_or(i64::try_from(default_limit).unwrap_or(i64::MAX));
+    if raw_limit <= 0 {
+        return Err(llm_contract_error_response(
+            "limit must be a positive integer",
+            "INVALID_REQUEST",
+            400,
+        ));
+    }
+    let limit = usize::try_from(raw_limit).unwrap_or(usize::MAX);
+    if limit > max_limit {
+        return Err(llm_contract_error_response(
+            &format!("limit cannot exceed {max_limit}"),
+            "INVALID_REQUEST",
+            400,
+        ));
+    }
+    Ok(limit)
+}
+
+fn ensure_import_session_exists(
+    runtime: &SqliteRuntime,
+    session_id: &str,
+    user_id: UserId,
+) -> Result<(), ImportV2RouteResponse> {
+    match get_import_session(runtime.connection(), session_id, user_id) {
+        Ok(Some(_)) => Ok(()),
+        Ok(None) => Err(llm_contract_error_response(
+            "Import session not found",
+            "IMPORT_SESSION_NOT_FOUND",
+            404,
+        )),
+        Err(error) => Err(db_error_response(error)),
+    }
+}
+
+fn effective_llm_runtime_config(
+    state: &ProxyState,
+    runtime: &SqliteRuntime,
+    user_id: i64,
+) -> Result<Value, ImportV2RouteResponse> {
+    let config = state
+        .get_llm_runtime_config(user_id)
+        .map(Ok)
+        .unwrap_or_else(|| effective_llm_config_from_saved(runtime.connection(), user_id))
+        .map_err(db_error_response)?;
+    if !config
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Err(llm_contract_error_response(
+            "LLM service is not enabled",
+            "LLM_DISABLED",
+            400,
+        ));
+    }
+    Ok(config)
+}
+
+fn llm_provider_context_from_config(
+    config: &Value,
+) -> Result<LlmProviderRequestContext, ImportV2RouteResponse> {
+    let copied = copy_runtime_llm_config(config);
+    let object = copied.as_object();
+    let provider = object
+        .and_then(|item| item.get("provider"))
+        .and_then(Value::as_str)
+        .unwrap_or("openai");
+    let provider_config = object
+        .and_then(|item| item.get("provider_config"))
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let provider_contract = build_llm_provider_config(provider, Some(&provider_config))
+        .map_err(|error| llm_contract_error_response(&error, "INVALID_REQUEST", 400))?;
+    let provider_object = provider_config.as_object();
+    let api_key = provider_object
+        .and_then(|item| item.get("api_key"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let advanced = object
+        .and_then(|item| item.get("advanced_settings"))
+        .and_then(Value::as_object);
+    let system_prompt = advanced
+        .and_then(|item| item.get("system_prompt"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(LLM_SYSTEM_PROMPT)
+        .to_string();
+    let temperature = advanced
+        .and_then(|item| item.get("temperature"))
+        .and_then(value_to_f64)
+        .unwrap_or(0.3);
+    let max_tokens = advanced
+        .and_then(|item| item.get("max_tokens"))
+        .and_then(value_to_i64)
+        .unwrap_or(2048);
+    let reasoning_depth = advanced
+        .and_then(|item| item.get("reasoning_depth"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    Ok(LlmProviderRequestContext {
+        config: provider_contract,
+        api_key,
+        system_prompt,
+        temperature,
+        max_tokens,
+        reasoning_depth,
+    })
+}
+
+async fn execute_llm_provider_request(
+    state: &ProxyState,
+    context: &LlmProviderRequestContext,
+    prompt: &str,
+) -> Result<LlmProviderRuntimeResponse, ImportV2RouteResponse> {
+    let client = reqwest::Client::builder()
+        .timeout(state.config.timeout)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| {
+            llm_contract_error_response("LLM provider unavailable", "LLM_PROVIDER_UNAVAILABLE", 503)
+        })?;
+    let (url, headers, payload) = llm_provider_http_request(context, prompt);
+    let mut last_error = String::new();
+    for attempt in 0..3 {
+        let mut request = client.post(&url);
+        for (key, value) in &headers {
+            request = request.header(*key, value);
+        }
+        let response = request.body(payload.to_string()).send().await;
+        match response {
+            Ok(response) => {
+                let status = response.status();
+                if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                    return Err(llm_contract_error_response(
+                        "Rate limit exceeded",
+                        "LLM_RATE_LIMITED",
+                        429,
+                    ));
+                }
+                if status.is_success() {
+                    let raw_text = read_limited_llm_provider_body(response).await?;
+                    let raw_response = serde_json::from_str::<Value>(&raw_text).map_err(|_| {
+                        llm_contract_error_response(
+                            "LLM provider returned invalid JSON",
+                            "LLM_PROVIDER_UNAVAILABLE",
+                            503,
+                        )
+                    })?;
+                    return llm_provider_runtime_response(context, raw_response);
+                }
+                last_error = format!("provider status {}", status.as_u16());
+                if !status.is_server_error() || attempt == 2 {
+                    break;
+                }
+            }
+            Err(error) => {
+                last_error = if error.is_timeout() {
+                    "provider timeout".to_string()
+                } else {
+                    "provider request failed".to_string()
+                };
+                if attempt == 2 {
+                    break;
+                }
+            }
+        }
+        sleep(StdDuration::from_millis(
+            50 * u64::try_from(attempt + 1).unwrap_or(1),
+        ))
+        .await;
+    }
+    Err(llm_contract_error_response(
+        &format!("LLM provider unavailable: {last_error}"),
+        "LLM_PROVIDER_UNAVAILABLE",
+        503,
+    ))
+}
+
+async fn read_limited_llm_provider_body(
+    mut response: reqwest::Response,
+) -> Result<String, ImportV2RouteResponse> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > LLM_PROVIDER_RESPONSE_MAX_BYTES as u64)
+    {
+        return Err(llm_contract_error_response(
+            "LLM provider response is too large",
+            "LLM_PROVIDER_UNAVAILABLE",
+            503,
+        ));
+    }
+    let mut bytes = BytesMut::new();
+    while let Some(chunk) = response.chunk().await.map_err(|_| {
+        llm_contract_error_response(
+            "LLM provider returned invalid response",
+            "LLM_PROVIDER_UNAVAILABLE",
+            503,
+        )
+    })? {
+        if bytes.len().saturating_add(chunk.len()) > LLM_PROVIDER_RESPONSE_MAX_BYTES {
+            return Err(llm_contract_error_response(
+                "LLM provider response is too large",
+                "LLM_PROVIDER_UNAVAILABLE",
+                503,
+            ));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    String::from_utf8(bytes.to_vec()).map_err(|_| {
+        llm_contract_error_response(
+            "LLM provider returned invalid JSON",
+            "LLM_PROVIDER_UNAVAILABLE",
+            503,
+        )
+    })
+}
+
+fn llm_provider_http_request(
+    context: &LlmProviderRequestContext,
+    prompt: &str,
+) -> (String, Vec<(&'static str, String)>, Value) {
+    let base_url = context.config.base_url.trim_end_matches('/');
+    match context.config.provider_kind.as_str() {
+        "claude" => {
+            let mut payload = json!({
+                "model": context.config.model,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": context.max_tokens,
+                "temperature": context.temperature,
+            });
+            if !context.system_prompt.trim().is_empty() {
+                payload["system"] = json!(context.system_prompt);
+            }
+            (
+                format!("{base_url}/messages"),
+                vec![
+                    ("x-api-key", context.api_key.clone()),
+                    ("anthropic-version", "2023-06-01".to_string()),
+                    ("content-type", "application/json".to_string()),
+                ],
+                payload,
+            )
+        }
+        "ollama" => {
+            let mut payload = json!({
+                "model": context.config.model,
+                "prompt": prompt,
+                "stream": false,
+                "options": {
+                    "temperature": context.temperature,
+                    "num_predict": context.max_tokens,
+                },
+            });
+            if !context.system_prompt.trim().is_empty() {
+                payload["system"] = json!(context.system_prompt);
+            }
+            (
+                format!("{base_url}/api/generate"),
+                vec![("content-type", "application/json".to_string())],
+                payload,
+            )
+        }
+        _ => {
+            let mut messages = Vec::new();
+            if !context.system_prompt.trim().is_empty() {
+                messages.push(json!({"role": "system", "content": context.system_prompt}));
+            }
+            messages.push(json!({"role": "user", "content": prompt}));
+            let mut payload = json!({
+                "model": context.config.model,
+                "messages": messages,
+                "temperature": context.temperature,
+                "max_tokens": context.max_tokens,
+            });
+            if !context.reasoning_depth.trim().is_empty()
+                && matches!(context.config.provider_name.as_str(), "openai" | "azure")
+            {
+                payload["reasoning_effort"] = json!(context.reasoning_depth);
+            }
+            (
+                format!("{base_url}/chat/completions"),
+                vec![
+                    ("authorization", format!("Bearer {}", context.api_key)),
+                    ("content-type", "application/json".to_string()),
+                ],
+                payload,
+            )
+        }
+    }
+}
+
+fn llm_provider_runtime_response(
+    context: &LlmProviderRequestContext,
+    raw_response: Value,
+) -> Result<LlmProviderRuntimeResponse, ImportV2RouteResponse> {
+    let content = match context.config.provider_kind.as_str() {
+        "claude" => raw_response
+            .get("content")
+            .and_then(Value::as_array)
+            .map(|blocks| {
+                blocks
+                    .iter()
+                    .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+                    .filter_map(|block| block.get("text").and_then(Value::as_str))
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .unwrap_or_default(),
+        "ollama" => raw_response
+            .get("response")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        _ => raw_response
+            .get("choices")
+            .and_then(Value::as_array)
+            .and_then(|choices| choices.first())
+            .and_then(|choice| choice.get("message"))
+            .and_then(|message| message.get("content"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+    };
+    if content.trim().is_empty() {
+        return Err(llm_contract_error_response(
+            "LLM provider returned empty content",
+            "LLM_PROVIDER_UNAVAILABLE",
+            503,
+        ));
+    }
+    Ok(LlmProviderRuntimeResponse {
+        content,
+        model: context.config.model.clone(),
+        provider: context.config.provider_name.clone(),
+    })
+}
+
+fn reserve_llm_rate_limit(user_id: i64, slots: usize) -> Result<(), ImportV2RouteResponse> {
+    if slots == 0 {
+        return Ok(());
+    }
+    let buckets = LLM_RATE_LIMIT_BUCKETS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut buckets = buckets.lock().map_err(|_| {
+        llm_contract_error_response("Rate limit state unavailable", "LLM_RATE_LIMITED", 429)
+    })?;
+    let now = Instant::now();
+    let bucket = buckets.entry(user_id).or_default();
+    bucket.retain(|instant| now.duration_since(*instant) < StdDuration::from_secs(60));
+    if bucket.len().saturating_add(slots) > 10 {
+        return Err(llm_contract_error_response(
+            "Rate limit exceeded: max 10 calls per 60s",
+            "LLM_RATE_LIMITED",
+            429,
+        ));
+    }
+    for _ in 0..slots {
+        bucket.push_back(now);
+    }
+    Ok(())
+}
+
+fn preview_patches_from_payload(
+    payload: &Value,
+    limit: usize,
+) -> Result<Vec<ImportPreviewPatch>, ImportV2RouteResponse> {
+    limited_preview_update_items_from_payload(payload, limit)?
+        .into_iter()
+        .map(|object| {
+            let preview_id = preview_id_from_payload(object)?;
+            Ok(build_preview_patch_from_payload(preview_id, object))
+        })
+        .collect()
+}
+
+fn selected_preview_rows_for_llm(
+    connection: &Connection,
+    payload: &Value,
+    session_id: &str,
+    user_id: UserId,
+    limit: usize,
+) -> Result<Vec<ImportPreviewRow>, ImportV2RouteResponse> {
+    let object = payload_object(payload)?;
+    let preview_ids =
+        limited_id_list_field_from_object(object, &["preview_ids", "previewIds"], limit)?;
+    let mut seen_update_ids = BTreeSet::new();
+    let update_ids = limited_preview_update_items_from_payload(payload, limit)?
+        .into_iter()
+        .filter_map(|item| preview_id_from_payload(item).ok())
+        .filter(|id| *id > 0 && seen_update_ids.insert(*id))
+        .collect::<Vec<_>>();
+    let mut rows = if let Some(preview_ids) = preview_ids {
+        if preview_ids.is_empty() {
+            return Err(llm_contract_error_response(
+                "No preview rows selected",
+                "PREVIEW_SELECTION_EMPTY",
+                400,
+            ));
+        }
+        load_preview_rows_by_ids(connection, session_id, user_id, &preview_ids)?
+    } else if !update_ids.is_empty() {
+        load_preview_rows_by_ids(connection, session_id, user_id, &update_ids)?
+    } else {
+        get_preview_by_session(connection, session_id, user_id, true).map_err(db_error_response)?
+    };
+    rows.truncate(limit);
+    Ok(rows)
+}
+
+fn validate_llm_preview_selection_limits(
+    payload: &Value,
+    limit: usize,
+) -> Result<(), ImportV2RouteResponse> {
+    let object = payload_object(payload)?;
+    let _ = limited_id_list_field_from_object(object, &["preview_ids", "previewIds"], limit)?;
+    let _ = limited_preview_update_items_from_payload(payload, limit)?;
+    Ok(())
+}
+
+fn load_preview_rows_by_ids(
+    connection: &Connection,
+    session_id: &str,
+    user_id: UserId,
+    preview_ids: &[i64],
+) -> Result<Vec<ImportPreviewRow>, ImportV2RouteResponse> {
+    let mut rows = Vec::new();
+    for preview_id in preview_ids.iter().copied().filter(|value| *value > 0) {
+        if let Some(row) =
+            get_preview_bill_by_id(connection, preview_id, user_id).map_err(db_error_response)?
+        {
+            if row.session_id == session_id {
+                rows.push(row);
+            }
+        }
+    }
+    Ok(rows)
+}
+
+fn preview_row_prompt_value(row: &ImportPreviewRow) -> Value {
+    json!({
+        "id": row.id,
+        "date": row.preview_date,
+        "amount": row.preview_amount,
+        "type": row.preview_type,
+        "counterparty": row.preview_counterparty,
+        "description": row.preview_description,
+        "payment_method": row.preview_payment_method,
+        "main_category": row.preview_main_category,
+        "sub_category": row.preview_sub_category,
+    })
+}
+
+fn load_llm_memory_prompt_context(
+    connection: &Connection,
+    user_id: UserId,
+) -> Result<Vec<Value>, ImportV2RouteResponse> {
+    let events = get_llm_memory_events(connection, user_id, None, Some("feedback"), 20, 0)
+        .map_err(db_error_response)?;
+    Ok(events
+        .into_iter()
+        .map(|event| {
+            let description_hint = event
+                .metadata
+                .as_ref()
+                .and_then(|metadata| {
+                    metadata
+                        .get("description")
+                        .or_else(|| metadata.get("counterparty"))
+                })
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            json!({
+                "decision": event.decision.unwrap_or_default(),
+                "suggested_main_category": event.suggested_main_category.unwrap_or_default(),
+                "suggested_sub_category": event.suggested_sub_category.unwrap_or_default(),
+                "description_hint": description_hint,
+            })
+        })
+        .collect())
+}
+
+fn load_existing_category_paths(
+    connection: &Connection,
+    user_id: i64,
+) -> Result<Vec<String>, ImportV2RouteResponse> {
+    Ok(load_existing_category_values(connection, user_id)?
+        .into_iter()
+        .filter_map(|value| {
+            value
+                .get("path")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .collect())
+}
+
+fn load_existing_category_values(
+    connection: &Connection,
+    user_id: i64,
+) -> Result<Vec<Value>, ImportV2RouteResponse> {
+    if !table_exists(connection, "categories")? {
+        return Ok(Vec::new());
+    }
+    let mut statement = connection
+        .prepare(
+            "SELECT id, main_category, sub_category FROM categories WHERE user_id = ?1 ORDER BY id ASC",
+        )
+        .map_err(db_error_response)?;
+    let rows = statement
+        .query_map(params![user_id], |row| {
+            let id = row.get::<_, i64>(0)?;
+            let main_category = row.get::<_, Option<String>>(1)?.unwrap_or_default();
+            let sub_category = row.get::<_, Option<String>>(2)?.unwrap_or_default();
+            Ok(json!({
+                "id": id,
+                "main_category": main_category,
+                "sub_category": sub_category,
+                "path": category_path(&main_category, &sub_category),
+            }))
+        })
+        .map_err(db_error_response)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(db_error_response)
+}
+
+fn load_existing_account_names(
+    connection: &Connection,
+    user_id: i64,
+) -> Result<Vec<String>, ImportV2RouteResponse> {
+    Ok(load_account_id_map(connection, user_id)?
+        .into_keys()
+        .collect::<Vec<_>>())
+}
+
+fn load_account_id_map(
+    connection: &Connection,
+    user_id: i64,
+) -> Result<BTreeMap<String, i64>, ImportV2RouteResponse> {
+    if !table_exists(connection, "accounts")? {
+        return Ok(BTreeMap::new());
+    }
+    let mut statement = connection
+        .prepare("SELECT id, name FROM accounts WHERE user_id = ?1 ORDER BY id ASC")
+        .map_err(db_error_response)?;
+    let rows = statement
+        .query_map(params![user_id], |row| {
+            Ok((
+                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                row.get::<_, i64>(0)?,
+            ))
+        })
+        .map_err(db_error_response)?;
+    let mut accounts = BTreeMap::new();
+    for row in rows {
+        let (name, id) = row.map_err(db_error_response)?;
+        if !name.trim().is_empty() {
+            accounts.insert(name, id);
+        }
+    }
+    Ok(accounts)
+}
+
+fn fill_llm_suggestion_account_ids(value: Value, account_ids: &BTreeMap<String, i64>) -> Value {
+    let Some(mut object) = value.as_object().cloned() else {
+        return value;
+    };
+    for key in [
+        "resolved_source_account_id",
+        "resolvedSourceAccountId",
+        "sourceAccountId",
+        "source_account_id",
+        "resolved_destination_account_id",
+        "resolvedDestinationAccountId",
+        "destinationAccountId",
+        "destination_account_id",
+    ] {
+        object.remove(key);
+    }
+    for (name_keys, id_key) in [
+        (
+            &[
+                "suggested_source_account",
+                "suggestedSourceAccount",
+                "sourceAccount",
+                "source_account",
+            ][..],
+            "resolved_source_account_id",
+        ),
+        (
+            &[
+                "suggested_destination_account",
+                "suggestedDestinationAccount",
+                "destinationAccount",
+                "destination_account",
+            ][..],
+            "resolved_destination_account_id",
+        ),
+    ] {
+        if let Some(account_name) = first_value(&object, name_keys).and_then(value_to_text) {
+            if let Some(account_id) = account_ids.get(account_name.trim()) {
+                object.insert(id_key.to_string(), json!(account_id));
+            }
+        }
+    }
+    Value::Object(object)
+}
+
+fn llm_preview_recommendation_item(
+    result: ImportPreviewLlmDecisionResult,
+    preview_id: i64,
+) -> Option<Value> {
+    let preview = result.preview?;
+    let llm_payload = preview
+        .preview_matching_feedback
+        .get("llm")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    Some(json!({
+        "preview_id": preview_id,
+        "preview": preview_row_to_value(preview),
+        "matching": {"llm": llm_payload},
+        "event_id": result.event_id,
+        "applied_fields": result.applied_fields,
+    }))
+}
+
+fn rule_induction_groups(
+    rows: Vec<ImportPreviewRow>,
+) -> Result<Vec<RuleInductionGroup>, ImportV2RouteResponse> {
+    let mut groups: BTreeMap<(String, String), Vec<ImportPreviewRow>> = BTreeMap::new();
+    for row in rows {
+        if row.preview_main_category.trim().is_empty() && row.preview_sub_category.trim().is_empty()
+        {
+            continue;
+        }
+        if row.preview_counterparty.trim().is_empty()
+            && row.preview_description.trim().is_empty()
+            && row.preview_payment_method.trim().is_empty()
+        {
+            continue;
+        }
+        groups
+            .entry((
+                row.preview_main_category.trim().to_string(),
+                row.preview_sub_category.trim().to_string(),
+            ))
+            .or_default()
+            .push(row);
+    }
+    if groups.is_empty() {
+        return Err(llm_contract_error_response(
+            "Selected preview rows do not contain enough categorized evidence",
+            "PREVIEW_SELECTION_INSUFFICIENT",
+            422,
+        ));
+    }
+    if groups.len() > 10 {
+        return Err(llm_contract_error_response(
+            "Selected preview rows contain too many category groups",
+            "PREVIEW_SELECTION_TOO_LARGE",
+            422,
+        ));
+    }
+    Ok(groups
+        .into_iter()
+        .map(|((main_category, sub_category), rows)| {
+            let category_name = category_path(&main_category, &sub_category);
+            RuleInductionGroup {
+                category_name,
+                main_category,
+                sub_category,
+                source_ids: rows.iter().map(|row| row.id).collect(),
+                transactions: rows.iter().map(preview_row_prompt_value).collect(),
+            }
+        })
+        .collect())
+}
+
+fn load_persisted_bill_prompt_values(
+    connection: &Connection,
+    user_id: i64,
+    bill_ids: Option<&[i64]>,
+    limit: usize,
+) -> Result<Vec<Value>, ImportV2RouteResponse> {
+    if let Some(bill_ids) = bill_ids {
+        let mut seen_ids = BTreeSet::new();
+        let bill_ids = bill_ids
+            .iter()
+            .copied()
+            .filter(|value| *value > 0)
+            .filter(|value| seen_ids.insert(*value))
+            .take(limit)
+            .collect::<Vec<_>>();
+        if bill_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = std::iter::repeat_n("?", bill_ids.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut values = vec![rusqlite::types::Value::Integer(user_id)];
+        values.extend(
+            bill_ids
+                .iter()
+                .copied()
+                .map(rusqlite::types::Value::Integer),
+        );
+        let sql = format!(
+            "SELECT id, date, amount, counterparty, description, payment_method FROM bills \
+             WHERE user_id = ? AND id IN ({placeholders}) ORDER BY date DESC, id DESC"
+        );
+        return query_bill_prompt_values(connection, &sql, values, limit);
+    }
+    query_bill_prompt_values(
+        connection,
+        "SELECT id, date, amount, counterparty, description, payment_method FROM bills \
+         WHERE user_id = ?1 AND (main_category IS NULL OR TRIM(main_category) = '' OR main_category = '未分类') \
+         ORDER BY date DESC, id DESC LIMIT ?2",
+        vec![
+            rusqlite::types::Value::Integer(user_id),
+            rusqlite::types::Value::Integer(usize_to_i64(limit)),
+        ],
+        limit,
+    )
+}
+
+fn query_bill_prompt_values(
+    connection: &Connection,
+    sql: &str,
+    values: Vec<rusqlite::types::Value>,
+    limit: usize,
+) -> Result<Vec<Value>, ImportV2RouteResponse> {
+    let mut statement = connection.prepare(sql).map_err(db_error_response)?;
+    let rows = statement
+        .query_map(rusqlite::params_from_iter(values), |row| {
+            Ok(json!({
+                "id": row.get::<_, i64>(0)?,
+                "date": row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                "amount": row.get::<_, Option<f64>>(2)?.unwrap_or_default(),
+                "counterparty": row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                "description": row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                "payment_method": row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+            }))
+        })
+        .map_err(db_error_response)?;
+    let mut items = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(db_error_response)?;
+    items.truncate(limit);
+    Ok(items)
+}
+
+fn build_rule_synthesis_knowledge_pack(
+    connection: &Connection,
+    user_id: UserId,
+    categories: &[Value],
+) -> Result<Value, ImportV2RouteResponse> {
+    let rules = load_import_learning_rules(connection, user_id, Some(true), 50, 0)?;
+    let suggestions = load_learning_suggestions(connection, user_id, None, 50, 0)?
+        .into_iter()
+        .filter(|suggestion| {
+            suggestion
+                .get("status")
+                .and_then(Value::as_str)
+                .is_none_or(|status| status != "rejected")
+        })
+        .collect::<Vec<_>>();
+    let concept_stats = load_learning_concept_stats(connection, user_id_i64_value(user_id)?)?;
+    let concept_stats_by_key = concept_stats
+        .iter()
+        .filter_map(|stats| {
+            stats
+                .get("concept_key")
+                .and_then(Value::as_str)
+                .map(|key| (key.to_string(), stats.clone()))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let category_paths_by_id = categories
+        .iter()
+        .filter_map(|category| {
+            Some((
+                category.get("id").and_then(value_to_i64)?,
+                category.get("path").and_then(Value::as_str)?.to_string(),
+            ))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut existing_category_paths = category_paths_by_id.values().cloned().collect::<Vec<_>>();
+    existing_category_paths.sort();
+    let mut category_bundles: BTreeMap<String, RuleSynthesisCategoryBundle> = BTreeMap::new();
+    for rule in &rules {
+        let Some(category_id) = rule.get("learnedCategoryId").and_then(value_to_i64) else {
+            continue;
+        };
+        let Some(category_path) = category_paths_by_id.get(&category_id) else {
+            continue;
+        };
+        let learned_type = rule
+            .get("learnedType")
+            .and_then(value_to_text)
+            .unwrap_or_default();
+        let concept_key = format!(
+            "rule:{}",
+            rule.get("id").and_then(value_to_i64).unwrap_or_default()
+        );
+        let feedback = concept_stats_by_key
+            .get(&concept_key)
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let bundle =
+            ensure_rule_synthesis_bundle(&mut category_bundles, category_path, &learned_type);
+        bundle.push_evidence(json!({
+            "source": "learning_rule",
+            "source_id": concept_key,
+            "match_type": rule.get("matchType").and_then(value_to_text).unwrap_or_default(),
+            "match_value": rule.get("matchValue").and_then(value_to_text).unwrap_or_default(),
+            "match_features": rule.get("matchFeatures").cloned().unwrap_or_else(|| json!({})),
+            "sample_count": rule.get("appliedCount").and_then(value_to_i64).unwrap_or_default(),
+            "enabled": rule.get("enabled").and_then(Value::as_bool).unwrap_or(false),
+            "feedback": feedback,
+        }));
+    }
+    for suggestion in &suggestions {
+        let Some(category_id) = suggestion
+            .get("suggested_category_id")
+            .and_then(value_to_i64)
+        else {
+            continue;
+        };
+        let Some(category_path) = category_paths_by_id.get(&category_id) else {
+            continue;
+        };
+        let learned_type = suggestion
+            .get("suggested_type")
+            .and_then(value_to_text)
+            .unwrap_or_default();
+        let concept_key = format!(
+            "suggestion:{}",
+            suggestion
+                .get("id")
+                .and_then(value_to_i64)
+                .unwrap_or_default()
+        );
+        let feedback = concept_stats_by_key
+            .get(&concept_key)
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let bundle =
+            ensure_rule_synthesis_bundle(&mut category_bundles, category_path, &learned_type);
+        bundle.push_evidence(json!({
+            "source": "learning_suggestion",
+            "source_id": concept_key,
+            "match_type": suggestion.get("match_type").and_then(value_to_text).unwrap_or_default(),
+            "match_value": suggestion.get("match_value").and_then(value_to_text).unwrap_or_default(),
+            "match_features": json_object_from_text_field(suggestion, "match_features_json"),
+            "sample_count": suggestion.get("sample_count").and_then(value_to_i64).unwrap_or_default(),
+            "status": suggestion.get("status").and_then(value_to_text).unwrap_or_default(),
+            "feedback": feedback,
+        }));
+    }
+    let mut ranked_categories = category_bundles.into_values().collect::<Vec<_>>();
+    ranked_categories.sort_by_key(|category| std::cmp::Reverse(category.rank()));
+    let category_bundles = ranked_categories
+        .into_iter()
+        .take(LLM_RULE_SYNTHESIS_MAX_GROUPS)
+        .map(RuleSynthesisCategoryBundle::into_value)
+        .collect::<Vec<_>>();
+    let recent_feedback = get_llm_memory_events(connection, user_id, None, Some("feedback"), 20, 0)
+        .map_err(db_error_response)?
+        .into_iter()
+        .map(|event| {
+            json!({
+                "decision": event.decision.unwrap_or_default(),
+                "suggested_main_category": event.suggested_main_category.unwrap_or_default(),
+                "suggested_sub_category": event.suggested_sub_category.unwrap_or_default(),
+                "confidence": event.confidence,
+                "created_at": event.created_at,
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(json!({
+        "knowledge_summary_version": "a6-rule-synthesis-v1",
+        "existing_categories": existing_category_paths,
+        "durable_learning_rules": rules,
+        "learning_suggestions": suggestions,
+        "concept_stats": concept_stats,
+        "active_model": load_rule_synthesis_active_model(connection, user_id_i64_value(user_id)?)?,
+        "recent_llm_feedback": recent_feedback,
+        "categories": category_bundles,
+    }))
+}
+
+#[derive(Debug, Clone)]
+struct RuleSynthesisCategoryBundle {
+    category_name: String,
+    learned_type: String,
+    evidence: Vec<Value>,
+    accepted_count: i64,
+    rejected_count: i64,
+    auto_applied_count: i64,
+    rollback_count: i64,
+}
+
+impl RuleSynthesisCategoryBundle {
+    fn new(category_name: &str, learned_type: &str) -> Self {
+        Self {
+            category_name: category_name.to_string(),
+            learned_type: learned_type.to_string(),
+            evidence: Vec::new(),
+            accepted_count: 0,
+            rejected_count: 0,
+            auto_applied_count: 0,
+            rollback_count: 0,
+        }
+    }
+
+    fn push_evidence(&mut self, evidence: Value) {
+        if let Some(learned_type) = evidence
+            .get("learned_type")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+        {
+            if self.learned_type.is_empty() {
+                self.learned_type = learned_type.to_string();
+            }
+        }
+        let feedback = evidence.get("feedback").unwrap_or(&Value::Null);
+        self.accepted_count += rule_synthesis_feedback_count(feedback, "accepted_count");
+        self.rejected_count += rule_synthesis_feedback_count(feedback, "rejected_count");
+        self.auto_applied_count += rule_synthesis_feedback_count(feedback, "auto_applied_count");
+        self.rollback_count += rule_synthesis_feedback_count(feedback, "rollback_count");
+        self.evidence.push(evidence);
+    }
+
+    fn rank(&self) -> (i64, usize, String) {
+        (
+            self.accepted_count + self.auto_applied_count.saturating_mul(2),
+            self.evidence.len(),
+            self.category_name.clone(),
+        )
+    }
+
+    fn into_value(mut self) -> Value {
+        self.evidence.sort_by(|left, right| {
+            rule_synthesis_evidence_rank(right).cmp(&rule_synthesis_evidence_rank(left))
+        });
+        self.evidence
+            .truncate(LLM_RULE_SYNTHESIS_MAX_EVIDENCE_PER_GROUP);
+        json!({
+            "category_name": self.category_name,
+            "learned_type": self.learned_type,
+            "evidence": self.evidence,
+            "feedback_summary": {
+                "accepted_count": self.accepted_count,
+                "rejected_count": self.rejected_count,
+                "auto_applied_count": self.auto_applied_count,
+                "rollback_count": self.rollback_count,
+            },
+        })
+    }
+}
+
+fn ensure_rule_synthesis_bundle<'a>(
+    bundles: &'a mut BTreeMap<String, RuleSynthesisCategoryBundle>,
+    category_name: &str,
+    learned_type: &str,
+) -> &'a mut RuleSynthesisCategoryBundle {
+    let bundle = bundles
+        .entry(category_name.to_string())
+        .or_insert_with(|| RuleSynthesisCategoryBundle::new(category_name, learned_type));
+    if bundle.learned_type.is_empty() && !learned_type.trim().is_empty() {
+        bundle.learned_type = learned_type.to_string();
+    }
+    bundle
+}
+
+fn rule_synthesis_evidence_rank(evidence: &Value) -> (i64, i64, String) {
+    let feedback = evidence.get("feedback").unwrap_or(&Value::Null);
+    (
+        rule_synthesis_feedback_count(feedback, "accepted_count")
+            + rule_synthesis_feedback_count(feedback, "auto_applied_count").saturating_mul(2),
+        evidence
+            .get("sample_count")
+            .and_then(value_to_i64)
+            .unwrap_or_default(),
+        evidence
+            .get("match_value")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+    )
+}
+
+fn rule_synthesis_feedback_count(feedback: &Value, key: &str) -> i64 {
+    feedback.get(key).and_then(value_to_i64).unwrap_or_default()
+}
+
+fn json_object_from_text_field(value: &Value, key: &str) -> Value {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .and_then(|text| serde_json::from_str::<Value>(text).ok())
+        .and_then(|value| value.as_object().cloned().map(Value::Object))
+        .unwrap_or_else(|| json!({}))
+}
+
+fn load_rule_synthesis_active_model(
+    connection: &Connection,
+    user_id: i64,
+) -> Result<Value, ImportV2RouteResponse> {
+    if !table_exists(connection, "import_learning_model_registry")? {
+        return Ok(Value::Null);
+    }
+    connection
+        .query_row(
+            "
+            SELECT model_version, dataset_snapshot_id, metrics_json, updated_at
+            FROM import_learning_model_registry
+            WHERE user_id = ?1 AND model_key = ?2 AND status = 'active'
+            ORDER BY updated_at DESC, id DESC
+            LIMIT 1
+            ",
+            params![user_id, IMPORT_LEARNING_MODEL_KEY],
+            |row| {
+                let metrics_text = row.get::<_, Option<String>>(2)?.unwrap_or_default();
+                let metrics = serde_json::from_str::<Value>(&metrics_text)
+                    .ok()
+                    .and_then(|value| value.as_object().cloned().map(Value::Object))
+                    .unwrap_or_else(|| json!({}));
+                Ok(json!({
+                    "model_version": row.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                    "dataset_snapshot_id": row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
+                    "feature_schema_version": metrics.get("feature_schema_version").and_then(Value::as_str).unwrap_or_default(),
+                    "policy_version": metrics.get("policy_version").and_then(Value::as_str).unwrap_or_default(),
+                    "sample_count": metrics.get("sample_count").and_then(value_to_i64).unwrap_or_default(),
+                    "updated_at": row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                }))
+            },
+        )
+        .optional()
+        .map(|value| value.unwrap_or(Value::Null))
+        .map_err(db_error_response)
+}
+
+fn load_learning_concept_stats(
+    connection: &Connection,
+    user_id: i64,
+) -> Result<Vec<Value>, ImportV2RouteResponse> {
+    if !table_exists(connection, "import_learning_concept_stats")? {
+        return Ok(Vec::new());
+    }
+    let mut statement = connection
+        .prepare(
+            "SELECT concept_key, concept_type, sample_count, accepted_count, rejected_count, \
+                    auto_applied_count, rollback_count, updated_at \
+             FROM import_learning_concept_stats WHERE user_id = ?1 ORDER BY updated_at DESC LIMIT 50",
+        )
+        .map_err(db_error_response)?;
+    let rows = statement
+        .query_map(params![user_id], |row| {
+            Ok(json!({
+                "concept_key": row.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                "concept_type": row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                "sample_count": row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
+                "accepted_count": row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
+                "rejected_count": row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+                "auto_applied_count": row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
+                "rollback_count": row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
+                "updated_at": row.get::<_, Option<String>>(7)?.unwrap_or_default(),
+            }))
+        })
+        .map_err(db_error_response)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(db_error_response)
+}
+
+fn table_exists(connection: &Connection, table_name: &str) -> Result<bool, ImportV2RouteResponse> {
+    connection
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1",
+            params![table_name],
+            |_| Ok(true),
+        )
+        .optional()
+        .map(|value| value.unwrap_or(false))
+        .map_err(db_error_response)
+}
+
+fn llm_advanced_prompt_template(config: &Value, key: &str) -> String {
+    copy_runtime_llm_config(config)
+        .get("advanced_settings")
+        .and_then(Value::as_object)
+        .and_then(|object| object.get(key))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn preview_id_from_llm_value(value: &Value) -> i64 {
+    value
+        .as_object()
+        .and_then(|object| first_value(object, &["preview_id", "previewId", "id"]))
+        .and_then(value_to_i64)
+        .unwrap_or_default()
+}
+
+fn main_category_from_llm_value(value: &Value) -> String {
+    value
+        .as_object()
+        .and_then(|object| {
+            first_value(
+                object,
+                &[
+                    "suggested_main_category",
+                    "suggestedMainCategory",
+                    "main_category",
+                    "mainCategory",
+                ],
+            )
+        })
+        .and_then(value_to_text)
+        .unwrap_or_default()
+}
+
+fn sub_category_from_llm_value(value: &Value) -> String {
+    value
+        .as_object()
+        .and_then(|object| {
+            first_value(
+                object,
+                &[
+                    "suggested_sub_category",
+                    "suggestedSubCategory",
+                    "sub_category",
+                    "subCategory",
+                ],
+            )
+        })
+        .and_then(value_to_text)
+        .unwrap_or_default()
+}
+
+fn rule_expression_from_llm_value(value: &Value) -> String {
+    value
+        .as_object()
+        .and_then(|object| {
+            first_value(
+                object,
+                &[
+                    "rule_expression",
+                    "ruleExpression",
+                    "suggested_rule_expression",
+                    "suggestedRuleExpression",
+                ],
+            )
+        })
+        .and_then(value_to_text)
+        .map(|expression| expression.trim().to_string())
+        .unwrap_or_default()
+}
+
+fn confidence_from_value(value: &Value) -> f64 {
+    value
+        .as_object()
+        .and_then(|object| first_value(object, &["confidence"]))
+        .and_then(value_to_f64)
+        .unwrap_or_default()
+        .clamp(0.0, 1.0)
+}
+
+fn llm_candidate_raw_response(value: &Value) -> String {
+    let text = value.to_string();
+    if text.len() <= LLM_CANDIDATE_RAW_RESPONSE_MAX_BYTES {
+        return text;
+    }
+    let truncated = text
+        .char_indices()
+        .take_while(|(index, _)| *index < LLM_CANDIDATE_RAW_RESPONSE_MAX_BYTES)
+        .map(|(_, ch)| ch)
+        .collect::<String>();
+    json!({
+        "truncated": true,
+        "payload": truncated,
+    })
+    .to_string()
+}
+
+fn valid_rule_expression(expression: &str) -> bool {
+    !bill_analyser_core::category_rules::compile_rule_expression(expression.trim(), false).is_empty
+}
+
+fn rule_candidate_duplicate(
+    connection: &Connection,
+    user_id: i64,
+    main_category: &str,
+    sub_category: &str,
+    expression: &str,
+) -> Result<bool, ImportV2RouteResponse> {
+    let expression = expression.trim();
+    let category_rule_duplicate =
+        if table_exists(connection, "category_rules")? && table_exists(connection, "categories")? {
+            connection
+                .query_row(
+                    "
+                SELECT 1 FROM category_rules cr
+                JOIN categories c ON c.id = cr.category_id AND c.user_id = cr.user_id
+                WHERE cr.user_id = ?1 AND c.main_category = ?2 AND c.sub_category = ?3
+                  AND cr.rule_expression = ?4
+                LIMIT 1
+                ",
+                    params![user_id, main_category, sub_category, expression],
+                    |_| Ok(true),
+                )
+                .optional()
+                .map_err(db_error_response)?
+                .unwrap_or(false)
+        } else {
+            false
+        };
+    if category_rule_duplicate {
+        return Ok(true);
+    }
+    connection
+        .query_row(
+            "
+            SELECT 1 FROM llm_candidates
+            WHERE user_id = ?1 AND status = 'pending' AND type IN ('rule_synthesis', 'rule_induction')
+              AND suggested_main_category = ?2 AND suggested_sub_category = ?3
+              AND suggested_rule_expression = ?4
+            LIMIT 1
+            ",
+            params![user_id, main_category, sub_category, expression],
+            |_| Ok(true),
+        )
+        .optional()
+        .map(|value| value.unwrap_or(false))
+        .map_err(db_error_response)
+}
+
+fn category_path(main_category: &str, sub_category: &str) -> String {
+    let main_category = main_category.trim();
+    let sub_category = sub_category.trim();
+    if sub_category.is_empty() {
+        main_category.to_string()
+    } else if main_category.is_empty() {
+        sub_category.to_string()
+    } else {
+        format!("{main_category}/{sub_category}")
+    }
+}
+
 pub async fn llm_preview_recommend_accept_runtime_handler(
     State(state): State<ProxyState>,
     headers: HeaderMap,
@@ -2008,7 +4070,7 @@ async fn llm_preview_recommend_review_response(
             ));
         }
     };
-    let suggestion = first_value(object, &["suggestion"]).and_then(llm_suggestion_from_value);
+    let suggestion_value = first_value(object, &["suggestion"]).cloned();
     let user_correction =
         first_value(object, &["user_correction", "userCorrection"]).and_then(Value::as_object);
     let user_correction_category = user_correction.and_then(|object| {
@@ -2044,6 +4106,17 @@ async fn llm_preview_recommend_review_response(
     if let Err(response) = init_import_runtime_schema(&runtime) {
         return route_response(response);
     }
+    let user_id_value = match user_id_i64_value(user_id) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let account_ids = match load_account_id_map(runtime.connection(), user_id_value) {
+        Ok(account_ids) => account_ids,
+        Err(response) => return route_response(response),
+    };
+    let suggestion = suggestion_value
+        .map(|value| fill_llm_suggestion_account_ids(value, &account_ids))
+        .and_then(|value| llm_suggestion_from_value(&value));
     match review_preview_llm_recommendation(
         runtime.connection_mut(),
         ImportPreviewLlmReviewRequest {
@@ -2400,8 +4473,8 @@ pub async fn llm_candidates_list_runtime_handler(
     if let Err(response) = init_llm_config_runtime_schema(&runtime) {
         return route_response(response);
     }
-    let limit = query.limit.unwrap_or(50);
-    let offset = query.offset.unwrap_or(0);
+    let limit = query.limit.unwrap_or(50).clamp(1, 100);
+    let offset = query.offset.unwrap_or(0).max(0);
     let candidates = match list_llm_candidates(
         runtime.connection(),
         user_id_value,
@@ -6840,6 +8913,50 @@ fn id_list_field_from_object(object: &Map<String, Value>, keys: &[&str]) -> Opti
     })
 }
 
+fn limited_id_list_field_from_object(
+    object: &Map<String, Value>,
+    keys: &[&str],
+    limit: usize,
+) -> Result<Option<Vec<i64>>, ImportV2RouteResponse> {
+    let Some(value) = first_value(object, keys) else {
+        return Ok(None);
+    };
+    let Some(values) = value.as_array() else {
+        return Err(llm_contract_error_response(
+            "ID list fields must be arrays",
+            "INVALID_REQUEST",
+            400,
+        ));
+    };
+    let mut seen_ids = BTreeSet::new();
+    let mut ids = Vec::new();
+    for value in values {
+        let Some(id) = value_to_i64(value) else {
+            return Err(llm_contract_error_response(
+                "ID list fields must contain integer IDs",
+                "INVALID_REQUEST",
+                400,
+            ));
+        };
+        if id <= 0 || !seen_ids.insert(id) {
+            continue;
+        }
+        ids.push(id);
+    }
+    if ids.len() > limit {
+        return Err(preview_selection_too_large_response());
+    }
+    Ok(Some(ids))
+}
+
+fn preview_selection_too_large_response() -> ImportV2RouteResponse {
+    llm_contract_error_response(
+        "Selected preview rows exceed the maximum batch size",
+        "PREVIEW_SELECTION_TOO_LARGE",
+        422,
+    )
+}
+
 fn generate_import_session_id() -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -6866,6 +8983,17 @@ fn preview_update_items_from_payload(
     let mut items = Vec::with_capacity(updates.len());
     for item in updates {
         items.push(payload_object(item)?);
+    }
+    Ok(items)
+}
+
+fn limited_preview_update_items_from_payload(
+    payload: &Value,
+    limit: usize,
+) -> Result<Vec<&Map<String, Value>>, ImportV2RouteResponse> {
+    let items = preview_update_items_from_payload(payload)?;
+    if items.len() > limit {
+        return Err(preview_selection_too_large_response());
     }
     Ok(items)
 }
@@ -7705,4 +9833,718 @@ pub struct LlmCandidatesQuery {
     r#type: Option<String>,
     limit: Option<i64>,
     offset: Option<i64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn provider_context(provider: &str, provider_config: Value) -> LlmProviderRequestContext {
+        LlmProviderRequestContext {
+            config: build_llm_provider_config(provider, Some(&provider_config))
+                .expect("provider contract"),
+            api_key: "secret-key".to_string(),
+            system_prompt: "system prompt".to_string(),
+            temperature: 0.25,
+            max_tokens: 128,
+            reasoning_depth: "low".to_string(),
+        }
+    }
+
+    fn local_openai_context(base_url: String) -> LlmProviderRequestContext {
+        LlmProviderRequestContext {
+            config: LlmProviderConfigContract {
+                provider: "openai_compatible".to_string(),
+                normalized_provider: "openai_compatible".to_string(),
+                provider_kind: "openai_compatible".to_string(),
+                base_url,
+                model: "fake".to_string(),
+                provider_name: "openai_compatible".to_string(),
+            },
+            api_key: "secret-key".to_string(),
+            system_prompt: "system prompt".to_string(),
+            temperature: 0.25,
+            max_tokens: 128,
+            reasoning_depth: "low".to_string(),
+        }
+    }
+
+    fn row(
+        id: i64,
+        main_category: &str,
+        sub_category: &str,
+        description: &str,
+    ) -> ImportPreviewRow {
+        ImportPreviewRow {
+            id,
+            session_id: "session-a".to_string(),
+            user_id: 42,
+            preview_date: "2026-05-01".to_string(),
+            preview_type: "支出".to_string(),
+            preview_amount: 12.5,
+            preview_destination_amount: 0.0,
+            preview_main_category: main_category.to_string(),
+            preview_sub_category: sub_category.to_string(),
+            preview_source_account_id: None,
+            preview_destination_account_id: None,
+            preview_counterparty: "canteen".to_string(),
+            preview_payment_method: "card".to_string(),
+            preview_description: description.to_string(),
+            preview_parser_id: "wechat".to_string(),
+            preview_parser_tags: Vec::new(),
+            preview_recurring_id: None,
+            preview_recurring_name: String::new(),
+            preview_recurring_candidate_count: 0,
+            preview_recurring_match_score: 0.0,
+            preview_recurring_match_reasons: String::new(),
+            preview_recurring_matched_date: String::new(),
+            preview_selected: true,
+            dedup_type: String::new(),
+            dedup_source_ids: Vec::new(),
+            preview_matching_feedback: json!({}),
+            created_at: "2026-05-01T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn llm_provider_payloads_responses_and_limits_cover_provider_edges() {
+        let openai = provider_context(
+            "openai",
+            json!({
+                "base_url": "https://api.openai.com/v1",
+                "model": "gpt-test",
+            }),
+        );
+        let (url, headers, payload) = llm_provider_http_request(&openai, "classify this");
+        assert_eq!(url, "https://api.openai.com/v1/chat/completions");
+        assert!(headers.iter().any(|(key, _)| *key == "authorization"));
+        assert_eq!(payload["reasoning_effort"], "low");
+        assert_eq!(
+            llm_provider_runtime_response(
+                &openai,
+                json!({"choices": [{"message": {"content": "[{\"bill_id\":1}]"}}]})
+            )
+            .expect("openai response")
+            .content,
+            "[{\"bill_id\":1}]"
+        );
+
+        let claude = provider_context(
+            "anthropic",
+            json!({
+                "base_url": "https://api.anthropic.com/v1",
+                "model": "claude-test",
+            }),
+        );
+        let (url, headers, payload) = llm_provider_http_request(&claude, "rules");
+        assert_eq!(url, "https://api.anthropic.com/v1/messages");
+        assert!(headers.iter().any(|(key, _)| *key == "x-api-key"));
+        assert_eq!(payload["system"], "system prompt");
+        assert_eq!(
+            llm_provider_runtime_response(
+                &claude,
+                json!({"content": [{"type": "text", "text": "[{\"rule_expression\":\"OR={咖啡}\"}]"}, {"type": "tool", "text": "ignored"}]})
+            )
+            .expect("claude response")
+            .content,
+            "[{\"rule_expression\":\"OR={咖啡}\"}]"
+        );
+
+        let ollama = provider_context(
+            "ollama",
+            json!({
+                "base_url": "http://localhost:11434",
+                "model": "llama-test",
+            }),
+        );
+        let (url, headers, payload) = llm_provider_http_request(&ollama, "preview");
+        assert_eq!(url, "http://localhost:11434/api/generate");
+        assert_eq!(
+            headers,
+            vec![("content-type", "application/json".to_string())]
+        );
+        assert_eq!(payload["system"], "system prompt");
+        assert_eq!(
+            llm_provider_runtime_response(&ollama, json!({"response": "[{\"preview_id\":1}]"}))
+                .expect("ollama response")
+                .content,
+            "[{\"preview_id\":1}]"
+        );
+        assert!(llm_provider_runtime_response(&ollama, json!({"response": ""})).is_err());
+
+        let user_id = -9_001;
+        assert!(reserve_llm_rate_limit(user_id, 0).is_ok());
+        assert!(reserve_llm_rate_limit(user_id, 10).is_ok());
+        assert!(reserve_llm_rate_limit(user_id, 1).is_err());
+
+        let mut limit_object = Map::new();
+        assert_eq!(
+            llm_limit_from_object(&limit_object, 8, 20).expect("default limit"),
+            8
+        );
+        limit_object.insert("limit".to_string(), json!(0));
+        assert!(llm_limit_from_object(&limit_object, 8, 20).is_err());
+        limit_object.insert("limit".to_string(), json!(21));
+        assert!(llm_limit_from_object(&limit_object, 8, 20).is_err());
+    }
+
+    #[tokio::test]
+    async fn llm_provider_execution_covers_transport_and_payload_errors() {
+        let app = Router::new().route(
+            "/chat/completions",
+            post(|axum::Json(payload): axum::Json<Value>| async move {
+                let prompt = payload
+                    .get("messages")
+                    .and_then(Value::as_array)
+                    .and_then(|messages| messages.last())
+                    .and_then(|message| message.get("content"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                match prompt {
+                    "rate" => (StatusCode::TOO_MANY_REQUESTS, "limited").into_response(),
+                    "bad-json" => (StatusCode::OK, "not-json").into_response(),
+                    "empty" => (
+                        StatusCode::OK,
+                        Json(json!({"choices": [{"message": {"content": ""}}]})),
+                    )
+                        .into_response(),
+                    "server-error" => (StatusCode::INTERNAL_SERVER_ERROR, "retry").into_response(),
+                    _ => (
+                        StatusCode::OK,
+                        Json(json!({"choices": [{"message": {"content": "[{\"bill_id\":1}]"}}]})),
+                    )
+                        .into_response(),
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let addr = listener.local_addr().expect("addr");
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("provider server");
+        });
+        let context = local_openai_context(format!("http://{addr}"));
+        let config = HttpShellConfig::new_with_import_route_mode(
+            "http://127.0.0.1:9".to_string(),
+            StdDuration::from_millis(50),
+            1024,
+            crate::config::ImportRouteMode::ImportDbRuntime,
+        )
+        .expect("config");
+        let state = ProxyState::new(config).expect("state");
+
+        assert!(execute_llm_provider_request(&state, &context, "ok")
+            .await
+            .is_ok());
+        assert!(execute_llm_provider_request(&state, &context, "rate")
+            .await
+            .is_err());
+        assert!(execute_llm_provider_request(&state, &context, "bad-json")
+            .await
+            .is_err());
+        assert!(execute_llm_provider_request(&state, &context, "empty")
+            .await
+            .is_err());
+        assert!(
+            execute_llm_provider_request(&state, &context, "server-error")
+                .await
+                .is_err()
+        );
+
+        let refused = local_openai_context("http://127.0.0.1:9".to_string());
+        assert!(execute_llm_provider_request(&state, &refused, "transport")
+            .await
+            .is_err());
+        handle.abort();
+    }
+
+    #[test]
+    fn llm_provider_db_helpers_cover_selection_context_and_duplicates() {
+        let connection = Connection::open_in_memory().expect("memory db");
+        assert!(selected_preview_rows_for_llm(
+            &connection,
+            &json!({"preview_ids": []}),
+            "session-a",
+            UserId::new(42).expect("user"),
+            10,
+        )
+        .is_err());
+        assert!(load_existing_category_values(&connection, 42)
+            .expect("missing categories")
+            .is_empty());
+        assert!(load_account_id_map(&connection, 42)
+            .expect("missing accounts")
+            .is_empty());
+        assert!(load_learning_concept_stats(&connection, 42)
+            .expect("missing stats")
+            .is_empty());
+
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE categories(
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    main_category TEXT,
+                    sub_category TEXT
+                );
+                CREATE TABLE accounts(
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    name TEXT
+                );
+                CREATE TABLE import_learning_concept_stats(
+                    user_id INTEGER NOT NULL,
+                    concept_key TEXT,
+                    concept_type TEXT,
+                    sample_count INTEGER,
+                    accepted_count INTEGER,
+                    rejected_count INTEGER,
+                    auto_applied_count INTEGER,
+                    rollback_count INTEGER,
+                    updated_at TEXT
+                );
+                CREATE TABLE llm_candidates(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    type TEXT NOT NULL,
+                    source_bill_ids TEXT NOT NULL,
+                    suggested_main_category TEXT,
+                    suggested_sub_category TEXT,
+                    suggested_rule_expression TEXT,
+                    confidence REAL,
+                    llm_provider TEXT,
+                    llm_model TEXT,
+                    llm_response_raw TEXT,
+                    status TEXT NOT NULL,
+                    created_at TEXT
+                );
+                CREATE TABLE category_rules(
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    category_id INTEGER NOT NULL,
+                    rule_expression TEXT NOT NULL
+                );
+                INSERT INTO categories(id, user_id, main_category, sub_category)
+                    VALUES (1, 42, '餐饮', '咖啡');
+                INSERT INTO accounts(id, user_id, name)
+                    VALUES (7, 42, '现金'), (8, 42, '');
+                INSERT INTO import_learning_concept_stats(
+                    user_id, concept_key, concept_type, sample_count, accepted_count,
+                    rejected_count, auto_applied_count, rollback_count, updated_at
+                ) VALUES (42, 'merchant:cafe', 'merchant', 3, 2, 1, 0, 0, '2026-05-01');
+                INSERT INTO category_rules(id, user_id, category_id, rule_expression)
+                    VALUES (5, 42, 1, 'OR={咖啡}');
+                ",
+            )
+            .expect("schema");
+
+        let categories = load_existing_category_values(&connection, 42).expect("categories");
+        assert_eq!(categories[0]["path"], "餐饮/咖啡");
+        assert_eq!(
+            load_existing_category_paths(&connection, 42).expect("category paths"),
+            vec!["餐饮/咖啡".to_string()]
+        );
+        assert_eq!(
+            load_existing_account_names(&connection, 42).expect("account names"),
+            vec!["现金".to_string()]
+        );
+        let account_ids = load_account_id_map(&connection, 42).expect("account ids");
+        assert_eq!(account_ids["现金"], 7);
+        assert_eq!(
+            load_learning_concept_stats(&connection, 42).expect("stats")[0]["concept_key"],
+            "merchant:cafe"
+        );
+        init_import_staging_schema(&connection).expect("llm memory schema");
+        bill_analyser_db::create_llm_memory_event(
+            &connection,
+            &bill_analyser_db::LlmMemoryEventDraft {
+                user_id: UserId::new(42).expect("user"),
+                session_id: Some("session-a".to_string()),
+                preview_id: Some(1),
+                event_type: "feedback".to_string(),
+                decision: Some("accept".to_string()),
+                prompt_text: None,
+                llm_response_raw: None,
+                llm_provider: Some("openai".to_string()),
+                llm_model: Some("gpt".to_string()),
+                suggested_main_category: Some("餐饮".to_string()),
+                suggested_sub_category: Some("咖啡".to_string()),
+                suggested_source_account: None,
+                suggested_destination_account: None,
+                confidence: 0.9,
+                user_correction_category: None,
+                user_correction_account: None,
+                snapshot_before: None,
+                snapshot_after: None,
+                metadata: Some(json!({"description": "latte"})),
+            },
+        )
+        .expect("memory event");
+        let memory = load_llm_memory_prompt_context(&connection, UserId::new(42).expect("user"))
+            .expect("memory context");
+        assert_eq!(memory[0]["decision"], "accept");
+        assert_eq!(memory[0]["description_hint"], "latte");
+        assert!(
+            rule_candidate_duplicate(&connection, 42, "餐饮", "咖啡", "OR={咖啡}")
+                .expect("rule duplicate")
+        );
+        assert!(
+            rule_candidate_duplicate(&connection, 42, "餐饮", "咖啡", " OR={咖啡} ")
+                .expect("trimmed rule duplicate")
+        );
+        assert!(
+            !rule_candidate_duplicate(&connection, 42, "餐饮", "咖啡", "OR={奶茶}")
+                .expect("no duplicate")
+        );
+        let no_rule_tables = Connection::open_in_memory().expect("memory db");
+        no_rule_tables
+            .execute_batch(
+                "
+                CREATE TABLE llm_candidates(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    type TEXT NOT NULL,
+                    source_bill_ids TEXT NOT NULL,
+                    suggested_main_category TEXT,
+                    suggested_sub_category TEXT,
+                    suggested_rule_expression TEXT,
+                    confidence REAL,
+                    llm_provider TEXT,
+                    llm_model TEXT,
+                    llm_response_raw TEXT,
+                    status TEXT NOT NULL,
+                    created_at TEXT
+                );
+                ",
+            )
+            .expect("candidate schema");
+        assert!(
+            !rule_candidate_duplicate(&no_rule_tables, 42, "餐饮", "咖啡", "OR={咖啡}")
+                .expect("no category rule table")
+        );
+
+        let filled = fill_llm_suggestion_account_ids(
+            json!({
+                "suggested_source_account": "现金",
+                "suggested_destination_account": "不存在"
+            }),
+            &account_ids,
+        );
+        assert_eq!(filled["resolved_source_account_id"], 7);
+        assert!(filled.get("resolved_destination_account_id").is_none());
+        let kept = fill_llm_suggestion_account_ids(
+            json!({"resolved_source_account_id": 99, "source_account": "现金"}),
+            &account_ids,
+        );
+        assert_eq!(kept["resolved_source_account_id"], 7);
+        let removed = fill_llm_suggestion_account_ids(
+            json!({"sourceAccountId": 99, "source_account": "不存在"}),
+            &account_ids,
+        );
+        assert!(removed.get("sourceAccountId").is_none());
+        assert!(removed.get("resolved_source_account_id").is_none());
+        assert_eq!(
+            fill_llm_suggestion_account_ids(json!("plain"), &account_ids),
+            json!("plain")
+        );
+    }
+
+    #[test]
+    fn llm_runtime_config_and_session_helpers_cover_disabled_and_missing_edges() {
+        let temp = tempfile::NamedTempFile::new().expect("temp db");
+        let db_path = SqliteDbPath::temporary_file(temp.path()).expect("temp sqlite path");
+        let mut runtime = SqliteRuntime::open(SqliteConnectionConfig {
+            path: db_path,
+            create_if_missing: true,
+            busy_timeout: StdDuration::from_millis(50),
+        })
+        .expect("runtime");
+        init_import_staging_schema(runtime.connection()).expect("import schema");
+        runtime
+            .connection()
+            .execute_batch(
+                "
+                CREATE TABLE users(id INTEGER PRIMARY KEY, username TEXT, is_active INTEGER);
+                INSERT INTO users(id, username, is_active) VALUES (42, 'user-42', 1);
+                ",
+            )
+            .expect("users");
+        assert!(ensure_import_session_exists(
+            &runtime,
+            "missing-session",
+            UserId::new(42).expect("user"),
+        )
+        .is_err());
+        assert!(selected_preview_rows_for_llm(
+            runtime.connection(),
+            &json!({}),
+            "missing-session",
+            UserId::new(42).expect("user"),
+            10,
+        )
+        .expect("empty preview selection")
+        .is_empty());
+        bill_analyser_db::create_import_session(
+            runtime.connection(),
+            &ImportSessionDraft {
+                session_id: "session-a".to_string(),
+                user_id: UserId::new(42).expect("user"),
+                file_count: 1,
+            },
+        )
+        .expect("session");
+        insert_preview_bills_batch(
+            runtime.connection_mut(),
+            "session-a",
+            UserId::new(42).expect("user"),
+            &[bill_analyser_db::ImportPreviewDraft {
+                preview_date: "2026-05-01".to_string(),
+                preview_type: "支出".to_string(),
+                preview_amount: 12.5,
+                preview_main_category: "餐饮".to_string(),
+                preview_sub_category: "咖啡".to_string(),
+                preview_counterparty: "cafe".to_string(),
+                preview_description: "latte".to_string(),
+                preview_payment_method: "cash".to_string(),
+                ..Default::default()
+            }],
+        )
+        .expect("preview row");
+        assert!(load_preview_rows_by_ids(
+            runtime.connection(),
+            "other-session",
+            UserId::new(42).expect("user"),
+            &[1],
+        )
+        .expect("wrong session rows")
+        .is_empty());
+        let invalid_preview_ids = selected_preview_rows_for_llm(
+            runtime.connection(),
+            &json!({"preview_ids": "1"}),
+            "session-a",
+            UserId::new(42).expect("user"),
+            10,
+        )
+        .expect_err("invalid preview id shape");
+        assert_eq!(invalid_preview_ids.status_code, 400);
+        assert_eq!(invalid_preview_ids.body["code"], "INVALID_REQUEST");
+        let limited_preview_rows = selected_preview_rows_for_llm(
+            runtime.connection(),
+            &json!({"preview_ids": [1, 1]}),
+            "session-a",
+            UserId::new(42).expect("user"),
+            1,
+        )
+        .expect("deduped preview rows");
+        assert_eq!(limited_preview_rows.len(), 1);
+        let too_many_preview_ids = selected_preview_rows_for_llm(
+            runtime.connection(),
+            &json!({"preview_ids": [1, 999]}),
+            "session-a",
+            UserId::new(42).expect("user"),
+            1,
+        )
+        .expect_err("too many preview ids");
+        assert_eq!(too_many_preview_ids.status_code, 422);
+        assert_eq!(
+            too_many_preview_ids.body["code"],
+            "PREVIEW_SELECTION_TOO_LARGE"
+        );
+
+        let config = HttpShellConfig::new_with_import_route_mode(
+            "http://127.0.0.1:9".to_string(),
+            StdDuration::from_millis(50),
+            1024,
+            crate::config::ImportRouteMode::ImportDbRuntime,
+        )
+        .expect("config");
+        let state = ProxyState::new(config).expect("state");
+        state.set_llm_runtime_config(42, json!({"enabled": false}));
+        assert!(effective_llm_runtime_config(&state, &runtime, 42).is_err());
+
+        init_global_learning_runtime_schema(&runtime).expect("global learning schema");
+        runtime
+            .connection()
+            .execute_batch(
+                "
+                CREATE TABLE import_learning_model_registry (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    model_key TEXT NOT NULL,
+                    model_version TEXT NOT NULL,
+                    dataset_snapshot_id INTEGER,
+                    status TEXT NOT NULL,
+                    metrics_json TEXT,
+                    updated_at TEXT NOT NULL
+                );
+                INSERT INTO import_learning_rules(
+                    user_id, match_type, match_value, normalized_match_value, learned_type,
+                    learned_category_id, enabled, match_features_json, applied_count,
+                    created_at, updated_at
+                )
+                VALUES (
+                    42, 'merchant', 'cafe', 'cafe', '支出', 1, 1,
+                    '{\"parser_id\":\"wechat\"}', 3,
+                    '2026-05-14T00:00:00Z', '2026-05-14T00:00:00Z'
+                );
+                INSERT INTO import_learning_suggestions(
+                    user_id, match_type, match_value, normalized_match_value,
+                    match_features_json, suggested_type, suggested_category_id,
+                    sample_count, status, created_at, updated_at
+                )
+                VALUES (
+                    42, 'merchant', 'old cafe', 'old cafe',
+                    '{\"parser_id\":\"wechat\"}', '支出', 1,
+                    2, 'rejected', '2026-05-14T00:00:00Z', '2026-05-14T00:00:00Z'
+                );
+                INSERT INTO import_learning_concept_stats(
+                    user_id, concept_key, concept_type, sample_count, accepted_count,
+                    rejected_count, auto_applied_count, rollback_count, updated_at
+                )
+                VALUES (
+                    42, 'rule:1', 'rule', 3, 2, 0, 1, 0,
+                    '2026-05-14T00:00:00Z'
+                );
+                INSERT INTO import_learning_model_registry(
+                    user_id, model_key, model_version, dataset_snapshot_id, status,
+                    metrics_json, updated_at
+                )
+                VALUES (
+                    42, 'import-learning-dual-head', 'v1', 7, 'active',
+                    '{\"feature_schema_version\":\"fs1\",\"policy_version\":\"p1\",\"sample_count\":3}',
+                    '2026-05-14T00:00:00Z'
+                );
+                ",
+            )
+            .expect("learning evidence");
+        bill_analyser_db::create_llm_memory_event(
+            runtime.connection(),
+            &bill_analyser_db::LlmMemoryEventDraft {
+                user_id: UserId::new(42).expect("user"),
+                session_id: Some("session-a".to_string()),
+                preview_id: Some(1),
+                event_type: "feedback".to_string(),
+                decision: Some("accept".to_string()),
+                prompt_text: None,
+                llm_response_raw: None,
+                llm_provider: Some("openai".to_string()),
+                llm_model: Some("gpt".to_string()),
+                suggested_main_category: Some("餐饮".to_string()),
+                suggested_sub_category: Some("咖啡".to_string()),
+                suggested_source_account: None,
+                suggested_destination_account: None,
+                confidence: 0.9,
+                user_correction_category: None,
+                user_correction_account: None,
+                snapshot_before: None,
+                snapshot_after: None,
+                metadata: Some(json!({"counterparty": "cafe"})),
+            },
+        )
+        .expect("memory event");
+        let pack = build_rule_synthesis_knowledge_pack(
+            runtime.connection(),
+            UserId::new(42).expect("user"),
+            &[json!({"id": 1, "path": "餐饮/咖啡"})],
+        )
+        .expect("knowledge pack");
+        assert_eq!(pack["recent_llm_feedback"][0]["decision"], "accept");
+        assert_eq!(pack["categories"][0]["category_name"], "餐饮/咖啡");
+        assert_eq!(
+            pack["categories"][0]["evidence"][0]["source"],
+            "learning_rule"
+        );
+        assert_eq!(pack["active_model"]["model_version"], "v1");
+        assert!(pack["learning_suggestions"]
+            .as_array()
+            .expect("learning suggestions")
+            .is_empty());
+        assert!(rule_synthesis_has_learning_evidence(&pack));
+        assert!(!rule_synthesis_has_learning_evidence(&json!({
+            "categories": [],
+        })));
+    }
+
+    #[test]
+    fn llm_rule_grouping_and_bill_prompt_helpers_cover_edges() {
+        let mut blank_evidence = row(5, "餐饮", "午餐", "");
+        blank_evidence.preview_counterparty.clear();
+        blank_evidence.preview_payment_method.clear();
+        let groups = rule_induction_groups(vec![
+            row(1, "餐饮", "午餐", "canteen lunch"),
+            row(2, "餐饮", "午餐", ""),
+            row(3, "", "", "ignored category"),
+            blank_evidence,
+        ])
+        .expect("rule groups");
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].category_name, "餐饮/午餐");
+        assert_eq!(groups[0].source_ids, vec![1, 2]);
+        assert!(rule_induction_groups(vec![row(4, "", "", "")]).is_err());
+        let too_many_groups = (1..=11)
+            .map(|id| row(id, &format!("分类{id}"), "", "evidence"))
+            .collect::<Vec<_>>();
+        let too_many = rule_induction_groups(too_many_groups).expect_err("too many groups");
+        assert_eq!(too_many.status_code, 422);
+        assert_eq!(too_many.body["code"], "PREVIEW_SELECTION_TOO_LARGE");
+
+        assert_eq!(category_path("餐饮", ""), "餐饮");
+        assert_eq!(category_path("", "咖啡"), "咖啡");
+        assert_eq!(category_path("餐饮", "咖啡"), "餐饮/咖啡");
+
+        let connection = Connection::open_in_memory().expect("memory db");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE bills(
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    date TEXT,
+                    amount REAL,
+                    counterparty TEXT,
+                    description TEXT,
+                    payment_method TEXT,
+                    main_category TEXT
+                );
+                INSERT INTO bills(id, user_id, date, amount, counterparty, description, payment_method, main_category)
+                    VALUES (10, 42, '2026-05-01', 18.5, 'cafe', 'latte', 'cash', ''),
+                           (11, 42, '2026-05-02', 8.0, 'shop', 'snack', 'card', '餐饮');
+                ",
+            )
+            .expect("bills schema");
+        assert!(
+            load_persisted_bill_prompt_values(&connection, 42, Some(&[]), 10)
+                .expect("empty selected ids")
+                .is_empty()
+        );
+        let selected = load_persisted_bill_prompt_values(&connection, 42, Some(&[10, -1]), 10)
+            .expect("selected bill");
+        assert_eq!(selected[0]["id"], 10);
+        let deduped_selected =
+            load_persisted_bill_prompt_values(&connection, 42, Some(&[10, 10, 11]), 1)
+                .expect("deduped selected bill");
+        assert_eq!(deduped_selected.len(), 1);
+        let uncategorized = load_persisted_bill_prompt_values(&connection, 42, None, 10)
+            .expect("uncategorized bills");
+        assert_eq!(uncategorized.len(), 1);
+
+        assert_eq!(preview_id_from_llm_value(&json!({"previewId": 9})), 9);
+        assert_eq!(
+            main_category_from_llm_value(&json!({"mainCategory": "餐饮"})),
+            "餐饮"
+        );
+        assert_eq!(
+            sub_category_from_llm_value(&json!({"subCategory": "咖啡"})),
+            "咖啡"
+        );
+        assert_eq!(
+            rule_expression_from_llm_value(&json!({"suggestedRuleExpression": "OR={咖啡}"})),
+            "OR={咖啡}"
+        );
+        assert_eq!(confidence_from_value(&json!({"confidence": 2.0})), 1.0);
+        assert!(valid_rule_expression("OR={咖啡}"));
+        assert!(!valid_rule_expression("(OR={broken}"));
+    }
 }
