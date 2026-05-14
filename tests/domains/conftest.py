@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 import time
 import uuid
 from pathlib import Path
@@ -48,6 +49,29 @@ def _ensure_domain_auth_schema(flask_app):
     db_instance = flask_app.config.get("DB_INSTANCE")
     if db_instance is not None:
         asyncio.run(db_instance.init_db())
+        if not _sqlite_file_has_table(getattr(db_instance, "db_path", None), "categories"):
+            asyncio.run(db_instance.close())
+            asyncio.run(db_instance.init_db())
+        assert _sqlite_file_has_table(getattr(db_instance, "db_path", None), "categories")
+
+
+def _sqlite_file_has_table(db_path: object, table_name: str) -> bool:
+    """Return whether an independent SQLite connection sees a schema table."""
+    if db_path is None:
+        return False
+    db_path_text = str(db_path)
+    if db_path_text in {":memory:", "file::memory:?cache=shared"}:
+        return True
+
+    try:
+        with sqlite3.connect(db_path_text) as conn:
+            row = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (table_name,),
+            ).fetchone()
+    except sqlite3.Error:
+        return False
+    return row is not None
 
 
 @pytest.fixture(scope="session")
