@@ -23,11 +23,11 @@ use bill_analyser_db::{
     delete_user_custom_exchange_rate, find_statistics_all_date_range,
     get_statistics_user_default_currency, list_user_custom_exchange_rates,
     query_asset_trends_payload, query_category_pie_payload, query_category_statistics_payload,
-    query_category_trends_payload, query_statistics_analyzer_category_payload,
-    query_statistics_analyzer_comparison_payload, query_statistics_analyzer_report_payload,
-    query_statistics_analyzer_trends_payload, query_top_merchants_payload,
-    query_transaction_amount_period, upsert_user_custom_exchange_rate, SqliteConnectionConfig,
-    SqliteDbPath, SqliteRuntime, StatisticsBillFilters,
+    query_category_trends_payload, query_insight_anomaly_summary_payload,
+    query_statistics_analyzer_category_payload, query_statistics_analyzer_comparison_payload,
+    query_statistics_analyzer_report_payload, query_statistics_analyzer_trends_payload,
+    query_top_merchants_payload, query_transaction_amount_period, upsert_user_custom_exchange_rate,
+    SqliteConnectionConfig, SqliteDbPath, SqliteRuntime, StatisticsBillFilters,
 };
 use chrono::{Datelike, Local, NaiveDate, TimeZone};
 use serde::Deserialize;
@@ -51,6 +51,7 @@ pub const STATISTICS_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/statistics/comparison"),
     ("GET", "/api/statistics/category"),
     ("GET", "/api/statistics/trend"),
+    ("GET", "/api/insights/anomalies"),
     ("GET", "/api/statistics/exchange-rates"),
     ("PUT", "/api/statistics/exchange-rates/custom"),
     ("DELETE", "/api/statistics/exchange-rates/custom/{currency}"),
@@ -80,6 +81,7 @@ pub fn statistics_runtime_router() -> Router<ProxyState> {
         )
         .route("/api/statistics/category", get(analyzer_category_handler))
         .route("/api/statistics/trend", get(analyzer_trend_handler))
+        .route("/api/insights/anomalies", get(insights_anomalies_handler))
         .route(
             "/api/statistics/exchange-rates",
             get(exchange_rates_handler),
@@ -135,6 +137,11 @@ struct AnalyzerStatisticsQuery {
     compare_type: Option<String>,
     main_category: Option<String>,
     granularity: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct InsightsAnomaliesQuery {
+    months: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -499,6 +506,34 @@ async fn analyzer_trend_handler(
         query.category.as_deref(),
     ) {
         Ok(result) => json_response(StatusCode::OK, build_statistics_trend_response(&result)),
+        Err(_) => db_error_response(),
+    }
+}
+
+async fn insights_anomalies_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Query(query): Query<InsightsAnomaliesQuery>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let analyzed_months = match insights_analyzed_months(query.months.as_deref()) {
+        Ok(value) => value,
+        Err(message) => return insights_error(message),
+    };
+    match query_insight_anomaly_summary_payload(
+        runtime.connection(),
+        user_id,
+        analyzed_months,
+        Local::now().date_naive(),
+    ) {
+        Ok(payload) => json_response(StatusCode::OK, payload),
         Err(_) => db_error_response(),
     }
 }
@@ -1290,6 +1325,13 @@ fn internal_error(message: impl ToString) -> Response {
     error_response(StatusCode::INTERNAL_SERVER_ERROR, message)
 }
 
+fn insights_error(message: impl ToString) -> Response {
+    json_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        json!({ "success": false, "message": message.to_string() }),
+    )
+}
+
 fn db_error_response() -> Response {
     error_response(
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -1354,4 +1396,13 @@ fn analyzer_period(value: Option<&str>) -> String {
         .filter(|value| !value.is_empty())
         .unwrap_or("month")
         .to_string()
+}
+
+fn insights_analyzed_months(value: Option<&str>) -> Result<u32, String> {
+    let Some(raw) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(6);
+    };
+    raw.parse::<u32>()
+        .map(|months| months.min(24))
+        .map_err(|_| format!("invalid literal for int() with base 10: '{raw}'"))
 }

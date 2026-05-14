@@ -1752,7 +1752,15 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust taxonomy rule-center runtime aggregates user-scoped import learning rules, enabled category rule count, and recurring rule summaries without mutating rule state; the old Flask rule-center overview route shell has been removed.",
     },
-    python_proxy_route!("GET", "/api/insights/anomalies", "statistics-analyzer"),
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/insights/anomalies",
+        domain: "statistics-analyzer",
+        state: MigrationState::PythonDeleted,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessData,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust statistics_analyzer_runtime owns insights anomaly detection for current-user bills; the old Flask insights route shell is deleted.",
+    },
     python_proxy_route!("GET", "/api/llm/candidates", "ai-learning-llm"),
     python_proxy_route!("GET", "/api/llm/candidates/{candidate_id}", "ai-learning-llm"),
     python_proxy_route!(
@@ -2738,13 +2746,10 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
     },
     DomainGovernancePolicy {
         domain: "statistics-analyzer",
-        python_owner_files: &[
-            "src/bill_analyser/api/routes/insights.py",
-            "src/bill_analyser/api/routes/networth.py",
-            "src/bill_analyser/core/analyzer.py",
-        ],
+        python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
             "crates/bill-analyser-http/src/statistics_routes.rs",
+            "crates/bill-analyser-db/src/statistics.rs",
             "crates/bill-analyser-core/src/statistics.rs",
         ],
         tests_migrated: &[
@@ -2754,12 +2759,12 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
         coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
-        deletion_blockers: &["report_chart_generation", "insights_networth_adjacent_routes"],
+        deletion_blockers: EMPTY_STRINGS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "The old Flask statistics Analyzer route shell has been removed; report chart generation plus insights/networth adjacent routes still use Python until their later P10/P8 slices.",
-        decision_required: DecisionRequired::Port,
-        decision_owner: "migration-program",
+            "The old Flask statistics Analyzer and insights route shells have been removed; Analyzer report data, chart-plan contract, and insights anomaly detection are Rust-owned. Net worth remains governed by matching-recurring-calendar-networth.",
+        decision_required: DecisionRequired::None,
+        decision_owner: "none",
         transition_evidence: FULL_ROUTE_EVIDENCE_NO_FIXTURE,
     },
     DomainGovernancePolicy {

@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use bill_analyser_core::statistics::{
     build_asset_trend_legend, build_asset_trends, build_category_pie_data,
-    build_category_statistics_items, build_category_trend_statistics, build_net_worth_snapshot,
+    build_category_statistics_items, build_category_trend_statistics,
+    build_insight_anomaly_summary, build_net_worth_snapshot,
     build_statistics_analyzer_category_result, build_statistics_analyzer_comparison_result,
     build_statistics_analyzer_report, build_statistics_analyzer_trend_bucket,
     build_statistics_analyzer_trends_result, build_top_merchants_data,
@@ -234,6 +235,29 @@ pub fn query_net_worth_payload(connection: &Connection, user_id: UserId) -> DbRe
     let user_id = UserScope::new(user_id).bind_value()?;
     let accounts = load_statistics_accounts(connection, user_id)?;
     Ok(json!(build_net_worth_snapshot(&accounts)))
+}
+
+pub fn query_insight_anomaly_summary_payload(
+    connection: &Connection,
+    user_id: UserId,
+    analyzed_months: u32,
+    today: NaiveDate,
+) -> DbResult<Value> {
+    let user_id = UserScope::new(user_id).bind_value()?;
+    let end_date = today.to_string();
+    let start_date = (today - Duration::days(i64::from(analyzed_months) * 30)).to_string();
+    let filters = StatisticsBillFilters {
+        start_date: Some(start_date.clone()),
+        end_date: Some(end_date.clone()),
+        ..StatisticsBillFilters::default()
+    };
+    let bills = load_statistics_bills(connection, user_id, &filters)?;
+    Ok(build_insight_anomaly_summary(
+        &bills,
+        analyzed_months,
+        &start_date,
+        &end_date,
+    ))
 }
 
 pub fn get_statistics_user_default_currency(

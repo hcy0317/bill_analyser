@@ -186,7 +186,7 @@ S14a makes Rust the runtime owner for DB-backed statistics read routes in `impor
 
 ## S14a.1 Statistics Analyzer Runtime
 
-S14a.1 makes Rust the runtime owner for Analyzer statistics routes in `import_db_runtime`: `GET /api/statistics/overview`, `GET /api/statistics/trends`, `GET /api/statistics/comparison`, `GET /api/statistics/category`, and `GET /api/statistics/trend`. The Rust path reads current-user `bills` directly, preserves Python `StatisticsAnalyzer` period windows, category/type aggregation, trend buckets, top bills, comparison/category filters, and Flask-compatible `success/result` or `success/data` envelopes. The old Flask statistics Analyzer route shell is deleted; report chart generation plus insights/networth adjacent routes remain for later P10/P8 slices.
+S14a.1 makes Rust the runtime owner for Analyzer statistics routes in `import_db_runtime`: `GET /api/statistics/overview`, `GET /api/statistics/trends`, `GET /api/statistics/comparison`, `GET /api/statistics/category`, and `GET /api/statistics/trend`. The Rust path reads current-user `bills` directly, preserves Python `StatisticsAnalyzer` period windows, category/type aggregation, trend buckets, top bills, comparison/category filters, and Flask-compatible `success/result` or `success/data` envelopes. `GET /api/insights/anomalies` is also Rust-owned and reads current-user bills for large-transaction, duplicate-charge, and category-spike anomaly projections. The old Flask statistics Analyzer and insights route shells are deleted; networth adjacent routes remain governed by P8.
 
 ## S14b Bills Recurring Runtime
 

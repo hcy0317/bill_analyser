@@ -36,6 +36,7 @@ async fn statistics_read_runtime_serves_owned_routes_and_reads_db() -> Result<()
         ("GET", "/api/statistics/comparison"),
         ("GET", "/api/statistics/category"),
         ("GET", "/api/statistics/trend"),
+        ("GET", "/api/insights/anomalies"),
     ] {
         assert!(STATISTICS_ROUTE_PATTERNS.iter().any(|item| item == &route));
     }
@@ -152,6 +153,58 @@ async fn statistics_read_runtime_serves_owned_routes_and_reads_db() -> Result<()
         amounts_body["result"]["thisMonth"]["amounts"][0]["expenseAmount"],
         1234
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn insights_anomalies_runtime_serves_owned_route_and_reads_db() -> Result<(), Box<dyn Error>>
+{
+    assert!(STATISTICS_ROUTE_PATTERNS
+        .iter()
+        .any(|item| item == &("GET", "/api/insights/anomalies")));
+
+    let fixture = RuntimeFixture::new()?;
+    seed_insight_anomaly_bills(&fixture.db_path)?;
+    let app = runtime_router(&fixture);
+
+    let response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/insights/anomalies?months=99",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    assert_eq!(body["success"], true);
+    assert_eq!(body["data"]["analyzedMonths"], 24);
+    assert!(body["data"]["analyzedBills"].as_u64().expect("bill count") >= 8);
+    let anomaly_types = body["data"]["anomalies"]
+        .as_array()
+        .expect("anomalies")
+        .iter()
+        .filter_map(|item| item["type"].as_str())
+        .collect::<Vec<_>>();
+    assert!(anomaly_types.contains(&"large_transaction"));
+    assert!(anomaly_types.contains(&"duplicate_charge"));
+    assert!(anomaly_types.contains(&"category_spike"));
+
+    let invalid_response = app
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/insights/anomalies?months=bad",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(invalid_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let invalid_body = read_json(invalid_response).await;
+    assert_eq!(invalid_body["success"], false);
+    assert!(invalid_body["message"]
+        .as_str()
+        .expect("invalid months message")
+        .contains("invalid literal"));
 
     Ok(())
 }
@@ -728,6 +781,22 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
     connection.execute(
         "INSERT INTO user_exchange_rates(user_id, from_currency, to_currency, rate, source, effective_date, created_at, updated_at)
          VALUES (42, 'CNY', 'USD', 7.12, 'manual', '2026-03-01T12:00:00+00:00', 'now', 'now')",
+        [],
+    )?;
+    Ok(())
+}
+
+fn seed_insight_anomaly_bills(path: &Path) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    connection.execute(
+        "INSERT INTO bills(user_id, date, type, amount, counterparty, description, payment_method, main_category, sub_category, source_account_id)
+         VALUES (42, '2026-01-05 08:00:00', '支出', -60.0, 'Market', 'groceries jan', 'cash', 'Food', '', 10),
+                (42, '2026-02-05 08:00:00', '支出', -60.0, 'Market', 'groceries feb', 'cash', 'Food', '', 10),
+                (42, '2026-03-05 08:00:00', '支出', -60.0, 'Market', 'groceries mar', 'cash', 'Food', '', 10),
+                (42, '2026-04-05 08:00:00', '支出', -60.0, 'Market', 'groceries apr', 'cash', 'Food', '', 10),
+                (42, '2026-05-05 08:00:00', '支出', -500.0, 'Restaurant', 'Banquet', 'cash', 'Food', '', 10),
+                (42, '2026-03-06 08:00:00', '支出', -12.0, 'Gym', 'membership', 'cash', 'Fitness', '', 10),
+                (42, '2026-03-08 08:00:00', '支出', -12.0, 'Gym', 'membership duplicate', 'cash', 'Fitness', '', 10)",
         [],
     )?;
     Ok(())

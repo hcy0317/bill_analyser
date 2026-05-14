@@ -169,6 +169,7 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
         ("GET", "/api/statistics/comparison"),
         ("GET", "/api/statistics/category"),
         ("GET", "/api/statistics/trend"),
+        ("GET", "/api/insights/anomalies"),
         ("GET", "/api/statistics/exchange-rates"),
         ("PUT", "/api/statistics/exchange-rates/custom"),
         ("DELETE", "/api/statistics/exchange-rates/custom/{currency}"),
@@ -298,6 +299,7 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
         ("GET", "/api/statistics/comparison"),
         ("GET", "/api/statistics/category"),
         ("GET", "/api/statistics/trend"),
+        ("GET", "/api/insights/anomalies"),
         ("GET", "/api/statistics/exchange-rates"),
         ("PUT", "/api/statistics/exchange-rates/custom"),
         ("DELETE", "/api/statistics/exchange-rates/custom/{currency}"),
@@ -611,6 +613,7 @@ fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
             ("POST", "/api/category-rules/migrate"),
             ("POST", "/api/category-rules/reorder"),
             ("GET", "/api/rules/overview"),
+            ("GET", "/api/insights/anomalies"),
             ("GET", "/api/settings/bundle/export"),
             ("POST", "/api/settings/bundle/import"),
             ("POST", "/api/settings/bundle/import/preview"),
@@ -1222,6 +1225,7 @@ fn domain_policies_record_provider_and_deletion_blockers() {
         "budgets-history",
         "budgets-import",
         "statistics-read",
+        "statistics-analyzer",
         "statistics-exchange",
     ] {
         let policy = find_domain_policy(domain).expect("Rust-owned deleted domain policy exists");

@@ -94,7 +94,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 | src/bill_analyser/api/routes/bills/v2_preview_actions.py | bills-import | api-route | port | 316 |
 | src/bill_analyser/api/routes/bills/v2_sessions.py | bills-import | api-route | port | 194 |
 | src/bill_analyser/api/routes/calendar.py | recurring-calendar | api-route | port | 167 |
-| src/bill_analyser/api/routes/insights.py | statistics-reporting | api-route | port | 178 |
+| src/bill_analyser/api/routes/insights.py | statistics-reporting | api-route | port | 9 |
 | src/bill_analyser/api/routes/learning.py | ai-learning-llm | api-route | port | 256 |
 | src/bill_analyser/api/routes/llm/__init__.py | ai-learning-llm | package-marker | facade | 40 |
 | src/bill_analyser/api/routes/llm/analysis.py | ai-learning-llm | api-route | port | 137 |

@@ -13,6 +13,7 @@ RUST_OWNED_STATISTICS_REQUESTS = [
     ("get", "/api/statistics/comparison"),
     ("get", "/api/statistics/category"),
     ("get", "/api/statistics/trend"),
+    ("get", "/api/insights/anomalies"),
     ("get", "/api/statistics/exchange-rates"),
     ("put", "/api/statistics/exchange-rates/custom"),
     ("delete", "/api/statistics/exchange-rates/custom/USD"),
@@ -41,11 +42,17 @@ def test_statistics_read_and_exchange_flask_sidecar_routes_are_deleted(
 
 
 def test_flask_app_statistics_route_map_is_empty(app) -> None:
-    """Statistics route paths should no longer be registered in Flask sidecar."""
+    """Statistics and insights route paths should no longer be registered in Flask sidecar."""
     statistics_rules = sorted(
         str(rule)
         for rule in app.url_map.iter_rules()
         if str(rule).startswith("/api/statistics")
     )
+    insights_rules = sorted(
+        str(rule)
+        for rule in app.url_map.iter_rules()
+        if str(rule).startswith("/api/insights")
+    )
 
     assert statistics_rules == []
+    assert insights_rules == []
