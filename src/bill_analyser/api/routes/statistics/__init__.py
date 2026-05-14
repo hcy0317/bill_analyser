@@ -1,3 +1,4 @@
+# pylint: disable=too-few-public-methods,wildcard-import,unused-wildcard-import
 """Statistics API route package split by functional domain."""
 
 from __future__ import annotations
@@ -9,22 +10,10 @@ from . import support as _support
 from .support import *  # noqa: F403
 from . import basic as _basic
 from .basic import *  # noqa: F403
-from . import exchange_rates as _exchange_rates
-from .exchange_rates import *  # noqa: F403
-from . import category_analysis as _category_analysis
-from .category_analysis import *  # noqa: F403
-from . import trend_analysis as _trend_analysis
-from .trend_analysis import *  # noqa: F403
-from . import asset_trends as _asset_trends
-from .asset_trends import *  # noqa: F403
 
 _COMPAT_MODULES = (
     _support,
     _basic,
-    _exchange_rates,
-    _category_analysis,
-    _trend_analysis,
-    _asset_trends,
 )
 
 

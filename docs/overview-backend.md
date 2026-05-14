@@ -12,7 +12,7 @@
 - `GET|POST /api/templates/`、`GET|PUT|DELETE /api/templates/{template_id}` 与 `PUT /api/templates/display-orders` 已由 Rust taxonomy runtime 接管，旧 Flask `templates.py` route shell 已删除
 - `GET /api/settings/bundle/export`、`GET|POST /api/settings/bundle/sections/{section_key}/export`、`POST /api/settings/bundle/import`、`POST /api/settings/bundle/import/preview`、`POST /api/settings/bundle/sections/{section_key}/import` 与 `POST /api/settings/bundle/sections/{section_key}/import/preview` 已由 Rust taxonomy runtime 接管，旧 Flask `settings_bundle.py` route shell 已删除
 - `GET|POST /api/budgets`、`GET|POST /api/budgets/`、`GET|PUT|DELETE /api/budgets/{budget_id}`、`GET /api/budgets/export`、`GET /api/budgets/execution`、`GET /api/budgets/forecast`、`GET /api/budgets/history`、`POST /api/budgets/history/snapshot` 与 `POST /api/budgets/import` 已由 Rust budgets runtime 接管，旧 Flask `budgets/` route package 已删除
-- `statistics/`：统计同名 package；统计总览、趋势、分类/商户分析、资产趋势与汇率接口；默认 Rust `import_db_runtime` 下，category statistics、category trends、asset trends、category pie、top merchants、amounts 以及 exchange-rate provider/custom-rate 已由 Rust HTTP/DB 读取写入路径接管，Analyzer overview/trends/comparison/category/trend 仍由 Python sidecar 运行
+- `statistics/`：统计同名 package；默认 Rust `import_db_runtime` 下，category statistics、category trends、asset trends、category pie、top merchants、amounts 以及 exchange-rate provider/custom-rate 已由 Rust HTTP/DB 读取写入路径接管，旧 Flask read/exchange route shell 已删除；该 package 现在只保留 Analyzer overview/trends/comparison/category/trend 的 Python sidecar 代理
 - `backup/`：备份同名 package；备份文件、恢复、任务与清理接口
 - `llm/`：LLM 同名 package；配置、导入会话分析、候选审核、预览推荐与 memory 事件接口
 - `receipt_ocr.py`：小票/支付截图 OCR REST 蓝图，继续提供 `POST /api/ml/receipt-recognition` 与 `GET/PUT /api/ml/receipt-recognition/config`

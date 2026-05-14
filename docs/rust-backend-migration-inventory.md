@@ -6,10 +6,10 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 
 ## Summary
 
-- Python backend files: 292
+- Python backend files: 288
 - Rust backend files: 101
 - Migration domains: 22
-- Files marked port: 228
+- Files marked port: 224
 - Files marked facade: 64
 - Files marked deferred: 0
 - Verified dead files: 0
@@ -39,7 +39,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 | settings-bundle | 8 | 1 | 0 |
 | shared-primitives | 5 | 3 | 0 |
 | smart-dedup | 9 | 1 | 0 |
-| statistics-reporting | 26 | 4 | 0 |
+| statistics-reporting | 22 | 4 | 0 |
 | sync-runtime | 1 | 0 | 0 |
 | tags-templates | 5 | 4 | 0 |
 
@@ -111,13 +111,9 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 | src/bill_analyser/api/routes/receipt_ocr.py | ai-ocr | api-route | port | 185 |
 | src/bill_analyser/api/routes/recurring.py | recurring-calendar | api-route | port | 210 |
 | src/bill_analyser/api/routes/request_context_helpers.py | api-runtime-shell | api-route | port | 40 |
-| src/bill_analyser/api/routes/statistics/__init__.py | statistics-reporting | package-marker | facade | 43 |
-| src/bill_analyser/api/routes/statistics/asset_trends.py | statistics-reporting | api-route | port | 323 |
-| src/bill_analyser/api/routes/statistics/basic.py | statistics-reporting | api-route | port | 341 |
-| src/bill_analyser/api/routes/statistics/category_analysis.py | statistics-reporting | api-route | port | 276 |
-| src/bill_analyser/api/routes/statistics/exchange_rates.py | statistics-reporting | api-route | port | 393 |
-| src/bill_analyser/api/routes/statistics/support.py | statistics-reporting | api-route | port | 140 |
-| src/bill_analyser/api/routes/statistics/trend_analysis.py | statistics-reporting | api-route | port | 363 |
+| src/bill_analyser/api/routes/statistics/__init__.py | statistics-reporting | package-marker | facade | 32 |
+| src/bill_analyser/api/routes/statistics/basic.py | statistics-reporting | api-route | port | 160 |
+| src/bill_analyser/api/routes/statistics/support.py | statistics-reporting | api-route | port | 25 |
 | src/bill_analyser/constants.py | shared-primitives | backend-module | port | 18 |
 | src/bill_analyser/core/__init__.py | shared-primitives | package-marker | facade | 6 |
 | src/bill_analyser/core/account_rust_bridge.py | accounts | core-service | port | 176 |

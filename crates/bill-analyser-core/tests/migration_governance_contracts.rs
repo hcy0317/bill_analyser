@@ -24,15 +24,15 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(!rust_owned.contains(&("POST", "/api/bills/batch")));
     assert!(!rust_owned.contains(&("GET", "/api/budgets/")));
     assert!(!rust_owned.contains(&("POST", "/api/budgets/import")));
-    assert!(rust_owned.contains(&("GET", "/api/statistics/category-statistics")));
-    assert!(rust_owned.contains(&("GET", "/api/statistics/category-statistics/trends")));
-    assert!(rust_owned.contains(&("GET", "/api/statistics/asset-trends")));
-    assert!(rust_owned.contains(&("GET", "/api/statistics/category-pie")));
-    assert!(rust_owned.contains(&("GET", "/api/statistics/top-merchants")));
-    assert!(rust_owned.contains(&("GET", "/api/statistics/amounts")));
-    assert!(rust_owned.contains(&("GET", "/api/statistics/exchange-rates")));
-    assert!(rust_owned.contains(&("PUT", "/api/statistics/exchange-rates/custom")));
-    assert!(rust_owned.contains(&("DELETE", "/api/statistics/exchange-rates/custom/{currency}")));
+    assert!(!rust_owned.contains(&("GET", "/api/statistics/category-statistics")));
+    assert!(!rust_owned.contains(&("GET", "/api/statistics/category-statistics/trends")));
+    assert!(!rust_owned.contains(&("GET", "/api/statistics/asset-trends")));
+    assert!(!rust_owned.contains(&("GET", "/api/statistics/category-pie")));
+    assert!(!rust_owned.contains(&("GET", "/api/statistics/top-merchants")));
+    assert!(!rust_owned.contains(&("GET", "/api/statistics/amounts")));
+    assert!(!rust_owned.contains(&("GET", "/api/statistics/exchange-rates")));
+    assert!(!rust_owned.contains(&("PUT", "/api/statistics/exchange-rates/custom")));
+    assert!(!rust_owned.contains(&("DELETE", "/api/statistics/exchange-rates/custom/{currency}")));
     assert!(rust_owned.contains(&("GET", "/api/tokens")));
     assert!(rust_owned.contains(&("DELETE", "/api/tokens")));
     assert!(rust_owned.contains(&("DELETE", "/api/tokens/{token_id}")));
@@ -154,6 +154,19 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
         ("GET", "/api/budgets/history"),
         ("POST", "/api/budgets/history/snapshot"),
         ("POST", "/api/budgets/import"),
+    ] {
+        assert!(python_deleted_routes.contains(&(method, pattern)));
+    }
+    for (method, pattern) in [
+        ("GET", "/api/statistics/category-statistics"),
+        ("GET", "/api/statistics/category-statistics/trends"),
+        ("GET", "/api/statistics/asset-trends"),
+        ("GET", "/api/statistics/category-pie"),
+        ("GET", "/api/statistics/top-merchants"),
+        ("GET", "/api/statistics/amounts"),
+        ("GET", "/api/statistics/exchange-rates"),
+        ("PUT", "/api/statistics/exchange-rates/custom"),
+        ("DELETE", "/api/statistics/exchange-rates/custom/{currency}"),
     ] {
         assert!(python_deleted_routes.contains(&(method, pattern)));
     }
@@ -284,11 +297,15 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
         ("PUT", "/api/statistics/exchange-rates/custom"),
         ("DELETE", "/api/statistics/exchange-rates/custom/{currency}"),
     ] {
-        let endpoint = find_endpoint_ownership(method, pattern)
-            .unwrap_or_else(|| panic!("missing Rust-owned exchange endpoint {method} {pattern}"));
-        assert_eq!(endpoint.state, MigrationState::RustOwnedVerified);
+        let endpoint = find_endpoint_ownership(method, pattern).unwrap_or_else(|| {
+            panic!("missing Python-deleted exchange endpoint {method} {pattern}")
+        });
+        assert_eq!(endpoint.state, MigrationState::PythonDeleted);
         assert!(!endpoint.is_python_runtime_owner());
         assert!(!endpoint.is_import_deletion_blocked());
+        assert!(endpoint
+            .notes
+            .contains("Flask exchange route shell is deleted"));
     }
 }
 
@@ -539,6 +556,15 @@ fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
             ("GET", "/api/budgets/history"),
             ("POST", "/api/budgets/history/snapshot"),
             ("POST", "/api/budgets/import"),
+            ("GET", "/api/statistics/category-statistics"),
+            ("GET", "/api/statistics/category-statistics/trends"),
+            ("GET", "/api/statistics/asset-trends"),
+            ("GET", "/api/statistics/category-pie"),
+            ("GET", "/api/statistics/top-merchants"),
+            ("GET", "/api/statistics/amounts"),
+            ("GET", "/api/statistics/exchange-rates"),
+            ("PUT", "/api/statistics/exchange-rates/custom"),
+            ("DELETE", "/api/statistics/exchange-rates/custom/{currency}"),
             ("GET", "/api/accounts/"),
             ("POST", "/api/accounts/"),
             ("DELETE", "/api/accounts/{account_id}"),
@@ -1186,14 +1212,14 @@ fn domain_policies_record_provider_and_deletion_blockers() {
         "budgets-analysis",
         "budgets-history",
         "budgets-import",
+        "statistics-read",
+        "statistics-exchange",
     ] {
-        let policy = find_domain_policy(domain).expect("budget domain policy exists");
+        let policy = find_domain_policy(domain).expect("Rust-owned deleted domain policy exists");
         assert_eq!(policy.decision_required, DecisionRequired::None);
         assert!(policy.python_owner_files.is_empty(), "{domain}");
         assert!(policy.deletion_blockers.is_empty(), "{domain}");
-        assert!(policy
-            .unsupported_behavior
-            .contains("old Flask budgets route package has been removed"));
+        assert!(policy.unsupported_behavior.contains("old Flask"));
     }
 
     let database_schema_writer = database_schema_db_writer_policy();

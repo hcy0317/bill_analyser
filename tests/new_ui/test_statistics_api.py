@@ -1,3 +1,7 @@
+"""统计 API sidecar 边界回归测试。"""
+
+from __future__ import annotations
+
 import asyncio
 import json
 import time
@@ -7,8 +11,6 @@ import pytest
 
 from tests.runtime_paths import get_test_db_path
 from tests.user_cleanup_support import register_test_user_for_cleanup
-
-# pylint: disable=import-outside-toplevel,redefined-outer-name
 
 
 @pytest.fixture(scope="module")
@@ -47,7 +49,10 @@ def auth_headers(client):
     assert register_response.status_code in (200, 201), register_response.get_data(as_text=True)
     register_test_user_for_cleanup(db, username)
 
-    login_response = client.post("/api/auth/login", json={"loginName": username, "password": password})
+    login_response = client.post(
+        "/api/auth/login",
+        json={"loginName": username, "password": password},
+    )
     assert login_response.status_code == 200, login_response.get_data(as_text=True)
 
     result = (login_response.get_json() or {}).get("result") or {}
@@ -56,8 +61,8 @@ def auth_headers(client):
     return {"Authorization": f"Bearer {token}"}
 
 
-class TestStatisticsAPI:
-    """统计API测试类"""
+class TestStatisticsAnalyzerSidecar:
+    """仍由 Python Analyzer sidecar 承载的统计路由。"""
 
     def test_get_overview(self, client, auth_headers):
         """测试获取总览统计"""
@@ -68,17 +73,11 @@ class TestStatisticsAPI:
         assert data["success"] is True
         assert "result" in data
 
-        # 验证统计数据结构
         stats = data["result"]
         assert "total_income" in stats
         assert "total_expense" in stats
         assert "net_income" in stats
         assert "bill_count" in stats
-
-        # 验证数据类型
-        assert isinstance(stats["total_income"], (int, float))
-        assert isinstance(stats["total_expense"], (int, float))
-        assert isinstance(stats["net_income"], (int, float))
         assert isinstance(stats["bill_count"], int)
 
     def test_get_overview_with_date_range(self, client, auth_headers):
@@ -91,150 +90,29 @@ class TestStatisticsAPI:
             headers=auth_headers,
         )
         assert response.status_code == 200
+        assert (response.get_json() or {})["success"] is True
 
-        data = json.loads(response.data)
-        assert data["success"] is True
-
-    def test_get_trend_monthly(self, client, auth_headers):
-        """测试获取月度趋势"""
-        response = client.get("/api/statistics/trend?granularity=month", headers=auth_headers)
+    @pytest.mark.parametrize("granularity", ["month", "week", "day"])
+    def test_get_trend(self, client, auth_headers, granularity):
+        """测试趋势 Analyzer 代理路由。"""
+        response = client.get(
+            f"/api/statistics/trend?granularity={granularity}",
+            headers=auth_headers,
+        )
         assert response.status_code == 200
 
         data = json.loads(response.data)
         assert data["success"] is True
         assert isinstance(data["data"], list)
-
-        # 验证趋势数据结构
-        if data["data"]:
-            first_point = data["data"][0]
-            assert "date" in first_point
-            assert "income" in first_point
-            assert "expense" in first_point
-            assert "net" in first_point
-
-    def test_get_trend_weekly(self, client, auth_headers):
-        """测试获取周度趋势"""
-        response = client.get("/api/statistics/trend?granularity=week", headers=auth_headers)
-        assert response.status_code == 200
-
-        data = json.loads(response.data)
-        assert data["success"] is True
-        assert isinstance(data["data"], list)
-
-    def test_get_trend_daily(self, client, auth_headers):
-        """测试获取日度趋势"""
-        response = client.get("/api/statistics/trend?granularity=day", headers=auth_headers)
-        assert response.status_code == 200
-
-        data = json.loads(response.data)
-        assert data["success"] is True
-        assert isinstance(data["data"], list)
-
-    def test_get_category_pie(self, client, auth_headers):
-        """测试获取分类饼图数据"""
-        response = client.get("/api/statistics/category-pie", headers=auth_headers)
-        assert response.status_code == 200
-
-        data = json.loads(response.data)
-        assert data["success"] is True
-        assert isinstance(data["data"], list)
-
-        # 验证饼图数据结构
-        if data["data"]:
-            first_item = data["data"][0]
-            assert "name" in first_item
-            assert "value" in first_item
-
-    def test_get_category_pie_with_type(self, client, auth_headers):
-        """测试按类型获取分类饼图"""
-        response = client.get("/api/statistics/category-pie?type=支出", headers=auth_headers)
-        assert response.status_code == 200
-
-        data = json.loads(response.data)
-        assert data["success"] is True
-
-    def test_get_top_merchants_default(self, client, auth_headers):
-        """测试获取TOP商家（默认限制）"""
-        response = client.get("/api/statistics/top-merchants", headers=auth_headers)
-        assert response.status_code == 200
-
-        data = json.loads(response.data)
-        assert data["success"] is True
-        assert isinstance(data["data"], list)
-
-        # 默认返回不超过10个
-        assert len(data["data"]) <= 10
-
-        # 验证商家数据结构
-        if data["data"]:
-            first_merchant = data["data"][0]
-            assert "name" in first_merchant
-            assert "amount" in first_merchant
-            assert "count" in first_merchant
-
-    def test_get_top_merchants_with_limit(self, client, auth_headers):
-        """测试带限制数量的TOP商家"""
-        response = client.get("/api/statistics/top-merchants?limit=5", headers=auth_headers)
-        assert response.status_code == 200
-
-        data = json.loads(response.data)
-        assert data["success"] is True
-        assert len(data["data"]) <= 5
-
-    def test_get_top_merchants_sorted(self, client, auth_headers):
-        """测试TOP商家按金额排序"""
-        response = client.get("/api/statistics/top-merchants?limit=5", headers=auth_headers)
-        assert response.status_code == 200
-
-        data = json.loads(response.data)
-        if len(data["data"]) >= 2:
-            # 验证按金额降序排列
-            for i in range(len(data["data"]) - 1):
-                assert data["data"][i]["amount"] >= data["data"][i + 1]["amount"]
-
-
-class TestStatisticsIntegration:
-    """统计API集成测试"""
 
     def test_overview_consistency(self, client, auth_headers):
         """测试总览统计的一致性"""
         response = client.get("/api/statistics/overview", headers=auth_headers)
         data = json.loads(response.data)
 
-        if response.status_code == 200:
-            stats = data["result"]
-            # 净收入 = 总收入 - 总支出
-            expected_net = round(stats["total_income"] - stats["total_expense"], 2)
-            assert stats["net_income"] == expected_net
-
-    def test_trend_data_ordered(self, client, auth_headers):
-        """测试趋势数据按日期排序"""
-        response = client.get("/api/statistics/trend?granularity=month", headers=auth_headers)
-        data = json.loads(response.data)
-
-        if len(data["data"]) >= 2:
-            dates = [item["date"] for item in data["data"]]
-            # 验证日期升序排列
-            assert dates == sorted(dates)
-
-    def test_category_pie_sum(self, client, auth_headers):
-        """测试分类饼图金额总和与总览一致"""
-        # 获取总览
-        overview_response = client.get("/api/statistics/overview", headers=auth_headers)
-        overview_data = json.loads(overview_response.data)
-
-        # 获取支出分类饼图
-        pie_response = client.get("/api/statistics/category-pie?type=支出", headers=auth_headers)
-        pie_data = json.loads(pie_response.data)
-
-        if overview_response.status_code == 200 and pie_response.status_code == 200:
-            pie_sum = sum(item["value"] for item in pie_data["data"])
-            # 允许浮点数误差
-            assert abs(pie_sum - overview_data["result"]["total_expense"]) < 0.01
-
-
-class TestStatisticsPerformance:
-    """统计API性能测试"""
+        stats = data["result"]
+        expected_net = round(stats["total_income"] - stats["total_expense"], 2)
+        assert stats["net_income"] == expected_net
 
     @pytest.mark.timeout(5)
     def test_overview_performance(self, client, auth_headers):
@@ -247,3 +125,29 @@ class TestStatisticsPerformance:
         """测试趋势统计响应时间（应在5秒内）"""
         response = client.get("/api/statistics/trend", headers=auth_headers)
         assert response.status_code == 200
+
+
+class TestRustOwnedStatisticsSidecarDeletion:
+    """已由 Rust 接管的统计读取路由不再注册 Flask sidecar。"""
+
+    @pytest.mark.parametrize(
+        "method,path",
+        [
+            ("get", "/api/statistics/category-statistics"),
+            ("get", "/api/statistics/category-statistics/trends"),
+            ("get", "/api/statistics/asset-trends"),
+            ("get", "/api/statistics/category-pie"),
+            ("get", "/api/statistics/top-merchants"),
+            ("get", "/api/statistics/amounts"),
+        ],
+    )
+    def test_rust_owned_read_routes_removed_from_sidecar(
+        self,
+        client,
+        auth_headers,
+        method,
+        path,
+    ):
+        response = getattr(client, method)(path, headers=auth_headers)
+        assert response.status_code in (404, 405), response.get_data(as_text=True)
+        assert (response.get_json() or {})["success"] is False
