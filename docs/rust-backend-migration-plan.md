@@ -138,7 +138,11 @@ S9b wires preview update and reclassify HTTP routes to the Rust DB primitives. T
 
 ## S9c Preview-Item, Learning, and LLM Runtime Wiring
 
-S9c wires preview-item transfer/recurring decisions, session learning bypass/promotion, and LLM review/memory routes. The S9c HTTP tests cover transfer accept projection, recurring match updates, learning promotion, and LLM memory writes. Python-proxied provider generation routes, and Python-proxied global Learning Center suggestion/rule routes remain outside this Rust-owned import-session boundary.
+S9c wires preview-item transfer/recurring decisions, session learning bypass/promotion, and LLM review/memory routes. The S9c HTTP tests cover transfer accept projection, recurring match updates, learning promotion, and LLM memory writes. Python-proxied provider generation routes remain outside this Rust-owned import-session boundary; global Learning Center suggestion/rule routes are Rust-owned by the P11 learning-center runtime slice.
+
+## P11a Global Learning Center Runtime
+
+P11a makes Rust the runtime owner for global Learning Center suggestion and rule routes in `import_db_runtime`: `GET /api/learning/suggestions`, `POST /api/learning/suggestions/generate`, suggestion accept/batch-accept/reject, `GET /api/learning/rules`, rule toggle/update/delete. The Rust path reads durable `import_learning_corpus_samples`, mines deterministic composite suggestions, materializes accepted suggestions into `import_learning_rules`, records feedback events, preserves current-user scope and Flask-compatible `success/data` envelopes, and deletes the old Flask `learning.py` route shell. Live LLM provider generation remains proxied through `POST /api/llm/preview-recommend`, `POST /api/llm/analyze-transactions`, and `POST /api/llm/rule-synthesis`.
 
 ## S9d Import Parse, Dedup, Confirm, and Frontend Upload Runtime Wiring
 
@@ -146,7 +150,7 @@ S9d wires JSON parse -> parse_generic -> dedup -> confirm and frontend FormData 
 
 ## S9e Bills and Transactions CRUD Runtime
 
-S9e makes Rust the runtime owner for core bills/transactions CRUD routes in `import_db_runtime`, including `GET/POST /api/bills`, by-month/get aliases, single update/delete, legacy modify/delete, and batch create/update/delete. Recurring candidates/match, reconciliation statements, and category action helpers are Rust-owned after S14b-S14d. The old Flask bills CRUD and import route shells are deleted; remaining Python core import services stay preserved for later matching/provider/global-learning cutovers.
+S9e makes Rust the runtime owner for core bills/transactions CRUD routes in `import_db_runtime`, including `GET/POST /api/bills`, by-month/get aliases, single update/delete, legacy modify/delete, and batch create/update/delete. Recurring candidates/match, reconciliation statements, and category action helpers are Rust-owned after S14b-S14d. The old Flask bills CRUD and import route shells are deleted; remaining Python core import services stay preserved for later matching/provider/provider cutovers.
 
 ## S9f Transaction Picture Runtime
 
@@ -200,7 +204,7 @@ S14c makes Rust the runtime owner for account reconciliation statements in `impo
 
 S14d makes Rust the runtime owner for bill category action helpers in `import_db_runtime`: `POST /api/bills/category/quick-add-keyword` and `POST /api/bills/category/refresh`. The Rust path preserves Flask-compatible quick-add validation and messages, appends non-duplicate `categories.keywords`, reload-equivalent `category_rules` matching semantics, user-scoped bill refresh, and the `success/result` refresh counters.
 
-Runtime metadata now reports `business_migration=import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime`; the statistics read/analyzer/exchange route set has no Python-proxy remainder after S14a.1. After S15c.6, the P4 taxonomy route set has no legacy category rules config/cache Python-proxy remainder.
+Runtime metadata now reports `business_migration=import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime`; the statistics read/analyzer/exchange route set has no Python-proxy remainder after S14a.1. After S15c.6, the P4 taxonomy route set has no legacy category rules config/cache Python-proxy remainder.
 
 After S15c.7, the `taxonomy-rules-settings` manifest bucket also has no settings encryption status Python-proxy remainder; backup file operations and real SQLCipher connection/migration behavior remain in later ops phases.
 

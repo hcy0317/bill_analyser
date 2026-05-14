@@ -45,11 +45,11 @@ async fn import_db_runtime_reports_primary_http_import_runtime() -> Result<(), B
     let runtime_body = read_json(runtime).await;
     assert_eq!(
         runtime_body["runtime_boundary"],
-        "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+auth-login-register-token-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
+        "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+auth-login-register-token-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
     );
     assert_eq!(
         runtime_body["business_migration"],
-        "import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
+        "import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
     );
     assert_eq!(runtime_body["api_takeover"], true);
 
@@ -455,10 +455,6 @@ async fn import_db_runtime_proxies_provider_generation_routes_to_python_sidecar(
         ("/api/llm/preview-recommend", "llm-preview-recommend"),
         ("/api/llm/analyze-transactions", "llm-analyze-transactions"),
         ("/api/llm/rule-synthesis", "llm-rule-synthesis"),
-        (
-            "/api/learning/suggestions/generate",
-            "learning-suggestions-generate",
-        ),
     ] {
         let response = app
             .clone()
@@ -2219,71 +2215,212 @@ async fn import_db_runtime_handles_legacy_confirm_session_batch_and_recurring_ca
 }
 
 #[tokio::test]
-async fn import_db_runtime_proxies_global_learning_center_routes_to_python_sidecar(
-) -> Result<(), Box<dyn Error>> {
-    let (upstream, server) = provider_generation_upstream().await?;
-    let fixture = RuntimeFixture::new_with_upstream(upstream)?;
+async fn import_db_runtime_owns_global_learning_center_routes() -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new().await?;
+    let runtime = runtime_for(fixture.db_path())?;
+    seed_users(&runtime, &[42])?;
+    seed_global_learning_corpus(&runtime)?;
     let app = runtime_router(&fixture);
 
-    for (method, uri, route) in [
-        (
-            Method::GET,
-            "/api/learning/suggestions?status=pending",
-            "learning-suggestions-list",
-        ),
-        (
-            Method::POST,
-            "/api/learning/suggestions/11/accept",
-            "learning-suggestion-accept",
-        ),
-        (
-            Method::POST,
-            "/api/learning/suggestions/12/reject",
-            "learning-suggestion-reject",
-        ),
-        (
-            Method::POST,
-            "/api/learning/suggestions/batch-accept",
-            "learning-suggestions-batch-accept",
-        ),
-        (
-            Method::GET,
-            "/api/learning/rules?limit=5",
-            "learning-rules-list",
-        ),
-        (
-            Method::PUT,
-            "/api/learning/rules/7/toggle",
-            "learning-rule-toggle",
-        ),
-        (Method::PUT, "/api/learning/rules/7", "learning-rule-update"),
-        (
-            Method::DELETE,
-            "/api/learning/rules/7",
-            "learning-rule-delete",
-        ),
-    ] {
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method(method)
-                    .uri(uri)
-                    .header("content-type", "application/json")
-                    .body(Body::from("{}"))
-                    .expect("request builds"),
-            )
-            .await
-            .expect("response");
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = read_json(response).await;
-        assert_eq!(body["success"], true);
-        assert_eq!(body["runtime"], "python-sidecar");
-        assert_eq!(body["route"], route);
-    }
+    let generate_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/learning/suggestions/generate")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from("{}"))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(generate_response.status(), StatusCode::OK);
+    let generate_body = read_json(generate_response).await;
+    assert_eq!(generate_body["success"], true);
+    assert_eq!(generate_body["data"]["total_annotations"], 2);
+    assert_eq!(generate_body["data"]["created"], 2);
 
-    server.abort();
-    let _ = server.await;
+    let suggestions_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/learning/suggestions?status=pending&limit=5")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(suggestions_response.status(), StatusCode::OK);
+    let suggestions_body = read_json(suggestions_response).await;
+    let suggestions = suggestions_body["data"]["items"]
+        .as_array()
+        .expect("suggestions");
+    assert_eq!(suggestions.len(), 2);
+    assert_eq!(suggestions[0]["match_type"], "composite");
+    let accept_id = suggestions[0]["id"].as_i64().expect("accept suggestion id");
+    let reject_id = suggestions[1]["id"].as_i64().expect("reject suggestion id");
+
+    let accept_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/learning/suggestions/{accept_id}/accept"))
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from("{}"))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(accept_response.status(), StatusCode::OK);
+    let accept_body = read_json(accept_response).await;
+    assert_eq!(accept_body["success"], true);
+    assert_eq!(accept_body["data"]["status"], "accepted");
+    let rule_id = accept_body["data"]["rule_id"].as_i64().expect("rule id");
+
+    let reject_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/learning/suggestions/{reject_id}/reject"))
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from("{}"))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(reject_response.status(), StatusCode::OK);
+    assert_eq!(read_json(reject_response).await["success"], true);
+
+    let rules_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/learning/rules?limit=5")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(rules_response.status(), StatusCode::OK);
+    let rules_body = read_json(rules_response).await;
+    assert_eq!(rules_body["data"]["total"], 1);
+    assert_eq!(rules_body["data"]["items"][0]["id"], rule_id);
+    assert_eq!(rules_body["data"]["items"][0]["enabled"], true);
+
+    let toggle_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::PUT)
+                .uri(format!("/api/learning/rules/{rule_id}/toggle"))
+                .header("content-type", "application/json")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from(r#"{"enabled":false}"#))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(toggle_response.status(), StatusCode::OK);
+    let toggle_body = read_json(toggle_response).await;
+    assert_eq!(toggle_body["data"]["ruleId"], rule_id);
+    assert_eq!(toggle_body["data"]["enabled"], false);
+
+    let update_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::PUT)
+                .uri(format!("/api/learning/rules/{rule_id}"))
+                .header("content-type", "application/json")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from(r#"{"learnedType":"支出","enabled":true}"#))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(update_response.status(), StatusCode::OK);
+    let update_body = read_json(update_response).await;
+    assert_eq!(update_body["data"]["learned_type"], "支出");
+    assert_eq!(update_body["data"]["enabled"], true);
+
+    let empty_batch_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/learning/suggestions/batch-accept")
+                .header("content-type", "application/json")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from(r#"{"suggestionIds":[]}"#))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(empty_batch_response.status(), StatusCode::BAD_REQUEST);
+
+    let invalid_batch_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/learning/suggestions/batch-accept")
+                .header("content-type", "application/json")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from(r#"{"suggestionIds":[999998,999999]}"#))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(invalid_batch_response.status(), StatusCode::OK);
+    let invalid_batch_body = read_json(invalid_batch_response).await;
+    assert_eq!(invalid_batch_body["data"]["acceptedCount"], 0);
+    assert_eq!(invalid_batch_body["data"]["failedCount"], 2);
+
+    let delete_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!("/api/learning/rules/{rule_id}"))
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(delete_response.status(), StatusCode::OK);
+    assert_eq!(read_json(delete_response).await["success"], true);
+
+    let missing_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/learning/suggestions/999999/accept")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from("{}"))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(missing_response.status(), StatusCode::NOT_FOUND);
     Ok(())
 }
 
@@ -2533,6 +2670,64 @@ fn seed_users(runtime: &SqliteRuntime, user_ids: &[i64]) -> Result<(), Box<dyn E
                 user_id,
                 format!("user-{user_id}"),
                 format!("user-{user_id}@example.test"),
+            ),
+        )?;
+    }
+    Ok(())
+}
+
+fn seed_global_learning_corpus(runtime: &SqliteRuntime) -> Result<(), Box<dyn Error>> {
+    runtime.connection().execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS import_learning_corpus_samples (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            session_id TEXT NOT NULL,
+            preview_id INTEGER NOT NULL,
+            parser_id TEXT,
+            counterparty TEXT,
+            description TEXT,
+            payment_method TEXT,
+            composite_match_hash TEXT,
+            match_features_json TEXT,
+            annotated_type TEXT,
+            annotated_category_id INTEGER,
+            annotated_source_account_id INTEGER,
+            annotated_destination_account_id INTEGER,
+            source_snapshot_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, session_id, preview_id)
+        );
+        ",
+    )?;
+    for (preview_id, counterparty, description, category_id) in
+        [(1001, "商户A", "早餐", 31), (1002, "商户B", "午餐", 32)]
+    {
+        let features = serde_json::json!({
+            "parser_id": "wechat",
+            "counterparty": counterparty,
+            "description": description,
+            "payment_method": "微信支付",
+        });
+        let composite_hash = format!("c={counterparty}|d={description}|m=微信支付|p=wechat");
+        runtime.connection().execute(
+            "
+            INSERT INTO import_learning_corpus_samples (
+                user_id, session_id, preview_id, parser_id, counterparty,
+                description, payment_method, composite_match_hash, match_features_json,
+                annotated_type, annotated_category_id, created_at, updated_at
+            ) VALUES (42, ?1, ?2, 'wechat', ?3, ?4, '微信支付', ?5, ?6, '支出', ?7, ?8, ?8)
+            ",
+            (
+                format!("session-{preview_id}"),
+                preview_id,
+                counterparty,
+                description,
+                composite_hash,
+                features.to_string(),
+                category_id,
+                "2026-05-14T00:00:00Z",
             ),
         )?;
     }

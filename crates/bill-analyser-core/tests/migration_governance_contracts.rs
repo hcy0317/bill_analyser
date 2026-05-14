@@ -232,8 +232,8 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     }
     assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
     assert!(rust_owned.contains(&("GET", "/api/ml/receipt-recognition/config")));
-    assert!(!rust_owned.contains(&("GET", "/api/learning/rules")));
-    assert!(!rust_owned.contains(&("GET", "/api/learning/suggestions")));
+    assert!(rust_owned.contains(&("GET", "/api/learning/rules")));
+    assert!(rust_owned.contains(&("GET", "/api/learning/suggestions")));
     assert!(!rust_owned.contains(&("POST", "/api/llm/preview-recommend")));
     assert!(!rust_owned.contains(&("POST", "/api/llm/analyze-transactions")));
     assert!(!rust_owned.contains(&("POST", "/api/llm/rule-synthesis")));
@@ -336,6 +336,15 @@ fn bills_import_routes_are_python_deleted_and_provider_routes_remain_proxied() {
         ("POST", "/api/llm/preview-recommend"),
         ("POST", "/api/llm/analyze-transactions"),
         ("POST", "/api/llm/rule-synthesis"),
+    ] {
+        let endpoint = find_endpoint_ownership(method, pattern)
+            .unwrap_or_else(|| panic!("missing provider-owned endpoint {method} {pattern}"));
+        assert_eq!(endpoint.state, MigrationState::PythonProxied);
+        assert!(endpoint.is_python_runtime_owner());
+        assert!(!endpoint.is_import_deletion_blocked());
+    }
+
+    for (method, pattern) in [
         ("GET", "/api/learning/suggestions"),
         ("POST", "/api/learning/suggestions/generate"),
         ("POST", "/api/learning/suggestions/{suggestion_id}/accept"),
@@ -347,9 +356,9 @@ fn bills_import_routes_are_python_deleted_and_provider_routes_remain_proxied() {
         ("DELETE", "/api/learning/rules/{rule_id}"),
     ] {
         let endpoint = find_endpoint_ownership(method, pattern)
-            .unwrap_or_else(|| panic!("missing provider-owned endpoint {method} {pattern}"));
-        assert_eq!(endpoint.state, MigrationState::PythonProxied);
-        assert!(endpoint.is_python_runtime_owner());
+            .unwrap_or_else(|| panic!("missing Rust-owned learning endpoint {method} {pattern}"));
+        assert_eq!(endpoint.state, MigrationState::RustOwnedVerified);
+        assert!(!endpoint.is_python_runtime_owner());
         assert!(!endpoint.is_import_deletion_blocked());
     }
 

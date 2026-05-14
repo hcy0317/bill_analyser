@@ -18,7 +18,6 @@ from bill_analyser.api.routes import (
     auth,
     backup,
     insights,
-    learning,
     llm,
     matching,
     networth,
@@ -141,7 +140,6 @@ def create_app():  # pylint: disable=too-many-statements
     flask_app.register_blueprint(statistics.bp, url_prefix="/api/statistics")
     flask_app.register_blueprint(backup.bp, url_prefix="/api/backup")
     flask_app.register_blueprint(matching.bp, url_prefix="/api/matching")
-    flask_app.register_blueprint(learning.bp, url_prefix="/api/learning")
     flask_app.register_blueprint(recurring.bp, url_prefix="/api/recurring")
     flask_app.register_blueprint(calendar_routes.bp, url_prefix="/api/calendar")
     flask_app.register_blueprint(networth.bp, url_prefix="/api/networth")
