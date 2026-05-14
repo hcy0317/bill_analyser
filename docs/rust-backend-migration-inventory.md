@@ -6,10 +6,10 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 
 ## Summary
 
-- Python backend files: 302
+- Python backend files: 301
 - Rust backend files: 101
 - Migration domains: 22
-- Files marked port: 237
+- Files marked port: 236
 - Files marked facade: 65
 - Files marked deferred: 0
 - Verified dead files: 0
@@ -27,7 +27,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 | api-runtime-shell | 3 | 8 | 0 |
 | auth-security | 18 | 2 | 0 |
 | backup-operations | 5 | 1 | 0 |
-| bills-import | 52 | 7 | 0 |
+| bills-import | 51 | 7 | 0 |
 | budgets | 16 | 6 | 0 |
 | classification-rules | 9 | 1 | 0 |
 | database-facade | 3 | 2 | 0 |
@@ -80,7 +80,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 | src/bill_analyser/api/routes/backup/files.py | backup-operations | api-route | port | 474 |
 | src/bill_analyser/api/routes/backup/jobs.py | backup-operations | api-route | port | 149 |
 | src/bill_analyser/api/routes/backup/support.py | backup-operations | api-route | port | 449 |
-| src/bill_analyser/api/routes/bills/__init__.py | bills-import | package-marker | facade | 74 |
+| src/bill_analyser/api/routes/bills/__init__.py | bills-import | package-marker | facade | 71 |
 | src/bill_analyser/api/routes/bills/crud_create_update.py | bills-import | api-route | port | 311 |
 | src/bill_analyser/api/routes/bills/crud_prepare.py | bills-import | api-route | port | 301 |
 | src/bill_analyser/api/routes/bills/crud_query.py | bills-import | api-route | port | 455 |
@@ -92,7 +92,6 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 | src/bill_analyser/api/routes/bills/import_review.py | bills-import | api-route | port | 394 |
 | src/bill_analyser/api/routes/bills/import_rows.py | bills-import | api-route | port | 316 |
 | src/bill_analyser/api/routes/bills/parse_import.py | bills-import | api-route | port | 200 |
-| src/bill_analyser/api/routes/bills/reconciliation.py | bills-import | api-route | port | 284 |
 | src/bill_analyser/api/routes/bills/support.py | bills-import | api-route | port | 323 |
 | src/bill_analyser/api/routes/bills/v2_pipeline.py | bills-import | api-route | port | 441 |
 | src/bill_analyser/api/routes/bills/v2_preview_actions.py | bills-import | api-route | port | 316 |

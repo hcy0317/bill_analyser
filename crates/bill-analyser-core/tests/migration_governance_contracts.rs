@@ -187,7 +187,6 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
         ("GET", "/api/bills/export"),
         ("POST", "/api/bills/pictures"),
         ("POST", "/api/bills/pictures/unused"),
-        ("GET", "/api/bills/reconciliation_statements"),
         ("GET", "/api/bills/{bill_id}/recurring-candidates"),
         ("PUT", "/api/bills/{bill_id}/recurring-match"),
         ("DELETE", "/api/bills/{bill_id}/recurring-match"),
@@ -205,14 +204,14 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
         ("DELETE", "/api/bills/batch/delete"),
         ("POST", "/api/bills/category/quick-add-keyword"),
         ("POST", "/api/bills/category/refresh"),
+        ("GET", "/api/bills/reconciliation_statements"),
     ] {
-        let endpoint = find_endpoint_ownership(method, pattern).unwrap_or_else(|| {
-            panic!("missing Python-deleted bills category/batch endpoint {method} {pattern}")
-        });
+        let endpoint = find_endpoint_ownership(method, pattern)
+            .unwrap_or_else(|| panic!("missing Python-deleted bills endpoint {method} {pattern}"));
         assert_eq!(endpoint.state, MigrationState::PythonDeleted);
         assert!(!endpoint.is_python_runtime_owner());
         assert!(!endpoint.is_import_deletion_blocked());
-        assert!(endpoint.notes.contains("category_actions.py"));
+        assert!(endpoint.notes.contains(".py route shell"));
     }
 
     let receipt_recognition = find_endpoint_ownership("POST", "/api/ml/receipt-recognition")
@@ -473,6 +472,7 @@ fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
         vec![
             ("PUT", "/api/bills/batch/update"),
             ("DELETE", "/api/bills/batch/delete"),
+            ("GET", "/api/bills/reconciliation_statements"),
             ("POST", "/api/bills/category/quick-add-keyword"),
             ("POST", "/api/bills/category/refresh"),
             ("GET", "/api/accounts/"),

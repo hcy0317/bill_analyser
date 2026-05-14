@@ -30,8 +30,6 @@ from . import import_config as _import_config
 from .import_config import *  # noqa: F403
 from . import parse_import as _parse_import
 from .parse_import import *  # noqa: F403
-from . import reconciliation as _reconciliation
-from .reconciliation import *  # noqa: F403
 from . import v2_pipeline as _v2_pipeline
 from .v2_pipeline import *  # noqa: F403
 from . import v2_sessions as _v2_sessions
@@ -52,7 +50,6 @@ _COMPAT_MODULES = (
     _import_learning,
     _import_config,
     _parse_import,
-    _reconciliation,
     _v2_pipeline,
     _v2_sessions,
     _v2_preview_actions,

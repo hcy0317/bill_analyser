@@ -114,10 +114,11 @@ class TestAPIBlueprints:
         assert response.status_code == 404
 
     def test_bills_category_actions_removed_from_flask_sidecar(self, client):
-        """账单分类动作和批量改删已由 Rust runtime 接管，不再注册 Flask sidecar route shell。"""
+        """账单分类动作、对账单和批量改删已由 Rust runtime 接管，不再注册 Flask sidecar route shell。"""
         cases = [
             ("post", "/api/bills/category/quick-add-keyword"),
             ("post", "/api/bills/category/refresh"),
+            ("get", "/api/bills/reconciliation_statements?account_id=1&start_time=0&end_time=0"),
             ("put", "/api/bills/batch/update"),
             ("delete", "/api/bills/batch/delete"),
         ]

@@ -558,10 +558,10 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/bills/reconciliation_statements",
         domain: "bills-crud-adjacent",
-        state: MigrationState::RustOwnedVerified,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills reconciliation runtime owns account statements, balance trace, filters, and Flask-compatible envelopes.",
+        notes: "Rust bills reconciliation runtime owns account statements, balance trace, filters, and Flask-compatible envelopes; the old Flask bills/reconciliation.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -2563,10 +2563,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
     },
     DomainGovernancePolicy {
         domain: "bills-crud-adjacent",
-        python_owner_files: &[
-            "src/bill_analyser/api/routes/bills/reconciliation.py",
-            "src/bill_analyser/api/routes/bills/support.py",
-        ],
+        python_owner_files: &["src/bill_analyser/api/routes/bills/support.py"],
         rust_owner_files: &[
             "crates/bill-analyser-http/src/bill_routes.rs",
             "crates/bill-analyser-core/src/adapters/transaction.rs",
