@@ -83,8 +83,8 @@ class TestAPIBlueprints:
     """测试API蓝图注册"""
 
     def test_bills_blueprint_registered(self, client):
-        """测试bills蓝图已注册"""
-        response = client.get("/api/bills/")
+        """测试bills import sidecar 蓝图仍保留"""
+        response = client.get("/api/bills/import/parsers")
         # 应该返回200或其他有效响应，而不是404
         assert response.status_code != 404
 
@@ -114,10 +114,24 @@ class TestAPIBlueprints:
         assert response.status_code == 404
 
     def test_bills_category_actions_removed_from_flask_sidecar(self, client):
-        """账单分类动作、对账单和批量改删已由 Rust runtime 接管，不再注册 Flask sidecar route shell。"""
+        """账单非 import route shell 已由 Rust runtime 接管，不再注册 Flask sidecar。"""
         cases = [
+            ("get", "/api/bills/"),
+            ("post", "/api/bills/"),
+            ("get", "/api/bills/by-month?year=2026&month=1&type=0"),
+            ("get", "/api/bills/get?id=1"),
+            ("get", "/api/bills/1"),
+            ("put", "/api/bills/1"),
+            ("delete", "/api/bills/1"),
             ("post", "/api/bills/modify"),
             ("post", "/api/bills/delete"),
+            ("post", "/api/bills/batch"),
+            ("get", "/api/bills/export"),
+            ("post", "/api/bills/pictures"),
+            ("post", "/api/bills/pictures/unused"),
+            ("get", "/api/bills/1/recurring-candidates"),
+            ("put", "/api/bills/1/recurring-match"),
+            ("delete", "/api/bills/1/recurring-match"),
             ("post", "/api/bills/category/quick-add-keyword"),
             ("post", "/api/bills/category/refresh"),
             ("get", "/api/bills/reconciliation_statements?account_id=1&start_time=0&end_time=0"),
@@ -143,13 +157,13 @@ class TestErrorHandling:
     def test_invalid_json(self, client, auth_headers):
         """测试无效的JSON请求"""
         response = client.post(
-            "/api/bills/batch",
+            "/api/bills/import/batch",
             data="invalid json",
             content_type="application/json",
             headers=auth_headers
         )
         # 应该返回400或500，而不是崩溃
-        assert response.status_code in (400, 500)
+        assert response.status_code in (400, 415, 500)
 
     def test_method_not_allowed(self, client):
         """测试不允许的HTTP方法"""

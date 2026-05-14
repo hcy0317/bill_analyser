@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from typing import Any
 
 
 
@@ -18,71 +17,6 @@ def _current_user_id(client, auth_headers, db_instance) -> int:
     user = _run(db_instance.get_user_by_username(username))
     assert user is not None
     return int(user["id"])
-
-
-
-def _create_account(db_instance, user_id: int, name: str) -> int:
-    return _run(
-        db_instance.create_account(
-            {
-                "name": name,
-                "type": 1,
-                "category": "asset",
-                "currency": "CNY",
-                "icon": "",
-                "color": "",
-                "balance": 0.0,
-                "initial_balance": 0.0,
-                "hidden": False,
-                "display_order": 0,
-                "comment": "",
-                "aliases": [],
-            },
-            user_id=user_id,
-        )
-    )
-
-
-
-def _create_category(db_instance, user_id: int, *, main_category: str, sub_category: str = "") -> int:
-    return _run(
-        db_instance.create_category(
-            {
-                "type": 3,
-                "main_category": main_category,
-                "sub_category": sub_category,
-                "description": "",
-                "priority": 0,
-                "keywords": "",
-                "hidden": False,
-                "icon": "",
-                "color": "",
-            },
-            user_id=user_id,
-        )
-    )
-
-
-
-def _create_bill(db_instance, user_id: int, **overrides: Any) -> int:
-    payload = {
-        "date": "2026-03-05 12:00:00",
-        "type": "支出",
-        "amount": -28.5,
-        "counterparty": "域测试商户",
-        "description": "域测试描述",
-        "payment_method": "支付宝",
-        "main_category": "域测试餐饮",
-        "sub_category": "午餐",
-        "source_account_id": 0,
-        "destination_account_id": 0,
-        "destination_amount": 0.0,
-    }
-    payload.update(overrides)
-    bill_id = _run(db_instance.create_bill(payload, user_id=user_id))
-    assert bill_id is not None
-    return int(bill_id)
-
 
 
 def _count_bills(db_instance, user_id: int) -> int:
@@ -128,54 +62,15 @@ def _create_import_learning_rule(db_instance, user_id: int, match_value: str) ->
 
 
 
-def test_get_bills_combines_account_category_keyword_and_time_filters(client, auth_headers, db_instance) -> None:
-    """账单列表应联合应用账户、分类、关键词与时间筛选。"""
-    user_id = _current_user_id(client, auth_headers, db_instance)
-    matched_account_id = _create_account(db_instance, user_id, "域测试账户-命中")
-    other_account_id = _create_account(db_instance, user_id, "域测试账户-排除")
-    matched_category_id = _create_category(
-        db_instance,
-        user_id,
-        main_category="域测试餐饮",
-        sub_category="午餐",
-    )
-    _create_category(db_instance, user_id, main_category="域测试交通", sub_category="地铁")
-
-    _create_bill(
-        db_instance,
-        user_id,
-        date="2026-03-05 12:00:00",
-        description="域测试命中账单",
-        main_category="域测试餐饮",
-        sub_category="午餐",
-        source_account_id=matched_account_id,
-    )
-    _create_bill(
-        db_instance,
-        user_id,
-        date="2026-03-06 12:00:00",
-        description="域测试错误分类",
-        main_category="域测试交通",
-        sub_category="地铁",
-        source_account_id=matched_account_id,
-    )
-    _create_bill(
-        db_instance,
-        user_id,
-        date="2026-03-07 12:00:00",
-        description="域测试错误账户",
-        main_category="域测试餐饮",
-        sub_category="午餐",
-        source_account_id=other_account_id,
-    )
-
+def test_get_bills_flask_sidecar_route_is_deleted(client, auth_headers) -> None:
+    """账单列表 Flask route shell 已删除，CRUD 合同由 Rust runtime 覆盖。"""
     response = client.get(
         "/api/bills/",
         query_string={
             "page": 1,
             "page_size": 20,
-            "accountIds": str(matched_account_id),
-            "categoryIds": str(matched_category_id),
+            "accountIds": "1",
+            "categoryIds": "1",
             "keyword": "域测试命中",
             "min_time": int(datetime(2026, 3, 1, 0, 0, 0).timestamp() * 1000),
             "max_time": int(datetime(2026, 3, 31, 23, 59, 59).timestamp() * 1000),
@@ -183,17 +78,14 @@ def test_get_bills_combines_account_category_keyword_and_time_filters(client, au
         headers=auth_headers,
     )
 
-    assert response.status_code == 200, response.get_data(as_text=True)
+    assert response.status_code in (404, 405), response.get_data(as_text=True)
     payload = response.get_json() or {}
-    assert payload["success"] is True
-    assert payload["result"]["totalCount"] == 1
-    assert len(payload["result"]["items"]) == 1
-    assert payload["result"]["items"][0]["comment"] == "域测试命中账单"
+    assert payload["success"] is False
 
 
 
-def test_create_bill_invalid_source_account_id_returns_400_without_persisting(client, auth_headers, db_instance) -> None:
-    """单条创建接口遇到非法账户 ID 时应返回 400，且不写入账单。"""
+def test_create_bill_flask_sidecar_route_is_deleted_without_persisting(client, auth_headers, db_instance) -> None:
+    """账单创建 Flask route shell 已删除，sidecar 不应写入账单。"""
     user_id = _current_user_id(client, auth_headers, db_instance)
     bill_count_before = _count_bills(db_instance, user_id)
 
@@ -215,10 +107,10 @@ def test_create_bill_invalid_source_account_id_returns_400_without_persisting(cl
         headers=auth_headers,
     )
 
-    assert response.status_code == 400
+    assert response.status_code in (404, 405)
     payload = response.get_json() or {}
     assert payload["success"] is False
-    assert "invalid literal for int()" in payload["error"]
+    assert payload["error"] in {"Not Found", "Method Not Allowed"}
     assert _count_bills(db_instance, user_id) == bill_count_before
 
 

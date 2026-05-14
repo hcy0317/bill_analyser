@@ -20,8 +20,8 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("GET", "/api/health")));
     assert!(rust_owned.contains(&("GET", "/api/runtime")));
     assert!(rust_owned.contains(&("POST", "/api/bills/import/v2/parse")));
-    assert!(rust_owned.contains(&("GET", "/api/bills")));
-    assert!(rust_owned.contains(&("POST", "/api/bills/batch")));
+    assert!(!rust_owned.contains(&("GET", "/api/bills")));
+    assert!(!rust_owned.contains(&("POST", "/api/bills/batch")));
     assert!(rust_owned.contains(&("GET", "/api/budgets/")));
     assert!(rust_owned.contains(&("POST", "/api/budgets/")));
     assert!(rust_owned.contains(&("GET", "/api/budgets/export")));
@@ -126,6 +126,26 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(python_deleted_routes.contains(&("PUT", "/api/templates/{template_id}")));
     assert!(python_deleted_routes.contains(&("DELETE", "/api/templates/{template_id}")));
     assert!(python_deleted_routes.contains(&("PUT", "/api/templates/display-orders")));
+    for (method, pattern) in [
+        ("GET", "/api/bills"),
+        ("GET", "/api/bills/"),
+        ("POST", "/api/bills"),
+        ("POST", "/api/bills/"),
+        ("GET", "/api/bills/by-month"),
+        ("GET", "/api/bills/get"),
+        ("GET", "/api/bills/{bill_id}"),
+        ("PUT", "/api/bills/{bill_id}"),
+        ("DELETE", "/api/bills/{bill_id}"),
+        ("POST", "/api/bills/batch"),
+        ("GET", "/api/bills/export"),
+        ("POST", "/api/bills/pictures"),
+        ("POST", "/api/bills/pictures/unused"),
+        ("GET", "/api/bills/{bill_id}/recurring-candidates"),
+        ("PUT", "/api/bills/{bill_id}/recurring-match"),
+        ("DELETE", "/api/bills/{bill_id}/recurring-match"),
+    ] {
+        assert!(python_deleted_routes.contains(&(method, pattern)));
+    }
     assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
     assert!(rust_owned.contains(&("GET", "/api/ml/receipt-recognition/config")));
     assert!(!rust_owned.contains(&("GET", "/api/learning/rules")));
@@ -184,26 +204,26 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
     }
 
     for (method, pattern) in [
+        ("GET", "/api/bills"),
+        ("GET", "/api/bills/"),
+        ("POST", "/api/bills"),
+        ("POST", "/api/bills/"),
+        ("GET", "/api/bills/by-month"),
+        ("GET", "/api/bills/get"),
+        ("GET", "/api/bills/{bill_id}"),
+        ("PUT", "/api/bills/{bill_id}"),
+        ("DELETE", "/api/bills/{bill_id}"),
+        ("POST", "/api/bills/modify"),
+        ("POST", "/api/bills/delete"),
+        ("POST", "/api/bills/batch"),
+        ("PUT", "/api/bills/batch/update"),
+        ("DELETE", "/api/bills/batch/delete"),
         ("GET", "/api/bills/export"),
         ("POST", "/api/bills/pictures"),
         ("POST", "/api/bills/pictures/unused"),
         ("GET", "/api/bills/{bill_id}/recurring-candidates"),
         ("PUT", "/api/bills/{bill_id}/recurring-match"),
         ("DELETE", "/api/bills/{bill_id}/recurring-match"),
-    ] {
-        let endpoint = find_endpoint_ownership(method, pattern).unwrap_or_else(|| {
-            panic!("missing Rust-owned bills adjacent endpoint {method} {pattern}")
-        });
-        assert_eq!(endpoint.state, MigrationState::RustOwnedVerified);
-        assert!(!endpoint.is_python_runtime_owner());
-        assert!(!endpoint.is_import_deletion_blocked());
-    }
-
-    for (method, pattern) in [
-        ("POST", "/api/bills/modify"),
-        ("POST", "/api/bills/delete"),
-        ("PUT", "/api/bills/batch/update"),
-        ("DELETE", "/api/bills/batch/delete"),
         ("POST", "/api/bills/category/quick-add-keyword"),
         ("POST", "/api/bills/category/refresh"),
         ("GET", "/api/bills/reconciliation_statements"),
@@ -472,11 +492,27 @@ fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
     assert_eq!(
         python_deleted,
         vec![
+            ("GET", "/api/bills"),
+            ("GET", "/api/bills/"),
+            ("POST", "/api/bills"),
+            ("POST", "/api/bills/"),
+            ("GET", "/api/bills/by-month"),
+            ("GET", "/api/bills/get"),
+            ("GET", "/api/bills/{bill_id}"),
+            ("PUT", "/api/bills/{bill_id}"),
+            ("DELETE", "/api/bills/{bill_id}"),
             ("POST", "/api/bills/modify"),
             ("POST", "/api/bills/delete"),
+            ("POST", "/api/bills/batch"),
             ("PUT", "/api/bills/batch/update"),
             ("DELETE", "/api/bills/batch/delete"),
+            ("GET", "/api/bills/export"),
+            ("POST", "/api/bills/pictures"),
+            ("POST", "/api/bills/pictures/unused"),
             ("GET", "/api/bills/reconciliation_statements"),
+            ("GET", "/api/bills/{bill_id}/recurring-candidates"),
+            ("PUT", "/api/bills/{bill_id}/recurring-match"),
+            ("DELETE", "/api/bills/{bill_id}/recurring-match"),
             ("POST", "/api/bills/category/quick-add-keyword"),
             ("POST", "/api/bills/category/refresh"),
             ("GET", "/api/accounts/"),
@@ -803,10 +839,30 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         bills_export.envelope,
         ResponseEnvelopeFamily::FlaskRawPassthrough
     );
-    assert_eq!(bills_export.state, MigrationState::RustOwnedVerified);
+    assert_eq!(bills_export.state, MigrationState::PythonDeleted);
     assert_eq!(bills_export.handler, RouteHandlerId::BillsCrudRuntime);
+    assert!(bills_export.deletion_blockers.is_empty());
 
-    for endpoint in ["POST /api/bills/modify", "POST /api/bills/delete"] {
+    for endpoint in [
+        "GET /api/bills",
+        "GET /api/bills/",
+        "POST /api/bills",
+        "POST /api/bills/",
+        "GET /api/bills/by-month",
+        "GET /api/bills/get",
+        "GET /api/bills/{bill_id}",
+        "PUT /api/bills/{bill_id}",
+        "DELETE /api/bills/{bill_id}",
+        "POST /api/bills/modify",
+        "POST /api/bills/delete",
+        "POST /api/bills/batch",
+        "GET /api/bills/export",
+        "POST /api/bills/pictures",
+        "POST /api/bills/pictures/unused",
+        "GET /api/bills/{bill_id}/recurring-candidates",
+        "PUT /api/bills/{bill_id}/recurring-match",
+        "DELETE /api/bills/{bill_id}/recurring-match",
+    ] {
         let entry = manifest
             .iter()
             .find(|entry| entry.endpoint == endpoint)
@@ -821,7 +877,7 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         .iter()
         .find(|entry| entry.endpoint == "DELETE /api/bills/{bill_id}/recurring-match")
         .expect("recurring match delete route is present");
-    assert_eq!(recurring_match.state, MigrationState::RustOwnedVerified);
+    assert_eq!(recurring_match.state, MigrationState::PythonDeleted);
     assert_eq!(recurring_match.handler, RouteHandlerId::BillsCrudRuntime);
     assert_eq!(recurring_match.decision_required, DecisionRequired::None);
     assert!(recurring_match.deletion_blockers.is_empty());

@@ -18,8 +18,8 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
         sorted(path.relative_to(repo_root).as_posix() for path in (repo_root / "src/bill_analyser").rglob("*.py"))
     )
 
-    assert len(expected_python_paths) == 300
-    assert inventory.summary["python_backend_files"] == 300
+    assert len(expected_python_paths) == 298
+    assert inventory.summary["python_backend_files"] == 298
     assert tuple(record.path for record in inventory.python_files) == expected_python_paths
     assert inventory.summary["rust_backend_files"] == 101
     assert "crates/bill-analyser-core/src/ai_ocr_llm.rs" in inventory.rust_files
@@ -132,7 +132,9 @@ def test_every_python_file_has_migration_domain_status_and_no_verified_dead(repo
     assert "src/bill_analyser/api/routes/templates.py" not in records
     assert "src/bill_analyser/api/routes/settings_bundle.py" not in records
     assert "src/bill_analyser/api/routes/bills/category_actions.py" not in records
+    assert "src/bill_analyser/api/routes/bills/crud_create_update.py" not in records
     assert "src/bill_analyser/api/routes/bills/crud_prepare.py" not in records
+    assert "src/bill_analyser/api/routes/bills/crud_query.py" not in records
     assert "src/bill_analyser/api/routes/bills/reconciliation.py" not in records
     assert records["src/bill_analyser/core/database/templates/recurring.py"].initial_status == "facade"
     assert records["src/bill_analyser/core/database/templates/schedule.py"].initial_status == "facade"
@@ -148,7 +150,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
 
     assert first_render == second_render
     assert "# Rust Backend Migration Inventory" in first_render
-    assert "- Python backend files: 300" in first_render
+    assert "- Python backend files: 298" in first_render
     assert "- Rust backend files: 101" in first_render
     assert "- Verified dead files: 0" in first_render
     assert "Route/domain cutover state lives separately in the Rust governance manifest" in first_render

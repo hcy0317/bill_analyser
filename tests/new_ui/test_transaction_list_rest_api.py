@@ -40,33 +40,21 @@ def _auth_headers_fixture(client):
 
 
 def test_transactions_list_rest_endpoint(client, auth_headers):
-    """交易列表应可通过 REST 主链访问。"""
+    """交易列表 REST 主链已由 Rust 接管，不再注册 Flask sidecar route shell。"""
     response = client.get(
         "/api/bills/?max_time=9999999999999&min_time=0&type=0&page_size=10&page=1&with_count=true",
         headers=auth_headers,
     )
-    assert response.status_code == 200
-
-    data = json.loads(response.data)
-    assert data["success"] is True
-    assert "result" in data
-    assert "items" in data["result"]
-    assert "totalCount" in data["result"]
+    assert response.status_code == 404
 
 
 def test_transactions_list_by_month_rest_endpoint(client, auth_headers):
-    """按月交易列表应可通过 REST 主链访问。"""
+    """按月交易列表 REST 主链已由 Rust 接管，不再注册 Flask sidecar route shell。"""
     response = client.get(
         "/api/bills/by-month?year=2025&month=1&type=0",
         headers=auth_headers,
     )
-    assert response.status_code == 200
-
-    data = json.loads(response.data)
-    assert data["success"] is True
-    assert "result" in data
-    assert "items" in data["result"]
-    assert "totalCount" in data["result"]
+    assert response.status_code == 404
 
 
 def test_transactions_list_legacy_routes_removed(client, auth_headers):

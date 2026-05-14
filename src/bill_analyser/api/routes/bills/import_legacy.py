@@ -1,4 +1,5 @@
-# pylint: disable=wildcard-import,unused-wildcard-import,undefined-variable
+"""Legacy Python bills import sidecar routes."""
+# pylint: disable=wildcard-import,unused-wildcard-import,undefined-variable,broad-exception-caught,too-many-locals
 from .support import *  # noqa: F403
 from .import_detection import *  # noqa: F403
 from .import_rows import *  # noqa: F403
@@ -43,7 +44,10 @@ def upload_and_import():
         # 检查文件扩展名
         if not allowed_file(file.filename):
             return jsonify(
-                {"success": False, "error": f"File type not allowed. Supported: {', '.join(ALLOWED_EXTENSIONS)}"}
+                {
+                    "success": False,
+                    "error": f"File type not allowed. Supported: {', '.join(ALLOWED_EXTENSIONS)}",
+                }
             ), 400
 
         # 获取解析器类型
@@ -188,6 +192,30 @@ def get_available_parsers():
 
     except Exception as e:
         logger.error("获取解析器列表失败: %s", e)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route("/import/batch", methods=["POST"])
+@log_method
+@require_auth
+def import_bills_batch():
+    """批量导入账单。"""
+    try:
+        data = request.get_json()
+        if not data or "file_path" not in data:
+            return jsonify({"success": False, "error": "file_path is required"}), 400
+
+        _, bill_service, _ = get_app_context()
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(bill_service.import_bills(data["file_path"]))
+        loop.close()
+
+        return jsonify({"success": result["success"], "result": result})
+
+    except Exception as e:
+        logger.error("批量导入账单失败: %s", e)
         return jsonify({"success": False, "error": str(e)}), 500
 
 

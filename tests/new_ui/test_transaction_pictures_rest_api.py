@@ -4,7 +4,7 @@ import io
 
 
 def test_upload_transaction_picture_rest(client, auth_headers):
-    """交易图片上传应走新的 REST 主链。"""
+    """交易图片上传已由 Rust runtime 接管，不再注册 Flask sidecar route shell。"""
     png_bytes = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\x0b\xe7\x02\x9d\x00\x00\x00\x00IEND\xaeB`\x82'
     response = client.post(
         '/api/bills/pictures',
@@ -15,38 +15,17 @@ def test_upload_transaction_picture_rest(client, auth_headers):
         content_type='multipart/form-data'
     )
 
-    assert response.status_code == 200, response.get_data(as_text=True)
-    data = response.get_json() or {}
-    assert data.get('success') is True
-    result = data.get('result') or {}
-    assert result.get('pictureId')
-    assert str(result.get('originalUrl', '')).startswith('data:image/png;base64,')
+    assert response.status_code in (404, 405), response.get_data(as_text=True)
 
 
 def test_remove_unused_transaction_picture_rest(client, auth_headers):
-    """交易图片删除应走新的 REST 主链。"""
-    png_bytes = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\x0b\xe7\x02\x9d\x00\x00\x00\x00IEND\xaeB`\x82'
-    upload_response = client.post(
-        '/api/bills/pictures',
-        data={
-            'picture': (io.BytesIO(png_bytes), 'remove.png')
-        },
-        headers=auth_headers,
-        content_type='multipart/form-data'
-    )
-    assert upload_response.status_code == 200
-    picture_id = ((upload_response.get_json() or {}).get('result') or {}).get('pictureId')
-    assert picture_id
-
+    """交易图片清理已由 Rust runtime 接管，不再注册 Flask sidecar route shell。"""
     delete_response = client.post(
         '/api/bills/pictures/unused',
-        json={'id': picture_id},
+        json={'id': 'remove.png'},
         headers=auth_headers
     )
-    assert delete_response.status_code == 200, delete_response.get_data(as_text=True)
-    data = delete_response.get_json() or {}
-    assert data.get('success') is True
-    assert data.get('result') is True
+    assert delete_response.status_code in (404, 405), delete_response.get_data(as_text=True)
 
 
 def test_transaction_picture_legacy_routes_removed(client, auth_headers):
