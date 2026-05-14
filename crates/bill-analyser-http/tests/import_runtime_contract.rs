@@ -1,4 +1,4 @@
-use std::{error::Error, net::SocketAddr, path::Path, time::Duration};
+use std::{env, error::Error, fs, net::SocketAddr, path::Path, time::Duration};
 
 use axum::{
     body::{to_bytes, Body},
@@ -26,6 +26,7 @@ use tokio::net::TcpListener;
 use tower::ServiceExt;
 
 const TEST_AUTH_SECRET: &str = "rust-import-test-secret";
+static OCR_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[tokio::test]
 async fn import_db_runtime_reports_primary_http_import_runtime() -> Result<(), Box<dyn Error>> {
@@ -45,11 +46,11 @@ async fn import_db_runtime_reports_primary_http_import_runtime() -> Result<(), B
     let runtime_body = read_json(runtime).await;
     assert_eq!(
         runtime_body["runtime_boundary"],
-        "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+ai-llm-config-candidates-runtime+auth-login-register-token-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
+        "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+ai-llm-config-candidates-runtime+ai-ocr-recognition-runtime+auth-login-register-token-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
     );
     assert_eq!(
         runtime_body["business_migration"],
-        "import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+ai-llm-config-candidates-runtime+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
+        "import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+ai-llm-config-candidates-runtime+ai-ocr-recognition-runtime+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
     );
     assert_eq!(runtime_body["api_takeover"], true);
 
@@ -417,10 +418,9 @@ async fn import_db_runtime_persists_ocr_config_and_rejects_unknown_provider(
 }
 
 #[tokio::test]
-async fn import_db_runtime_proxies_receipt_ocr_recognition_to_python_sidecar(
+async fn import_db_runtime_owns_receipt_ocr_recognition_disabled_error(
 ) -> Result<(), Box<dyn Error>> {
-    let (upstream, server) = receipt_ocr_upstream().await?;
-    let fixture = RuntimeFixture::new_with_upstream(upstream)?;
+    let fixture = RuntimeFixture::new().await?;
     let app = runtime_router(&fixture);
 
     let response = app
@@ -429,18 +429,377 @@ async fn import_db_runtime_proxies_receipt_ocr_recognition_to_python_sidecar(
                 .method(Method::POST)
                 .uri("/api/ml/receipt-recognition")
                 .header("content-type", "application/octet-stream")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
                 .body(Body::from("receipt-image"))
                 .expect("request builds"),
         )
         .await
         .expect("response");
 
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let body = read_json(response).await;
+    assert_eq!(body["success"], false);
+    assert_eq!(body["errorCode"], "provider_unconfigured");
+    assert_eq!(body["message"], "ocr provider not configured");
+    Ok(())
+}
+
+#[tokio::test]
+async fn import_db_runtime_owns_receipt_ocr_recognition_cancelled_multipart(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new().await?;
+    let app = runtime_router(&fixture);
+    let boundary = "ocr-cancel-boundary";
+    let body = multipart_body_bytes(
+        boundary,
+        &[("cancelled", "true")],
+        &[(
+            "image",
+            "receipt.png",
+            "image/png",
+            b"receipt-image".as_slice(),
+        )],
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/ml/receipt-recognition")
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .header("x-user-id", "43")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from(body))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::from_u16(499)?);
+    let body = read_json(response).await;
+    assert_eq!(body["success"], false);
+    assert_eq!(body["errorCode"], "cancelled");
+    assert_eq!(body["message"], "request cancelled by client");
+    Ok(())
+}
+
+#[tokio::test]
+async fn import_db_runtime_owns_receipt_ocr_recognition_tesseract_payload(
+) -> Result<(), Box<dyn Error>> {
+    let _env_guard = OCR_ENV_LOCK.lock().await;
+    let fixture = RuntimeFixture::new().await?;
+    let app = runtime_router(&fixture);
+    let fixture_text = fixture._temp_dir.path().join("ocr-text.txt");
+    fs::write(
+        &fixture_text,
+        "支付宝\n商品: 拿铁咖啡\n付款金额 12.34\n2025-01-02 10:30",
+    )?;
+    let script = write_fake_tesseract_script(fixture._temp_dir.path())?;
+    env::set_var("BILL_ANALYSER_RUST_OCR_FIXTURE_TEXT", &fixture_text);
+    configure_fake_tesseract_command(&script);
+    env::set_var("BILL_ANALYSER_RUST_OCR_TIMEOUT_MS", "1000");
+
+    let put_config = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::PUT)
+                .uri("/api/ml/receipt-recognition/config")
+                .header("content-type", "application/json")
+                .header("x-user-id", "44")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from(
+                    json!({"provider": "tesseract", "lang": "eng"}).to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(put_config.status(), StatusCode::OK);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/ml/receipt-recognition")
+                .header("content-type", "image/png")
+                .header("x-user-id", "44")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from("fake-image-bytes"))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    clear_fake_tesseract_env();
     assert_eq!(response.status(), StatusCode::OK);
     let body = read_json(response).await;
     assert_eq!(body["success"], true);
-    assert_eq!(body["runtime"], "python-sidecar");
-    server.abort();
-    let _ = server.await;
+    assert_eq!(body["result"]["amount"], 12.34);
+    assert_eq!(body["result"]["trade_time"], "2025-01-02 10:30");
+    assert_eq!(body["result"]["description"], "拿铁咖啡");
+    assert_eq!(body["result"]["payment_platform"], "alipay");
+    assert_eq!(body["result"]["provenance"]["provider"], "tesseract");
+    assert_eq!(body["result"]["provenance"]["model"], "tesseract");
+    assert_eq!(
+        body["result"]["raw_provider_response"]["engine"],
+        "tesseract"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn import_db_runtime_owns_receipt_ocr_recognition_auth_and_input_edges(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new().await?;
+    let app = runtime_router(&fixture);
+
+    let unauthenticated = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/ml/receipt-recognition")
+                .body(Body::from("receipt-image"))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+
+    let default_mime = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/ml/receipt-recognition")
+                .header("x-user-id", "45")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from("receipt-image"))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(default_mime.status(), StatusCode::NOT_IMPLEMENTED);
+    let default_body = read_json(default_mime).await;
+    assert_eq!(default_body["errorCode"], "provider_unconfigured");
+
+    let malformed_multipart = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/ml/receipt-recognition")
+                .header("content-type", "multipart/form-data")
+                .header("x-user-id", "45")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from("not-a-valid-multipart-body"))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(malformed_multipart.status(), StatusCode::BAD_REQUEST);
+    Ok(())
+}
+
+#[tokio::test]
+async fn import_db_runtime_owns_receipt_ocr_recognition_provider_error_edges(
+) -> Result<(), Box<dyn Error>> {
+    let _env_guard = OCR_ENV_LOCK.lock().await;
+    clear_fake_tesseract_env();
+    let fixture = RuntimeFixture::new().await?;
+    let app = runtime_router(&fixture);
+
+    let cloud_config = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::PUT)
+                .uri("/api/ml/receipt-recognition/config")
+                .header("content-type", "application/json")
+                .header("x-user-id", "46")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from(
+                    json!({"provider": "cloud_stub", "lang": "chi_sim"}).to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(cloud_config.status(), StatusCode::OK);
+
+    let cloud_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/ml/receipt-recognition")
+                .header("content-type", "image/png")
+                .header("x-user-id", "46")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from("receipt-image"))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(cloud_response.status(), StatusCode::NOT_IMPLEMENTED);
+    let cloud_body = read_json(cloud_response).await;
+    assert_eq!(cloud_body["errorCode"], "provider_unconfigured");
+    assert_eq!(cloud_body["message"], "cloud_ocr_not_configured");
+
+    let tesseract_config = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::PUT)
+                .uri("/api/ml/receipt-recognition/config")
+                .header("content-type", "application/json")
+                .header("x-user-id", "47")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from(
+                    json!({"provider": "tesseract", "lang": "eng"}).to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(tesseract_config.status(), StatusCode::OK);
+
+    env::set_var(
+        "BILL_ANALYSER_RUST_OCR_TESSERACT_COMMAND",
+        "bill-analyser-missing-tesseract-command",
+    );
+    env::remove_var("BILL_ANALYSER_RUST_OCR_TESSERACT_COMMAND_ARGS");
+    for index in 0..11 {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/ml/receipt-recognition")
+                    .header("content-type", "image/png")
+                    .header("x-user-id", "47")
+                    .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                    .body(Body::from("receipt-image"))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("response");
+        let body = read_json(response).await;
+        if index < 10 {
+            assert_eq!(body["errorCode"], "provider_unconfigured");
+            assert!(body["message"]
+                .as_str()
+                .expect("message")
+                .contains("tesseract provider unavailable"));
+        } else {
+            assert_eq!(body["errorCode"], "rate_limited");
+            assert_eq!(body["message"], "ocr per-user rate limit exceeded");
+        }
+    }
+    clear_fake_tesseract_env();
+    Ok(())
+}
+
+#[tokio::test]
+async fn import_db_runtime_owns_receipt_ocr_recognition_tesseract_process_edges(
+) -> Result<(), Box<dyn Error>> {
+    let _env_guard = OCR_ENV_LOCK.lock().await;
+    clear_fake_tesseract_env();
+    let fixture = RuntimeFixture::new().await?;
+    let app = runtime_router(&fixture);
+
+    let put_config = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::PUT)
+                .uri("/api/ml/receipt-recognition/config")
+                .header("content-type", "application/json")
+                .header("x-user-id", "48")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from(
+                    json!({"provider": "tesseract", "lang": "eng"}).to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(put_config.status(), StatusCode::OK);
+
+    let failing_script = write_failing_tesseract_script(fixture._temp_dir.path())?;
+    configure_fake_tesseract_command(&failing_script);
+    env::set_var("BILL_ANALYSER_RUST_OCR_TIMEOUT_MS", "1000");
+    let failed = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/ml/receipt-recognition")
+                .header("content-type", "image/png")
+                .header("x-user-id", "48")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from("receipt-image"))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(failed.status(), StatusCode::NOT_IMPLEMENTED);
+    let failed_body = read_json(failed).await;
+    assert_eq!(failed_body["errorCode"], "provider_unconfigured");
+    assert!(failed_body["message"]
+        .as_str()
+        .expect("message")
+        .contains("tesseract provider unavailable"));
+
+    let silent_failing_script = write_silent_failing_tesseract_script(fixture._temp_dir.path())?;
+    configure_fake_tesseract_command(&silent_failing_script);
+    let silent_failed = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/ml/receipt-recognition")
+                .header("content-type", "image/png")
+                .header("x-user-id", "50")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from("receipt-image"))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(silent_failed.status(), StatusCode::NOT_IMPLEMENTED);
+    let silent_failed_body = read_json(silent_failed).await;
+    assert_eq!(
+        silent_failed_body["message"],
+        "tesseract provider unavailable"
+    );
+
+    let slow_script = write_slow_tesseract_script(fixture._temp_dir.path())?;
+    configure_fake_tesseract_command(&slow_script);
+    env::set_var("BILL_ANALYSER_RUST_OCR_TIMEOUT_MS", "1");
+    let timed_out = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/ml/receipt-recognition")
+                .header("content-type", "image/png")
+                .header("x-user-id", "49")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from("receipt-image"))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(timed_out.status(), StatusCode::GATEWAY_TIMEOUT);
+    let timed_out_body = read_json(timed_out).await;
+    assert_eq!(timed_out_body["errorCode"], "timeout");
+    assert_eq!(timed_out_body["message"], "ocr provider timeout");
+
+    clear_fake_tesseract_env();
     Ok(())
 }
 
@@ -3270,26 +3629,6 @@ async fn unavailable_upstream() -> String {
     format!("http://{addr}")
 }
 
-async fn receipt_ocr_upstream() -> Result<(String, tokio::task::JoinHandle<()>), Box<dyn Error>> {
-    let app = Router::new().route(
-        "/api/ml/receipt-recognition",
-        post(|| async {
-            (
-                StatusCode::OK,
-                axum::Json(json!({"success": true, "runtime": "python-sidecar"})),
-            )
-        }),
-    );
-    let listener = TcpListener::bind("127.0.0.1:0").await?;
-    let addr: SocketAddr = listener.local_addr()?;
-    let handle = tokio::spawn(async move {
-        axum::serve(listener, app)
-            .await
-            .expect("receipt OCR upstream");
-    });
-    Ok((format!("http://{addr}"), handle))
-}
-
 async fn provider_generation_upstream(
 ) -> Result<(String, tokio::task::JoinHandle<()>), Box<dyn Error>> {
     let app = Router::new()
@@ -3519,6 +3858,114 @@ fn multipart_body_bytes(
     }
     body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
     body
+}
+
+fn write_fake_tesseract_script(dir: &Path) -> Result<std::path::PathBuf, Box<dyn Error>> {
+    #[cfg(windows)]
+    {
+        let script = dir.join("fake-tesseract.cmd");
+        fs::write(
+            &script,
+            "@echo off\r\ntype \"%BILL_ANALYSER_RUST_OCR_FIXTURE_TEXT%\"\r\n",
+        )?;
+        Ok(script)
+    }
+    #[cfg(not(windows))]
+    {
+        let script = dir.join("fake-tesseract.sh");
+        fs::write(
+            &script,
+            "#!/bin/sh\ncat \"$BILL_ANALYSER_RUST_OCR_FIXTURE_TEXT\"\n",
+        )?;
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&script)?.permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions)?;
+        Ok(script)
+    }
+}
+
+fn write_failing_tesseract_script(dir: &Path) -> Result<std::path::PathBuf, Box<dyn Error>> {
+    #[cfg(windows)]
+    {
+        let script = dir.join("failing-tesseract.cmd");
+        fs::write(&script, "@echo off\r\necho boom 1>&2\r\nexit /b 3\r\n")?;
+        Ok(script)
+    }
+    #[cfg(not(windows))]
+    {
+        let script = dir.join("failing-tesseract.sh");
+        fs::write(&script, "#!/bin/sh\necho boom >&2\nexit 3\n")?;
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&script)?.permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions)?;
+        Ok(script)
+    }
+}
+
+fn write_silent_failing_tesseract_script(dir: &Path) -> Result<std::path::PathBuf, Box<dyn Error>> {
+    #[cfg(windows)]
+    {
+        let script = dir.join("silent-failing-tesseract.cmd");
+        fs::write(&script, "@echo off\r\nexit /b 3\r\n")?;
+        Ok(script)
+    }
+    #[cfg(not(windows))]
+    {
+        let script = dir.join("silent-failing-tesseract.sh");
+        fs::write(&script, "#!/bin/sh\nexit 3\n")?;
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&script)?.permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions)?;
+        Ok(script)
+    }
+}
+
+fn write_slow_tesseract_script(dir: &Path) -> Result<std::path::PathBuf, Box<dyn Error>> {
+    #[cfg(windows)]
+    {
+        let script = dir.join("slow-tesseract.cmd");
+        fs::write(&script, "@echo off\r\nping -n 3 127.0.0.1 > nul\r\n")?;
+        Ok(script)
+    }
+    #[cfg(not(windows))]
+    {
+        let script = dir.join("slow-tesseract.sh");
+        fs::write(&script, "#!/bin/sh\nsleep 2\n")?;
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&script)?.permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions)?;
+        Ok(script)
+    }
+}
+
+fn configure_fake_tesseract_command(script: &Path) {
+    #[cfg(windows)]
+    {
+        env::set_var("BILL_ANALYSER_RUST_OCR_TESSERACT_COMMAND", "cmd");
+        env::set_var(
+            "BILL_ANALYSER_RUST_OCR_TESSERACT_COMMAND_ARGS",
+            format!("/C;{}", script.display()),
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        env::set_var("BILL_ANALYSER_RUST_OCR_TESSERACT_COMMAND", "sh");
+        env::set_var(
+            "BILL_ANALYSER_RUST_OCR_TESSERACT_COMMAND_ARGS",
+            script.display().to_string(),
+        );
+    }
+}
+
+fn clear_fake_tesseract_env() {
+    env::remove_var("BILL_ANALYSER_RUST_OCR_FIXTURE_TEXT");
+    env::remove_var("BILL_ANALYSER_RUST_OCR_TESSERACT_COMMAND");
+    env::remove_var("BILL_ANALYSER_RUST_OCR_TESSERACT_COMMAND_ARGS");
+    env::remove_var("BILL_ANALYSER_RUST_OCR_TIMEOUT_MS");
 }
 
 async fn read_json(response: axum::response::Response) -> Value {

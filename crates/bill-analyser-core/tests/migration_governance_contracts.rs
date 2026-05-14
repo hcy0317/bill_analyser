@@ -231,13 +231,13 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
         assert!(python_deleted_routes.contains(&(method, pattern)));
     }
     assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
+    assert!(rust_owned.contains(&("POST", "/api/ml/receipt-recognition")));
     assert!(rust_owned.contains(&("GET", "/api/ml/receipt-recognition/config")));
     assert!(rust_owned.contains(&("GET", "/api/learning/rules")));
     assert!(rust_owned.contains(&("GET", "/api/learning/suggestions")));
     assert!(!rust_owned.contains(&("POST", "/api/llm/preview-recommend")));
     assert!(!rust_owned.contains(&("POST", "/api/llm/analyze-transactions")));
     assert!(!rust_owned.contains(&("POST", "/api/llm/rule-synthesis")));
-    assert!(!rust_owned.contains(&("POST", "/api/ml/receipt-recognition")));
 
     let matrix = rust_http_shell_ownership_matrix();
     assert!(matrix
@@ -328,8 +328,8 @@ fn bills_import_routes_are_python_deleted_and_provider_routes_remain_proxied() {
 
     let receipt_recognition = find_endpoint_ownership("POST", "/api/ml/receipt-recognition")
         .expect("receipt OCR recognition route is governed");
-    assert_eq!(receipt_recognition.state, MigrationState::PythonProxied);
-    assert!(receipt_recognition.is_python_runtime_owner());
+    assert_eq!(receipt_recognition.state, MigrationState::RustOwnedVerified);
+    assert!(!receipt_recognition.is_python_runtime_owner());
     assert!(!receipt_recognition.is_import_deletion_blocked());
 
     for (method, pattern) in [
@@ -869,15 +869,11 @@ fn envelope_oracle_wraps_only_proxy_infrastructure_failures() {
         assert!(!policy.proxy_may_wrap);
     }
 
-    for family in [
-        ResponseEnvelopeFamily::FlaskSuccessData,
-        ResponseEnvelopeFamily::OcrMl,
-    ] {
-        let policy = response_envelope_policy(family).expect("shared envelope policy exists");
-        assert!(policy.applies_to_owner(MigrationState::RustImplemented));
-        assert!(policy.applies_to_owner(MigrationState::RustOwnedVerified));
-        assert!(policy.applies_to_owner(MigrationState::PythonProxied));
-    }
+    let shared_success = response_envelope_policy(ResponseEnvelopeFamily::FlaskSuccessData)
+        .expect("shared envelope policy exists");
+    assert!(shared_success.applies_to_owner(MigrationState::RustImplemented));
+    assert!(shared_success.applies_to_owner(MigrationState::RustOwnedVerified));
+    assert!(shared_success.applies_to_owner(MigrationState::PythonProxied));
 
     let raw_passthrough = response_envelope_policy(ResponseEnvelopeFamily::FlaskRawPassthrough)
         .expect("raw passthrough envelope policy exists");
@@ -989,10 +985,8 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         .iter()
         .find(|entry| entry.endpoint == "POST /api/ml/receipt-recognition")
         .expect("ocr provider route is present");
-    assert_eq!(ocr_provider.decision_required, DecisionRequired::Port);
-    assert!(ocr_provider
-        .deletion_blockers
-        .contains(&"provider_execution_parity"));
+    assert_eq!(ocr_provider.decision_required, DecisionRequired::None);
+    assert!(ocr_provider.deletion_blockers.is_empty());
 
     let settings_export = manifest
         .iter()

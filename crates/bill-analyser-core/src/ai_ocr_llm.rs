@@ -51,6 +51,14 @@ pub struct AiRouteResponse {
     pub body: Value,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcrProviderTextResult {
+    pub text: String,
+    pub confidence: f64,
+    pub model: String,
+    pub raw_provider_response: Value,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LlmProviderConfigContract {
@@ -163,6 +171,37 @@ pub fn build_ocr_error_response(code: &str, message: Option<&str>) -> AiRouteRes
             "errorCode": code,
             "errorMessage": resolved_message,
             "message": resolved_message,
+        }),
+    }
+}
+
+pub fn build_ocr_recognition_success_response(
+    provider_name: &str,
+    provider_result: &OcrProviderTextResult,
+    request_id: &str,
+) -> AiRouteResponse {
+    let parsed = parse_payment_screenshot_text(&provider_result.text);
+    let confidence = provider_result
+        .confidence
+        .max(parsed.confidence)
+        .clamp(0.0, 1.0);
+    AiRouteResponse {
+        status_code: 200,
+        body: json!({
+            "success": true,
+            "result": {
+                "amount": parsed.amount,
+                "trade_time": parsed.trade_time,
+                "description": parsed.description,
+                "payment_platform": parsed.payment_platform,
+                "provenance": {
+                    "provider": provider_name,
+                    "model": provider_result.model,
+                    "request_id": request_id,
+                },
+                "confidence": confidence,
+                "raw_provider_response": provider_result.raw_provider_response,
+            },
         }),
     }
 }

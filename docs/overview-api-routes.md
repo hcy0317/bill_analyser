@@ -5,7 +5,7 @@
   - `/api/matching`
   - `/api/statistics`
   - `/api/backup`
-- 小票识图入口由 `api/routes/receipt_ocr.py` 提供并在 `app.py` 注册：`POST /api/ml/receipt-recognition` 与 `GET/PUT /api/ml/receipt-recognition/config`；运行时复用 `core/ai/ocr` 下配置的 OCR provider，并在 OCR 文本层对支付宝 / 微信支付截图抽取金额、时间、商户/备注和 `payment_platform`。该域的 Rust `ai_ocr_llm` 合同层固定配置、错误 envelope 与解析规则；`GET/PUT /api/ml/receipt-recognition/config` 已由 Rust 接管，真实 `POST /api/ml/receipt-recognition` provider 调用仍由 Python sidecar 负责。
+- 小票识图入口 `POST /api/ml/receipt-recognition` 与 `GET/PUT /api/ml/receipt-recognition/config` 在默认 `import_db_runtime` 下由 Rust 接管；Rust 读取 `receipt_ocr_config`，保持 disabled/cloud_stub typed error、tesseract provider 执行、限流、取消标记和支付宝 / 微信支付截图字段抽取语义。Flask sidecar 的 `receipt_ocr.py` 仍作为迁移期残留 route shell，运行态不再是该 API 的主 owner。
 
 ## 5.1.1 当前 REST 收口进展（2026-03-06）
 - 账户域首批 legacy action 已收口到 REST：

@@ -14,17 +14,18 @@ use axum::{
 use bill_analyser_core::{
     build_composite_match_features, build_import_preview_filter_index_item,
     build_llm_candidate_list_response, build_llm_candidate_reject_response,
-    build_llm_config_get_response, build_ocr_config_success_response,
-    build_unknown_ocr_provider_response, can_delete_python_import_paths,
-    coerce_preview_selected_value, composite_hash_from_features, copy_runtime_llm_config,
-    import_preview_index_success, import_preview_page_success,
+    build_llm_config_get_response, build_ocr_config_success_response, build_ocr_error_response,
+    build_ocr_recognition_success_response, build_unknown_ocr_provider_response,
+    can_delete_python_import_paths, coerce_preview_selected_value, composite_hash_from_features,
+    copy_runtime_llm_config, import_preview_index_success, import_preview_page_success,
     import_session_cancel_missing_response, import_session_cancel_success_response,
     import_session_not_found_response, import_session_success, import_stage_confirm_success,
     import_stage_dedup_success, import_stage_parse_success, import_v2_data_response,
     import_v2_error_response, preview_state_conflict_response, safe_llm_config_payload,
     AiRouteResponse, ImportDeletionEvidence, ImportPreviewIndexData, ImportPreviewPageData,
     ImportSessionSummary, ImportStageConfirmData, ImportStageDedupData, ImportStageParseData,
-    ImportV2RouteResponse, SmartDeduplicationEngine, UserId,
+    ImportV2RouteResponse, OcrConfigContract, OcrProviderTextResult, SmartDeduplicationEngine,
+    UserId, OCR_DISABLED_PROVIDER_NAME,
 };
 use bill_analyser_db::{
     accept_llm_candidate, activate_llm_config, apply_preview_transfer_decision,
@@ -59,11 +60,16 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
-    fs,
+    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
+    env, fs, io,
+    io::Write,
     path::{Component, Path as FsPath, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
+    process::{Command, Stdio},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex, OnceLock,
+    },
+    time::{Duration as StdDuration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use crate::{auth::resolve_user_id_from_headers, config::HttpShellConfig, proxy::ProxyState};
@@ -72,6 +78,8 @@ const NOT_YET_OWNED_ERROR: &str =
     "Rust import route skeleton is not business-owned; Python proxy remains authoritative";
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
 static IMPORT_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
+static OCR_REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
+static OCR_RATE_LIMIT_BUCKETS: OnceLock<Mutex<HashMap<i64, VecDeque<Instant>>>> = OnceLock::new();
 
 pub const IMPORT_SKELETON_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/bills/import/v2/parse"),
@@ -423,6 +431,10 @@ pub fn import_runtime_router() -> Router<ProxyState> {
         .route(
             "/api/ml/receipt-recognition/config",
             get(ocr_config_get_runtime_handler).put(ocr_config_put_runtime_handler),
+        )
+        .route(
+            "/api/ml/receipt-recognition",
+            post(ocr_recognition_runtime_handler),
         )
         .route(
             "/api/learning/suggestions",
@@ -2561,6 +2573,68 @@ pub async fn ocr_config_put_runtime_handler(
     }
 }
 
+pub async fn ocr_recognition_runtime_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let user_id_value = match user_id_i64_value(user_id) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(runtime) => runtime,
+        Err(response) => return route_response(response),
+    };
+    if let Err(response) = init_ocr_runtime_schema(&runtime) {
+        return route_response(response);
+    }
+    let config = match load_ocr_config_setting(runtime.connection()) {
+        Ok(config) => config,
+        Err(error) => return route_response(db_error_response(error)),
+    };
+    let input = match ocr_recognition_input_from_request(&headers, &body) {
+        Ok(input) => input,
+        Err(response) => return route_response(response),
+    };
+    if input.cancelled {
+        return ai_route_response(build_ocr_error_response(
+            "cancelled",
+            Some("request cancelled by client"),
+        ));
+    }
+    if config.provider == OCR_DISABLED_PROVIDER_NAME {
+        return ai_route_response(build_ocr_error_response(
+            "provider_unconfigured",
+            Some("ocr provider not configured"),
+        ));
+    }
+    if !ocr_rate_limit_try_acquire(user_id_value) {
+        return ai_route_response(build_ocr_error_response(
+            "rate_limited",
+            Some("ocr per-user rate limit exceeded"),
+        ));
+    }
+    let request_id = format!(
+        "rust-ocr-{}",
+        OCR_REQUEST_COUNTER.fetch_add(1, Ordering::SeqCst)
+    );
+    let provider_result =
+        match run_ocr_provider(&config, input.image_bytes, input.mime.clone()).await {
+            Ok(result) => result,
+            Err(response) => return ai_route_response(response),
+        };
+    ai_route_response(build_ocr_recognition_success_response(
+        &config.provider,
+        &provider_result,
+        &request_id,
+    ))
+}
+
 pub async fn learning_suggestions_list_runtime_handler(
     State(state): State<ProxyState>,
     Query(query): Query<LearningCenterListQuery>,
@@ -3322,6 +3396,7 @@ fn copy_alias_if_missing(object: &mut Map<String, Value>, target: &str, aliases:
 struct MultipartPart {
     name: String,
     filename: Option<String>,
+    content_type: Option<String>,
     body: Vec<u8>,
 }
 
@@ -3348,6 +3423,14 @@ impl MultipartForm {
             .filter(|part| !part.body.is_empty())
             .collect()
     }
+
+    fn first_file_part_named(&self, keys: &[&str]) -> Option<&MultipartPart> {
+        keys.iter().find_map(|key| {
+            self.parts
+                .iter()
+                .find(|part| part.name == *key && !part.body.is_empty())
+        })
+    }
 }
 
 #[derive(Debug, Default)]
@@ -3360,6 +3443,13 @@ struct ImportPreviewRequest {
     temp_path: Option<String>,
     uploaded_file: Option<Vec<u8>>,
     delimiter: Option<String>,
+}
+
+#[derive(Debug)]
+struct OcrRecognitionInput {
+    image_bytes: Vec<u8>,
+    mime: String,
+    cancelled: bool,
 }
 
 #[derive(Debug)]
@@ -3376,6 +3466,205 @@ fn content_type_from_headers(headers: &HeaderMap) -> String {
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default()
         .to_string()
+}
+
+fn ocr_recognition_input_from_request(
+    headers: &HeaderMap,
+    body: &[u8],
+) -> Result<OcrRecognitionInput, ImportV2RouteResponse> {
+    let content_type = content_type_from_headers(headers);
+    if content_type
+        .to_ascii_lowercase()
+        .contains("multipart/form-data")
+    {
+        let form = parse_multipart_form_data(&content_type, body)?;
+        let image = form
+            .first_file_part_named(&["image", "file", "files"])
+            .map(|part| {
+                (
+                    part.body.clone(),
+                    part.content_type
+                        .clone()
+                        .unwrap_or_else(|| "application/octet-stream".to_string()),
+                )
+            })
+            .unwrap_or_else(|| (Vec::new(), "application/octet-stream".to_string()));
+        return Ok(OcrRecognitionInput {
+            image_bytes: image.0,
+            mime: image.1,
+            cancelled: form
+                .text_value(&["cancelled"])
+                .is_some_and(|value| truthy_form_value(&value)),
+        });
+    }
+    Ok(OcrRecognitionInput {
+        image_bytes: body.to_vec(),
+        mime: if content_type.trim().is_empty() {
+            "application/octet-stream".to_string()
+        } else {
+            content_type
+        },
+        cancelled: false,
+    })
+}
+
+fn truthy_form_value(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+fn ocr_rate_limit_try_acquire(user_id: i64) -> bool {
+    let buckets = OCR_RATE_LIMIT_BUCKETS.get_or_init(|| Mutex::new(HashMap::new()));
+    let Ok(mut buckets) = buckets.lock() else {
+        return false;
+    };
+    let now = Instant::now();
+    let bucket = buckets.entry(user_id).or_default();
+    let cutoff = now - StdDuration::from_secs(60);
+    while bucket.front().is_some_and(|timestamp| *timestamp < cutoff) {
+        bucket.pop_front();
+    }
+    if bucket.len() >= 10 {
+        return false;
+    }
+    bucket.push_back(now);
+    true
+}
+
+async fn run_ocr_provider(
+    config: &OcrConfigContract,
+    image_bytes: Vec<u8>,
+    mime: String,
+) -> Result<OcrProviderTextResult, AiRouteResponse> {
+    match config.provider.as_str() {
+        "cloud_stub" => Err(build_ocr_error_response(
+            "provider_unconfigured",
+            Some("cloud_ocr_not_configured"),
+        )),
+        "tesseract" => run_tesseract_ocr(config.lang.clone(), image_bytes, mime).await,
+        _ => Err(build_ocr_error_response(
+            "provider_unconfigured",
+            Some("ocr provider not configured"),
+        )),
+    }
+}
+
+async fn run_tesseract_ocr(
+    lang: String,
+    image_bytes: Vec<u8>,
+    mime: String,
+) -> Result<OcrProviderTextResult, AiRouteResponse> {
+    match tokio::task::spawn_blocking(move || run_tesseract_ocr_blocking(lang, image_bytes, mime))
+        .await
+    {
+        Ok(result) => result,
+        Err(error) => Err(build_ocr_error_response(
+            "provider_unconfigured",
+            Some(&format!("tesseract provider unavailable: {error}")),
+        )),
+    }
+}
+
+fn run_tesseract_ocr_blocking(
+    lang: String,
+    image_bytes: Vec<u8>,
+    _mime: String,
+) -> Result<OcrProviderTextResult, AiRouteResponse> {
+    let program =
+        env::var("BILL_ANALYSER_RUST_OCR_TESSERACT_COMMAND").unwrap_or_else(|_| "tesseract".into());
+    let mut args = env::var("BILL_ANALYSER_RUST_OCR_TESSERACT_COMMAND_ARGS")
+        .ok()
+        .map(|value| {
+            value
+                .split(';')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    args.extend([
+        "stdin".to_string(),
+        "stdout".to_string(),
+        "-l".to_string(),
+        lang.clone(),
+    ]);
+    let timeout = env::var("BILL_ANALYSER_RUST_OCR_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(StdDuration::from_millis)
+        .unwrap_or_else(|| StdDuration::from_secs(30));
+
+    let mut child = Command::new(&program)
+        .args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| {
+            build_ocr_error_response(
+                "provider_unconfigured",
+                Some(&format!("tesseract provider unavailable: {error}")),
+            )
+        })?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(&image_bytes)
+            .map_err(ocr_io_error_response)?;
+    }
+
+    let started_at = Instant::now();
+    loop {
+        match child.try_wait().map_err(ocr_io_error_response)? {
+            Some(status) => {
+                let output = child.wait_with_output().map_err(ocr_io_error_response)?;
+                if !status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    return Err(build_ocr_error_response(
+                        "provider_unconfigured",
+                        Some(&format!(
+                            "tesseract provider unavailable{}",
+                            if stderr.is_empty() {
+                                String::new()
+                            } else {
+                                format!(": {stderr}")
+                            }
+                        )),
+                    ));
+                }
+                let text = String::from_utf8(output.stdout).map_err(|error| {
+                    build_ocr_error_response("parse_error", Some(&error.to_string()))
+                })?;
+                return Ok(OcrProviderTextResult {
+                    text,
+                    confidence: 0.0,
+                    model: "tesseract".to_string(),
+                    raw_provider_response: json!({
+                        "engine": "tesseract",
+                        "lang": lang,
+                    }),
+                });
+            }
+            None if started_at.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(build_ocr_error_response(
+                    "timeout",
+                    Some("ocr provider timeout"),
+                ));
+            }
+            None => std::thread::sleep(StdDuration::from_millis(5)),
+        }
+    }
+}
+
+fn ocr_io_error_response(error: io::Error) -> AiRouteResponse {
+    build_ocr_error_response(
+        "provider_unconfigured",
+        Some(&format!("tesseract provider unavailable: {error}")),
+    )
 }
 
 fn first_text_from_object(object: &Map<String, Value>, keys: &[&str]) -> Option<String> {
@@ -3533,9 +3822,21 @@ fn parse_multipart_form_data(
         let filename = disposition_param(disposition, "filename")
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
+        let content_type = headers_text
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                if name.trim().eq_ignore_ascii_case("content-type") {
+                    Some(value.trim().to_string())
+                } else {
+                    None
+                }
+            })
+            .filter(|value| !value.is_empty());
         form.parts.push(MultipartPart {
             name,
             filename,
+            content_type,
             body: strip_trailing_newline(part_body).to_vec(),
         });
     }

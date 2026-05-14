@@ -4,11 +4,12 @@ use bill_analyser_core::ai_ocr_llm::{
     build_llm_contract_error_response, build_llm_preview_recommend_response,
     build_llm_provider_config, build_ocr_config_response_payload,
     build_ocr_config_success_response, build_ocr_error_response,
-    build_runtime_llm_config_from_saved_config, build_unknown_ocr_provider_response,
-    copy_runtime_llm_config, llm_available_providers, llm_review_endpoint_requires_live_provider,
-    normalize_llm_advanced_settings, normalize_llm_provider_name, normalize_ocr_config,
-    ocr_available_providers_with_disabled, ocr_error_http_status, parse_payment_screenshot_text,
-    safe_llm_config_payload,
+    build_ocr_recognition_success_response, build_runtime_llm_config_from_saved_config,
+    build_unknown_ocr_provider_response, copy_runtime_llm_config, llm_available_providers,
+    llm_review_endpoint_requires_live_provider, normalize_llm_advanced_settings,
+    normalize_llm_provider_name, normalize_ocr_config, ocr_available_providers_with_disabled,
+    ocr_error_http_status, parse_payment_screenshot_text, safe_llm_config_payload,
+    OcrProviderTextResult,
 };
 use serde_json::{json, Value};
 
@@ -121,6 +122,41 @@ fn payment_screenshot_parser_extracts_wechat_and_alipay_contract_fields() {
     assert_eq!(empty.description, None);
     assert_eq!(empty.payment_platform, None);
     assert_eq!(empty.confidence, 0.0);
+}
+
+#[test]
+fn ocr_recognition_success_response_matches_receipt_route_payload() {
+    let provider_result = OcrProviderTextResult {
+        text: "支付宝\n商品: 拿铁咖啡\n付款金额 12.34\n2025-01-02 10:30".to_string(),
+        confidence: 0.42,
+        model: "tesseract".to_string(),
+        raw_provider_response: json!({
+            "engine": "tesseract",
+            "lang": "chi_sim+eng",
+        }),
+    };
+    let response =
+        build_ocr_recognition_success_response("tesseract", &provider_result, "rust-ocr-7");
+    assert_eq!(response.status_code, 200);
+    assert_eq!(response.body["success"], true);
+    assert_eq!(response.body["result"]["amount"], 12.34);
+    assert_eq!(response.body["result"]["trade_time"], "2025-01-02 10:30");
+    assert_eq!(response.body["result"]["description"], "拿铁咖啡");
+    assert_eq!(response.body["result"]["payment_platform"], "alipay");
+    assert_eq!(
+        response.body["result"]["provenance"]["provider"],
+        "tesseract"
+    );
+    assert_eq!(response.body["result"]["provenance"]["model"], "tesseract");
+    assert_eq!(
+        response.body["result"]["provenance"]["request_id"],
+        "rust-ocr-7"
+    );
+    assert_eq!(
+        response.body["result"]["raw_provider_response"]["engine"],
+        "tesseract"
+    );
+    assert_eq!(response.body["result"]["confidence"], 1.0);
 }
 
 #[test]
