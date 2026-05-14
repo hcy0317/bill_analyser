@@ -18,8 +18,6 @@ from . import import_review as _import_review
 from .import_review import *  # noqa: F403
 from . import crud_query as _crud_query
 from .crud_query import *  # noqa: F403
-from . import crud_prepare as _crud_prepare
-from .crud_prepare import *  # noqa: F403
 from . import crud_create_update as _crud_create_update
 from .crud_create_update import *  # noqa: F403
 from . import import_legacy as _import_legacy
@@ -44,7 +42,6 @@ _COMPAT_MODULES = (
     _import_mapping,
     _import_review,
     _crud_query,
-    _crud_prepare,
     _crud_create_update,
     _import_legacy,
     _import_learning,

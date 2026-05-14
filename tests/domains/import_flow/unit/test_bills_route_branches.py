@@ -1840,7 +1840,7 @@ def test_bills_get_list_and_legacy_modify_routes_cover_remaining_query_and_updat
     bills_route_app: Flask,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """账单列表与 legacy modify 路由应覆盖额外筛选和简化更新分支。"""
+    """账单列表路由应覆盖额外筛选和时间参数分支。"""
     db = FakeBillsDB()
     service = FakeBillsService()
     category_engine = FakeBillsCategoryEngine()
@@ -1860,7 +1860,6 @@ def test_bills_get_list_and_legacy_modify_routes_cover_remaining_query_and_updat
     )
 
     get_bills_route = _unwrap_all(bills_module.get_bills)
-    modify_route = _unwrap_all(bills_module.modify_bill)
 
     seen_filters: list[dict[str, Any]] = []
 
@@ -1901,38 +1900,6 @@ def test_bills_get_list_and_legacy_modify_routes_cover_remaining_query_and_updat
         assert seen_filters[-1]["start_date"] == "2024-03-31"
         assert seen_filters[-1]["end_date"] == "2024-04-01"
         assert "type" not in seen_filters[-1]
-
-    db.bill_lookup[1] = {
-        "id": 1,
-        "type": "收入",
-        "source_account_id": 11,
-        "destination_account_id": 22,
-        "destination_amount": 77,
-    }
-    captured_updates: list[dict[str, Any]] = []
-
-    async def _update_bill_capture(bill_id: int, payload: dict[str, Any], *, user_id: int) -> bool:
-        _ = (bill_id, user_id)
-        captured_updates.append(dict(payload))
-        return True
-
-    monkeypatch.setattr(db, "update_bill", _update_bill_capture)
-    monkeypatch.setattr(db, "update_bill_tags", lambda *args, **kwargs: asyncio.sleep(0, result=None))
-    monkeypatch.setattr(db, "sync_account_balance", lambda *args, **kwargs: asyncio.sleep(0, result=None))
-    with bills_route_app.test_request_context(
-        "/api/bills/modify",
-        method="POST",
-        json={"id": 1, "remark": "新备注", "comment": "最终备注"},
-    ):
-        _set_request_user_id()
-        payload = modify_route().get_json() or {}
-        assert payload == {"success": True, "result": {"id": "1"}}
-        assert captured_updates[-1]["description"] == "最终备注"
-        assert captured_updates[-1]["type"] == "收入"
-        assert captured_updates[-1]["source_account_id"] == 11
-        assert captured_updates[-1]["destination_account_id"] == 22
-        assert captured_updates[-1]["destination_amount"] == 77
-
 
 def test_bills_parse_import_file_and_stage1_routes_cover_remaining_parser_and_cleanup_branches(
     bills_route_app: Flask,
@@ -3005,11 +2972,11 @@ def test_bills_preview_recurring_match_routes_cover_put_delete_and_conflicts(
         assert response.get_json()["error"] == "Internal Server Error"
 
 
-def test_bills_legacy_delete_batch_create_and_import_batch_routes_cover_remaining_paths(
+def test_bills_batch_create_and_import_batch_routes_cover_remaining_paths(
     bills_route_app: Flask,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """遗留删除、批量创建和批量导入路由应覆盖主要成功与失败分支。"""
+    """批量创建和批量导入路由应覆盖主要成功与失败分支。"""
     db = FakeBillsDB()
     service = FakeBillsService()
     category_engine = FakeBillsCategoryEngine()
@@ -3023,45 +2990,8 @@ def test_bills_legacy_delete_batch_create_and_import_batch_routes_cover_remainin
         lambda user_id=None: (db, service, category_engine, adapter),
     )
 
-    legacy_delete_route = _unwrap_all(bills_module.delete_bill_by_query)
     batch_create_route = _unwrap_all(bills_module.batch_create_bills)
     import_batch_route = _unwrap_all(bills_module.import_bills_batch)
-
-    with bills_route_app.test_request_context("/api/bills/delete", method="POST", json={}):
-        _set_request_user_id()
-        response, status = _unwrap_response(legacy_delete_route())
-        assert status == 400
-        assert response.get_json()["error"] == "Missing id parameter"
-
-    db.bill_lookup[1] = None
-    with bills_route_app.test_request_context("/api/bills/delete", method="POST", json={"id": 1}):
-        _set_request_user_id()
-        response, status = _unwrap_response(legacy_delete_route())
-        assert status == 404
-        assert response.get_json()["error"] == "Bill not found"
-
-    db.bill_lookup[1] = {"source_account_id": 11, "destination_account_id": 22}
-    db.delete_bill_result = True
-    db.synced_accounts = []
-    with bills_route_app.test_request_context("/api/bills/delete", method="POST", json={"id": 1}):
-        _set_request_user_id()
-        payload = legacy_delete_route().get_json() or {}
-        assert payload == {"success": True}
-        assert db.synced_accounts == [11, 22]
-
-    db.delete_bill_result = False
-    with bills_route_app.test_request_context("/api/bills/delete", method="POST", json={"id": 1}):
-        _set_request_user_id()
-        response, status = _unwrap_response(legacy_delete_route())
-        assert status == 500
-        assert response.get_json()["error"] == "Failed to delete bill"
-
-    db.bill_lookup[1] = RuntimeError("legacy delete boom")
-    with bills_route_app.test_request_context("/api/bills/delete", method="POST", json={"id": 1}):
-        _set_request_user_id()
-        response, status = _unwrap_response(legacy_delete_route())
-        assert status == 500
-        assert response.get_json()["error"] == "legacy delete boom"
 
     with bills_route_app.test_request_context(
         "/api/bills/batch",
@@ -3296,100 +3226,6 @@ def test_bills_upload_route_covers_remaining_heavy_paths(
         response, status = _unwrap_response(upload_route())
         assert status == 500
         assert response.get_json()["error"] == "upload boom"
-
-
-def test_bills_legacy_modify_route_covers_partial_update_and_error_paths(
-    bills_route_app: Flask,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """legacy modify 路由应覆盖简化备注更新、分类查询与失败分支。"""
-    db = FakeBillsDB()
-    service = FakeBillsService()
-    category_engine = FakeBillsCategoryEngine()
-    adapter = FakeBillsAdapter()
-    loop = FakeLoop()
-    _install_fake_loop(monkeypatch, loop)
-    monkeypatch.setattr(
-        bills_module,
-        "get_app_context_with_adapter",
-        lambda user_id=None: (db, service, category_engine, adapter),
-    )
-
-    modify_route = _unwrap_all(bills_module.modify_bill)
-
-    with bills_route_app.test_request_context("/api/bills/modify", method="POST", json={}):
-        _set_request_user_id()
-        response, status = _unwrap_response(modify_route())
-        assert status == 400
-        assert response.get_json()["error"] == "Missing id parameter"
-
-    db.bill_lookup[1] = None
-    with bills_route_app.test_request_context("/api/bills/modify", method="POST", json={"id": 1}):
-        _set_request_user_id()
-        response, status = _unwrap_response(modify_route())
-        assert status == 404
-        assert response.get_json()["error"] == "Bill not found"
-
-    db.bill_lookup[1] = {
-        "id": 1,
-        "type": "支出",
-        "source_account_id": 11,
-        "destination_account_id": 22,
-        "destination_amount": 34.5,
-    }
-    db.category_by_id = {10: {"main_category": "餐饮", "sub_category": "早餐"}}
-    db.synced_accounts = []
-    adapter.frontend_to_backend_result = (
-        {"amount": 12.3},
-        {"category_id": "10", "tag_ids": [7]},
-    )
-    with bills_route_app.test_request_context(
-        "/api/bills/modify",
-        method="POST",
-        json={"id": 1, "remark": "只改备注", "tagIds": [7]},
-    ):
-        _set_request_user_id(9)
-        payload = modify_route().get_json() or {}
-        assert payload == {"success": True, "result": {"id": "1"}}
-        assert db.synced_accounts == [11, 22, 11, 22]
-
-    db.synced_accounts = []
-    adapter.frontend_to_backend_result = (
-        {"type": "收入", "source_account_id": 99, "destination_account_id": 100},
-        {"category_id": "bad", "tag_ids": [8]},
-    )
-    with bills_route_app.test_request_context(
-        "/api/bills/modify",
-        method="POST",
-        json={"id": 1, "type": 2, "tagIds": [8]},
-    ):
-        _set_request_user_id()
-        payload = modify_route().get_json() or {}
-        assert payload == {"success": True, "result": {"id": "1"}}
-        assert db.synced_accounts == [11, 22, 99, 100]
-
-    db.update_bill_result = False
-    with bills_route_app.test_request_context(
-        "/api/bills/modify",
-        method="POST",
-        json={"id": 1, "type": 2},
-    ):
-        _set_request_user_id()
-        response, status = _unwrap_response(modify_route())
-        assert status == 500
-        assert response.get_json()["error"] == "Failed to update bill"
-
-    db.update_bill_result = True
-    db.bill_lookup[1] = RuntimeError("modify boom")
-    with bills_route_app.test_request_context(
-        "/api/bills/modify",
-        method="POST",
-        json={"id": 1, "type": 2},
-    ):
-        _set_request_user_id()
-        response, status = _unwrap_response(modify_route())
-        assert status == 500
-        assert response.get_json()["error"] == "modify boom"
 
 
 def test_parse_import_file_covers_parser_first_and_generic_fallback_paths(
@@ -3825,12 +3661,12 @@ def test_prepare_backend_bill_for_create_covers_missing_invest_account_and_unkno
     assert backend_data["sub_category"] == ""
 
 
-def test_bills_context_picture_modify_and_parser_routes_cover_remaining_tail_branches(
+def test_bills_context_picture_preview_and_parser_routes_cover_remaining_tail_branches(
     bills_route_app: Flask,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """上下文、图片、legacy modify、预览与解析器列表路由应覆盖剩余轻尾分支。"""
+    """上下文、图片、预览与解析器列表路由应覆盖剩余轻尾分支。"""
     db = FakeBillsDB()
     service = FakeBillsService()
     category_engine = FakeBillsCategoryEngine()
@@ -3841,7 +3677,6 @@ def test_bills_context_picture_modify_and_parser_routes_cover_remaining_tail_bra
     monkeypatch.setattr(bills_module, "get_app_context", lambda user_id=None: (db, service, category_engine))
 
     upload_picture_route = _unwrap_all(bills_module.upload_transaction_picture_rest)
-    modify_route = _unwrap_all(bills_module.modify_bill)
     preview_route = _unwrap_all(bills_module.preview_import_file)
     parsers_route = _unwrap_all(bills_module.get_available_parsers)
 
@@ -3883,34 +3718,6 @@ def test_bills_context_picture_modify_and_parser_routes_cover_remaining_tail_bra
         response, status = _unwrap_response(upload_picture_route())
         assert status == 500
         assert response.get_json()["error"] == "picture boom"
-
-    db.bill_lookup[1] = {
-        "id": 1,
-        "type": "转账",
-        "source_account_id": 11,
-        "destination_account_id": 22,
-        "destination_amount": 77,
-    }
-    captured_updates: list[dict[str, Any]] = []
-
-    async def _capture_modify_update(bill_id: int, payload: dict[str, Any], *, user_id: int) -> bool:
-        _ = (bill_id, user_id)
-        captured_updates.append(dict(payload))
-        return True
-
-    monkeypatch.setattr(db, "update_bill", _capture_modify_update)
-    monkeypatch.setattr(db, "update_bill_tags", lambda *args, **kwargs: asyncio.sleep(0, result=None))
-    monkeypatch.setattr(db, "sync_account_balance", lambda *args, **kwargs: asyncio.sleep(0, result=None))
-    adapter.frontend_to_backend_result = ({"type": "", "source_account_id": 11}, {"category_id": "bad"})
-    with bills_route_app.test_request_context(
-        "/api/bills/modify",
-        method="POST",
-        json={"id": 1, "sourceAmount": 100, "sourceAccountId": "11"},
-    ):
-        _set_request_user_id()
-        payload = modify_route().get_json() or {}
-        assert payload == {"success": True, "result": {"id": "1"}}
-        assert captured_updates[-1]["type"] == "转账"
 
     with bills_route_app.test_request_context(
         "/api/bills/import/preview",

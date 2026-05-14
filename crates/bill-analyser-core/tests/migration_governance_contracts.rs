@@ -200,6 +200,8 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
     }
 
     for (method, pattern) in [
+        ("POST", "/api/bills/modify"),
+        ("POST", "/api/bills/delete"),
         ("PUT", "/api/bills/batch/update"),
         ("DELETE", "/api/bills/batch/delete"),
         ("POST", "/api/bills/category/quick-add-keyword"),
@@ -470,6 +472,8 @@ fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
     assert_eq!(
         python_deleted,
         vec![
+            ("POST", "/api/bills/modify"),
+            ("POST", "/api/bills/delete"),
             ("PUT", "/api/bills/batch/update"),
             ("DELETE", "/api/bills/batch/delete"),
             ("GET", "/api/bills/reconciliation_statements"),
@@ -801,6 +805,17 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
     );
     assert_eq!(bills_export.state, MigrationState::RustOwnedVerified);
     assert_eq!(bills_export.handler, RouteHandlerId::BillsCrudRuntime);
+
+    for endpoint in ["POST /api/bills/modify", "POST /api/bills/delete"] {
+        let entry = manifest
+            .iter()
+            .find(|entry| entry.endpoint == endpoint)
+            .unwrap_or_else(|| panic!("legacy bills route is present: {endpoint}"));
+        assert_eq!(entry.state, MigrationState::PythonDeleted);
+        assert_eq!(entry.handler, RouteHandlerId::BillsCrudRuntime);
+        assert!(entry.deletion_blockers.is_empty());
+        assert_eq!(entry.decision_required, DecisionRequired::None);
+    }
 
     let recurring_match = manifest
         .iter()

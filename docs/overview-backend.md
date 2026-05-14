@@ -2,7 +2,7 @@
 
 ## 3.1 API 路由模块（`src/bill_analyser/api/routes/`）
 - `auth/`：认证同名 package；按 session、registration/password、profile/external-auth、tokens、2FA、step-up、user-data 等功能域拆分，`auth.bp` 和既有 route URL/method 保持稳定
-- `bills/`：账单同名 package；按 CRUD/pictures、通用导入解析、导入配置、导入学习、v2 session/preview/decision 等功能域拆分，`bills.bp` 和 `/api/bills/*` 契约保持稳定；批量更新/删除、账户对账单与分类 quick actions 已由 Rust bills runtime 接管，旧 Flask `bills/category_actions.py` 与 `bills/reconciliation.py` route shell 已删除
+- `bills/`：账单同名 package；按 CRUD/pictures、通用导入解析、导入配置、导入学习、v2 session/preview/decision 等功能域拆分，`bills.bp` 和 `/api/bills/*` 契约保持稳定；legacy modify/delete、批量更新/删除、账户对账单与分类 quick actions 已由 Rust bills runtime 接管，旧 Flask `bills/crud_prepare.py`、`bills/category_actions.py` 与 `bills/reconciliation.py` route shell 已删除
 - `matching/`：matching 同名 package；导入会话级 matching candidate 投影、preview family generic accept/reject、历史正式账单后配对与 pair 列表接口，以及规则中心 investment pairing settings 的 canonical REST 读写接口
 - `GET /api/rules/overview` 的规则中心 legacy 兼容聚合口已由 Rust taxonomy runtime 汇总 learning rules、启用的 category rule count 与 recurring rules，旧 Flask `rules.py` route shell 已删除，不再把 legacy `category_keywords` 作为运行时总览来源
 - `GET|POST /api/accounts/`、`GET|PUT|DELETE /api/accounts/{account_id}`、`PUT /api/accounts/display-orders`、`POST /api/accounts/sync-balances`、`POST /api/accounts/{account_id}/transactions/move` 与 `POST /api/accounts/{account_id}/transactions/clear` 已由 Rust taxonomy runtime 接管，旧 Flask `accounts/` route package 已删除

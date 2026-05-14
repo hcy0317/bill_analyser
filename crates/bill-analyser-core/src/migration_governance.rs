@@ -486,19 +486,19 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/modify",
         domain: "bills-crud",
-        state: MigrationState::RustOwnedVerified,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills_crud_runtime owns legacy modify route.",
+        notes: "Rust bills_crud_runtime owns legacy modify route; the old Flask bills/crud_prepare.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "POST",
         pattern: "/api/bills/delete",
         domain: "bills-crud",
-        state: MigrationState::RustOwnedVerified,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills_crud_runtime owns legacy delete route.",
+        notes: "Rust bills_crud_runtime owns legacy delete route; the old Flask bills/crud_prepare.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -2539,7 +2539,6 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         python_owner_files: &[
             "src/bill_analyser/api/routes/bills/crud_query.py",
             "src/bill_analyser/api/routes/bills/crud_create_update.py",
-            "src/bill_analyser/api/routes/bills/crud_prepare.py",
         ],
         rust_owner_files: &[
             "crates/bill-analyser-http/src/bill_routes.rs",
@@ -3310,6 +3309,15 @@ fn route_contract_details(
         },
         ("taxonomy-rules-settings", MigrationState::PythonDeleted) => RouteContractDetails {
             handler: RouteHandlerId::TaxonomyRuntime,
+            deletion_blockers: EMPTY_STRINGS,
+            blocked_status: MigrationBlockedStatus::None,
+            unsupported_behavior: "",
+            decision_required: DecisionRequired::None,
+            decision_owner: "none",
+            transition_evidence: DB_RUNTIME_EVIDENCE,
+        },
+        ("bills-crud", MigrationState::PythonDeleted) => RouteContractDetails {
+            handler: RouteHandlerId::BillsCrudRuntime,
             deletion_blockers: EMPTY_STRINGS,
             blocked_status: MigrationBlockedStatus::None,
             unsupported_behavior: "",
