@@ -265,7 +265,7 @@ import AmountInputDialog from '@/components/desktop/AmountInputDialog.vue';
 import EditDialog from '@/views/desktop/transactions/list/dialogs/EditDialog.vue';
 import { TransactionEditPageType } from '@/views/base/transactions/TransactionEditPageBase.ts';
 
-import { ref, computed, useTemplateRef } from 'vue';
+import { ref, computed, useTemplateRef, watch } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
 import { useReconciliationStatementPageBase } from '@/views/base/accounts/ReconciliationStatementPageBase.ts';
@@ -375,7 +375,7 @@ const showAccountBalanceTrendsCharts = ref<boolean>(false);
 const chartType = ref<number>(AccountBalanceTrendChartType.Default.type);
 const chartDataDateAggregationType = ref<number>(ChartDateAggregationType.Day.type);
 
-let rejectFunc: ((reason?: unknown) => void) | null = null;
+let resolveFunc: (() => void) | null = null;
 
 const numeralSystem = computed<NumeralSystem>(() => getCurrentNumeralSystemType());
 const reconciliationStatementsTablePageOptions = computed<NameNumeralValue[]>(() => getTablePageOptions(reconciliationStatements.value?.transactions.length));
@@ -472,12 +472,18 @@ function open(options: { accountId: string, startTime: number, endTime: number }
         if (!error.processed) {
             emit('error', error);
             showState.value = false;
+            settleOpenPromise();
         }
     });
 
-    return new Promise<void>((resolve, reject) => {
-        rejectFunc = reject;
+    return new Promise<void>((resolve) => {
+        resolveFunc = resolve;
     });
+}
+
+function settleOpenPromise(): void {
+    resolveFunc?.();
+    resolveFunc = null;
 }
 
 function reload(force: boolean): void {
@@ -609,9 +615,15 @@ function showTransaction(transaction: TransactionReconciliationStatementResponse
 }
 
 function close(): void {
-    rejectFunc?.();
     showState.value = false;
+    settleOpenPromise();
 }
+
+watch(showState, (newValue, oldValue) => {
+    if (!newValue && oldValue) {
+        settleOpenPromise();
+    }
+});
 
 defineExpose({
     open

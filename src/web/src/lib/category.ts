@@ -97,26 +97,24 @@ export function getSecondaryTransactionMapByName(allCategories?: TransactionCate
     return ret;
 }
 
-export function getTransactionPrimaryCategoryName(categoryId: string | null | undefined, allCategories?: TransactionCategory[], transactionCategory?: TransactionCategoryInfoResponse): string {
-    // 如果 categoryId 为空或 '0'，直接返回空字符串，不记录警告
-    if (!categoryId || categoryId === '0') {
-        return '';
-    }
+interface TransactionCategoryPath {
+    primaryName: string;
+    secondaryName: string;
+}
 
-    // 优先使用transaction.category（来自API，最可靠）
-    if (transactionCategory && transactionCategory.id === categoryId) {
-        // 解析categoryName，格式为"主分类-子分类"或"主分类"
-        const categoryName = transactionCategory.name || '';
-        const parts = categoryName.split('-');
-        return parts[0] || '';  // 返回主分类名称
-    }
-
-    // 降级使用allCategories（来自store，可能不完整）
+function findTransactionCategoryPath(categoryId: string, allCategories?: TransactionCategory[]): TransactionCategoryPath | null {
     if (!allCategories) {
-        return '';
+        return null;
     }
 
     for (const category of allCategories) {
+        if (category.id === categoryId) {
+            return {
+                primaryName: category.name,
+                secondaryName: ''
+            };
+        }
+
         const subCategoryList = category.subCategories;
 
         if (!subCategoryList) {
@@ -125,9 +123,67 @@ export function getTransactionPrimaryCategoryName(categoryId: string | null | un
 
         for (const subCategory of subCategoryList) {
             if (subCategory.id === categoryId) {
-                return category.name;
+                return {
+                    primaryName: category.name,
+                    secondaryName: subCategory.name
+                };
             }
         }
+    }
+
+    return null;
+}
+
+function splitTransactionCategoryDisplayName(transactionCategory?: TransactionCategoryInfoResponse): TransactionCategoryPath | null {
+    if (!transactionCategory?.name) {
+        return null;
+    }
+
+    const normalizedName = transactionCategory.name.trim();
+    const separators = ['-', '＞', '>', '/'];
+
+    for (const separator of separators) {
+        const parts = normalizedName.split(separator).map(part => part.trim()).filter(Boolean);
+
+        if (parts.length >= 2) {
+            return {
+                primaryName: parts[0]!,
+                secondaryName: parts.slice(1).join(separator)
+            };
+        }
+    }
+
+    return null;
+}
+
+export function getTransactionPrimaryCategoryName(categoryId: string | null | undefined, allCategories?: TransactionCategory[], transactionCategory?: TransactionCategoryInfoResponse): string {
+    // 如果 categoryId 为空或 '0'，直接返回空字符串，不记录警告
+    if (!categoryId || categoryId === '0') {
+        return '';
+    }
+
+    const categoryPath = findTransactionCategoryPath(categoryId, allCategories);
+
+    if (categoryPath) {
+        return categoryPath.primaryName;
+    }
+
+    if (transactionCategory && transactionCategory.id === categoryId) {
+        const displayNamePath = splitTransactionCategoryDisplayName(transactionCategory);
+
+        if (displayNamePath) {
+            return displayNamePath.primaryName;
+        }
+
+        if (!transactionCategory.parentId || transactionCategory.parentId === '0') {
+            return transactionCategory.name || '';
+        }
+
+        return '';
+    }
+
+    if (!allCategories && !transactionCategory) {
+        return '';
     }
 
     // 只有在 categoryId 有值但找不到匹配时才记录警告
@@ -141,32 +197,28 @@ export function getTransactionSecondaryCategoryName(categoryId: string | null | 
         return '';
     }
 
-    // 优先使用transaction.category（来自API，最可靠）
-    if (transactionCategory && transactionCategory.id === categoryId) {
-        // 解析categoryName，格式为"主分类-子分类"或"主分类"
-        const categoryName = transactionCategory.name || '';
-        const parts = categoryName.split('-');
-        // split至少返回1个元素，所以parts[0]和parts[1]都可能存在
-        return parts.length > 1 ? (parts[1] || '') : (parts[0] || '');
+    const categoryPath = findTransactionCategoryPath(categoryId, allCategories);
+
+    if (categoryPath) {
+        return categoryPath.secondaryName;
     }
 
-    // 降级使用allCategories（来自store，可能不完整）
-    if (!allCategories) {
+    if (transactionCategory && transactionCategory.id === categoryId) {
+        const displayNamePath = splitTransactionCategoryDisplayName(transactionCategory);
+
+        if (displayNamePath) {
+            return displayNamePath.secondaryName;
+        }
+
+        if (transactionCategory.parentId && transactionCategory.parentId !== '0') {
+            return transactionCategory.name || '';
+        }
+
         return '';
     }
 
-    for (const category of allCategories) {
-        const subCategoryList = category.subCategories;
-
-        if (!subCategoryList) {
-            continue;
-        }
-
-        for (const subCategory of subCategoryList) {
-            if (subCategory.id === categoryId) {
-                return subCategory.name;
-            }
-        }
+    if (!allCategories && !transactionCategory) {
+        return '';
     }
 
     // 只有在 categoryId 有值但找不到匹配时才记录警告

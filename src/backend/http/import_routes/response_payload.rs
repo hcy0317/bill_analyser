@@ -16,6 +16,10 @@ fn payload_object(payload: &Value) -> Result<&Map<String, Value>, ImportV2RouteR
         .ok_or_else(|| import_v2_error_response(400, "Invalid request"))
 }
 
+fn import_stage_elapsed_ms(started_at: Instant) -> u128 {
+    started_at.elapsed().as_millis()
+}
+
 #[derive(Debug)]
 struct ImportParseRuntimeInput {
     session_id: String,
@@ -95,6 +99,7 @@ fn import_parse_json_runtime_response(
             unmatched_files: Vec::new(),
             require_existing_session,
         },
+        Instant::now(),
     )
 }
 
@@ -104,14 +109,22 @@ fn import_parse_multipart_runtime_response(
     content_type: &str,
     body: &[u8],
 ) -> Response {
+    let request_started_at = Instant::now();
     let user_id = match user_id_from_headers(headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
     };
+    let multipart_started_at = Instant::now();
     let form = match parse_multipart_form_data(content_type, body) {
         Ok(form) => form,
         Err(response) => return route_response(response),
     };
+    eprintln!(
+        "[bill analyser import] stage1 multipart parsed user_id={} body_bytes={} elapsed_ms={}",
+        user_id.get(),
+        body.len(),
+        import_stage_elapsed_ms(multipart_started_at)
+    );
     let session_id = form
         .text_value(&["session_id", "sessionId"])
         .unwrap_or_else(generate_import_session_id);
@@ -132,6 +145,7 @@ fn import_parse_multipart_runtime_response(
     let mut first_detected_parser_id: Option<String> = None;
 
     for part in file_parts {
+        let file_started_at = Instant::now();
         let original_name = part
             .filename
             .clone()
@@ -141,6 +155,12 @@ fn import_parse_multipart_runtime_response(
         if let Some(parsed) = parsed.filter(|parsed| !parsed.bills.is_empty()) {
             first_detected_parser_id.get_or_insert_with(|| parsed.parser_id.clone());
             let parsed_count = parsed.bills.len();
+            eprintln!(
+                "[bill analyser import] stage1 dedicated parser matched user_id={} session_id={session_id} filename={original_name} parser_id={} parsed_count={parsed_count} elapsed_ms={}",
+                user_id.get(),
+                parsed.parser_id,
+                import_stage_elapsed_ms(file_started_at)
+            );
             files.push(json!({
                 "filename": original_name,
                 "parser_id": parsed.parser_id,
@@ -149,6 +169,7 @@ fn import_parse_multipart_runtime_response(
             }));
             standard_bills.extend(parsed.bills);
         } else {
+            let unmatched_started_at = Instant::now();
             let unmatched_parser_id = if requested_parser == "auto" {
                 "rust-import"
             } else {
@@ -163,6 +184,11 @@ fn import_parse_multipart_runtime_response(
                 Ok(path) => path,
                 Err(response) => return route_response(response),
             };
+            eprintln!(
+                "[bill analyser import] stage1 unmatched file persisted user_id={} session_id={session_id} filename={original_name} temp_path={temp_path} elapsed_ms={}",
+                user_id.get(),
+                import_stage_elapsed_ms(unmatched_started_at)
+            );
             unmatched_files.push(json!({
                 "original_name": original_name,
                 "originalName": original_name,
@@ -198,6 +224,7 @@ fn import_parse_multipart_runtime_response(
             unmatched_files,
             require_existing_session: false,
         },
+        request_started_at,
     )
 }
 
@@ -205,6 +232,7 @@ fn persist_import_parse_runtime_response(
     state: &HttpAppState,
     user_id: UserId,
     input: ImportParseRuntimeInput,
+    request_started_at: Instant,
 ) -> Response {
     let mut runtime = match open_runtime(state) {
         Ok(runtime) => runtime,
@@ -215,6 +243,7 @@ fn persist_import_parse_runtime_response(
     }
     let drafts =
         parser_template_drafts_from_standard_bills(&input.standard_bills, &input.parser_id);
+    let staging_started_at = Instant::now();
     let staging_result = match stage_import_parser_templates(
         runtime.connection_mut(),
         &ImportSessionDraft {
@@ -228,6 +257,16 @@ fn persist_import_parse_runtime_response(
         Ok(result) => result,
         Err(error) => return route_response(db_error_response(error)),
     };
+    eprintln!(
+        "[bill analyser import] stage1 staging inserted user_id={} session_id={} parser_id={} drafts={} inserted_count={} staging_elapsed_ms={} total_elapsed_ms={}",
+        user_id.get(),
+        input.session_id,
+        input.parser_id,
+        drafts.len(),
+        staging_result.inserted_count,
+        import_stage_elapsed_ms(staging_started_at),
+        import_stage_elapsed_ms(request_started_at)
+    );
     if !staging_result.session_found {
         return route_response(import_session_not_found_response());
     }

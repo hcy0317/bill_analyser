@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use bill_analyser_core::UserId;
 use bill_analyser_db::{
     init_auth_security_schema, init_foundational_schema, migrate_categories_unique_constraint,
-    migrate_user_id_field, run_transaction, schema_inventory, SchemaDryRun, SqliteConnectionConfig,
-    SqliteDbPath, SqliteRuntime, UserScope,
+    migrate_user_id_field, run_transaction, schema_inventory, DbError, SchemaDryRun,
+    SqliteConnectionConfig, SqliteDbPath, SqliteRuntime, UserScope,
 };
 use rusqlite::Connection;
 
@@ -157,10 +157,8 @@ fn safe_path_guard_rejects_temp_symlink_to_real_data_bills_db() -> Result<(), Bo
     let error = SqliteDbPath::temporary_file(&link_path).unwrap_err();
 
     assert!(
-        error.to_string().contains("data/bills.db")
-            || error
-                .to_string()
-                .contains("target must stay under temp root")
+        matches!(&error, DbError::UnsafePath(_)),
+        "expected unsafe path error, got {error}"
     );
     Ok(())
 }

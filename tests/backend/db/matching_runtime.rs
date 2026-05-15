@@ -424,6 +424,90 @@ fn matching_runtime_repository_covers_bill_preview_and_reconciliation_flows(
     Ok(())
 }
 
+#[test]
+fn matching_bill_candidates_tolerate_legacy_learning_rule_shape() -> Result<(), Box<dyn Error>> {
+    let mut connection = Connection::open_in_memory()?;
+    seed_matching_fixture(&mut connection)?;
+    let user_id = user_id();
+
+    connection.execute_batch(
+        "
+        DROP TABLE import_learning_rules;
+        CREATE TABLE import_learning_rules(
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            match_type TEXT
+        );
+        INSERT INTO import_learning_rules(id, user_id, match_type)
+        VALUES (88, 42, 'legacy');
+        ",
+    )?;
+
+    let payload = query_matching_bill_candidates_payload(&connection, user_id, 101)?
+        .expect("valid bill candidates");
+    let ids = candidate_ids(&payload);
+
+    assert!(ids.contains(&"bill:101:transfer:102".to_string()));
+    assert!(ids.iter().all(|id| !id.starts_with("bill:101:learning:")));
+    Ok(())
+}
+
+#[test]
+fn matching_bill_candidates_support_current_learning_rule_shape_without_confidence(
+) -> Result<(), Box<dyn Error>> {
+    let mut connection = Connection::open_in_memory()?;
+    seed_matching_fixture(&mut connection)?;
+    let user_id = user_id();
+
+    connection.execute_batch(
+        "
+        ALTER TABLE import_learning_rules RENAME TO import_learning_rules_with_confidence;
+        CREATE TABLE import_learning_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            match_type TEXT NOT NULL,
+            match_value TEXT NOT NULL,
+            normalized_match_value TEXT NOT NULL,
+            learned_type TEXT,
+            learned_category_id INTEGER,
+            learned_source_account_id INTEGER,
+            learned_destination_account_id INTEGER,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            source_session_id TEXT,
+            source_preview_id INTEGER,
+            parser_id TEXT,
+            composite_match_hash TEXT,
+            match_features_json TEXT,
+            applied_count INTEGER NOT NULL DEFAULT 0,
+            last_applied_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, match_type, normalized_match_value)
+        );
+        INSERT INTO import_learning_rules(
+            id, user_id, match_type, match_value, normalized_match_value,
+            learned_type, learned_category_id, learned_source_account_id,
+            learned_destination_account_id, enabled, parser_id, composite_match_hash,
+            match_features_json, applied_count, last_applied_at, created_at, updated_at
+        )
+        SELECT
+            id, user_id, match_type, match_value, normalized_match_value,
+            learned_type, learned_category_id, learned_source_account_id,
+            learned_destination_account_id, enabled, parser_id, composite_match_hash,
+            match_features_json, applied_count, last_applied_at, created_at, updated_at
+        FROM import_learning_rules_with_confidence;
+        DROP TABLE import_learning_rules_with_confidence;
+        ",
+    )?;
+
+    let payload = query_matching_bill_candidates_payload(&connection, user_id, 301)?
+        .expect("learning candidates");
+    let ids = candidate_ids(&payload);
+
+    assert!(ids.iter().any(|id| id.starts_with("bill:301:learning:8:")));
+    Ok(())
+}
+
 fn seed_matching_fixture(connection: &mut Connection) -> Result<(), Box<dyn Error>> {
     create_business_schema(connection)?;
     init_import_staging_schema(connection)?;

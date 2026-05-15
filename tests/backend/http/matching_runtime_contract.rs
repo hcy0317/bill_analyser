@@ -372,6 +372,45 @@ async fn matching_recurring_calendar_networth_runtime_serves_owned_routes(
 }
 
 #[tokio::test]
+async fn matching_candidates_route_tolerates_legacy_learning_rule_shape(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    let connection = Connection::open(&fixture.db_path)?;
+    connection.execute_batch(
+        "
+        DROP TABLE IF EXISTS import_learning_rules;
+        CREATE TABLE import_learning_rules(
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            match_type TEXT
+        );
+        INSERT INTO import_learning_rules(id, user_id, match_type)
+        VALUES (88, 42, 'legacy');
+        ",
+    )?;
+    drop(connection);
+
+    let app = runtime_router(&fixture);
+    let response = app
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/matching/candidates?billId=20",
+            Body::empty(),
+        ))
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    assert_eq!(body["success"], true);
+    assert_eq!(body["data"]["billId"], 20);
+    assert_eq!(
+        body["data"]["candidates"][0]["candidateId"],
+        "bill:20:transfer:21"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn recurring_calendar_networth_runtime_covers_auth_validation_and_config_edges(
 ) -> Result<(), Box<dyn Error>> {
     let fixture = RuntimeFixture::new()?;

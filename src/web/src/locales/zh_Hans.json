@@ -3144,5 +3144,7 @@
     "Operation Password": "操作密码",
     "Please enter operation password": "请输入操作密码",
     "Password can be configured via environment variable": "可通过环境变量配置密码",
-    "Priority (smaller number means higher priority)": "优先级（数字越小优先级越高）"
+    "Priority (smaller number means higher priority)": "优先级（数字越小优先级越高）",
+    "Loading": "加载中",
+    "All categories hidden": "所有分类均已隐藏"
 }

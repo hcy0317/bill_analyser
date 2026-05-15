@@ -584,7 +584,7 @@
                         v-model="ruleBuilderModel"
                         :auto-rule-name="autoRuleName"
                         :disabled="saving"
-                        :title="tt('Canonical Category Rule')"
+                        title="Canonical Category Rule"
                     />
                 </v-form>
             </v-card-text>

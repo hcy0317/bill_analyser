@@ -1771,6 +1771,65 @@ async fn import_db_runtime_previews_temp_file_and_parses_column_mapping(
 }
 
 #[tokio::test]
+async fn import_db_runtime_parse_keeps_multiple_unmatched_files_in_one_session(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new().await?;
+    let runtime = runtime_for(fixture.db_path())?;
+    seed_users(&runtime, &[42])?;
+    let app = runtime_router(&fixture);
+    let boundary = "rust-import-multi-unmatched-boundary";
+    let body = multipart_body(
+        boundary,
+        &[("parser_type", "auto")],
+        &[
+            (
+                "files",
+                "custom-ledger-a.csv",
+                "text/csv",
+                "when,kind,value,note\n2026-05-05 10:00:00,收款,88.20,奖金\n",
+            ),
+            (
+                "files",
+                "custom-ledger-b.csv",
+                "text/csv",
+                "when,kind,value,note\n2026-05-06 10:00:00,付款,12.30,咖啡\n",
+            ),
+        ],
+    );
+
+    let parse = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/parse")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(parse.status(), StatusCode::OK);
+    let parse_body = read_json(parse).await;
+    assert_eq!(parse_body["success"], true);
+    assert_eq!(parse_body["data"]["parsed_count"], 0);
+    let unmatched_files = parse_body["data"]["unmatched_files"]
+        .as_array()
+        .expect("unmatched files");
+    assert_eq!(unmatched_files.len(), 2);
+    assert_eq!(unmatched_files[0]["original_name"], "custom-ledger-a.csv");
+    assert_eq!(unmatched_files[1]["original_name"], "custom-ledger-b.csv");
+    assert!(unmatched_files.iter().all(|file| file["temp_path"]
+        .as_str()
+        .is_some_and(|value| value.starts_with("user-42/"))));
+    Ok(())
+}
+
+#[tokio::test]
 async fn import_db_runtime_updates_preview_row_and_returns_preview_item(
 ) -> Result<(), Box<dyn Error>> {
     let fixture = RuntimeFixture::new().await?;

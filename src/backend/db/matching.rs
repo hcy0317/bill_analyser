@@ -1198,6 +1198,9 @@ fn list_learning_candidates_for_bill(
     if !table_exists(connection, "import_learning_rules")? {
         return Ok(Vec::new());
     }
+    if !import_learning_rules_candidate_columns_available(connection)? {
+        return Ok(Vec::new());
+    }
     if !user_import_learning_enabled(connection, user_id)? {
         return Ok(Vec::new());
     }
@@ -1213,6 +1216,16 @@ fn list_learning_candidates_for_bill(
         &categories,
         &accounts,
     ))
+}
+
+fn import_learning_rules_candidate_columns_available(connection: &Connection) -> DbResult<bool> {
+    for column in ["id", "user_id", "enabled"] {
+        if !column_exists(connection, "import_learning_rules", column)? {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
 }
 
 fn list_reconciliation_candidates_for_bill(
@@ -2540,13 +2553,19 @@ fn learning_suppression_revision_map(
 }
 
 fn load_learning_rules(connection: &Connection, user_id: i64) -> DbResult<Vec<Value>> {
-    let mut statement = connection.prepare(
+    let order_by = if column_exists(connection, "import_learning_rules", "confidence")? {
+        "ORDER BY COALESCE(confidence, 0) DESC, id DESC"
+    } else {
+        "ORDER BY id DESC"
+    };
+    let sql = format!(
         "
         SELECT * FROM import_learning_rules
         WHERE user_id = ? AND COALESCE(enabled, 1) = 1
-        ORDER BY COALESCE(confidence, 0) DESC, id DESC
-        ",
-    )?;
+        {order_by}
+        "
+    );
+    let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(params![user_id], |row| row_to_map(row, ""))?;
     Ok(rows
         .collect::<Result<Vec<_>, _>>()?

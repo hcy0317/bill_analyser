@@ -428,7 +428,7 @@ import { ImportTransaction, type ImportTransactionResponse } from '@/models/impo
 import { getCurrentToken } from '@/lib/userstate.ts';
 import services from '@/lib/services.ts';
 import logger from '@/lib/logger.ts';
-import { DEFAULT_UPLOAD_API_TIMEOUT } from '@/consts/api.ts';
+import { DEFAULT_IMPORT_PARSE_API_TIMEOUT, DEFAULT_UPLOAD_API_TIMEOUT } from '@/consts/api.ts';
 
 import {
     mdiFilterOutline,
@@ -738,12 +738,17 @@ function extractApiErrorMessage(payload: unknown, fallbackMessage: string): stri
 }
 
 function isAbortError(error: unknown): boolean {
-    return error instanceof DOMException && error.name === 'AbortError';
+    return (error instanceof DOMException && error.name === 'AbortError')
+        || (!!error && typeof error === 'object' && 'name' in error && error.name === 'AbortError');
 }
 
-async function fetchImportStage(url: string, init: RequestInit, stageLabel: string): Promise<Response> {
+function formatTimeoutSeconds(timeoutMs: number): string {
+    return `${Math.round(timeoutMs / 1000)}秒`;
+}
+
+async function fetchImportStage(url: string, init: RequestInit, stageLabel: string, timeoutMs = DEFAULT_UPLOAD_API_TIMEOUT): Promise<Response> {
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), DEFAULT_UPLOAD_API_TIMEOUT);
+    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
 
     try {
         return await fetch(url, {
@@ -752,7 +757,7 @@ async function fetchImportStage(url: string, init: RequestInit, stageLabel: stri
         });
     } catch (error) {
         if (isAbortError(error)) {
-            throw new Error(`${stageLabel}超时，请检查后端 parser 日志`);
+            throw new Error(`${stageLabel}客户端等待超时（${formatTimeoutSeconds(timeoutMs)}），请检查后端 parser/import 日志确认是否仍在解析或写入`);
         }
         throw error;
     } finally {
@@ -1454,7 +1459,7 @@ async function parseData(): Promise<void> {
             method: 'POST',
             headers: headers,
             body: formData
-        }, '阶段1解析');
+        }, '阶段1解析', DEFAULT_IMPORT_PARSE_API_TIMEOUT);
 
         if (!stage1Response.ok) {
             const errorText = await stage1Response.text();

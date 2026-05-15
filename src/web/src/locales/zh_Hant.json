@@ -2842,5 +2842,7 @@
     "Operation Password": "操作密碼",
     "Please enter operation password": "請輸入操作密碼",
     "Password can be configured via environment variable": "可透過環境變數設定密碼",
-    "Priority (smaller number means higher priority)": "優先級（數字越小優先級越高）"
+    "Priority (smaller number means higher priority)": "優先級（數字越小優先級越高）",
+    "Loading": "載入中",
+    "All categories hidden": "所有分類均已隱藏"
 }
