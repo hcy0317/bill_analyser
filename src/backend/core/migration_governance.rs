@@ -46,7 +46,7 @@ pub enum DecisionRequired {
 pub enum RouteHandlerId {
     #[serde(rename = "src/backend/http/router.rs::build_router")]
     RouterBuildRouter,
-    #[serde(rename = "src/backend/http/bill_routes.rs::bills_crud_runtime")]
+    #[serde(rename = "src/backend/http/bill_routes/mod.rs::bills_crud_runtime")]
     BillsCrudRuntime,
     #[serde(rename = "src/backend/http/import_routes/mod.rs::import_db_runtime")]
     ImportDbRuntime,
@@ -86,7 +86,7 @@ impl RouteHandlerId {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::RouterBuildRouter => "src/backend/http/router.rs::build_router",
-            Self::BillsCrudRuntime => "src/backend/http/bill_routes.rs::bills_crud_runtime",
+            Self::BillsCrudRuntime => "src/backend/http/bill_routes/mod.rs::bills_crud_runtime",
             Self::ImportDbRuntime => "src/backend/http/import_routes/mod.rs::import_db_runtime",
             Self::LlmLearningRuntimeBoundary => {
                 "src/backend/http/import_routes/mod.rs::llm_learning_runtime_boundary"
@@ -2671,7 +2671,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "bills-crud",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "src/backend/http/bill_routes.rs",
+            "src/backend/http/bill_routes/",
             "src/backend/db/bills.rs",
             "src/backend/core/adapters/transaction.rs",
         ],
@@ -2693,7 +2693,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "bills-crud-adjacent",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "src/backend/http/bill_routes.rs",
+            "src/backend/http/bill_routes/",
             "src/backend/core/adapters/transaction.rs",
             "src/backend/core/matching.rs",
             "src/backend/core/ops.rs",
@@ -2717,7 +2717,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "bills-recurring",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "src/backend/http/bill_routes.rs",
+            "src/backend/http/bill_routes/",
             "src/backend/db/bills.rs",
         ],
         tests_migrated: &[
@@ -2738,7 +2738,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "bills-category-actions",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "src/backend/http/bill_routes.rs",
+            "src/backend/http/bill_routes/",
             "src/backend/core/category_rules/mod.rs",
             "src/backend/core/matching.rs",
         ],
@@ -3556,7 +3556,7 @@ pub fn bills_crud_db_writer_policy() -> DbWriterPolicy {
         domain: "bills-crud",
         mode: DbWriterMode::RustDomainOwned,
         active_writer:
-            "src/backend/http/bill_routes.rs + src/backend/db/bills.rs via Rust bills_crud_runtime",
+            "src/backend/http/bill_routes/ + src/backend/db/bills.rs via Rust bills_crud_runtime",
         rust_write_allowed: true,
         invariants: &CRUD_DB_WRITE_INVARIANTS,
     }

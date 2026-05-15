@@ -965,7 +965,7 @@ fn db_writer_policies_mark_rust_owned_runtime_domains_and_pin_invariants() {
     assert_eq!(import_policy.domain, "bills-import");
     assert!(import_policy.active_writer.contains("import_routes/mod.rs"));
     assert_eq!(bills_policy.domain, "bills-crud");
-    assert!(bills_policy.active_writer.contains("bill_routes.rs"));
+    assert!(bills_policy.active_writer.contains("bill_routes/"));
     assert_eq!(budgets_policy.domain, "budgets-crud");
     assert!(budgets_policy.active_writer.contains("budget_routes.rs"));
 }

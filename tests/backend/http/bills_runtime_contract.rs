@@ -312,6 +312,299 @@ async fn bills_runtime_covers_batch_month_filters_and_error_edges() -> Result<()
 }
 
 #[tokio::test]
+async fn bills_runtime_covers_split_route_error_edges_and_frontend_mutations(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    let app = runtime_router(&fixture);
+
+    let frontend_create_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/bills",
+            json!({
+                "type": 3,
+                "time": 1_768_198_400_000i64,
+                "sourceAmount": 1234,
+                "destinationAmount": 0,
+                "sourceAccountId": "0",
+                "destinationAccountId": "",
+                "categoryId": 1,
+                "tagIds": "1",
+                "comment": "frontend create",
+                "merchantName": ""
+            }),
+        ))
+        .await?;
+    assert_eq!(frontend_create_response.status(), StatusCode::CREATED);
+    let bill_id = read_json(frontend_create_response).await["result"]["id"]
+        .as_str()
+        .expect("bill id")
+        .to_string();
+
+    let frontend_update_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            &format!("/api/bills/{bill_id}"),
+            json!({
+                "type": 2,
+                "time": 1_768_284_800i64,
+                "sourceAmount": 2500,
+                "sourceAccountId": "10",
+                "categoryId": 1,
+                "tagIds": null,
+                "comment": "frontend update"
+            }),
+        ))
+        .await?;
+    assert_eq!(frontend_update_response.status(), StatusCode::OK);
+
+    let alias_update_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            &format!("/api/bills/{bill_id}"),
+            json!({
+                "channel": "card",
+                "category": "工资",
+                "comment": "alias update"
+            }),
+        ))
+        .await?;
+    assert_eq!(alias_update_response.status(), StatusCode::OK);
+
+    for (method, path, body, status) in [
+        (
+            Method::POST,
+            "/api/bills/batch",
+            json!({"transactions": [{}]}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            Method::PUT,
+            "/api/bills/batch/update",
+            json!({"billIds": [bill_id.clone()], "updates": {}}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            Method::PUT,
+            "/api/bills/batch/update",
+            json!({"billIds": [bill_id.clone()], "updates": {"amount": {}}}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            Method::POST,
+            "/api/bills/modify",
+            json!({}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            Method::POST,
+            "/api/bills/delete",
+            json!({}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            Method::POST,
+            "/api/bills/delete",
+            json!({"id": 999}),
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            Method::GET,
+            "/api/bills/get?id=999",
+            Value::Null,
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            Method::PUT,
+            "/api/bills/999",
+            json!({"description": "missing"}),
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            Method::POST,
+            "/api/bills/modify",
+            json!({"id": 999, "description": "missing"}),
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            Method::PUT,
+            "/api/bills/999/recurring-match",
+            json!({"recurringId": 999}),
+            StatusCode::NOT_FOUND,
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(json_request(method, path, body))
+            .await?;
+        assert_eq!(response.status(), status, "{path}");
+    }
+
+    let recurring_unbind_missing_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::DELETE,
+            "/api/bills/999/recurring-match",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(
+        recurring_unbind_missing_response.status(),
+        StatusCode::NOT_FOUND
+    );
+
+    let unauthenticated_batch_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/batch")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"transactions":[]}"#))?,
+        )
+        .await?;
+    assert_eq!(
+        unauthenticated_batch_response.status(),
+        StatusCode::UNAUTHORIZED
+    );
+
+    let unauthenticated_recurring_delete_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!("/api/bills/{bill_id}/recurring-match"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(
+        unauthenticated_recurring_delete_response.status(),
+        StatusCode::UNAUTHORIZED
+    );
+
+    for (method, path, body) in [
+        (Method::POST, "/api/bills", json!({})),
+        (
+            Method::PUT,
+            &format!("/api/bills/{bill_id}"),
+            json!({"description": "not authed"}),
+        ),
+        (
+            Method::POST,
+            "/api/bills/modify",
+            json!({"id": bill_id.clone(), "description": "not authed"}),
+        ),
+        (
+            Method::POST,
+            "/api/bills/delete",
+            json!({"id": bill_id.clone()}),
+        ),
+        (
+            Method::PUT,
+            "/api/bills/batch/update",
+            json!({"billIds": [bill_id.clone()], "updates": {"description": "not authed"}}),
+        ),
+        (
+            Method::DELETE,
+            "/api/bills/batch/delete",
+            json!({"ids": [bill_id.clone()]}),
+        ),
+        (
+            Method::PUT,
+            &format!("/api/bills/{bill_id}/recurring-match"),
+            json!({"recurringId": 1}),
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))?,
+            )
+            .await?;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{path}");
+    }
+
+    let missing_db_state = HttpAppState::new(
+        HttpShellConfig::new_with_import_route_mode(
+            "http://127.0.0.1:9".to_string(),
+            Duration::from_secs(1),
+            1024 * 1024,
+            ImportRouteMode::ImportDbRuntime,
+        )?
+        .with_trusted_user_header_secret(TEST_AUTH_SECRET),
+    )?;
+    let missing_db_app = build_router(missing_db_state);
+    for (method, path, body) in [
+        (Method::GET, "/api/bills", Value::Null),
+        (
+            Method::GET,
+            "/api/bills/by-month?year=2026&month=1",
+            Value::Null,
+        ),
+        (Method::GET, "/api/bills/1", Value::Null),
+        (
+            Method::POST,
+            "/api/bills",
+            json!({"date": "2026-01-01", "type": "收入", "amount": 1.0}),
+        ),
+        (
+            Method::POST,
+            "/api/bills/batch",
+            json!({"transactions": []}),
+        ),
+        (
+            Method::PUT,
+            "/api/bills/1",
+            json!({"description": "missing db"}),
+        ),
+        (
+            Method::POST,
+            "/api/bills/modify",
+            json!({"id": 1, "description": "missing db"}),
+        ),
+        (Method::DELETE, "/api/bills/1", Value::Null),
+        (
+            Method::PUT,
+            "/api/bills/batch/update",
+            json!({"billIds": [bill_id], "updates": {"description": "x"}}),
+        ),
+        (
+            Method::DELETE,
+            "/api/bills/batch/delete",
+            json!({"ids": [1]}),
+        ),
+        (
+            Method::GET,
+            "/api/bills/1/recurring-candidates",
+            Value::Null,
+        ),
+        (
+            Method::PUT,
+            "/api/bills/1/recurring-match",
+            json!({"recurringId": 1}),
+        ),
+        (Method::DELETE, "/api/bills/1/recurring-match", Value::Null),
+    ] {
+        let request = if body.is_null() {
+            authed_request(method, path, Body::empty())
+        } else {
+            json_request(method, path, body)
+        };
+        let response = missing_db_app.clone().oneshot(request).await?;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "{path}");
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn bills_runtime_exports_csv_and_xlsx_without_legacy_fallback() -> Result<(), Box<dyn Error>>
 {
     assert!(BILL_CRUD_ROUTE_PATTERNS

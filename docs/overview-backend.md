@@ -7,7 +7,7 @@
 Axum HTTP 入口，负责路由注册、认证上下文、请求解析、multipart 上传、response envelope 和 structured error。主要 route modules：
 
 - `auth_routes/`
-- `bill_routes.rs`
+- `bill_routes/`
 - `import_routes/`
 - `taxonomy_routes/`
 - `budget_routes.rs`

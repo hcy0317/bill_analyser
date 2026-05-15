@@ -38,13 +38,6 @@
       "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
     },
     {
-      "path": "src/backend/http/bill_routes.rs",
-      "kind": "rust",
-      "area": "http",
-      "lines": 2441,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
       "path": "src/backend/db/budgets.rs",
       "kind": "rust",
       "area": "db",
