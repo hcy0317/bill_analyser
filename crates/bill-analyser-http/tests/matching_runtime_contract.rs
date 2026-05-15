@@ -21,10 +21,24 @@ const TEST_AUTH_SECRET: &str = "matching-route-secret";
 const TEST_USER_ID: &str = "42";
 
 #[tokio::test]
-async fn recurring_calendar_networth_runtime_serves_owned_routes_and_keeps_matching_proxied(
+async fn matching_recurring_calendar_networth_runtime_serves_owned_routes(
 ) -> Result<(), Box<dyn Error>> {
     for route in [
         ("GET", "/api/calendar/events"),
+        ("GET", "/api/matching/bills/{bill_id}/candidates"),
+        ("GET", "/api/matching/bills/{bill_id}/feedback"),
+        ("GET", "/api/matching/candidates"),
+        ("POST", "/api/matching/candidates/{*candidate_id}/accept"),
+        ("POST", "/api/matching/candidates/{*candidate_id}/clear"),
+        ("POST", "/api/matching/candidates/{*candidate_id}/reject"),
+        ("GET", "/api/matching/investment-settings"),
+        ("PUT", "/api/matching/investment-settings"),
+        ("POST", "/api/matching/manual-pair"),
+        ("GET", "/api/matching/pairs"),
+        ("DELETE", "/api/matching/pairs/{pair_id}"),
+        ("POST", "/api/matching/reconcile-history"),
+        ("GET", "/api/matching/reconciliation-candidates"),
+        ("GET", "/api/matching/sessions/{session_id}/candidates"),
         ("GET", "/api/networth/snapshot"),
         ("GET", "/api/recurring/suggestions"),
         ("POST", "/api/recurring/suggestions/detect"),
@@ -35,20 +49,12 @@ async fn recurring_calendar_networth_runtime_serves_owned_routes_and_keeps_match
             .iter()
             .any(|item| item == &route));
     }
-    for route in [
-        ("GET", "/api/matching/candidates"),
-        ("POST", "/api/matching/candidates/{*candidate_id}/accept"),
-        ("GET", "/api/matching/investment-settings"),
-    ] {
-        assert!(MATCHING_RECURRING_CALENDAR_NETWORTH_PROXIED_ROUTE_PATTERNS
-            .iter()
-            .any(|item| item == &route));
-    }
+    assert!(MATCHING_RECURRING_CALENDAR_NETWORTH_PROXIED_ROUTE_PATTERNS.is_empty());
     assert!(!is_manifest_python_proxied_route(
         "GET",
         "/api/recurring/suggestions"
     ));
-    assert!(is_manifest_python_proxied_route(
+    assert!(!is_manifest_python_proxied_route(
         "GET",
         "/api/matching/candidates"
     ));
@@ -111,6 +117,178 @@ async fn recurring_calendar_networth_runtime_serves_owned_routes_and_keeps_match
     assert_eq!(networth_body["data"]["totalLiabilities"], 300.4);
     assert_eq!(networth_body["data"]["netWorth"], 899.72);
     assert_eq!(networth_body["data"]["accountCount"], 2);
+
+    let matching_candidates_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/matching/candidates?billId=20",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(matching_candidates_response.status(), StatusCode::OK);
+    let matching_candidates_body = read_json(matching_candidates_response).await;
+    assert_eq!(matching_candidates_body["success"], true);
+    assert_eq!(matching_candidates_body["data"]["billId"], 20);
+    assert_eq!(
+        matching_candidates_body["data"]["candidates"][0]["candidateId"],
+        "bill:20:transfer:21"
+    );
+    assert_eq!(
+        matching_candidates_body["data"]["candidates"][0]["bill"]["id"],
+        21
+    );
+
+    let invalid_selector_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/matching/candidates",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(invalid_selector_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_selector_response).await["error"],
+        "Exactly one of sessionId or billId is required"
+    );
+
+    let candidate_history_response = app
+        .clone()
+        .oneshot(authed_json_request(
+            Method::POST,
+            "/api/matching/reconcile-history",
+            serde_json::json!({"billIds": [20], "families": ["transfer"]}),
+        ))
+        .await?;
+    assert_eq!(candidate_history_response.status(), StatusCode::OK);
+    let candidate_history_body = read_json(candidate_history_response).await;
+    assert_eq!(candidate_history_body["data"]["summary"]["billCount"], 1);
+
+    let accept_matching_response = app
+        .clone()
+        .oneshot(authed_json_request(
+            Method::POST,
+            "/api/matching/candidates/bill%3A20%3Atransfer%3A21/accept",
+            serde_json::json!({}),
+        ))
+        .await?;
+    let accept_matching_status = accept_matching_response.status();
+    let accept_matching_body = read_json(accept_matching_response).await;
+    assert_eq!(
+        accept_matching_status,
+        StatusCode::OK,
+        "{accept_matching_body}"
+    );
+    assert_eq!(accept_matching_body["success"], true);
+    assert_eq!(accept_matching_body["data"]["action"], "accept");
+    assert_eq!(accept_matching_body["data"]["pair"]["pairType"], "transfer");
+    assert_eq!(accept_matching_body["data"]["pair"]["leftBillId"], 20);
+    assert_eq!(accept_matching_body["data"]["pair"]["rightBillId"], 21);
+
+    let feedback_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/matching/bills/20/feedback",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(feedback_response.status(), StatusCode::OK);
+    let feedback_body = read_json(feedback_response).await;
+    assert_eq!(
+        feedback_body["data"]["events"][0]["candidateId"],
+        "bill:20:transfer:21"
+    );
+    assert_eq!(feedback_body["data"]["events"][0]["action"], "accept");
+
+    let reconcile_response = app
+        .clone()
+        .oneshot(authed_json_request(
+            Method::POST,
+            "/api/matching/reconcile-history",
+            serde_json::json!({"billIds": [20], "families": ["transfer"]}),
+        ))
+        .await?;
+    assert_eq!(reconcile_response.status(), StatusCode::OK);
+    let reconcile_body = read_json(reconcile_response).await;
+    assert_eq!(reconcile_body["data"]["summary"]["billCount"], 1);
+    assert_eq!(reconcile_body["data"]["summary"]["linkedPairCount"], 1);
+    assert_eq!(
+        reconcile_body["data"]["results"][0]["linkedPair"]["pairType"],
+        "transfer"
+    );
+
+    let pairs_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/matching/pairs",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(pairs_response.status(), StatusCode::OK);
+    let pairs_body = read_json(pairs_response).await;
+    let pair_id = pairs_body["data"]["pairs"][0]["id"]
+        .as_i64()
+        .expect("pair id");
+    assert_eq!(pairs_body["data"]["pairs"][0]["leftBill"]["id"], 20);
+    assert_eq!(pairs_body["data"]["pairs"][0]["rightBill"]["id"], 21);
+
+    let delete_pair_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::DELETE,
+            &format!("/api/matching/pairs/{pair_id}"),
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(delete_pair_response.status(), StatusCode::OK);
+    let delete_pair_body = read_json(delete_pair_response).await;
+    assert_eq!(delete_pair_body["data"]["pair"]["id"], pair_id);
+
+    let manual_pair_response = app
+        .clone()
+        .oneshot(authed_json_request(
+            Method::POST,
+            "/api/matching/manual-pair",
+            serde_json::json!({"billId": 20, "candidateBillId": 21, "pairType": "transfer"}),
+        ))
+        .await?;
+    assert_eq!(manual_pair_response.status(), StatusCode::OK);
+    let manual_pair_body = read_json(manual_pair_response).await;
+    assert_eq!(manual_pair_body["data"]["pair"]["pairType"], "transfer");
+
+    let reconciliation_candidates_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/matching/reconciliation-candidates?candidateType=transfer&status=pending&limit=25",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(reconciliation_candidates_response.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(reconciliation_candidates_response).await["data"]["candidates"]
+            .as_array()
+            .expect("reconciliation candidates")
+            .len(),
+        0
+    );
+
+    let investment_settings_response = app
+        .clone()
+        .oneshot(authed_json_request(
+            Method::PUT,
+            "/api/matching/investment-settings",
+            serde_json::json!({"platformKeywords": ["fund"]}),
+        ))
+        .await?;
+    assert_eq!(investment_settings_response.status(), StatusCode::GONE);
+    assert_eq!(
+        read_json(investment_settings_response).await["error"],
+        "Investment recognition settings are managed by category rules"
+    );
 
     let list_response = app
         .clone()
@@ -215,6 +393,29 @@ async fn recurring_calendar_networth_runtime_covers_auth_validation_and_config_e
             "/api/calendar/events?start_date=2026-03-01&end_date=2026-03-15",
         ),
         (Method::GET, "/api/networth/snapshot"),
+        (Method::GET, "/api/matching/candidates?sessionId=missing"),
+        (Method::GET, "/api/matching/candidates?billId=20"),
+        (Method::GET, "/api/matching/bills/20/candidates"),
+        (Method::GET, "/api/matching/bills/20/feedback"),
+        (
+            Method::GET,
+            "/api/matching/reconciliation-candidates?status=pending",
+        ),
+        (Method::GET, "/api/matching/pairs"),
+        (Method::GET, "/api/matching/investment-settings"),
+        (Method::PUT, "/api/matching/investment-settings"),
+        (Method::POST, "/api/matching/manual-pair"),
+        (Method::DELETE, "/api/matching/pairs/1"),
+        (
+            Method::POST,
+            "/api/matching/candidates/preview%3A1%3Atransfer/reject",
+        ),
+        (
+            Method::POST,
+            "/api/matching/candidates/preview%3A1%3Atransfer/clear",
+        ),
+        (Method::POST, "/api/matching/reconcile-history"),
+        (Method::GET, "/api/matching/sessions/missing/candidates"),
         (Method::GET, "/api/recurring/suggestions"),
         (Method::POST, "/api/recurring/suggestions/detect"),
         (Method::POST, "/api/recurring/suggestions/1/accept"),
@@ -244,6 +445,154 @@ async fn recurring_calendar_networth_runtime_covers_auth_validation_and_config_e
         read_json(invalid_date).await["message"],
         "end_date must use YYYY-MM-DD format"
     );
+
+    let invalid_matching_bill_id = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/matching/candidates?billId=not-a-number",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(invalid_matching_bill_id.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_matching_bill_id).await["error"],
+        "Invalid billId"
+    );
+
+    let missing_matching_session = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/matching/candidates?sessionId=missing",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(missing_matching_session.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        read_json(missing_matching_session).await["error"],
+        "Import session not found"
+    );
+
+    let missing_matching_bill = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/matching/bills/999/candidates",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(missing_matching_bill.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        read_json(missing_matching_bill).await["error"],
+        "Bill not found"
+    );
+
+    let missing_matching_feedback = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/matching/bills/999/feedback",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(missing_matching_feedback.status(), StatusCode::NOT_FOUND);
+
+    let invalid_reconciliation_filter = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/matching/reconciliation-candidates?candidateType=unknown",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(
+        invalid_reconciliation_filter.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(invalid_reconciliation_filter).await["error"],
+        "Invalid candidateType"
+    );
+
+    let invalid_manual_pair = app
+        .clone()
+        .oneshot(authed_json_request(
+            Method::POST,
+            "/api/matching/manual-pair",
+            serde_json::json!({}),
+        ))
+        .await?;
+    assert_eq!(invalid_manual_pair.status(), StatusCode::BAD_REQUEST);
+
+    let invalid_matching_action_payload = app
+        .clone()
+        .oneshot(authed_json_request(
+            Method::POST,
+            "/api/matching/candidates/preview%3A1%3Atransfer/reject",
+            serde_json::json!("bad"),
+        ))
+        .await?;
+    assert_eq!(
+        invalid_matching_action_payload.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(invalid_matching_action_payload).await["error"],
+        "Invalid request"
+    );
+
+    let invalid_matching_candidate = app
+        .clone()
+        .oneshot(authed_json_request(
+            Method::POST,
+            "/api/matching/candidates/not-a-candidate/clear",
+            serde_json::json!({}),
+        ))
+        .await?;
+    assert_eq!(invalid_matching_candidate.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_matching_candidate).await["error"],
+        "Invalid candidateId"
+    );
+
+    let invalid_reconcile_payload = app
+        .clone()
+        .oneshot(authed_json_request(
+            Method::POST,
+            "/api/matching/reconcile-history",
+            serde_json::json!("bad"),
+        ))
+        .await?;
+    assert_eq!(invalid_reconcile_payload.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_reconcile_payload).await["error"],
+        "Invalid request"
+    );
+
+    let missing_reconcile_bill_ids = app
+        .clone()
+        .oneshot(authed_json_request(
+            Method::POST,
+            "/api/matching/reconcile-history",
+            serde_json::json!({}),
+        ))
+        .await?;
+    assert_eq!(missing_reconcile_bill_ids.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(missing_reconcile_bill_ids).await["error"],
+        "billIds is required"
+    );
+
+    let missing_reconcile_bill = app
+        .clone()
+        .oneshot(authed_json_request(
+            Method::POST,
+            "/api/matching/reconcile-history",
+            serde_json::json!({"billIds": [999]}),
+        ))
+        .await?;
+    assert_eq!(missing_reconcile_bill.status(), StatusCode::NOT_FOUND);
 
     let invalid_limit = app
         .clone()
@@ -465,12 +814,15 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             amount REAL NOT NULL,
             counterparty TEXT NOT NULL,
             description TEXT NOT NULL,
+            payment_method TEXT DEFAULT '',
             main_category TEXT,
             sub_category TEXT,
             source_account_id INTEGER DEFAULT 0,
             destination_account_id INTEGER DEFAULT 0,
             destination_amount REAL DEFAULT 0,
-            created_from_recurring INTEGER
+            created_from_recurring INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE bill_templates (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -526,6 +878,8 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
         );
         ",
     )?;
+    bill_analyser_db::init_import_staging_schema(&connection)?;
+    bill_analyser_db::init_matching_runtime_schema(&connection)?;
     connection.execute("INSERT INTO users(id, username) VALUES (42, 'owner')", [])?;
     connection.execute(
         "INSERT INTO accounts(id, user_id, name, type, balance, initial_balance, currency, icon, hidden, created_at, updated_at)
@@ -535,12 +889,14 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
         [],
     )?;
     connection.execute(
-        "INSERT INTO bills(user_id, date, type, amount, counterparty, description, main_category, sub_category, source_account_id, destination_account_id, destination_amount)
-         VALUES (42, '2026-03-01T08:30:00', 'expense', -25.5, 'Cafe', 'Breakfast', 'Food', 'Coffee', 10, 0, 0),
-                (42, '2026-03-02', 'income', 100.0, 'Client', 'Invoice', 'Work', 'Consulting', 10, 0, 0),
-                (42, '2026-03-03', 'transfer', 10.0, 'Savings', 'Move', 'Transfer', 'Internal', 10, 11, 10.0),
-                (42, '2026-03-15T23:59:59', 'expense', -7.25, 'Late Store', 'End date timestamp', 'Food', 'Snack', 10, 0, 0),
-                (77, '2026-03-01', 'expense', -999.0, 'Other', 'Other user', 'Food', '', 10, 0, 0)",
+        "INSERT INTO bills(id, user_id, date, type, amount, counterparty, description, payment_method, main_category, sub_category, source_account_id, destination_account_id, destination_amount)
+         VALUES (1, 42, '2026-03-01T08:30:00', 'expense', -25.5, 'Cafe', 'Breakfast', 'cash', 'Food', 'Coffee', 10, 0, 0),
+                (2, 42, '2026-03-02', 'income', 100.0, 'Client', 'Invoice', 'cash', 'Work', 'Consulting', 10, 0, 0),
+                (3, 42, '2026-03-03', 'transfer', 10.0, 'Savings', 'Move', 'card', 'Transfer', 'Internal', 10, 11, 10.0),
+                (4, 42, '2026-03-15T23:59:59', 'expense', -7.25, 'Late Store', 'End date timestamp', 'cash', 'Food', 'Snack', 10, 0, 0),
+                (20, 42, '2026-03-05T09:00:00', 'expense', -25.5, 'Wallet', 'Transfer out', 'cash', 'Transfer', '', 10, 0, 0),
+                (21, 42, '2026-03-05T09:20:00', 'income', 25.5, 'Card', 'Transfer in', 'card', 'Transfer', '', 11, 0, 0),
+                (77, 77, '2026-03-01', 'expense', -999.0, 'Other', 'Other user', 'cash', 'Food', '', 10, 0, 0)",
         [],
     )?;
     let monthly_dates = recent_monthly_dates(Local::now().date_naive());
@@ -631,6 +987,17 @@ fn authed_request(method: Method, uri: &str, body: Body) -> Request<Body> {
         .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
         .header("x-bill-analyser-user-id", TEST_USER_ID)
         .body(body)
+        .expect("request")
+}
+
+fn authed_json_request(method: Method, uri: &str, body: Value) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+        .header("x-bill-analyser-user-id", TEST_USER_ID)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
         .expect("request")
 }
 

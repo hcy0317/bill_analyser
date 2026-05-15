@@ -1,0 +1,926 @@
+use std::error::Error;
+
+use bill_analyser_core::UserId;
+use bill_analyser_db::{
+    apply_matching_candidate_action, create_import_session, create_manual_matching_pair,
+    delete_manual_matching_pair, init_import_staging_schema, init_matching_runtime_schema,
+    insert_preview_bills_batch, list_reconciliation_candidates_payload,
+    query_matching_bill_candidates_payload, query_matching_bill_feedback_payload,
+    query_matching_pairs_payload, query_matching_session_candidates_payload, ImportPreviewDraft,
+    ImportPreviewExpectedState, ImportPreviewLearningApply, ImportPreviewRecurringCandidate,
+    ImportSessionDraft, PreviewMatchingActionRequest, ReconciliationCandidateFilters,
+};
+use rusqlite::{params, Connection};
+use serde_json::{json, Value};
+
+const OWNER_ID: u64 = 42;
+
+#[test]
+fn matching_runtime_repository_covers_bill_preview_and_reconciliation_flows(
+) -> Result<(), Box<dyn Error>> {
+    let mut connection = Connection::open_in_memory()?;
+    seed_matching_fixture(&mut connection)?;
+    let user_id = user_id();
+
+    let session_payload =
+        query_matching_session_candidates_payload(&connection, user_id, "session-matching")?
+            .expect("session candidates");
+    assert_eq!(session_payload["session_id"], "session-matching");
+    assert!(session_payload["candidates"]
+        .as_array()
+        .expect("session candidate rows")
+        .iter()
+        .any(|candidate| candidate["candidate_id"] == "preview:1:transfer"));
+    assert!(query_matching_session_candidates_payload(&connection, user_id, "missing")?.is_none());
+
+    let transfer_payload = query_matching_bill_candidates_payload(&connection, user_id, 101)?
+        .expect("transfer candidates");
+    assert!(candidate_ids(&transfer_payload).contains(&"bill:101:transfer:102".to_string()));
+    let investment_payload = query_matching_bill_candidates_payload(&connection, user_id, 201)?
+        .expect("investment candidates");
+    assert!(candidate_ids(&investment_payload).contains(&"bill:201:investment:202".to_string()));
+    let learning_payload =
+        query_matching_bill_candidates_payload(&connection, user_id, 301)?.expect("learning");
+    let learning_candidate_id = candidate_ids(&learning_payload)
+        .into_iter()
+        .find(|candidate_id| candidate_id.starts_with("bill:301:learning:8:"))
+        .expect("learning candidate id");
+    assert!(query_matching_bill_candidates_payload(&connection, user_id, 999)?.is_none());
+
+    let manual_pair = create_manual_matching_pair(
+        &mut connection,
+        user_id,
+        101,
+        102,
+        "transfer",
+        Some("bill:101:transfer:102"),
+    )?;
+    let manual_pair_id = manual_pair["pair"]["id"].as_i64().expect("manual pair id");
+    let pairs = query_matching_pairs_payload(&connection, user_id)?;
+    assert_eq!(pairs["pairs"][0]["leftBillId"], 101);
+    let feedback =
+        query_matching_bill_feedback_payload(&connection, user_id, 101)?.expect("feedback payload");
+    assert_eq!(feedback["events"][0]["action"], "accept");
+    let deleted_pair = delete_manual_matching_pair(&mut connection, user_id, manual_pair_id)?;
+    assert_eq!(deleted_pair["pair"]["id"], manual_pair_id);
+
+    let accepted_transfer = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "bill:101:transfer:102",
+        "accept",
+        &PreviewMatchingActionRequest::default(),
+    )?;
+    assert_eq!(accepted_transfer["pair"]["pairType"], "transfer");
+    let linked_payload = query_matching_bill_candidates_payload(&connection, user_id, 101)?
+        .expect("linked pair payload");
+    assert_eq!(linked_payload["linkedPair"]["otherBillId"], 102);
+
+    let rejected_transfer = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "bill:103:transfer:104",
+        "reject",
+        &PreviewMatchingActionRequest::default(),
+    )?;
+    assert_eq!(rejected_transfer["action"], "reject");
+    let suppressed_transfer =
+        query_matching_bill_candidates_payload(&connection, user_id, 103)?.expect("suppressed");
+    assert!(!candidate_ids(&suppressed_transfer).contains(&"bill:103:transfer:104".to_string()));
+
+    let accepted_investment = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "bill:201:investment:202",
+        "accept",
+        &PreviewMatchingActionRequest::default(),
+    )?;
+    assert_eq!(accepted_investment["pair"]["pairType"], "investment");
+    let rejected_investment = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "bill:203:investment:204",
+        "reject",
+        &PreviewMatchingActionRequest::default(),
+    )?;
+    assert_eq!(rejected_investment["action"], "reject");
+
+    let accepted_learning = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        &learning_candidate_id,
+        "accept",
+        &PreviewMatchingActionRequest::default(),
+    )?;
+    assert_eq!(accepted_learning["bill"]["main_category"], "Food");
+    let accepted_learning_rule_count: i64 = connection.query_row(
+        "SELECT applied_count FROM import_learning_rules WHERE id = 8",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(accepted_learning_rule_count, 1);
+    let post_learning_payload =
+        query_matching_bill_candidates_payload(&connection, user_id, 301)?.expect("post learning");
+    assert!(!candidate_ids(&post_learning_payload).contains(&learning_candidate_id));
+
+    let learning_reject_payload =
+        query_matching_bill_candidates_payload(&connection, user_id, 302)?.expect("learning 302");
+    let learning_reject_id = candidate_ids(&learning_reject_payload)
+        .into_iter()
+        .find(|candidate_id| candidate_id.starts_with("bill:302:learning:8:"))
+        .expect("learning reject candidate id");
+    let rejected_learning = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        &learning_reject_id,
+        "reject",
+        &PreviewMatchingActionRequest::default(),
+    )?;
+    assert_eq!(rejected_learning["action"], "reject");
+
+    let accepted_preview_transfer = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "preview:1:transfer",
+        "accept",
+        &PreviewMatchingActionRequest {
+            response_mode_preview_item: true,
+            reviewed_type: Some("transfer".to_string()),
+            ..Default::default()
+        },
+    )?;
+    assert_eq!(
+        accepted_preview_transfer["preview_item"]["matching"]["transfer"]["review_status"],
+        "accepted"
+    );
+    let cleared_preview_transfer = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "preview:1:transfer",
+        "clear",
+        &PreviewMatchingActionRequest {
+            response_mode_preview_item: true,
+            ..Default::default()
+        },
+    )?;
+    assert!(cleared_preview_transfer["preview_item"]["matching"]
+        .get("transfer")
+        .is_none());
+
+    let accepted_preview_learning = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "preview:2:learning",
+        "accept",
+        &PreviewMatchingActionRequest {
+            response_mode_preview_item: true,
+            learning_apply: Some(ImportPreviewLearningApply {
+                preview_type: Some("expense".to_string()),
+                preview_main_category: Some("Food".to_string()),
+                preview_sub_category: Some("Coffee".to_string()),
+                preview_source_account_id: Some(Some(10)),
+                preview_destination_account_id: Some(None),
+                rule_id: Some(8),
+            }),
+            ..Default::default()
+        },
+    )?;
+    assert_eq!(
+        accepted_preview_learning["preview_item"]["matching"]["learning"]["review_status"],
+        "accepted"
+    );
+    let rejected_preview_learning = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "preview:2:learning",
+        "reject",
+        &PreviewMatchingActionRequest {
+            response_mode_preview_item: true,
+            ..Default::default()
+        },
+    )?;
+    assert_eq!(
+        rejected_preview_learning["preview_item"]["matching"]["learning"]["review_status"],
+        "rejected"
+    );
+
+    let recurring_candidate = ImportPreviewRecurringCandidate {
+        id: 900,
+        name: "Monthly Rent".to_string(),
+        match_score: 0.91,
+        match_reasons: vec!["same_amount".to_string(), "monthly".to_string()],
+        matched_occurrence_date: "2026-04-01".to_string(),
+    };
+    let accepted_preview_recurring = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "preview:3:recurring",
+        "accept",
+        &PreviewMatchingActionRequest {
+            response_mode_preview_item: true,
+            recurring_id: Some(900),
+            recurring_candidate_count: 1,
+            recurring_candidate: Some(recurring_candidate.clone()),
+            ..Default::default()
+        },
+    )?;
+    assert_eq!(accepted_preview_recurring["recurring_id"], 900);
+    let rejected_preview_recurring = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "preview:3:recurring",
+        "reject",
+        &PreviewMatchingActionRequest {
+            response_mode_preview_item: true,
+            ..Default::default()
+        },
+    )?;
+    assert!(rejected_preview_recurring["preview_item"]["matching"]["recurring"]["id"].is_null());
+
+    let conflict = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "preview:1:transfer",
+        "accept",
+        &PreviewMatchingActionRequest {
+            expected_state: Some(ImportPreviewExpectedState {
+                session_id: Some("wrong-session".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    )
+    .expect_err("stale preview expected state");
+    assert_eq!(conflict.status_code(), 409);
+    assert_eq!(conflict.message(), "Preview row changed, please refresh");
+
+    let missing_recurring = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "preview:3:recurring",
+        "accept",
+        &PreviewMatchingActionRequest::default(),
+    )
+    .expect_err("missing recurring id");
+    assert_eq!(missing_recurring.status_code(), 400);
+
+    let reconciliation_list = list_reconciliation_candidates_payload(
+        &connection,
+        user_id,
+        &ReconciliationCandidateFilters {
+            session_id: Some("session-matching".to_string()),
+            preview_id: Some(3),
+            existing_bill_id: Some(401),
+            candidate_type: Some("duplicate".to_string()),
+            status: Some("pending".to_string()),
+            limit: 25,
+        },
+    )?;
+    assert_eq!(
+        reconciliation_list["candidates"][0]["candidateId"],
+        reconciliation_id()
+    );
+    let reconciliation_bill =
+        query_matching_bill_candidates_payload(&connection, user_id, 401)?.expect("reconcile bill");
+    assert!(candidate_ids(&reconciliation_bill)
+        .into_iter()
+        .any(|candidate_id| candidate_id == reconciliation_id()));
+    let accepted_reconciliation = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        &reconciliation_id(),
+        "accept",
+        &PreviewMatchingActionRequest::default(),
+    )?;
+    assert_eq!(accepted_reconciliation["projection"]["bill_id"], 401);
+    assert_eq!(
+        accepted_reconciliation["projection"]["description"],
+        "Existing subscription|Imported subscription note"
+    );
+    assert_eq!(
+        accepted_reconciliation["projection"]["tag_ids"],
+        json!([71, 72])
+    );
+    assert_eq!(
+        bill_description(&connection, 401)?,
+        "Existing subscription|Imported subscription note"
+    );
+    assert_eq!(bill_tag_ids(&connection, 401)?, vec![71, 72]);
+    assert!(!preview_selected(&connection, 3)?);
+    let projection = query_matching_bill_candidates_payload(&connection, user_id, 401)?
+        .expect("projection after merge");
+    assert_eq!(projection["reconciliation"]["status"], "merged");
+    let cleared_reconciliation = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        &reconciliation_id(),
+        "clear",
+        &PreviewMatchingActionRequest::default(),
+    )?;
+    assert_eq!(
+        cleared_reconciliation["projection"]["description"],
+        "Existing subscription"
+    );
+    assert_eq!(cleared_reconciliation["projection"]["tag_ids"], json!([71]));
+    assert_eq!(
+        cleared_reconciliation["projection"]["candidate_ids"],
+        json!([])
+    );
+    assert_eq!(bill_description(&connection, 401)?, "Existing subscription");
+    assert_eq!(bill_tag_ids(&connection, 401)?, vec![71]);
+    assert!(preview_selected(&connection, 3)?);
+    let projection_after_clear = query_matching_bill_candidates_payload(&connection, user_id, 401)?
+        .expect("projection after clear");
+    assert!(projection_after_clear["reconciliation"].is_null());
+
+    apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        &reconciliation_id(),
+        "accept",
+        &PreviewMatchingActionRequest::default(),
+    )?;
+    let rejected_reconciliation = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        &reconciliation_id(),
+        "reject",
+        &PreviewMatchingActionRequest::default(),
+    )?;
+    assert_eq!(rejected_reconciliation["action"], "reject");
+    assert_eq!(bill_description(&connection, 401)?, "Existing subscription");
+    assert_eq!(bill_tag_ids(&connection, 401)?, vec![71]);
+    assert!(preview_selected(&connection, 3)?);
+
+    apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        &reconciliation_id(),
+        "accept",
+        &PreviewMatchingActionRequest::default(),
+    )?;
+    connection.execute(
+        "UPDATE bills SET description = 'Manual override after merge' WHERE id = 401",
+        [],
+    )?;
+    let stale_clear = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        &reconciliation_id(),
+        "clear",
+        &PreviewMatchingActionRequest::default(),
+    )
+    .expect_err("stale projection conflict");
+    assert_eq!(stale_clear.status_code(), 409);
+    assert_eq!(
+        stale_clear.message(),
+        "Bill changed since reconciliation projection, please refresh"
+    );
+    assert_eq!(
+        bill_description(&connection, 401)?,
+        "Manual override after merge"
+    );
+
+    let accepted_transfer_reconciliation = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        &transfer_reconciliation_id(),
+        "accept",
+        &PreviewMatchingActionRequest::default(),
+    )?;
+    assert_eq!(
+        accepted_transfer_reconciliation["projection"]["signal_label"],
+        "\u{5339}\u{914d}\u{ff1a}\u{4eba}\u{5de5}|\u{652f}\u{4ed8}\u{5b9d}"
+    );
+    assert_eq!(
+        accepted_transfer_reconciliation["projection"]["description"],
+        "Existing transfer|Imported transfer note"
+    );
+    assert!(!preview_selected(&connection, 1)?);
+    let cleared_transfer_reconciliation = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        &transfer_reconciliation_id(),
+        "clear",
+        &PreviewMatchingActionRequest::default(),
+    )?;
+    assert_eq!(
+        cleared_transfer_reconciliation["projection"]["description"],
+        "Existing transfer"
+    );
+    assert!(preview_selected(&connection, 1)?);
+
+    let bad_candidate = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "not-a-candidate",
+        "accept",
+        &PreviewMatchingActionRequest::default(),
+    )
+    .expect_err("invalid candidate");
+    assert_eq!(bad_candidate.status_code(), 400);
+    assert_eq!(bad_candidate.message(), "Invalid candidateId");
+
+    Ok(())
+}
+
+fn seed_matching_fixture(connection: &mut Connection) -> Result<(), Box<dyn Error>> {
+    create_business_schema(connection)?;
+    init_import_staging_schema(connection)?;
+    init_matching_runtime_schema(connection)?;
+    insert_core_rows(connection)?;
+    seed_import_preview_rows(connection)?;
+    seed_reconciliation_rows(connection)?;
+    Ok(())
+}
+
+fn create_business_schema(connection: &Connection) -> Result<(), Box<dyn Error>> {
+    connection.execute_batch(
+        "
+        CREATE TABLE users(
+            id INTEGER PRIMARY KEY,
+            username TEXT NOT NULL,
+            import_learning_enabled INTEGER DEFAULT 1,
+            investment_platform_keywords TEXT,
+            investment_product_keywords TEXT,
+            investment_exclude_keywords TEXT
+        );
+        CREATE TABLE accounts(
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            type TEXT,
+            balance REAL,
+            initial_balance REAL,
+            currency TEXT,
+            icon TEXT,
+            hidden INTEGER DEFAULT 0,
+            created_at TEXT,
+            updated_at TEXT
+        );
+        CREATE TABLE categories(
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            main_category TEXT,
+            sub_category TEXT,
+            name TEXT,
+            type INTEGER
+        );
+        CREATE TABLE tags(
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            color TEXT,
+            icon TEXT,
+            display_order INTEGER DEFAULT 0,
+            hidden INTEGER DEFAULT 0,
+            created_at TEXT,
+            updated_at TEXT
+        );
+        CREATE TABLE bills(
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            date TEXT NOT NULL,
+            type TEXT NOT NULL,
+            amount REAL NOT NULL,
+            counterparty TEXT NOT NULL,
+            description TEXT NOT NULL,
+            payment_method TEXT DEFAULT '',
+            main_category TEXT,
+            sub_category TEXT,
+            source_account_id INTEGER DEFAULT 0,
+            destination_account_id INTEGER DEFAULT 0,
+            destination_amount REAL DEFAULT 0,
+            created_at TEXT,
+            updated_at TEXT
+        );
+        CREATE TABLE bill_tags(
+            bill_id INTEGER NOT NULL,
+            tag_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (bill_id, tag_id)
+        );
+        CREATE TABLE import_learning_rules(
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            match_type TEXT,
+            match_value TEXT,
+            normalized_match_value TEXT,
+            learned_type TEXT,
+            learned_category_id INTEGER,
+            learned_source_account_id INTEGER,
+            learned_destination_account_id INTEGER,
+            enabled INTEGER DEFAULT 1,
+            parser_id TEXT,
+            composite_match_hash TEXT,
+            match_features_json TEXT,
+            applied_count INTEGER DEFAULT 0,
+            confidence REAL DEFAULT 1,
+            support_count INTEGER DEFAULT 1,
+            last_applied_at TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        );
+        CREATE TABLE import_learning_rule_logs(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            rule_id INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            payload_json TEXT,
+            created_at TEXT
+        );
+        ",
+    )?;
+    Ok(())
+}
+
+fn insert_core_rows(connection: &Connection) -> Result<(), Box<dyn Error>> {
+    connection.execute(
+        "
+        INSERT INTO users(
+            id, username, import_learning_enabled,
+            investment_platform_keywords, investment_product_keywords, investment_exclude_keywords
+        ) VALUES (42, 'owner', 1, ?1, ?2, '[]')
+        ",
+        params![
+            json!(["Acme Invest"]).to_string(),
+            json!(["Index Fund"]).to_string()
+        ],
+    )?;
+    connection.execute(
+        "INSERT INTO users(id, username, import_learning_enabled) VALUES (77, 'other', 1)",
+        [],
+    )?;
+    connection.execute(
+        "
+        INSERT INTO accounts(id, user_id, name, type, balance, initial_balance, currency, icon, hidden, created_at, updated_at)
+        VALUES (10, 42, 'Cash', 'cash', 1000.0, 0.0, 'CNY', 'wallet', 0, 'now', 'now'),
+               (11, 42, 'Card', 'cash', 500.0, 0.0, 'CNY', 'card', 0, 'now', 'now'),
+               (12, 42, 'Brokerage', 'investment', 0.0, 0.0, 'CNY', 'chart', 0, 'now', 'now'),
+               (99, 77, 'Other', 'cash', 1.0, 0.0, 'CNY', 'wallet', 0, 'now', 'now')
+        ",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO categories(id, user_id, main_category, sub_category, name, type)
+         VALUES (6, 42, 'Food', 'Coffee', 'Coffee', 0)",
+        [],
+    )?;
+    connection.execute(
+        "
+        INSERT INTO tags(id, user_id, name, created_at, updated_at)
+        VALUES (71, 42, 'Manual', 'now', 'now'),
+               (72, 42, 'Import', 'now', 'now'),
+               (73, 77, 'Other user tag', 'now', 'now')
+        ",
+        [],
+    )?;
+    connection.execute(
+        "
+        INSERT INTO bills(
+            id, user_id, date, type, amount, counterparty, description, payment_method,
+            main_category, sub_category, source_account_id, destination_account_id, destination_amount,
+            created_at, updated_at
+        ) VALUES
+            (101, 42, '2026-04-01T09:00:00', 'expense', -50.0, 'Cash', 'Transfer out', 'cash', 'Transfer', '', 10, 0, 0, 'now', 'now'),
+            (102, 42, '2026-04-01T09:10:00', 'income', 50.0, 'Card', 'Transfer in', 'card', 'Transfer', '', 11, 0, 0, 'now', 'now'),
+            (103, 42, '2026-04-02T09:00:00', 'expense', -60.0, 'Cash', 'Reject transfer out', 'cash', 'Transfer', '', 10, 0, 0, 'now', 'now'),
+            (104, 42, '2026-04-02T09:15:00', 'income', 60.0, 'Card', 'Reject transfer in', 'card', 'Transfer', '', 11, 0, 0, 'now', 'now'),
+            (201, 42, '2026-04-03T10:00:00', 'expense', -100.0, 'Acme Invest', 'Buy Index Fund', 'cash', 'Investment', 'Fund', 10, 0, 0, 'now', 'now'),
+            (202, 42, '2026-04-03T10:30:00', 'income', 100.0, 'Acme Invest', 'Sell Index Fund', 'brokerage', 'Investment', 'Fund', 12, 0, 0, 'now', 'now'),
+            (203, 42, '2026-04-04T10:00:00', 'expense', -120.0, 'Acme Invest', 'Buy Index Fund', 'cash', 'Investment', 'Fund', 10, 0, 0, 'now', 'now'),
+            (204, 42, '2026-04-04T10:30:00', 'income', 120.0, 'Acme Invest', 'Sell Index Fund', 'brokerage', 'Investment', 'Fund', 12, 0, 0, 'now', 'now'),
+            (301, 42, '2026-04-05T08:00:00', 'expense', -4.5, 'Coffee Shop', 'Latte', 'card', '', '', 11, 0, 0, 'now', 'now'),
+            (302, 42, '2026-04-06T08:00:00', 'expense', -5.5, 'Coffee Shop', 'Latte', 'card', '', '', 11, 0, 0, 'now', 'now'),
+            (401, 42, '2026-04-07T08:00:00', 'expense', -20.0, 'Subscription', 'Existing subscription', 'card', 'Life', 'Service', 11, 0, 0, 'now', 'now'),
+            (402, 42, '2026-04-08T09:00:00', 'expense', -30.0, 'Transfer peer', 'Existing transfer', 'card', 'Transfer', '', 11, 0, 0, 'now', 'now'),
+            (901, 77, '2026-04-01', 'expense', -50.0, 'Other', 'Other user', 'cash', 'Other', '', 99, 0, 0, 'now', 'now')
+        ",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO bill_tags(bill_id, tag_id, created_at) VALUES (401, 71, 'now'), (402, 71, 'now')",
+        [],
+    )?;
+    connection.execute(
+        "
+        INSERT INTO import_learning_rules(
+            id, user_id, match_type, match_value, normalized_match_value,
+            learned_type, learned_category_id, learned_source_account_id,
+            learned_destination_account_id, enabled, parser_id, composite_match_hash,
+            match_features_json, applied_count, confidence, support_count, created_at, updated_at
+        ) VALUES (8, 42, 'composite', '', '', 'expense', 6, 10, NULL, 1, '',
+                  'coffee-shop-latte-card', ?1, 0, 0.98, 4, 'now', 'now')
+        ",
+        params![json!({
+            "counterparty": "Coffee Shop",
+            "description": "Latte",
+            "payment_method": "card"
+        })
+        .to_string()],
+    )?;
+    Ok(())
+}
+
+fn seed_import_preview_rows(connection: &mut Connection) -> Result<(), Box<dyn Error>> {
+    create_import_session(
+        connection,
+        &ImportSessionDraft {
+            session_id: "session-matching".to_string(),
+            user_id: user_id(),
+            file_count: 1,
+        },
+    )?;
+    insert_preview_bills_batch(
+        connection,
+        "session-matching",
+        user_id(),
+        &[
+            preview_draft("2026-04-08", 50.0, "Preview transfer"),
+            preview_draft("2026-04-09", 4.5, "Preview learning"),
+            recurring_preview_draft(),
+        ],
+    )?;
+    connection.execute(
+        "UPDATE bills_preview SET preview_matching_feedback_json = ?1 WHERE id = 1",
+        params![json!({
+            "transfer": {
+                "candidate_type": "transfer",
+                "score": 0.96,
+                "level": "high",
+                "reason": "opposite_amount",
+                "review_status": "pending"
+            }
+        })
+        .to_string()],
+    )?;
+    connection.execute(
+        "UPDATE bills_preview SET preview_matching_feedback_json = ?1 WHERE id = 2",
+        params![json!({
+            "learning": {
+                "rule_id": 8,
+                "score": 0.98,
+                "level": "high",
+                "reason": "counterparty:exact",
+                "recommended_type": "expense",
+                "summary": "Food / Coffee",
+                "review_status": "pending"
+            }
+        })
+        .to_string()],
+    )?;
+    Ok(())
+}
+
+fn seed_reconciliation_rows(connection: &Connection) -> Result<(), Box<dyn Error>> {
+    connection.execute(
+        "
+        INSERT INTO bill_merge_groups(user_id, family, group_key, group_type, status, metadata_json, created_at, updated_at)
+        VALUES (42, 'import_reconciliation', 'group-dup-401', 'duplicate', 'pending', ?1, 'now', 'now')
+        ",
+        params![json!({
+            "signal_label": "duplicate import",
+            "source_chain": ["import", "dedup"]
+        })
+        .to_string()],
+    )?;
+    let group_id = connection.last_insert_rowid();
+    let import_snapshot = json!({
+        "id": 0,
+        "date": "2026-04-07",
+        "type": "expense",
+        "amount": -20.0,
+        "counterparty": "Subscription",
+        "description": "Imported subscription note",
+        "payment_method": "card",
+        "main_category": "Life",
+        "sub_category": "Service",
+        "tag_ids": [72, 73],
+        "source_account_id": 11,
+        "destination_account_id": 0
+    });
+    let existing_snapshot = json!({
+        "id": 401,
+        "date": "2026-04-07",
+        "type": "expense",
+        "amount": -20.0,
+        "counterparty": "Subscription",
+        "description": "Existing subscription",
+        "payment_method": "card",
+        "main_category": "Life",
+        "sub_category": "Service",
+        "tag_ids": [71],
+        "source_account_id": 11,
+        "destination_account_id": 0
+    });
+    connection.execute(
+        "
+        INSERT INTO bill_reconciliation_candidates(
+            user_id, family, candidate_id, candidate_type, status, session_id, preview_id,
+            import_bill_key, existing_bill_id, group_key, amount_abs, time_diff_seconds,
+            score, level, reason, import_bill_snapshot_json, existing_bill_snapshot_json,
+            source_payload_json, seen_count, first_seen_at, last_seen_at, created_at, updated_at
+        ) VALUES (
+            42, 'import_reconciliation', ?1, 'duplicate', 'pending', 'session-matching', 3,
+            'import-preview-3', 401, 'group-dup-401', 20.0, 0, 0.98, 'high',
+            'same_date_amount_counterparty', ?2, ?3, ?4, 1, 'now', 'now', 'now', 'now'
+        )
+        ",
+        params![
+            reconciliation_id(),
+            import_snapshot.to_string(),
+            existing_snapshot.to_string(),
+            json!({
+                "signal_label": "duplicate import",
+                "source_chain": ["import", "dedup"],
+            })
+            .to_string()
+        ],
+    )?;
+    connection.execute(
+        "
+        INSERT INTO bill_merge_members(
+            group_id, user_id, member_key, member_type, bill_id, import_bill_key,
+            candidate_id, role, snapshot_json, created_at, updated_at
+        ) VALUES (?1, 42, 'bill-401', 'existing_bill', 401, NULL, ?2, 'canonical', ?3, 'now', 'now'),
+                 (?1, 42, 'import-preview-3', 'import_bill', NULL, 'import-preview-3', ?2, 'candidate', ?4, 'now', 'now')
+        ",
+        params![
+            group_id,
+            reconciliation_id(),
+            existing_snapshot.to_string(),
+            import_snapshot.to_string()
+        ],
+    )?;
+    connection.execute(
+        "
+        INSERT INTO bill_merge_groups(user_id, family, group_key, group_type, status, metadata_json, created_at, updated_at)
+        VALUES (42, 'import_reconciliation', 'group-transfer-402', 'transfer', 'pending', ?1, 'now', 'now')
+        ",
+        params![json!({
+            "signal_label": "transfer import",
+            "source_chain": ["import", "transfer"]
+        })
+        .to_string()],
+    )?;
+    let transfer_group_id = connection.last_insert_rowid();
+    let transfer_import_snapshot = json!({
+        "id": 0,
+        "date": "2026-04-08",
+        "type": "income",
+        "amount": 30.0,
+        "counterparty": "Transfer peer",
+        "description": "Imported transfer note",
+        "payment_method": "alipay",
+        "parser_id": "alipay",
+        "main_category": "Transfer",
+        "tag_ids": [72],
+        "source_account_id": 10,
+        "destination_account_id": 0
+    });
+    let transfer_existing_snapshot = json!({
+        "id": 402,
+        "date": "2026-04-08",
+        "type": "expense",
+        "amount": -30.0,
+        "counterparty": "Transfer peer",
+        "description": "Existing transfer",
+        "payment_method": "card",
+        "main_category": "Transfer",
+        "tag_ids": [71],
+        "source_account_id": 11,
+        "destination_account_id": 0
+    });
+    connection.execute(
+        "
+        INSERT INTO bill_reconciliation_candidates(
+            user_id, family, candidate_id, candidate_type, status, session_id, preview_id,
+            import_bill_key, existing_bill_id, group_key, amount_abs, time_diff_seconds,
+            score, level, reason, import_bill_snapshot_json, existing_bill_snapshot_json,
+            source_payload_json, seen_count, first_seen_at, last_seen_at, created_at, updated_at
+        ) VALUES (
+            42, 'import_reconciliation', ?1, 'transfer', 'pending', 'session-matching', NULL,
+            'session:session-matching:template:2', 402, 'group-transfer-402', 30.0, 0, 0.97, 'high',
+            'opposite_amount', ?2, ?3, ?4, 1, 'now', 'now', 'now', 'now'
+        )
+        ",
+        params![
+            transfer_reconciliation_id(),
+            transfer_import_snapshot.to_string(),
+            transfer_existing_snapshot.to_string(),
+            json!({
+                "signal_label": "transfer import",
+                "source_chain": ["import", "transfer"],
+            })
+            .to_string()
+        ],
+    )?;
+    connection.execute(
+        "
+        INSERT INTO bill_merge_members(
+            group_id, user_id, member_key, member_type, bill_id, import_bill_key,
+            candidate_id, role, snapshot_json, created_at, updated_at
+        ) VALUES (?1, 42, 'bill-402', 'existing_bill', 402, NULL, ?2, 'canonical', ?3, 'now', 'now'),
+                 (?1, 42, 'session:session-matching:template:2', 'import_bill', NULL, 'session:session-matching:template:2', ?2, 'candidate', ?4, 'now', 'now')
+        ",
+        params![
+            transfer_group_id,
+            transfer_reconciliation_id(),
+            transfer_existing_snapshot.to_string(),
+            transfer_import_snapshot.to_string()
+        ],
+    )?;
+    Ok(())
+}
+
+fn preview_draft(date: &str, amount: f64, description: &str) -> ImportPreviewDraft {
+    ImportPreviewDraft {
+        preview_date: date.to_string(),
+        preview_type: "expense".to_string(),
+        preview_amount: amount,
+        preview_destination_amount: 0.0,
+        preview_main_category: "Food".to_string(),
+        preview_sub_category: "Coffee".to_string(),
+        preview_source_account_id: Some(10),
+        preview_destination_account_id: None,
+        preview_counterparty: "Coffee Shop".to_string(),
+        preview_payment_method: "card".to_string(),
+        preview_description: description.to_string(),
+        preview_parser_id: "fixture".to_string(),
+        preview_parser_tags: Some(json!(["fixture"])),
+        dedup_type: Some("remaining".to_string()),
+        dedup_source_ids: vec![1, 2],
+        ..Default::default()
+    }
+}
+
+fn recurring_preview_draft() -> ImportPreviewDraft {
+    ImportPreviewDraft {
+        preview_date: "2026-04-10".to_string(),
+        preview_type: "expense".to_string(),
+        preview_amount: 100.0,
+        preview_destination_amount: 0.0,
+        preview_main_category: "Housing".to_string(),
+        preview_sub_category: "Rent".to_string(),
+        preview_source_account_id: Some(10),
+        preview_counterparty: "Landlord".to_string(),
+        preview_payment_method: "cash".to_string(),
+        preview_description: "Monthly rent".to_string(),
+        preview_parser_id: "fixture".to_string(),
+        preview_recurring_candidate_count: 1,
+        preview_recurring_match_score: 0.88,
+        preview_recurring_match_reasons: "same_amount|monthly".to_string(),
+        preview_recurring_matched_date: "2026-03-10".to_string(),
+        dedup_type: Some("remaining".to_string()),
+        ..Default::default()
+    }
+}
+
+fn candidate_ids(payload: &Value) -> Vec<String> {
+    payload["candidates"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|candidate| {
+            candidate["candidateId"]
+                .as_str()
+                .or_else(|| candidate["candidate_id"].as_str())
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+fn reconciliation_id() -> String {
+    "reconcile:import:duplicate:bill:401:preview-3".to_string()
+}
+
+fn transfer_reconciliation_id() -> String {
+    "reconcile:import:transfer:bill:402:template-2".to_string()
+}
+
+fn bill_description(connection: &Connection, bill_id: i64) -> Result<String, Box<dyn Error>> {
+    Ok(connection.query_row(
+        "SELECT description FROM bills WHERE id = ?",
+        params![bill_id],
+        |row| row.get(0),
+    )?)
+}
+
+fn bill_tag_ids(connection: &Connection, bill_id: i64) -> Result<Vec<i64>, Box<dyn Error>> {
+    let mut statement =
+        connection.prepare("SELECT tag_id FROM bill_tags WHERE bill_id = ? ORDER BY tag_id")?;
+    let rows = statement.query_map(params![bill_id], |row| row.get::<_, i64>(0))?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+fn preview_selected(connection: &Connection, preview_id: i64) -> Result<bool, Box<dyn Error>> {
+    Ok(connection.query_row(
+        "SELECT preview_selected FROM bills_preview WHERE id = ?",
+        params![preview_id],
+        |row| row.get::<_, i64>(0),
+    )? != 0)
+}
+
+fn user_id() -> UserId {
+    UserId::new(OWNER_ID).expect("valid test user id")
+}

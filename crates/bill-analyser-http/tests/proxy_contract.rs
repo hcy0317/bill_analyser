@@ -466,7 +466,6 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
     for (method, path) in [
         (Method::OPTIONS, "/api/auth/register"),
         (Method::POST, "/api/llm/induce-rules"),
-        (Method::POST, "/api/matching/candidates/session/12/accept"),
     ] {
         let response = app
             .clone()
@@ -486,6 +485,22 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
             "{path}"
         );
     }
+
+    let deleted_matching_proxy_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/matching/candidates/session/12/accept")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(
+        deleted_matching_proxy_response.status(),
+        StatusCode::NOT_FOUND
+    );
 
     for (method, path) in [
         (Method::GET, "/api/categories/rules"),

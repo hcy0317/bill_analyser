@@ -399,11 +399,6 @@ fn bills_import_routes_are_python_deleted_and_provider_routes_are_rust_owned() {
 fn live_python_sidecar_routes_are_manifested_for_import_db_runtime_proxy() {
     for (method, pattern, domain) in [
         ("POST", "/api/llm/induce-rules", "ai-learning-llm"),
-        (
-            "POST",
-            "/api/matching/candidates/{*candidate_id}/accept",
-            "matching-recurring-calendar-networth",
-        ),
         ("GET", "/api/backup/jobs", "backup-ops"),
     ] {
         let endpoint = find_endpoint_ownership(method, pattern)
@@ -745,6 +740,20 @@ fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
             ("POST", "/api/category-rules/reorder"),
             ("GET", "/api/rules/overview"),
             ("GET", "/api/insights/anomalies"),
+            ("GET", "/api/matching/bills/{bill_id}/candidates"),
+            ("GET", "/api/matching/bills/{bill_id}/feedback"),
+            ("GET", "/api/matching/candidates"),
+            ("POST", "/api/matching/candidates/{*candidate_id}/accept"),
+            ("POST", "/api/matching/candidates/{*candidate_id}/clear"),
+            ("POST", "/api/matching/candidates/{*candidate_id}/reject"),
+            ("GET", "/api/matching/investment-settings"),
+            ("PUT", "/api/matching/investment-settings"),
+            ("POST", "/api/matching/manual-pair"),
+            ("GET", "/api/matching/pairs"),
+            ("DELETE", "/api/matching/pairs/{pair_id}"),
+            ("POST", "/api/matching/reconcile-history"),
+            ("GET", "/api/matching/reconciliation-candidates"),
+            ("GET", "/api/matching/sessions/{session_id}/candidates"),
             ("GET", "/api/networth/snapshot"),
             ("GET", "/api/recurring/suggestions"),
             ("POST", "/api/recurring/suggestions/{suggestion_id}/accept"),

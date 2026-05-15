@@ -18,10 +18,10 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
         sorted(path.relative_to(repo_root).as_posix() for path in (repo_root / "src/bill_analyser").rglob("*.py"))
     )
 
-    assert len(expected_python_paths) == 269
-    assert inventory.summary["python_backend_files"] == 269
+    assert len(expected_python_paths) == 264
+    assert inventory.summary["python_backend_files"] == 264
     assert tuple(record.path for record in inventory.python_files) == expected_python_paths
-    assert inventory.summary["rust_backend_files"] == 108
+    assert inventory.summary["rust_backend_files"] == 110
     assert "crates/bill-analyser-core/src/ai_ocr_llm.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/lib.rs" in inventory.rust_files
     assert "crates/bill-analyser-parsers/src/dedicated.rs" in inventory.rust_files
@@ -56,6 +56,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert "crates/bill-analyser-db/src/budgets.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/import_staging.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/llm.rs" in inventory.rust_files
+    assert "crates/bill-analyser-db/src/matching.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/recurring.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/statistics.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/taxonomy/category_rules.rs" in inventory.rust_files
@@ -149,6 +150,11 @@ def test_every_python_file_has_migration_domain_status_and_no_verified_dead(repo
     assert "src/bill_analyser/api/routes/bills/import_learning.py" not in records
     assert "src/bill_analyser/api/routes/bills/v2_pipeline.py" not in records
     assert "src/bill_analyser/api/routes/bills/reconciliation.py" not in records
+    assert "src/bill_analyser/api/routes/matching/__init__.py" not in records
+    assert "src/bill_analyser/api/routes/matching/actions.py" not in records
+    assert "src/bill_analyser/api/routes/matching/pairs.py" not in records
+    assert "src/bill_analyser/api/routes/matching/queries.py" not in records
+    assert "src/bill_analyser/api/routes/matching/support.py" not in records
     assert "src/bill_analyser/api/routes/budgets/__init__.py" not in records
     assert "src/bill_analyser/api/routes/budgets/crud.py" not in records
     assert "src/bill_analyser/api/routes/budgets/execution.py" not in records
@@ -175,8 +181,8 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
 
     assert first_render == second_render
     assert "# Rust Backend Migration Inventory" in first_render
-    assert "- Python backend files: 269" in first_render
-    assert "- Rust backend files: 108" in first_render
+    assert "- Python backend files: 264" in first_render
+    assert "- Rust backend files: 110" in first_render
     assert "- Verified dead files: 0" in first_render
     assert "Route/domain cutover state lives separately in the Rust governance manifest" in first_render
     assert "Governance manifest tool: `cargo run -p bill-analyser-core --bin bill_migration_manifest`" in first_render
@@ -222,6 +228,11 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
     assert "src/bill_analyser/api/routes/bills/import_learning.py" not in first_render
     assert "src/bill_analyser/api/routes/bills/v2_pipeline.py" not in first_render
     assert "src/bill_analyser/api/routes/bills/reconciliation.py" not in first_render
+    assert "src/bill_analyser/api/routes/matching/__init__.py" not in first_render
+    assert "src/bill_analyser/api/routes/matching/actions.py" not in first_render
+    assert "src/bill_analyser/api/routes/matching/pairs.py" not in first_render
+    assert "src/bill_analyser/api/routes/matching/queries.py" not in first_render
+    assert "src/bill_analyser/api/routes/matching/support.py" not in first_render
     assert "src/bill_analyser/api/routes/budgets/__init__.py" not in first_render
     assert "src/bill_analyser/api/routes/budgets/crud.py" not in first_render
     assert "src/bill_analyser/api/routes/budgets/execution.py" not in first_render

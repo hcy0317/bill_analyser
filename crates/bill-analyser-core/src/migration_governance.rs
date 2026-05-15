@@ -389,6 +389,20 @@ macro_rules! python_proxy_route {
     };
 }
 
+macro_rules! python_deleted_route {
+    ($method:literal, $pattern:literal, $domain:literal, $envelope:expr, $notes:literal) => {
+        EndpointOwnership {
+            method: $method,
+            pattern: $pattern,
+            domain: $domain,
+            state: MigrationState::PythonDeleted,
+            envelope: $envelope,
+            deletion_blocked_until_all_import_gates: false,
+            notes: $notes,
+        }
+    };
+}
+
 const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
     EndpointOwnership {
         method: "GET",
@@ -1872,75 +1886,103 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         notes: "Rust statistics_analyzer_runtime owns insights anomaly detection for current-user bills; the old Flask insights route shell is deleted.",
     },
     python_proxy_route!("POST", "/api/llm/induce-rules", "ai-learning-llm"),
-    python_proxy_route!(
+    python_deleted_route!(
         "GET",
         "/api/matching/bills/{bill_id}/candidates",
-        "matching-recurring-calendar-networth"
+        "matching-recurring-calendar-networth",
+        ResponseEnvelopeFamily::FlaskSuccessData,
+        "Rust matching runtime owns formal bill candidate reads; the old Flask matching route shell is deleted."
     ),
-    python_proxy_route!(
+    python_deleted_route!(
         "GET",
         "/api/matching/bills/{bill_id}/feedback",
-        "matching-recurring-calendar-networth"
+        "matching-recurring-calendar-networth",
+        ResponseEnvelopeFamily::FlaskSuccessData,
+        "Rust matching runtime owns formal bill feedback reads; the old Flask matching route shell is deleted."
     ),
-    python_proxy_route!(
+    python_deleted_route!(
         "GET",
         "/api/matching/candidates",
-        "matching-recurring-calendar-networth"
+        "matching-recurring-calendar-networth",
+        ResponseEnvelopeFamily::FlaskSuccessData,
+        "Rust matching runtime owns unified session and formal bill candidate reads; the old Flask matching route shell is deleted."
     ),
-    python_proxy_route!(
+    python_deleted_route!(
         "POST",
         "/api/matching/candidates/{*candidate_id}/accept",
-        "matching-recurring-calendar-networth"
+        "matching-recurring-calendar-networth",
+        ResponseEnvelopeFamily::FlaskSuccessData,
+        "Rust matching runtime owns candidate accept actions across formal bills and import-preview matching families; the old Flask matching route shell is deleted."
     ),
-    python_proxy_route!(
+    python_deleted_route!(
         "POST",
         "/api/matching/candidates/{*candidate_id}/clear",
-        "matching-recurring-calendar-networth"
+        "matching-recurring-calendar-networth",
+        ResponseEnvelopeFamily::FlaskSuccessData,
+        "Rust matching runtime owns candidate clear actions for supported import-preview matching families; the old Flask matching route shell is deleted."
     ),
-    python_proxy_route!(
+    python_deleted_route!(
         "POST",
         "/api/matching/candidates/{*candidate_id}/reject",
-        "matching-recurring-calendar-networth"
+        "matching-recurring-calendar-networth",
+        ResponseEnvelopeFamily::FlaskSuccessData,
+        "Rust matching runtime owns candidate reject actions across formal bills and import-preview matching families; the old Flask matching route shell is deleted."
     ),
-    python_proxy_route!(
+    python_deleted_route!(
         "GET",
         "/api/matching/investment-settings",
-        "matching-recurring-calendar-networth"
+        "matching-recurring-calendar-networth",
+        ResponseEnvelopeFamily::FlaskSuccessData,
+        "Rust matching runtime owns the retired investment-settings endpoint and returns the deterministic 410 contract; the old Flask matching route shell is deleted."
     ),
-    python_proxy_route!(
+    python_deleted_route!(
         "PUT",
         "/api/matching/investment-settings",
-        "matching-recurring-calendar-networth"
+        "matching-recurring-calendar-networth",
+        ResponseEnvelopeFamily::FlaskSuccessData,
+        "Rust matching runtime owns the retired investment-settings endpoint and returns the deterministic 410 contract; the old Flask matching route shell is deleted."
     ),
-    python_proxy_route!(
+    python_deleted_route!(
         "POST",
         "/api/matching/manual-pair",
-        "matching-recurring-calendar-networth"
+        "matching-recurring-calendar-networth",
+        ResponseEnvelopeFamily::FlaskSuccessData,
+        "Rust matching runtime owns manual transfer and investment pair creation for formal bills; the old Flask matching route shell is deleted."
     ),
-    python_proxy_route!(
+    python_deleted_route!(
         "GET",
         "/api/matching/pairs",
-        "matching-recurring-calendar-networth"
+        "matching-recurring-calendar-networth",
+        ResponseEnvelopeFamily::FlaskSuccessData,
+        "Rust matching runtime owns manual pair listing for formal bills; the old Flask matching route shell is deleted."
     ),
-    python_proxy_route!(
+    python_deleted_route!(
         "DELETE",
         "/api/matching/pairs/{pair_id}",
-        "matching-recurring-calendar-networth"
+        "matching-recurring-calendar-networth",
+        ResponseEnvelopeFamily::FlaskSuccessData,
+        "Rust matching runtime owns manual pair deletion for formal bills; the old Flask matching route shell is deleted."
     ),
-    python_proxy_route!(
+    python_deleted_route!(
         "POST",
         "/api/matching/reconcile-history",
-        "matching-recurring-calendar-networth"
+        "matching-recurring-calendar-networth",
+        ResponseEnvelopeFamily::FlaskSuccessData,
+        "Rust matching runtime owns explicit formal bill matching history reconciliation; the old Flask matching route shell is deleted."
     ),
-    python_proxy_route!(
+    python_deleted_route!(
         "GET",
         "/api/matching/reconciliation-candidates",
-        "matching-recurring-calendar-networth"
+        "matching-recurring-calendar-networth",
+        ResponseEnvelopeFamily::FlaskSuccessData,
+        "Rust matching runtime owns persisted import-to-formal reconciliation candidate reads; the old Flask matching route shell is deleted."
     ),
-    python_proxy_route!(
+    python_deleted_route!(
         "GET",
         "/api/matching/sessions/{session_id}/candidates",
-        "matching-recurring-calendar-networth"
+        "matching-recurring-calendar-networth",
+        ResponseEnvelopeFamily::FlaskSuccessData,
+        "Rust matching runtime owns import session candidate reads; the old Flask matching route shell is deleted."
     ),
     EndpointOwnership {
         method: "GET",
@@ -2937,9 +2979,10 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
     },
     DomainGovernancePolicy {
         domain: "matching-recurring-calendar-networth",
-        python_owner_files: &["src/bill_analyser/api/routes/matching"],
+        python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
             "crates/bill-analyser-http/src/matching_routes.rs",
+            "crates/bill-analyser-db/src/matching.rs",
             "crates/bill-analyser-db/src/recurring.rs",
             "crates/bill-analyser-db/src/statistics.rs",
             "crates/bill-analyser-http/src/proxy.rs",
@@ -2953,12 +2996,12 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: EMPTY_STRINGS,
         coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
-        deletion_blockers: &["matching_runtime_parity"],
+        deletion_blockers: EMPTY_STRINGS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Recurring suggestions, calendar, and net worth runtime routes are Rust-owned; formal matching candidates, feedback, manual pairs, reconcile history, and investment settings remain Python-proxied until the remaining P8 matching cutover ports handlers.",
-        decision_required: DecisionRequired::Port,
-        decision_owner: "migration-program",
+            "Formal matching candidates, feedback, manual pairs, candidate actions, reconcile history, retired investment settings, recurring suggestions, calendar, and net worth runtime routes are Rust-owned; the old Flask matching, recurring, calendar, and networth route shells have been removed.",
+        decision_required: DecisionRequired::None,
+        decision_owner: "none",
         transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
     },
     DomainGovernancePolicy {

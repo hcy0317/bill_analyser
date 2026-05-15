@@ -12,6 +12,7 @@ pub mod connection;
 pub mod error;
 pub mod import_staging;
 pub mod llm;
+pub mod matching;
 pub mod path;
 pub mod recurring;
 pub mod schema;
@@ -105,6 +106,13 @@ pub use llm::{
     init_llm_runtime_schema, list_llm_candidates, list_llm_configs, reject_llm_candidate,
     update_llm_candidate_status, update_llm_config, LlmCandidateDraft, LlmConfigDraft,
     LlmConfigUpdate,
+};
+pub use matching::{
+    apply_matching_candidate_action, create_manual_matching_pair, delete_manual_matching_pair,
+    init_matching_runtime_schema, list_reconciliation_candidates_payload,
+    query_matching_bill_candidates_payload, query_matching_bill_feedback_payload,
+    query_matching_pairs_payload, query_matching_session_candidates_payload, MatchingRuntimeError,
+    PreviewMatchingActionRequest, ReconciliationCandidateFilters,
 };
 pub use path::SqliteDbPath;
 pub use recurring::{

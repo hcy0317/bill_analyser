@@ -6,11 +6,11 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 
 ## Summary
 
-- Python backend files: 269
-- Rust backend files: 108
+- Python backend files: 264
+- Rust backend files: 110
 - Migration domains: 22
-- Files marked port: 206
-- Files marked facade: 63
+- Files marked port: 202
+- Files marked facade: 62
 - Files marked deferred: 0
 - Verified dead files: 0
 - Governance manifest tool: `cargo run -p bill-analyser-core --bin bill_migration_manifest`
@@ -34,7 +34,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 | database-schema | 11 | 3 | 0 |
 | import-contracts | 0 | 3 | 0 |
 | import-parsers | 8 | 2 | 0 |
-| matching-reconciliation | 22 | 5 | 0 |
+| matching-reconciliation | 18 | 4 | 0 |
 | recurring-calendar | 2 | 0 | 0 |
 | settings-bundle | 8 | 1 | 0 |
 | shared-primitives | 5 | 3 | 0 |
@@ -53,7 +53,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 | src/bill_analyser/api/adapters/account_adapter.py | api-contract-adapters | api-adapter | facade | 125 |
 | src/bill_analyser/api/adapters/category_adapter.py | api-contract-adapters | api-adapter | facade | 85 |
 | src/bill_analyser/api/adapters/transaction_adapter.py | api-contract-adapters | api-adapter | facade | 242 |
-| src/bill_analyser/api/app.py | api-runtime-shell | api-shell | facade | 335 |
+| src/bill_analyser/api/app.py | api-runtime-shell | api-shell | facade | 333 |
 | src/bill_analyser/api/config/__init__.py | api-runtime-shell | package-marker | facade | 1 |
 | src/bill_analyser/api/config/auth.py | api-runtime-shell | api-config | facade | 148 |
 | src/bill_analyser/api/config/bills.py | api-runtime-shell | api-config | facade | 132 |
@@ -87,11 +87,6 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 | src/bill_analyser/api/routes/llm/configs.py | ai-learning-llm | api-route | port | 174 |
 | src/bill_analyser/api/routes/llm/preview.py | ai-learning-llm | api-route | port | 178 |
 | src/bill_analyser/api/routes/llm/support.py | ai-learning-llm | api-route | port | 318 |
-| src/bill_analyser/api/routes/matching/__init__.py | matching-reconciliation | package-marker | facade | 37 |
-| src/bill_analyser/api/routes/matching/actions.py | matching-reconciliation | api-route | port | 161 |
-| src/bill_analyser/api/routes/matching/pairs.py | matching-reconciliation | api-route | port | 114 |
-| src/bill_analyser/api/routes/matching/queries.py | matching-reconciliation | api-route | port | 152 |
-| src/bill_analyser/api/routes/matching/support.py | matching-reconciliation | api-route | port | 366 |
 | src/bill_analyser/api/routes/receipt_ocr.py | ai-ocr | api-route | port | 185 |
 | src/bill_analyser/api/routes/request_context_helpers.py | api-runtime-shell | api-route | port | 40 |
 | src/bill_analyser/api/routes/statistics/__init__.py | statistics-reporting | package-marker | facade | 9 |
@@ -377,6 +372,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 - crates/bill-analyser-db/src/import_staging.rs
 - crates/bill-analyser-db/src/lib.rs
 - crates/bill-analyser-db/src/llm.rs
+- crates/bill-analyser-db/src/matching.rs
 - crates/bill-analyser-db/src/path.rs
 - crates/bill-analyser-db/src/recurring.rs
 - crates/bill-analyser-db/src/schema.rs
@@ -397,6 +393,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 - crates/bill-analyser-db/tests/budgets_runtime.rs
 - crates/bill-analyser-db/tests/import_staging.rs
 - crates/bill-analyser-db/tests/llm_runtime.rs
+- crates/bill-analyser-db/tests/matching_runtime.rs
 - crates/bill-analyser-db/tests/recurring_runtime.rs
 - crates/bill-analyser-db/tests/sqlite_runtime.rs
 - crates/bill-analyser-db/tests/taxonomy_bridge_cli.rs
