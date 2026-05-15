@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,10 @@ DEFAULT_PLAN_PATH = Path(".omx/plans/rust-full-rewrite-total-plan.md")
 DEFAULT_STATE_PATH = Path(".omx/state/autopilot-state.json")
 PHASE_ORDER = ("P0", "P1", "P2", "P6", "P3", "P4", "P5", "P9", "P10", "P7", "P11", "P8", "P12", "P13", "P14", "P15")
 TERMINAL_STATUSES = {"completed", "skipped"}
+LEDGER_HEADING = "## 13. Execution Progress Ledger"
+LEDGER_ROW_RE = re.compile(r"^\|\s*(P\d+[a-z]?)\s*\|\s*([^|]+?)\s*\|", re.IGNORECASE)
+NEXT_ALLOWED_RE = re.compile(r"Next allowed phase by gate:\s*(P\d+)\b", re.IGNORECASE)
+PHASE_ID_RE = re.compile(r"^(P\d+)(?:[a-z])?$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -23,7 +28,7 @@ class PhaseAudit:
 
 
 def _now_iso() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def load_state(path: Path) -> dict[str, Any]:
@@ -49,6 +54,85 @@ def ensure_progress(state: dict[str, Any]) -> dict[str, Any]:
 
 def phase_status(progress: dict[str, Any], phase: str) -> str:
     return str(progress.get("phases", {}).get(phase, {}).get("status", "pending"))
+
+
+def parent_phase_id(phase: str) -> str:
+    match = PHASE_ID_RE.match(phase.strip())
+    if not match:
+        raise ValueError(f"unknown phase: {phase}")
+    return match.group(1).upper()
+
+
+def normalize_status(status: str) -> str:
+    normalized = status.strip().strip("`").lower().replace(" ", "_").replace("-", "_")
+    return normalized or "pending"
+
+
+def parse_plan_progress(plan_path: Path) -> tuple[dict[str, str], str | None]:
+    if not plan_path.exists():
+        return {}, None
+
+    in_ledger = False
+    ledger_statuses: dict[str, list[str]] = {}
+    next_allowed: str | None = None
+    for raw_line in plan_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if line == LEDGER_HEADING:
+            in_ledger = True
+            continue
+        if not in_ledger:
+            continue
+        next_allowed_match = NEXT_ALLOWED_RE.search(line)
+        if next_allowed_match:
+            next_allowed = parent_phase_id(next_allowed_match.group(1))
+            break
+        if line.startswith("## "):
+            break
+        row_match = LEDGER_ROW_RE.match(line)
+        if not row_match:
+            continue
+        phase = parent_phase_id(row_match.group(1))
+        if phase not in PHASE_ORDER:
+            continue
+        ledger_statuses.setdefault(phase, []).append(normalize_status(row_match.group(2)))
+
+    return {phase: aggregate_plan_status(statuses) for phase, statuses in ledger_statuses.items()}, next_allowed
+
+
+def aggregate_plan_status(statuses: list[str]) -> str:
+    if not statuses:
+        return "pending"
+    if all(status in TERMINAL_STATUSES for status in statuses):
+        return "completed" if "completed" in statuses else "skipped"
+    if "blocked" in statuses:
+        return "blocked"
+    if "in_progress" in statuses:
+        return "in_progress"
+    if "pending" in statuses:
+        return "pending"
+    return statuses[-1]
+
+
+def hydrate_progress_from_plan(progress: dict[str, Any], plan_path: Path) -> dict[str, Any]:
+    ledger_statuses, next_allowed = parse_plan_progress(plan_path)
+    phases = progress.setdefault("phases", {})
+    for phase, status in ledger_statuses.items():
+        entry = phases.setdefault(phase, {})
+        entry["status"] = status
+        entry["source"] = "plan_ledger"
+
+    phase_order = tuple(progress.get("phase_order") or PHASE_ORDER)
+    if next_allowed and next_allowed in phase_order:
+        next_index = phase_order.index(next_allowed)
+        for phase in phase_order[:next_index]:
+            if phase in ledger_statuses:
+                continue
+            if phase_status(progress, phase) not in TERMINAL_STATUSES:
+                entry = phases.setdefault(phase, {})
+                entry["status"] = "completed"
+                entry.setdefault("source", "plan_next_allowed")
+        phases.setdefault(next_allowed, {}).setdefault("status", "pending")
+    return progress
 
 
 def blocked_prior_phases(progress: dict[str, Any], phase: str) -> list[str]:
@@ -109,8 +193,10 @@ def mark_phase(state: dict[str, Any], *, phase: str, status: str, evidence: list
     return state
 
 
-def render_status(state: dict[str, Any]) -> str:
+def render_status(state: dict[str, Any], *, plan_path: Path | None = None) -> str:
     progress = ensure_progress(state)
+    if plan_path:
+        hydrate_progress_from_plan(progress, plan_path)
     lines = ["phase status:"]
     for phase in progress.get("phase_order", PHASE_ORDER):
         lines.append(f"- {phase}: {phase_status(progress, phase)}")
@@ -208,6 +294,7 @@ def render_audit(audits: list[PhaseAudit]) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Track OMX P0-P15 plan progress and enforce phase order.")
     parser.add_argument("--state", type=Path, default=DEFAULT_STATE_PATH)
+    parser.add_argument("--plan", type=Path, default=DEFAULT_PLAN_PATH)
     parser.add_argument("--repo-root", type=Path, default=Path("."))
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -241,11 +328,13 @@ def main(argv: list[str] | None = None) -> int:
     ensure_progress(state)
 
     if args.command == "status":
-        print(render_status(state))
+        print(render_status(state, plan_path=args.plan))
         return 0
 
     if args.command == "check":
-        blockers = blocked_prior_phases(ensure_progress(state), args.phase)
+        progress = ensure_progress(state)
+        hydrate_progress_from_plan(progress, args.plan)
+        blockers = blocked_prior_phases(progress, args.phase)
         if blockers:
             print(f"blocked: {args.phase} cannot run before {', '.join(blockers)}", file=sys.stderr)
             return 1
