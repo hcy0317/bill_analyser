@@ -80,6 +80,7 @@ def test_gitea_workflows_use_absolute_action_urls() -> None:
 def test_ci_workflow_covers_gitea_contract_regression() -> None:
     text = _read("ci.yml")
     assert ".gitea/**" in text, "ci workflow should trigger on Gitea workflow changes"
+    assert ".omx/plans/**" in text, "ci workflow should trigger on committed OMX plan writebacks"
     assert "tests/test_gitea_workflows.py" in text, "agent-stack job should cover the Gitea workflow contract test"
     assert (
         "python -m pytest tests/test_reviewer_agent_diff_contract.py tests/test_agent_stack_health.py tests/test_ai_workflow_docs.py tests/test_task_state.py tests/test_task_state_reader.py tests/test_gitea_workflows.py -v"
