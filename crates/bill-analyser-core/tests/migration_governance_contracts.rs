@@ -399,12 +399,45 @@ fn bills_import_routes_are_python_deleted_and_provider_routes_are_rust_owned() {
 fn live_python_sidecar_routes_are_manifested_for_import_db_runtime_proxy() {
     for (method, pattern, domain) in [
         ("POST", "/api/llm/induce-rules", "ai-learning-llm"),
-        ("GET", "/api/backup/jobs", "backup-ops"),
+        ("GET", "/api/backup/", "backup-ops"),
     ] {
         let endpoint = find_endpoint_ownership(method, pattern)
             .unwrap_or_else(|| panic!("missing live Python sidecar endpoint {method} {pattern}"));
         assert_eq!(endpoint.state, MigrationState::PythonProxied);
         assert_eq!(endpoint.domain, domain);
+    }
+}
+
+#[test]
+fn backup_jobs_routes_are_rust_owned_while_file_ops_remain_proxied() {
+    let manifest = expanded_route_manifest();
+    for endpoint in ["GET /api/backup/jobs", "POST /api/backup/jobs"] {
+        let entry = manifest
+            .iter()
+            .find(|entry| entry.endpoint == endpoint)
+            .unwrap_or_else(|| panic!("backup jobs route is present: {endpoint}"));
+        assert_eq!(entry.state, MigrationState::RustOwnedVerified);
+        assert_eq!(entry.handler, RouteHandlerId::BackupOpsRuntime);
+        assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessData);
+        assert!(entry.deletion_blockers.is_empty());
+        assert_eq!(entry.decision_required, DecisionRequired::None);
+    }
+
+    for endpoint in [
+        "GET /api/backup/",
+        "POST /api/backup/create",
+        "POST /api/backup/restore/verify",
+        "GET /api/backup/download/{filename}",
+        "DELETE /api/backup/delete/{filename}",
+        "POST /api/backup/restore/{filename}",
+        "POST /api/backup/cleanup",
+    ] {
+        let entry = manifest
+            .iter()
+            .find(|entry| entry.endpoint == endpoint)
+            .unwrap_or_else(|| panic!("backup file route is present: {endpoint}"));
+        assert_eq!(entry.state, MigrationState::PythonProxied);
+        assert_eq!(entry.handler, RouteHandlerId::LegacyPythonProxyPassthrough);
     }
 }
 

@@ -7,6 +7,7 @@ use axum::{
 
 use crate::{
     auth_routes::auth_token_runtime_router,
+    backup_routes::backup_ops_runtime_router,
     bill_routes::bill_runtime_router,
     budget_routes::budget_runtime_router,
     config::ImportRouteMode,
@@ -30,6 +31,7 @@ pub fn build_router(state: ProxyState) -> Router {
             .merge(import_runtime_router())
             .merge(bill_runtime_router())
             .merge(auth_token_runtime_router())
+            .merge(backup_ops_runtime_router())
             .merge(budget_runtime_router())
             .merge(matching_recurring_calendar_networth_runtime_router())
             .merge(statistics_runtime_router())

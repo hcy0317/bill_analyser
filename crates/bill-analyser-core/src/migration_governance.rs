@@ -97,6 +97,8 @@ pub enum RouteHandlerId {
         rename = "crates/bill-analyser-http/src/matching_routes.rs::matching_recurring_calendar_networth_runtime"
     )]
     MatchingRecurringCalendarNetworthRuntime,
+    #[serde(rename = "crates/bill-analyser-http/src/backup_routes.rs::backup_ops_runtime")]
+    BackupOpsRuntime,
     #[serde(rename = "crates/bill-analyser-http/src/proxy.rs::ownership_aware_proxy_handler")]
     LegacyPythonProxyPassthrough,
     #[serde(rename = "crates/bill-analyser-core/src/migration_governance.rs::contract_oracle")]
@@ -157,6 +159,9 @@ impl RouteHandlerId {
             }
             Self::MatchingRecurringCalendarNetworthRuntime => {
                 "crates/bill-analyser-http/src/matching_routes.rs::matching_recurring_calendar_networth_runtime"
+            }
+            Self::BackupOpsRuntime => {
+                "crates/bill-analyser-http/src/backup_routes.rs::backup_ops_runtime"
             }
             Self::LegacyPythonProxyPassthrough => {
                 "crates/bill-analyser-http/src/proxy.rs::ownership_aware_proxy_handler"
@@ -1611,8 +1616,24 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         "backup-ops",
         ResponseEnvelopeFamily::FlaskRawPassthrough
     ),
-    python_proxy_route!("GET", "/api/backup/jobs", "backup-ops"),
-    python_proxy_route!("POST", "/api/backup/jobs", "backup-ops"),
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/backup/jobs",
+        domain: "backup-ops",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessData,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust backup ops runtime lists authenticated user backup job schedules from the SQLite backup_jobs table; the Python backup jobs route remains only as sidecar code while this Rust route owns the import_db_runtime path.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/backup/jobs",
+        domain: "backup-ops",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessData,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust backup ops runtime validates and saves authenticated user backup job schedules, writes backup_job_saved audit rows, and keeps backup file operations on the Python sidecar.",
+    },
     python_proxy_route!("POST", "/api/backup/restore/{filename}", "backup-ops"),
     python_proxy_route!("POST", "/api/backup/restore/verify", "backup-ops"),
     EndpointOwnership {
@@ -3478,6 +3499,15 @@ fn route_contract_details(
                 transition_evidence: DB_RUNTIME_EVIDENCE,
             }
         }
+        ("backup-ops", MigrationState::RustOwnedVerified) => RouteContractDetails {
+            handler: RouteHandlerId::BackupOpsRuntime,
+            deletion_blockers: EMPTY_STRINGS,
+            blocked_status: MigrationBlockedStatus::None,
+            unsupported_behavior: "",
+            decision_required: DecisionRequired::None,
+            decision_owner: "none",
+            transition_evidence: DB_RUNTIME_EVIDENCE,
+        },
         _ => RouteContractDetails {
             handler: route_handler_for_domain(route.domain),
             deletion_blockers: policy.deletion_blockers,

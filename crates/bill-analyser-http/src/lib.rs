@@ -6,6 +6,7 @@
 
 pub mod auth;
 pub mod auth_routes;
+pub mod backup_routes;
 pub mod bill_routes;
 pub mod budget_routes;
 pub mod config;
@@ -24,6 +25,9 @@ pub use auth::{
 };
 pub use auth_routes::{
     auth_token_runtime_router, AUTH_PROXIED_ROUTE_PATTERNS, AUTH_TOKEN_ROUTE_PATTERNS,
+};
+pub use backup_routes::{
+    backup_ops_runtime_router, BACKUP_OPS_PROXIED_ROUTE_PATTERNS, BACKUP_OPS_ROUTE_PATTERNS,
 };
 pub use bill_routes::{
     bill_runtime_router, BILL_CRUD_PROXIED_ROUTE_PATTERNS, BILL_CRUD_ROUTE_PATTERNS,

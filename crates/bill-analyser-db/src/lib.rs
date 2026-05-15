@@ -6,6 +6,7 @@
 pub mod app_settings;
 pub mod auth;
 pub mod auth_registration;
+pub mod backup;
 pub mod bills;
 pub mod budgets;
 pub mod connection;
@@ -52,6 +53,10 @@ pub use auth_registration::{
     auth_email_exists, auth_username_exists, create_registered_user_with_defaults,
     RegisterDefaultSeedSummary, RegisterPresetCategory, RegisterPresetSubCategory,
     RegisterUserDraft, RegisterUserResult,
+};
+pub use backup::{
+    create_backup_audit_log_best_effort, create_or_update_backup_job, init_backup_ops_schema,
+    list_backup_jobs, BackupAuditLogDraft, BackupJobDraft, BackupJobRow,
 };
 pub use bills::{
     batch_create_bills, batch_delete_bills, batch_update_bills, bind_bill_to_recurring,

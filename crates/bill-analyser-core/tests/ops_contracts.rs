@@ -244,6 +244,30 @@ fn backup_job_encryption_and_sqlcipher_contracts_match_python_defaults() {
             .error,
         "retention_count must be greater than or equal to 0"
     );
+    assert_eq!(
+        normalize_backup_job_payload(&json!({"job_type": "daily", "retention_days": -1}))
+            .expect_err("negative retention_days")
+            .error,
+        "retention_days must be between 0 and 3650"
+    );
+    assert_eq!(
+        normalize_backup_job_payload(&json!({"job_type": "daily", "retention_count": 1001}))
+            .expect_err("large retention_count")
+            .error,
+        "retention_count must be less than or equal to 1000"
+    );
+    assert_eq!(
+        normalize_backup_job_payload(&json!({"job_type": "daily job"}))
+            .expect_err("bad job_type")
+            .error,
+        "job_type is invalid"
+    );
+    assert_eq!(
+        normalize_backup_job_payload(&json!({"job_type": "daily", "schedule_expr": "bad\ncron"}))
+            .expect_err("bad schedule_expr")
+            .error,
+        "schedule_expr is invalid"
+    );
     for invalid_id in [json!(0), json!(-1), json!("0"), json!("bad"), json!(1.5)] {
         assert_eq!(
             normalize_backup_job_payload(&json!({"job_type": "daily", "id": invalid_id}))

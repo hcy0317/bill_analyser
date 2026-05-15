@@ -1174,7 +1174,7 @@ pub fn schema_inventory() -> SchemaInventory {
             },
             SchemaResponsibility {
                 python_path: "src/bill_analyser/core/database/schema/users_security.py",
-                rust_mapping: "crates/bill-analyser-db/src/schema.rs covers auth/security users/session/cloud schema; crates/bill-analyser-db/src/app_settings.rs covers app_settings/OCR config subset; backup tables remain deferred",
+                rust_mapping: "crates/bill-analyser-db/src/schema.rs covers auth/security users/session/cloud schema; crates/bill-analyser-db/src/app_settings.rs covers app_settings/OCR config subset; crates/bill-analyser-db/src/backup.rs covers audit_logs/backup_records/backup_jobs for ops runtime",
                 status: "foundational",
             },
         ],

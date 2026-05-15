@@ -7,7 +7,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 ## Summary
 
 - Python backend files: 264
-- Rust backend files: 110
+- Rust backend files: 114
 - Migration domains: 22
 - Files marked port: 202
 - Files marked facade: 62
@@ -364,6 +364,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 - crates/bill-analyser-db/src/app_settings.rs
 - crates/bill-analyser-db/src/auth.rs
 - crates/bill-analyser-db/src/auth_registration.rs
+- crates/bill-analyser-db/src/backup.rs
 - crates/bill-analyser-db/src/bills.rs
 - crates/bill-analyser-db/src/bin/bill_taxonomy_bridge.rs
 - crates/bill-analyser-db/src/budgets.rs
@@ -389,6 +390,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 - crates/bill-analyser-db/src/user_scope.rs
 - crates/bill-analyser-db/tests/app_settings.rs
 - crates/bill-analyser-db/tests/auth_two_factor_recovery.rs
+- crates/bill-analyser-db/tests/backup_runtime.rs
 - crates/bill-analyser-db/tests/bills_runtime.rs
 - crates/bill-analyser-db/tests/budgets_runtime.rs
 - crates/bill-analyser-db/tests/import_staging.rs
@@ -399,6 +401,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 - crates/bill-analyser-db/tests/taxonomy_bridge_cli.rs
 - crates/bill-analyser-http/src/auth.rs
 - crates/bill-analyser-http/src/auth_routes.rs
+- crates/bill-analyser-http/src/backup_routes.rs
 - crates/bill-analyser-http/src/bill_routes.rs
 - crates/bill-analyser-http/src/bin/bill_http_server.rs
 - crates/bill-analyser-http/src/budget_routes.rs
@@ -413,6 +416,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 - crates/bill-analyser-http/src/statistics_routes.rs
 - crates/bill-analyser-http/src/taxonomy_routes.rs
 - crates/bill-analyser-http/tests/auth_runtime_contract.rs
+- crates/bill-analyser-http/tests/backup_runtime_contract.rs
 - crates/bill-analyser-http/tests/bills_runtime_contract.rs
 - crates/bill-analyser-http/tests/budget_runtime_contract.rs
 - crates/bill-analyser-http/tests/import_runtime_contract.rs

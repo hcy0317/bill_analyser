@@ -21,7 +21,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert len(expected_python_paths) == 264
     assert inventory.summary["python_backend_files"] == 264
     assert tuple(record.path for record in inventory.python_files) == expected_python_paths
-    assert inventory.summary["rust_backend_files"] == 110
+    assert inventory.summary["rust_backend_files"] == 114
     assert "crates/bill-analyser-core/src/ai_ocr_llm.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/lib.rs" in inventory.rust_files
     assert "crates/bill-analyser-parsers/src/dedicated.rs" in inventory.rust_files
@@ -52,6 +52,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert "crates/bill-analyser-db/src/lib.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/app_settings.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/auth.rs" in inventory.rust_files
+    assert "crates/bill-analyser-db/src/backup.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/bills.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/budgets.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/import_staging.rs" in inventory.rust_files
@@ -65,6 +66,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert "crates/bill-analyser-db/tests/import_staging.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/tests/app_settings.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/tests/auth_two_factor_recovery.rs" in inventory.rust_files
+    assert "crates/bill-analyser-db/tests/backup_runtime.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/tests/bills_runtime.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/tests/budgets_runtime.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/tests/llm_runtime.rs" in inventory.rust_files
@@ -72,6 +74,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert "crates/bill-analyser-db/tests/taxonomy_bridge_cli.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/src/auth.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/src/auth_routes.rs" in inventory.rust_files
+    assert "crates/bill-analyser-http/src/backup_routes.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/src/bill_routes.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/src/budget_routes.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/src/bin/bill_http_server.rs" in inventory.rust_files
@@ -83,6 +86,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert "crates/bill-analyser-http/src/statistics_routes.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/src/taxonomy_routes.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/tests/auth_runtime_contract.rs" in inventory.rust_files
+    assert "crates/bill-analyser-http/tests/backup_runtime_contract.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/tests/bills_runtime_contract.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/tests/budget_runtime_contract.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/tests/import_runtime_contract.rs" in inventory.rust_files
@@ -182,7 +186,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
     assert first_render == second_render
     assert "# Rust Backend Migration Inventory" in first_render
     assert "- Python backend files: 264" in first_render
-    assert "- Rust backend files: 110" in first_render
+    assert "- Rust backend files: 114" in first_render
     assert "- Verified dead files: 0" in first_render
     assert "Route/domain cutover state lives separately in the Rust governance manifest" in first_render
     assert "Governance manifest tool: `cargo run -p bill-analyser-core --bin bill_migration_manifest`" in first_render
