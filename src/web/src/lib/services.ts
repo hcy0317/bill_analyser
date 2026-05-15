@@ -2382,14 +2382,6 @@ export default {
             return buildApiResponse(response, response.data?.data);
         });
     },
-    induceLLMRules: (categoryId: number, sampleCount?: number): ApiResponsePromise<any> => {
-        return axios.post('llm/induce-rules', {
-            category_id: categoryId,
-            sample_count: sampleCount || 10
-        }, { timeout: DEFAULT_LLM_API_TIMEOUT } as any).then(response => {
-            return buildApiResponse(response, response.data?.data);
-        });
-    },
     generateLLMRuleSynthesis: ({
         limit
     }: {

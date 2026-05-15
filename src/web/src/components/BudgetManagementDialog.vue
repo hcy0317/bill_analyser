@@ -361,6 +361,8 @@ interface BudgetStatus {
     };
 }
 
+type BudgetStatusKey = keyof NonNullable<BudgetStatus['summary']>;
+
 // 属性
 const props = defineProps<{
     modelValue: boolean;
@@ -482,12 +484,73 @@ const getUsagePercent = (budget: Budget): number => {
     return Math.round(ratio * 100);
 };
 
+const normalizeEnabled = (value: unknown): boolean => {
+    if (value === false || value === 0 || value === '0') {
+        return false;
+    }
+    return true;
+};
+
+const normalizeExecutionBudget = (item: any): Budget => {
+    const amount = Number(item?.budget_amount ?? item?.amount ?? 0);
+    const used = Number(item?.spent_amount ?? item?.used ?? 0);
+    const usageRatio = amount > 0 ? used / amount : 0;
+    const alertThreshold = Number(item?.alert_threshold ?? 80) / 100;
+    const criticalThreshold = Number(item?.critical_threshold ?? 90) / 100;
+    const status = usageRatio >= 1
+        ? 'exceeded'
+        : usageRatio >= criticalThreshold
+            ? 'critical'
+            : usageRatio >= alertThreshold
+                ? 'warning'
+                : 'normal';
+
+    return {
+        id: item?.id,
+        name: item?.name || '',
+        category: item?.sub_category ? `${item.category || ''}/${item.sub_category}` : (item?.category || ''),
+        period_type: item?.period_type || 'monthly',
+        amount,
+        start_date: item?.start_date || '',
+        end_date: item?.end_date || '',
+        warning_threshold: item?.alert_threshold,
+        critical_threshold: item?.critical_threshold,
+        notes: item?.notes,
+        enabled: normalizeEnabled(item?.enabled),
+        used,
+        remaining: Number(item?.remaining_amount ?? Math.max(0, amount - used)),
+        status,
+        usage_ratio: usageRatio
+    };
+};
+
 const loadBudgetStatus = async (): Promise<void> => {
     try {
-        const response = await axios.get('/api/budgets/status');
+        const response = await axios.get('/api/budgets/execution');
         if (response.data.success) {
-            budgetStatus.value = response.data.data;
-            budgets.value = response.data.data.budgets || [];
+            const executionItems: Budget[] = Array.isArray(response.data.result?.items)
+                ? response.data.result.items.map(normalizeExecutionBudget)
+                : [];
+            const summary = executionItems.reduce<NonNullable<BudgetStatus['summary']>>((counts, budget) => {
+                const status = (budget.status || 'normal') as BudgetStatusKey;
+                if (status === 'warning' || status === 'critical' || status === 'exceeded') {
+                    counts[status] += 1;
+                } else {
+                    counts.normal += 1;
+                }
+                return counts;
+            }, {
+                normal: 0,
+                warning: 0,
+                critical: 0,
+                exceeded: 0
+            });
+
+            budgetStatus.value = {
+                budgets: executionItems,
+                summary
+            };
+            budgets.value = executionItems;
         }
     } catch (error: any) {
         console.error('Failed to load budget status:', error);
