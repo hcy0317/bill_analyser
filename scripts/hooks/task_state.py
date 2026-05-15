@@ -83,8 +83,12 @@ def build_task_title(scopes: Sequence[str], recent_files: Sequence[str], explici
         return "从已批准计划进入执行"
     if {"backend-runtime", "frontend"} <= scope_set:
         return "推进跨端实现并对齐契约"
+    if {"rust-runtime", "frontend"} <= scope_set:
+        return "推进 Rust 运行时与前端契约对齐"
     if "ai-customization" in scope_set:
         return "完善 AI 工作流与定制资产"
+    if "rust-runtime" in scope_set:
+        return "推进 Rust 运行时代码改动"
     if "backend-runtime" in scope_set:
         return "推进后端运行时代码改动"
     if "frontend" in scope_set:

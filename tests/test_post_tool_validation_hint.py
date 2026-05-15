@@ -63,3 +63,23 @@ def test_build_hook_messages_handles_snapshot_write_failures_gracefully(monkeypa
     assert not any("last-session.md" in message for message in messages)
     assert not any("task-state.json" in message for message in messages)
     assert any("Python 文件已编辑" in message for message in messages)
+
+
+def test_build_hook_messages_suggests_cargo_for_rust_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {
+        "cwd": str(hook.REPO_ROOT),
+        "tool_name": "Edit",
+        "tool_input": {
+            "file_path": str(hook.REPO_ROOT / "crates" / "bill-analyser-http" / "src" / "router.rs"),
+            "old_string": "before",
+            "new_string": "after",
+        },
+    }
+
+    monkeypatch.setattr(hook, "write_session_snapshot", lambda **_kwargs: None)
+
+    messages = hook.build_hook_messages(payload)
+
+    assert any("cargo test" in message for message in messages)
+    assert any("cargo llvm-cov" in message for message in messages)
+    assert not any("pytest" in message for message in messages)

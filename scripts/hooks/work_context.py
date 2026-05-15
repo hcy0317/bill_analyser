@@ -20,8 +20,10 @@ AI_CUSTOMIZATION_PREFIXES = (
     "scripts/hooks/",
 )
 BACKEND_PREFIX = "src/bill_analyser/"
+RUST_RUNTIME_PREFIX = "crates/"
 FRONTEND_PREFIX = "src/web/"
 TEST_PREFIX = "tests/"
+RUST_WORKSPACE_FILES = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rust-toolchain")
 
 
 @dataclass(frozen=True)
@@ -113,6 +115,8 @@ def detect_scopes(paths: Sequence[str]) -> tuple[str, ...]:
 
     if any(path.startswith(BACKEND_PREFIX) for path in normalized_paths):
         scopes.append("backend-runtime")
+    if any(path.startswith(RUST_RUNTIME_PREFIX) or path in RUST_WORKSPACE_FILES for path in normalized_paths):
+        scopes.append("rust-runtime")
     if any(path.startswith(FRONTEND_PREFIX) for path in normalized_paths):
         scopes.append("frontend")
     if any(
@@ -139,6 +143,10 @@ def build_verification_steps(paths: Sequence[str]) -> tuple[str, ...]:
     if any(path.startswith(BACKEND_PREFIX) for path in normalized_paths):
         steps.append("运行受影响的 pytest 与 repository-baseline pylint。")
         steps.append("如果触及业务运行时代码，验收前必须全量运行 `./.venv/Scripts/python.exe -m pytest tests/ -v`。")
+
+    if any(path.startswith(RUST_RUNTIME_PREFIX) or path in RUST_WORKSPACE_FILES for path in normalized_paths):
+        steps.append("运行受影响的 `cargo test`，并按风险补 `cargo clippy --workspace --all-targets -- -D warnings`。")
+        steps.append("如果触及 Rust 业务运行时代码，验收前必须运行 `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90`。")
 
     if any(path.startswith(FRONTEND_PREFIX) for path in normalized_paths):
         steps.append("在 `src/web` 下运行 `npm run lint`，必要时补最小构建验证。")
@@ -183,13 +191,15 @@ def build_verification_steps(paths: Sequence[str]) -> tuple[str, ...]:
 def choose_next_step(paths: Sequence[str]) -> str:
     scopes = set(detect_scopes(paths))
 
-    if {"backend-runtime", "frontend"} <= scopes:
+    if ("backend-runtime" in scopes or "rust-runtime" in scopes) and "frontend" in scopes:
         return "先核对前后端 API 契约与 services/store 映射，再分别运行后端与前端验证。"
     if "ai-customization" in scopes:
         return (
             "先运行 agent_stack_health 与相关 hook 测试，"
             "确认 AI 定制层、handoff 工作流与 task-state 持久化链路仍然健康。"
         )
+    if "rust-runtime" in scopes:
+        return "先确认 Rust 接管域与迁移治理状态，再运行受影响 cargo 验证和覆盖率门禁。"
     if "backend-runtime" in scopes:
         return "先补或更新回归测试，再运行受影响 pytest / pylint；验收前再跑全量 pytest。"
     if "frontend" in scopes:

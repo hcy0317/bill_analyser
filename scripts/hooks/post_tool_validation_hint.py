@@ -12,8 +12,10 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.hooks.session_snapshot import write_session_snapshot
 
 PYTHON_RUNTIME_PREFIX = "src/bill_analyser/"
+RUST_RUNTIME_PREFIX = "crates/"
 API_ROUTE_PREFIX = "src/bill_analyser/api/routes/"
 SERVICES_TS_PATH = "src/web/src/lib/services.ts"
+RUST_WORKSPACE_FILES = {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rust-toolchain"}
 PYTHON_EDIT_TOOL_NAMES = {"edit", "write", "create", "apply_patch", "create_file"}
 PATH_KEYS = ("file_path", "path", "filePath")
 TASK_STATE_CONTRACT_PATH = ".git/ai/task-state.json"
@@ -92,6 +94,16 @@ def build_messages(relative_path: str) -> list[str]:
         messages.append(
             "[hook] 检测到业务运行时代码变更：最终验收前必须跑全量 "
             "`./.venv/Scripts/python.exe -m pytest tests/ -v`。"
+        )
+
+    if relative_path.startswith(RUST_RUNTIME_PREFIX) or relative_path in RUST_WORKSPACE_FILES:
+        messages.append(
+            "[hook] 检测到 Rust 运行时/工作区变更：建议运行受影响 `cargo test`，"
+            "并按风险补 `cargo clippy --workspace --all-targets -- -D warnings`。"
+        )
+        messages.append(
+            "[hook] 如果触及 Rust 业务运行时代码，最终验收前必须运行 "
+            "`cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90`。"
         )
 
     if relative_path.startswith(API_ROUTE_PREFIX) or relative_path == "src/bill_analyser/api/app.py":

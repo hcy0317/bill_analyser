@@ -97,6 +97,7 @@ def test_build_task_title_prefers_handoff_and_start_work_specific_assets() -> No
         task_state.build_task_title(("ai-customization",), (".github/prompts/start-work.prompt.md",))
         == "从已批准计划进入执行"
     )
+    assert task_state.build_task_title(("rust-runtime",), ("crates/bill-analyser-http/src/router.rs",)) == "推进 Rust 运行时代码改动"
 
 
 def test_build_task_state_payload_preserves_absolute_paths_outside_repo() -> None:
