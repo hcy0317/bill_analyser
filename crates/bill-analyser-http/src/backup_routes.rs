@@ -36,6 +36,7 @@ use serde_json::{json, Map, Value};
 use sha2::Digest;
 use tempfile::{Builder as TempFileBuilder, TempDir};
 use tokio_util::io::ReaderStream;
+use url::Url;
 use walkdir::WalkDir;
 use zip::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
@@ -618,6 +619,7 @@ fn finish_sync_backup_response(
     let filename = prepared.backup_info.filename.clone();
     match upload_result {
         Ok(result) => {
+            let safe_config = audit_safe_sync_config(&prepared.contract.safe_config);
             update_backup_record_by_filename(
                 auth_runtime.runtime.connection(),
                 &filename,
@@ -627,7 +629,7 @@ fn finish_sync_backup_response(
                     "sync_object_key": result.object_key.clone(),
                     "sync_status": "success",
                     "sync_status_code": result.status_code,
-                    "sync_safe_config": prepared.contract.safe_config.clone(),
+                    "sync_safe_config": safe_config.clone(),
                 }),
             )
             .map_err(|_| Box::new(db_error_response()))?;
@@ -642,7 +644,7 @@ fn finish_sync_backup_response(
                     "provider": result.provider.clone(),
                     "object_key": result.object_key.clone(),
                     "status_code": result.status_code,
-                    "safe_config": prepared.contract.safe_config.clone(),
+                    "safe_config": safe_config.clone(),
                 }),
                 1,
                 "success",
@@ -657,13 +659,14 @@ fn finish_sync_backup_response(
                         "provider": result.provider,
                         "object_key": result.object_key,
                         "status_code": result.status_code,
-                        "safe_config": prepared.contract.safe_config,
+                        "safe_config": safe_config,
                         "backup": prepared.backup_info,
                     }
                 }),
             ))
         }
         Err(error) => {
+            let safe_config = audit_safe_sync_config(&prepared.contract.safe_config);
             update_backup_record_by_filename(
                 auth_runtime.runtime.connection(),
                 &filename,
@@ -673,7 +676,7 @@ fn finish_sync_backup_response(
                     "sync_object_key": prepared.contract.object_key.clone(),
                     "sync_status": "failed",
                     "sync_error": error.message.clone(),
-                    "sync_safe_config": prepared.contract.safe_config.clone(),
+                    "sync_safe_config": safe_config.clone(),
                 }),
             )
             .map_err(|_| Box::new(db_error_response()))?;
@@ -687,7 +690,7 @@ fn finish_sync_backup_response(
                     "provider": prepared.contract.provider.clone(),
                     "object_key": prepared.contract.object_key.clone(),
                     "status_code": error.response_status,
-                    "safe_config": prepared.contract.safe_config.clone(),
+                    "safe_config": safe_config.clone(),
                 }),
                 0,
                 "failed",
@@ -702,7 +705,7 @@ fn finish_sync_backup_response(
                         "filename": prepared.backup_info.filename,
                         "provider": prepared.contract.provider,
                         "object_key": prepared.contract.object_key,
-                        "safe_config": prepared.contract.safe_config,
+                        "safe_config": safe_config,
                         "backup": prepared.backup_info,
                     }
                 }),
@@ -2304,7 +2307,7 @@ fn backup_sync_config_payload(payload: &Value) -> Value {
 fn sync_config_validation_audit_details(config: &Value) -> Value {
     json!({
         "provider": audit_safe_json_field(config, "provider"),
-        "endpoint": audit_safe_json_field(config, "endpoint"),
+        "endpoint": audit_safe_endpoint_json_field(config, "endpoint"),
         "bucket": audit_safe_json_field(config, "bucket"),
         "prefix": audit_safe_json_field(config, "prefix"),
     })
@@ -2314,11 +2317,11 @@ fn sync_config_audit_details(contract: &SyncConfigContract) -> Value {
     json!({
         "provider": contract.provider.clone(),
         "supported": contract.supported,
-        "endpoint": contract.endpoint.clone(),
+        "endpoint": audit_safe_endpoint_text(&contract.endpoint),
         "bucket": contract.bucket.clone(),
         "prefix": contract.prefix.clone(),
         "object_key": contract.object_key.clone(),
-        "safe_config": contract.safe_config.clone(),
+        "safe_config": audit_safe_sync_config(&contract.safe_config),
     })
 }
 
@@ -2429,6 +2432,63 @@ fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
 
 fn audit_safe_json_field(payload: &Value, key: &str) -> String {
     payload.get(key).map(audit_safe_value).unwrap_or_default()
+}
+
+fn audit_safe_endpoint_json_field(payload: &Value, key: &str) -> String {
+    payload
+        .get(key)
+        .map(audit_safe_endpoint_value)
+        .unwrap_or_default()
+}
+
+fn audit_safe_endpoint_value(value: &Value) -> String {
+    value
+        .as_str()
+        .map(audit_safe_endpoint_text)
+        .unwrap_or_else(|| "<invalid-url>".to_string())
+}
+
+fn audit_safe_endpoint_text(raw: &str) -> String {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return String::new();
+    }
+    let Ok(mut url) = Url::parse(raw) else {
+        return "<invalid-url>".to_string();
+    };
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.set_query(None);
+    url.set_fragment(None);
+    audit_safe_value(&Value::String(
+        url.as_str().trim_end_matches('/').to_string(),
+    ))
+}
+
+fn audit_safe_sync_config(config: &Value) -> Value {
+    let mut config = config.clone();
+    audit_sanitize_endpoint_keys(&mut config);
+    config
+}
+
+fn audit_sanitize_endpoint_keys(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            for (key, value) in map.iter_mut() {
+                if key.eq_ignore_ascii_case("endpoint") {
+                    *value = Value::String(audit_safe_endpoint_value(value));
+                } else {
+                    audit_sanitize_endpoint_keys(value);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                audit_sanitize_endpoint_keys(item);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
 }
 
 fn audit_safe_value(value: &Value) -> String {

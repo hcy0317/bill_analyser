@@ -1,4 +1,4 @@
-use std::{path::Path, time::Duration};
+use std::{env, net::IpAddr, path::Path, time::Duration};
 
 use base64::{engine::general_purpose, Engine as _};
 use bill_analyser_core::SyncConfigContract;
@@ -13,6 +13,7 @@ use url::Url;
 
 const CONTENT_TYPE: &str = "application/octet-stream";
 const AZURE_BLOB_VERSION: &str = "2023-11-03";
+const BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV: &str = "BILL_ANALYSER_BACKUP_SYNC_ENDPOINT_ALLOWLIST";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CloudBackupUploadResult {
@@ -67,7 +68,7 @@ pub fn validate_sync_upload_config(
             contract.provider
         )));
     }
-    let endpoint = endpoint_url(config)?;
+    let endpoint = endpoint_url(config, &contract.provider)?;
     match contract.provider.as_str() {
         "webdav" => {
             let _ = endpoint;
@@ -104,6 +105,7 @@ pub async fn upload_backup_to_cloud(
     validate_sync_upload_config(config, contract)?;
     let client = Client::builder()
         .timeout(timeout)
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|error| CloudBackupUploadError::provider(error.to_string()))?;
     let response = match contract.provider.as_str() {
@@ -139,7 +141,7 @@ async fn upload_webdav(
     contract: &SyncConfigContract,
     file_path: &Path,
 ) -> Result<reqwest::Response, CloudBackupUploadError> {
-    let endpoint = endpoint_url(config)?;
+    let endpoint = endpoint_url(config, &contract.provider)?;
     let access_key = string_config(config, "access_key");
     let secret_key = string_config(config, "secret_key");
     let prefix_segments = contract
@@ -193,7 +195,7 @@ async fn upload_oss(
     let bucket = require_non_empty(config, "bucket")?;
     let access_key = require_non_empty(config, "access_key")?;
     let secret_key = require_non_empty(config, "secret_key")?;
-    let url = append_url_segments(endpoint_url(config)?, &[bucket])?;
+    let url = append_url_segments(endpoint_url(config, &contract.provider)?, &[bucket])?;
     let url = append_url_segments_from_key(url, &contract.object_key)?;
     let date = Utc::now().format("%a, %d %b %Y %H:%M:%S GMT").to_string();
     let canonical_resource = format!("/{bucket}/{}", contract.object_key);
@@ -226,7 +228,7 @@ async fn upload_s3(
     let region = non_empty_config(config, "region").unwrap_or_else(|| {
         region_from_s3_endpoint(config).unwrap_or_else(|| "us-east-1".to_string())
     });
-    let url = append_url_segments(endpoint_url(config)?, &[bucket])?;
+    let url = append_url_segments(endpoint_url(config, &contract.provider)?, &[bucket])?;
     let url = append_url_segments_from_key(url, &contract.object_key)?;
     let host = host_header_value(&url)?;
     let payload_hash = sha256_file_hex(file_path).await?;
@@ -271,7 +273,11 @@ async fn upload_cos(
     let bucket = require_non_empty(config, "bucket")?;
     let access_key = require_non_empty(config, "access_key")?;
     let secret_key = require_non_empty(config, "secret_key")?;
-    let url = cos_upload_url(endpoint_url(config)?, bucket, &contract.object_key)?;
+    let url = cos_upload_url(
+        endpoint_url(config, &contract.provider)?,
+        bucket,
+        &contract.object_key,
+    )?;
     let host = host_header_value(&url)?;
     let now = Utc::now().timestamp();
     let sign_time = format!("{now};{}", now + 600);
@@ -309,7 +315,7 @@ async fn upload_azure(
     let decoded_key = general_purpose::STANDARD
         .decode(account_key)
         .map_err(|_| CloudBackupUploadError::config("azure secret_key must be base64"))?;
-    let url = append_url_segments(endpoint_url(config)?, &[container])?;
+    let url = append_url_segments(endpoint_url(config, &contract.provider)?, &[container])?;
     let url = append_url_segments_from_key(url, &contract.object_key)?;
     let stat = tokio::fs::metadata(file_path)
         .await
@@ -368,7 +374,7 @@ async fn sha256_file_hex(file_path: &Path) -> Result<String, CloudBackupUploadEr
     Ok(hex_lower(&hasher.finalize()))
 }
 
-fn endpoint_url(config: &Value) -> Result<Url, CloudBackupUploadError> {
+fn endpoint_url(config: &Value, provider: &str) -> Result<Url, CloudBackupUploadError> {
     let endpoint = require_non_empty(config, "endpoint")?;
     let url = Url::parse(endpoint)
         .map_err(|_| CloudBackupUploadError::config("endpoint must be a valid URL"))?;
@@ -386,7 +392,38 @@ fn endpoint_url(config: &Value) -> Result<Url, CloudBackupUploadError> {
             "endpoint must not include credentials, query, or fragment",
         ));
     }
-    Ok(url)
+    let Some(host) = url.host_str() else {
+        return Err(CloudBackupUploadError::config("endpoint host is required"));
+    };
+    if backup_sync_endpoint_host_is_never_allowed(host) {
+        return Err(CloudBackupUploadError::config(
+            "backup sync endpoint host is not allowed",
+        ));
+    }
+    if backup_sync_endpoint_is_allowlisted(&url) {
+        if url.scheme() == "https" || backup_sync_endpoint_is_self_hosted_plain_http(&url) {
+            return Ok(url);
+        }
+        return Err(CloudBackupUploadError::config(
+            "backup sync endpoint must use https unless allowlisting a local or private endpoint",
+        ));
+    }
+    if backup_sync_endpoint_host_is_restricted(host) {
+        return Err(CloudBackupUploadError::config(
+            "backup sync endpoint host is not allowed",
+        ));
+    }
+    if url.scheme() != "https" {
+        return Err(CloudBackupUploadError::config(
+            "backup sync endpoint must use https",
+        ));
+    }
+    if backup_sync_endpoint_matches_provider(&url, provider) {
+        return Ok(url);
+    }
+    Err(CloudBackupUploadError::config(format!(
+        "backup sync endpoint is not allowed; configure {BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV}"
+    )))
 }
 
 fn append_url_segments(mut url: Url, segments: &[&str]) -> Result<Url, CloudBackupUploadError> {
@@ -446,6 +483,99 @@ fn cos_upload_url(
 
 fn is_loopback_or_local_test_host(host: &str) -> bool {
     matches!(host, "localhost" | "127.0.0.1" | "::1") || host.ends_with(".localhost")
+}
+
+fn backup_sync_endpoint_matches_provider(url: &Url, provider: &str) -> bool {
+    let Some(host) = url.host_str().map(str::to_ascii_lowercase) else {
+        return false;
+    };
+    match provider {
+        "oss" => host.ends_with(".aliyuncs.com") || host == "aliyuncs.com",
+        "s3" => host.ends_with(".amazonaws.com") || host == "amazonaws.com",
+        "cos" => host.ends_with(".myqcloud.com") || host == "myqcloud.com",
+        "azure" => {
+            host.ends_with(".blob.core.windows.net")
+                || host == "blob.core.windows.net"
+                || host.ends_with(".blob.core.chinacloudapi.cn")
+                || host == "blob.core.chinacloudapi.cn"
+        }
+        "webdav" => false,
+        _ => false,
+    }
+}
+
+fn backup_sync_endpoint_is_allowlisted(url: &Url) -> bool {
+    let origin = backup_sync_endpoint_origin(url);
+    let full = url.as_str().trim_end_matches('/').to_ascii_lowercase();
+    env::var(BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV)
+        .unwrap_or_default()
+        .split([',', ';'])
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| entry.trim_end_matches('/').to_ascii_lowercase())
+        .any(|entry| entry == full || entry == origin)
+}
+
+fn backup_sync_endpoint_origin(url: &Url) -> String {
+    let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
+    match url.port() {
+        Some(port) => format!("{}://{}:{port}", url.scheme(), host),
+        None => format!("{}://{}", url.scheme(), host),
+    }
+}
+
+fn backup_sync_endpoint_is_self_hosted_plain_http(url: &Url) -> bool {
+    if url.scheme() != "http" {
+        return false;
+    }
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    if host.eq_ignore_ascii_case("localhost") || host.ends_with(".localhost") {
+        return true;
+    }
+    let Ok(address) = host.parse::<IpAddr>() else {
+        return false;
+    };
+    match address {
+        IpAddr::V4(address) => address.is_loopback() || address.is_private(),
+        IpAddr::V6(address) => address.is_loopback() || address.is_unique_local(),
+    }
+}
+
+fn backup_sync_endpoint_host_is_restricted(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") || host.ends_with(".localhost") {
+        return true;
+    }
+    let Ok(address) = host.parse::<IpAddr>() else {
+        return false;
+    };
+    if address.is_unspecified() || address.is_loopback() || address.is_multicast() {
+        return true;
+    }
+    match address {
+        IpAddr::V4(address) => address.is_private() || address.is_link_local(),
+        IpAddr::V6(address) => address.is_unique_local() || address.is_unicast_link_local(),
+    }
+}
+
+fn backup_sync_endpoint_host_is_never_allowed(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("metadata.google.internal") {
+        return true;
+    }
+    let Ok(address) = host.parse::<IpAddr>() else {
+        return false;
+    };
+    matches!(
+        address,
+        IpAddr::V4(address)
+            if address.octets() == [169, 254, 169, 254]
+                || address.octets() == [100, 100, 100, 200]
+                || address.is_link_local()
+    ) || matches!(
+        address,
+        IpAddr::V6(address) if address.is_unicast_link_local()
+    )
 }
 
 fn host_header_value(url: &Url) -> Result<String, CloudBackupUploadError> {
@@ -509,7 +639,7 @@ fn apply_optional_basic_auth(
 }
 
 fn region_from_s3_endpoint(config: &Value) -> Option<String> {
-    let endpoint = endpoint_url(config).ok()?;
+    let endpoint = endpoint_url(config, "s3").ok()?;
     endpoint
         .host_str()?
         .split('.')

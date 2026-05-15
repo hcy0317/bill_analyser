@@ -1,6 +1,8 @@
 use std::{
     collections::BTreeMap,
+    env,
     error::Error,
+    ffi::OsString,
     fs::{self, File},
     io::Write,
     path::Path,
@@ -11,7 +13,8 @@ use std::{
 use axum::{
     body::{to_bytes, Body},
     extract::State,
-    http::{HeaderMap, Method, Request, StatusCode, Uri},
+    http::{header, HeaderMap, HeaderValue, Method, Request, StatusCode, Uri},
+    response::IntoResponse,
     routing::any,
     Router,
 };
@@ -32,6 +35,32 @@ use zip::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
 const TEST_TRUST_SECRET: &str = "backup-route-secret";
 const TEST_AUTH_SECRET: &str = "backup-auth-secret";
 const TEST_USER_ID: &str = "42";
+const BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV: &str = "BILL_ANALYSER_BACKUP_SYNC_ENDPOINT_ALLOWLIST";
+static BACKUP_SYNC_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+struct EnvVarRestore {
+    name: &'static str,
+    value: Option<OsString>,
+}
+
+impl EnvVarRestore {
+    fn capture(name: &'static str) -> Self {
+        Self {
+            name,
+            value: env::var_os(name),
+        }
+    }
+}
+
+impl Drop for EnvVarRestore {
+    fn drop(&mut self) {
+        if let Some(value) = &self.value {
+            env::set_var(self.name, value);
+        } else {
+            env::remove_var(self.name);
+        }
+    }
+}
 
 #[tokio::test]
 async fn backup_jobs_runtime_serves_list_validation_create_and_update() -> Result<(), Box<dyn Error>>
@@ -435,6 +464,9 @@ async fn backup_file_runtime_creates_lists_downloads_deletes_and_cleans_up(
 #[tokio::test]
 async fn backup_sync_runtime_rejects_invalid_config_before_creating_backup(
 ) -> Result<(), Box<dyn Error>> {
+    let _env_lock = BACKUP_SYNC_ENV_LOCK.lock().await;
+    let _allowlist_restore = EnvVarRestore::capture(BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV);
+    env::remove_var(BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV);
     let fixture = RuntimeFixture::new()?;
     fs::write(fixture.data_dir.join("records.json"), b"records")?;
     let app = runtime_router(&fixture);
@@ -460,9 +492,19 @@ async fn backup_sync_runtime_rejects_invalid_config_before_creating_backup(
         }),
         json!({"provider": "webdav", "endpoint": "ftp://example.test"}),
         json!({"provider": "webdav", "endpoint": "http://user:pass@127.0.0.1/"}),
+        json!({"provider": "webdav", "endpoint": "http://169.254.169.254/"}),
+        json!({"provider": "webdav", "endpoint": "http://metadata.google.internal/"}),
+        json!({"provider": "webdav", "endpoint": "http://backup.example.test/"}),
+        json!({"provider": "webdav", "endpoint": "https://backup.example.test/"}),
+        json!({
+            "provider": "s3",
+            "endpoint": "https://s3.amazonaws.com",
+            "access_key": "ak",
+            "secret_key": "sk",
+        }),
         json!({
             "provider": "azure",
-            "endpoint": "http://127.0.0.1:9",
+            "endpoint": "https://account.blob.core.windows.net",
             "bucket": "container",
             "access_key": "account",
             "secret_key": "not-base64",
@@ -483,10 +525,93 @@ async fn backup_sync_runtime_rejects_invalid_config_before_creating_backup(
         assert_eq!(body["success"], false);
     }
 
+    let secret_endpoint = "https://user:pass@s3.amazonaws.com/path?token=secret#frag";
+    let contract_validation_failure = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/backup/sync",
+            json!({
+                "provider": "s3",
+                "endpoint": secret_endpoint,
+                "bucket": "bucket",
+                "access_key": "ak",
+                "secret_key": "sk",
+                "prefix": "../escape",
+            }),
+        ))
+        .await?;
+    assert_eq!(
+        contract_validation_failure.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_secret_endpoint_not_persisted(
+        &latest_audit(&fixture.db_path, "backup_cloud_synced", "failed")?.details,
+    );
+
+    let upload_validation_failure = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/backup/sync",
+            json!({
+                "provider": "s3",
+                "endpoint": secret_endpoint,
+                "bucket": "bucket",
+                "access_key": "ak",
+                "secret_key": "sk",
+            }),
+        ))
+        .await?;
+    assert_eq!(upload_validation_failure.status(), StatusCode::BAD_REQUEST);
+    assert_secret_endpoint_not_persisted(
+        &latest_audit(&fixture.db_path, "backup_cloud_synced", "failed")?.details,
+    );
+
+    let object_endpoint_failure = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/backup/sync",
+            json!({
+                "provider": "webdav",
+                "endpoint": {
+                    "url": "https://user:pass@nested.example/path?token=secret#frag"
+                },
+            }),
+        ))
+        .await?;
+    assert_eq!(object_endpoint_failure.status(), StatusCode::BAD_REQUEST);
+    let object_endpoint_audit =
+        latest_audit(&fixture.db_path, "backup_cloud_synced", "failed")?.details;
+    assert_no_secret_url_parts(&object_endpoint_audit);
+    assert_eq!(object_endpoint_audit["endpoint"], "");
+    assert_eq!(
+        object_endpoint_audit["safe_config"]["endpoint"],
+        "<invalid-url>"
+    );
+
+    env::set_var(
+        BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV,
+        "http://backup.example.test",
+    );
+    let allowlisted_public_http = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/backup/sync",
+            json!({"provider": "webdav", "endpoint": "http://backup.example.test/"}),
+        ))
+        .await?;
+    assert_eq!(allowlisted_public_http.status(), StatusCode::BAD_REQUEST);
+    let allowlisted_public_http_body = read_json(allowlisted_public_http).await;
+    assert_eq!(allowlisted_public_http_body["success"], false);
+    env::remove_var(BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV);
+
     assert!(fixture.backup_dir.read_dir()?.next().is_none());
     assert_eq!(
         audit_count(&fixture.db_path, "backup_cloud_synced", "failed")?,
-        7
+        16
     );
 
     Ok(())
@@ -495,9 +620,12 @@ async fn backup_sync_runtime_rejects_invalid_config_before_creating_backup(
 #[tokio::test]
 async fn backup_sync_runtime_records_provider_failure_with_safe_payload(
 ) -> Result<(), Box<dyn Error>> {
+    let _env_lock = BACKUP_SYNC_ENV_LOCK.lock().await;
+    let _allowlist_restore = EnvVarRestore::capture(BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV);
     let fixture = RuntimeFixture::new()?;
     fs::write(fixture.data_dir.join("records.json"), b"records")?;
     let server = FakeCloudServer::start_with_status(StatusCode::INTERNAL_SERVER_ERROR).await?;
+    env::set_var(BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV, server.endpoint());
     let app = runtime_router(&fixture);
 
     let response = app
@@ -511,6 +639,9 @@ async fn backup_sync_runtime_records_provider_failure_with_safe_payload(
                 "access_key": "ak",
                 "secret_key": "sk",
                 "prefix": "prefix",
+                "nested": {
+                    "endpoint": "https://user:pass@nested.example/path?token=secret#frag"
+                },
             }),
         ))
         .await?;
@@ -523,6 +654,23 @@ async fn backup_sync_runtime_records_provider_failure_with_safe_payload(
         .as_str()
         .unwrap_or_default()
         .contains("s3 upload failed with status 500"));
+    assert_no_secret_url_parts(&body["data"]["safe_config"]);
+    assert_eq!(
+        body["data"]["safe_config"]["nested"]["endpoint"],
+        "https://nested.example/path"
+    );
+    let failed_audit = latest_audit(&fixture.db_path, "backup_cloud_synced", "failed")?.details;
+    assert_no_secret_url_parts(&failed_audit);
+    assert_eq!(
+        failed_audit["safe_config"]["nested"]["endpoint"],
+        "https://nested.example/path"
+    );
+    let failed_metadata = latest_backup_record_metadata(&fixture.db_path)?;
+    assert_no_secret_url_parts(&failed_metadata);
+    assert_eq!(
+        failed_metadata["sync_safe_config"]["nested"]["endpoint"],
+        "https://nested.example/path"
+    );
     assert_eq!(
         audit_count(&fixture.db_path, "backup_created", "success")?,
         1
@@ -540,7 +688,46 @@ async fn backup_sync_runtime_records_provider_failure_with_safe_payload(
 }
 
 #[tokio::test]
+async fn backup_sync_runtime_does_not_follow_cloud_redirects() -> Result<(), Box<dyn Error>> {
+    let _env_lock = BACKUP_SYNC_ENV_LOCK.lock().await;
+    let _allowlist_restore = EnvVarRestore::capture(BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV);
+    let fixture = RuntimeFixture::new()?;
+    fs::write(fixture.data_dir.join("records.json"), b"records")?;
+    let server = FakeCloudServer::start_redirect("http://169.254.169.254/latest/meta-data").await?;
+    env::set_var(BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV, server.endpoint());
+    let app = runtime_router(&fixture);
+
+    let response = app
+        .oneshot(json_request(
+            Method::POST,
+            "/api/backup/sync",
+            json!({
+                "provider": "s3",
+                "endpoint": server.endpoint(),
+                "bucket": "bucket",
+                "access_key": "ak",
+                "secret_key": "sk",
+            }),
+        ))
+        .await?;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let body = read_json(response).await;
+    assert!(body["error"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("s3 upload failed with status 307"));
+    let requests = server.requests();
+    assert_eq!(requests.len(), 1, "redirect target must not be followed");
+    assert_eq!(requests[0].method, "PUT");
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn backup_sync_runtime_reports_payload_and_prepare_errors() -> Result<(), Box<dyn Error>> {
+    let _env_lock = BACKUP_SYNC_ENV_LOCK.lock().await;
+    let _allowlist_restore = EnvVarRestore::capture(BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV);
+    env::remove_var(BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV);
     let fixture = RuntimeFixture::new()?;
     let app = runtime_router(&fixture);
 
@@ -557,6 +744,7 @@ async fn backup_sync_runtime_reports_payload_and_prepare_errors() -> Result<(), 
     fs::remove_dir_all(&source_error_fixture.data_dir)?;
     fs::write(&source_error_fixture.data_dir, b"not a directory")?;
     let source_error_app = runtime_router(&source_error_fixture);
+    env::set_var(BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV, "http://127.0.0.1:9");
     let source_error = source_error_app
         .oneshot(json_request(
             Method::POST,
@@ -584,14 +772,44 @@ async fn backup_sync_runtime_reports_payload_and_prepare_errors() -> Result<(), 
         1
     );
 
+    let unchanged_fixture = RuntimeFixture::new()?;
+    fs::remove_dir_all(&unchanged_fixture.data_dir)?;
+    let unchanged_app = runtime_router(&unchanged_fixture);
+    env::set_var(
+        BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV,
+        "https://backup.example.test",
+    );
+    let unchanged_response = unchanged_app
+        .oneshot(json_request(
+            Method::POST,
+            "/api/backup/sync",
+            json!({
+                "provider": "webdav",
+                "endpoint": "https://backup.example.test",
+                "prefix": "prepare/empty",
+            }),
+        ))
+        .await?;
+    assert_eq!(unchanged_response.status(), StatusCode::BAD_REQUEST);
+    let unchanged_body = read_json(unchanged_response).await;
+    assert_eq!(unchanged_body["success"], false);
+    assert_eq!(unchanged_body["error"], "数据未变化，无需备份");
+    assert_eq!(
+        audit_count(&unchanged_fixture.db_path, "backup_cloud_synced", "failed")?,
+        1
+    );
+
     Ok(())
 }
 
 #[tokio::test]
 async fn backup_sync_runtime_uploads_to_webdav_and_redacts_secrets() -> Result<(), Box<dyn Error>> {
+    let _env_lock = BACKUP_SYNC_ENV_LOCK.lock().await;
+    let _allowlist_restore = EnvVarRestore::capture(BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV);
     let fixture = RuntimeFixture::new()?;
     fs::write(fixture.data_dir.join("records.json"), b"records")?;
     let server = FakeCloudServer::start().await?;
+    env::set_var(BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV, server.endpoint());
     let app = runtime_router(&fixture);
 
     let response = app
@@ -605,6 +823,9 @@ async fn backup_sync_runtime_uploads_to_webdav_and_redacts_secrets() -> Result<(
                     "access_key": "alice",
                     "secret_key": "secret",
                     "prefix": "remote/path",
+                    "nested": {
+                        "endpoint": "https://user:pass@nested.example/path?token=secret#frag"
+                    },
                 },
                 "step_up_token": "trusted-header-auth-does-not-use-this-field",
             }),
@@ -617,6 +838,11 @@ async fn backup_sync_runtime_uploads_to_webdav_and_redacts_secrets() -> Result<(
     assert_eq!(body["data"]["provider"], "webdav");
     assert_eq!(body["data"]["safe_config"]["access_key"], "********");
     assert_eq!(body["data"]["safe_config"]["secret_key"], "********");
+    assert_no_secret_url_parts(&body["data"]["safe_config"]);
+    assert_eq!(
+        body["data"]["safe_config"]["nested"]["endpoint"],
+        "https://nested.example/path"
+    );
     assert!(body["data"]["object_key"]
         .as_str()
         .unwrap_or_default()
@@ -648,6 +874,18 @@ async fn backup_sync_runtime_uploads_to_webdav_and_redacts_secrets() -> Result<(
         audit_count(&fixture.db_path, "backup_cloud_synced", "success")?,
         1
     );
+    let success_audit = latest_audit(&fixture.db_path, "backup_cloud_synced", "success")?.details;
+    assert_no_secret_url_parts(&success_audit);
+    assert_eq!(
+        success_audit["safe_config"]["nested"]["endpoint"],
+        "https://nested.example/path"
+    );
+    let success_metadata = latest_backup_record_metadata(&fixture.db_path)?;
+    assert_no_secret_url_parts(&success_metadata);
+    assert_eq!(
+        success_metadata["sync_safe_config"]["nested"]["endpoint"],
+        "https://nested.example/path"
+    );
 
     Ok(())
 }
@@ -655,6 +893,8 @@ async fn backup_sync_runtime_uploads_to_webdav_and_redacts_secrets() -> Result<(
 #[tokio::test]
 async fn backup_sync_runtime_signs_object_storage_provider_requests() -> Result<(), Box<dyn Error>>
 {
+    let _env_lock = BACKUP_SYNC_ENV_LOCK.lock().await;
+    let _allowlist_restore = EnvVarRestore::capture(BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV);
     for provider in ["oss", "s3", "cos", "azure"] {
         let fixture = RuntimeFixture::new()?;
         fs::write(
@@ -662,6 +902,7 @@ async fn backup_sync_runtime_signs_object_storage_provider_requests() -> Result<
             format!("{provider}-records"),
         )?;
         let server = FakeCloudServer::start().await?;
+        env::set_var(BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV, server.endpoint());
         let app = runtime_router(&fixture);
         let secret_key = if provider == "azure" {
             general_purpose::STANDARD.encode("azure-secret")
@@ -712,19 +953,19 @@ async fn backup_sync_runtime_signs_object_storage_provider_requests() -> Result<
             .map(String::as_str)
             .unwrap_or_default();
         match provider {
-            "oss" => assert!(authorization.starts_with("OSS ak:"), "{authorization}"),
-            "s3" => assert!(
-                authorization.starts_with("AWS4-HMAC-SHA256 Credential=ak/"),
-                "{authorization}"
+            "oss" => assert_eq!(
+                authorization,
+                expected_oss_authorization(put, "ak", "sk", "bucket")
             ),
-            "cos" => assert!(
-                authorization.starts_with("q-sign-algorithm=sha1&q-ak=ak"),
-                "{authorization}"
+            "s3" => assert_eq!(
+                authorization,
+                expected_s3_authorization(put, "ak", "sk", "ap-shanghai")
             ),
+            "cos" => assert!(cos_signature_is_valid(put, "ak", "sk"), "{authorization}"),
             "azure" => {
-                assert!(
-                    authorization.starts_with("SharedKey account:"),
-                    "{authorization}"
+                assert_eq!(
+                    authorization,
+                    expected_azure_authorization(put, "account", "azure-secret", "container")
                 );
                 assert_eq!(
                     put.headers.get("x-ms-blob-type").map(String::as_str),
@@ -1229,6 +1470,7 @@ struct RecordedCloudRequest {
     method: String,
     path: String,
     headers: BTreeMap<String, String>,
+    body: Vec<u8>,
     body_len: usize,
 }
 
@@ -1238,12 +1480,27 @@ impl FakeCloudServer {
     }
 
     async fn start_with_status(status: StatusCode) -> Result<Self, Box<dyn Error>> {
+        Self::start_with_status_and_location(status, None).await
+    }
+
+    async fn start_redirect(location: &str) -> Result<Self, Box<dyn Error>> {
+        Self::start_with_status_and_location(StatusCode::TEMPORARY_REDIRECT, Some(location)).await
+    }
+
+    async fn start_with_status_and_location(
+        status: StatusCode,
+        location: Option<&str>,
+    ) -> Result<Self, Box<dyn Error>> {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let endpoint = format!("http://{}", listener.local_addr()?);
         let app = Router::new()
             .fallback(any(record_cloud_request))
-            .with_state((requests.clone(), status));
+            .with_state(FakeCloudState {
+                requests: requests.clone(),
+                status,
+                location: location.map(str::to_string),
+            });
         tokio::spawn(async move {
             axum::serve(listener, app).await.expect("fake cloud server");
         });
@@ -1259,13 +1516,20 @@ impl FakeCloudServer {
     }
 }
 
+#[derive(Clone)]
+struct FakeCloudState {
+    requests: Arc<Mutex<Vec<RecordedCloudRequest>>>,
+    status: StatusCode,
+    location: Option<String>,
+}
+
 async fn record_cloud_request(
-    State((requests, status)): State<(Arc<Mutex<Vec<RecordedCloudRequest>>>, StatusCode)>,
+    State(state): State<FakeCloudState>,
     method: Method,
     uri: Uri,
     headers: HeaderMap,
     body: Body,
-) -> StatusCode {
+) -> axum::response::Response {
     let body = to_bytes(body, 1024 * 1024).await.expect("cloud body");
     let headers = headers
         .iter()
@@ -1276,16 +1540,169 @@ async fn record_cloud_request(
                 .map(|text| (key.as_str().to_string(), text.to_string()))
         })
         .collect::<BTreeMap<_, _>>();
-    requests
+    state
+        .requests
         .lock()
         .expect("requests")
         .push(RecordedCloudRequest {
             method: method.as_str().to_string(),
             path: uri.path().to_string(),
             headers,
+            body: body.to_vec(),
             body_len: body.len(),
         });
-    status
+    let mut response = state.status.into_response();
+    if let Some(location) = state.location {
+        response.headers_mut().insert(
+            header::LOCATION,
+            HeaderValue::from_str(&location).expect("redirect location"),
+        );
+    }
+    response
+}
+
+fn expected_oss_authorization(
+    request: &RecordedCloudRequest,
+    access_key: &str,
+    secret_key: &str,
+    bucket: &str,
+) -> String {
+    let date = request.headers.get("date").expect("OSS date header");
+    let object_key = request
+        .path
+        .strip_prefix(&format!("/{bucket}/"))
+        .expect("OSS object key");
+    let string_to_sign = format!("PUT\n\napplication/octet-stream\n{date}\n/{bucket}/{object_key}");
+    let key = hmac::Key::new(hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY, secret_key.as_bytes());
+    let signature = general_purpose::STANDARD.encode(hmac::sign(&key, string_to_sign.as_bytes()));
+    format!("OSS {access_key}:{signature}")
+}
+
+fn expected_s3_authorization(
+    request: &RecordedCloudRequest,
+    access_key: &str,
+    secret_key: &str,
+    region: &str,
+) -> String {
+    let amz_date = request
+        .headers
+        .get("x-amz-date")
+        .expect("S3 x-amz-date header");
+    let scope_date = &amz_date[..8];
+    let payload_hash = sha256_bytes_hex(&request.body);
+    assert_eq!(
+        request
+            .headers
+            .get("x-amz-content-sha256")
+            .map(String::as_str),
+        Some(payload_hash.as_str())
+    );
+    let host = request.headers.get("host").expect("S3 host header");
+    let signed_headers = "content-type;host;x-amz-content-sha256;x-amz-date";
+    let canonical_headers = format!(
+        "content-type:application/octet-stream\nhost:{host}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n"
+    );
+    let canonical_request = format!(
+        "PUT\n{}\n\n{canonical_headers}\n{signed_headers}\n{payload_hash}",
+        request.path
+    );
+    let canonical_hash = sha256_bytes_hex(canonical_request.as_bytes());
+    let scope = format!("{scope_date}/{region}/s3/aws4_request");
+    let string_to_sign = format!("AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n{canonical_hash}");
+    let signing_key = aws_signing_key(secret_key, scope_date, region, "s3");
+    let signature = hex_lower(&hmac_sha256(&signing_key, string_to_sign.as_bytes()));
+    format!(
+        "AWS4-HMAC-SHA256 Credential={access_key}/{scope}, SignedHeaders={signed_headers}, Signature={signature}"
+    )
+}
+
+fn cos_signature_is_valid(
+    request: &RecordedCloudRequest,
+    access_key: &str,
+    secret_key: &str,
+) -> bool {
+    let authorization = request
+        .headers
+        .get("authorization")
+        .map(String::as_str)
+        .unwrap_or_default();
+    let sign_time = authorization
+        .split('&')
+        .find_map(|part| part.strip_prefix("q-sign-time="))
+        .expect("COS q-sign-time");
+    let host = request.headers.get("host").expect("COS host header");
+    let canonical_request = format!("put\n{}\n\nhost={host}\n", request.path);
+    let string_to_sign = format!(
+        "sha1\n{sign_time}\n{}\n",
+        sha1_bytes_hex(canonical_request.as_bytes())
+    );
+    let sign_key = hmac_sha1(secret_key.as_bytes(), sign_time.as_bytes());
+    let signature = hex_lower(&hmac_sha1(&sign_key, string_to_sign.as_bytes()));
+    authorization
+        == format!(
+            "q-sign-algorithm=sha1&q-ak={access_key}&q-sign-time={sign_time}&q-key-time={sign_time}&q-header-list=host&q-url-param-list=&q-signature={signature}"
+        )
+}
+
+fn expected_azure_authorization(
+    request: &RecordedCloudRequest,
+    account_name: &str,
+    account_key: &str,
+    container: &str,
+) -> String {
+    let x_ms_date = request.headers.get("x-ms-date").expect("Azure date");
+    let content_length = request.body_len.to_string();
+    let object_key = request
+        .path
+        .strip_prefix(&format!("/{container}/"))
+        .expect("Azure object key");
+    let canonicalized_headers =
+        format!("x-ms-blob-type:BlockBlob\nx-ms-date:{x_ms_date}\nx-ms-version:2023-11-03\n");
+    let canonicalized_resource = format!("/{account_name}/{container}/{object_key}");
+    let string_to_sign = format!(
+        "PUT\n\n\n{content_length}\n\napplication/octet-stream\n\n\n\n\n\n\n{canonicalized_headers}{canonicalized_resource}"
+    );
+    let signature = general_purpose::STANDARD.encode(hmac_sha256(
+        account_key.as_bytes(),
+        string_to_sign.as_bytes(),
+    ));
+    format!("SharedKey {account_name}:{signature}")
+}
+
+fn aws_signing_key(secret_key: &str, date: &str, region: &str, service: &str) -> Vec<u8> {
+    let date_key = hmac_sha256(format!("AWS4{secret_key}").as_bytes(), date.as_bytes());
+    let region_key = hmac_sha256(&date_key, region.as_bytes());
+    let service_key = hmac_sha256(&region_key, service.as_bytes());
+    hmac_sha256(&service_key, b"aws4_request")
+}
+
+fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
+    let key = hmac::Key::new(hmac::HMAC_SHA256, key);
+    hmac::sign(&key, data).as_ref().to_vec()
+}
+
+fn hmac_sha1(key: &[u8], data: &[u8]) -> Vec<u8> {
+    let key = hmac::Key::new(hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY, key);
+    hmac::sign(&key, data).as_ref().to_vec()
+}
+
+fn sha256_bytes_hex(value: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(value))
+}
+
+fn sha1_bytes_hex(value: &[u8]) -> String {
+    let digest = ring::digest::digest(&ring::digest::SHA1_FOR_LEGACY_USE_ONLY, value);
+    hex_lower(digest.as_ref())
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(HEX[(byte >> 4) as usize] as char);
+        output.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    output
 }
 
 async fn read_json(response: axum::response::Response) -> Value {
@@ -1335,4 +1752,38 @@ fn latest_audit(
             .unwrap_or(Value::Null),
         ip_address,
     })
+}
+
+fn assert_secret_endpoint_not_persisted(details: &Value) {
+    assert_no_secret_url_parts(details);
+    assert_eq!(
+        details["endpoint"], "https://s3.amazonaws.com/path",
+        "audit endpoint should keep only sanitized scheme, host, and path"
+    );
+}
+
+fn assert_no_secret_url_parts(value: &Value) {
+    let text = value.to_string();
+    for secret in ["user:pass", "token=secret", "frag"] {
+        assert!(!text.contains(secret), "value leaked {secret}: {text}");
+    }
+}
+
+fn latest_backup_record_metadata(path: &Path) -> Result<Value, Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    let metadata_json: Option<String> = connection.query_row(
+        r#"
+        SELECT metadata_json
+        FROM backup_records
+        ORDER BY id DESC
+        LIMIT 1
+        "#,
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(metadata_json
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()?
+        .unwrap_or(Value::Null))
 }
