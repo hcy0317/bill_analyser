@@ -55,4 +55,24 @@ describe('i18n key contract for reported warning surfaces', () => {
             expect(source).not.toMatch(/<category-rule-builder-fields[\s\S]*?:title="tt\(/);
         }
     });
+
+    test('snackbar only translates known keys and leaves raw runtime messages alone', () => {
+        const snackbarSource = readSource('src/components/desktop/SnackBar.vue');
+        const helperSource = readSource('src/locales/helpers.ts');
+        const budgetSource = readSource('src/views/desktop/budgets/ListPage.vue');
+
+        expect(snackbarSource).toContain('const { tt, tm, te } = useI18n();');
+        expect(snackbarSource).toContain('messageContent.value = tm(message, options);');
+        expect(snackbarSource).not.toContain('messageContent.value = tt(message)');
+        expect(helperSource).toContain('function translateMessage');
+        expect(helperSource).toContain('return hasLocaleMessage(key) || hasLocaleMessage(key, DEFAULT_LANGUAGE);');
+        expect(helperSource).not.toContain('return t(finalMessage, parameters);');
+        expect(budgetSource).toContain("showMessage('Budgets exported successfully')");
+        expect(budgetSource).not.toContain("showMessage(tt('Budgets exported successfully'))");
+
+        for (const locale of activeLocales) {
+            const messages = readLocale(locale);
+            expect(messages).toHaveProperty('Budgets exported successfully');
+        }
+    });
 });

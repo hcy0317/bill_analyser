@@ -50,7 +50,7 @@ describe('reconciliation statement dialog promise contract', () => {
         expect(source).toContain('function settleOpenPromise(): void {');
         expect(source).toContain('resolveFunc = null;');
         expect(source).toContain("emit('error', error);");
-        expect(source).toContain('showState.value = false;\n            settleOpenPromise();');
+        expect(source).toMatch(/showState\.value = false;\s+settleOpenPromise\(\);/);
         expect(source).toContain('watch(showState, (newValue, oldValue) => {');
     });
 });

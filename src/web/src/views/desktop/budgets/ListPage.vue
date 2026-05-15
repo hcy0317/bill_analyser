@@ -3263,7 +3263,7 @@ async function exportBudgets(): Promise<void> {
         link.click();
         URL.revokeObjectURL(url);
 
-        snackbar.value?.showMessage(tt('Budgets exported successfully'));
+        snackbar.value?.showMessage('Budgets exported successfully');
     } catch (error: unknown) {
         const err = error as { message?: string };
         snackbar.value?.showError(err.message || tt('Failed to export budgets'));

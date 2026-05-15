@@ -2619,6 +2619,7 @@
     "Investment Settings": "投資識別設定",
     "Open Transactions": "開啟交易頁",
     "Generate LLM Rule Candidates": "產生 LLM 規則候選",
+    "Budgets exported successfully": "預算匯出成功",
     "LLM session analysis created {count} candidate rules": "LLM 會話分析已產生 {count} 條候選規則",
     "LLM session analysis found no candidate rules for the selected preview rows": "LLM 會話分析未為所選預覽列產生候選規則",
     "LLM session analysis completed, but no candidate rules satisfied induction conditions": "LLM 會話分析已完成，但沒有候選規則符合歸納條件",

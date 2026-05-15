@@ -291,7 +291,7 @@ export function getRtlLocales(): Record<string, boolean> {
 }
 
 export function useI18n() {
-    const { t, locale } = useVueI18n();
+    const { t, te: hasLocaleMessage, locale } = useVueI18n();
 
     const settingsStore = useSettingsStore();
     const userStore = useUserStore();
@@ -852,13 +852,35 @@ export function useI18n() {
     }
 
     // 公共函数
+    function hasTranslationKey(message: string): boolean {
+        const key = message.trim();
+
+        if (!key) {
+            return false;
+        }
+
+        return hasLocaleMessage(key) || hasLocaleMessage(key, DEFAULT_LANGUAGE);
+    }
+
+    function translateMessage(message: string, options?: Record<string, unknown>): string {
+        if (!hasTranslationKey(message)) {
+            return message;
+        }
+
+        if (options) {
+            return t(message, options);
+        }
+
+        return t(message);
+    }
+
     function translateIf(text: string | undefined, isTranslate?: boolean): string {
         if (!isDefined(text)) {
             return '';
         }
 
         if (isTranslate) {
-            return t(text);
+            return translateMessage(text);
         }
 
         return text;
@@ -878,7 +900,7 @@ export function useI18n() {
             return '';
         }
 
-        return t(finalMessage, parameters);
+        return translateMessage(finalMessage, parameters);
     }
 
     function joinMultiText(textArray: string[]): string {
@@ -2332,6 +2354,7 @@ export function useI18n() {
     return {
         // 通用函数
         tt: t,
+        tm: translateMessage,
         ti: translateIf,
         te: translateError,
         joinMultiText,

@@ -20,19 +20,14 @@ const emit = defineEmits<{
     (e: 'update:show', value: boolean): void;
 }>();
 
-const { tt, te } = useI18n();
+const { tt, tm, te } = useI18n();
 
 const showState= ref<boolean>(false);
 const messageContent = ref<string>('');
 
 function showMessage(message: string, options?: Record<string, unknown>): void {
     showState.value = true;
-
-    if (options) {
-        messageContent.value = tt(message, options);
-    } else {
-        messageContent.value = tt(message);
-    }
+    messageContent.value = tm(message, options);
 }
 
 function showError(error: string | { message: string } | { error: ErrorResponse }): void {

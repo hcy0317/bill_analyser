@@ -411,6 +411,70 @@ async fn matching_candidates_route_tolerates_legacy_learning_rule_shape(
 }
 
 #[tokio::test]
+async fn matching_candidates_route_supports_current_learning_rule_shape_without_confidence(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    let connection = Connection::open(&fixture.db_path)?;
+    connection.execute_batch(
+        "
+        DROP TABLE IF EXISTS import_learning_rules;
+        CREATE TABLE import_learning_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            match_type TEXT NOT NULL,
+            match_value TEXT NOT NULL,
+            normalized_match_value TEXT NOT NULL,
+            learned_type TEXT,
+            learned_category_id INTEGER,
+            learned_source_account_id INTEGER,
+            learned_destination_account_id INTEGER,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            source_session_id TEXT,
+            source_preview_id INTEGER,
+            parser_id TEXT,
+            composite_match_hash TEXT,
+            match_features_json TEXT,
+            applied_count INTEGER NOT NULL DEFAULT 0,
+            last_applied_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, match_type, normalized_match_value)
+        );
+        INSERT INTO import_learning_rules(
+            id, user_id, match_type, match_value, normalized_match_value,
+            learned_type, enabled, parser_id, composite_match_hash,
+            match_features_json, created_at, updated_at
+        )
+        VALUES (
+            810, 42, 'description', 'Transfer out', 'transfer out',
+            'expense', 1, 'manual', 'current-shape-rule',
+            NULL, 'now', 'now'
+        );
+        ",
+    )?;
+    drop(connection);
+
+    let app = runtime_router(&fixture);
+    let response = app
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/matching/candidates?billId=20",
+            Body::empty(),
+        ))
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    assert_eq!(body["success"], true);
+    assert_eq!(body["data"]["billId"], 20);
+    assert_eq!(
+        body["data"]["candidates"][0]["candidateId"],
+        "bill:20:transfer:21"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn recurring_calendar_networth_runtime_covers_auth_validation_and_config_edges(
 ) -> Result<(), Box<dyn Error>> {
     let fixture = RuntimeFixture::new()?;

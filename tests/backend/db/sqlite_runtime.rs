@@ -18,47 +18,6 @@ fn runtime_for(path: &std::path::Path) -> Result<SqliteRuntime, Box<dyn Error>> 
     })?)
 }
 
-struct CreatedRealDb {
-    path: PathBuf,
-    remove_file_on_drop: bool,
-}
-
-impl CreatedRealDb {
-    fn ensure() -> Result<Self, Box<dyn Error>> {
-        let path = std::env::current_dir()?.join("data").join("bills.db");
-        if path.exists() {
-            return Ok(Self {
-                path,
-                remove_file_on_drop: false,
-            });
-        }
-
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::File::create(&path)?;
-        Ok(Self {
-            path,
-            remove_file_on_drop: true,
-        })
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for CreatedRealDb {
-    fn drop(&mut self) {
-        if self.remove_file_on_drop {
-            let _ = std::fs::remove_file(&self.path);
-            if let Some(parent) = self.path.parent() {
-                let _ = std::fs::remove_dir(parent);
-            }
-        }
-    }
-}
-
 #[cfg(windows)]
 fn symlink_file(target: &Path, link: &Path) -> std::io::Result<()> {
     std::os::windows::fs::symlink_file(target, link)
@@ -93,6 +52,38 @@ fn table_indexes(connection: &Connection, table: &str) -> Result<Vec<String>, Bo
     Ok(indexes)
 }
 
+fn collect_rust_files(root: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+    let mut files = Vec::new();
+
+    for entry in std::fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            files.extend(collect_rust_files(&path)?);
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            files.push(path);
+        }
+    }
+
+    Ok(files)
+}
+
+fn workspace_root() -> Result<PathBuf, Box<dyn Error>> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "CARGO_MANIFEST_DIR is not under src/backend/db",
+            )
+        })?;
+    Ok(workspace_root.to_path_buf())
+}
+
 #[test]
 fn safe_path_guard_rejects_real_data_bills_db() -> Result<(), Box<dyn Error>> {
     let real_db = std::env::current_dir()
@@ -110,12 +101,17 @@ fn safe_path_guard_rejects_real_data_bills_db() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn application_path_guard_accepts_real_data_bills_db_for_runtime() -> Result<(), Box<dyn Error>> {
-    let real_db = CreatedRealDb::ensure()?;
+fn application_path_guard_accepts_temp_application_file_for_runtime() -> Result<(), Box<dyn Error>>
+{
+    let temp_dir = tempfile::tempdir()?;
+    let data_dir = temp_dir.path().join("data");
+    std::fs::create_dir_all(&data_dir)?;
+    let application_db = data_dir.join("bills.db");
+    std::fs::File::create(&application_db)?;
 
-    let db_path = SqliteDbPath::application_file(real_db.path())?;
+    let db_path = SqliteDbPath::application_file(&application_db)?;
 
-    assert_eq!(db_path.as_path(), real_db.path());
+    assert_eq!(db_path.as_path(), application_db.as_path());
     Ok(())
 }
 
@@ -140,11 +136,14 @@ fn application_path_guard_rejects_missing_parent_and_directory_target() -> Resul
 
 #[test]
 fn safe_path_guard_rejects_temp_symlink_to_real_data_bills_db() -> Result<(), Box<dyn Error>> {
-    let real_db = CreatedRealDb::ensure()?;
+    let real_db = std::env::current_dir()?.join("data").join("bills.db");
+    if !real_db.is_file() {
+        return Ok(());
+    }
     let temp_dir = tempfile::tempdir()?;
     let link_path = temp_dir.path().join("linked_real.db");
 
-    if let Err(error) = symlink_file(real_db.path(), &link_path) {
+    if let Err(error) = symlink_file(&real_db, &link_path) {
         if cfg!(windows)
             && (error.kind() == std::io::ErrorKind::PermissionDenied
                 || error.raw_os_error() == Some(1314))
@@ -160,6 +159,37 @@ fn safe_path_guard_rejects_temp_symlink_to_real_data_bills_db() -> Result<(), Bo
         matches!(&error, DbError::UnsafePath(_)),
         "expected unsafe path error, got {error}"
     );
+    Ok(())
+}
+
+#[test]
+fn backend_db_tests_do_not_create_repo_data_bills_db() -> Result<(), Box<dyn Error>> {
+    let db_tests_root = workspace_root()?.join("tests").join("backend").join("db");
+    let this_file = db_tests_root.join("sqlite_runtime.rs").canonicalize()?;
+    let repo_join_pattern = [".join(\"data\")", ".join(\"bills.db\")"].concat();
+    let old_real_db_guard_pattern = ["Created", "RealDb"].concat();
+
+    for file in collect_rust_files(&db_tests_root)? {
+        let canonical = file.canonicalize()?;
+        let source = std::fs::read_to_string(&file)?;
+
+        assert!(
+            !source.contains(&old_real_db_guard_pattern),
+            "{} must not create or clean up repository data/bills.db as a test fixture",
+            file.display()
+        );
+
+        if canonical == this_file {
+            continue;
+        }
+
+        assert!(
+            !source.contains(&repo_join_pattern),
+            "{} must use temp DB fixtures and leave repository data/bills.db untouched",
+            file.display()
+        );
+    }
+
     Ok(())
 }
 
