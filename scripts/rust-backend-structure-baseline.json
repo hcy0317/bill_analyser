@@ -1,0 +1,328 @@
+{
+  "version": 1,
+  "description": "Rust backend file-size baseline for legacy oversized files. Ratchet only: entries may shrink but must not grow.",
+  "thresholds": {
+    "rust": {
+      "warning": 600,
+      "hard": 1000
+    }
+  },
+  "generatedBy": "scripts/check-rust-backend-structure.mjs --print-baseline",
+  "files": [
+    {
+      "path": "src/backend/core/migration_governance.rs",
+      "kind": "rust",
+      "area": "core",
+      "lines": 3584,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/db/import_staging.rs",
+      "kind": "rust",
+      "area": "db",
+      "lines": 3095,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/db/matching.rs",
+      "kind": "rust",
+      "area": "db",
+      "lines": 2969,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/core/matching.rs",
+      "kind": "rust",
+      "area": "core",
+      "lines": 2633,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/http/backup_routes.rs",
+      "kind": "rust",
+      "area": "http",
+      "lines": 2584,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/http/bill_routes.rs",
+      "kind": "rust",
+      "area": "http",
+      "lines": 2441,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/db/budgets.rs",
+      "kind": "rust",
+      "area": "db",
+      "lines": 2409,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/db/auth.rs",
+      "kind": "rust",
+      "area": "db",
+      "lines": 2262,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/db/taxonomy/settings_bundle.rs",
+      "kind": "rust",
+      "area": "db",
+      "lines": 2180,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/core/statistics.rs",
+      "kind": "rust",
+      "area": "core",
+      "lines": 2110,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/db/bills.rs",
+      "kind": "rust",
+      "area": "db",
+      "lines": 2002,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/core/adapters/transaction.rs",
+      "kind": "rust",
+      "area": "core",
+      "lines": 1697,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/core/smart_dedup.rs",
+      "kind": "rust",
+      "area": "core",
+      "lines": 1570,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/core/ai_ocr_llm.rs",
+      "kind": "rust",
+      "area": "core",
+      "lines": 1529,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/http/matching_routes.rs",
+      "kind": "rust",
+      "area": "http",
+      "lines": 1482,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/db/auth_registration.rs",
+      "kind": "rust",
+      "area": "db",
+      "lines": 1479,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/http/statistics_routes.rs",
+      "kind": "rust",
+      "area": "http",
+      "lines": 1406,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/db/taxonomy/category_rules.rs",
+      "kind": "rust",
+      "area": "db",
+      "lines": 1327,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/core/budgets.rs",
+      "kind": "rust",
+      "area": "core",
+      "lines": 1264,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/db/schema.rs",
+      "kind": "rust",
+      "area": "db",
+      "lines": 1206,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/http/auth_routes/profile_data_handlers.rs",
+      "kind": "rust",
+      "area": "http",
+      "lines": 1125,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/db/taxonomy/templates.rs",
+      "kind": "rust",
+      "area": "db",
+      "lines": 1103,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/http/auth_routes/runtime_audit_helpers.rs",
+      "kind": "rust",
+      "area": "http",
+      "lines": 1088,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/core/ops.rs",
+      "kind": "rust",
+      "area": "core",
+      "lines": 1052,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/http/taxonomy_routes/account_category_formatters.rs",
+      "kind": "rust",
+      "area": "http",
+      "lines": 1041,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/db/taxonomy/accounts.rs",
+      "kind": "rust",
+      "area": "db",
+      "lines": 970,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/core/import_learning.rs",
+      "kind": "rust",
+      "area": "core",
+      "lines": 899,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/http/import_routes/stage_handlers.rs",
+      "kind": "rust",
+      "area": "http",
+      "lines": 896,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/core/import_pipeline.rs",
+      "kind": "rust",
+      "area": "core",
+      "lines": 878,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/http/budget_routes.rs",
+      "kind": "rust",
+      "area": "http",
+      "lines": 873,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/http/auth_routes/jwt_totp_helpers.rs",
+      "kind": "rust",
+      "area": "http",
+      "lines": 854,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/db/statistics.rs",
+      "kind": "rust",
+      "area": "db",
+      "lines": 843,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/db/taxonomy/categories.rs",
+      "kind": "rust",
+      "area": "db",
+      "lines": 842,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/http/import_routes/runtime_helpers.rs",
+      "kind": "rust",
+      "area": "http",
+      "lines": 842,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/http/import_routes/preview_mutation_helpers.rs",
+      "kind": "rust",
+      "area": "http",
+      "lines": 818,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/http/auth_routes/profile_payload_helpers.rs",
+      "kind": "rust",
+      "area": "http",
+      "lines": 775,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/http/auth_routes/two_factor_handlers.rs",
+      "kind": "rust",
+      "area": "http",
+      "lines": 773,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/core/category_rules/mod.rs",
+      "kind": "rust",
+      "area": "core",
+      "lines": 741,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/http/import_routes/learning/suggestions.rs",
+      "kind": "rust",
+      "area": "http",
+      "lines": 732,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/http/backup_sync.rs",
+      "kind": "rust",
+      "area": "http",
+      "lines": 718,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/parsers/dedicated.rs",
+      "kind": "rust",
+      "area": "parsers",
+      "lines": 707,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/db/recurring.rs",
+      "kind": "rust",
+      "area": "db",
+      "lines": 677,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/http/import_routes/learning/schema_and_rules.rs",
+      "kind": "rust",
+      "area": "http",
+      "lines": 652,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/http/auth.rs",
+      "kind": "rust",
+      "area": "http",
+      "lines": 630,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/http/import_routes/llm/rule_synthesis_helpers.rs",
+      "kind": "rust",
+      "area": "http",
+      "lines": 623,
+      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+    }
+  ]
+}

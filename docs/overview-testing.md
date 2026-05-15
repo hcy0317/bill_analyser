@@ -7,6 +7,7 @@
 - `cargo test --workspace` 覆盖 Rust workspace 的单元、集成和契约测试。
 - Rust 集成/契约测试源码集中在 `tests/backend/core`、`tests/backend/db`、`tests/backend/http`、`tests/backend/parsers`，并通过各 crate `Cargo.toml` 的 `[[test]]` 目标纳入 workspace。
 - `cargo clippy --workspace --all-targets -- -D warnings` 是共享 runtime 改动的静态门禁。
+- `node scripts/check-rust-backend-structure.mjs` 是 Rust 后端结构体量门禁，按已追踪的 `src/backend/**/*.rs` 文件和 `scripts/rust-backend-structure-baseline.json` 做 ratchet-only 检查；生成或复核 baseline 使用 `node scripts/check-rust-backend-structure.mjs --print-baseline`。
 - `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90` 是业务代码最终覆盖率门禁。
 
 ## 前端
