@@ -93,6 +93,10 @@ pub enum RouteHandlerId {
     AuthTokenRuntime,
     #[serde(rename = "crates/bill-analyser-http/src/taxonomy_routes.rs::taxonomy_runtime")]
     TaxonomyRuntime,
+    #[serde(
+        rename = "crates/bill-analyser-http/src/matching_routes.rs::matching_recurring_calendar_networth_runtime"
+    )]
+    MatchingRecurringCalendarNetworthRuntime,
     #[serde(rename = "crates/bill-analyser-http/src/proxy.rs::ownership_aware_proxy_handler")]
     LegacyPythonProxyPassthrough,
     #[serde(rename = "crates/bill-analyser-core/src/migration_governance.rs::contract_oracle")]
@@ -150,6 +154,9 @@ impl RouteHandlerId {
             }
             Self::TaxonomyRuntime => {
                 "crates/bill-analyser-http/src/taxonomy_routes.rs::taxonomy_runtime"
+            }
+            Self::MatchingRecurringCalendarNetworthRuntime => {
+                "crates/bill-analyser-http/src/matching_routes.rs::matching_recurring_calendar_networth_runtime"
             }
             Self::LegacyPythonProxyPassthrough => {
                 "crates/bill-analyser-http/src/proxy.rs::ownership_aware_proxy_handler"
@@ -1594,11 +1601,15 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
     python_proxy_route!("POST", "/api/backup/jobs", "backup-ops"),
     python_proxy_route!("POST", "/api/backup/restore/{filename}", "backup-ops"),
     python_proxy_route!("POST", "/api/backup/restore/verify", "backup-ops"),
-    python_proxy_route!(
-        "GET",
-        "/api/calendar/events",
-        "matching-recurring-calendar-networth"
-    ),
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/calendar/events",
+        domain: "matching-recurring-calendar-networth",
+        state: MigrationState::PythonDeleted,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessData,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust matching recurring calendar networth runtime owns calendar event aggregation and recurring projections; the old Flask calendar.py route shell is deleted.",
+    },
     EndpointOwnership {
         method: "GET",
         pattern: "/api/categories",
@@ -1931,31 +1942,51 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         "/api/matching/sessions/{session_id}/candidates",
         "matching-recurring-calendar-networth"
     ),
-    python_proxy_route!(
-        "GET",
-        "/api/networth/snapshot",
-        "matching-recurring-calendar-networth"
-    ),
-    python_proxy_route!(
-        "GET",
-        "/api/recurring/suggestions",
-        "matching-recurring-calendar-networth"
-    ),
-    python_proxy_route!(
-        "POST",
-        "/api/recurring/suggestions/{suggestion_id}/accept",
-        "matching-recurring-calendar-networth"
-    ),
-    python_proxy_route!(
-        "POST",
-        "/api/recurring/suggestions/{suggestion_id}/reject",
-        "matching-recurring-calendar-networth"
-    ),
-    python_proxy_route!(
-        "POST",
-        "/api/recurring/suggestions/detect",
-        "matching-recurring-calendar-networth"
-    ),
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/networth/snapshot",
+        domain: "matching-recurring-calendar-networth",
+        state: MigrationState::PythonDeleted,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessData,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust matching recurring calendar networth runtime owns net-worth snapshot aggregation; the old Flask networth.py route shell is deleted.",
+    },
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/recurring/suggestions",
+        domain: "matching-recurring-calendar-networth",
+        state: MigrationState::PythonDeleted,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessData,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust matching recurring calendar networth runtime owns recurring suggestion listing; the old Flask recurring.py route shell is deleted.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/recurring/suggestions/{suggestion_id}/accept",
+        domain: "matching-recurring-calendar-networth",
+        state: MigrationState::PythonDeleted,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessData,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust matching recurring calendar networth runtime owns recurring suggestion accept and recurring rule creation; the old Flask recurring.py route shell is deleted.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/recurring/suggestions/{suggestion_id}/reject",
+        domain: "matching-recurring-calendar-networth",
+        state: MigrationState::PythonDeleted,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessData,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust matching recurring calendar networth runtime owns recurring suggestion rejection; the old Flask recurring.py route shell is deleted.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/recurring/suggestions/detect",
+        domain: "matching-recurring-calendar-networth",
+        state: MigrationState::PythonDeleted,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessData,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust matching recurring calendar networth runtime owns recurring pattern detection and suggestion persistence; the old Flask recurring.py route shell is deleted.",
+    },
     EndpointOwnership {
         method: "GET",
         pattern: "/api/settings/bundle/export",
@@ -2906,24 +2937,26 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
     },
     DomainGovernancePolicy {
         domain: "matching-recurring-calendar-networth",
-        python_owner_files: &[
-            "src/bill_analyser/api/routes/matching",
-            "src/bill_analyser/api/routes/recurring.py",
-            "src/bill_analyser/api/routes/calendar.py",
-            "src/bill_analyser/api/routes/networth.py",
-        ],
+        python_owner_files: &["src/bill_analyser/api/routes/matching"],
         rust_owner_files: &[
+            "crates/bill-analyser-http/src/matching_routes.rs",
+            "crates/bill-analyser-db/src/recurring.rs",
+            "crates/bill-analyser-db/src/statistics.rs",
             "crates/bill-analyser-http/src/proxy.rs",
             "crates/bill-analyser-core/src/matching.rs",
+            "crates/bill-analyser-core/src/statistics.rs",
         ],
-        tests_migrated: &["crates/bill-analyser-core/tests/matching_contracts.rs"],
+        tests_migrated: &[
+            "crates/bill-analyser-core/tests/matching_contracts.rs",
+            "crates/bill-analyser-http/tests/matching_runtime_contract.rs",
+        ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: EMPTY_STRINGS,
         coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
-        deletion_blockers: &["matching_runtime_parity", "recurring_calendar_networth_parity"],
+        deletion_blockers: &["matching_runtime_parity"],
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Formal matching, recurring suggestions, calendar, and net worth runtime routes remain Python-proxied until the P8 domain cutover ports handlers.",
+            "Recurring suggestions, calendar, and net worth runtime routes are Rust-owned; formal matching candidates, feedback, manual pairs, reconcile history, and investment settings remain Python-proxied until the remaining P8 matching cutover ports handlers.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
@@ -3391,6 +3424,17 @@ fn route_contract_details(
             decision_owner: "none",
             transition_evidence: DB_RUNTIME_EVIDENCE,
         },
+        ("matching-recurring-calendar-networth", MigrationState::PythonDeleted) => {
+            RouteContractDetails {
+                handler: RouteHandlerId::MatchingRecurringCalendarNetworthRuntime,
+                deletion_blockers: EMPTY_STRINGS,
+                blocked_status: MigrationBlockedStatus::None,
+                unsupported_behavior: "",
+                decision_required: DecisionRequired::None,
+                decision_owner: "none",
+                transition_evidence: DB_RUNTIME_EVIDENCE,
+            }
+        }
         _ => RouteContractDetails {
             handler: route_handler_for_domain(route.domain),
             deletion_blockers: policy.deletion_blockers,

@@ -18,10 +18,10 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
         sorted(path.relative_to(repo_root).as_posix() for path in (repo_root / "src/bill_analyser").rglob("*.py"))
     )
 
-    assert len(expected_python_paths) == 272
-    assert inventory.summary["python_backend_files"] == 272
+    assert len(expected_python_paths) == 269
+    assert inventory.summary["python_backend_files"] == 269
     assert tuple(record.path for record in inventory.python_files) == expected_python_paths
-    assert inventory.summary["rust_backend_files"] == 104
+    assert inventory.summary["rust_backend_files"] == 108
     assert "crates/bill-analyser-core/src/ai_ocr_llm.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/lib.rs" in inventory.rust_files
     assert "crates/bill-analyser-parsers/src/dedicated.rs" in inventory.rust_files
@@ -56,6 +56,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert "crates/bill-analyser-db/src/budgets.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/import_staging.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/llm.rs" in inventory.rust_files
+    assert "crates/bill-analyser-db/src/recurring.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/statistics.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/taxonomy/category_rules.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/user_data.rs" in inventory.rust_files
@@ -66,6 +67,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert "crates/bill-analyser-db/tests/bills_runtime.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/tests/budgets_runtime.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/tests/llm_runtime.rs" in inventory.rust_files
+    assert "crates/bill-analyser-db/tests/recurring_runtime.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/tests/taxonomy_bridge_cli.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/src/auth.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/src/auth_routes.rs" in inventory.rust_files
@@ -74,6 +76,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert "crates/bill-analyser-http/src/bin/bill_http_server.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/src/lib.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/src/import_routes.rs" in inventory.rust_files
+    assert "crates/bill-analyser-http/src/matching_routes.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/src/proxy.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/src/server.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/src/statistics_routes.rs" in inventory.rust_files
@@ -83,6 +86,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert "crates/bill-analyser-http/tests/budget_runtime_contract.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/tests/import_runtime_contract.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/tests/import_skeleton_contract.rs" in inventory.rust_files
+    assert "crates/bill-analyser-http/tests/matching_runtime_contract.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/tests/proxy_contract.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/tests/statistics_runtime_contract.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/tests/taxonomy_runtime_contract.rs" in inventory.rust_files
@@ -130,6 +134,9 @@ def test_every_python_file_has_migration_domain_status_and_no_verified_dead(repo
     assert "src/bill_analyser/api/routes/categories/support.py" not in records
     assert "src/bill_analyser/api/routes/category_rules.py" not in records
     assert "src/bill_analyser/api/routes/encryption.py" not in records
+    assert "src/bill_analyser/api/routes/calendar.py" not in records
+    assert "src/bill_analyser/api/routes/networth.py" not in records
+    assert "src/bill_analyser/api/routes/recurring.py" not in records
     assert "src/bill_analyser/api/routes/rules.py" not in records
     assert "src/bill_analyser/api/routes/tags.py" not in records
     assert "src/bill_analyser/api/routes/templates.py" not in records
@@ -168,8 +175,8 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
 
     assert first_render == second_render
     assert "# Rust Backend Migration Inventory" in first_render
-    assert "- Python backend files: 272" in first_render
-    assert "- Rust backend files: 104" in first_render
+    assert "- Python backend files: 269" in first_render
+    assert "- Rust backend files: 108" in first_render
     assert "- Verified dead files: 0" in first_render
     assert "Route/domain cutover state lives separately in the Rust governance manifest" in first_render
     assert "Governance manifest tool: `cargo run -p bill-analyser-core --bin bill_migration_manifest`" in first_render
@@ -190,6 +197,9 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
     assert "src/bill_analyser/api/routes/categories/support.py" not in first_render
     assert "src/bill_analyser/api/routes/category_rules.py" not in first_render
     assert "src/bill_analyser/api/routes/tags.py" not in first_render
+    assert "src/bill_analyser/api/routes/calendar.py" not in first_render
+    assert "src/bill_analyser/api/routes/networth.py" not in first_render
+    assert "src/bill_analyser/api/routes/recurring.py" not in first_render
     assert (
         "| src/bill_analyser/core/category_rule_rust_bridge.py | classification-rules | core-service | port |"
         in first_render
@@ -257,6 +267,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
     assert "- crates/bill-analyser-db/src/budgets.rs" in first_render
     assert "- crates/bill-analyser-db/src/import_staging.rs" in first_render
     assert "- crates/bill-analyser-db/src/llm.rs" in first_render
+    assert "- crates/bill-analyser-db/src/recurring.rs" in first_render
     assert "- crates/bill-analyser-db/src/statistics.rs" in first_render
     assert "- crates/bill-analyser-db/src/taxonomy/category_rules.rs" in first_render
     assert "- crates/bill-analyser-db/src/user_data.rs" in first_render
@@ -267,6 +278,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
     assert "- crates/bill-analyser-db/tests/bills_runtime.rs" in first_render
     assert "- crates/bill-analyser-db/tests/budgets_runtime.rs" in first_render
     assert "- crates/bill-analyser-db/tests/llm_runtime.rs" in first_render
+    assert "- crates/bill-analyser-db/tests/recurring_runtime.rs" in first_render
     assert "- crates/bill-analyser-db/tests/taxonomy_bridge_cli.rs" in first_render
     assert "- crates/bill-analyser-http/src/auth.rs" in first_render
     assert "- crates/bill-analyser-http/src/auth_routes.rs" in first_render
@@ -275,6 +287,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
     assert "- crates/bill-analyser-http/src/bin/bill_http_server.rs" in first_render
     assert "- crates/bill-analyser-http/src/lib.rs" in first_render
     assert "- crates/bill-analyser-http/src/import_routes.rs" in first_render
+    assert "- crates/bill-analyser-http/src/matching_routes.rs" in first_render
     assert "- crates/bill-analyser-http/src/proxy.rs" in first_render
     assert "- crates/bill-analyser-http/src/server.rs" in first_render
     assert "- crates/bill-analyser-http/src/statistics_routes.rs" in first_render
@@ -284,6 +297,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
     assert "- crates/bill-analyser-http/tests/budget_runtime_contract.rs" in first_render
     assert "- crates/bill-analyser-http/tests/import_runtime_contract.rs" in first_render
     assert "- crates/bill-analyser-http/tests/import_skeleton_contract.rs" in first_render
+    assert "- crates/bill-analyser-http/tests/matching_runtime_contract.rs" in first_render
     assert "- crates/bill-analyser-http/tests/proxy_contract.rs" in first_render
     assert "- crates/bill-analyser-http/tests/statistics_runtime_contract.rs" in first_render
     assert "- crates/bill-analyser-http/tests/taxonomy_runtime_contract.rs" in first_render

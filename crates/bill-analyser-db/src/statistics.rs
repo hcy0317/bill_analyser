@@ -1,16 +1,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use bill_analyser_core::statistics::{
-    build_asset_trend_legend, build_asset_trends, build_category_pie_data,
-    build_category_statistics_items, build_category_trend_statistics,
+    build_asset_trend_legend, build_asset_trends, build_calendar_events_data,
+    build_category_pie_data, build_category_statistics_items, build_category_trend_statistics,
     build_insight_anomaly_summary, build_net_worth_snapshot,
     build_statistics_analyzer_category_result, build_statistics_analyzer_comparison_result,
     build_statistics_analyzer_report, build_statistics_analyzer_trend_bucket,
     build_statistics_analyzer_trends_result, build_top_merchants_data,
-    build_transaction_amount_period_result, statistics_analyzer_period_range,
-    NameValueStatisticItem, StatisticsAccountInput, StatisticsAnalyzerTrendBucket,
-    StatisticsBillInput, StatisticsCategoryInput, StatisticsYearMonthRange,
-    TopMerchantStatisticItem, TransactionAmountPeriodResult, UserCustomExchangeRateInput,
+    build_transaction_amount_period_result, statistics_analyzer_period_range, CalendarEventsData,
+    NameValueStatisticItem, RecurringRuleInput, StatisticsAccountInput,
+    StatisticsAnalyzerTrendBucket, StatisticsBillInput, StatisticsCategoryInput,
+    StatisticsYearMonthRange, TopMerchantStatisticItem, TransactionAmountPeriodResult,
+    UserCustomExchangeRateInput,
 };
 use bill_analyser_core::UserId;
 use chrono::{Datelike, Duration, Local, NaiveDate, SecondsFormat};
@@ -235,6 +236,28 @@ pub fn query_net_worth_payload(connection: &Connection, user_id: UserId) -> DbRe
     let user_id = UserScope::new(user_id).bind_value()?;
     let accounts = load_statistics_accounts(connection, user_id)?;
     Ok(json!(build_net_worth_snapshot(&accounts)))
+}
+
+pub fn query_calendar_events_payload(
+    connection: &Connection,
+    user_id: UserId,
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+) -> DbResult<CalendarEventsData> {
+    let user_id = UserScope::new(user_id).bind_value()?;
+    let filters = StatisticsBillFilters {
+        start_date: Some(start_date.to_string()),
+        end_date: Some(end_date.to_string()),
+        ..StatisticsBillFilters::default()
+    };
+    let bills = load_statistics_bills(connection, user_id, &filters)?;
+    let recurring_rules = load_calendar_recurring_rules(connection, user_id).unwrap_or_default();
+    Ok(build_calendar_events_data(
+        &bills,
+        &recurring_rules,
+        start_date,
+        end_date,
+    ))
 }
 
 pub fn query_insight_anomaly_summary_payload(
@@ -474,11 +497,11 @@ fn load_statistics_bills(
     let mut conditions = vec!["user_id = ?".to_string()];
     let mut values = vec![SqlValue::Integer(user_id)];
     if let Some(start_date) = text_filter(filters.start_date.as_deref()) {
-        conditions.push("date >= ?".to_string());
+        conditions.push("substr(date, 1, 10) >= ?".to_string());
         values.push(SqlValue::Text(start_date));
     }
     if let Some(end_date) = text_filter(filters.end_date.as_deref()) {
-        conditions.push("date <= ?".to_string());
+        conditions.push("substr(date, 1, 10) <= ?".to_string());
         values.push(SqlValue::Text(end_date));
     }
     if let Some(transaction_type) = text_filter(filters.transaction_type.as_deref()) {
@@ -612,6 +635,55 @@ fn load_statistics_accounts(
             ),
             currency: row.get::<_, Option<String>>("currency")?,
             icon: row.get::<_, Option<String>>("icon")?,
+        })
+    })?;
+    collect_rows(rows)
+}
+
+fn load_calendar_recurring_rules(
+    connection: &Connection,
+    user_id: i64,
+) -> DbResult<Vec<RecurringRuleInput>> {
+    if !table_exists(connection, "recurring_bills")? {
+        return Ok(Vec::new());
+    }
+    let id_expr = optional_column_expr(connection, "recurring_bills", "id", "NULL")?;
+    let name_expr = optional_column_expr(connection, "recurring_bills", "name", "''")?;
+    let amount_expr = optional_column_expr(connection, "recurring_bills", "amount", "0")?;
+    let type_expr = optional_column_expr(connection, "recurring_bills", "type", "''")?;
+    let frequency_expr = optional_column_expr(connection, "recurring_bills", "frequency", "''")?;
+    let next_date_expr = optional_column_expr(connection, "recurring_bills", "next_date", "''")?;
+    let enabled_expr = optional_column_expr(connection, "recurring_bills", "enabled", "1")?;
+    let display_order_expr =
+        optional_column_expr(connection, "recurring_bills", "display_order", "0")?;
+    let sql = format!(
+        "
+        SELECT {id_expr} AS id,
+               {name_expr} AS name,
+               {amount_expr} AS amount,
+               {type_expr} AS bill_type,
+               {frequency_expr} AS frequency,
+               {next_date_expr} AS next_date
+        FROM recurring_bills
+        WHERE user_id = ?1 AND {enabled_expr} = 1
+        ORDER BY COALESCE({display_order_expr}, 0), name
+        "
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params![user_id], |row| {
+        Ok(RecurringRuleInput {
+            id: positive_i64(row.get::<_, Option<i64>>("id")?),
+            name: row.get::<_, Option<String>>("name")?.unwrap_or_default(),
+            amount_yuan: sqlite_number_text(row.get::<_, Option<f64>>("amount")?.unwrap_or(0.0)),
+            bill_type: row
+                .get::<_, Option<String>>("bill_type")?
+                .unwrap_or_default(),
+            frequency: row
+                .get::<_, Option<String>>("frequency")?
+                .unwrap_or_default(),
+            next_date: row
+                .get::<_, Option<String>>("next_date")?
+                .unwrap_or_default(),
         })
     })?;
     collect_rows(rows)

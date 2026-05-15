@@ -13,6 +13,7 @@ pub mod error;
 pub mod import_staging;
 pub mod llm;
 pub mod path;
+pub mod recurring;
 pub mod schema;
 pub mod statistics;
 pub mod taxonomy;
@@ -106,6 +107,12 @@ pub use llm::{
     LlmConfigUpdate,
 };
 pub use path::SqliteDbPath;
+pub use recurring::{
+    accept_recurring_suggestion, count_recurring_suggestions,
+    detect_and_save_recurring_suggestions, get_bills_linked_to_recurring,
+    init_recurring_runtime_schema, list_recent_bills_for_recurring_detection,
+    list_recurring_suggestions, reject_recurring_suggestion, RecurringSuggestionSaveSummary,
+};
 pub use schema::{
     init_auth_security_schema, init_foundational_schema, migrate_bills_hash_unique_constraint,
     migrate_categories_unique_constraint, migrate_core_user_scope_constraints,
@@ -115,8 +122,9 @@ pub use schema::{
 pub use statistics::{
     delete_user_custom_exchange_rate, find_statistics_all_date_range,
     get_statistics_user_default_currency, list_user_custom_exchange_rates,
-    query_asset_trends_payload, query_category_pie_payload, query_category_statistics_payload,
-    query_category_trends_payload, query_insight_anomaly_summary_payload, query_net_worth_payload,
+    query_asset_trends_payload, query_calendar_events_payload, query_category_pie_payload,
+    query_category_statistics_payload, query_category_trends_payload,
+    query_insight_anomaly_summary_payload, query_net_worth_payload,
     query_statistics_analyzer_category_payload, query_statistics_analyzer_comparison_payload,
     query_statistics_analyzer_report_payload, query_statistics_analyzer_trends_payload,
     query_top_merchants_payload, query_transaction_amount_period, upsert_user_custom_exchange_rate,

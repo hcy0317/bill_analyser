@@ -10,6 +10,7 @@ pub mod bill_routes;
 pub mod budget_routes;
 pub mod config;
 pub mod import_routes;
+pub mod matching_routes;
 pub mod proxy;
 pub mod router;
 pub mod runtime;
@@ -33,6 +34,11 @@ pub use budget_routes::{
 pub use config::{HttpShellConfig, HttpShellConfigError, ImportRouteMode};
 pub use import_routes::{
     import_skeleton_router, not_yet_owned_response, IMPORT_SKELETON_ROUTE_PATTERNS,
+};
+pub use matching_routes::{
+    matching_recurring_calendar_networth_runtime_router,
+    MATCHING_RECURRING_CALENDAR_NETWORTH_PROXIED_ROUTE_PATTERNS,
+    MATCHING_RECURRING_CALENDAR_NETWORTH_ROUTE_PATTERNS,
 };
 pub use proxy::{
     build_upstream_url, filter_proxy_request_headers, filter_proxy_response_headers,

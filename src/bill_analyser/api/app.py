@@ -20,12 +20,9 @@ from bill_analyser.api.routes import (
     insights,
     llm,
     matching,
-    networth,
-    recurring,
     receipt_ocr,
     statistics,
 )
-from bill_analyser.api.routes import calendar as calendar_routes
 from bill_analyser.constants import PROJECT_ROOT, STATIC_DIR
 from bill_analyser.core.bills import BillService
 from bill_analyser.core.category_engine import CategoryEngine
@@ -140,9 +137,6 @@ def create_app():  # pylint: disable=too-many-statements
     flask_app.register_blueprint(statistics.bp, url_prefix="/api/statistics")
     flask_app.register_blueprint(backup.bp, url_prefix="/api/backup")
     flask_app.register_blueprint(matching.bp, url_prefix="/api/matching")
-    flask_app.register_blueprint(recurring.bp, url_prefix="/api/recurring")
-    flask_app.register_blueprint(calendar_routes.bp, url_prefix="/api/calendar")
-    flask_app.register_blueprint(networth.bp, url_prefix="/api/networth")
     flask_app.register_blueprint(insights.bp, url_prefix="/api/insights")
     flask_app.register_blueprint(llm.bp, url_prefix="/api/llm")
     flask_app.register_blueprint(receipt_ocr.bp, url_prefix="/api/ml")

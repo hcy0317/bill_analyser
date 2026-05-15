@@ -111,7 +111,7 @@ def test_architecture_docs_record_rust_primary_http_and_import_runtime_gates() -
     assert "Python import route disabling/deletion is blocked unless all five evidence gates pass" in migration_plan
     assert "business_migration=import-route-skeleton-no-db" in migration_plan
     assert "`BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE=import_db_runtime`" in architecture
-    assert "business_migration=import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime" in migration_plan
+    assert "business_migration=import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+matching-recurring-calendar-networth-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime" in migration_plan
     assert "S15b.1 makes Rust the runtime owner for tag batch creation" in migration_plan
     assert "S15c makes Rust the runtime owner for category master-data routes" in migration_plan
     assert "S15c.1 makes Rust the runtime owner for `GET /api/categories/statistics`" in migration_plan
