@@ -119,7 +119,8 @@
 
 它做的是**仓库语义感知**的完整验证，例如：
 
-- 后端改动 → pytest / pylint
+- Rust 后端改动 → `cargo test` / `cargo clippy` / `cargo llvm-cov`
+- 残留 Python sidecar 改动 → pytest / pylint
 - 前端改动 → `npm run lint`
 - AI 定制层改动 → `agent_stack_health.py --mode repo`
 - API 契约改动 → 检查 `src/web/src/lib/services.ts`
@@ -208,12 +209,22 @@ PR 标题必须使用 `type(scope): 主标题` 这种 Conventional Commit 大标
 
 ## 按路径选择验证动作
 
+### `crates/**`
+
+- 先跑受影响 `cargo test`
+- 共享 runtime 或业务代码改动补：
+  - `cargo fmt --all -- --check`
+  - `cargo clippy --workspace --all-targets -- -D warnings`
+- 最终业务验收跑：
+  - `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90`
+
 ### `src/bill_analyser/**`
 
+- 这是残留 Python/Flask sidecar 与迁移期对照实现
 - 先跑受影响 pytest
 - 跑 repository-baseline pylint
 - 如果是业务运行时代码，最终必须全量跑：
-  - `./.venv/Scripts/python.exe -m pytest tests/ -v`
+  - `./.venv/Scripts/python.exe -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v -n auto --dist loadfile`
 
 ### `src/web/**`
 

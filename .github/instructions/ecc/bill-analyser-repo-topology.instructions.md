@@ -1,7 +1,7 @@
 ---
 name: 'bill-analyser-repo-topology'
 description: 'Bill Analyser 仓库拓扑与边界：canonical sources、source-of-truth/generated/runtime-state/temp/diagnostics/backups 分桶、测试 taxonomy、db facade + shards/mixins、route/adapter 边界与 protected zones。'
-applyTo: 'AGENTS.md,CLAUDE.md,README.md,pyproject.toml,pytest.ini,*.ps1,*.bat,docs/**,scripts/**,src/bill_analyser/**,src/web/src/**,src/web/node_modules/**,tests/**,.github/**,.agents/**,.claude/**,.tmp/**,backup/**,output/**,logs/**,uploads/**,data/**'
+applyTo: 'AGENTS.md,CLAUDE.md,README.md,Cargo.toml,Cargo.lock,pyproject.toml,pytest.ini,*.ps1,*.bat,docs/**,scripts/**,crates/**,src/bill_analyser/**,src/web/src/**,src/web/node_modules/**,tests/**,.github/**,.agents/**,.claude/**,.tmp/**,backup/**,output/**,logs/**,uploads/**,data/**'
 ---
 
 # Bill Analyser Repository Topology
@@ -11,16 +11,17 @@ applyTo: 'AGENTS.md,CLAUDE.md,README.md,pyproject.toml,pytest.ini,*.ps1,*.bat,do
 ## Canonical Sources
 
 - Restore repository intent from `AGENTS.md` and `docs/PROJECT_OVERVIEW.md`.
-- Validate backend runtime topology against `src/bill_analyser/**` and frontend runtime topology against `src/web/src/**`.
+- Validate Rust backend runtime topology against `crates/**`, residual Python sidecar topology against `src/bill_analyser/**`, and frontend runtime topology against `src/web/src/**`.
 - Treat `.github/**`, `.agents/**`, and `.claude/**` as committed AI customization surfaces, not `.tmp/**` or other unpacked copies.
 - Use `tests/test_repository_layout.py` and `scripts/hooks/pre_tool_repo_guard.py` as layout/governance evidence when deciding where code or artifacts should live.
-- Runtime Python code must stay under `src/bill_analyser/**`; do not reintroduce runtime files under top-level shadow directories such as `src/api/`, `src/core/`, `src/parsers/`, `src/utils/`, `src/data/`, or `src/uploads/`.
+- Rust runtime code belongs under `crates/**`; residual runtime Python sidecar code must stay under `src/bill_analyser/**`. Do not reintroduce runtime files under top-level shadow directories such as `src/api/`, `src/core/`, `src/parsers/`, `src/utils/`, `src/data/`, or `src/uploads/`.
 - Runtime log artifacts belong in root `logs/`, not `src/logs/`.
 
 ## Path Buckets
 
 - **source-of-truth**
   - `src/bill_analyser/**`
+  - `crates/**`
   - `src/web/src/**`
   - `tests/**`
   - `scripts/**`
@@ -74,6 +75,7 @@ applyTo: 'AGENTS.md,CLAUDE.md,README.md,pyproject.toml,pytest.ini,*.ps1,*.bat,do
 
 ## DB Façade + Shards / Mixins
 
+- New Rust-owned persistence/runtime work belongs in `crates/bill-analyser-db` or the owning Rust crate; keep the Python façade rules below for residual sidecar and compatibility code.
 - External callers should continue importing `Database` from `src/bill_analyser/core/db.py`.
 - Keep `db.py` thin: it is the public async facade, not the place to re-expand all domain logic.
 - Keep persistence split by domain/runtime/schema under `src/bill_analyser/core/database/**`.
@@ -84,8 +86,10 @@ applyTo: 'AGENTS.md,CLAUDE.md,README.md,pyproject.toml,pytest.ini,*.ps1,*.bat,do
 
 ## Route / Adapter Boundary
 
-- Keep HTTP orchestration and request/auth handling in `src/bill_analyser/api/routes/**`.
-- Put API field-shape, time, money, account, category, and transaction conversion logic in `src/bill_analyser/api/adapters/**`.
+- New Rust-owned HTTP orchestration and request/auth handling belong in `crates/bill-analyser-http/**`.
+- Keep residual Python sidecar HTTP orchestration and request/auth handling in `src/bill_analyser/api/routes/**`.
+- Put Rust-owned API field-shape, time, money, account, category, and transaction conversion logic in the owning Rust HTTP/domain crate, usually `crates/bill-analyser-http/**` or the corresponding `crates/bill-analyser-*` crate.
+- Put residual Python sidecar conversion logic in `src/bill_analyser/api/adapters/**`.
 - Prefer the neutral adapter modules such as `transaction_adapter.py`, `account_adapter.py`, and `category_adapter.py`; do not recreate legacy `v1_*` adapter wrappers.
 - Do not duplicate contract conversion logic across routes, services, and frontend stores. If a mapping is reused or contract-sensitive, move it to an adapter.
 

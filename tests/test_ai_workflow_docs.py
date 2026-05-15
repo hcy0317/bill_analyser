@@ -20,6 +20,9 @@ def test_ai_workflow_doc_exists_and_explains_default_entrypoints() -> None:
     assert "session-resume" in text
     assert "/hooks" in text
     assert "gitea-ci-cache-discipline" in text
+    assert "Rust 后端改动" in text
+    assert "cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90" in text
+    assert "残留 Python sidecar" in text
 
 
 def test_verification_assets_define_non_overlapping_roles() -> None:

@@ -44,15 +44,17 @@ Tool-specific entry files should stay thin and only add platform-specific discov
 
 Bill Analyser 是一个账单导入、去重、自动分类、预算与统计分析系统。
 
-- 后端入口：`src/bill_analyser/api/app.py`
+- 后端主入口：`crates/bill-analyser-http/src/bin/bill_http_server.rs`
+- Python/Flask sidecar 入口：`src/bill_analyser/api/app.py`，仅用于 manifest 中仍为 `PythonProxied` 的迁移期边界
 - 前端工程：`src/web`
 - 当前运行态主链：`REST /api/...`
 
 ## Architecture
 
-- Flask 路由层保持同步入口，通过独立事件循环桥接 async 服务；不要把路由层改成直接 async 运行模型。
-- 数据库访问保持 `async def + aiosqlite`；不要把核心数据库逻辑改回同步。
-- 新实现优先走 `REST /api/...`，不要重新引入 `/api/v1/*` 作为运行时主链。
+- Rust `bill_http_server` 是当前默认 HTTP 入口；Python/Flask sidecar 仅承接尚未删除的 `PythonProxied` 边界，不要为已 Rust-owned 的域重新增加 Python fallback。
+- 残留 Flask sidecar 路由层保持同步入口，通过独立事件循环桥接 async 服务；不要把 sidecar 路由层改成直接 async 运行模型。
+- 残留 Python 数据库访问保持 `async def + aiosqlite`；不要把核心数据库逻辑改回同步。
+- 新实现优先走 Rust crates + `REST /api/...`，不要重新引入 `/api/v1/*` 作为运行时主链。
 - 时间、金额、账户、分类的前后端转换优先放在适配器/转换层，不要在路由或 store 中重复散落。
 
 ## Critical conventions
@@ -99,6 +101,10 @@ Across Copilot-, Claude-, and Codex-adjacent reviewer assets, treat review scope
 .\停止服务器.ps1
 
 # 测试
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90
 .\.venv\Scripts\python.exe -m pytest tests/ -v -n auto --dist loadfile
 .\.venv\Scripts\python.exe -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v -n auto --dist loadfile
 
@@ -111,7 +117,7 @@ npm run lint
 npm run test:coverage
 ```
 
-提交前最低检查：受影响的 pytest 用例通过；只要交付的是代码改动，就必须补一条真实 coverage 命令并满足覆盖率 > 90%；如果改动了业务源码，被改业务代码自身也必须单独达到 90% 覆盖率（优先按 diff 改动的可执行行核算，缺少行级数据时按被改文件核算）；Python 改动至少通过对应模块的 pylint；前端改动至少通过 `npm run lint` 或最小构建验证；接口或金额字段变更时人工复核一次元/分转换。
+提交前最低检查：受影响的 Rust/Python/前端用例通过；只要交付的是代码改动，就必须补一条真实 coverage 命令并满足覆盖率 > 90%；如果改动了业务源码，被改业务代码自身也必须单独达到 90% 覆盖率（优先按 diff 改动的可执行行核算，缺少行级数据时按被改文件核算）；Rust 改动至少通过相关 `cargo test`，风险较高或工作区共享改动补 `cargo clippy --workspace --all-targets -- -D warnings`；Python 改动至少通过对应模块的 pylint；前端改动至少通过 `npm run lint` 或最小构建验证；接口或金额字段变更时人工复核一次元/分转换。
 
 ## Default AI workflow
 
@@ -120,6 +126,7 @@ npm run test:coverage
 - `prompts` 是快捷入口，`agents` 是专项能力；不要把它们当成第二套仓库级规则来源。
 - 普通任务优先保持单 agent、小步修改、就地验证；只有在架构设计、显式代码评审、安全审查、构建故障、关键 E2E 等场景才升级为专项 agent。
 - 按改动路径选择验证动作：
+	- `crates/**`、`Cargo.toml`、`Cargo.lock`：先跑受影响 `cargo test`；共享 runtime/业务代码交付前必须运行 `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings` 与 `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90`
 	- `src/bill_analyser/**`：先跑受影响 pytest / pylint；代码交付前必须运行带 coverage JSON 与 fail-under 的全量 pytest，并满足总覆盖率 > 90% 以及被改业务代码自身覆盖率 > 90%
 	- `src/web/**`：至少运行 `npm run lint`；若交付前端代码，还必须运行 `npm run test:coverage`，并满足总覆盖率 > 90% 以及被改业务代码自身覆盖率 > 90%
 	- `.gitea/**`：先读 `.agents/skills/gitea-ci-cache-discipline/SKILL.md`，运行 `tests/test_gitea_workflows.py`、YAML 解析与 repo agent-stack 健康检查
@@ -127,11 +134,11 @@ npm run test:coverage
 
 ## Audit gate for business-code changes
 
-- 任何业务代码变更（包括 `src/bill_analyser/**` 运行时代码，以及会影响业务行为、导入链路、预算/统计结果、API 契约的相关实现）在准备验收前，必须至少执行一次完整测试套件，并拿到总覆盖率 > 90% 的真实结果：`./.venv/Scripts/python.exe -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v -n auto --dist loadfile`
+- 任何业务代码变更（包括 `crates/**` Rust 运行时代码、`src/bill_analyser/**` 残留 Python sidecar 代码，以及会影响业务行为、导入链路、预算/统计结果、API 契约的相关实现）在准备验收前，必须至少执行一次对应技术栈的完整覆盖率门禁：Rust 使用 `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90`，Python 使用 `./.venv/Scripts/python.exe -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v -n auto --dist loadfile`
 - 业务源码改动还必须单独核算被改代码覆盖率：优先用 `coverage.json` / `lcov.info` 按 diff 新增/修改的可执行行计算，改动行覆盖率必须 > 90%；缺少行级数据时，被改文件的文件级覆盖率必须 > 90%。
 - 开发过程中可以先跑受影响用例做快速反馈，但这不能替代最终的全量测试验收。
-- 只有在全量 pytest 套件执行完成、全部通过、总覆盖率 > 90%，且被改业务代码覆盖率 > 90% 时，才可以视为通过审计验收。
-- 如果没有执行全量测试，或全量测试 / coverage gate 存在任何失败，则该改动必须打回重做，不得以“局部测试通过”代替。
+- 只有在对应技术栈的全量测试 / coverage gate 执行完成、全部通过、总覆盖率 > 90%，且被改业务代码覆盖率 > 90% 时，才可以视为通过审计验收。
+- 如果没有执行对应技术栈的全量测试，或全量测试 / coverage gate 存在任何失败，则该改动必须打回重做，不得以“局部测试通过”代替。
 
 ## Interrupted-session recovery
 
