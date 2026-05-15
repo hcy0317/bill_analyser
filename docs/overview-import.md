@@ -8,10 +8,10 @@
 
 ## 核心模块
 
-- `crates/bill-analyser-parsers`：provider parser 与标准账单结构。
-- `crates/bill-analyser-http/src/import_routes.rs`：导入 HTTP surface、multipart、preview、confirm、learning、LLM/OCR 调用。
-- `crates/bill-analyser-db/src/imports`：session、preview、staging、learning、template mapping 与 confirm repository。
-- `crates/bill-analyser-core/src/import_pipeline.rs`：导入管线合同。
+- `src/backend/parsers`：provider parser 与标准账单结构。
+- `src/backend/http/import_routes/`：导入 HTTP surface、multipart、preview、confirm、learning、LLM/OCR 调用。
+- `src/backend/db/imports`：session、preview、staging、learning、template mapping 与 confirm repository。
+- `src/backend/core/import_pipeline.rs`：导入管线合同。
 
 ## 行为约束
 

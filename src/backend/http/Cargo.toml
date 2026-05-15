@@ -8,13 +8,13 @@ publish = false
 
 [lib]
 name = "bill_analyser_http"
-path = "src/lib.rs"
+path = "lib.rs"
 
 [dependencies]
 axum.workspace = true
-bill-analyser-core = { path = "../bill-analyser-core" }
-bill-analyser-db = { path = "../bill-analyser-db" }
-bill-analyser-parsers = { path = "../bill-analyser-parsers" }
+bill-analyser-core = { path = "../core" }
+bill-analyser-db = { path = "../db" }
+bill-analyser-parsers = { path = "../parsers" }
 base64.workspace = true
 bcrypt.workspace = true
 bytes.workspace = true
@@ -40,6 +40,46 @@ zip.workspace = true
 
 [dev-dependencies]
 tower.workspace = true
+
+[[bin]]
+name = "bill_http_server"
+path = "bin/bill_http_server.rs"
+
+[[test]]
+name = "auth_runtime_contract"
+path = "../../../tests/backend/http/auth_runtime_contract.rs"
+
+[[test]]
+name = "backup_runtime_contract"
+path = "../../../tests/backend/http/backup_runtime_contract.rs"
+
+[[test]]
+name = "bills_runtime_contract"
+path = "../../../tests/backend/http/bills_runtime_contract.rs"
+
+[[test]]
+name = "budget_runtime_contract"
+path = "../../../tests/backend/http/budget_runtime_contract.rs"
+
+[[test]]
+name = "config_runtime_contract"
+path = "../../../tests/backend/http/config_runtime_contract.rs"
+
+[[test]]
+name = "import_runtime_contract"
+path = "../../../tests/backend/http/import_runtime_contract.rs"
+
+[[test]]
+name = "matching_runtime_contract"
+path = "../../../tests/backend/http/matching_runtime_contract.rs"
+
+[[test]]
+name = "statistics_runtime_contract"
+path = "../../../tests/backend/http/statistics_runtime_contract.rs"
+
+[[test]]
+name = "taxonomy_runtime_contract"
+path = "../../../tests/backend/http/taxonomy_runtime_contract.rs"
 
 [lints]
 workspace = true

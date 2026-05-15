@@ -49,7 +49,7 @@ Use this skill when the user asks to run the migrated source command `fix-bill-i
 - `src/web/src/views/desktop/transactions/import/ImportDialog.vue`
 - `src/web/src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue`
 - `src/web/src/models/transaction.ts`
-- 如有必要，检查 `src/bill_analyser/core/bills/` 和 `src/bill_analyser/api/routes/bills/`
+- 如有必要，检查 `src/backend/http/import_routes/`、`src/backend/db/import_staging.rs` 和相关 Rust 导入测试
 
 ## 完成标准
 

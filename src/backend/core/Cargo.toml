@@ -8,7 +8,7 @@ publish = false
 
 [lib]
 name = "bill_analyser_core"
-path = "src/lib.rs"
+path = "lib.rs"
 
 [dependencies]
 chrono.workspace = true
@@ -20,6 +20,78 @@ sha2.workspace = true
 thiserror.workspace = true
 unicode-normalization.workspace = true
 url.workspace = true
+
+[[bin]]
+name = "bill_auth_bridge"
+path = "bin/bill_auth_bridge.rs"
+
+[[bin]]
+name = "bill_category_rule_bridge"
+path = "bin/bill_category_rule_bridge.rs"
+
+[[bin]]
+name = "bill_migration_manifest"
+path = "bin/bill_migration_manifest.rs"
+
+[[test]]
+name = "ai_ocr_llm_contracts"
+path = "../../../tests/backend/core/ai_ocr_llm_contracts.rs"
+
+[[test]]
+name = "auth_security_contracts"
+path = "../../../tests/backend/core/auth_security_contracts.rs"
+
+[[test]]
+name = "bridge_cli_contracts"
+path = "../../../tests/backend/core/bridge_cli_contracts.rs"
+
+[[test]]
+name = "budget_contracts"
+path = "../../../tests/backend/core/budget_contracts.rs"
+
+[[test]]
+name = "import_learning_contracts"
+path = "../../../tests/backend/core/import_learning_contracts.rs"
+
+[[test]]
+name = "import_pipeline_contracts"
+path = "../../../tests/backend/core/import_pipeline_contracts.rs"
+
+[[test]]
+name = "matching_contracts"
+path = "../../../tests/backend/core/matching_contracts.rs"
+
+[[test]]
+name = "migration_governance_contracts"
+path = "../../../tests/backend/core/migration_governance_contracts.rs"
+
+[[test]]
+name = "ops_contracts"
+path = "../../../tests/backend/core/ops_contracts.rs"
+
+[[test]]
+name = "response_contract"
+path = "../../../tests/backend/core/response_contract.rs"
+
+[[test]]
+name = "runtime_contract"
+path = "../../../tests/backend/core/runtime_contract.rs"
+
+[[test]]
+name = "shared_primitives"
+path = "../../../tests/backend/core/shared_primitives.rs"
+
+[[test]]
+name = "smart_dedup_contracts"
+path = "../../../tests/backend/core/smart_dedup_contracts.rs"
+
+[[test]]
+name = "statistics_contracts"
+path = "../../../tests/backend/core/statistics_contracts.rs"
+
+[[test]]
+name = "transaction_adapter_contracts"
+path = "../../../tests/backend/core/transaction_adapter_contracts.rs"
 
 [lints]
 workspace = true

@@ -285,6 +285,6 @@ fn dedicated_rust_parser_rejects_generic_csv_fixture() {
 
 fn import_sample_path(filename: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/fixtures/import_samples")
+        .join("../../../tests/fixtures/import_samples")
         .join(filename)
 }

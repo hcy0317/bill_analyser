@@ -244,6 +244,23 @@ interface ApiDataResponse<T> {
     data: T;
 }
 
+function isPublicNoAuthRequest(url: string): boolean {
+    const normalizedUrl = (url.split('?')[0] || '')
+        .replace(/^\/+/, '')
+        .replace(/^api\/+/, '');
+    return [
+        'auth/login',
+        'auth/register',
+        'auth/email/resend-verification',
+        'auth/email/verify',
+        'auth/password/forgot',
+        'auth/password/reset',
+        '2fa/verify',
+        '2fa/recovery/verify',
+        'auth/oauth2/authorize'
+    ].includes(normalizedUrl);
+}
+
 type MatchingCandidateActionName = 'accept' | 'reject' | 'clear';
 
 interface MatchingCandidateActionResponse {
@@ -766,6 +783,7 @@ logger.info(`[services.ts] Registering request interceptor...`);
 
 axios.interceptors.request.use((config: ApiRequestConfig) => {
     const url = (config as any).url || 'unknown';
+    const effectiveNoAuth = !!config.noAuth || isPublicNoAuthRequest(url);
 
     // 强制日志：验证拦截器是否被调用
     logger.info(`[Interceptor START] ${url}`);
@@ -781,7 +799,7 @@ axios.interceptors.request.use((config: ApiRequestConfig) => {
                 const latestToken = getCurrentToken();
                 logger.info(`[Interceptor] Unblocking ${url}, fetching latest token from storage`);
 
-                if (latestToken && !config.noAuth) {
+                if (latestToken && !effectiveNoAuth) {
                     // 双重保险：同时更新axios.defaults和config.headers
                     axios.defaults.headers.common['Authorization'] = `Bearer ${latestToken}`;
 
@@ -792,7 +810,7 @@ axios.interceptors.request.use((config: ApiRequestConfig) => {
 
                     setAuthorizationHeader(config.headers, latestToken);
                     logger.info(`[Interceptor] ✓ Unblocked ${url} with latest token (defaults+config), length=${latestToken.length}`);
-                } else if (!latestToken && !config.noAuth) {
+                } else if (!latestToken && !effectiveNoAuth) {
                     logger.error(`[Interceptor] ✗ Unblocked ${url} but no token in localStorage!`);
                 } else {
                     logger.info(`[Interceptor] Unblocked ${url} (noAuth request)`);
@@ -815,7 +833,7 @@ axios.interceptors.request.use((config: ApiRequestConfig) => {
         sessionStorage: sessionStorage.getItem('ebk_user_session_token') ? 'exists' : 'missing',
         appLock: isEnableApplicationLock(),
         needBlock: needBlockRequest,
-        noAuth: config.noAuth,
+        noAuth: effectiveNoAuth,
         hasHeaders: !!config.headers,
         headersType: typeof config.headers
     };
@@ -828,7 +846,7 @@ axios.interceptors.request.use((config: ApiRequestConfig) => {
         config.headers = {} as AxiosRequestHeaders;
     }
 
-    if (token && !config.noAuth) {
+    if (token && !effectiveNoAuth) {
         //  终极修复：多种方式确保Authorization头被传递到HTTP请求
         const authValue = `Bearer ${token}`;
 
@@ -876,7 +894,7 @@ axios.interceptors.request.use((config: ApiRequestConfig) => {
         if (!authHeader) {
             logger.error(`[Interceptor] CRITICAL: Authorization not found after set! This should never happen!`);
         }
-    } else if (!config.noAuth) {
+    } else if (!effectiveNoAuth) {
         logger.error(`[Interceptor] ✗ NO TOKEN for ${url}!`, tokenStatus);
     }
 
@@ -973,7 +991,9 @@ export default {
         axios.defaults.headers.common['Accept-Language'] = locale;
     },
     authorize: (data: UserLoginRequest): ApiResponsePromise<AuthResponse> => {
-        return axios.post<ApiResponse<AuthResponse>>('auth/login', data);
+        return axios.post<ApiResponse<AuthResponse>>('auth/login', data, {
+            noAuth: true
+        } as ApiRequestConfig);
     },
     authorize2FA: ({ passcode, token }: { passcode: string, token: string }): ApiResponsePromise<AuthResponse> => {
         return axios.post<ApiResponse<AuthResponse>>('2fa/verify', {
@@ -1010,7 +1030,9 @@ export default {
         } as ApiRequestConfig);
     },
     register: (req: UserRegisterRequest): ApiResponsePromise<RegisterResponse> => {
-        return axios.post<ApiResponse<RegisterResponse>>('auth/register', req);
+        return axios.post<ApiResponse<RegisterResponse>>('auth/register', req, {
+            noAuth: true
+        } as ApiRequestConfig);
     },
     verifyEmail: ({ token, requestNewToken }: { token: string, requestNewToken: boolean }): ApiResponsePromise<UserVerifyEmailResponse> => {
         return axios.post<ApiResponse<UserVerifyEmailResponse>>('auth/email/verify', {
@@ -1022,7 +1044,9 @@ export default {
         } as ApiRequestConfig);
     },
     resendVerifyEmailByUnloginUser: (req: UserResendVerifyEmailRequest): ApiResponsePromise<boolean> => {
-        return axios.post<ApiResponse<boolean>>('auth/email/resend-verification', req);
+        return axios.post<ApiResponse<boolean>>('auth/email/resend-verification', req, {
+            noAuth: true
+        } as ApiRequestConfig);
     },
     requestResetPassword: (req: ForgetPasswordRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('auth/password/forgot', req, {

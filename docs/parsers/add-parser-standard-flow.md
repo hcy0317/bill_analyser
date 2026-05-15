@@ -4,10 +4,10 @@
 
 ## 主要文件
 
-- `crates/bill-analyser-parsers/`
-- `crates/bill-analyser-parsers/tests/fixtures/`
-- `crates/bill-analyser-http/src/import_routes.rs`
-- `crates/bill-analyser-http/tests/import_runtime_contract.rs`
+- `src/backend/parsers/`
+- `tests/backend/parsers/fixtures/`
+- `src/backend/http/import_routes/mod.rs`
+- `tests/backend/http/import_runtime_contract.rs`
 
 ## 工作流
 

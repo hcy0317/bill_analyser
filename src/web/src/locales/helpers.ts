@@ -374,6 +374,7 @@ export function useI18n() {
     }
 
     function getLanguageKeyFromLanguageAlias(alias: string): string | null {
+        alias = alias.replaceAll('_', '-');
         for (const [languageKey, languageInfo] of entries(ALL_LANGUAGES)) {
             if (languageKey.toLowerCase() === alias.toLowerCase()) {
                 return languageKey;
@@ -393,6 +394,20 @@ export function useI18n() {
         }
 
         return null;
+    }
+
+    function normalizeLanguageKey(languageKey: string | null | undefined): string | null {
+        if (!languageKey) {
+            return null;
+        }
+        const normalizedLanguageKey = languageKey.trim().replaceAll('_', '-');
+        if (!normalizedLanguageKey) {
+            return null;
+        }
+        if (ALL_LANGUAGES[normalizedLanguageKey]) {
+            return normalizedLanguageKey;
+        }
+        return getLanguageKeyFromLanguageAlias(normalizedLanguageKey);
     }
 
     function getLanguageKeyFromMarcoLanguageTag(languageTag: string): string | null {
@@ -1548,7 +1563,8 @@ export function useI18n() {
     }
 
     function getLanguageInfo(languageKey: string): LanguageInfo | undefined {
-        return ALL_LANGUAGES[languageKey];
+        const normalizedLanguageKey = normalizeLanguageKey(languageKey);
+        return normalizedLanguageKey ? ALL_LANGUAGES[normalizedLanguageKey] : undefined;
     }
 
     function getMonthShortName(monthName: string): string {
@@ -2195,6 +2211,7 @@ export function useI18n() {
             logger.info(`No specified language, use browser default language ${languageKey}`);
         }
 
+        languageKey = normalizeLanguageKey(languageKey) || languageKey;
         const languageInfo = getLanguageInfo(languageKey);
 
         if (!languageInfo) {
@@ -2287,14 +2304,16 @@ export function useI18n() {
 
     function initLocale(lastUserLanguage?: string, timezone?: string): LocaleDefaultSettings | null {
         const sessionLanguageKey: string = getSessionCurrentLanguageKey();
+        const normalizedLastUserLanguage = normalizeLanguageKey(lastUserLanguage);
+        const normalizedSessionLanguageKey = normalizeLanguageKey(sessionLanguageKey);
         let localeDefaultSettings: LocaleDefaultSettings | null = null;
 
-        if (lastUserLanguage && getLanguageInfo(lastUserLanguage)) {
-            logger.info(`Last user language is ${lastUserLanguage}`);
-            localeDefaultSettings = setLanguage(lastUserLanguage, true);
-        } else if (sessionLanguageKey && getLanguageInfo(sessionLanguageKey)) {
-            logger.info(`Session language is ${sessionLanguageKey}`);
-            localeDefaultSettings = setLanguage(sessionLanguageKey, true);
+        if (normalizedLastUserLanguage && getLanguageInfo(normalizedLastUserLanguage)) {
+            logger.info(`Last user language is ${normalizedLastUserLanguage}`);
+            localeDefaultSettings = setLanguage(normalizedLastUserLanguage, true);
+        } else if (normalizedSessionLanguageKey && getLanguageInfo(normalizedSessionLanguageKey)) {
+            logger.info(`Session language is ${normalizedSessionLanguageKey}`);
+            localeDefaultSettings = setLanguage(normalizedSessionLanguageKey, true);
         } else {
             localeDefaultSettings = setLanguage(null, true);
         }

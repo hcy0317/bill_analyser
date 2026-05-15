@@ -62,9 +62,10 @@
 
 ## 验证基线
 
-### `crates/**`
+### `src/backend/**`
 
 - 先跑受影响 `cargo test`
+- Rust 集成/契约测试源码放在 `tests/backend/*`，不要再放回 crate-local `tests/` 目录
 - 共享 runtime 或业务代码改动补：
   - `cargo fmt --all -- --check`
   - `cargo clippy --workspace --all-targets -- -D warnings`

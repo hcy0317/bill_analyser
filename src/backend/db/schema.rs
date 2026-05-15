@@ -1129,17 +1129,17 @@ pub fn schema_inventory() -> SchemaInventory {
             SchemaResponsibility {
                 legacy_area: "runtime connection",
                 rust_mapping:
-                    "crates/bill-analyser-db/src/connection.rs; crates/bill-analyser-db/src/path.rs",
+                    "src/backend/db/connection.rs; src/backend/db/path.rs",
                 status: "foundational",
             },
             SchemaResponsibility {
                 legacy_area: "user scope helpers",
-                rust_mapping: "crates/bill-analyser-db/src/user_scope.rs",
+                rust_mapping: "src/backend/db/user_scope.rs",
                 status: "foundational",
             },
             SchemaResponsibility {
                 legacy_area: "time normalization",
-                rust_mapping: "crates/bill-analyser-core/src/time.rs",
+                rust_mapping: "src/backend/core/time.rs",
                 status: "foundational",
             },
             SchemaResponsibility {
@@ -1149,32 +1149,32 @@ pub fn schema_inventory() -> SchemaInventory {
             },
             SchemaResponsibility {
                 legacy_area: "schema initializer",
-                rust_mapping: "crates/bill-analyser-db/src/schema.rs",
+                rust_mapping: "src/backend/db/schema.rs",
                 status: "foundational",
             },
             SchemaResponsibility {
                 legacy_area: "business table DDL",
-                rust_mapping: "crates/bill-analyser-db/src/schema.rs",
+                rust_mapping: "src/backend/db/schema.rs",
                 status: "foundational",
             },
             SchemaResponsibility {
                 legacy_area: "core indexes",
-                rust_mapping: "crates/bill-analyser-db/src/schema.rs",
+                rust_mapping: "src/backend/db/schema.rs",
                 status: "foundational",
             },
             SchemaResponsibility {
                 legacy_area: "legacy ALTER migrations",
-                rust_mapping: "crates/bill-analyser-db/src/schema.rs",
+                rust_mapping: "src/backend/db/schema.rs",
                 status: "foundational",
             },
             SchemaResponsibility {
                 legacy_area: "templates and import staging",
-                rust_mapping: "crates/bill-analyser-db/src/import_staging.rs; crates/bill-analyser-db/src/taxonomy",
+                rust_mapping: "src/backend/db/import_staging.rs; src/backend/db/taxonomy",
                 status: "foundational",
             },
             SchemaResponsibility {
                 legacy_area: "users and security schema",
-                rust_mapping: "crates/bill-analyser-db/src/schema.rs covers auth/security users/session/cloud schema; crates/bill-analyser-db/src/app_settings.rs covers app_settings/OCR config subset; crates/bill-analyser-db/src/backup.rs covers audit_logs/backup_records/backup_jobs for ops runtime",
+                rust_mapping: "src/backend/db/schema.rs covers auth/security users/session/cloud schema; src/backend/db/app_settings.rs covers app_settings/OCR config subset; src/backend/db/backup.rs covers audit_logs/backup_records/backup_jobs for ops runtime",
                 status: "foundational",
             },
         ],

@@ -1,27 +1,26 @@
 ---
 name: 'bill-analyser-repo-topology'
-description: 'Bill Analyser 仓库拓扑与边界：canonical sources、source-of-truth/generated/runtime-state/temp/diagnostics/backups 分桶、测试 taxonomy、db facade + shards/mixins、route/adapter 边界与 protected zones。'
-applyTo: 'AGENTS.md,CLAUDE.md,README.md,Cargo.toml,Cargo.lock,pyproject.toml,pytest.ini,*.ps1,*.bat,docs/**,scripts/**,crates/**,src/bill_analyser/**,src/web/src/**,src/web/node_modules/**,tests/**,.github/**,.agents/**,.claude/**,.tmp/**,backup/**,output/**,logs/**,uploads/**,data/**'
+description: 'Bill Analyser 仓库拓扑与边界：canonical sources、source-of-truth/generated/runtime-state/temp/diagnostics/backups 分桶、测试 taxonomy、Rust backend、route/adapter 边界与 protected zones。'
+applyTo: 'AGENTS.md,CLAUDE.md,README.md,Cargo.toml,Cargo.lock,*.ps1,*.bat,docs/**,scripts/**,src/backend/**,src/web/src/**,src/web/node_modules/**,tests/**,.github/**,.agents/**,.claude/**,.tmp/**,backup/**,output/**,logs/**,uploads/**,data/**'
 ---
 
 # Bill Analyser Repository Topology
 
-> This file captures Bill Analyser-specific repository topology and edit-boundary facts that generic common/python/typescript rules do not cover.
+> This file captures Bill Analyser-specific repository topology and edit-boundary facts that generic common/typescript rules do not cover.
 
 ## Canonical Sources
 
 - Restore repository intent from `AGENTS.md` and `docs/PROJECT_OVERVIEW.md`.
-- Validate Rust backend runtime topology against `crates/**`, residual Python sidecar topology against `src/bill_analyser/**`, and frontend runtime topology against `src/web/src/**`.
+- Validate Rust backend runtime topology against `src/backend/**` and frontend runtime topology against `src/web/src/**`.
 - Treat `.github/**`, `.agents/**`, and `.claude/**` as committed AI customization surfaces, not `.tmp/**` or other unpacked copies.
 - Use `tests/test_repository_layout.py` and `scripts/hooks/pre_tool_repo_guard.py` as layout/governance evidence when deciding where code or artifacts should live.
-- Rust runtime code belongs under `crates/**`; residual runtime Python sidecar code must stay under `src/bill_analyser/**`. Do not reintroduce runtime files under top-level shadow directories such as `src/api/`, `src/core/`, `src/parsers/`, `src/utils/`, `src/data/`, or `src/uploads/`.
+- Rust runtime code belongs under `src/backend/**`. Do not reintroduce Python runtime code or top-level shadow directories such as `src/api/`, `src/core/`, `src/parsers/`, `src/utils/`, `src/data/`, or `src/uploads/`.
 - Runtime log artifacts belong in root `logs/`, not `src/logs/`.
 
 ## Path Buckets
 
 - **source-of-truth**
-  - `src/bill_analyser/**`
-  - `crates/**`
+  - `src/backend/**`
   - `src/web/src/**`
   - `tests/**`
   - `scripts/**`
@@ -29,7 +28,7 @@ applyTo: 'AGENTS.md,CLAUDE.md,README.md,Cargo.toml,Cargo.lock,pyproject.toml,pyt
   - `.github/**`
   - `.agents/**`
   - `.claude/**`
-  - `AGENTS.md`, `CLAUDE.md`, `README.md`, `pyproject.toml`, `pytest.ini`
+  - `AGENTS.md`, `CLAUDE.md`, `README.md`
   - Default promotion and long-lived edit targets.
 
 - **generated**
@@ -67,30 +66,22 @@ applyTo: 'AGENTS.md,CLAUDE.md,README.md,Cargo.toml,Cargo.lock,pyproject.toml,pyt
 
 ## Testing Taxonomy
 
-- `tests/domains/**` is the primary domain unit/integration regression tree for active business behavior.
-- `tests/new_ui/**` is the active REST/API contract and legacy-404 regression tree.
+- `tests/backend/**` is the Rust backend integration and contract test tree; package manifests expose these tests to `cargo test --workspace`.
 - `tests/web/**` is the frontend test root; keep frontend tests there instead of under `src/web/src/**`.
 - Root-level `tests/check_*`, `tests/debug_*`, `tests/quick_*`, `tests/manual_test_*`, and `tests/e2e_*` are diagnostic or historical helpers; treat them as supporting evidence, not as the final authority by themselves.
 - `tests/test_repository_layout.py` is a repository topology/layout regression, not a normal business-flow spec.
 
-## DB Façade + Shards / Mixins
+## Rust Backend
 
-- New Rust-owned persistence/runtime work belongs in `crates/bill-analyser-db` or the owning Rust crate; keep the Python façade rules below for residual sidecar and compatibility code.
-- External callers should continue importing `Database` from `src/bill_analyser/core/db.py`.
-- Keep `db.py` thin: it is the public async facade, not the place to re-expand all domain logic.
-- Keep persistence split by domain/runtime/schema under `src/bill_analyser/core/database/**`.
-- Keep schema orchestration in `src/bill_analyser/core/database/schema/` plus its `core/`, `templates_imports/`, and `users_security.py` shards.
-- Do not add new root-level `src/bill_analyser/core/db_*` implementation modules or packages.
-- Do not bypass the façade by teaching routes or services to assemble mixins directly.
-- When refactoring persistence, preserve the façade-plus-shards structure instead of collapsing multiple domains back into one large module.
+- New persistence/runtime work belongs in `src/backend/db` or the owning Rust crate.
+- Keep HTTP request handling in `src/backend/http`, shared business contracts in `src/backend/core`, and parser-only behavior in `src/backend/parsers`.
+- Keep oversized Rust route files split by functional domain directories rather than re-growing single-file route modules.
 
 ## Route / Adapter Boundary
 
-- New Rust-owned HTTP orchestration and request/auth handling belong in `crates/bill-analyser-http/**`.
-- Keep residual Python sidecar HTTP orchestration and request/auth handling in `src/bill_analyser/api/routes/**`.
-- Put Rust-owned API field-shape, time, money, account, category, and transaction conversion logic in the owning Rust HTTP/domain crate, usually `crates/bill-analyser-http/**` or the corresponding `crates/bill-analyser-*` crate.
-- Put residual Python sidecar conversion logic in `src/bill_analyser/api/adapters/**`.
-- Prefer the neutral adapter modules such as `transaction_adapter.py`, `account_adapter.py`, and `category_adapter.py`; do not recreate legacy `v1_*` adapter wrappers.
+- New Rust-owned HTTP orchestration and request/auth handling belong in `src/backend/http/**`.
+- Put Rust-owned API field-shape, time, money, account, category, and transaction conversion logic in the owning Rust HTTP/domain crate, usually `src/backend/http/**` or the corresponding `src/backend/*` crate.
+- Do not recreate legacy `v1_*` adapter wrappers.
 - Do not duplicate contract conversion logic across routes, services, and frontend stores. If a mapping is reused or contract-sensitive, move it to an adapter.
 
 ## Protected / No-Edit Zones

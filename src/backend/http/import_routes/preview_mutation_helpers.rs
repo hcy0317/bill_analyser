@@ -1,0 +1,818 @@
+fn bool_field_from_object(object: &Map<String, Value>, keys: &[&str]) -> Option<bool> {
+    first_value(object, keys).and_then(|value| match value {
+        Value::Bool(value) => Some(*value),
+        Value::Number(number) => number.as_i64().map(|value| value != 0),
+        Value::String(text) => match text.trim().to_ascii_lowercase().as_str() {
+            "true" | "1" | "yes" | "y" => Some(true),
+            "false" | "0" | "no" | "n" => Some(false),
+            _ => None,
+        },
+        Value::Null | Value::Array(_) | Value::Object(_) => None,
+    })
+}
+
+fn id_list_field_from_object(object: &Map<String, Value>, keys: &[&str]) -> Option<Vec<i64>> {
+    first_value(object, keys).and_then(|value| {
+        let ids = value
+            .as_array()?
+            .iter()
+            .filter_map(value_to_i64)
+            .filter(|id| *id > 0)
+            .collect::<Vec<_>>();
+        Some(ids)
+    })
+}
+
+fn limited_id_list_field_from_object(
+    object: &Map<String, Value>,
+    keys: &[&str],
+    limit: usize,
+) -> Result<Option<Vec<i64>>, ImportV2RouteResponse> {
+    let Some(value) = first_value(object, keys) else {
+        return Ok(None);
+    };
+    let Some(values) = value.as_array() else {
+        return Err(llm_contract_error_response(
+            "ID list fields must be arrays",
+            "INVALID_REQUEST",
+            400,
+        ));
+    };
+    let mut seen_ids = BTreeSet::new();
+    let mut ids = Vec::new();
+    for value in values {
+        let Some(id) = value_to_i64(value) else {
+            return Err(llm_contract_error_response(
+                "ID list fields must contain integer IDs",
+                "INVALID_REQUEST",
+                400,
+            ));
+        };
+        if id <= 0 || !seen_ids.insert(id) {
+            continue;
+        }
+        ids.push(id);
+    }
+    if ids.len() > limit {
+        return Err(preview_selection_too_large_response());
+    }
+    Ok(Some(ids))
+}
+
+fn preview_selection_too_large_response() -> ImportV2RouteResponse {
+    llm_contract_error_response(
+        "Selected preview rows exceed the maximum batch size",
+        "PREVIEW_SELECTION_TOO_LARGE",
+        422,
+    )
+}
+
+fn generate_import_session_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let counter = IMPORT_SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("rust-import-{nanos}-{counter}")
+}
+
+fn usize_to_i64(value: usize) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
+}
+
+fn preview_update_items_from_payload(
+    payload: &Value,
+) -> Result<Vec<&Map<String, Value>>, ImportV2RouteResponse> {
+    let object = payload_object(payload)?;
+    let Some(updates) = first_value(object, &["preview_updates", "previewUpdates"]) else {
+        return Ok(Vec::new());
+    };
+    let updates = updates
+        .as_array()
+        .ok_or_else(|| import_v2_error_response(400, "Invalid request"))?;
+    let mut items = Vec::with_capacity(updates.len());
+    for item in updates {
+        items.push(payload_object(item)?);
+    }
+    Ok(items)
+}
+
+fn limited_preview_update_items_from_payload(
+    payload: &Value,
+    limit: usize,
+) -> Result<Vec<&Map<String, Value>>, ImportV2RouteResponse> {
+    let items = preview_update_items_from_payload(payload)?;
+    if items.len() > limit {
+        return Err(preview_selection_too_large_response());
+    }
+    Ok(items)
+}
+
+fn preview_id_from_payload(object: &Map<String, Value>) -> Result<i64, ImportV2RouteResponse> {
+    first_value(object, &["id", "preview_id", "previewId"])
+        .and_then(value_to_i64)
+        .filter(|value| *value > 0)
+        .ok_or_else(|| import_v2_error_response(400, "Missing bill id"))
+}
+
+fn build_preview_patch_from_payload(
+    preview_id: i64,
+    object: &Map<String, Value>,
+) -> ImportPreviewPatch {
+    let mut changes = Vec::new();
+    push_text_change(
+        &mut changes,
+        object,
+        &["date", "preview_date", "previewDate"],
+        ImportPreviewPatchField::Date,
+    );
+    push_preview_type_change(
+        &mut changes,
+        object,
+        &["type", "preview_type", "previewType"],
+    );
+    push_real_change(
+        &mut changes,
+        object,
+        &["amount", "preview_amount", "previewAmount"],
+        ImportPreviewPatchField::Amount,
+    );
+    push_real_change(
+        &mut changes,
+        object,
+        &[
+            "destinationAmount",
+            "preview_destination_amount",
+            "previewDestinationAmount",
+        ],
+        ImportPreviewPatchField::DestinationAmount,
+    );
+    push_text_change(
+        &mut changes,
+        object,
+        &[
+            "mainCategory",
+            "preview_main_category",
+            "previewMainCategory",
+        ],
+        ImportPreviewPatchField::MainCategory,
+    );
+    push_text_change(
+        &mut changes,
+        object,
+        &["subCategory", "preview_sub_category", "previewSubCategory"],
+        ImportPreviewPatchField::SubCategory,
+    );
+    push_nullable_i64_change(
+        &mut changes,
+        object,
+        &[
+            "sourceAccountId",
+            "preview_source_account_id",
+            "previewSourceAccountId",
+        ],
+        ImportPreviewPatchField::SourceAccountId,
+    );
+    push_nullable_i64_change(
+        &mut changes,
+        object,
+        &[
+            "destinationAccountId",
+            "preview_destination_account_id",
+            "previewDestinationAccountId",
+        ],
+        ImportPreviewPatchField::DestinationAccountId,
+    );
+    push_text_change(
+        &mut changes,
+        object,
+        &[
+            "counterparty",
+            "preview_counterparty",
+            "previewCounterparty",
+        ],
+        ImportPreviewPatchField::Counterparty,
+    );
+    push_text_change(
+        &mut changes,
+        object,
+        &[
+            "paymentMethod",
+            "preview_payment_method",
+            "previewPaymentMethod",
+        ],
+        ImportPreviewPatchField::PaymentMethod,
+    );
+    push_text_change(
+        &mut changes,
+        object,
+        &["description", "preview_description", "previewDescription"],
+        ImportPreviewPatchField::Description,
+    );
+    push_nullable_i64_change(
+        &mut changes,
+        object,
+        &["recurringId", "preview_recurring_id", "previewRecurringId"],
+        ImportPreviewPatchField::RecurringId,
+    );
+    push_text_change(
+        &mut changes,
+        object,
+        &[
+            "recurringName",
+            "preview_recurring_name",
+            "previewRecurringName",
+        ],
+        ImportPreviewPatchField::RecurringName,
+    );
+    push_i64_change(
+        &mut changes,
+        object,
+        &[
+            "recurringCandidateCount",
+            "preview_recurring_candidate_count",
+            "previewRecurringCandidateCount",
+        ],
+        ImportPreviewPatchField::RecurringCandidateCount,
+    );
+    push_real_change(
+        &mut changes,
+        object,
+        &[
+            "recurringMatchScore",
+            "preview_recurring_match_score",
+            "previewRecurringMatchScore",
+        ],
+        ImportPreviewPatchField::RecurringMatchScore,
+    );
+    push_text_change(
+        &mut changes,
+        object,
+        &[
+            "recurringMatchReasons",
+            "preview_recurring_match_reasons",
+            "previewRecurringMatchReasons",
+        ],
+        ImportPreviewPatchField::RecurringMatchReasons,
+    );
+    push_text_change(
+        &mut changes,
+        object,
+        &[
+            "recurringMatchedDate",
+            "preview_recurring_matched_date",
+            "previewRecurringMatchedDate",
+        ],
+        ImportPreviewPatchField::RecurringMatchedDate,
+    );
+    if let Some(value) = first_value(object, &["isSelected", "selected", "preview_selected"]) {
+        changes.push((
+            ImportPreviewPatchField::Selected,
+            ImportPreviewPatchValue::Bool(coerce_preview_selected_value(Some(value), true)),
+        ));
+    }
+    if let Some(value) = first_value(
+        object,
+        &[
+            "matchingFeedback",
+            "preview_matching_feedback",
+            "previewMatchingFeedback",
+        ],
+    ) {
+        changes.push((
+            ImportPreviewPatchField::MatchingFeedback,
+            ImportPreviewPatchValue::Json(value.clone()),
+        ));
+    }
+
+    let mut patch = ImportPreviewPatch::new(preview_id).with_changes(changes);
+    if first_value(
+        object,
+        &["clear_transfer_decision", "clearTransferDecision"],
+    )
+    .is_some_and(|value| coerce_preview_selected_value(Some(value), false))
+    {
+        patch = patch.with_transfer_decision_cleared();
+    }
+    patch
+}
+
+fn apply_preview_updates_from_payload(
+    runtime: &mut SqliteRuntime,
+    session_id: &str,
+    user_id: UserId,
+    payload: &Value,
+) -> Result<usize, ImportV2RouteResponse> {
+    let update_items = preview_update_items_from_payload(payload)?;
+    if update_items.is_empty() {
+        return Ok(0);
+    }
+
+    let mut patches = Vec::with_capacity(update_items.len());
+    for item in update_items {
+        let preview_id = preview_id_from_payload(item)?;
+        match get_preview_bill_by_id(runtime.connection(), preview_id, user_id) {
+            Ok(Some(preview)) if preview.session_id == session_id => {}
+            Ok(Some(_)) | Ok(None) => {
+                return Err(import_v2_error_response(404, "Preview bill not found"));
+            }
+            Err(error) => return Err(db_error_response(error)),
+        }
+        patches.push(build_preview_patch_from_payload(preview_id, item));
+    }
+    update_preview_bills_batch(runtime.connection_mut(), session_id, user_id, &patches)
+        .map_err(db_error_response)
+}
+
+fn preview_ids_from_payload(payload: &Value) -> Vec<i64> {
+    let Ok(object) = payload_object(payload) else {
+        return Vec::new();
+    };
+    let mut preview_ids = Vec::new();
+    if let Some(value) = first_value(object, &["preview_ids", "previewIds"]) {
+        match value {
+            Value::Array(values) => {
+                preview_ids.extend(values.iter().filter_map(value_to_i64).filter(|id| *id > 0));
+            }
+            other => {
+                if let Some(preview_id) = value_to_i64(other).filter(|id| *id > 0) {
+                    preview_ids.push(preview_id);
+                }
+            }
+        }
+    }
+    if preview_ids.is_empty() {
+        if let Ok(items) = preview_update_items_from_payload(payload) {
+            preview_ids.extend(
+                items
+                    .iter()
+                    .filter_map(|item| preview_id_from_payload(item).ok()),
+            );
+        }
+    }
+    preview_ids.sort_unstable();
+    preview_ids.dedup();
+    preview_ids
+}
+
+fn expected_state_from_payload(
+    object: &Map<String, Value>,
+) -> Result<ImportPreviewExpectedState, ImportV2RouteResponse> {
+    let expected_state = first_value(object, &["expectedState", "expected_state"])
+        .and_then(Value::as_object)
+        .ok_or_else(|| import_v2_error_response(400, "Invalid request"))?;
+    Ok(ImportPreviewExpectedState {
+        session_id: first_value(expected_state, &["sessionId", "session_id"])
+            .and_then(value_to_text),
+        preview_type: first_value(expected_state, &["type", "previewType", "preview_type"])
+            .and_then(value_to_text),
+        preview_main_category: first_value(
+            expected_state,
+            &[
+                "mainCategory",
+                "previewMainCategory",
+                "preview_main_category",
+            ],
+        )
+        .and_then(value_to_text),
+        preview_sub_category: first_value(
+            expected_state,
+            &["subCategory", "previewSubCategory", "preview_sub_category"],
+        )
+        .and_then(value_to_text),
+        preview_recurring_id: optional_id_field_from_object(
+            expected_state,
+            &[
+                "recurringTemplateId",
+                "recurringId",
+                "previewRecurringId",
+                "preview_recurring_id",
+            ],
+        ),
+        preview_source_account_id: optional_id_field_from_object(
+            expected_state,
+            &[
+                "sourceAccountId",
+                "previewSourceAccountId",
+                "preview_source_account_id",
+            ],
+        ),
+        preview_destination_account_id: optional_id_field_from_object(
+            expected_state,
+            &[
+                "destinationAccountId",
+                "previewDestinationAccountId",
+                "preview_destination_account_id",
+            ],
+        ),
+        preview_matching_feedback: first_value(
+            expected_state,
+            &[
+                "matchingFeedback",
+                "previewMatchingFeedback",
+                "preview_matching_feedback",
+            ],
+        )
+        .cloned(),
+    })
+}
+
+fn optional_id_field_from_object(
+    object: &Map<String, Value>,
+    keys: &[&str],
+) -> Option<Option<i64>> {
+    first_value(object, keys).map(|value| match value_to_i64(value) {
+        Some(value) if value > 0 => Some(value),
+        _ => None,
+    })
+}
+
+fn decision_from_payload(
+    object: &Map<String, Value>,
+) -> Result<ImportPreviewDecision, ImportV2RouteResponse> {
+    let decision = first_value(object, &["decision"])
+        .and_then(value_to_text)
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    match decision.as_str() {
+        "accept" | "accepted" => Ok(ImportPreviewDecision::Accept),
+        "reject" | "rejected" => Ok(ImportPreviewDecision::Reject),
+        "clear" | "cleared" => Ok(ImportPreviewDecision::Clear),
+        _ => Err(import_v2_error_response(400, "Invalid decision")),
+    }
+}
+
+fn decision_name(decision: ImportPreviewDecision) -> &'static str {
+    match decision {
+        ImportPreviewDecision::Accept => "accept",
+        ImportPreviewDecision::Reject => "reject",
+        ImportPreviewDecision::Clear => "clear",
+    }
+}
+
+fn recurring_candidate_from_payload(
+    object: &Map<String, Value>,
+    recurring_id: i64,
+) -> Option<ImportPreviewRecurringCandidate> {
+    let candidate = first_value(
+        object,
+        &[
+            "candidate",
+            "targetCandidate",
+            "target_candidate",
+            "recurringCandidate",
+            "recurring_candidate",
+        ],
+    )
+    .and_then(Value::as_object)?;
+    Some(ImportPreviewRecurringCandidate {
+        id: first_value(candidate, &["id", "recurringId", "recurring_id"])
+            .and_then(value_to_i64)
+            .unwrap_or(recurring_id),
+        name: first_value(candidate, &["name", "recurringName", "recurring_name"])
+            .and_then(value_to_text)
+            .unwrap_or_default(),
+        match_score: first_value(candidate, &["matchScore", "match_score"])
+            .and_then(value_to_f64)
+            .unwrap_or_default(),
+        match_reasons: match_reasons_from_value(first_value(
+            candidate,
+            &["matchReasons", "match_reasons"],
+        )),
+        matched_occurrence_date: first_value(
+            candidate,
+            &["matchedOccurrenceDate", "matched_occurrence_date"],
+        )
+        .and_then(value_to_text)
+        .unwrap_or_default(),
+    })
+}
+
+fn recurring_candidate_count_from_payload(
+    object: &Map<String, Value>,
+    target_candidate: Option<&ImportPreviewRecurringCandidate>,
+) -> i64 {
+    first_value(
+        object,
+        &[
+            "candidateCount",
+            "candidate_count",
+            "recurringCandidateCount",
+            "previewRecurringCandidateCount",
+            "preview_recurring_candidate_count",
+        ],
+    )
+    .and_then(value_to_i64)
+    .unwrap_or_else(|| i64::from(target_candidate.is_some()))
+}
+
+fn match_reasons_from_value(value: Option<&Value>) -> Vec<String> {
+    match value {
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(value_to_text)
+            .map(|text| text.trim().to_string())
+            .filter(|text| !text.is_empty())
+            .collect(),
+        Some(value) => value_to_text(value)
+            .unwrap_or_default()
+            .split(['|', ','])
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_string)
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
+fn preview_decision_result_response(
+    result: ImportPreviewDecisionResult,
+    extra: Value,
+) -> ImportV2RouteResponse {
+    if result.state_conflict {
+        return preview_state_conflict_response();
+    }
+    if result.invalid_recurring_id {
+        return import_v2_error_response(400, "Invalid recurringId");
+    }
+    let Some(preview) = result.preview else {
+        return import_v2_error_response(404, "Preview bill not found");
+    };
+    let preview_id = preview.id;
+    let session_id = preview.session_id.clone();
+    let preview_item = preview_row_to_value(preview);
+    let mut data = json!({
+        "previewId": preview_id,
+        "sessionId": session_id,
+        "previewItem": preview_item.clone(),
+        "preview": [preview_item],
+    });
+    if let (Some(data), Some(extra)) = (data.as_object_mut(), extra.as_object()) {
+        for (key, value) in extra {
+            data.insert(key.clone(), value.clone());
+        }
+    }
+    import_v2_data_response(data)
+}
+
+fn llm_suggestion_from_value(value: &Value) -> Option<ImportPreviewLlmSuggestion> {
+    let object = value.as_object()?;
+    let suggestion = ImportPreviewLlmSuggestion {
+        suggested_main_category: first_value(
+            object,
+            &[
+                "suggested_main_category",
+                "suggestedMainCategory",
+                "mainCategory",
+                "main_category",
+            ],
+        )
+        .and_then(value_to_text)
+        .unwrap_or_default(),
+        suggested_sub_category: first_value(
+            object,
+            &[
+                "suggested_sub_category",
+                "suggestedSubCategory",
+                "subCategory",
+                "sub_category",
+            ],
+        )
+        .and_then(value_to_text)
+        .unwrap_or_default(),
+        suggested_source_account: first_value(
+            object,
+            &[
+                "suggested_source_account",
+                "suggestedSourceAccount",
+                "sourceAccount",
+                "source_account",
+            ],
+        )
+        .and_then(value_to_text)
+        .unwrap_or_default(),
+        suggested_destination_account: first_value(
+            object,
+            &[
+                "suggested_destination_account",
+                "suggestedDestinationAccount",
+                "destinationAccount",
+                "destination_account",
+            ],
+        )
+        .and_then(value_to_text)
+        .unwrap_or_default(),
+        resolved_source_account_id: first_value(
+            object,
+            &[
+                "resolved_source_account_id",
+                "resolvedSourceAccountId",
+                "sourceAccountId",
+                "source_account_id",
+            ],
+        )
+        .and_then(value_to_i64)
+        .filter(|value| *value > 0),
+        resolved_destination_account_id: first_value(
+            object,
+            &[
+                "resolved_destination_account_id",
+                "resolvedDestinationAccountId",
+                "destinationAccountId",
+                "destination_account_id",
+            ],
+        )
+        .and_then(value_to_i64)
+        .filter(|value| *value > 0),
+        confidence: first_value(object, &["confidence"])
+            .and_then(value_to_f64)
+            .unwrap_or_default(),
+        reason: first_value(object, &["reason"])
+            .and_then(value_to_text)
+            .unwrap_or_default(),
+    };
+    Some(suggestion)
+}
+
+fn llm_decision_result_response(
+    result: ImportPreviewLlmDecisionResult,
+    session_id: &str,
+    preview_id: i64,
+    decision: &str,
+) -> ImportV2RouteResponse {
+    let Some(preview) = result.preview else {
+        return import_v2_error_response(404, "Preview recommendation is no longer available");
+    };
+    let llm_payload = preview
+        .preview_matching_feedback
+        .get("llm")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let preview = preview_row_to_value(preview);
+    import_v2_data_response(json!({
+        "session_id": session_id,
+        "preview_id": preview_id,
+        "preview": preview,
+        "matching": {"llm": llm_payload},
+        "event_id": result.event_id,
+        "applied_fields": result.applied_fields,
+        "decision": decision,
+        "restored": result.restored,
+    }))
+}
+
+fn first_value<'a>(object: &'a Map<String, Value>, keys: &[&str]) -> Option<&'a Value> {
+    keys.iter().find_map(|key| object.get(*key))
+}
+
+fn push_text_change(
+    changes: &mut Vec<(ImportPreviewPatchField, ImportPreviewPatchValue)>,
+    object: &Map<String, Value>,
+    keys: &[&str],
+    field: ImportPreviewPatchField,
+) {
+    if let Some(value) = first_value(object, keys).and_then(value_to_text) {
+        changes.push((field, ImportPreviewPatchValue::Text(value)));
+    }
+}
+
+fn push_preview_type_change(
+    changes: &mut Vec<(ImportPreviewPatchField, ImportPreviewPatchValue)>,
+    object: &Map<String, Value>,
+    keys: &[&str],
+) {
+    if let Some(value) = first_value(object, keys).and_then(value_to_preview_type_text) {
+        changes.push((
+            ImportPreviewPatchField::Type,
+            ImportPreviewPatchValue::Text(value),
+        ));
+    }
+}
+
+fn push_real_change(
+    changes: &mut Vec<(ImportPreviewPatchField, ImportPreviewPatchValue)>,
+    object: &Map<String, Value>,
+    keys: &[&str],
+    field: ImportPreviewPatchField,
+) {
+    if let Some(value) = first_value(object, keys).and_then(value_to_f64) {
+        changes.push((field, ImportPreviewPatchValue::Real(value)));
+    }
+}
+
+fn push_i64_change(
+    changes: &mut Vec<(ImportPreviewPatchField, ImportPreviewPatchValue)>,
+    object: &Map<String, Value>,
+    keys: &[&str],
+    field: ImportPreviewPatchField,
+) {
+    if let Some(value) = first_value(object, keys).and_then(value_to_i64) {
+        changes.push((field, ImportPreviewPatchValue::Integer(value)));
+    }
+}
+
+fn push_nullable_i64_change(
+    changes: &mut Vec<(ImportPreviewPatchField, ImportPreviewPatchValue)>,
+    object: &Map<String, Value>,
+    keys: &[&str],
+    field: ImportPreviewPatchField,
+) {
+    if let Some(value) = first_value(object, keys) {
+        let patch_value = match value_to_i64(value) {
+            Some(value) if value > 0 => ImportPreviewPatchValue::Integer(value),
+            _ => ImportPreviewPatchValue::Null,
+        };
+        changes.push((field, patch_value));
+    }
+}
+
+fn value_to_text(value: &Value) -> Option<String> {
+    match value {
+        Value::Null => None,
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Array(_) | Value::Object(_) => Some(value.to_string()),
+    }
+}
+
+fn value_to_preview_type_text(value: &Value) -> Option<String> {
+    if let Some(label) = value_to_i64(value).and_then(transaction_type_label_from_i64) {
+        return Some(label.to_string());
+    }
+    let text = value_to_text(value)?;
+    normalize_transaction_type_text(&text)
+}
+
+fn normalize_transaction_type_text(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let normalized = match trimmed.to_ascii_lowercase().as_str() {
+        "expense" => "支出",
+        "income" => "收入",
+        "transfer" => "转账",
+        "investment" => "投资",
+        _ => trimmed,
+    };
+    Some(normalized.to_string())
+}
+
+fn value_to_i64(value: &Value) -> Option<i64> {
+    match value {
+        Value::Null => None,
+        Value::Number(number) => number
+            .as_i64()
+            .or_else(|| number.as_u64().and_then(|value| i64::try_from(value).ok())),
+        Value::String(text) => {
+            let text = text.trim();
+            if text.is_empty() {
+                None
+            } else {
+                text.parse::<i64>().ok()
+            }
+        }
+        Value::Bool(value) => Some(i64::from(*value)),
+        Value::Array(_) | Value::Object(_) => None,
+    }
+}
+
+fn value_to_f64(value: &Value) -> Option<f64> {
+    match value {
+        Value::Null => None,
+        Value::Number(number) => number.as_f64(),
+        Value::String(text) => {
+            let text = text.trim();
+            if text.is_empty() {
+                None
+            } else {
+                text.parse::<f64>().ok()
+            }
+        }
+        Value::Bool(value) => Some(f64::from(u8::from(*value))),
+        Value::Array(_) | Value::Object(_) => None,
+    }
+}
+
+fn response_mode_is_preview_item(object: &Map<String, Value>) -> bool {
+    first_value(object, &["responseMode", "response_mode"]).is_some_and(|value| {
+        value
+            .as_str()
+            .is_some_and(|text| text.eq_ignore_ascii_case("preview-item"))
+    })
+}
+
+fn preview_row_to_value(row: ImportPreviewRow) -> Value {
+    serde_json::to_value(row).unwrap_or_else(|_| json!({}))
+}
+
+fn preview_row_is_categorized(row: &&ImportPreviewRow) -> bool {
+    !row.preview_main_category.trim().is_empty() || !row.preview_sub_category.trim().is_empty()
+}
+
+fn preview_row_has_account(row: &&ImportPreviewRow) -> bool {
+    row.preview_source_account_id.is_some() || row.preview_destination_account_id.is_some()
+}
+

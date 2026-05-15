@@ -1,6 +1,6 @@
 # Runtime Audit Archive
 
-This audit is archived. The active runtime has completed the Rust-only cutover, and tracked backend source now lives under `crates/`.
+This audit is archived. The active runtime has completed the Rust-only cutover, and tracked backend source now lives under `src/backend/`.
 
 Current audit checks:
 

@@ -3134,5 +3134,10 @@
     "Rows per page": "Rows per page",
     "Rule range": "{range}",
     "Yes": "Yes",
-    "No": "No"
+    "No": "No",
+    "Verify Operation Password": "Verify Operation Password",
+    "Operation Password": "Operation Password",
+    "Please enter operation password": "Please enter operation password",
+    "Password can be configured via environment variable": "Password can be configured via environment variable",
+    "Priority (smaller number means higher priority)": "Priority (smaller number means higher priority)"
 }

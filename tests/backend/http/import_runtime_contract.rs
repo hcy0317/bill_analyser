@@ -1282,6 +1282,49 @@ async fn import_db_runtime_parse_dedup_confirm_writes_import_chain() -> Result<(
     assert_eq!(preview.len(), 3);
     let selected_preview = preview.first().expect("preview rows").id;
 
+    let preview_index = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!("/api/bills/import/v2/preview/{session_id}/index"))
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(preview_index.status(), StatusCode::OK);
+    let preview_index_body = read_json(preview_index).await;
+    assert_eq!(preview_index_body["data"]["total"], 3);
+
+    let preview_page = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!(
+                    "/api/bills/import/v2/preview/{session_id}?page=1&page_size=2"
+                ))
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(preview_page.status(), StatusCode::OK);
+    let preview_page_body = read_json(preview_page).await;
+    assert_eq!(preview_page_body["data"]["total"], 3);
+    assert_eq!(
+        preview_page_body["data"]["preview"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
     let confirm = app
         .oneshot(
             Request::builder()
@@ -1400,7 +1443,7 @@ async fn import_db_runtime_parses_dedicated_xlsx_upload_without_legacy_fallback(
     seed_users(&runtime, &[42])?;
     let app = runtime_router(&fixture);
     let sample_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/fixtures/import_samples/abc_statement_sample.xlsx");
+        .join("../../../tests/fixtures/import_samples/abc_statement_sample.xlsx");
     let sample = std::fs::read(sample_path)?;
     let boundary = "rust-import-dedicated-xlsx-boundary";
     let body = multipart_body_bytes(

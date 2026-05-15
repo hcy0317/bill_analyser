@@ -245,6 +245,11 @@ pub fn delete_budget(
         let period_type = record_text(&budget, "period_type");
         let start_date = record_text(&budget, "start_date");
         let sub_category = normalize_sub_category(record_value(&budget, "sub_category"));
+        let affected_budgets = if sub_category.is_empty() {
+            get_budgets_for_sync_group_on_tx(tx, user_id, &category, &period_type, &start_date)?
+        } else {
+            vec![budget.clone()]
+        };
 
         let deleted = if sub_category.is_empty() {
             tx.execute(
@@ -269,7 +274,9 @@ pub fn delete_budget(
             )?;
             deleted
         };
-        synchronize_budget_period_hierarchy(tx, &budget, user_id)?;
+        for affected_budget in &affected_budgets {
+            synchronize_budget_period_hierarchy(tx, affected_budget, user_id)?;
+        }
         Ok(deleted > 0)
     })
 }
@@ -1623,6 +1630,35 @@ fn get_budget_by_id_on_tx(
         .map_err(DbError::from)
 }
 
+fn get_budgets_for_sync_group_on_tx(
+    tx: &Transaction<'_>,
+    user_id: i64,
+    category: &str,
+    period_type: &str,
+    start_date: &str,
+) -> DbResult<Vec<BudgetRecord>> {
+    let sql = format!(
+        "
+        SELECT {} FROM budgets
+        WHERE category = ?1
+          AND period_type = ?2
+          AND start_date = ?3
+          AND user_id = ?4
+        ",
+        BUDGET_SELECT_COLUMNS.join(", ")
+    );
+    let mut statement = tx.prepare(&sql)?;
+    let rows = statement.query_map(
+        params![category, period_type, start_date, user_id],
+        budget_record_from_row,
+    )?;
+    let mut budgets = Vec::new();
+    for row in rows {
+        budgets.push(row?);
+    }
+    Ok(budgets)
+}
+
 fn synchronize_budget_period_hierarchy(
     tx: &Transaction<'_>,
     budget: &BudgetRecord,
@@ -1687,10 +1723,13 @@ fn synchronize_period_parent_budget_for_group(
         return Ok(());
     };
     let child_total = get_period_child_budgets_total(tx, &group_key, period_end)?;
+    let parent_budget = get_period_parent_budget(tx, &group_key)?;
     if child_total <= 0.0 {
+        if let Some(parent_budget) = parent_budget {
+            delete_budget_record_on_tx(tx, &parent_budget)?;
+        }
         return Ok(());
     }
-    let parent_budget = get_period_parent_budget(tx, &group_key)?;
     let now = now_text();
     if let Some(parent_budget) = parent_budget {
         update_parent_budget_floor(tx, &parent_budget, child_total, period_end, &now)?;
@@ -1733,6 +1772,14 @@ fn synchronize_primary_budget_for_group(
     };
     let sub_total = get_sub_category_budgets_total(tx, &group_key)?;
     if sub_total <= 0.0 {
+        if reference_data
+            .map(|record| !normalize_sub_category(record.get("sub_category")).is_empty())
+            .unwrap_or(false)
+        {
+            if let Some(primary_budget) = get_primary_category_budget(tx, &group_key)? {
+                delete_budget_record_on_tx(tx, &primary_budget)?;
+            }
+        }
         return Ok(());
     }
     let primary_budget = get_primary_category_budget(tx, &group_key)?;
@@ -1791,6 +1838,19 @@ fn synchronize_primary_budget_for_group(
         payload.insert("updated_at".to_string(), Value::String(now));
         insert_budget_on_tx(tx, group_key.user_id, &mut payload)?;
     }
+    Ok(())
+}
+
+fn delete_budget_record_on_tx(tx: &Transaction<'_>, budget: &BudgetRecord) -> DbResult<()> {
+    let budget_id = record_i64(budget, "id").unwrap_or_default();
+    let user_id = record_i64(budget, "user_id").unwrap_or_default();
+    if budget_id <= 0 || user_id <= 0 {
+        return Ok(());
+    }
+    tx.execute(
+        "DELETE FROM budgets WHERE id = ?1 AND user_id = ?2",
+        params![budget_id, user_id],
+    )?;
     Ok(())
 }
 

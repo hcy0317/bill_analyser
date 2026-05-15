@@ -1,6 +1,6 @@
 # 数据库与数据流
 
-数据库运行态由 `crates/bill-analyser-db` 提供，默认使用 SQLite WAL 模式。
+数据库运行态由 `src/backend/db` 提供，默认使用 SQLite WAL 模式。
 
 ## 核心职责
 

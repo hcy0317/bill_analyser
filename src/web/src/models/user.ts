@@ -324,11 +324,25 @@ function normalizeStringId(value: unknown): string {
     return String(value);
 }
 
+function normalizeFiscalYearStart(value: unknown): number {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return EMPTY_USER_BASIC_INFO.fiscalYearStart;
+    }
+    if (FiscalYearStart.valueOf(value)) {
+        return value;
+    }
+    const monthOnly = Number.isInteger(value) && value >= 1 && value <= 12
+        ? FiscalYearStart.of(value, 1)
+        : undefined;
+    return monthOnly?.value ?? EMPTY_USER_BASIC_INFO.fiscalYearStart;
+}
+
 export function normalizeUserBasicInfo(userInfo?: Partial<UserBasicInfo> | null): UserBasicInfo {
     return {
         ...EMPTY_USER_BASIC_INFO,
         ...(userInfo || {}),
         defaultAccountId: normalizeStringId(userInfo?.defaultAccountId),
+        fiscalYearStart: normalizeFiscalYearStart(userInfo?.fiscalYearStart),
         cashAccountId: normalizeStringId(userInfo?.cashAccountId),
         cashTransferCategoryId: normalizeStringId(userInfo?.cashTransferCategoryId),
         investmentPlatformKeywords: [...(userInfo?.investmentPlatformKeywords || [])],

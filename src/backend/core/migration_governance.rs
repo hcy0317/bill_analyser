@@ -44,103 +44,83 @@ pub enum DecisionRequired {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RouteHandlerId {
-    #[serde(rename = "crates/bill-analyser-http/src/router.rs::build_router")]
+    #[serde(rename = "src/backend/http/router.rs::build_router")]
     RouterBuildRouter,
-    #[serde(rename = "crates/bill-analyser-http/src/bill_routes.rs::bills_crud_runtime")]
+    #[serde(rename = "src/backend/http/bill_routes.rs::bills_crud_runtime")]
     BillsCrudRuntime,
-    #[serde(rename = "crates/bill-analyser-http/src/import_routes.rs::import_db_runtime")]
+    #[serde(rename = "src/backend/http/import_routes/mod.rs::import_db_runtime")]
     ImportDbRuntime,
-    #[serde(
-        rename = "crates/bill-analyser-http/src/import_routes.rs::llm_learning_runtime_boundary"
-    )]
+    #[serde(rename = "src/backend/http/import_routes/mod.rs::llm_learning_runtime_boundary")]
     LlmLearningRuntimeBoundary,
-    #[serde(rename = "crates/bill-analyser-http/src/import_routes.rs::ocr_runtime_boundary")]
+    #[serde(rename = "src/backend/http/import_routes/mod.rs::ocr_runtime_boundary")]
     OcrRuntimeBoundary,
-    #[serde(rename = "crates/bill-analyser-http/src/budget_routes.rs::budgets_crud_runtime")]
+    #[serde(rename = "src/backend/http/budget_routes.rs::budgets_crud_runtime")]
     BudgetsCrudRuntime,
-    #[serde(rename = "crates/bill-analyser-http/src/budget_routes.rs::budgets_analysis_runtime")]
+    #[serde(rename = "src/backend/http/budget_routes.rs::budgets_analysis_runtime")]
     BudgetsAnalysisRuntime,
-    #[serde(rename = "crates/bill-analyser-http/src/budget_routes.rs::budgets_history_runtime")]
+    #[serde(rename = "src/backend/http/budget_routes.rs::budgets_history_runtime")]
     BudgetsHistoryRuntime,
-    #[serde(rename = "crates/bill-analyser-http/src/budget_routes.rs::budgets_import_runtime")]
+    #[serde(rename = "src/backend/http/budget_routes.rs::budgets_import_runtime")]
     BudgetsImportRuntime,
-    #[serde(
-        rename = "crates/bill-analyser-http/src/statistics_routes.rs::statistics_read_runtime"
-    )]
+    #[serde(rename = "src/backend/http/statistics_routes.rs::statistics_read_runtime")]
     StatisticsReadRuntime,
-    #[serde(
-        rename = "crates/bill-analyser-http/src/statistics_routes.rs::statistics_analyzer_runtime"
-    )]
+    #[serde(rename = "src/backend/http/statistics_routes.rs::statistics_analyzer_runtime")]
     StatisticsAnalyzerRuntime,
-    #[serde(
-        rename = "crates/bill-analyser-http/src/statistics_routes.rs::statistics_exchange_runtime"
-    )]
+    #[serde(rename = "src/backend/http/statistics_routes.rs::statistics_exchange_runtime")]
     StatisticsExchangeRuntime,
-    #[serde(rename = "crates/bill-analyser-http/src/auth_routes.rs::auth_token_runtime")]
+    #[serde(rename = "src/backend/http/auth_routes/mod.rs::auth_token_runtime")]
     AuthTokenRuntime,
-    #[serde(rename = "crates/bill-analyser-http/src/taxonomy_routes.rs::taxonomy_runtime")]
+    #[serde(rename = "src/backend/http/taxonomy_routes/mod.rs::taxonomy_runtime")]
     TaxonomyRuntime,
     #[serde(
-        rename = "crates/bill-analyser-http/src/matching_routes.rs::matching_recurring_calendar_networth_runtime"
+        rename = "src/backend/http/matching_routes.rs::matching_recurring_calendar_networth_runtime"
     )]
     MatchingRecurringCalendarNetworthRuntime,
-    #[serde(rename = "crates/bill-analyser-http/src/backup_routes.rs::backup_ops_runtime")]
+    #[serde(rename = "src/backend/http/backup_routes.rs::backup_ops_runtime")]
     BackupOpsRuntime,
-    #[serde(rename = "crates/bill-analyser-core/src/migration_governance.rs::contract_oracle")]
+    #[serde(rename = "src/backend/core/migration_governance.rs::contract_oracle")]
     DatabaseFacadeContractOracle,
 }
 
 impl RouteHandlerId {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::RouterBuildRouter => "crates/bill-analyser-http/src/router.rs::build_router",
-            Self::BillsCrudRuntime => {
-                "crates/bill-analyser-http/src/bill_routes.rs::bills_crud_runtime"
-            }
-            Self::ImportDbRuntime => {
-                "crates/bill-analyser-http/src/import_routes.rs::import_db_runtime"
-            }
+            Self::RouterBuildRouter => "src/backend/http/router.rs::build_router",
+            Self::BillsCrudRuntime => "src/backend/http/bill_routes.rs::bills_crud_runtime",
+            Self::ImportDbRuntime => "src/backend/http/import_routes/mod.rs::import_db_runtime",
             Self::LlmLearningRuntimeBoundary => {
-                "crates/bill-analyser-http/src/import_routes.rs::llm_learning_runtime_boundary"
+                "src/backend/http/import_routes/mod.rs::llm_learning_runtime_boundary"
             }
             Self::OcrRuntimeBoundary => {
-                "crates/bill-analyser-http/src/import_routes.rs::ocr_runtime_boundary"
+                "src/backend/http/import_routes/mod.rs::ocr_runtime_boundary"
             }
-            Self::BudgetsCrudRuntime => {
-                "crates/bill-analyser-http/src/budget_routes.rs::budgets_crud_runtime"
-            }
+            Self::BudgetsCrudRuntime => "src/backend/http/budget_routes.rs::budgets_crud_runtime",
             Self::BudgetsAnalysisRuntime => {
-                "crates/bill-analyser-http/src/budget_routes.rs::budgets_analysis_runtime"
+                "src/backend/http/budget_routes.rs::budgets_analysis_runtime"
             }
             Self::BudgetsHistoryRuntime => {
-                "crates/bill-analyser-http/src/budget_routes.rs::budgets_history_runtime"
+                "src/backend/http/budget_routes.rs::budgets_history_runtime"
             }
             Self::BudgetsImportRuntime => {
-                "crates/bill-analyser-http/src/budget_routes.rs::budgets_import_runtime"
+                "src/backend/http/budget_routes.rs::budgets_import_runtime"
             }
             Self::StatisticsReadRuntime => {
-                "crates/bill-analyser-http/src/statistics_routes.rs::statistics_read_runtime"
+                "src/backend/http/statistics_routes.rs::statistics_read_runtime"
             }
             Self::StatisticsAnalyzerRuntime => {
-                "crates/bill-analyser-http/src/statistics_routes.rs::statistics_analyzer_runtime"
+                "src/backend/http/statistics_routes.rs::statistics_analyzer_runtime"
             }
             Self::StatisticsExchangeRuntime => {
-                "crates/bill-analyser-http/src/statistics_routes.rs::statistics_exchange_runtime"
+                "src/backend/http/statistics_routes.rs::statistics_exchange_runtime"
             }
-            Self::AuthTokenRuntime => {
-                "crates/bill-analyser-http/src/auth_routes.rs::auth_token_runtime"
-            }
-            Self::TaxonomyRuntime => {
-                "crates/bill-analyser-http/src/taxonomy_routes.rs::taxonomy_runtime"
-            }
+            Self::AuthTokenRuntime => "src/backend/http/auth_routes/mod.rs::auth_token_runtime",
+            Self::TaxonomyRuntime => "src/backend/http/taxonomy_routes/mod.rs::taxonomy_runtime",
             Self::MatchingRecurringCalendarNetworthRuntime => {
-                "crates/bill-analyser-http/src/matching_routes.rs::matching_recurring_calendar_networth_runtime"
+                "src/backend/http/matching_routes.rs::matching_recurring_calendar_networth_runtime"
             }
-            Self::BackupOpsRuntime => {
-                "crates/bill-analyser-http/src/backup_routes.rs::backup_ops_runtime"
-            }
+            Self::BackupOpsRuntime => "src/backend/http/backup_routes.rs::backup_ops_runtime",
             Self::DatabaseFacadeContractOracle => {
-                "crates/bill-analyser-core/src/migration_governance.rs::contract_oracle"
+                "src/backend/core/migration_governance.rs::contract_oracle"
             }
         }
     }
@@ -2595,12 +2575,12 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "api-runtime-shell",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-http/src/router.rs",
-            "crates/bill-analyser-http/src/server.rs",
-            "crates/bill-analyser-http/src/runtime.rs",
+            "src/backend/http/router.rs",
+            "src/backend/http/server.rs",
+            "src/backend/http/runtime.rs",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-http/tests/import_runtime_contract.rs",
+            "tests/backend/http/import_runtime_contract.rs",
         ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: EMPTY_STRINGS,
@@ -2616,17 +2596,17 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "bills-import",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-http/src/import_routes.rs",
-            "crates/bill-analyser-db/src/import_staging.rs",
-            "crates/bill-analyser-core/src/import_pipeline.rs",
-            "crates/bill-analyser-parsers/src/lib.rs",
+            "src/backend/http/import_routes/mod.rs",
+            "src/backend/db/import_staging.rs",
+            "src/backend/core/import_pipeline.rs",
+            "src/backend/parsers/lib.rs",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-http/tests/import_runtime_contract.rs",
-            "crates/bill-analyser-db/tests/import_staging.rs",
-            "crates/bill-analyser-parsers/tests/parser_contracts.rs",
+            "tests/backend/http/import_runtime_contract.rs",
+            "tests/backend/db/import_staging.rs",
+            "tests/backend/parsers/parser_contracts.rs",
         ],
-        fixtures: &["crates/bill-analyser-parsers/tests/fixtures/parser_golden_contracts.json"],
+        fixtures: &["tests/backend/parsers/fixtures/parser_golden_contracts.json"],
         db_invariant_ids: IMPORT_DB_INVARIANT_IDS,
         coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
         deletion_blockers: EMPTY_STRINGS,
@@ -2641,14 +2621,14 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "ai-learning-llm",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-http/src/import_routes.rs",
-            "crates/bill-analyser-core/src/ai_ocr_llm.rs",
-            "crates/bill-analyser-core/src/import_learning.rs",
+            "src/backend/http/import_routes/mod.rs",
+            "src/backend/core/ai_ocr_llm.rs",
+            "src/backend/core/import_learning.rs",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-core/tests/ai_ocr_llm_contracts.rs",
-            "crates/bill-analyser-core/tests/import_learning_contracts.rs",
-            "crates/bill-analyser-http/tests/import_runtime_contract.rs",
+            "tests/backend/core/ai_ocr_llm_contracts.rs",
+            "tests/backend/core/import_learning_contracts.rs",
+            "tests/backend/http/import_runtime_contract.rs",
             "tests/new_ui/test_llm_import_session_analysis_api.py",
         ],
         fixtures: EMPTY_STRINGS,
@@ -2666,14 +2646,14 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "ai-ocr",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-http/src/import_routes.rs",
-            "crates/bill-analyser-core/src/ai_ocr_llm.rs",
-            "crates/bill-analyser-db/src/app_settings.rs",
+            "src/backend/http/import_routes/mod.rs",
+            "src/backend/core/ai_ocr_llm.rs",
+            "src/backend/db/app_settings.rs",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-core/tests/ai_ocr_llm_contracts.rs",
-            "crates/bill-analyser-db/tests/app_settings.rs",
-            "crates/bill-analyser-http/tests/import_runtime_contract.rs",
+            "tests/backend/core/ai_ocr_llm_contracts.rs",
+            "tests/backend/db/app_settings.rs",
+            "tests/backend/http/import_runtime_contract.rs",
             "tests/test_ocr_service.py",
         ],
         fixtures: EMPTY_STRINGS,
@@ -2691,13 +2671,13 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "bills-crud",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-http/src/bill_routes.rs",
-            "crates/bill-analyser-db/src/bills.rs",
-            "crates/bill-analyser-core/src/adapters/transaction.rs",
+            "src/backend/http/bill_routes.rs",
+            "src/backend/db/bills.rs",
+            "src/backend/core/adapters/transaction.rs",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-http/tests/bills_runtime_contract.rs",
-            "crates/bill-analyser-db/tests/bills_runtime.rs",
+            "tests/backend/http/bills_runtime_contract.rs",
+            "tests/backend/db/bills_runtime.rs",
         ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
@@ -2713,15 +2693,15 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "bills-crud-adjacent",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-http/src/bill_routes.rs",
-            "crates/bill-analyser-core/src/adapters/transaction.rs",
-            "crates/bill-analyser-core/src/matching.rs",
-            "crates/bill-analyser-core/src/ops.rs",
+            "src/backend/http/bill_routes.rs",
+            "src/backend/core/adapters/transaction.rs",
+            "src/backend/core/matching.rs",
+            "src/backend/core/ops.rs",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-http/tests/bills_runtime_contract.rs",
-            "crates/bill-analyser-core/tests/transaction_adapter_contracts.rs",
-            "crates/bill-analyser-core/tests/matching_contracts.rs",
+            "tests/backend/http/bills_runtime_contract.rs",
+            "tests/backend/core/transaction_adapter_contracts.rs",
+            "tests/backend/core/matching_contracts.rs",
         ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
@@ -2737,12 +2717,12 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "bills-recurring",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-http/src/bill_routes.rs",
-            "crates/bill-analyser-db/src/bills.rs",
+            "src/backend/http/bill_routes.rs",
+            "src/backend/db/bills.rs",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-http/tests/bills_runtime_contract.rs",
-            "crates/bill-analyser-core/tests/migration_governance_contracts.rs",
+            "tests/backend/http/bills_runtime_contract.rs",
+            "tests/backend/core/migration_governance_contracts.rs",
         ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
@@ -2758,13 +2738,13 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "bills-category-actions",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-http/src/bill_routes.rs",
-            "crates/bill-analyser-core/src/category_rules/mod.rs",
-            "crates/bill-analyser-core/src/matching.rs",
+            "src/backend/http/bill_routes.rs",
+            "src/backend/core/category_rules/mod.rs",
+            "src/backend/core/matching.rs",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-http/tests/bills_runtime_contract.rs",
-            "crates/bill-analyser-core/src/category_rules/mod.rs",
+            "tests/backend/http/bills_runtime_contract.rs",
+            "src/backend/core/category_rules/mod.rs",
             "tests/domains/categories/unit/test_category_rule_rust_bridge.py",
         ],
         fixtures: EMPTY_STRINGS,
@@ -2781,13 +2761,13 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "budgets-crud",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-http/src/budget_routes.rs",
-            "crates/bill-analyser-db/src/budgets.rs",
-            "crates/bill-analyser-core/src/budgets.rs",
+            "src/backend/http/budget_routes.rs",
+            "src/backend/db/budgets.rs",
+            "src/backend/core/budgets.rs",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-http/tests/budget_runtime_contract.rs",
-            "crates/bill-analyser-db/tests/budgets_runtime.rs",
+            "tests/backend/http/budget_runtime_contract.rs",
+            "tests/backend/db/budgets_runtime.rs",
         ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
@@ -2803,13 +2783,13 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "budgets-analysis",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-http/src/budget_routes.rs",
-            "crates/bill-analyser-db/src/budgets.rs",
-            "crates/bill-analyser-core/src/budgets.rs",
+            "src/backend/http/budget_routes.rs",
+            "src/backend/db/budgets.rs",
+            "src/backend/core/budgets.rs",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-http/tests/budget_runtime_contract.rs",
-            "crates/bill-analyser-db/tests/budgets_runtime.rs",
+            "tests/backend/http/budget_runtime_contract.rs",
+            "tests/backend/db/budgets_runtime.rs",
         ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
@@ -2825,13 +2805,13 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "budgets-history",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-http/src/budget_routes.rs",
-            "crates/bill-analyser-db/src/budgets.rs",
-            "crates/bill-analyser-core/src/budgets.rs",
+            "src/backend/http/budget_routes.rs",
+            "src/backend/db/budgets.rs",
+            "src/backend/core/budgets.rs",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-http/tests/budget_runtime_contract.rs",
-            "crates/bill-analyser-db/tests/budgets_runtime.rs",
+            "tests/backend/http/budget_runtime_contract.rs",
+            "tests/backend/db/budgets_runtime.rs",
         ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
@@ -2847,13 +2827,13 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "budgets-import",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-http/src/budget_routes.rs",
-            "crates/bill-analyser-db/src/budgets.rs",
-            "crates/bill-analyser-core/src/budgets.rs",
+            "src/backend/http/budget_routes.rs",
+            "src/backend/db/budgets.rs",
+            "src/backend/core/budgets.rs",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-http/tests/budget_runtime_contract.rs",
-            "crates/bill-analyser-db/tests/budgets_runtime.rs",
+            "tests/backend/http/budget_runtime_contract.rs",
+            "tests/backend/db/budgets_runtime.rs",
         ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
@@ -2869,13 +2849,13 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "statistics-read",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-http/src/statistics_routes.rs",
-            "crates/bill-analyser-db/src/statistics.rs",
-            "crates/bill-analyser-core/src/statistics.rs",
+            "src/backend/http/statistics_routes.rs",
+            "src/backend/db/statistics.rs",
+            "src/backend/core/statistics.rs",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-http/tests/statistics_runtime_contract.rs",
-            "crates/bill-analyser-core/tests/statistics_contracts.rs",
+            "tests/backend/http/statistics_runtime_contract.rs",
+            "tests/backend/core/statistics_contracts.rs",
         ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
@@ -2892,13 +2872,13 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "statistics-analyzer",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-http/src/statistics_routes.rs",
-            "crates/bill-analyser-db/src/statistics.rs",
-            "crates/bill-analyser-core/src/statistics.rs",
+            "src/backend/http/statistics_routes.rs",
+            "src/backend/db/statistics.rs",
+            "src/backend/core/statistics.rs",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-http/tests/statistics_runtime_contract.rs",
-            "crates/bill-analyser-core/tests/statistics_contracts.rs",
+            "tests/backend/http/statistics_runtime_contract.rs",
+            "tests/backend/core/statistics_contracts.rs",
         ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
@@ -2915,13 +2895,13 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "statistics-exchange",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-http/src/statistics_routes.rs",
-            "crates/bill-analyser-core/src/statistics.rs",
-            "crates/bill-analyser-db/src/statistics.rs",
+            "src/backend/http/statistics_routes.rs",
+            "src/backend/core/statistics.rs",
+            "src/backend/db/statistics.rs",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-http/tests/statistics_runtime_contract.rs",
-            "crates/bill-analyser-core/tests/statistics_contracts.rs",
+            "tests/backend/http/statistics_runtime_contract.rs",
+            "tests/backend/core/statistics_contracts.rs",
         ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
@@ -2937,15 +2917,15 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "auth-security-user-data",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-http/src/auth_routes.rs",
-            "crates/bill-analyser-db/src/auth.rs",
-            "crates/bill-analyser-db/src/auth_registration.rs",
-            "crates/bill-analyser-db/src/user_data.rs",
-            "crates/bill-analyser-core/src/auth/mod.rs",        ],
+            "src/backend/http/auth_routes/mod.rs",
+            "src/backend/db/auth.rs",
+            "src/backend/db/auth_registration.rs",
+            "src/backend/db/user_data.rs",
+            "src/backend/core/auth/mod.rs",        ],
         tests_migrated: &[
-            "crates/bill-analyser-http/tests/auth_runtime_contract.rs",
-            "crates/bill-analyser-core/tests/auth_security_contracts.rs",
-            "crates/bill-analyser-core/tests/ops_contracts.rs",
+            "tests/backend/http/auth_runtime_contract.rs",
+            "tests/backend/core/auth_security_contracts.rs",
+            "tests/backend/core/ops_contracts.rs",
         ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: EMPTY_STRINGS,
@@ -2962,12 +2942,12 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "taxonomy-rules-settings",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-http/src/taxonomy_routes.rs",            "crates/bill-analyser-core/src/adapters/category.rs",
-            "crates/bill-analyser-db/src/taxonomy",
+            "src/backend/http/taxonomy_routes/mod.rs",            "src/backend/core/adapters/category.rs",
+            "src/backend/db/taxonomy",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-http/tests/taxonomy_runtime_contract.rs",
-            "crates/bill-analyser-db/tests/taxonomy_bridge_cli.rs",
+            "tests/backend/http/taxonomy_runtime_contract.rs",
+            "tests/backend/db/taxonomy_bridge_cli.rs",
         ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: EMPTY_STRINGS,
@@ -2984,15 +2964,15 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "matching-recurring-calendar-networth",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-http/src/matching_routes.rs",
-            "crates/bill-analyser-db/src/matching.rs",
-            "crates/bill-analyser-db/src/recurring.rs",
-            "crates/bill-analyser-db/src/statistics.rs",            "crates/bill-analyser-core/src/matching.rs",
-            "crates/bill-analyser-core/src/statistics.rs",
+            "src/backend/http/matching_routes.rs",
+            "src/backend/db/matching.rs",
+            "src/backend/db/recurring.rs",
+            "src/backend/db/statistics.rs",            "src/backend/core/matching.rs",
+            "src/backend/core/statistics.rs",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-core/tests/matching_contracts.rs",
-            "crates/bill-analyser-http/tests/matching_runtime_contract.rs",
+            "tests/backend/core/matching_contracts.rs",
+            "tests/backend/http/matching_runtime_contract.rs",
         ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: EMPTY_STRINGS,
@@ -3009,15 +2989,15 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "backup-ops",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-http/src/backup_routes.rs",
-            "crates/bill-analyser-http/src/backup_sync.rs",
-            "crates/bill-analyser-core/src/ops.rs",
-            "crates/bill-analyser-db/src/backup.rs",
+            "src/backend/http/backup_routes.rs",
+            "src/backend/http/backup_sync.rs",
+            "src/backend/core/ops.rs",
+            "src/backend/db/backup.rs",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-core/tests/ops_contracts.rs",
-            "crates/bill-analyser-db/tests/backup_runtime.rs",
-            "crates/bill-analyser-http/tests/backup_runtime_contract.rs",
+            "tests/backend/core/ops_contracts.rs",
+            "tests/backend/db/backup_runtime.rs",
+            "tests/backend/http/backup_runtime_contract.rs",
         ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: EMPTY_STRINGS,
@@ -3034,13 +3014,13 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "database-schema",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-db/src/connection.rs",
-            "crates/bill-analyser-db/src/schema.rs",
-            "crates/bill-analyser-db/src/transaction.rs",
-            "crates/bill-analyser-db/src/user_scope.rs",
+            "src/backend/db/connection.rs",
+            "src/backend/db/schema.rs",
+            "src/backend/db/transaction.rs",
+            "src/backend/db/user_scope.rs",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-db/tests/sqlite_runtime.rs",
+            "tests/backend/db/sqlite_runtime.rs",
             "tests/domains/db/integration/test_db_schema_core_paths.py",
             "tests/domains/db/unit/test_db_runtime_helpers.py",
         ],
@@ -3059,21 +3039,21 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "database-repositories",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-db/src/bills.rs",
-            "crates/bill-analyser-db/src/budgets.rs",
-            "crates/bill-analyser-db/src/import_staging.rs",
-            "crates/bill-analyser-db/src/auth.rs",
-            "crates/bill-analyser-db/src/statistics.rs",
-            "crates/bill-analyser-db/src/app_settings.rs",
-            "crates/bill-analyser-db/src/taxonomy",
+            "src/backend/db/bills.rs",
+            "src/backend/db/budgets.rs",
+            "src/backend/db/import_staging.rs",
+            "src/backend/db/auth.rs",
+            "src/backend/db/statistics.rs",
+            "src/backend/db/app_settings.rs",
+            "src/backend/db/taxonomy",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-db/tests/bills_runtime.rs",
-            "crates/bill-analyser-db/tests/budgets_runtime.rs",
-            "crates/bill-analyser-db/tests/import_staging.rs",
-            "crates/bill-analyser-db/tests/auth_two_factor_recovery.rs",
-            "crates/bill-analyser-db/tests/app_settings.rs",
-            "crates/bill-analyser-db/tests/taxonomy_bridge_cli.rs",
+            "tests/backend/db/bills_runtime.rs",
+            "tests/backend/db/budgets_runtime.rs",
+            "tests/backend/db/import_staging.rs",
+            "tests/backend/db/auth_two_factor_recovery.rs",
+            "tests/backend/db/app_settings.rs",
+            "tests/backend/db/taxonomy_bridge_cli.rs",
         ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
@@ -3090,13 +3070,13 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "database-facade",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-core/src/migration_governance.rs",
-            "crates/bill-analyser-db/src/connection.rs",
-            "crates/bill-analyser-db/src/schema.rs",
+            "src/backend/core/migration_governance.rs",
+            "src/backend/db/connection.rs",
+            "src/backend/db/schema.rs",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-db/tests/sqlite_runtime.rs",
-            "crates/bill-analyser-core/tests/migration_governance_contracts.rs",
+            "tests/backend/db/sqlite_runtime.rs",
+            "tests/backend/core/migration_governance_contracts.rs",
         ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: IMPORT_DB_INVARIANT_IDS,
@@ -3565,7 +3545,7 @@ pub fn import_db_writer_policy() -> DbWriterPolicy {
     DbWriterPolicy {
         domain: "bills-import",
         mode: DbWriterMode::RustDomainOwned,
-        active_writer: "crates/bill-analyser-http/src/import_routes.rs via Rust import_db_runtime",
+        active_writer: "src/backend/http/import_routes/mod.rs via Rust import_db_runtime",
         rust_write_allowed: true,
         invariants: &IMPORT_DB_WRITE_INVARIANTS,
     }
@@ -3575,7 +3555,8 @@ pub fn bills_crud_db_writer_policy() -> DbWriterPolicy {
     DbWriterPolicy {
         domain: "bills-crud",
         mode: DbWriterMode::RustDomainOwned,
-        active_writer: "crates/bill-analyser-http/src/bill_routes.rs + crates/bill-analyser-db/src/bills.rs via Rust bills_crud_runtime",
+        active_writer:
+            "src/backend/http/bill_routes.rs + src/backend/db/bills.rs via Rust bills_crud_runtime",
         rust_write_allowed: true,
         invariants: &CRUD_DB_WRITE_INVARIANTS,
     }
@@ -3585,7 +3566,7 @@ pub fn budgets_crud_db_writer_policy() -> DbWriterPolicy {
     DbWriterPolicy {
         domain: "budgets-crud",
         mode: DbWriterMode::RustDomainOwned,
-        active_writer: "crates/bill-analyser-http/src/budget_routes.rs + crates/bill-analyser-db/src/budgets.rs via Rust budgets_crud_runtime",
+        active_writer: "src/backend/http/budget_routes.rs + src/backend/db/budgets.rs via Rust budgets_crud_runtime",
         rust_write_allowed: true,
         invariants: &CRUD_DB_WRITE_INVARIANTS,
     }
@@ -3595,7 +3576,8 @@ pub fn database_schema_db_writer_policy() -> DbWriterPolicy {
     DbWriterPolicy {
         domain: "database-schema",
         mode: DbWriterMode::RustDomainOwned,
-        active_writer: "crates/bill-analyser-db/src/schema.rs::init_foundational_schema + init_auth_security_schema",
+        active_writer:
+            "src/backend/db/schema.rs::init_foundational_schema + init_auth_security_schema",
         rust_write_allowed: true,
         invariants: &CRUD_DB_WRITE_INVARIANTS,
     }

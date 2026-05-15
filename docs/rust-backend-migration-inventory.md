@@ -2,10 +2,10 @@
 
 The migration inventory is complete. Runtime source now lives under the Rust workspace:
 
-- `crates/bill-analyser-http`
-- `crates/bill-analyser-core`
-- `crates/bill-analyser-db`
-- `crates/bill-analyser-parsers`
+- `src/backend/http`
+- `src/backend/core`
+- `src/backend/db`
+- `src/backend/parsers`
 
 Frontend source remains under `src/web`, with contract tests under `tests/web`.
 

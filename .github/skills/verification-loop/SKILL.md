@@ -27,19 +27,20 @@ Invoke this skill:
 
 Inspect `git status`, staged diff, and unstaged diff first. Verification should follow the touched paths instead of running a generic one-size-fits-all pipeline.
 
-### Phase 1: Python / Runtime Verification
+### Phase 1: Rust Runtime Verification
 
-Run these when `src/bill_analyser/**`, `tests/**`, or other Python runtime files changed:
+Run these when `src/backend/**`, `tests/backend/**`, or other Rust runtime files changed:
 
 ```powershell
-./.venv/Scripts/python.exe -m pylint src/bill_analyser/core/*.py src/bill_analyser/api/routes/*.py
-./.venv/Scripts/python.exe -m pytest tests/affected_scope -v
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
 ```
 
-If the diff touches business runtime code under `src/bill_analyser/**`, audit acceptance still requires:
+If the diff touches business runtime code under `src/backend/**`, audit acceptance still requires:
 
 ```powershell
-./.venv/Scripts/python.exe -m pytest tests/ -v
+cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90
 ```
 
 ### Phase 2: Frontend Verification
@@ -86,9 +87,9 @@ VERIFICATION REPORT
 ==================
 
 Scope:     [backend/frontend/ai-customization/mixed]
-Pylint:    [PASS/FAIL/N-A]
+Rust:      [PASS/FAIL/N-A]
 Frontend:  [PASS/FAIL/N-A]
-Pytest:    [PASS/FAIL/N-A]
+Coverage:  [PASS/FAIL/N-A]
 Hooks:     [PASS/FAIL/N-A]
 Contracts: [PASS/FAIL/N-A]
 Diff:      [X files changed]

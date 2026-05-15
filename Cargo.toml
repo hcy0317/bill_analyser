@@ -1,9 +1,9 @@
 [workspace]
 members = [
-    "crates/bill-analyser-core",
-    "crates/bill-analyser-db",
-    "crates/bill-analyser-http",
-    "crates/bill-analyser-parsers",
+    "src/backend/core",
+    "src/backend/db",
+    "src/backend/http",
+    "src/backend/parsers",
 ]
 resolver = "2"
 

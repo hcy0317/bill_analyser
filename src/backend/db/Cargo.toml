@@ -8,11 +8,11 @@ publish = false
 
 [lib]
 name = "bill_analyser_db"
-path = "src/lib.rs"
+path = "lib.rs"
 
 [dependencies]
-bill-analyser-core = { path = "../bill-analyser-core" }
-bill-analyser-parsers = { path = "../bill-analyser-parsers" }
+bill-analyser-core = { path = "../core" }
+bill-analyser-parsers = { path = "../parsers" }
 chrono.workspace = true
 md5.workspace = true
 rusqlite.workspace = true
@@ -23,6 +23,54 @@ thiserror.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[[bin]]
+name = "bill_taxonomy_bridge"
+path = "bin/bill_taxonomy_bridge.rs"
+
+[[test]]
+name = "app_settings"
+path = "../../../tests/backend/db/app_settings.rs"
+
+[[test]]
+name = "auth_two_factor_recovery"
+path = "../../../tests/backend/db/auth_two_factor_recovery.rs"
+
+[[test]]
+name = "backup_runtime"
+path = "../../../tests/backend/db/backup_runtime.rs"
+
+[[test]]
+name = "bills_runtime"
+path = "../../../tests/backend/db/bills_runtime.rs"
+
+[[test]]
+name = "budgets_runtime"
+path = "../../../tests/backend/db/budgets_runtime.rs"
+
+[[test]]
+name = "import_staging"
+path = "../../../tests/backend/db/import_staging.rs"
+
+[[test]]
+name = "llm_runtime"
+path = "../../../tests/backend/db/llm_runtime.rs"
+
+[[test]]
+name = "matching_runtime"
+path = "../../../tests/backend/db/matching_runtime.rs"
+
+[[test]]
+name = "recurring_runtime"
+path = "../../../tests/backend/db/recurring_runtime.rs"
+
+[[test]]
+name = "sqlite_runtime"
+path = "../../../tests/backend/db/sqlite_runtime.rs"
+
+[[test]]
+name = "taxonomy_bridge_cli"
+path = "../../../tests/backend/db/taxonomy_bridge_cli.rs"
 
 [lints]
 workspace = true

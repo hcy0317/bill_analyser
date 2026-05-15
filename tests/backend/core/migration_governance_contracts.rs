@@ -963,7 +963,7 @@ fn db_writer_policies_mark_rust_owned_runtime_domains_and_pin_invariants() {
     }
 
     assert_eq!(import_policy.domain, "bills-import");
-    assert!(import_policy.active_writer.contains("import_routes.rs"));
+    assert!(import_policy.active_writer.contains("import_routes/mod.rs"));
     assert_eq!(bills_policy.domain, "bills-crud");
     assert!(bills_policy.active_writer.contains("bill_routes.rs"));
     assert_eq!(budgets_policy.domain, "budgets-crud");
@@ -1325,10 +1325,10 @@ fn domain_policies_record_final_rust_cutover_state() {
     assert_eq!(database_schema.decision_required, DecisionRequired::None);
     assert!(database_schema
         .rust_owner_files
-        .contains(&"crates/bill-analyser-db/src/schema.rs"));
+        .contains(&"src/backend/db/schema.rs"));
     assert!(database_schema
         .tests_migrated
-        .contains(&"crates/bill-analyser-db/tests/sqlite_runtime.rs"));
+        .contains(&"tests/backend/db/sqlite_runtime.rs"));
     assert!(database_schema.deletion_blockers.is_empty());
     assert!(database_schema
         .transition_evidence
@@ -1342,10 +1342,10 @@ fn domain_policies_record_final_rust_cutover_state() {
         .contains(&"repository_contract"));
     assert!(database_repositories
         .rust_owner_files
-        .contains(&"crates/bill-analyser-db/src/auth.rs"));
+        .contains(&"src/backend/db/auth.rs"));
     assert!(database_repositories
         .tests_migrated
-        .contains(&"crates/bill-analyser-db/tests/auth_two_factor_recovery.rs"));
+        .contains(&"tests/backend/db/auth_two_factor_recovery.rs"));
     assert!(database_repositories
         .unsupported_behavior
         .contains("2FA recovery-code DB primitives"));

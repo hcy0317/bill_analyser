@@ -20,7 +20,7 @@ on:
       - 'tests/web/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
-      - 'crates/**'
+      - 'src/backend/**'
       - '*.ps1'
       - '*.bat'
   pull_request:
@@ -40,7 +40,7 @@ on:
       - 'tests/web/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
-      - 'crates/**'
+      - 'src/backend/**'
       - '*.ps1'
       - '*.bat'
   workflow_dispatch:

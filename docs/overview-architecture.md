@@ -4,7 +4,7 @@ Bill Analyser 当前是 Rust-only 后端 + Vue 前端 + SQLite 本地数据的�
 
 ## 运行入口
 
-- 后端：`crates/bill-analyser-http/src/bin/bill_http_server.rs`
+- 后端：`src/backend/http/bin/bill_http_server.rs`
 - 默认监听：`BILL_ANALYSER_HTTP_BIND=127.0.0.1:5000`
 - 前端：`src/web`，开发态默认 `http://127.0.0.1:8081`
 - API 主链：`REST /api/...`

@@ -128,7 +128,7 @@ export const ALL_LANGUAGES: Record<string, LanguageInfo> = {
         name: 'Chinese (Simplified)',
         displayName: '中文 (简体)',
         alternativeLanguageTag: 'zh-CN',
-        aliases: ['zh-CHS', 'zh-CN', 'zh-SG'],
+        aliases: ['zh-CHS', 'zh-CN', 'zh-SG', 'zh_Hans', 'zh_CN', 'zh_SG'],
         textDirection: 'ltr',
         content: zhHans
     },
@@ -136,7 +136,7 @@ export const ALL_LANGUAGES: Record<string, LanguageInfo> = {
         name: 'Chinese (Traditional)',
         displayName: '中文 (繁體)',
         alternativeLanguageTag: 'zh-TW',
-        aliases: ['zh-CHT', 'zh-TW', 'zh-HK', 'zh-MO'],
+        aliases: ['zh-CHT', 'zh-TW', 'zh-HK', 'zh-MO', 'zh_Hant', 'zh_TW', 'zh_HK', 'zh_MO'],
         textDirection: 'ltr',
         content: zhHant
     },

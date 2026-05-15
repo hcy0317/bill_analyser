@@ -5,6 +5,7 @@
 ## Rust 后端
 
 - `cargo test --workspace` 覆盖 Rust workspace 的单元、集成和契约测试。
+- Rust 集成/契约测试源码集中在 `tests/backend/core`、`tests/backend/db`、`tests/backend/http`、`tests/backend/parsers`，并通过各 crate `Cargo.toml` 的 `[[test]]` 目标纳入 workspace。
 - `cargo clippy --workspace --all-targets -- -D warnings` 是共享 runtime 改动的静态门禁。
 - `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90` 是业务代码最终覆盖率门禁。
 

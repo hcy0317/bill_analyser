@@ -38,7 +38,7 @@ Use this skill when the user asks to run the migrated source command `fix-statis
    - `stores/statistics.ts` 如何保存并分发汇率相关状态
    - 哪些 statistics 页面、图表或摘要金额依赖这份汇率结果
 4. 优先修根因，不要只在前端吞掉错误提示、硬编码汇率，或只改单个展示点掩盖统一换算错误。
-5. 如果问题涉及 SSL 或第三方提供者异常，优先检查 `exchange_rate_providers.py` 的 provider 顺序、证书处理和解析逻辑。
+5. 如果问题涉及 SSL 或第三方提供者异常，优先检查 Rust statistics runtime/provider 集成的 provider 顺序、证书处理和解析逻辑。
 6. 完成修改后验证接口返回、回退顺序和所有依赖汇率的 statistics 展示，而不是只做静态代码修改。
 
 ## 输出格式
@@ -53,8 +53,9 @@ Use this skill when the user asks to run the migrated source command `fix-statis
 
 ## 最少检查项
 
-- `src/bill_analyser/api/routes/statistics.py`
-- `src/bill_analyser/core/exchange_rate_providers.py`
+- `src/backend/http/statistics_routes.rs`
+- `src/backend/db/statistics.rs`
+- `src/backend/core/statistics.rs`
 - `src/web/src/lib/services.ts`
 - `src/web/src/stores/statistics.ts`
 - `src/web/src/views/desktop/statistics/TransactionPage.vue`

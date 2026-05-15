@@ -248,6 +248,17 @@ fn budget_crud_is_user_scoped_and_syncs_primary_and_period_hierarchy() -> Result
         },
     )?;
     assert!(quarterly.iter().any(|row| amount(row) >= 200.0));
+    let yearly = query_budgets_for_listing(
+        runtime.connection(),
+        user_id(42),
+        &BudgetFilters {
+            category: Some("餐饮".to_string()),
+            period_type: Some("yearly".to_string()),
+            budget_type: Some(3),
+            ..BudgetFilters::default()
+        },
+    )?;
+    assert!(yearly.iter().any(|row| amount(row) >= 200.0));
 
     assert!(delete_budget(
         runtime.connection_mut(),
@@ -264,6 +275,26 @@ fn budget_crud_is_user_scoped_and_syncs_primary_and_period_hierarchy() -> Result
         },
     )?;
     assert!(monthly_after_delete.is_empty());
+    let quarterly_after_delete = query_budgets_for_listing(
+        runtime.connection(),
+        user_id(42),
+        &BudgetFilters {
+            category: Some("餐饮".to_string()),
+            period_type: Some("quarterly".to_string()),
+            ..BudgetFilters::default()
+        },
+    )?;
+    assert!(quarterly_after_delete.is_empty());
+    let yearly_after_delete = query_budgets_for_listing(
+        runtime.connection(),
+        user_id(42),
+        &BudgetFilters {
+            category: Some("餐饮".to_string()),
+            period_type: Some("yearly".to_string()),
+            ..BudgetFilters::default()
+        },
+    )?;
+    assert!(yearly_after_delete.is_empty());
     assert!(
         delete_budget(runtime.connection_mut(), user_id(42), primary_id)
             .is_ok_and(|deleted| !deleted)

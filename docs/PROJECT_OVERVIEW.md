@@ -2,7 +2,7 @@
 
 Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预算与统计分析全栈系统。当前运行态已经完成 Rust-only 切换：`bill_http_server` 是唯一 HTTP 服务入口，默认监听 `BILL_ANALYSER_HTTP_BIND=127.0.0.1:5000`，所有业务 API 通过 `REST /api/...` 进入 Rust Axum router；未知 `/api/...` 返回 Rust 侧结构化 404，不再透传到外部后端。
 
-后端 Rust workspace 按领域拆分：`crates/bill-analyser-http` 提供 Axum 路由、认证上下文、上传与响应 envelope；`crates/bill-analyser-db` 提供 SQLite WAL 连接、schema 初始化、事务 helper 与各业务 repository；`crates/bill-analyser-core` 固定迁移治理、金额/时间/分类/统计等共享业务合同；`crates/bill-analyser-parsers` 提供微信、支付宝、工商银行、农业银行、建设银行、民生银行等账单解析器。前端为 Vue 3/TypeScript/Vite，桌面端使用 Vuetify，移动端使用 Framework7，统一调用 `REST /api/...`。
+后端 Rust workspace 位于 `src/backend/*`，按功能域拆分：`src/backend/http` 提供 Axum 路由、认证上下文、上传与响应 envelope，导入、认证、分类/账户/标签/模板等大路由已拆成目录模块；`src/backend/db` 提供 SQLite WAL 连接、schema 初始化、事务 helper 与各业务 repository；`src/backend/core` 固定迁移治理、金额/时间/分类/统计等共享业务合同；`src/backend/parsers` 提供微信、支付宝、工商银行、农业银行、建设银行、民生银行等账单解析器。Rust 集成/契约测试集中在 `tests/backend/*` 并由各 crate manifest 显式纳入 `cargo test --workspace`。前端为 Vue 3/TypeScript/Vite，桌面端使用 Vuetify，移动端使用 Framework7，统一调用 `REST /api/...`。
 
 Rust HTTP runtime 直接接管账单导入三阶段链路、账单 CRUD/export/picture/recurring/reconciliation/category actions、账户/标签/分类/分类规则/模板/设置包、预算 CRUD/export/execution/forecast/history/snapshot/import、统计读取/Analyzer/洞察/汇率、matching/recurring/calendar/networth、auth/profile/token/2FA/step-up/user-data、LLM 配置/候选/provider 生成、OCR recognition、backup file/jobs/sync 等主链路。数据库以 SQLite 文件为默认运行库，保持 WAL、foreign keys、user-scope、事务原子性和关键审计 best-effort 写入。
 
@@ -10,8 +10,9 @@ Rust HTTP runtime 直接接管账单导入三阶段链路、账单 CRUD/export/p
 
 ## 关键业务链路
 
-- **导入链路**：parser-first multipart 上传、JSON parse、未匹配文件列映射、session/preview/dedup/confirm、preview update/reclassify、transfer/recurring/learning decision 和 learning promotion 都在 Rust runtime 中完成。
+- **导入链路**：parser-first multipart 上传、JSON parse、未匹配文件列映射、session/preview/dedup/confirm、preview update/reclassify、transfer/recurring/learning decision 和 learning promotion 都在 Rust runtime 中完成；dedup 可不内联返回预览列表，但仍会落库供 preview index/page 分页读取。
 - **金额边界**：数据库核心金额通常按元存储，前端/API 交互存在分字段；涉及账单、账户、预算、统计或导入字段时必须人工复核元/分转换。
+- **预算层级**：预算按月/季/年层级同步，删除分类主预算或最后一个子预算时会同步清理自动派生的父周期预算，避免季度/年度空壳残留。
 - **认证安全**：Rust auth runtime 校验 Bearer access token，2FA、step-up、user-data clear、backup file 操作按当前用户和动作类型执行额外校验，并写入认证或业务审计。
 - **备份运维**：Rust backup runtime 负责本地 zip 备份、加密备份公开名、下载、删除、恢复、cleanup、jobs 与 cloud sync；恢复前先创建 `before_restore_*` 快照，并拒绝不安全 zip 成员。
 - **LLM/OCR**：LLM 临时配置保存在 Rust 进程内 user-scoped map，saved config 落库并脱敏；provider 生成保留 allowlist/SSRF 防护、响应体上限、候选截断和 rate limit；OCR recognition 默认 disabled，配置后通过对应 provider 返回结构化识别结果。

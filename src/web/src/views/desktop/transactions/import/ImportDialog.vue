@@ -428,6 +428,7 @@ import { ImportTransaction, type ImportTransactionResponse } from '@/models/impo
 import { getCurrentToken } from '@/lib/userstate.ts';
 import services from '@/lib/services.ts';
 import logger from '@/lib/logger.ts';
+import { DEFAULT_UPLOAD_API_TIMEOUT } from '@/consts/api.ts';
 
 import {
     mdiFilterOutline,
@@ -734,6 +735,29 @@ function extractApiErrorMessage(payload: unknown, fallbackMessage: string): stri
     };
 
     return apiError.errorMessage || apiError.error || apiError.message || fallbackMessage;
+}
+
+function isAbortError(error: unknown): boolean {
+    return error instanceof DOMException && error.name === 'AbortError';
+}
+
+async function fetchImportStage(url: string, init: RequestInit, stageLabel: string): Promise<Response> {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), DEFAULT_UPLOAD_API_TIMEOUT);
+
+    try {
+        return await fetch(url, {
+            ...init,
+            signal: controller.signal
+        });
+    } catch (error) {
+        if (isAbortError(error)) {
+            throw new Error(`${stageLabel}超时，请检查后端 parser 日志`);
+        }
+        throw error;
+    } finally {
+        window.clearTimeout(timeoutId);
+    }
 }
 
 function getPreviewTransactionType(previewType?: string): number | undefined {
@@ -1266,12 +1290,13 @@ async function fetchPreviewPage(
         searchParams.set('preview_ids', normalizedPreviewIds.join(','));
     }
 
-    const response = await fetch(
+    const response = await fetchImportStage(
         `/api/bills/import/v2/preview/${encodeURIComponent(serverSessionId.value)}?${searchParams.toString()}`,
         {
             method: 'GET',
             headers,
-        }
+        },
+        '预览分页加载'
     );
 
     if (!response.ok) {
@@ -1338,14 +1363,14 @@ async function executeStage2Dedup(): Promise<void> {
         headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const stage2Response = await fetch('/api/bills/import/v2/dedup', {
+    const stage2Response = await fetchImportStage('/api/bills/import/v2/dedup', {
         method: 'POST',
         headers,
         body: JSON.stringify({
             session_id: serverSessionId.value,
             include_preview: false
         })
-    });
+    }, '阶段2去重');
 
     if (!stage2Response.ok) {
         const errorText = await stage2Response.text();
@@ -1425,11 +1450,11 @@ async function parseData(): Promise<void> {
             headers['Authorization'] = `Bearer ${token}`;
         }
 
-        const stage1Response = await fetch('/api/bills/import/v2/parse', {
+        const stage1Response = await fetchImportStage('/api/bills/import/v2/parse', {
             method: 'POST',
             headers: headers,
             body: formData
-        });
+        }, '阶段1解析');
 
         if (!stage1Response.ok) {
             const errorText = await stage1Response.text();
@@ -1740,14 +1765,14 @@ function submit(): void {
                 headers['Authorization'] = `Bearer ${token}`;
             }
 
-            const response = await fetch('/api/bills/import/v2/confirm', {
+            const response = await fetchImportStage('/api/bills/import/v2/confirm', {
                 method: 'POST',
                 headers: headers,
                 body: JSON.stringify({
                     session_id: serverSessionId.value,
                     preview_updates: previewUpdates
                 })
-            });
+            }, '阶段3确认导入');
 
             if (!response.ok) {
                 const errorText = await response.text();

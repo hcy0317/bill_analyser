@@ -1698,8 +1698,28 @@ fn template_unresolved_warning(item: &Value, payload: &Value) -> Option<String> 
 }
 
 fn has_template_ref_value(item: &Value, keys: &[&str]) -> bool {
-    keys.iter()
-        .any(|key| !safe_text(get_any(item, &[*key]), "").is_empty())
+    keys.iter().any(|key| {
+        let value = safe_text(get_any(item, &[*key]), "");
+        if value.is_empty() {
+            return false;
+        }
+        if is_optional_zero_id_key(key) && value == "0" {
+            return false;
+        }
+        true
+    })
+}
+
+fn is_optional_zero_id_key(key: &str) -> bool {
+    matches!(
+        key,
+        "sourceAccountId"
+            | "source_account_id"
+            | "destinationAccountId"
+            | "destination_account_id"
+            | "categoryId"
+            | "category_id"
+    )
 }
 
 fn id_ref_map(items: &[Value], prefix: &str) -> BTreeMap<i64, String> {

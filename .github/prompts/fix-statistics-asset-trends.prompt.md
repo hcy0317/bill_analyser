@@ -42,11 +42,13 @@ agent: 'agent'
 
 ## 最少检查项
 
-- `src/bill_analyser/api/routes/statistics.py`
+- `src/backend/http/statistics_routes.rs`
+- `src/backend/db/statistics.rs`
+- `src/backend/core/statistics.rs`
 - `src/web/src/lib/services.ts`
 - `src/web/src/stores/statistics.ts`
 - `src/web/src/views/desktop/statistics/TransactionPage.vue`
-- 如有必要，检查 `src/bill_analyser/core/db.py` 或相关汇率/账户模型
+- 如有必要，检查相关账户、汇率或统计聚合模型
 
 ## 完成标准
 

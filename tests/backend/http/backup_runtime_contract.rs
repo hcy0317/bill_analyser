@@ -1194,6 +1194,7 @@ impl RuntimeFixture {
         let fixture_root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("..")
+            .join("..")
             .join("target")
             .join("backup-runtime-fixtures");
         fs::create_dir_all(&fixture_root)?;

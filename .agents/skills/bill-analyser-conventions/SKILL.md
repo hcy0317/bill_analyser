@@ -1,6 +1,6 @@
 ---
 name: bill-analyser-conventions
-description: Repository-specific conventions for Bill Analyser. Use this for import, budgeting, statistics, Rust/Python migration, and full-stack changes.
+description: Repository-specific conventions for Bill Analyser. Use this for import, budgeting, statistics, Rust backend, and full-stack changes.
 ---
 
 # Bill Analyser Conventions
@@ -12,7 +12,7 @@ Tool-specific entries should stay thin and point back here.
 
 Use this skill when you are:
 
-- modifying Rust HTTP, Rust DB primitives, Flask sidecar routes, services, or SQLite access
+- modifying Rust HTTP, Rust DB primitives, backend services, or SQLite access
 - changing Vue/TypeScript screens or stores
 - working on bill import, categories, budgets, statistics, accounts, tags, matching, learning, OCR, or LLM behavior
 - validating API contracts, money-unit conversions, Rust route ownership, DB write semantics, or frontend import flow
@@ -21,12 +21,10 @@ Use this skill when you are:
 
 - Follow `AGENTS.md` first, then use tool-specific adapter files only for platform-native deltas.
 - Read `docs/PROJECT_OVERVIEW.md` before changing import, budgeting, statistics, accounts, categories, tags, or other cross-module flows.
-- Rust is the primary HTTP service. Unmigrated domains are reverse-proxied to the Python/Flask sidecar.
-- Preserve the Flask-to-async bridge pattern for Python sidecar routes.
-- Keep Python database code async with aiosqlite.
+- Rust is the only HTTP runtime service; do not reintroduce Python/Flask sidecars or proxy fallback.
 - Treat REST `/api/...` as the runtime API chain; do not revive `/api/v1/*`.
 - Keep yuan and cents conversions explicit.
-- Do not delete Python import paths until Rust route runtime, DB write semantics, frontend import flow, full coverage, and no residual references all pass together.
+- Backend Rust source lives under `src/backend/*`; Rust integration and contract tests live under `tests/backend/*` and are wired through crate manifests.
 - After stable business behavior, API contracts, or module relationships change, update the relevant section of `docs/PROJECT_OVERVIEW.md`.
 - Write `docs/PROJECT_OVERVIEW.md` as current-state business/architecture documentation, not as an update log.
 
@@ -40,8 +38,7 @@ Use this skill when you are:
 
 ## Verification Baseline
 
-- `src/bill_analyser/**`: first run affected pytest and pylint; before delivery run `./.venv/Scripts/python.exe -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v -n auto --dist loadfile`, and require total coverage above 90% plus changed business code coverage above 90%.
-- `crates/**`: run focused `cargo test`, then `cargo clippy --workspace --all-targets -- -D warnings`; business Rust changes require `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90`.
+- `src/backend/**`: run focused `cargo test`, then `cargo clippy --workspace --all-targets -- -D warnings`; business Rust changes require `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90`.
 - `src/web/**`: at least run `npm run lint` in `src/web`; frontend delivery also requires `npm run test:coverage` and coverage above 90%.
 - `.gitea/**`: load `.agents/skills/gitea-ci-cache-discipline/SKILL.md`, then run `./.venv/Scripts/python.exe -m pytest tests/test_gitea_workflows.py -v`, YAML parsing for `.gitea/workflows/ci.yml`, and `./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo`.
 - `.github/**`, `.agents/**`, `.claude/**`, `.codex/**`, and `scripts/hooks/**`: run `./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo` plus relevant hook or health pytest.
@@ -68,8 +65,6 @@ Use this skill when you are:
 
 ## Common Commands
 
-- `./.venv/Scripts/python.exe -m pytest tests/ -v -n auto --dist loadfile`
-- `./.venv/Scripts/python.exe -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v -n auto --dist loadfile`
 - `cargo test --workspace`
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90`

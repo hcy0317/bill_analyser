@@ -8,16 +8,20 @@ publish = false
 
 [lib]
 name = "bill_analyser_parsers"
-path = "src/lib.rs"
+path = "lib.rs"
 
 [dependencies]
-bill-analyser-core = { path = "../bill-analyser-core" }
+bill-analyser-core = { path = "../core" }
 calamine.workspace = true
 csv.workspace = true
 encoding_rs.workspace = true
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[[test]]
+name = "parser_contracts"
+path = "../../../tests/backend/parsers/parser_contracts.rs"
 
 [lints]
 workspace = true
