@@ -1,7 +1,8 @@
 # Rust Backend Migration Inventory
 
-This S0 baseline is generated from a deterministic filesystem scan.
-It does not change runtime behavior and does not mark any Python business file as dead.
+This current inventory snapshot is generated from a deterministic filesystem scan.
+It does not change runtime behavior and does not mark any remaining Python business file as dead.
+Deleted Python route shells no longer appear in this matrix; deletion evidence lives in the P0-P15 ledger and governance manifest.
 Route/domain cutover state lives separately in the Rust governance manifest and must not be inferred from `port/facade/deferred` inventory labels.
 
 ## Summary

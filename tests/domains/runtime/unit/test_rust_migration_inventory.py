@@ -186,6 +186,8 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
 
     assert first_render == second_render
     assert "# Rust Backend Migration Inventory" in first_render
+    assert "This current inventory snapshot is generated from a deterministic filesystem scan." in first_render
+    assert "Deleted Python route shells no longer appear in this matrix" in first_render
     assert "- Python backend files: 264" in first_render
     assert "- Rust backend files: 115" in first_render
     assert "- Verified dead files: 0" in first_render
@@ -320,7 +322,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
     assert "- crates/bill-analyser-http/tests/taxonomy_runtime_contract.rs" in first_render
 
 
-def test_migration_plan_markdown_is_deterministic_and_keeps_s0_non_runtime(repo_root: Path) -> None:
+def test_migration_plan_markdown_is_deterministic_and_uses_current_snapshot_language(repo_root: Path) -> None:
     inventory = rust_migration_inventory.build_inventory(repo_root)
 
     first_render = rust_migration_inventory.render_plan_markdown(inventory)
@@ -328,9 +330,11 @@ def test_migration_plan_markdown_is_deterministic_and_keeps_s0_non_runtime(repo_
 
     assert first_render == second_render
     assert "# Rust Backend Migration Plan Baseline" in first_render
-    assert "S0 does not add a Rust runtime, does not change Flask route behavior" in first_render
+    assert "This document records the auditable contract used by Python-to-Rust migration slices." in first_render
     assert "P0-P15 state machine" in first_render
-    assert "Every Python backend file remains preserved unless a later slice proves verified-dead" in first_render
+    assert "Every remaining Python backend file remains preserved unless a later slice proves verified-dead" in first_render
+    assert "Rust `bill_http_server` is the primary HTTP entry" in first_render
+    assert "## Current Migration Surface" in first_render
     assert "## P0 Governance Contracts" in first_render
     assert "PythonProxied -> RustImplemented -> RustOwnedVerified -> PythonDeleted" in first_render
     assert "cargo run -p bill-analyser-core --bin bill_migration_manifest" in first_render
@@ -346,3 +350,16 @@ def test_write_docs_leaves_curated_plan_doc_unchanged(repo_root: Path) -> None:
 
     after = plan_path.read_text(encoding="utf-8")
     assert after == before
+
+
+def test_checked_in_migration_plan_counts_match_current_inventory(repo_root: Path) -> None:
+    inventory = rust_migration_inventory.build_inventory(repo_root)
+    plan_text = (repo_root / "docs" / "rust-backend-migration-plan.md").read_text(encoding="utf-8")
+
+    assert (
+        f"- Remaining Python backend files to track: {inventory.summary['python_backend_files']}"
+        in plan_text
+    )
+    assert f"- Current Rust backend files: {inventory.summary['rust_backend_files']}" in plan_text
+    assert "## Current Migration Surface" in plan_text
+    assert "Rust `bill_http_server` is the primary HTTP entry" in plan_text

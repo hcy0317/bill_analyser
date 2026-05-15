@@ -1,8 +1,9 @@
-"""Generate the Python-to-Rust backend migration inventory baseline.
+"""Generate the Python-to-Rust backend migration inventory snapshot.
 
-S0 is intentionally read-only for runtime code: it records every Python backend
-file, gives it an initial migration domain, and keeps ``verified_dead`` empty
-until a later slice produces direct evidence.
+The inventory is intentionally read-only for runtime code: it records every
+remaining Python backend file, gives it a migration domain, and keeps
+``verified_dead`` empty because deleted Python files no longer appear in the
+current filesystem scan.
 """
 
 # pylint: disable=line-too-long,missing-class-docstring,missing-function-docstring,too-many-return-statements
@@ -348,8 +349,9 @@ def render_inventory_markdown(inventory: RustMigrationInventory) -> str:
     lines = [
         "# Rust Backend Migration Inventory",
         "",
-        "This S0 baseline is generated from a deterministic filesystem scan.",
-        "It does not change runtime behavior and does not mark any Python business file as dead.",
+        "This current inventory snapshot is generated from a deterministic filesystem scan.",
+        "It does not change runtime behavior and does not mark any remaining Python business file as dead.",
+        "Deleted Python route shells no longer appear in this matrix; deletion evidence lives in the P0-P15 ledger and governance manifest.",
         "Route/domain cutover state lives separately in the Rust governance manifest and must not be inferred from `port/facade/deferred` inventory labels.",
         "",
         "## Summary",
@@ -416,22 +418,21 @@ def render_plan_markdown(inventory: RustMigrationInventory) -> str:
     lines = [
         "# Rust Backend Migration Plan Baseline",
         "",
-        "S0 establishes the auditable contract used by later Python-to-Rust migration slices.",
-        "S0 does not add a Rust runtime, does not change Flask route behavior, and does not delete Python code.",
-        "The active rewrite program is governed by the `.omx/plans/rust-full-rewrite-total-plan.md` P0-P15 state machine; the S-sections below remain historical evidence, not the new governance source of truth.",
+        "This document records the auditable contract used by Python-to-Rust migration slices.",
+        "The active rewrite program is governed by the `.omx/plans/rust-full-rewrite-total-plan.md` P0-P15 state machine; historical S-sections remain migration evidence, not the current governance source of truth.",
         "",
         "## Preservation Rules",
         "",
-        "- Every Python backend file remains preserved unless a later slice proves verified-dead with direct evidence.",
-        "- Flask REST remains the runtime shell until a later slice introduces and verifies a Rust implementation boundary.",
+        "- Every remaining Python backend file remains preserved unless a later slice proves verified-dead with direct evidence.",
+        "- Rust `bill_http_server` is the primary HTTP entry; Python/Flask sidecar remains only for manifest `PythonProxied` boundaries until P15 final cutover.",
         "- `/api/v1/*` is not revived as a runtime chain.",
         "- Business behavior, amount units, time semantics, DB isolation, and response envelopes remain unchanged.",
         "",
-        "## Initial Migration Surface",
+        "## Current Migration Surface",
         "",
-        f"- Python backend files to track: {inventory.summary['python_backend_files']}",
+        f"- Remaining Python backend files to track: {inventory.summary['python_backend_files']}",
         f"- Current Rust backend files: {inventory.summary['rust_backend_files']}",
-        f"- Initial verified-dead files: {inventory.summary['verified_dead_files']}",
+        f"- Current verified-dead files: {inventory.summary['verified_dead_files']}",
         "",
         "## Domain Review Baseline",
         "",

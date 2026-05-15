@@ -1,8 +1,7 @@
 # Rust Backend Migration Plan Baseline
 
-S0 establishes the auditable contract used by later Python-to-Rust migration slices.
-S0 does not add a Rust runtime, does not change Flask route behavior, and does not delete Python code.
-The active rewrite program is now governed by the `.omx/plans/rust-full-rewrite-total-plan.md` P0-P15 state machine; the historical S-sections below remain valid migration evidence, not the new governance source of truth.
+This document records the auditable contract used by Python-to-Rust migration slices.
+The active rewrite program is governed by the `.omx/plans/rust-full-rewrite-total-plan.md` P0-P15 state machine; historical S-sections remain migration evidence, not the current governance source of truth.
 
 ## P0 Governance Contracts
 
@@ -14,43 +13,43 @@ The active rewrite program is now governed by the `.omx/plans/rust-full-rewrite-
 
 ## Preservation Rules
 
-- Every Python backend file remains preserved unless a later slice proves verified-dead with direct evidence.
-- Flask REST remains the runtime shell until a later slice introduces and verifies a Rust implementation boundary.
+- Every remaining Python backend file remains preserved unless a later slice proves verified-dead with direct evidence.
+- Rust `bill_http_server` is the primary HTTP entry; Python/Flask sidecar remains only for manifest `PythonProxied` boundaries until P15 final cutover.
 - `/api/v1/*` is not revived as a runtime chain.
 - Business behavior, amount units, time semantics, DB isolation, and response envelopes remain unchanged.
 
-## Initial Migration Surface
+## Current Migration Surface
 
-- Python backend files to track: 321
-- Current Rust backend files: 92
-- Initial verified-dead files: 0
+- Remaining Python backend files to track: 264
+- Current Rust backend files: 115
+- Current verified-dead files: 0
 
 ## Domain Review Baseline
 
 | Domain | Port | Facade | Deferred |
 | --- | ---: | ---: | ---: |
-| accounts | 7 | 2 | 0 |
-| ai-learning-llm | 24 | 6 | 0 |
+| accounts | 4 | 1 | 0 |
+| ai-learning-llm | 23 | 6 | 0 |
 | ai-ocr | 4 | 1 | 0 |
 | api-contract-adapters | 0 | 4 | 0 |
 | api-runtime-shell | 3 | 8 | 0 |
-| auth-security | 19 | 2 | 0 |
+| auth-security | 18 | 2 | 0 |
 | backup-operations | 5 | 1 | 0 |
-| bills-import | 53 | 7 | 0 |
-| budgets | 16 | 6 | 0 |
-| classification-rules | 18 | 2 | 0 |
+| bills-import | 36 | 6 | 0 |
+| budgets | 11 | 5 | 0 |
+| classification-rules | 9 | 1 | 0 |
 | database-facade | 3 | 2 | 0 |
 | database-schema | 11 | 3 | 0 |
 | import-contracts | 0 | 3 | 0 |
 | import-parsers | 8 | 2 | 0 |
-| matching-reconciliation | 22 | 5 | 0 |
-| recurring-calendar | 4 | 0 | 0 |
-| settings-bundle | 9 | 1 | 0 |
+| matching-reconciliation | 18 | 4 | 0 |
+| recurring-calendar | 2 | 0 | 0 |
+| settings-bundle | 8 | 1 | 0 |
 | shared-primitives | 5 | 3 | 0 |
 | smart-dedup | 9 | 1 | 0 |
-| statistics-reporting | 26 | 4 | 0 |
+| statistics-reporting | 19 | 4 | 0 |
 | sync-runtime | 1 | 0 | 0 |
-| tags-templates | 6 | 5 | 0 |
+| tags-templates | 5 | 4 | 0 |
 
 ## Review Contract
 
