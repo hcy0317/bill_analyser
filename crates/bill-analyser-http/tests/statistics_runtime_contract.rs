@@ -9,8 +9,7 @@ use axum::{
     Router,
 };
 use bill_analyser_http::{
-    build_router, HttpShellConfig, ImportRouteMode, ProxyState, STATISTICS_PROXIED_ROUTE_PATTERNS,
-    STATISTICS_ROUTE_PATTERNS,
+    build_router, HttpAppState, HttpShellConfig, ImportRouteMode, STATISTICS_ROUTE_PATTERNS,
 };
 use chrono::{Local, TimeZone};
 use rusqlite::Connection;
@@ -210,7 +209,7 @@ async fn insights_anomalies_runtime_serves_owned_route_and_reads_db() -> Result<
 }
 
 #[tokio::test]
-async fn statistics_runtime_covers_error_edges_auth_and_proxy_boundaries(
+async fn statistics_runtime_covers_error_edges_auth_and_runtime_boundaries(
 ) -> Result<(), Box<dyn Error>> {
     let fixture = RuntimeFixture::new_with_upstream(spawn_fake_upstream().await.url())?;
     let app = runtime_router(&fixture);
@@ -346,7 +345,7 @@ async fn statistics_runtime_covers_error_edges_auth_and_proxy_boundaries(
         .await?;
     assert_eq!(unauthenticated_response.status(), StatusCode::UNAUTHORIZED);
 
-    let missing_db_state = ProxyState::new(
+    let missing_db_state = HttpAppState::new(
         HttpShellConfig::new_with_import_route_mode(
             "http://127.0.0.1:9".to_string(),
             Duration::from_secs(1),
@@ -367,7 +366,7 @@ async fn statistics_runtime_covers_error_edges_auth_and_proxy_boundaries(
         StatusCode::SERVICE_UNAVAILABLE
     );
 
-    let invalid_db_path_response = build_router(ProxyState::new(
+    let invalid_db_path_response = build_router(HttpAppState::new(
         HttpShellConfig::new_with_import_route_mode(
             "http://127.0.0.1:9".to_string(),
             Duration::from_secs(1),
@@ -425,13 +424,6 @@ async fn statistics_runtime_covers_error_edges_auth_and_proxy_boundaries(
     ] {
         assert!(STATISTICS_ROUTE_PATTERNS.iter().any(|item| item == &route));
     }
-    assert!(STATISTICS_PROXIED_ROUTE_PATTERNS.is_empty());
-    assert!(!STATISTICS_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .any(|item| item == &("GET", "/api/statistics/exchange-rates")));
-    assert!(!STATISTICS_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .any(|item| item == &("PUT", "/api/statistics/exchange-rates/custom")));
 
     let invalid_provider_response = app
         .clone()
@@ -690,7 +682,7 @@ fn runtime_router(fixture: &RuntimeFixture) -> Router {
     .expect("config")
     .with_sqlite_db_path(fixture.db_path.display().to_string())
     .with_trusted_user_header_secret(TEST_AUTH_SECRET);
-    let state = ProxyState::new(config).expect("proxy state");
+    let state = HttpAppState::new(config).expect("http app state");
     build_router(state)
 }
 

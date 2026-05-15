@@ -6,14 +6,10 @@ use axum::{
     Router,
 };
 use bill_analyser_http::{
-    build_router, HttpShellConfig, ImportRouteMode, ProxyState,
-    TAXONOMY_ACCOUNT_PROXIED_ROUTE_PATTERNS, TAXONOMY_ACCOUNT_ROUTE_PATTERNS,
-    TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS, TAXONOMY_CATEGORY_ROUTE_PATTERNS,
-    TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS, TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS,
-    TAXONOMY_RULE_CENTER_PROXIED_ROUTE_PATTERNS, TAXONOMY_RULE_CENTER_ROUTE_PATTERNS,
-    TAXONOMY_SETTINGS_BUNDLE_PROXIED_ROUTE_PATTERNS, TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS,
-    TAXONOMY_TAG_PROXIED_ROUTE_PATTERNS, TAXONOMY_TAG_ROUTE_PATTERNS,
-    TAXONOMY_TEMPLATE_PROXIED_ROUTE_PATTERNS, TAXONOMY_TEMPLATE_ROUTE_PATTERNS,
+    build_router, HttpAppState, HttpShellConfig, ImportRouteMode, TAXONOMY_ACCOUNT_ROUTE_PATTERNS,
+    TAXONOMY_CATEGORY_ROUTE_PATTERNS, TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS,
+    TAXONOMY_RULE_CENTER_ROUTE_PATTERNS, TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS,
+    TAXONOMY_TAG_ROUTE_PATTERNS, TAXONOMY_TEMPLATE_ROUTE_PATTERNS,
 };
 use rusqlite::Connection;
 use serde_json::{json, Value};
@@ -41,15 +37,6 @@ async fn taxonomy_accounts_runtime_serves_crud_and_frontend_contract() -> Result
     assert!(TAXONOMY_ACCOUNT_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/accounts/{account_id}/transactions/clear")));
-    assert!(TAXONOMY_ACCOUNT_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("POST", "/api/accounts/{account_id}/transactions/move")));
-    assert!(TAXONOMY_ACCOUNT_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("POST", "/api/accounts/{account_id}/transactions/clear")));
-    assert!(TAXONOMY_ACCOUNT_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("POST", "/api/accounts/sync-balances")));
 
     let fixture = RuntimeFixture::new()?;
     let app = runtime_router(&fixture);
@@ -902,9 +889,6 @@ async fn taxonomy_tags_runtime_serves_crud_and_frontend_contract() -> Result<(),
     assert!(TAXONOMY_TAG_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/tags/batch")));
-    assert!(TAXONOMY_TAG_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("POST", "/api/tags/batch")));
 
     let fixture = RuntimeFixture::new()?;
     let app = runtime_router(&fixture);
@@ -1419,7 +1403,6 @@ async fn taxonomy_templates_runtime_serves_crud_and_frontend_contract() -> Resul
     assert!(TAXONOMY_TEMPLATE_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("PUT", "/api/templates/display-orders")));
-    assert!(TAXONOMY_TEMPLATE_PROXIED_ROUTE_PATTERNS.is_empty());
 
     let fixture = RuntimeFixture::new()?;
     let app = runtime_router(&fixture);
@@ -1745,18 +1728,6 @@ async fn taxonomy_categories_runtime_serves_master_data_contract() -> Result<(),
         .iter()
         .any(|route| route == &("PUT", "/api/categories/rules")));
     assert!(TAXONOMY_CATEGORY_ROUTE_PATTERNS
-        .iter()
-        .any(|route| route == &("POST", "/api/categories/update-all")));
-    assert!(TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("GET", "/api/categories/rules")));
-    assert!(TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("PUT", "/api/categories/rules")));
-    assert!(!TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .any(|route| route == &("GET", "/api/categories/statistics")));
-    assert!(!TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/categories/update-all")));
 
@@ -2110,27 +2081,6 @@ async fn taxonomy_category_rules_runtime_lists_canonical_rules_contract(
     assert!(TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/category-rules/migrate")));
-    assert!(TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("POST", "/api/category-rules/")));
-    assert!(TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("PUT", "/api/category-rules/{rule_id}")));
-    assert!(TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("DELETE", "/api/category-rules/{rule_id}")));
-    assert!(TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("POST", "/api/category-rules/reorder")));
-    assert!(TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("POST", "/api/category-rules/defaults")));
-    assert!(TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("POST", "/api/category-rules/migrate")));
-    assert!(!TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .any(|route| route == &("POST", "/api/category-rules/{rule_id}/test")));
 
     let fixture = RuntimeFixture::new()?;
     let app = runtime_router(&fixture);
@@ -2819,7 +2769,6 @@ async fn taxonomy_rules_overview_runtime_aggregates_user_scoped_rule_sources(
     assert!(TAXONOMY_RULE_CENTER_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("GET", "/api/rules/overview")));
-    assert!(TAXONOMY_RULE_CENTER_PROXIED_ROUTE_PATTERNS.is_empty());
 
     let fixture = RuntimeFixture::new()?;
     let app = runtime_router(&fixture);
@@ -2885,7 +2834,6 @@ async fn taxonomy_settings_bundle_export_runtime_serves_raw_bundle_and_sensitive
     assert!(TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/settings/bundle/sections/{section_key}/import")));
-    assert!(TAXONOMY_SETTINGS_BUNDLE_PROXIED_ROUTE_PATTERNS.is_empty());
 
     let fixture = RuntimeFixture::new()?;
     let app = runtime_router(&fixture);
@@ -3044,7 +2992,6 @@ async fn taxonomy_settings_encryption_status_runtime_reports_rust_sqlcipher_proj
     assert!(TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("GET", "/api/settings/encryption/status")));
-    assert!(TAXONOMY_SETTINGS_BUNDLE_PROXIED_ROUTE_PATTERNS.is_empty());
 
     let fixture = RuntimeFixture::new()?;
     let app = runtime_router(&fixture);
@@ -4550,7 +4497,7 @@ fn runtime_router(fixture: &RuntimeFixture) -> Router {
     .expect("config")
     .with_sqlite_db_path(fixture.db_path.display().to_string())
     .with_trusted_user_header_secret(TEST_AUTH_SECRET);
-    let state = ProxyState::new(config).expect("proxy state");
+    let state = HttpAppState::new(config).expect("http app state");
     build_router(state)
 }
 
@@ -4564,7 +4511,7 @@ fn runtime_router_without_db(fixture: &RuntimeFixture) -> Router {
     )
     .expect("config")
     .with_trusted_user_header_secret(TEST_AUTH_SECRET);
-    let state = ProxyState::new(config).expect("proxy state");
+    let state = HttpAppState::new(config).expect("http app state");
     build_router(state)
 }
 

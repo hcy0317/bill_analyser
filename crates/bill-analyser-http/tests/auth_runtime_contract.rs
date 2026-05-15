@@ -10,8 +10,7 @@ use base64::{engine::general_purpose, Engine as _};
 use bcrypt::{hash, verify};
 use bill_analyser_db::hash_two_factor_recovery_code;
 use bill_analyser_http::{
-    build_router, HttpShellConfig, ImportRouteMode, ProxyState, AUTH_PROXIED_ROUTE_PATTERNS,
-    AUTH_TOKEN_ROUTE_PATTERNS,
+    build_router, HttpAppState, HttpShellConfig, ImportRouteMode, AUTH_TOKEN_ROUTE_PATTERNS,
 };
 use chrono::{Duration as ChronoDuration, Local, Utc};
 use ring::hmac;
@@ -32,18 +31,12 @@ async fn auth_token_runtime_lists_and_revokes_user_scoped_sessions() -> Result<(
     assert!(AUTH_TOKEN_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("DELETE", "/api/tokens/{token_id}")));
-    assert!(AUTH_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("POST", "/api/tokens/refresh")));
     assert!(AUTH_TOKEN_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/tokens/refresh")));
     assert!(AUTH_TOKEN_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/auth/logout")));
-    assert!(AUTH_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("POST", "/api/auth/logout")));
 
     let fixture = RuntimeFixture::new()?;
     let token = test_access_token(42, TEST_AUTH_SECRET);
@@ -197,9 +190,6 @@ async fn auth_two_factor_status_runtime_reads_user_flag() -> Result<(), Box<dyn 
     assert!(AUTH_TOKEN_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("GET", "/api/2fa/status")));
-    assert!(AUTH_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("GET", "/api/2fa/status")));
 
     let fixture = RuntimeFixture::new()?;
     let token = test_access_token(42, TEST_AUTH_SECRET);
@@ -310,9 +300,6 @@ async fn auth_two_factor_verify_runtime_exchanges_pending_token_for_session(
     assert!(AUTH_TOKEN_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/2fa/verify")));
-    assert!(AUTH_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("POST", "/api/2fa/verify")));
 
     let fixture = RuntimeFixture::new()?;
     let token = test_access_token(42, TEST_AUTH_SECRET);
@@ -498,9 +485,6 @@ async fn auth_two_factor_recovery_verify_runtime_consumes_code_and_issues_sessio
     assert!(AUTH_TOKEN_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/2fa/recovery/verify")));
-    assert!(AUTH_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("POST", "/api/2fa/recovery/verify")));
 
     let fixture = RuntimeFixture::new()?;
     let token = test_access_token(42, TEST_AUTH_SECRET);
@@ -806,9 +790,6 @@ async fn auth_two_factor_write_runtime_manages_setup_recovery_and_disable(
         ("POST", "/api/2fa/recovery/regenerate"),
     ] {
         assert!(AUTH_TOKEN_ROUTE_PATTERNS.iter().any(|item| item == &route));
-        assert!(AUTH_PROXIED_ROUTE_PATTERNS
-            .iter()
-            .all(|item| item != &route));
     }
 
     let fixture = RuntimeFixture::new()?;
@@ -1051,9 +1032,6 @@ async fn auth_step_up_runtime_issues_short_lived_tokens_for_password_or_totp(
 ) -> Result<(), Box<dyn Error>> {
     let route = ("POST", "/api/security/step-up/verify");
     assert!(AUTH_TOKEN_ROUTE_PATTERNS.iter().any(|item| item == &route));
-    assert!(AUTH_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|item| item != &route));
 
     let fixture = RuntimeFixture::new()?;
     let token = test_access_token(42, TEST_AUTH_SECRET);
@@ -1378,9 +1356,6 @@ async fn auth_login_runtime_issues_session_tokens_and_preserves_edges() -> Resul
     assert!(AUTH_TOKEN_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/auth/login")));
-    assert!(AUTH_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("POST", "/api/auth/login")));
 
     let fixture = RuntimeFixture::new()?;
     let token = test_access_token(42, TEST_AUTH_SECRET);
@@ -1582,9 +1557,6 @@ async fn auth_register_runtime_creates_user_defaults_and_preserves_edges(
     assert!(AUTH_TOKEN_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/auth/register")));
-    assert!(AUTH_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("POST", "/api/auth/register")));
 
     let fixture = RuntimeFixture::new()?;
     let token = test_access_token(42, TEST_AUTH_SECRET);
@@ -1713,9 +1685,6 @@ async fn auth_profile_cloud_runtime_preserves_flask_contracts() -> Result<(), Bo
         ("GET", "/api/system/version"),
     ] {
         assert!(AUTH_TOKEN_ROUTE_PATTERNS.iter().any(|item| item == &route));
-        assert!(AUTH_PROXIED_ROUTE_PATTERNS
-            .iter()
-            .all(|item| item != &route));
     }
 
     let disabled_oauth_response = runtime_router_without_sqlite_path()
@@ -2363,9 +2332,6 @@ async fn auth_user_data_statistics_runtime_preserves_flask_contract() -> Result<
 {
     let route = ("GET", "/api/data/statistics");
     assert!(AUTH_TOKEN_ROUTE_PATTERNS.iter().any(|item| item == &route));
-    assert!(AUTH_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|item| item != &route));
 
     let fixture = RuntimeFixture::new()?;
     let token = test_access_token(42, TEST_AUTH_SECRET);
@@ -2402,9 +2368,6 @@ async fn auth_user_data_export_and_clear_runtime_preserve_flask_contracts(
         ("POST", "/api/data/clear/all"),
     ] {
         assert!(AUTH_TOKEN_ROUTE_PATTERNS.iter().any(|item| item == &route));
-        assert!(AUTH_PROXIED_ROUTE_PATTERNS
-            .iter()
-            .all(|item| item != &route));
     }
 
     let fixture = RuntimeFixture::new()?;
@@ -2616,9 +2579,6 @@ async fn auth_account_recovery_runtime_preserves_flask_contracts() -> Result<(),
         ("POST", "/api/auth/password/reset"),
     ] {
         assert!(AUTH_TOKEN_ROUTE_PATTERNS.iter().any(|item| item == &route));
-        assert!(AUTH_PROXIED_ROUTE_PATTERNS
-            .iter()
-            .all(|item| item != &route));
     }
 
     let disabled_fixture = RuntimeFixture::new()?;
@@ -2888,9 +2848,6 @@ async fn auth_token_runtime_generates_personal_and_refresh_tokens() -> Result<()
     assert!(AUTH_TOKEN_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/tokens/mcp")));
-    assert!(!AUTH_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .any(|route| route == &("POST", "/api/tokens/api")));
     assert!(AUTH_TOKEN_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/tokens/refresh")));
@@ -3419,7 +3376,7 @@ fn runtime_router_without_sqlite_path() -> Router {
     .with_trusted_user_header_secret(TEST_AUTH_SECRET)
     .with_auth_jwt_secret(TEST_AUTH_SECRET)
     .with_public_base_url("https://api.example.test");
-    let state = ProxyState::new(config).expect("proxy state");
+    let state = HttpAppState::new(config).expect("http app state");
     build_router(state)
 }
 
@@ -3439,7 +3396,7 @@ fn runtime_router_with_db_path(path: &Path, include_jwt_secret: bool) -> Router 
     if include_jwt_secret {
         config = config.with_auth_jwt_secret(TEST_AUTH_SECRET);
     }
-    let state = ProxyState::new(config).expect("proxy state");
+    let state = HttpAppState::new(config).expect("http app state");
     build_router(state)
 }
 
@@ -3456,7 +3413,7 @@ fn runtime_router_with_password_reset(path: &Path, enabled: bool) -> Router {
     .with_auth_jwt_secret(TEST_AUTH_SECRET)
     .with_auth_enable_user_forget_password(enabled)
     .with_public_base_url("https://api.example.test");
-    let state = ProxyState::new(config).expect("proxy state");
+    let state = HttpAppState::new(config).expect("http app state");
     build_router(state)
 }
 

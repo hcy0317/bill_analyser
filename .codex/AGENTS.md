@@ -10,7 +10,7 @@ This file supplements [AGENTS.md](AGENTS.md) with Codex-specific guidance.
 
 ## Recommended Focus
 
-- Prefer Rust runtime, TypeScript frontend, residual Python sidecar, testing, API review, and documentation tasks.
+- Prefer Rust runtime, TypeScript frontend, testing, API review, and documentation tasks.
 - Use the repository skill in [.agents/skills/bill-analyser-conventions](.agents/skills/bill-analyser-conventions).
 - Keep Codex work grounded in the current repository architecture rather than generic ECC defaults.
 - If a session is interrupted, recover from `.git/ai/last-session.md` and the shared `.agents/skills/session-resume/SKILL.md` workflow before resuming edits.

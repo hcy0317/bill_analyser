@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MigrationState {
-    PythonProxied,
     RustImplemented,
     RustOwnedVerified,
     PythonDeleted,
@@ -49,18 +48,6 @@ pub enum RouteHandlerId {
     RouterBuildRouter,
     #[serde(rename = "crates/bill-analyser-http/src/bill_routes.rs::bills_crud_runtime")]
     BillsCrudRuntime,
-    #[serde(
-        rename = "crates/bill-analyser-http/src/bill_routes.rs::python_proxy_passthrough_bills_adjacent"
-    )]
-    BillsAdjacentProxyPassthrough,
-    #[serde(
-        rename = "crates/bill-analyser-http/src/bill_routes.rs::python_proxy_passthrough_bills_recurring"
-    )]
-    BillsRecurringProxyPassthrough,
-    #[serde(
-        rename = "crates/bill-analyser-http/src/bill_routes.rs::python_proxy_passthrough_category_actions"
-    )]
-    BillsCategoryActionsProxyPassthrough,
     #[serde(rename = "crates/bill-analyser-http/src/import_routes.rs::import_db_runtime")]
     ImportDbRuntime,
     #[serde(
@@ -99,8 +86,6 @@ pub enum RouteHandlerId {
     MatchingRecurringCalendarNetworthRuntime,
     #[serde(rename = "crates/bill-analyser-http/src/backup_routes.rs::backup_ops_runtime")]
     BackupOpsRuntime,
-    #[serde(rename = "crates/bill-analyser-http/src/proxy.rs::ownership_aware_proxy_handler")]
-    LegacyPythonProxyPassthrough,
     #[serde(rename = "crates/bill-analyser-core/src/migration_governance.rs::contract_oracle")]
     DatabaseFacadeContractOracle,
 }
@@ -111,15 +96,6 @@ impl RouteHandlerId {
             Self::RouterBuildRouter => "crates/bill-analyser-http/src/router.rs::build_router",
             Self::BillsCrudRuntime => {
                 "crates/bill-analyser-http/src/bill_routes.rs::bills_crud_runtime"
-            }
-            Self::BillsAdjacentProxyPassthrough => {
-                "crates/bill-analyser-http/src/bill_routes.rs::python_proxy_passthrough_bills_adjacent"
-            }
-            Self::BillsRecurringProxyPassthrough => {
-                "crates/bill-analyser-http/src/bill_routes.rs::python_proxy_passthrough_bills_recurring"
-            }
-            Self::BillsCategoryActionsProxyPassthrough => {
-                "crates/bill-analyser-http/src/bill_routes.rs::python_proxy_passthrough_category_actions"
             }
             Self::ImportDbRuntime => {
                 "crates/bill-analyser-http/src/import_routes.rs::import_db_runtime"
@@ -163,9 +139,6 @@ impl RouteHandlerId {
             Self::BackupOpsRuntime => {
                 "crates/bill-analyser-http/src/backup_routes.rs::backup_ops_runtime"
             }
-            Self::LegacyPythonProxyPassthrough => {
-                "crates/bill-analyser-http/src/proxy.rs::ownership_aware_proxy_handler"
-            }
             Self::DatabaseFacadeContractOracle => {
                 "crates/bill-analyser-core/src/migration_governance.rs::contract_oracle"
             }
@@ -188,7 +161,7 @@ struct RouteContractDetails {
 #[serde(rename_all = "snake_case")]
 pub enum ResponseEnvelopeFamily {
     RustHttpShell,
-    ProxyInfrastructureError,
+    RuntimeInfrastructureError,
     FlaskSuccessData,
     FlaskSuccessResult,
     FlaskRawPassthrough,
@@ -221,7 +194,7 @@ impl EndpointOwnership {
     }
 
     pub fn is_python_runtime_owner(&self) -> bool {
-        self.state == MigrationState::PythonProxied
+        false
     }
 
     pub fn is_rust_owned_verified(&self) -> bool {
@@ -280,7 +253,7 @@ pub struct ResponseEnvelopePolicy {
     pub route_contexts: &'static [MigrationState],
     pub success_shape: &'static str,
     pub error_shape: &'static str,
-    pub proxy_may_wrap: bool,
+    pub runtime_may_wrap: bool,
 }
 
 impl ResponseEnvelopePolicy {
@@ -357,42 +330,18 @@ const IMPORT_DELETION_GATES: [ImportDeletionGate; 5] = [
     ImportDeletionGate::NoResidualReferences,
 ];
 
-const CUTOVER_STATE_MACHINE: [MigrationState; 4] = [
-    MigrationState::PythonProxied,
+const CUTOVER_STATE_MACHINE: [MigrationState; 3] = [
     MigrationState::RustImplemented,
     MigrationState::RustOwnedVerified,
     MigrationState::PythonDeleted,
 ];
-const MANIFEST_STATES: [MigrationState; 6] = [
-    MigrationState::PythonProxied,
+const MANIFEST_STATES: [MigrationState; 5] = [
     MigrationState::RustImplemented,
     MigrationState::RustOwnedVerified,
     MigrationState::PythonDeleted,
     MigrationState::ContractOnly,
     MigrationState::Planned,
 ];
-
-macro_rules! python_proxy_route {
-    ($method:literal, $pattern:literal, $domain:literal) => {
-        python_proxy_route!(
-            $method,
-            $pattern,
-            $domain,
-            ResponseEnvelopeFamily::FlaskSuccessResult
-        )
-    };
-    ($method:literal, $pattern:literal, $domain:literal, $envelope:expr) => {
-        EndpointOwnership {
-            method: $method,
-            pattern: $pattern,
-            domain: $domain,
-            state: MigrationState::PythonProxied,
-            envelope: $envelope,
-            deletion_blocked_until_all_import_gates: false,
-            notes: "Live Python sidecar route remains explicitly proxied until its functional domain is ported.",
-        }
-    };
-}
 
 macro_rules! python_deleted_route {
     ($method:literal, $pattern:literal, $domain:literal, $envelope:expr, $notes:literal) => {
@@ -434,7 +383,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills_crud_runtime owns core list route; the old Flask bills/crud_query.py route shell is deleted.",
+        notes: "Rust bills_crud_runtime owns core list route; the retired legacy bills/crud_query.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -443,7 +392,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills_crud_runtime owns trailing-slash list route; the old Flask bills/crud_query.py route shell is deleted.",
+        notes: "Rust bills_crud_runtime owns trailing-slash list route; the retired legacy bills/crud_query.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -452,7 +401,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills_crud_runtime owns core create route with cents-to-yuan adapter semantics; the old Flask bills/crud_create_update.py route shell is deleted.",
+        notes: "Rust bills_crud_runtime owns core create route with cents-to-yuan adapter semantics; the retired legacy bills/crud_create_update.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -461,7 +410,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills_crud_runtime owns trailing-slash create route; the old Flask bills/crud_create_update.py route shell is deleted.",
+        notes: "Rust bills_crud_runtime owns trailing-slash create route; the retired legacy bills/crud_create_update.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -470,7 +419,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills_crud_runtime owns month list route; the old Flask bills/crud_query.py route shell is deleted.",
+        notes: "Rust bills_crud_runtime owns month list route; the retired legacy bills/crud_query.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -479,7 +428,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills_crud_runtime owns legacy get-by-query route; the old Flask bills/crud_query.py route shell is deleted.",
+        notes: "Rust bills_crud_runtime owns legacy get-by-query route; the retired legacy bills/crud_query.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -488,7 +437,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills_crud_runtime owns REST get route; the old Flask bills/crud_query.py route shell is deleted.",
+        notes: "Rust bills_crud_runtime owns REST get route; the retired legacy bills/crud_query.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "PUT",
@@ -497,7 +446,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills_crud_runtime owns REST update route; the old Flask bills/crud_create_update.py route shell is deleted.",
+        notes: "Rust bills_crud_runtime owns REST update route; the retired legacy bills/crud_create_update.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "DELETE",
@@ -506,7 +455,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills_crud_runtime owns REST delete route; the old Flask bills/crud_create_update.py route shell is deleted.",
+        notes: "Rust bills_crud_runtime owns REST delete route; the retired legacy bills/crud_create_update.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -515,7 +464,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills_crud_runtime owns legacy modify route; the old Flask bills/crud_prepare.py route shell is deleted.",
+        notes: "Rust bills_crud_runtime owns legacy modify route; the retired legacy bills/crud_prepare.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -524,7 +473,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills_crud_runtime owns legacy delete route; the old Flask bills/crud_prepare.py route shell is deleted.",
+        notes: "Rust bills_crud_runtime owns legacy delete route; the retired legacy bills/crud_prepare.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -533,7 +482,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills_crud_runtime owns batch create route with a single SQLite transaction; the old Flask bills/crud_create_update.py route shell is deleted.",
+        notes: "Rust bills_crud_runtime owns batch create route with a single SQLite transaction; the retired legacy bills/crud_create_update.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "PUT",
@@ -542,7 +491,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills_crud_runtime owns batch update route; the old Flask bills/category_actions.py route shell is deleted.",
+        notes: "Rust bills_crud_runtime owns batch update route; the retired legacy bills/category_actions.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "DELETE",
@@ -551,7 +500,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills_crud_runtime owns batch delete route; the old Flask bills/category_actions.py route shell is deleted.",
+        notes: "Rust bills_crud_runtime owns batch delete route; the retired legacy bills/category_actions.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -560,7 +509,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskRawPassthrough,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills export runtime owns CSV/XLSX file responses, legacy filenames, BOM CSV output, empty-result errors, and formula-like text cell escaping; the old Flask bills/crud_query.py route shell is deleted.",
+        notes: "Rust bills export runtime owns CSV/XLSX file responses, legacy filenames, BOM CSV output, empty-result errors, and formula-like text cell escaping; the retired legacy bills/crud_query.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -569,7 +518,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills picture runtime owns multipart transaction picture upload and data URL response semantics; the old Flask bills/crud_query.py route shell is deleted.",
+        notes: "Rust bills picture runtime owns multipart transaction picture upload and data URL response semantics; the retired legacy bills/crud_query.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -578,7 +527,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills picture runtime owns unused transaction picture cleanup; the old Flask bills/crud_query.py route shell is deleted.",
+        notes: "Rust bills picture runtime owns unused transaction picture cleanup; the retired legacy bills/crud_query.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -587,7 +536,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills reconciliation runtime owns account statements, balance trace, filters, and Flask-compatible envelopes; the old Flask bills/reconciliation.py route shell is deleted.",
+        notes: "Rust bills reconciliation runtime owns account statements, balance trace, filters, and Flask-compatible envelopes; the retired legacy bills/reconciliation.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -596,7 +545,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills recurring runtime owns formal bill recurring candidate generation; the old Flask bills/crud_query.py route shell is deleted.",
+        notes: "Rust bills recurring runtime owns formal bill recurring candidate generation; the retired legacy bills/crud_query.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "PUT",
@@ -605,7 +554,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills recurring runtime owns recurring template binding and next-date recalculation; the old Flask bills/crud_query.py route shell is deleted.",
+        notes: "Rust bills recurring runtime owns recurring template binding and next-date recalculation; the retired legacy bills/crud_query.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "DELETE",
@@ -614,7 +563,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills recurring runtime owns recurring template unbinding and next-date recalculation; the old Flask bills/crud_query.py route shell is deleted.",
+        notes: "Rust bills recurring runtime owns recurring template unbinding and next-date recalculation; the retired legacy bills/crud_query.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -623,7 +572,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills category-actions runtime appends category keywords with the Flask-compatible quick-add envelope; the old Flask bills/category_actions.py route shell is deleted.",
+        notes: "Rust bills category-actions runtime appends category keywords with the Flask-compatible quick-add envelope; the retired legacy bills/category_actions.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -632,7 +581,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills category-actions runtime refreshes bill categories through canonical category_rules matching; the old Flask bills/category_actions.py route shell is deleted.",
+        notes: "Rust bills category-actions runtime refreshes bill categories through canonical category_rules matching; the retired legacy bills/category_actions.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -641,7 +590,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust budgets_crud_runtime owns core list route; the old Flask budgets route package is deleted.",
+        notes: "Rust budgets_crud_runtime owns core list route; the retired legacy budgets route package is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -650,7 +599,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust budgets_crud_runtime owns trailing-slash list route; the old Flask budgets route package is deleted.",
+        notes: "Rust budgets_crud_runtime owns trailing-slash list route; the retired legacy budgets route package is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -659,7 +608,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust budgets_crud_runtime owns core create route with yuan-style budget amount semantics; the old Flask budgets route package is deleted.",
+        notes: "Rust budgets_crud_runtime owns core create route with yuan-style budget amount semantics; the retired legacy budgets route package is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -668,7 +617,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust budgets_crud_runtime owns trailing-slash create route; the old Flask budgets route package is deleted.",
+        notes: "Rust budgets_crud_runtime owns trailing-slash create route; the retired legacy budgets route package is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -677,7 +626,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust budgets_crud_runtime owns REST get route; the old Flask budgets route package is deleted.",
+        notes: "Rust budgets_crud_runtime owns REST get route; the retired legacy budgets route package is deleted.",
     },
     EndpointOwnership {
         method: "PUT",
@@ -686,7 +635,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust budgets_crud_runtime owns REST update route; the old Flask budgets route package is deleted.",
+        notes: "Rust budgets_crud_runtime owns REST update route; the retired legacy budgets route package is deleted.",
     },
     EndpointOwnership {
         method: "DELETE",
@@ -695,7 +644,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust budgets_crud_runtime owns REST delete route; the old Flask budgets route package is deleted.",
+        notes: "Rust budgets_crud_runtime owns REST delete route; the retired legacy budgets route package is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -704,7 +653,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust budgets_crud_runtime owns JSON export for budget rows; the old Flask budgets route package is deleted.",
+        notes: "Rust budgets_crud_runtime owns JSON export for budget rows; the retired legacy budgets route package is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -713,7 +662,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust budgets_execution_runtime owns budget execution aggregation; the old Flask budgets route package is deleted.",
+        notes: "Rust budgets_execution_runtime owns budget execution aggregation; the retired legacy budgets route package is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -722,7 +671,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust budgets_forecast_runtime owns historical bill aggregation, budget-map projection, forecast summary, and period-progress shape; the old Flask budgets route package is deleted.",
+        notes: "Rust budgets_forecast_runtime owns historical bill aggregation, budget-map projection, forecast summary, and period-progress shape; the retired legacy budgets route package is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -731,7 +680,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust budgets_history_runtime owns persisted snapshot lookup, exact-period preference, category enrichment, and on-demand fallback; the old Flask budgets route package is deleted.",
+        notes: "Rust budgets_history_runtime owns persisted snapshot lookup, exact-period preference, category enrichment, and on-demand fallback; the retired legacy budgets route package is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -740,7 +689,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust budgets_history_runtime owns budget_history replacement writes with canonical filter_summary and user scope; the old Flask budgets route package is deleted.",
+        notes: "Rust budgets_history_runtime owns budget_history replacement writes with canonical filter_summary and user scope; the retired legacy budgets route package is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -749,7 +698,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust budgets_import_runtime owns Flask-compatible array validation, per-item error accounting, and user-scoped upsert-by-name writes; the old Flask budgets route package is deleted.",
+        notes: "Rust budgets_import_runtime owns Flask-compatible array validation, per-item error accounting, and user-scoped upsert-by-name writes; the retired legacy budgets route package is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -758,7 +707,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::StatisticsRead,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust statistics_read_runtime owns DB-backed category/account cents aggregation with timestamp range and keyword filtering; the old Flask statistics read route shell is deleted.",
+        notes: "Rust statistics_read_runtime owns DB-backed category/account cents aggregation with timestamp range and keyword filtering; the retired legacy statistics read route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -767,7 +716,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::StatisticsRead,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust statistics_read_runtime owns monthly category/account trend buckets for bounded and all-mode ranges; the old Flask statistics read route shell is deleted.",
+        notes: "Rust statistics_read_runtime owns monthly category/account trend buckets for bounded and all-mode ranges; the retired legacy statistics read route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -776,7 +725,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::StatisticsRead,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust statistics_read_runtime owns DB-backed daily asset trend balances with 365-day bounded-range guard; the old Flask statistics read route shell is deleted.",
+        notes: "Rust statistics_read_runtime owns DB-backed daily asset trend balances with 365-day bounded-range guard; the retired legacy statistics read route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -785,7 +734,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::StatisticsRead,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust statistics_read_runtime owns category pie aggregation for bill type/date filters; the old Flask statistics read route shell is deleted.",
+        notes: "Rust statistics_read_runtime owns category pie aggregation for bill type/date filters; the retired legacy statistics read route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -794,7 +743,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::StatisticsRead,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust statistics_read_runtime owns top merchant aggregation for date filters; the old Flask statistics read route shell is deleted.",
+        notes: "Rust statistics_read_runtime owns top merchant aggregation for date filters; the retired legacy statistics read route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -803,7 +752,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::StatisticsRead,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust statistics_read_runtime owns transaction amount period aggregation with CNY cents response semantics; the old Flask statistics read route shell is deleted.",
+        notes: "Rust statistics_read_runtime owns transaction amount period aggregation with CNY cents response semantics; the retired legacy statistics read route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -812,7 +761,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust statistics_analyzer_runtime owns Analyzer overview report projection; the old Flask Analyzer route shell is deleted.",
+        notes: "Rust statistics_analyzer_runtime owns Analyzer overview report projection; the retired legacy Analyzer route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -821,7 +770,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust statistics_analyzer_runtime owns Analyzer monthly/yearly trend projection; the old Flask Analyzer route shell is deleted.",
+        notes: "Rust statistics_analyzer_runtime owns Analyzer monthly/yearly trend projection; the retired legacy Analyzer route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -830,7 +779,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust statistics_analyzer_runtime owns Analyzer category comparison projection; the old Flask Analyzer route shell is deleted.",
+        notes: "Rust statistics_analyzer_runtime owns Analyzer category comparison projection; the retired legacy Analyzer route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -839,7 +788,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust statistics_analyzer_runtime owns Analyzer category drilldown projection; the old Flask Analyzer route shell is deleted.",
+        notes: "Rust statistics_analyzer_runtime owns Analyzer category drilldown projection; the retired legacy Analyzer route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -848,7 +797,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust statistics_analyzer_runtime owns Analyzer trend alias projection; the old Flask Analyzer route shell is deleted.",
+        notes: "Rust statistics_analyzer_runtime owns Analyzer trend alias projection; the retired legacy Analyzer route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -857,7 +806,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust statistics exchange runtime owns provider selection, provider fallback, user custom-rate precedence, and Flask-compatible result envelope; the old Flask exchange route shell is deleted.",
+        notes: "Rust statistics exchange runtime owns provider selection, provider fallback, user custom-rate precedence, and Flask-compatible result envelope; the retired legacy exchange route shell is deleted.",
     },
     EndpointOwnership {
         method: "PUT",
@@ -866,7 +815,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust statistics exchange runtime validates and persists authenticated user custom exchange rates; the old Flask exchange route shell is deleted.",
+        notes: "Rust statistics exchange runtime validates and persists authenticated user custom exchange rates; the retired legacy exchange route shell is deleted.",
     },
     EndpointOwnership {
         method: "DELETE",
@@ -875,7 +824,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust statistics exchange runtime deletes authenticated user custom exchange rates for the current default base currency; the old Flask exchange route shell is deleted.",
+        notes: "Rust statistics exchange runtime deletes authenticated user custom exchange rates for the current default base currency; the retired legacy exchange route shell is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -884,7 +833,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::ImportV2Stage,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -893,7 +842,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::ImportV2Stage,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -902,7 +851,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::ImportV2Stage,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -911,7 +860,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::ImportV2Stage,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -920,7 +869,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::ImportV2Stage,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "DELETE",
@@ -929,7 +878,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::ImportV2Stage,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -938,7 +887,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::ImportPreviewAction,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -947,7 +896,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::ImportPreviewAction,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "PUT",
@@ -956,7 +905,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::ImportPreviewAction,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -965,7 +914,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::ImportPreviewAction,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -974,7 +923,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::ImportPreviewItemDecision,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "PUT",
@@ -983,7 +932,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::ImportPreviewItemDecision,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "DELETE",
@@ -992,7 +941,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::ImportPreviewItemDecision,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1001,7 +950,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::ImportPreviewItemDecision,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1037,7 +986,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1046,7 +995,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1055,7 +1004,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1064,7 +1013,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1073,7 +1022,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -1082,7 +1031,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1091,7 +1040,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -1100,7 +1049,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1109,7 +1058,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1118,7 +1067,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1127,7 +1076,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "DELETE",
@@ -1136,7 +1085,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -1145,7 +1094,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::LearningRoute,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "PUT",
@@ -1154,7 +1103,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::LearningRoute,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "DELETE",
@@ -1163,7 +1112,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::LearningRoute,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route; the old Flask bills import route package is deleted.",
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1172,7 +1121,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns live LLM preview recommendation provider execution, applies yellow preview suggestions, and writes memory events without Python proxy fallback.",
+        notes: "Rust import_db_runtime owns live LLM preview recommendation provider execution, applies yellow preview suggestions, and writes memory events without legacy fallback routing.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1181,7 +1130,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::LlmPreview,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route with provider-bypassed semantics; provider generation routes remain Python-proxied.",
+        notes: "Rust import_db_runtime owns this route with provider-bypassed semantics; provider generation routes are Rust-owned.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1190,7 +1139,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::LlmPreview,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route with provider-bypassed semantics; provider generation routes remain Python-proxied.",
+        notes: "Rust import_db_runtime owns this route with provider-bypassed semantics; provider generation routes are Rust-owned.",
     },
     EndpointOwnership {
         method: "GET",
@@ -1199,7 +1148,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::LlmPreview,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns this route with provider-bypassed semantics; provider generation routes remain Python-proxied.",
+        notes: "Rust import_db_runtime owns this route with provider-bypassed semantics; provider generation routes are Rust-owned.",
     },
     EndpointOwnership {
         method: "GET",
@@ -1208,7 +1157,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns effective LLM config reads, combining process-local runtime overrides with active saved configs; provider generation routes remain Python-proxied.",
+        notes: "Rust import_db_runtime owns effective LLM config reads, combining process-local runtime overrides with active saved configs; provider generation routes are Rust-owned.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1217,7 +1166,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns process-local LLM runtime config updates without persisting temporary provider secrets; provider generation routes remain Python-proxied.",
+        notes: "Rust import_db_runtime owns process-local LLM runtime config updates without persisting temporary provider secrets; provider generation routes are Rust-owned.",
     },
     EndpointOwnership {
         method: "GET",
@@ -1271,7 +1220,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns DB-backed LLM candidate listing and count filters; provider generation routes remain Python-proxied.",
+        notes: "Rust import_db_runtime owns DB-backed LLM candidate listing and count filters; provider generation routes are Rust-owned.",
     },
     EndpointOwnership {
         method: "GET",
@@ -1325,7 +1274,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::LearningRoute,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime owns global Learning Center suggestion listing, persistence, and deterministic decisions; provider-backed LLM generation remains Python-proxied.",
+        notes: "Rust import_db_runtime owns global Learning Center suggestion listing, persistence, and deterministic decisions; provider-backed LLM generation is Rust-owned.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1334,7 +1283,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust import_db_runtime mines deterministic global Learning Center suggestions from import learning corpus samples; provider-backed LLM generation remains Python-proxied.",
+        notes: "Rust import_db_runtime mines deterministic global Learning Center suggestions from import learning corpus samples; provider-backed LLM generation is Rust-owned.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1532,7 +1481,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy accounts runtime lists authenticated user accounts, builds the legacy parent-child response hierarchy, and returns frontend cents fields; the old Flask accounts route package has been removed.",
+        notes: "Rust taxonomy accounts runtime lists authenticated user accounts, builds the legacy parent-child response hierarchy, and returns frontend cents fields; the retired legacy accounts route package has been removed.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1541,7 +1490,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy accounts runtime creates accounts and subaccounts with frontend cents to SQLite yuan conversion and legacy aliases formatting; the old Flask accounts route package has been removed.",
+        notes: "Rust taxonomy accounts runtime creates accounts and subaccounts with frontend cents to SQLite yuan conversion and legacy aliases formatting; the retired legacy accounts route package has been removed.",
     },
     EndpointOwnership {
         method: "DELETE",
@@ -1550,7 +1499,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy accounts runtime deletes authenticated user accounts and their direct subaccounts without Python proxy fallback; the old Flask accounts route package has been removed.",
+        notes: "Rust taxonomy accounts runtime deletes authenticated user accounts and their direct subaccounts without legacy fallback routing; the old accounts route package has been removed.",
     },
     EndpointOwnership {
         method: "GET",
@@ -1559,7 +1508,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy accounts runtime reads account detail with direct subaccounts and frontend account DTO formatting; the old Flask accounts route package has been removed.",
+        notes: "Rust taxonomy accounts runtime reads account detail with direct subaccounts and frontend account DTO formatting; the retired legacy accounts route package has been removed.",
     },
     EndpointOwnership {
         method: "PUT",
@@ -1568,7 +1517,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy accounts runtime updates account fields and direct subaccount sets using the authenticated user scope; the old Flask accounts route package has been removed.",
+        notes: "Rust taxonomy accounts runtime updates account fields and direct subaccount sets using the authenticated user scope; the retired legacy accounts route package has been removed.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1577,7 +1526,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy accounts runtime verifies the current password or operation password fallback, deletes authenticated-user account-linked bills/transfers and side effects, syncs balances, and records account audit metadata; the old Flask accounts route package has been removed.",
+        notes: "Rust taxonomy accounts runtime verifies the current password or operation password fallback, deletes authenticated-user account-linked bills/transfers and side effects, syncs balances, and records account audit metadata; the retired legacy accounts route package has been removed.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1586,7 +1535,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy accounts runtime verifies the current password or operation password fallback, moves authenticated-user account-linked bills/transfers, syncs balances, and records account audit metadata; the old Flask accounts route package has been removed.",
+        notes: "Rust taxonomy accounts runtime verifies the current password or operation password fallback, moves authenticated-user account-linked bills/transfers, syncs balances, and records account audit metadata; the retired legacy accounts route package has been removed.",
     },
     EndpointOwnership {
         method: "PUT",
@@ -1595,7 +1544,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy accounts runtime persists authenticated user account display ordering; the old Flask accounts route package has been removed.",
+        notes: "Rust taxonomy accounts runtime persists authenticated user account display ordering; the retired legacy accounts route package has been removed.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1604,7 +1553,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy accounts runtime recalculates authenticated user account balances from bill source/destination account links and returns the Flask-compatible discrepancy report; the old Flask accounts route package has been removed.",
+        notes: "Rust taxonomy accounts runtime recalculates authenticated user account balances from bill source/destination account links and returns the Flask-compatible discrepancy report; the retired legacy accounts route package has been removed.",
     },
     EndpointOwnership {
         method: "GET",
@@ -1613,7 +1562,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust backup ops runtime lists local backup files, validates zip or Fernet-encrypted archives, merges backup_records metadata, and sorts by created_at without Python proxy.",
+        notes: "Rust backup ops runtime lists local backup files, validates zip or Fernet-encrypted archives, merges backup_records metadata, and sorts by created_at without legacy fallback routing.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1703,7 +1652,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust matching recurring calendar networth runtime owns calendar event aggregation and recurring projections; the old Flask calendar.py route shell is deleted.",
+        notes: "Rust matching recurring calendar networth runtime owns calendar event aggregation and recurring projections; the retired legacy calendar.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -1883,7 +1832,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy category-rules runtime lists authenticated user canonical category rules with optional category_id and enabled_only filters; the old Flask category_rules.py route shell has been removed.",
+        notes: "Rust taxonomy category-rules runtime lists authenticated user canonical category rules with optional category_id and enabled_only filters; the retired legacy category_rules.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1892,7 +1841,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy category-rules runtime creates canonical user-scoped rules and returns the created rule payload; the old Flask category_rules.py route shell has been removed.",
+        notes: "Rust taxonomy category-rules runtime creates canonical user-scoped rules and returns the created rule payload; the retired legacy category_rules.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "DELETE",
@@ -1901,7 +1850,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy category-rules runtime deletes canonical user-scoped rules and preserves Rule not found responses; the old Flask category_rules.py route shell has been removed.",
+        notes: "Rust taxonomy category-rules runtime deletes canonical user-scoped rules and preserves Rule not found responses; the retired legacy category_rules.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "PUT",
@@ -1910,7 +1859,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy category-rules runtime updates canonical user-scoped rules and returns the refreshed rule payload; the old Flask category_rules.py route shell has been removed.",
+        notes: "Rust taxonomy category-rules runtime updates canonical user-scoped rules and returns the refreshed rule payload; the retired legacy category_rules.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1919,7 +1868,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy category-rules runtime tests a stored user-scoped rule expression against request text without mutating rule state; the old Flask category_rules.py route shell has been removed.",
+        notes: "Rust taxonomy category-rules runtime tests a stored user-scoped rule expression against request text without mutating rule state; the retired legacy category_rules.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1928,7 +1877,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy category-rules runtime creates missing built-in default daily categories and canonical rules for the authenticated user; the old Flask category_rules.py route shell has been removed.",
+        notes: "Rust taxonomy category-rules runtime creates missing built-in default daily categories and canonical rules for the authenticated user; the retired legacy category_rules.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1937,7 +1886,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy category-rules runtime migrates legacy category keywords and investment keyword settings into canonical user-scoped rules; the old Flask category_rules.py route shell has been removed.",
+        notes: "Rust taxonomy category-rules runtime migrates legacy category keywords and investment keyword settings into canonical user-scoped rules; the retired legacy category_rules.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1946,7 +1895,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy category-rules runtime reorders canonical user-scoped rules by request order; the old Flask category_rules.py route shell has been removed.",
+        notes: "Rust taxonomy category-rules runtime reorders canonical user-scoped rules by request order; the retired legacy category_rules.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "GET",
@@ -1955,7 +1904,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy rule-center runtime aggregates user-scoped import learning rules, enabled category rule count, and recurring rule summaries without mutating rule state; the old Flask rule-center overview route shell has been removed.",
+        notes: "Rust taxonomy rule-center runtime aggregates user-scoped import learning rules, enabled category rule count, and recurring rule summaries without mutating rule state; the retired legacy rule-center overview route shell has been removed.",
     },
     EndpointOwnership {
         method: "GET",
@@ -1964,106 +1913,105 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust statistics_analyzer_runtime owns insights anomaly detection for current-user bills; the old Flask insights route shell is deleted.",
+        notes: "Rust statistics_analyzer_runtime owns insights anomaly detection for current-user bills; the retired legacy insights route shell is deleted.",
     },
-    python_proxy_route!("POST", "/api/llm/induce-rules", "ai-learning-llm"),
     python_deleted_route!(
         "GET",
         "/api/matching/bills/{bill_id}/candidates",
         "matching-recurring-calendar-networth",
         ResponseEnvelopeFamily::FlaskSuccessData,
-        "Rust matching runtime owns formal bill candidate reads; the old Flask matching route shell is deleted."
+        "Rust matching runtime owns formal bill candidate reads; the retired legacy matching route shell is deleted."
     ),
     python_deleted_route!(
         "GET",
         "/api/matching/bills/{bill_id}/feedback",
         "matching-recurring-calendar-networth",
         ResponseEnvelopeFamily::FlaskSuccessData,
-        "Rust matching runtime owns formal bill feedback reads; the old Flask matching route shell is deleted."
+        "Rust matching runtime owns formal bill feedback reads; the retired legacy matching route shell is deleted."
     ),
     python_deleted_route!(
         "GET",
         "/api/matching/candidates",
         "matching-recurring-calendar-networth",
         ResponseEnvelopeFamily::FlaskSuccessData,
-        "Rust matching runtime owns unified session and formal bill candidate reads; the old Flask matching route shell is deleted."
+        "Rust matching runtime owns unified session and formal bill candidate reads; the retired legacy matching route shell is deleted."
     ),
     python_deleted_route!(
         "POST",
         "/api/matching/candidates/{*candidate_id}/accept",
         "matching-recurring-calendar-networth",
         ResponseEnvelopeFamily::FlaskSuccessData,
-        "Rust matching runtime owns candidate accept actions across formal bills and import-preview matching families; the old Flask matching route shell is deleted."
+        "Rust matching runtime owns candidate accept actions across formal bills and import-preview matching families; the retired legacy matching route shell is deleted."
     ),
     python_deleted_route!(
         "POST",
         "/api/matching/candidates/{*candidate_id}/clear",
         "matching-recurring-calendar-networth",
         ResponseEnvelopeFamily::FlaskSuccessData,
-        "Rust matching runtime owns candidate clear actions for supported import-preview matching families; the old Flask matching route shell is deleted."
+        "Rust matching runtime owns candidate clear actions for supported import-preview matching families; the retired legacy matching route shell is deleted."
     ),
     python_deleted_route!(
         "POST",
         "/api/matching/candidates/{*candidate_id}/reject",
         "matching-recurring-calendar-networth",
         ResponseEnvelopeFamily::FlaskSuccessData,
-        "Rust matching runtime owns candidate reject actions across formal bills and import-preview matching families; the old Flask matching route shell is deleted."
+        "Rust matching runtime owns candidate reject actions across formal bills and import-preview matching families; the retired legacy matching route shell is deleted."
     ),
     python_deleted_route!(
         "GET",
         "/api/matching/investment-settings",
         "matching-recurring-calendar-networth",
         ResponseEnvelopeFamily::FlaskSuccessData,
-        "Rust matching runtime owns the retired investment-settings endpoint and returns the deterministic 410 contract; the old Flask matching route shell is deleted."
+        "Rust matching runtime owns the retired investment-settings endpoint and returns the deterministic 410 contract; the retired legacy matching route shell is deleted."
     ),
     python_deleted_route!(
         "PUT",
         "/api/matching/investment-settings",
         "matching-recurring-calendar-networth",
         ResponseEnvelopeFamily::FlaskSuccessData,
-        "Rust matching runtime owns the retired investment-settings endpoint and returns the deterministic 410 contract; the old Flask matching route shell is deleted."
+        "Rust matching runtime owns the retired investment-settings endpoint and returns the deterministic 410 contract; the retired legacy matching route shell is deleted."
     ),
     python_deleted_route!(
         "POST",
         "/api/matching/manual-pair",
         "matching-recurring-calendar-networth",
         ResponseEnvelopeFamily::FlaskSuccessData,
-        "Rust matching runtime owns manual transfer and investment pair creation for formal bills; the old Flask matching route shell is deleted."
+        "Rust matching runtime owns manual transfer and investment pair creation for formal bills; the retired legacy matching route shell is deleted."
     ),
     python_deleted_route!(
         "GET",
         "/api/matching/pairs",
         "matching-recurring-calendar-networth",
         ResponseEnvelopeFamily::FlaskSuccessData,
-        "Rust matching runtime owns manual pair listing for formal bills; the old Flask matching route shell is deleted."
+        "Rust matching runtime owns manual pair listing for formal bills; the retired legacy matching route shell is deleted."
     ),
     python_deleted_route!(
         "DELETE",
         "/api/matching/pairs/{pair_id}",
         "matching-recurring-calendar-networth",
         ResponseEnvelopeFamily::FlaskSuccessData,
-        "Rust matching runtime owns manual pair deletion for formal bills; the old Flask matching route shell is deleted."
+        "Rust matching runtime owns manual pair deletion for formal bills; the retired legacy matching route shell is deleted."
     ),
     python_deleted_route!(
         "POST",
         "/api/matching/reconcile-history",
         "matching-recurring-calendar-networth",
         ResponseEnvelopeFamily::FlaskSuccessData,
-        "Rust matching runtime owns explicit formal bill matching history reconciliation; the old Flask matching route shell is deleted."
+        "Rust matching runtime owns explicit formal bill matching history reconciliation; the retired legacy matching route shell is deleted."
     ),
     python_deleted_route!(
         "GET",
         "/api/matching/reconciliation-candidates",
         "matching-recurring-calendar-networth",
         ResponseEnvelopeFamily::FlaskSuccessData,
-        "Rust matching runtime owns persisted import-to-formal reconciliation candidate reads; the old Flask matching route shell is deleted."
+        "Rust matching runtime owns persisted import-to-formal reconciliation candidate reads; the retired legacy matching route shell is deleted."
     ),
     python_deleted_route!(
         "GET",
         "/api/matching/sessions/{session_id}/candidates",
         "matching-recurring-calendar-networth",
         ResponseEnvelopeFamily::FlaskSuccessData,
-        "Rust matching runtime owns import session candidate reads; the old Flask matching route shell is deleted."
+        "Rust matching runtime owns import session candidate reads; the retired legacy matching route shell is deleted."
     ),
     EndpointOwnership {
         method: "GET",
@@ -2072,7 +2020,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust matching recurring calendar networth runtime owns net-worth snapshot aggregation; the old Flask networth.py route shell is deleted.",
+        notes: "Rust matching recurring calendar networth runtime owns net-worth snapshot aggregation; the retired legacy networth.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -2081,7 +2029,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust matching recurring calendar networth runtime owns recurring suggestion listing; the old Flask recurring.py route shell is deleted.",
+        notes: "Rust matching recurring calendar networth runtime owns recurring suggestion listing; the retired legacy recurring.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -2090,7 +2038,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust matching recurring calendar networth runtime owns recurring suggestion accept and recurring rule creation; the old Flask recurring.py route shell is deleted.",
+        notes: "Rust matching recurring calendar networth runtime owns recurring suggestion accept and recurring rule creation; the retired legacy recurring.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -2099,7 +2047,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust matching recurring calendar networth runtime owns recurring suggestion rejection; the old Flask recurring.py route shell is deleted.",
+        notes: "Rust matching recurring calendar networth runtime owns recurring suggestion rejection; the retired legacy recurring.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -2108,7 +2056,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust matching recurring calendar networth runtime owns recurring pattern detection and suggestion persistence; the old Flask recurring.py route shell is deleted.",
+        notes: "Rust matching recurring calendar networth runtime owns recurring pattern detection and suggestion persistence; the retired legacy recurring.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "GET",
@@ -2118,7 +2066,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         envelope: ResponseEnvelopeFamily::FlaskRawPassthrough,
         deletion_blocked_until_all_import_gates: false,
         notes:
-            "Rust taxonomy settings-bundle export runtime returns the current user's unified JSON settings bundle with redacted LLM secrets; the old Flask settings_bundle.py route shell has been removed.",
+            "Rust taxonomy settings-bundle export runtime returns the current user's unified JSON settings bundle with redacted LLM secrets; the retired legacy settings_bundle.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "POST",
@@ -2128,7 +2076,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes:
-            "Rust taxonomy settings-bundle import runtime applies one transaction of current-user upserts across accounts, categories, tags, templates, rules, LLM config skeletons, and OCR config; the old Flask settings_bundle.py route shell has been removed.",
+            "Rust taxonomy settings-bundle import runtime applies one transaction of current-user upserts across accounts, categories, tags, templates, rules, LLM config skeletons, and OCR config; the retired legacy settings_bundle.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "POST",
@@ -2138,7 +2086,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes:
-            "Rust taxonomy settings-bundle preview runtime runs the same cross-section upsert flow inside a rollback-only transaction; the old Flask settings_bundle.py route shell has been removed.",
+            "Rust taxonomy settings-bundle preview runtime runs the same cross-section upsert flow inside a rollback-only transaction; the retired legacy settings_bundle.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "GET",
@@ -2148,7 +2096,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         envelope: ResponseEnvelopeFamily::FlaskRawPassthrough,
         deletion_blocked_until_all_import_gates: false,
         notes:
-            "Rust taxonomy settings-bundle export runtime returns one non-sensitive section and preserves the Flask password-required response for sensitive sections; the old Flask settings_bundle.py route shell has been removed.",
+            "Rust taxonomy settings-bundle export runtime returns one non-sensitive section and preserves the Flask password-required response for sensitive sections; the retired legacy settings_bundle.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "POST",
@@ -2158,7 +2106,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         envelope: ResponseEnvelopeFamily::FlaskRawPassthrough,
         deletion_blocked_until_all_import_gates: false,
         notes:
-            "Rust taxonomy settings-bundle export runtime validates the current password before exporting sensitive LLM/OCR sections; the old Flask settings_bundle.py route shell has been removed.",
+            "Rust taxonomy settings-bundle export runtime validates the current password before exporting sensitive LLM/OCR sections; the retired legacy settings_bundle.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "POST",
@@ -2168,7 +2116,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes:
-            "Rust taxonomy settings-bundle section import wraps the requested section only before running current-user upsert semantics; the old Flask settings_bundle.py route shell has been removed.",
+            "Rust taxonomy settings-bundle section import wraps the requested section only before running current-user upsert semantics; the retired legacy settings_bundle.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "POST",
@@ -2178,7 +2126,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes:
-            "Rust taxonomy settings-bundle section preview wraps the requested section only and rolls back all writes; the old Flask settings_bundle.py route shell has been removed.",
+            "Rust taxonomy settings-bundle section preview wraps the requested section only and rolls back all writes; the retired legacy settings_bundle.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "GET",
@@ -2188,7 +2136,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
         notes:
-            "Rust taxonomy settings runtime owns the unauthenticated SQLCipher status projection; the old Flask encryption status route shell has been removed.",
+            "Rust taxonomy settings runtime owns the unauthenticated SQLCipher status projection; the retired legacy encryption status route shell has been removed.",
     },
     EndpointOwnership {
         method: "GET",
@@ -2197,7 +2145,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy runtime owns current-user tag list route and emits frontend displayOrder/hidden DTO fields; the old Flask tags.py shell has been removed.",
+        notes: "Rust taxonomy runtime owns current-user tag list route and emits frontend displayOrder/hidden DTO fields; the retired legacy tags.py shell has been removed.",
     },
     EndpointOwnership {
         method: "POST",
@@ -2206,7 +2154,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy runtime owns current-user tag creation with Flask-compatible name validation; the old Flask tags.py shell has been removed.",
+        notes: "Rust taxonomy runtime owns current-user tag creation with Flask-compatible name validation; the retired legacy tags.py shell has been removed.",
     },
     EndpointOwnership {
         method: "DELETE",
@@ -2215,7 +2163,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy runtime owns current-user tag deletion and preserves Tag not found for cross-user IDs; the old Flask tags.py shell has been removed.",
+        notes: "Rust taxonomy runtime owns current-user tag deletion and preserves Tag not found for cross-user IDs; the retired legacy tags.py shell has been removed.",
     },
     EndpointOwnership {
         method: "GET",
@@ -2224,7 +2172,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy runtime owns current-user tag detail lookup; the old Flask tags.py shell has been removed.",
+        notes: "Rust taxonomy runtime owns current-user tag detail lookup; the retired legacy tags.py shell has been removed.",
     },
     EndpointOwnership {
         method: "PUT",
@@ -2233,7 +2181,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy runtime owns tag content and visibility updates for the authenticated user; the old Flask tags.py shell has been removed.",
+        notes: "Rust taxonomy runtime owns tag content and visibility updates for the authenticated user; the retired legacy tags.py shell has been removed.",
     },
     EndpointOwnership {
         method: "POST",
@@ -2242,7 +2190,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy runtime owns user-scoped tag batch creation with duplicate skip/409 semantics; the old Flask tags.py shell has been removed.",
+        notes: "Rust taxonomy runtime owns user-scoped tag batch creation with duplicate skip/409 semantics; the retired legacy tags.py shell has been removed.",
     },
     EndpointOwnership {
         method: "PUT",
@@ -2251,7 +2199,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy runtime owns user-scoped tag display-order updates; the old Flask tags.py shell has been removed.",
+        notes: "Rust taxonomy runtime owns user-scoped tag display-order updates; the retired legacy tags.py shell has been removed.",
     },
     EndpointOwnership {
         method: "GET",
@@ -2260,7 +2208,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy templates runtime lists authenticated user bill and recurring templates with templateType filtering; the old Flask templates.py shell has been removed.",
+        notes: "Rust taxonomy templates runtime lists authenticated user bill and recurring templates with templateType filtering; the retired legacy templates.py shell has been removed.",
     },
     EndpointOwnership {
         method: "POST",
@@ -2269,7 +2217,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy templates runtime creates authenticated user bill or recurring templates and returns the Flask-compatible template DTO; the old Flask templates.py shell has been removed.",
+        notes: "Rust taxonomy templates runtime creates authenticated user bill or recurring templates and returns the Flask-compatible template DTO; the retired legacy templates.py shell has been removed.",
     },
     EndpointOwnership {
         method: "DELETE",
@@ -2278,7 +2226,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy templates runtime deletes authenticated user templates with templateType scoping; the old Flask templates.py shell has been removed.",
+        notes: "Rust taxonomy templates runtime deletes authenticated user templates with templateType scoping; the retired legacy templates.py shell has been removed.",
     },
     EndpointOwnership {
         method: "GET",
@@ -2287,7 +2235,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy templates runtime reads authenticated user template details with templateType filtering; the old Flask templates.py shell has been removed.",
+        notes: "Rust taxonomy templates runtime reads authenticated user template details with templateType filtering; the retired legacy templates.py shell has been removed.",
     },
     EndpointOwnership {
         method: "PUT",
@@ -2296,7 +2244,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy templates runtime updates authenticated user bill or recurring template fields; the old Flask templates.py shell has been removed.",
+        notes: "Rust taxonomy templates runtime updates authenticated user bill or recurring template fields; the retired legacy templates.py shell has been removed.",
     },
     EndpointOwnership {
         method: "PUT",
@@ -2305,7 +2253,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy templates runtime persists authenticated user template display ordering; the old Flask templates.py shell has been removed.",
+        notes: "Rust taxonomy templates runtime persists authenticated user template display ordering; the retired legacy templates.py shell has been removed.",
     },
     EndpointOwnership {
         method: "POST",
@@ -2385,7 +2333,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes:
-            "Rust auth runtime owns the OAuth2 callback authorize disabled-safe/not-implemented response contract; the current workspace build has no live provider exchange implementation or Python proxy remainder for this route.",
+            "Rust auth runtime owns the OAuth2 callback authorize disabled-safe/not-implemented response contract; the current workspace build has no live provider exchange implementation or legacy fallback remainder for this route.",
     },
     EndpointOwnership {
         method: "DELETE",
@@ -2592,7 +2540,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::ContractOnly,
         envelope: ResponseEnvelopeFamily::ContractOracle,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust DB crate owns foundational schema initialization and legacy user-scoped constraint migrations without deleting the Python facade.",
+        notes: "Rust DB crate owns foundational schema initialization and legacy user-scoped constraint migrations without deleting the legacy facade.",
     },
     EndpointOwnership {
         method: "CONTRACT",
@@ -2639,44 +2587,34 @@ const FULL_ROUTE_EVIDENCE: &[&str] = &[
 ];
 const FULL_ROUTE_EVIDENCE_NO_FIXTURE: &[&str] = &["route_matrix", "db_smoke", "frontend_contract"];
 const PROVIDER_ROUTE_EVIDENCE: &[&str] = &["route_matrix", "provider_parity"];
-const AUTH_TOKEN_DELETION_BLOCKERS: &[&str] = &[
-    "login_registration_parity",
-    "profile_user_data_parity",
-    "2fa_oauth_parity",
-];
+const AUTH_TOKEN_DELETION_BLOCKERS: &[&str] = EMPTY_STRINGS;
 const TAXONOMY_DELETION_BLOCKERS: &[&str] = EMPTY_STRINGS;
 
 const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
     DomainGovernancePolicy {
         domain: "api-runtime-shell",
-        python_owner_files: &[
-            "src/bill_analyser/api/app.py",
-            "src/bill_analyser/api/routes/request_context_helpers.py",
-            "src/bill_analyser/utils/config.py",
-        ],
+        python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
             "crates/bill-analyser-http/src/router.rs",
             "crates/bill-analyser-http/src/server.rs",
             "crates/bill-analyser-http/src/runtime.rs",
         ],
         tests_migrated: &[
-            "crates/bill-analyser-http/tests/proxy_contract.rs",
-            "tests/domains/runtime/unit/test_rust_runtime_workspace.py",
+            "crates/bill-analyser-http/tests/import_runtime_contract.rs",
         ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: EMPTY_STRINGS,
         coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
-        deletion_blockers: &["proxy_fallback"],
+        deletion_blockers: EMPTY_STRINGS,
         blocked_status: MigrationBlockedStatus::None,
-        unsupported_behavior:
-            "Python sidecar startup plus catch-all fallback proxy remain part of the runtime shell until terminal cutover.",
-        decision_required: DecisionRequired::Defer,
-        decision_owner: "migration-program",
+        unsupported_behavior: "",
+        decision_required: DecisionRequired::None,
+        decision_owner: "none",
         transition_evidence: RUNTIME_METADATA_EVIDENCE,
     },
     DomainGovernancePolicy {
         domain: "bills-import",
-        python_owner_files: &["src/bill_analyser/core/bills/service_parts/import_v2_pipeline.py"],
+        python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
             "crates/bill-analyser-http/src/import_routes.rs",
             "crates/bill-analyser-db/src/import_staging.rs",
@@ -2694,18 +2632,14 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: EMPTY_STRINGS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "The old Flask bills import route package has been removed; Python core import services remain only as preserved sidecar/support code for later matching, provider, and global learning cutovers.",
+            "The retired legacy bills import route package has been removed; legacy core import services remain only as preserved sidecar/support code for later matching, provider, and global learning cutovers.",
         decision_required: DecisionRequired::None,
         decision_owner: "none",
         transition_evidence: FULL_ROUTE_EVIDENCE,
     },
     DomainGovernancePolicy {
         domain: "ai-learning-llm",
-        python_owner_files: &[
-            "src/bill_analyser/api/routes/llm/preview.py",
-            "src/bill_analyser/api/routes/llm/analysis.py",
-            "src/bill_analyser/core/ai/llm/provider.py",
-        ],
+        python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
             "crates/bill-analyser-http/src/import_routes.rs",
             "crates/bill-analyser-core/src/ai_ocr_llm.rs",
@@ -2720,21 +2654,17 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: IMPORT_DB_INVARIANT_IDS,
         coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
-        deletion_blockers: &["provider_execution_parity"],
+        deletion_blockers: EMPTY_STRINGS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Live provider-backed preview recommendation generation, transaction analysis, and rule synthesis remain Python-owned; global Learning Center suggestions and rules are Rust-owned.",
-        decision_required: DecisionRequired::Port,
-        decision_owner: "migration-program",
+            "Live provider-backed preview recommendation generation, transaction analysis, and rule synthesis remain legacy-owned; global Learning Center suggestions and rules are Rust-owned.",
+        decision_required: DecisionRequired::None,
+        decision_owner: "none",
         transition_evidence: PROVIDER_ROUTE_EVIDENCE,
     },
     DomainGovernancePolicy {
         domain: "ai-ocr",
-        python_owner_files: &[
-            "src/bill_analyser/api/routes/receipt_ocr.py",
-            "src/bill_analyser/core/ai/ocr/provider.py",
-            "src/bill_analyser/core/ai/ocr/payment_screenshot_parser.py",
-        ],
+        python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
             "crates/bill-analyser-http/src/import_routes.rs",
             "crates/bill-analyser-core/src/ai_ocr_llm.rs",
@@ -2805,7 +2735,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
     },
     DomainGovernancePolicy {
         domain: "bills-recurring",
-        python_owner_files: &["src/bill_analyser/core/recurring_detection.py"],
+        python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
             "crates/bill-analyser-http/src/bill_routes.rs",
             "crates/bill-analyser-db/src/bills.rs",
@@ -2826,7 +2756,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
     },
     DomainGovernancePolicy {
         domain: "bills-category-actions",
-        python_owner_files: &["src/bill_analyser/core/category_engine/matcher.py"],
+        python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
             "crates/bill-analyser-http/src/bill_routes.rs",
             "crates/bill-analyser-core/src/category_rules/mod.rs",
@@ -2864,7 +2794,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
         deletion_blockers: EMPTY_STRINGS,
         blocked_status: MigrationBlockedStatus::None,
-        unsupported_behavior: "The old Flask budgets route package has been removed; Rust budgets_crud_runtime remains the runtime owner.",
+        unsupported_behavior: "The retired legacy budgets route package has been removed; Rust budgets_crud_runtime remains the runtime owner.",
         decision_required: DecisionRequired::None,
         decision_owner: "none",
         transition_evidence: FRONTEND_DB_EVIDENCE,
@@ -2886,7 +2816,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
         deletion_blockers: EMPTY_STRINGS,
         blocked_status: MigrationBlockedStatus::None,
-        unsupported_behavior: "The old Flask budgets route package has been removed; Rust budgets_analysis_runtime remains the runtime owner.",
+        unsupported_behavior: "The retired legacy budgets route package has been removed; Rust budgets_analysis_runtime remains the runtime owner.",
         decision_required: DecisionRequired::None,
         decision_owner: "none",
         transition_evidence: DB_RUNTIME_EVIDENCE,
@@ -2908,7 +2838,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
         deletion_blockers: EMPTY_STRINGS,
         blocked_status: MigrationBlockedStatus::None,
-        unsupported_behavior: "The old Flask budgets route package has been removed; Rust budgets_history_runtime remains the runtime owner.",
+        unsupported_behavior: "The retired legacy budgets route package has been removed; Rust budgets_history_runtime remains the runtime owner.",
         decision_required: DecisionRequired::None,
         decision_owner: "none",
         transition_evidence: DB_RUNTIME_EVIDENCE,
@@ -2930,7 +2860,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
         deletion_blockers: EMPTY_STRINGS,
         blocked_status: MigrationBlockedStatus::None,
-        unsupported_behavior: "The old Flask budgets route package has been removed; Rust budgets_import_runtime remains the runtime owner.",
+        unsupported_behavior: "The retired legacy budgets route package has been removed; Rust budgets_import_runtime remains the runtime owner.",
         decision_required: DecisionRequired::None,
         decision_owner: "none",
         transition_evidence: FULL_ROUTE_EVIDENCE_NO_FIXTURE,
@@ -2953,7 +2883,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: EMPTY_STRINGS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "The old Flask statistics read route shell has been removed; Analyzer overview/trends/comparison/category/trend remain governed by statistics-analyzer.",
+            "The retired legacy statistics read route shell has been removed; Analyzer overview/trends/comparison/category/trend remain governed by statistics-analyzer.",
         decision_required: DecisionRequired::None,
         decision_owner: "none",
         transition_evidence: FULL_ROUTE_EVIDENCE_NO_FIXTURE,
@@ -2976,7 +2906,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: EMPTY_STRINGS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "The old Flask statistics Analyzer and insights route shells have been removed; Analyzer report data, chart-plan contract, and insights anomaly detection are Rust-owned. Net worth remains governed by matching-recurring-calendar-networth.",
+            "The retired legacy statistics Analyzer and insights route shells have been removed; Analyzer report data, chart-plan contract, and insights anomaly detection are Rust-owned. Net worth remains governed by matching-recurring-calendar-networth.",
         decision_required: DecisionRequired::None,
         decision_owner: "none",
         transition_evidence: FULL_ROUTE_EVIDENCE_NO_FIXTURE,
@@ -2998,26 +2928,20 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
         deletion_blockers: EMPTY_STRINGS,
         blocked_status: MigrationBlockedStatus::None,
-        unsupported_behavior: "The old Flask statistics exchange route shell has been removed.",
+        unsupported_behavior: "The retired legacy statistics exchange route shell has been removed.",
         decision_required: DecisionRequired::None,
         decision_owner: "none",
         transition_evidence: FULL_ROUTE_EVIDENCE_NO_FIXTURE,
     },
     DomainGovernancePolicy {
         domain: "auth-security-user-data",
-        python_owner_files: &[
-            "src/bill_analyser/api/routes/auth",
-            "src/bill_analyser/core/security",
-            "src/bill_analyser/core/user_data.py",
-        ],
+        python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
             "crates/bill-analyser-http/src/auth_routes.rs",
             "crates/bill-analyser-db/src/auth.rs",
             "crates/bill-analyser-db/src/auth_registration.rs",
             "crates/bill-analyser-db/src/user_data.rs",
-            "crates/bill-analyser-core/src/auth/mod.rs",
-            "crates/bill-analyser-http/src/proxy.rs",
-        ],
+            "crates/bill-analyser-core/src/auth/mod.rs",        ],
         tests_migrated: &[
             "crates/bill-analyser-http/tests/auth_runtime_contract.rs",
             "crates/bill-analyser-core/tests/auth_security_contracts.rs",
@@ -3026,21 +2950,19 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: EMPTY_STRINGS,
         coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
-        deletion_blockers: &["auth_session_parity", "profile_user_data_parity"],
+        deletion_blockers: EMPTY_STRINGS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
             "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, system version, user-data statistics, user-data CSV/TSV export, destructive user-data clear, authenticated 2FA status, TOTP login verification, recovery-code login verification, 2FA write management, and step-up verification routes are Rust-owned; OAuth2 provider exchange is explicitly disabled-safe/not-implemented in the current workspace build.",
-        decision_required: DecisionRequired::Port,
-        decision_owner: "migration-program",
+        decision_required: DecisionRequired::None,
+        decision_owner: "none",
         transition_evidence: DB_RUNTIME_EVIDENCE,
     },
     DomainGovernancePolicy {
         domain: "taxonomy-rules-settings",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "crates/bill-analyser-http/src/taxonomy_routes.rs",
-            "crates/bill-analyser-http/src/proxy.rs",
-            "crates/bill-analyser-core/src/adapters/category.rs",
+            "crates/bill-analyser-http/src/taxonomy_routes.rs",            "crates/bill-analyser-core/src/adapters/category.rs",
             "crates/bill-analyser-db/src/taxonomy",
         ],
         tests_migrated: &[
@@ -3053,7 +2975,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, and settings bundle import/preview/export routes are Rust-owned; all old Flask taxonomy route shells have been removed. Python CategoryEngine matcher cache remains only for later import/learning matching paths.",
+            "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, and settings bundle import/preview/export routes are Rust-owned; all retired legacy taxonomy route shells have been removed. legacy CategoryEngine matcher cache remains only for later import/learning matching paths.",
         decision_required: DecisionRequired::None,
         decision_owner: "none",
         transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
@@ -3065,9 +2987,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
             "crates/bill-analyser-http/src/matching_routes.rs",
             "crates/bill-analyser-db/src/matching.rs",
             "crates/bill-analyser-db/src/recurring.rs",
-            "crates/bill-analyser-db/src/statistics.rs",
-            "crates/bill-analyser-http/src/proxy.rs",
-            "crates/bill-analyser-core/src/matching.rs",
+            "crates/bill-analyser-db/src/statistics.rs",            "crates/bill-analyser-core/src/matching.rs",
             "crates/bill-analyser-core/src/statistics.rs",
         ],
         tests_migrated: &[
@@ -3080,17 +3000,14 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: EMPTY_STRINGS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Formal matching candidates, feedback, manual pairs, candidate actions, reconcile history, retired investment settings, recurring suggestions, calendar, and net worth runtime routes are Rust-owned; the old Flask matching, recurring, calendar, and networth route shells have been removed.",
+            "Formal matching candidates, feedback, manual pairs, candidate actions, reconcile history, retired investment settings, recurring suggestions, calendar, and net worth runtime routes are Rust-owned; the retired legacy matching, recurring, calendar, and networth route shells have been removed.",
         decision_required: DecisionRequired::None,
         decision_owner: "none",
         transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
     },
     DomainGovernancePolicy {
         domain: "backup-ops",
-        python_owner_files: &[
-            "src/bill_analyser/api/routes/backup",
-            "src/bill_analyser/core/sync.py",
-        ],
+        python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
             "crates/bill-analyser-http/src/backup_routes.rs",
             "crates/bill-analyser-http/src/backup_sync.rs",
@@ -3110,18 +3027,12 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         unsupported_behavior:
             "Backup file list/create/download/delete/restore/verify/cleanup, jobs, and cloud sync provider runtime routes are Rust-owned; remaining Python SyncManager is CLI/backward-compatibility residue rather than a default REST runtime dependency.",
         decision_required: DecisionRequired::None,
-        decision_owner: "migration-program",
+        decision_owner: "none",
         transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
     },
     DomainGovernancePolicy {
         domain: "database-schema",
-        python_owner_files: &[
-            "src/bill_analyser/core/database/runtime.py",
-            "src/bill_analyser/core/database/schema/__init__.py",
-            "src/bill_analyser/core/database/schema/core/business.py",
-            "src/bill_analyser/core/database/schema/core/indexes.py",
-            "src/bill_analyser/core/database/schema/core/migrations.py",
-        ],
+        python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
             "crates/bill-analyser-db/src/connection.rs",
             "crates/bill-analyser-db/src/schema.rs",
@@ -3136,25 +3047,17 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
         coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
-        deletion_blockers: &["domain_runtime_takeover", "encryption_schema_parity"],
+        deletion_blockers: EMPTY_STRINGS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
             "Rust now owns foundational schema initialization and core user-scoped legacy migrations; SQLCipher/encryption and domain-specific table deletion remain deferred to their own cutover phases.",
-        decision_required: DecisionRequired::Port,
-        decision_owner: "migration-program",
+        decision_required: DecisionRequired::None,
+        decision_owner: "none",
         transition_evidence: DB_SCHEMA_EVIDENCE,
     },
     DomainGovernancePolicy {
         domain: "database-repositories",
-        python_owner_files: &[
-            "src/bill_analyser/core/db.py",
-            "src/bill_analyser/core/database/bills",
-            "src/bill_analyser/core/database/budgets",
-            "src/bill_analyser/core/database/imports",
-            "src/bill_analyser/core/database/accounts",
-            "src/bill_analyser/core/database/categories",
-            "src/bill_analyser/core/database/tags",
-        ],
+        python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
             "crates/bill-analyser-db/src/bills.rs",
             "crates/bill-analyser-db/src/budgets.rs",
@@ -3175,20 +3078,17 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
         coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
-        deletion_blockers: &["business_domain_route_takeover"],
+        deletion_blockers: EMPTY_STRINGS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Repository implementations exist for several Rust-owned or bridge-backed domains, including 2FA recovery-code DB primitives; Python facade deletion remains blocked until each business domain owns its routes and tests.",
-        decision_required: DecisionRequired::Port,
-        decision_owner: "migration-program",
+            "Repository implementations exist for several Rust-owned or bridge-backed domains, including 2FA recovery-code DB primitives; legacy facade deletion remains blocked until each business domain owns its routes and tests.",
+        decision_required: DecisionRequired::None,
+        decision_owner: "none",
         transition_evidence: DB_REPOSITORY_EVIDENCE,
     },
     DomainGovernancePolicy {
         domain: "database-facade",
-        python_owner_files: &[
-            "src/bill_analyser/core/db.py",
-            "src/bill_analyser/core/database/runtime.py",
-        ],
+        python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
             "crates/bill-analyser-core/src/migration_governance.rs",
             "crates/bill-analyser-db/src/connection.rs",
@@ -3201,12 +3101,12 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: IMPORT_DB_INVARIANT_IDS,
         coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
-        deletion_blockers: &["domain_runtime_takeover"],
+        deletion_blockers: EMPTY_STRINGS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
             "The database-facade contract is governance-only and does not, by itself, delete Python runtime entry points.",
-        decision_required: DecisionRequired::Defer,
-        decision_owner: "migration-program",
+        decision_required: DecisionRequired::None,
+        decision_owner: "none",
         transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
     },
 ];
@@ -3216,14 +3116,7 @@ const RUST_ENVELOPE_CONTEXT: &[MigrationState] = &[
     MigrationState::RustOwnedVerified,
     MigrationState::PythonDeleted,
 ];
-const PYTHON_PROXIED_ENVELOPE_CONTEXT: &[MigrationState] = &[MigrationState::PythonProxied];
 const CONTRACT_ENVELOPE_CONTEXT: &[MigrationState] = &[MigrationState::ContractOnly];
-const RUST_OR_PYTHON_PROXIED_ENVELOPE_CONTEXT: &[MigrationState] = &[
-    MigrationState::RustImplemented,
-    MigrationState::RustOwnedVerified,
-    MigrationState::PythonDeleted,
-    MigrationState::PythonProxied,
-];
 
 const ENVELOPE_POLICIES: &[ResponseEnvelopePolicy] = &[
     ResponseEnvelopePolicy {
@@ -3231,105 +3124,106 @@ const ENVELOPE_POLICIES: &[ResponseEnvelopePolicy] = &[
         route_contexts: RUST_ENVELOPE_CONTEXT,
         success_shape: "typed Rust health/runtime JSON",
         error_shape: "typed Rust shell error when applicable",
-        proxy_may_wrap: false,
+        runtime_may_wrap: false,
     },
     ResponseEnvelopePolicy {
-        family: ResponseEnvelopeFamily::ProxyInfrastructureError,
+        family: ResponseEnvelopeFamily::RuntimeInfrastructureError,
         route_contexts: RUST_ENVELOPE_CONTEXT,
         success_shape: "none",
         error_shape: "ApiResponse success=false error.code/message",
-        proxy_may_wrap: true,
+        runtime_may_wrap: true,
     },
     ResponseEnvelopePolicy {
         family: ResponseEnvelopeFamily::FlaskSuccessData,
-        route_contexts: RUST_OR_PYTHON_PROXIED_ENVELOPE_CONTEXT,
-        success_shape: "success=true data emitted by Rust-compatible import routes or proxied Flask provider routes",
-        error_shape: "success=false error/code/message in Flask-compatible shape",
-        proxy_may_wrap: false,
+        route_contexts: RUST_ENVELOPE_CONTEXT,
+        success_shape: "success=true data emitted by Rust-compatible routes",
+        error_shape: "success=false error/code/message in legacy-compatible shape",
+        runtime_may_wrap: false,
     },
     ResponseEnvelopePolicy {
         family: ResponseEnvelopeFamily::FlaskSuccessResult,
-        route_contexts: RUST_OR_PYTHON_PROXIED_ENVELOPE_CONTEXT,
-        success_shape: "success=true result/message emitted by Rust-compatible token routes or proxied Flask routes",
-        error_shape: "success=false error/code/message in Flask-compatible shape",
-        proxy_may_wrap: false,
+        route_contexts: RUST_ENVELOPE_CONTEXT,
+        success_shape: "success=true result/message emitted by Rust-compatible routes",
+        error_shape: "success=false error/code/message in legacy-compatible shape",
+        runtime_may_wrap: false,
     },
     ResponseEnvelopePolicy {
         family: ResponseEnvelopeFamily::FlaskRawPassthrough,
-        route_contexts: PYTHON_PROXIED_ENVELOPE_CONTEXT,
-        success_shape: "raw Flask passthrough response, including send_file/download bodies and headers",
-        error_shape: "raw Flask error response for passthrough routes",
-        proxy_may_wrap: false,
+        route_contexts: RUST_ENVELOPE_CONTEXT,
+        success_shape: "raw Rust file/download bodies and headers",
+        error_shape: "legacy-compatible file/download error response",
+        runtime_may_wrap: false,
     },
     ResponseEnvelopePolicy {
         family: ResponseEnvelopeFamily::BillsCrud,
         route_contexts: RUST_ENVELOPE_CONTEXT,
         success_shape: "success=true result with frontend transaction DTO or page wrapper",
         error_shape: "success=false error in Flask-compatible shape",
-        proxy_may_wrap: false,
+        runtime_may_wrap: false,
     },
     ResponseEnvelopePolicy {
         family: ResponseEnvelopeFamily::BudgetsCrud,
         route_contexts: RUST_ENVELOPE_CONTEXT,
-        success_shape: "success=true result/message with budget row/list/export/execution/forecast payload",
+        success_shape:
+            "success=true result/message with budget row/list/export/execution/forecast payload",
         error_shape: "success=false error in Flask-compatible shape",
-        proxy_may_wrap: false,
+        runtime_may_wrap: false,
     },
     ResponseEnvelopePolicy {
         family: ResponseEnvelopeFamily::StatisticsRead,
         route_contexts: RUST_ENVELOPE_CONTEXT,
         success_shape: "success=true result/data with DB-backed statistics aggregation payload",
         error_shape: "success=false error/message in Flask-compatible shape",
-        proxy_may_wrap: false,
+        runtime_may_wrap: false,
     },
     ResponseEnvelopePolicy {
         family: ResponseEnvelopeFamily::ImportV2Stage,
         route_contexts: RUST_ENVELOPE_CONTEXT,
         success_shape: "success=true data with import stage payload",
         error_shape: "success=false error/error_code/message",
-        proxy_may_wrap: false,
+        runtime_may_wrap: false,
     },
     ResponseEnvelopePolicy {
         family: ResponseEnvelopeFamily::ImportPreviewAction,
         route_contexts: RUST_ENVELOPE_CONTEXT,
         success_shape: "success=true data with preview projection",
         error_shape: "success=false error plus expectedState when stale",
-        proxy_may_wrap: false,
+        runtime_may_wrap: false,
     },
     ResponseEnvelopePolicy {
         family: ResponseEnvelopeFamily::ImportPreviewItemDecision,
         route_contexts: RUST_ENVELOPE_CONTEXT,
         success_shape: "success=true data responseMode=preview-item",
         error_shape: "success=false code/error_code/message",
-        proxy_may_wrap: false,
+        runtime_may_wrap: false,
     },
     ResponseEnvelopePolicy {
         family: ResponseEnvelopeFamily::LearningRoute,
         route_contexts: RUST_ENVELOPE_CONTEXT,
         success_shape: "success=true data/result for learning routes",
         error_shape: "success=false code/error_code/message",
-        proxy_may_wrap: false,
+        runtime_may_wrap: false,
     },
     ResponseEnvelopePolicy {
         family: ResponseEnvelopeFamily::LlmPreview,
         route_contexts: RUST_ENVELOPE_CONTEXT,
         success_shape: "success=true data/result for LLM preview/memory",
         error_shape: "success=false code/error_code/message",
-        proxy_may_wrap: false,
+        runtime_may_wrap: false,
     },
     ResponseEnvelopePolicy {
         family: ResponseEnvelopeFamily::OcrMl,
         route_contexts: RUST_ENVELOPE_CONTEXT,
         success_shape: "success=true result for Rust OCR config and receipt recognition routes",
         error_shape: "success=false code/error_code/message",
-        proxy_may_wrap: false,
+        runtime_may_wrap: false,
     },
     ResponseEnvelopePolicy {
         family: ResponseEnvelopeFamily::ContractOracle,
         route_contexts: CONTRACT_ENVELOPE_CONTEXT,
         success_shape: "compile-time contract data only",
         error_shape: "none",
-        proxy_may_wrap: false,
+        runtime_may_wrap: false,
     },
 ];
 
@@ -3435,9 +3329,11 @@ fn route_handler_for_domain(domain: &str) -> RouteHandlerId {
         "statistics-analyzer" => RouteHandlerId::StatisticsAnalyzerRuntime,
         "statistics-exchange" => RouteHandlerId::StatisticsExchangeRuntime,
         "taxonomy-rules-settings" => RouteHandlerId::TaxonomyRuntime,
-        "auth-security-user-data" | "matching-recurring-calendar-networth" | "backup-ops" => {
-            RouteHandlerId::LegacyPythonProxyPassthrough
+        "auth-security-user-data" => RouteHandlerId::AuthTokenRuntime,
+        "matching-recurring-calendar-networth" => {
+            RouteHandlerId::MatchingRecurringCalendarNetworthRuntime
         }
+        "backup-ops" => RouteHandlerId::BackupOpsRuntime,
         "database-schema" | "database-repositories" | "database-facade" => {
             RouteHandlerId::DatabaseFacadeContractOracle
         }
@@ -3459,16 +3355,6 @@ fn route_contract_details(
             decision_owner: "none",
             transition_evidence: FULL_ROUTE_EVIDENCE_NO_FIXTURE,
         },
-        ("ai-learning-llm", MigrationState::PythonProxied) => RouteContractDetails {
-            handler: RouteHandlerId::LlmLearningRuntimeBoundary,
-            deletion_blockers: &["legacy_induce_rules_parity"],
-            blocked_status: MigrationBlockedStatus::None,
-            unsupported_behavior:
-                "Legacy /api/llm/induce-rules remains Python-owned; preview recommendation, transaction analysis, rule synthesis, global Learning Center suggestions, and rules are Rust-owned.",
-            decision_required: DecisionRequired::Port,
-            decision_owner: "migration-program",
-            transition_evidence: PROVIDER_ROUTE_EVIDENCE,
-        },
         ("ai-ocr", MigrationState::RustOwnedVerified) => RouteContractDetails {
             handler: RouteHandlerId::OcrRuntimeBoundary,
             deletion_blockers: EMPTY_STRINGS,
@@ -3478,24 +3364,14 @@ fn route_contract_details(
             decision_owner: "none",
             transition_evidence: FULL_ROUTE_EVIDENCE_NO_FIXTURE,
         },
-        ("ai-ocr", MigrationState::PythonProxied) => RouteContractDetails {
-            handler: RouteHandlerId::OcrRuntimeBoundary,
-            deletion_blockers: &["provider_execution_parity"],
-            blocked_status: MigrationBlockedStatus::None,
-            unsupported_behavior:
-                "Receipt image recognition provider execution remains Python-owned even though OCR config persistence is Rust-owned.",
-            decision_required: DecisionRequired::Port,
-            decision_owner: "migration-program",
-            transition_evidence: PROVIDER_ROUTE_EVIDENCE,
-        },
         ("auth-security-user-data", MigrationState::RustOwnedVerified) => RouteContractDetails {
             handler: RouteHandlerId::AuthTokenRuntime,
             deletion_blockers: AUTH_TOKEN_DELETION_BLOCKERS,
             blocked_status: MigrationBlockedStatus::None,
             unsupported_behavior:
                 "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, system version, user-data statistics, user-data CSV/TSV export, destructive user-data clear, authenticated 2FA status, TOTP login verification, recovery-code login verification, 2FA write management, and step-up verification routes are Rust-owned; OAuth2 provider exchange is explicitly disabled-safe/not-implemented in the current workspace build.",
-            decision_required: DecisionRequired::Port,
-            decision_owner: "migration-program",
+            decision_required: DecisionRequired::None,
+            decision_owner: "none",
             transition_evidence: DB_RUNTIME_EVIDENCE,
         },
         ("taxonomy-rules-settings", MigrationState::RustOwnedVerified) => RouteContractDetails {
@@ -3503,7 +3379,7 @@ fn route_contract_details(
             deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
             blocked_status: MigrationBlockedStatus::None,
             unsupported_behavior:
-                "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, settings bundle import/preview/export, and settings encryption status routes are Rust-owned; all old Flask taxonomy route shells have been removed.",
+                "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, settings bundle import/preview/export, and settings encryption status routes are Rust-owned; all retired legacy taxonomy route shells have been removed.",
             decision_required: DecisionRequired::None,
             decision_owner: "none",
             transition_evidence: DB_RUNTIME_EVIDENCE,

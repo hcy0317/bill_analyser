@@ -61,7 +61,7 @@ use crate::{
         jwt_hmac_algorithm, normalize_jwt_algorithm, resolve_authenticated_user_from_headers,
         AuthenticatedUser, RustRouteAuthError,
     },
-    proxy::{proxy_request, ProxyState},
+    state::HttpAppState,
 };
 
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
@@ -120,9 +120,7 @@ pub const AUTH_TOKEN_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/2fa/recovery/verify"),
 ];
 
-pub const AUTH_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
-
-pub fn auth_token_runtime_router() -> Router<ProxyState> {
+pub fn auth_token_runtime_router() -> Router<HttpAppState> {
     Router::new()
         .route(
             "/api/auth/login",
@@ -247,18 +245,12 @@ pub fn auth_token_runtime_router() -> Router<ProxyState> {
         .layer(middleware::from_fn(auth_cors_middleware))
 }
 
-async fn login_options_handler(
-    State(state): State<ProxyState>,
-    request: Request<Body>,
-) -> Response {
-    proxy_request(state, request).await
+async fn login_options_handler() -> Response {
+    auth_options_handler().await
 }
 
-async fn register_options_handler(
-    State(state): State<ProxyState>,
-    request: Request<Body>,
-) -> Response {
-    proxy_request(state, request).await
+async fn register_options_handler() -> Response {
+    auth_options_handler().await
 }
 
 async fn auth_options_handler() -> Response {
@@ -281,7 +273,7 @@ async fn auth_cors_middleware(request: Request<Body>, next: Next) -> Response {
 }
 
 async fn register_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
@@ -462,7 +454,7 @@ async fn register_handler(
 }
 
 async fn generate_api_token_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
@@ -478,7 +470,7 @@ async fn generate_api_token_handler(
 }
 
 async fn generate_mcp_token_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
@@ -494,7 +486,7 @@ async fn generate_mcp_token_handler(
 }
 
 async fn login_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
@@ -697,7 +689,7 @@ async fn login_handler(
 }
 
 async fn refresh_token_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
@@ -791,7 +783,7 @@ async fn refresh_token_handler(
     )
 }
 
-async fn get_profile_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+async fn get_profile_handler(State(state): State<HttpAppState>, headers: HeaderMap) -> Response {
     let auth = match authenticated_user(&headers, &state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -810,7 +802,7 @@ async fn get_profile_handler(State(state): State<ProxyState>, headers: HeaderMap
 }
 
 async fn update_profile_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     headers: HeaderMap,
     body: Bytes,
@@ -901,7 +893,7 @@ async fn update_profile_handler(
 }
 
 async fn update_profile_avatar_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -917,7 +909,7 @@ async fn update_profile_avatar_handler(
 }
 
 async fn remove_profile_avatar_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     let auth = match authenticated_user(&headers, &state) {
@@ -928,7 +920,7 @@ async fn remove_profile_avatar_handler(
 }
 
 async fn update_profile_avatar_value(
-    state: &ProxyState,
+    state: &HttpAppState,
     user_id: UserId,
     avatar: String,
 ) -> Response {
@@ -957,7 +949,7 @@ async fn update_profile_avatar_value(
 }
 
 async fn resend_profile_verification_email_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
 ) -> Response {
@@ -1033,7 +1025,7 @@ async fn resend_profile_verification_email_handler(
 }
 
 async fn get_profile_cloud_settings_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     let auth = match authenticated_user(&headers, &state) {
@@ -1054,7 +1046,7 @@ async fn get_profile_cloud_settings_handler(
 }
 
 async fn update_profile_cloud_settings_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -1103,7 +1095,7 @@ async fn update_profile_cloud_settings_handler(
 }
 
 async fn delete_profile_cloud_settings_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     let auth = match authenticated_user(&headers, &state) {
@@ -1121,7 +1113,7 @@ async fn delete_profile_cloud_settings_handler(
 }
 
 async fn list_profile_external_auths_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     let auth = match authenticated_user(&headers, &state) {
@@ -1166,7 +1158,7 @@ async fn list_profile_external_auths_handler(
     success_result(StatusCode::OK, external_auths_payload(result))
 }
 
-async fn authorize_oauth2_callback_handler(State(state): State<ProxyState>) -> Response {
+async fn authorize_oauth2_callback_handler(State(state): State<HttpAppState>) -> Response {
     if !state.config.auth_enable_oauth2 {
         return auth_rest_error_response(AuthRestError::new(
             403,
@@ -1183,7 +1175,7 @@ async fn authorize_oauth2_callback_handler(State(state): State<ProxyState>) -> R
 }
 
 async fn verify_email_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
@@ -1314,7 +1306,7 @@ async fn verify_email_handler(
 }
 
 async fn resend_public_verification_email_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
@@ -1387,7 +1379,7 @@ async fn resend_public_verification_email_handler(
 }
 
 async fn forgot_password_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
@@ -1458,7 +1450,7 @@ async fn forgot_password_handler(
 }
 
 async fn reset_password_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
@@ -1569,7 +1561,7 @@ async fn reset_password_handler(
 }
 
 async fn unlink_profile_external_auth_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
@@ -1685,7 +1677,7 @@ async fn system_version_handler() -> Response {
 }
 
 async fn get_user_data_statistics_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     let auth = match authenticated_user(&headers, &state) {
@@ -1703,7 +1695,7 @@ async fn get_user_data_statistics_handler(
 }
 
 async fn export_user_data_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(file_type): Path<String>,
     Query(query): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -1753,7 +1745,7 @@ async fn export_user_data_handler(
 }
 
 async fn clear_user_transactions_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
@@ -1768,7 +1760,7 @@ async fn clear_user_transactions_handler(
 }
 
 async fn clear_all_user_data_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
@@ -1777,7 +1769,7 @@ async fn clear_all_user_data_handler(
 }
 
 fn clear_user_data_handler(
-    state: ProxyState,
+    state: HttpAppState,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
@@ -1917,7 +1909,7 @@ fn clear_user_data_handler(
 }
 
 async fn get_two_factor_status_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     let auth = match authenticated_user(&headers, &state) {
@@ -1944,7 +1936,7 @@ async fn get_two_factor_status_handler(
 }
 
 async fn verify_security_step_up_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
@@ -2100,7 +2092,7 @@ async fn verify_security_step_up_handler(
 }
 
 async fn verify_two_factor_login_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
@@ -2237,7 +2229,7 @@ async fn verify_two_factor_login_handler(
 }
 
 async fn request_two_factor_enable_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     let auth = match authenticated_user(&headers, &state) {
@@ -2280,7 +2272,7 @@ async fn request_two_factor_enable_handler(
 }
 
 async fn confirm_two_factor_enable_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
@@ -2402,7 +2394,7 @@ async fn confirm_two_factor_enable_handler(
 }
 
 async fn disable_two_factor_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
@@ -2465,7 +2457,7 @@ async fn disable_two_factor_handler(
 }
 
 async fn regenerate_two_factor_recovery_codes_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
@@ -2554,7 +2546,7 @@ async fn regenerate_two_factor_recovery_codes_handler(
 }
 
 async fn verify_two_factor_recovery_login_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
@@ -2689,7 +2681,7 @@ async fn verify_two_factor_recovery_login_handler(
     )
 }
 
-async fn list_tokens_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+async fn list_tokens_handler(State(state): State<HttpAppState>, headers: HeaderMap) -> Response {
     let auth = match authenticated_user(&headers, &state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -2718,7 +2710,7 @@ async fn list_tokens_handler(State(state): State<ProxyState>, headers: HeaderMap
 
 async fn generate_personal_token(
     token_kind: TokenKind,
-    state: ProxyState,
+    state: HttpAppState,
     headers: HeaderMap,
     peer_addr: Option<SocketAddr>,
     body: Bytes,
@@ -2881,7 +2873,7 @@ async fn generate_personal_token(
 }
 
 async fn revoke_other_tokens_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     let auth = match authenticated_user(&headers, &state) {
@@ -2913,7 +2905,7 @@ async fn revoke_other_tokens_handler(
 }
 
 async fn revoke_token_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(token_id): Path<String>,
 ) -> Response {
@@ -2944,7 +2936,7 @@ async fn revoke_token_handler(
 }
 
 async fn logout_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
 ) -> Response {
@@ -3082,7 +3074,7 @@ struct IssuedSessionTokens {
 
 fn validate_refresh_jwt(
     token: &str,
-    state: &ProxyState,
+    state: &HttpAppState,
 ) -> RouteResult<bill_analyser_core::auth::RefreshTokenClaims> {
     let secret = state
         .config
@@ -3143,7 +3135,7 @@ fn validate_refresh_jwt(
 
 fn validate_action_jwt(
     token: &str,
-    state: &ProxyState,
+    state: &HttpAppState,
     expected_type: &str,
     invalid_message: &'static str,
 ) -> RouteResult<Value> {
@@ -3152,13 +3144,13 @@ fn validate_action_jwt(
     })
 }
 
-fn validate_pending_two_factor_jwt(token: &str, state: &ProxyState) -> RouteResult<Value> {
+fn validate_pending_two_factor_jwt(token: &str, state: &HttpAppState) -> RouteResult<Value> {
     validate_action_jwt_with_invalid(token, state, "pending_2fa", invalid_pending_two_factor_box)
 }
 
 fn validate_action_jwt_with_invalid<F>(
     token: &str,
-    state: &ProxyState,
+    state: &HttpAppState,
     expected_type: &str,
     invalid_response: F,
 ) -> RouteResult<Value>
@@ -3257,7 +3249,7 @@ where
 fn issue_session_tokens(
     user_id: UserId,
     username: &str,
-    state: &ProxyState,
+    state: &HttpAppState,
 ) -> RouteResult<IssuedSessionTokens> {
     let now = Local::now();
     let access_expires_at = now + ChronoDuration::days(state.config.auth_jwt_expiration_days);
@@ -3298,7 +3290,7 @@ fn issue_action_token(
     user: &AuthLoginUserRow,
     token_type: &str,
     expires_in_hours: i64,
-    state: &ProxyState,
+    state: &HttpAppState,
 ) -> RouteResult<String> {
     let now = Local::now();
     let expires_at = now + ChronoDuration::hours(expires_in_hours);
@@ -3317,7 +3309,7 @@ fn issue_action_token(
 fn issue_access_token(
     user_id: bill_analyser_core::UserId,
     username: &str,
-    state: &ProxyState,
+    state: &HttpAppState,
     token_kind: TokenKind,
     expires_in_seconds: i64,
 ) -> RouteResult<IssuedAccessToken> {
@@ -3346,7 +3338,7 @@ fn issue_access_token(
     })
 }
 
-fn sign_jwt(payload: &Value, state: &ProxyState) -> RouteResult<String> {
+fn sign_jwt(payload: &Value, state: &HttpAppState) -> RouteResult<String> {
     let secret = state
         .config
         .auth_jwt_secret
@@ -3731,7 +3723,7 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
     diff == 0
 }
 
-fn authenticated_user(headers: &HeaderMap, state: &ProxyState) -> RouteResult<AuthenticatedUser> {
+fn authenticated_user(headers: &HeaderMap, state: &HttpAppState) -> RouteResult<AuthenticatedUser> {
     resolve_authenticated_user_from_headers(headers, &state.config, TRUSTED_USER_SECRET_HEADER)
         .map_err(|error| Box::new(auth_error_response(error)))
 }
@@ -3804,7 +3796,7 @@ enum SensitiveTwoFactorAuthError {
 fn resolve_sensitive_two_factor_auth(
     connection: &rusqlite::Connection,
     body: &Map<String, Value>,
-    state: &ProxyState,
+    state: &HttpAppState,
     user: &AuthLoginUserRow,
 ) -> Result<SensitiveTwoFactorAuthMode, SensitiveTwoFactorAuthError> {
     resolve_sensitive_two_factor_auth_with_policy(
@@ -3819,7 +3811,7 @@ fn resolve_sensitive_two_factor_auth(
 fn resolve_destructive_user_data_auth(
     connection: &rusqlite::Connection,
     body: &Map<String, Value>,
-    state: &ProxyState,
+    state: &HttpAppState,
     user: &AuthLoginUserRow,
 ) -> Result<SensitiveTwoFactorAuthMode, SensitiveTwoFactorAuthError> {
     resolve_sensitive_two_factor_auth_with_policy(
@@ -3834,7 +3826,7 @@ fn resolve_destructive_user_data_auth(
 fn resolve_sensitive_two_factor_auth_with_policy(
     connection: &rusqlite::Connection,
     body: &Map<String, Value>,
-    state: &ProxyState,
+    state: &HttpAppState,
     user: &AuthLoginUserRow,
     operation_password_policy: OperationPasswordPolicy,
 ) -> Result<SensitiveTwoFactorAuthMode, SensitiveTwoFactorAuthError> {
@@ -4896,7 +4888,7 @@ fn invalid_expires_response() -> Box<Response> {
     )))
 }
 
-fn open_runtime(state: &ProxyState) -> RouteResult<SqliteRuntime> {
+fn open_runtime(state: &HttpAppState) -> RouteResult<SqliteRuntime> {
     let db_path = state.config.sqlite_db_path.as_deref().ok_or_else(|| {
         Box::new(auth_rest_error_response(AuthRestError::new(
             503,
@@ -4953,7 +4945,7 @@ fn forwarded_header_ip(headers: &HeaderMap) -> Option<String> {
     None
 }
 
-fn request_origin(state: &ProxyState) -> RouteResult<String> {
+fn request_origin(state: &HttpAppState) -> RouteResult<String> {
     if let Some(public_base_url) = state.config.public_base_url.as_deref() {
         return Ok(public_base_url.to_string());
     }
@@ -5599,8 +5591,8 @@ mod tests {
     use super::*;
     use crate::config::HttpShellConfig;
 
-    fn test_state(config: HttpShellConfig) -> ProxyState {
-        ProxyState::new(config).expect("proxy state")
+    fn test_state(config: HttpShellConfig) -> HttpAppState {
+        HttpAppState::new(config).expect("http app state")
     }
 
     #[test]

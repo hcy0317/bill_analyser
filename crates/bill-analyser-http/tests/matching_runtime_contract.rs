@@ -7,8 +7,7 @@ use axum::{
     Router,
 };
 use bill_analyser_http::{
-    build_router, is_manifest_python_proxied_route, HttpShellConfig, ImportRouteMode, ProxyState,
-    MATCHING_RECURRING_CALENDAR_NETWORTH_PROXIED_ROUTE_PATTERNS,
+    build_router, HttpAppState, HttpShellConfig, ImportRouteMode,
     MATCHING_RECURRING_CALENDAR_NETWORTH_ROUTE_PATTERNS,
 };
 use chrono::{Datelike, Duration as ChronoDuration, Local, NaiveDate};
@@ -49,15 +48,6 @@ async fn matching_recurring_calendar_networth_runtime_serves_owned_routes(
             .iter()
             .any(|item| item == &route));
     }
-    assert!(MATCHING_RECURRING_CALENDAR_NETWORTH_PROXIED_ROUTE_PATTERNS.is_empty());
-    assert!(!is_manifest_python_proxied_route(
-        "GET",
-        "/api/recurring/suggestions"
-    ));
-    assert!(!is_manifest_python_proxied_route(
-        "GET",
-        "/api/matching/candidates"
-    ));
 
     let fixture = RuntimeFixture::new()?;
     let app = runtime_router(&fixture);
@@ -768,7 +758,7 @@ fn runtime_router_for_path(db_path: &Path) -> Router {
     .expect("config")
     .with_sqlite_db_path(db_path.display().to_string())
     .with_trusted_user_header_secret(TEST_AUTH_SECRET);
-    let state = ProxyState::new(config).expect("proxy state");
+    let state = HttpAppState::new(config).expect("http app state");
     build_router(state)
 }
 
@@ -781,7 +771,7 @@ fn runtime_router_without_db_path() -> Router {
     )
     .expect("config")
     .with_trusted_user_header_secret(TEST_AUTH_SECRET);
-    let state = ProxyState::new(config).expect("proxy state");
+    let state = HttpAppState::new(config).expect("http app state");
     build_router(state)
 }
 

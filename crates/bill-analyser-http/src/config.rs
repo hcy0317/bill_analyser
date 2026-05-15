@@ -4,7 +4,6 @@ use bill_analyser_core::auth::PasswordPolicy;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub const DEFAULT_PYTHON_UPSTREAM: &str = "http://127.0.0.1:5001";
 pub const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 pub const DEFAULT_BODY_LIMIT_BYTES: usize = 10 * 1024 * 1024;
 pub const DEFAULT_UPLOADS_DIR: &str = "data/uploads";
@@ -28,7 +27,6 @@ pub const MAX_AUTH_PASSWORD_MIN_LENGTH: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpShellConfig {
-    pub python_upstream: String,
     pub timeout: Duration,
     pub body_limit_bytes: usize,
     pub uploads_dir: String,
@@ -55,31 +53,29 @@ pub struct HttpShellConfig {
 
 impl HttpShellConfig {
     pub fn new(
-        python_upstream: impl Into<String>,
+        _legacy_upstream: impl Into<String>,
         timeout: Duration,
         body_limit_bytes: usize,
     ) -> Result<Self, HttpShellConfigError> {
         Self::new_with_import_route_mode(
-            python_upstream,
+            "",
             timeout,
             body_limit_bytes,
-            ImportRouteMode::ProxyOnly,
+            ImportRouteMode::ImportDbRuntime,
         )
     }
 
     pub fn new_with_import_route_mode(
-        python_upstream: impl Into<String>,
+        _legacy_upstream: impl Into<String>,
         timeout: Duration,
         body_limit_bytes: usize,
         import_route_mode: ImportRouteMode,
     ) -> Result<Self, HttpShellConfigError> {
-        let python_upstream = normalize_upstream(python_upstream.into())?;
         if body_limit_bytes == 0 {
             return Err(HttpShellConfigError::InvalidBodyLimit);
         }
 
         Ok(Self {
-            python_upstream,
             timeout,
             body_limit_bytes,
             uploads_dir: DEFAULT_UPLOADS_DIR.to_string(),
@@ -233,8 +229,6 @@ impl HttpShellConfig {
     pub fn from_env_with(
         mut lookup: impl FnMut(&'static str) -> Option<String>,
     ) -> Result<Self, HttpShellConfigError> {
-        let upstream = lookup("BILL_ANALYSER_PYTHON_UPSTREAM")
-            .unwrap_or_else(|| DEFAULT_PYTHON_UPSTREAM.to_string());
         let timeout_ms = parse_env_u64_value(
             "BILL_ANALYSER_HTTP_TIMEOUT_MS",
             lookup("BILL_ANALYSER_HTTP_TIMEOUT_MS"),
@@ -376,7 +370,7 @@ impl HttpShellConfig {
             .transpose()?;
 
         let mut config = Self::new_with_import_route_mode(
-            upstream,
+            "",
             Duration::from_millis(timeout_ms),
             body_limit_bytes,
             import_route_mode,
@@ -407,7 +401,7 @@ impl HttpShellConfig {
 impl Default for HttpShellConfig {
     fn default() -> Self {
         Self::new(
-            DEFAULT_PYTHON_UPSTREAM,
+            "",
             Duration::from_millis(DEFAULT_TIMEOUT_MS),
             DEFAULT_BODY_LIMIT_BYTES,
         )
@@ -432,22 +426,18 @@ pub enum HttpShellConfigError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ImportRouteMode {
-    ProxyOnly,
-    ImportRouteSkeleton,
     ImportDbRuntime,
 }
 
 impl ImportRouteMode {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::ProxyOnly => "proxy_only",
-            Self::ImportRouteSkeleton => "import_route_skeleton",
             Self::ImportDbRuntime => "import_db_runtime",
         }
     }
 
     pub const fn intercepts_import_routes(self) -> bool {
-        matches!(self, Self::ImportRouteSkeleton | Self::ImportDbRuntime)
+        matches!(self, Self::ImportDbRuntime)
     }
 }
 
@@ -538,11 +528,7 @@ fn parse_env_bool_value(
 fn parse_import_route_mode(value: Option<&str>) -> Result<ImportRouteMode, HttpShellConfigError> {
     let normalized = value.unwrap_or("").trim().to_ascii_lowercase();
     match normalized.as_str() {
-        "" | "proxy" | "proxy_only" | "python_proxy" => Ok(ImportRouteMode::ProxyOnly),
-        "skeleton" | "import_skeleton" | "import_route_skeleton" => {
-            Ok(ImportRouteMode::ImportRouteSkeleton)
-        }
-        "runtime" | "import_runtime" | "import_db_runtime" | "import_route_runtime" => {
+        "" | "runtime" | "import_runtime" | "import_db_runtime" | "import_route_runtime" => {
             Ok(ImportRouteMode::ImportDbRuntime)
         }
         _ => Err(HttpShellConfigError::InvalidImportRouteMode),

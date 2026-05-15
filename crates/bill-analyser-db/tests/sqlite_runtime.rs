@@ -724,16 +724,16 @@ fn user_scope_uses_positive_core_user_id_without_inline_sql_values() -> Result<(
 }
 
 #[test]
-fn schema_inventory_maps_python_runtime_schema_responsibilities_as_foundational_only() {
+fn schema_inventory_maps_rust_runtime_schema_responsibilities_as_foundational_only() {
     let inventory = schema_inventory();
-    let paths: Vec<_> = inventory
+    let areas: Vec<_> = inventory
         .responsibilities
         .iter()
-        .map(|item| item.python_path)
+        .map(|item| item.legacy_area)
         .collect();
 
-    assert!(paths.contains(&"src/bill_analyser/core/database/runtime.py"));
-    assert!(paths.contains(&"src/bill_analyser/core/database/schema/__init__.py"));
+    assert!(areas.contains(&"runtime connection"));
+    assert!(areas.contains(&"schema initializer"));
     assert!(inventory
         .responsibilities
         .iter()

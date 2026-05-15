@@ -384,24 +384,19 @@ fn bills_import_routes_are_python_deleted_and_provider_routes_are_rust_owned() {
         ("PUT", "/api/statistics/exchange-rates/custom"),
         ("DELETE", "/api/statistics/exchange-rates/custom/{currency}"),
     ] {
-        let endpoint = find_endpoint_ownership(method, pattern).unwrap_or_else(|| {
-            panic!("missing Python-deleted exchange endpoint {method} {pattern}")
-        });
+        let endpoint = find_endpoint_ownership(method, pattern)
+            .unwrap_or_else(|| panic!("missing Rust-owned exchange endpoint {method} {pattern}"));
         assert_eq!(endpoint.state, MigrationState::PythonDeleted);
         assert!(!endpoint.is_python_runtime_owner());
         assert!(!endpoint.is_import_deletion_blocked());
-        assert!(endpoint.notes.contains("Flask"));
+        assert!(endpoint.notes.contains("retired legacy"));
         assert!(endpoint.notes.contains("route shell is deleted"));
     }
 }
 
 #[test]
-fn live_python_sidecar_routes_are_manifested_for_import_db_runtime_proxy() {
-    let (method, pattern, domain) = ("POST", "/api/llm/induce-rules", "ai-learning-llm");
-    let endpoint = find_endpoint_ownership(method, pattern)
-        .unwrap_or_else(|| panic!("missing live Python sidecar endpoint {method} {pattern}"));
-    assert_eq!(endpoint.state, MigrationState::PythonProxied);
-    assert_eq!(endpoint.domain, domain);
+fn removed_llm_induce_rules_route_is_not_manifested_after_final_cutover() {
+    assert!(find_endpoint_ownership("POST", "/api/llm/induce-rules").is_none());
 }
 
 #[test]
@@ -436,7 +431,7 @@ fn backup_ops_routes_are_rust_owned_after_file_runtime_cutover() {
 }
 
 #[test]
-fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_proxy_remainder() {
+fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_remainder() {
     let manifest = expanded_route_manifest();
     for endpoint in [
         "GET /api/accounts/",
@@ -861,7 +856,7 @@ fn import_deletion_gate_requires_runtime_db_frontend_coverage_and_reference_evid
 }
 
 #[test]
-fn envelope_oracle_wraps_only_proxy_infrastructure_failures() {
+fn envelope_oracle_wraps_only_runtime_infrastructure_failures() {
     let families: Vec<_> = response_envelope_policies()
         .iter()
         .map(|policy| policy.family)
@@ -871,7 +866,7 @@ fn envelope_oracle_wraps_only_proxy_infrastructure_failures() {
         families,
         vec![
             ResponseEnvelopeFamily::RustHttpShell,
-            ResponseEnvelopeFamily::ProxyInfrastructureError,
+            ResponseEnvelopeFamily::RuntimeInfrastructureError,
             ResponseEnvelopeFamily::FlaskSuccessData,
             ResponseEnvelopeFamily::FlaskSuccessResult,
             ResponseEnvelopeFamily::FlaskRawPassthrough,
@@ -887,12 +882,12 @@ fn envelope_oracle_wraps_only_proxy_infrastructure_failures() {
             ResponseEnvelopeFamily::ContractOracle,
         ]
     );
-    let proxy_error = response_envelope_policy(ResponseEnvelopeFamily::ProxyInfrastructureError)
-        .expect("proxy error policy exists");
-    assert!(proxy_error.proxy_may_wrap);
-    assert!(proxy_error.applies_to_owner(MigrationState::RustImplemented));
-    assert!(proxy_error.applies_to_owner(MigrationState::RustOwnedVerified));
-    assert!(!proxy_error.applies_to_owner(MigrationState::PythonProxied));
+    let runtime_error =
+        response_envelope_policy(ResponseEnvelopeFamily::RuntimeInfrastructureError)
+            .expect("runtime error policy exists");
+    assert!(runtime_error.runtime_may_wrap);
+    assert!(runtime_error.applies_to_owner(MigrationState::RustImplemented));
+    assert!(runtime_error.applies_to_owner(MigrationState::RustOwnedVerified));
 
     for family in [
         ResponseEnvelopeFamily::ImportV2Stage,
@@ -908,24 +903,20 @@ fn envelope_oracle_wraps_only_proxy_infrastructure_failures() {
         let policy = response_envelope_policy(family).expect("business envelope policy exists");
         assert!(policy.applies_to_owner(MigrationState::RustImplemented));
         assert!(policy.applies_to_owner(MigrationState::RustOwnedVerified));
-        assert!(!policy.proxy_may_wrap);
+        assert!(!policy.runtime_may_wrap);
     }
 
     let shared_success = response_envelope_policy(ResponseEnvelopeFamily::FlaskSuccessData)
         .expect("shared envelope policy exists");
     assert!(shared_success.applies_to_owner(MigrationState::RustImplemented));
     assert!(shared_success.applies_to_owner(MigrationState::RustOwnedVerified));
-    assert!(shared_success.applies_to_owner(MigrationState::PythonProxied));
 
     let raw_passthrough = response_envelope_policy(ResponseEnvelopeFamily::FlaskRawPassthrough)
         .expect("raw passthrough envelope policy exists");
-    assert!(raw_passthrough.applies_to_owner(MigrationState::PythonProxied));
-    assert!(!raw_passthrough.applies_to_owner(MigrationState::RustImplemented));
-    assert!(!raw_passthrough.applies_to_owner(MigrationState::RustOwnedVerified));
+    assert!(raw_passthrough.applies_to_owner(MigrationState::RustOwnedVerified));
 
     let success_result = response_envelope_policy(ResponseEnvelopeFamily::FlaskSuccessResult)
         .expect("success/result envelope policy exists");
-    assert!(success_result.applies_to_owner(MigrationState::PythonProxied));
     assert!(success_result.applies_to_owner(MigrationState::RustOwnedVerified));
 }
 
@@ -984,7 +975,6 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
     assert_eq!(
         migration_state_machine(),
         &[
-            MigrationState::PythonProxied,
             MigrationState::RustImplemented,
             MigrationState::RustOwnedVerified,
             MigrationState::PythonDeleted,
@@ -1142,13 +1132,8 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         .expect("auth token route is present");
     assert_eq!(auth_tokens.state, MigrationState::RustOwnedVerified);
     assert_eq!(auth_tokens.handler, RouteHandlerId::AuthTokenRuntime);
-    assert_eq!(auth_tokens.decision_required, DecisionRequired::Port);
-    assert!(auth_tokens
-        .deletion_blockers
-        .contains(&"profile_user_data_parity"));
-    assert!(!auth_tokens
-        .deletion_blockers
-        .contains(&"token_refresh_parity"));
+    assert_eq!(auth_tokens.decision_required, DecisionRequired::None);
+    assert!(auth_tokens.deletion_blockers.is_empty());
 
     let auth_profile = manifest
         .iter()
@@ -1318,47 +1303,40 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
 }
 
 #[test]
-fn domain_policies_record_provider_and_deletion_blockers() {
+fn domain_policies_record_final_rust_cutover_state() {
     let domains = domain_governance_policies();
     assert!(!domains.is_empty());
 
     let ai_learning = find_domain_policy("ai-learning-llm").expect("ai domain policy exists");
-    assert_eq!(ai_learning.decision_required, DecisionRequired::Port);
+    assert_eq!(ai_learning.decision_required, DecisionRequired::None);
     assert_eq!(ai_learning.blocked_status, MigrationBlockedStatus::None);
-    assert!(ai_learning
-        .deletion_blockers
-        .contains(&"provider_execution_parity"));
+    assert!(ai_learning.deletion_blockers.is_empty());
     assert!(ai_learning.unsupported_behavior.contains("rule synthesis"));
 
     let database_facade =
         find_domain_policy("database-facade").expect("database facade policy exists");
-    assert_eq!(database_facade.decision_required, DecisionRequired::Defer);
+    assert_eq!(database_facade.decision_required, DecisionRequired::None);
     assert!(database_facade
         .transition_evidence
         .contains(&"route_matrix"));
 
     let database_schema =
         find_domain_policy("database-schema").expect("database schema policy exists");
-    assert_eq!(database_schema.decision_required, DecisionRequired::Port);
+    assert_eq!(database_schema.decision_required, DecisionRequired::None);
     assert!(database_schema
         .rust_owner_files
         .contains(&"crates/bill-analyser-db/src/schema.rs"));
     assert!(database_schema
         .tests_migrated
         .contains(&"crates/bill-analyser-db/tests/sqlite_runtime.rs"));
-    assert!(database_schema
-        .deletion_blockers
-        .contains(&"encryption_schema_parity"));
+    assert!(database_schema.deletion_blockers.is_empty());
     assert!(database_schema
         .transition_evidence
         .contains(&"schema_migration_contract"));
 
     let database_repositories =
         find_domain_policy("database-repositories").expect("database repositories policy exists");
-    assert_eq!(
-        database_repositories.deletion_blockers,
-        &["business_domain_route_takeover"]
-    );
+    assert!(database_repositories.deletion_blockers.is_empty());
     assert!(database_repositories
         .transition_evidence
         .contains(&"repository_contract"));
@@ -1378,7 +1356,7 @@ fn domain_policies_record_provider_and_deletion_blockers() {
     assert!(taxonomy.deletion_blockers.is_empty());
     assert!(taxonomy
         .unsupported_behavior
-        .contains("all old Flask taxonomy route shells have been removed"));
+        .contains("all retired legacy taxonomy route shells have been removed"));
 
     for domain in [
         "budgets-crud",
@@ -1393,7 +1371,7 @@ fn domain_policies_record_provider_and_deletion_blockers() {
         assert_eq!(policy.decision_required, DecisionRequired::None);
         assert!(policy.python_owner_files.is_empty(), "{domain}");
         assert!(policy.deletion_blockers.is_empty(), "{domain}");
-        assert!(policy.unsupported_behavior.contains("old Flask"));
+        assert!(policy.unsupported_behavior.contains("retired legacy"));
     }
 
     let database_schema_writer = database_schema_db_writer_policy();

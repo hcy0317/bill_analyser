@@ -7,8 +7,7 @@ use axum::{
     Router,
 };
 use bill_analyser_http::{
-    build_router, HttpShellConfig, ImportRouteMode, ProxyState, BUDGET_CRUD_ROUTE_PATTERNS,
-    BUDGET_PROXIED_ROUTE_PATTERNS,
+    build_router, HttpAppState, HttpShellConfig, ImportRouteMode, BUDGET_CRUD_ROUTE_PATTERNS,
 };
 use rusqlite::Connection;
 use serde_json::{json, Value};
@@ -565,7 +564,7 @@ async fn budgets_runtime_covers_error_edges_and_auth() -> Result<(), Box<dyn Err
         "Invalid data format. Expected array of budgets."
     );
 
-    let missing_db_state = ProxyState::new(
+    let missing_db_state = HttpAppState::new(
         HttpShellConfig::new_with_import_route_mode(
             "http://127.0.0.1:9".to_string(),
             Duration::from_secs(1),
@@ -626,12 +625,8 @@ async fn budgets_runtime_covers_error_edges_and_auth() -> Result<(), Box<dyn Err
 }
 
 #[tokio::test]
-async fn budgets_runtime_has_no_python_proxied_budget_routes_after_import_takeover(
+async fn budgets_runtime_has_no_legacy_budget_route_fallbacks_after_import_takeover(
 ) -> Result<(), Box<dyn Error>> {
-    assert!(BUDGET_PROXIED_ROUTE_PATTERNS.is_empty());
-    assert!(!BUDGET_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .any(|route| route == &("ANY", "/api/budgets/history")));
     assert!(BUDGET_CRUD_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/budgets/import")));
@@ -690,7 +685,7 @@ fn runtime_router(fixture: &RuntimeFixture) -> Router {
     .expect("config")
     .with_sqlite_db_path(fixture.db_path.display().to_string())
     .with_trusted_user_header_secret(TEST_AUTH_SECRET);
-    let state = ProxyState::new(config).expect("proxy state");
+    let state = HttpAppState::new(config).expect("http app state");
     build_router(state)
 }
 

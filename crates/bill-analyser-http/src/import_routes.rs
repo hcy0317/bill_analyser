@@ -2,11 +2,11 @@
 //!
 //! These handlers intentionally do not execute import business logic or write
 //! the database. They let the Rust HTTP shell prove route precedence and
-//! endpoint coverage before later slices replace Python-owned implementations.
+//! endpoint coverage for the Rust-only runtime.
 
 use axum::{
-    extract::{OriginalUri, Path, Query, State},
-    http::{HeaderMap, Method, StatusCode},
+    extract::{Path, Query, State},
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{delete, get, post, put},
     Json, Router,
@@ -19,16 +19,16 @@ use bill_analyser_core::{
     build_llm_provider_config, build_llm_rule_expression_synthesis_prompt,
     build_llm_rule_induction_prompt, build_ocr_config_success_response, build_ocr_error_response,
     build_ocr_recognition_success_response, build_unknown_ocr_provider_response,
-    can_delete_python_import_paths, coerce_preview_selected_value, composite_hash_from_features,
-    copy_runtime_llm_config, import_preview_index_success, import_preview_page_success,
+    coerce_preview_selected_value, composite_hash_from_features, copy_runtime_llm_config,
+    import_preview_index_success, import_preview_page_success,
     import_session_cancel_missing_response, import_session_cancel_success_response,
     import_session_not_found_response, import_session_success, import_stage_confirm_success,
     import_stage_dedup_success, import_stage_parse_success, import_v2_data_response,
     import_v2_error_response, parse_llm_json_array_response, preview_state_conflict_response,
-    render_llm_prompt_template, safe_llm_config_payload, AiRouteResponse, ImportDeletionEvidence,
-    ImportPreviewIndexData, ImportPreviewPageData, ImportSessionSummary, ImportStageConfirmData,
-    ImportStageDedupData, ImportStageParseData, ImportV2RouteResponse, LlmProviderConfigContract,
-    OcrConfigContract, OcrProviderTextResult, SmartDeduplicationEngine, UserId, LLM_SYSTEM_PROMPT,
+    render_llm_prompt_template, safe_llm_config_payload, AiRouteResponse, ImportPreviewIndexData,
+    ImportPreviewPageData, ImportSessionSummary, ImportStageConfirmData, ImportStageDedupData,
+    ImportStageParseData, ImportV2RouteResponse, LlmProviderConfigContract, OcrConfigContract,
+    OcrProviderTextResult, SmartDeduplicationEngine, UserId, LLM_SYSTEM_PROMPT,
     OCR_DISABLED_PROVIDER_NAME,
 };
 use bill_analyser_db::{
@@ -77,10 +77,8 @@ use std::{
 };
 use tokio::time::sleep;
 
-use crate::{auth::resolve_user_id_from_headers, config::HttpShellConfig, proxy::ProxyState};
+use crate::{auth::resolve_user_id_from_headers, config::HttpShellConfig, state::HttpAppState};
 
-const NOT_YET_OWNED_ERROR: &str =
-    "Rust import route skeleton is not business-owned; Python proxy remains authoritative";
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
 static IMPORT_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 static OCR_REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -162,131 +160,7 @@ pub const IMPORT_SKELETON_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("PUT", "/api/ml/receipt-recognition/config"),
 ];
 
-pub fn import_skeleton_router() -> Router<ProxyState> {
-    Router::new()
-        .route("/api/bills/import/v2/parse", post(not_yet_owned_handler))
-        .route(
-            "/api/bills/import/v2/parse_generic",
-            post(not_yet_owned_handler),
-        )
-        .route("/api/bills/import/v2/dedup", post(not_yet_owned_handler))
-        .route("/api/bills/import/v2/confirm", post(not_yet_owned_handler))
-        .route(
-            "/api/bills/import/v2/session/:session_id",
-            get(session_not_found_handler).delete(session_cancel_missing_handler),
-        )
-        .route(
-            "/api/bills/import/v2/preview/:session_id",
-            get(session_not_found_handler),
-        )
-        .route(
-            "/api/bills/import/v2/preview/:session_id/index",
-            get(session_not_found_handler),
-        )
-        .route(
-            "/api/bills/import/v2/preview/:session_id/update",
-            put(not_yet_owned_handler),
-        )
-        .route(
-            "/api/bills/import/v2/reclassify/:session_id",
-            post(not_yet_owned_handler),
-        )
-        .route(
-            "/api/bills/import/v2/preview-item/:preview_id/recurring-candidates",
-            get(not_yet_owned_handler),
-        )
-        .route(
-            "/api/bills/import/v2/preview-item/:preview_id/recurring-match",
-            put(not_yet_owned_handler).delete(not_yet_owned_handler),
-        )
-        .route(
-            "/api/bills/import/v2/preview-item/:preview_id/transfer-decision",
-            post(not_yet_owned_handler),
-        )
-        .route(
-            "/api/bills/import/v2/learning/:session_id/suggestions",
-            get(not_yet_owned_handler).post(not_yet_owned_handler),
-        )
-        .route(
-            "/api/bills/import/v2/learning/:session_id/promote",
-            post(not_yet_owned_handler),
-        )
-        .route("/api/bills/import/preview", post(not_yet_owned_handler))
-        .route("/api/bills/import/confirm", post(not_yet_owned_handler))
-        .route("/api/bills/import/batch", post(not_yet_owned_handler))
-        .route("/api/bills/parse_import", post(not_yet_owned_handler))
-        .route("/api/bills/import/upload", post(not_yet_owned_handler))
-        .route("/api/bills/import/parsers", get(not_yet_owned_handler))
-        .route("/api/bills/import/reclassify", post(not_yet_owned_handler))
-        .route(
-            "/api/bills/import/configs",
-            get(not_yet_owned_handler).post(not_yet_owned_handler),
-        )
-        .route(
-            "/api/bills/import/configs/match",
-            post(not_yet_owned_handler),
-        )
-        .route(
-            "/api/bills/import/configs/suggest",
-            post(not_yet_owned_handler),
-        )
-        .route(
-            "/api/bills/import/configs/:config_id",
-            delete(not_yet_owned_handler),
-        )
-        .route(
-            "/api/bills/import/learning-rules",
-            get(not_yet_owned_handler),
-        )
-        .route(
-            "/api/bills/import/learning-rules/:rule_id",
-            put(not_yet_owned_handler).delete(not_yet_owned_handler),
-        )
-        .route(
-            "/api/llm/preview-recommend/accept",
-            post(not_yet_owned_handler),
-        )
-        .route(
-            "/api/llm/preview-recommend/reject",
-            post(not_yet_owned_handler),
-        )
-        .route("/api/llm/memory", get(not_yet_owned_handler))
-        .route(
-            "/api/llm/config",
-            get(not_yet_owned_handler).post(not_yet_owned_handler),
-        )
-        .route(
-            "/api/llm/configs",
-            get(not_yet_owned_handler).post(not_yet_owned_handler),
-        )
-        .route(
-            "/api/llm/configs/:config_id",
-            put(not_yet_owned_handler).delete(not_yet_owned_handler),
-        )
-        .route(
-            "/api/llm/configs/:config_id/activate",
-            post(not_yet_owned_handler),
-        )
-        .route("/api/llm/candidates", get(not_yet_owned_handler))
-        .route(
-            "/api/llm/candidates/:candidate_id",
-            get(not_yet_owned_handler),
-        )
-        .route(
-            "/api/llm/candidates/:candidate_id/accept",
-            post(not_yet_owned_handler),
-        )
-        .route(
-            "/api/llm/candidates/:candidate_id/reject",
-            post(not_yet_owned_handler),
-        )
-        .route(
-            "/api/ml/receipt-recognition/config",
-            get(not_yet_owned_handler).put(not_yet_owned_handler),
-        )
-}
-
-pub fn import_runtime_router() -> Router<ProxyState> {
+pub fn import_runtime_router() -> Router<HttpAppState> {
     Router::new()
         .route(
             "/api/bills/import/v2/parse",
@@ -494,20 +368,8 @@ pub fn import_runtime_router() -> Router<ProxyState> {
         )
 }
 
-pub async fn not_yet_owned_handler(method: Method, OriginalUri(uri): OriginalUri) -> Response {
-    route_response(not_yet_owned_response(method.as_str(), uri.path()))
-}
-
-pub async fn session_not_found_handler() -> Response {
-    route_response(import_session_not_found_response())
-}
-
-pub async fn session_cancel_missing_handler() -> Response {
-    route_response(import_session_cancel_missing_response())
-}
-
 pub async fn import_parse_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -530,7 +392,7 @@ pub async fn import_parse_runtime_handler(
 }
 
 pub async fn import_parse_generic_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -538,7 +400,7 @@ pub async fn import_parse_generic_runtime_handler(
 }
 
 pub async fn legacy_import_preview_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -577,7 +439,7 @@ pub async fn legacy_import_preview_runtime_handler(
 }
 
 pub async fn legacy_import_parsers_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     if let Err(response) = user_id_from_headers(&headers, &state.config) {
@@ -593,7 +455,7 @@ pub async fn legacy_import_parsers_runtime_handler(
 }
 
 pub async fn legacy_parse_import_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -643,7 +505,7 @@ pub async fn legacy_parse_import_runtime_handler(
 }
 
 pub async fn legacy_import_upload_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -697,7 +559,7 @@ pub async fn legacy_import_upload_runtime_handler(
 }
 
 pub async fn legacy_import_reclassify_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -723,7 +585,7 @@ pub async fn legacy_import_reclassify_runtime_handler(
 }
 
 pub async fn import_configs_list_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Query(query): Query<ImportConfigQuery>,
     headers: HeaderMap,
 ) -> Response {
@@ -761,7 +623,7 @@ pub async fn import_configs_list_runtime_handler(
 }
 
 pub async fn import_configs_save_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -839,7 +701,7 @@ pub async fn import_configs_save_runtime_handler(
 }
 
 pub async fn import_configs_match_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -879,7 +741,7 @@ pub async fn import_configs_match_runtime_handler(
 }
 
 pub async fn import_configs_suggest_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -920,7 +782,7 @@ pub async fn import_configs_suggest_runtime_handler(
 }
 
 pub async fn import_configs_delete_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(config_id): Path<i64>,
     headers: HeaderMap,
 ) -> Response {
@@ -954,7 +816,7 @@ pub async fn import_configs_delete_runtime_handler(
 }
 
 pub async fn legacy_import_confirm_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -1023,7 +885,7 @@ pub async fn legacy_import_confirm_runtime_handler(
 }
 
 pub async fn legacy_import_batch_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -1068,7 +930,7 @@ pub async fn legacy_import_batch_runtime_handler(
 }
 
 pub async fn import_dedup_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -1167,7 +1029,7 @@ pub async fn import_dedup_runtime_handler(
 }
 
 pub async fn import_confirm_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -1260,7 +1122,7 @@ pub async fn import_confirm_runtime_handler(
 }
 
 pub async fn import_session_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
     headers: HeaderMap,
 ) -> Response {
@@ -1290,7 +1152,7 @@ pub async fn import_session_runtime_handler(
 }
 
 pub async fn import_session_cancel_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
     headers: HeaderMap,
 ) -> Response {
@@ -1316,7 +1178,7 @@ pub async fn import_session_cancel_runtime_handler(
 }
 
 pub async fn import_preview_page_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
     Query(query): Query<PreviewPageQuery>,
     headers: HeaderMap,
@@ -1372,7 +1234,7 @@ pub async fn import_preview_page_runtime_handler(
 }
 
 pub async fn import_preview_index_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
     headers: HeaderMap,
 ) -> Response {
@@ -1410,7 +1272,7 @@ pub async fn import_preview_index_runtime_handler(
 }
 
 pub async fn import_preview_update_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
@@ -1470,7 +1332,7 @@ pub async fn import_preview_update_runtime_handler(
 }
 
 pub async fn import_reclassify_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
@@ -1539,7 +1401,7 @@ pub async fn import_reclassify_runtime_handler(
 }
 
 pub async fn preview_recurring_candidates_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(preview_id): Path<i64>,
     headers: HeaderMap,
 ) -> Response {
@@ -1572,7 +1434,7 @@ pub async fn preview_recurring_candidates_runtime_handler(
 }
 
 pub async fn preview_recurring_match_put_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(preview_id): Path<i64>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
@@ -1625,7 +1487,7 @@ pub async fn preview_recurring_match_put_runtime_handler(
 }
 
 pub async fn preview_recurring_match_delete_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(preview_id): Path<i64>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
@@ -1670,7 +1532,7 @@ pub async fn preview_recurring_match_delete_runtime_handler(
 }
 
 pub async fn preview_transfer_decision_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(preview_id): Path<i64>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
@@ -1719,7 +1581,7 @@ pub async fn preview_transfer_decision_runtime_handler(
 }
 
 pub async fn import_learning_suggestions_get_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
     headers: HeaderMap,
 ) -> Response {
@@ -1727,7 +1589,7 @@ pub async fn import_learning_suggestions_get_runtime_handler(
 }
 
 pub async fn import_learning_suggestions_post_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
@@ -1736,7 +1598,7 @@ pub async fn import_learning_suggestions_post_runtime_handler(
 }
 
 async fn import_learning_suggestions_response(
-    state: ProxyState,
+    state: HttpAppState,
     session_id: String,
     headers: HeaderMap,
     payload: Option<Value>,
@@ -1782,7 +1644,7 @@ async fn import_learning_suggestions_response(
 }
 
 pub async fn import_learning_promote_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
@@ -1850,7 +1712,7 @@ pub async fn import_learning_promote_runtime_handler(
 }
 
 pub async fn import_learning_rules_list_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Query(query): Query<ImportLearningRulesQuery>,
     headers: HeaderMap,
 ) -> Response {
@@ -1902,7 +1764,7 @@ pub async fn import_learning_rules_list_runtime_handler(
 }
 
 pub async fn import_learning_rule_update_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(rule_id): Path<i64>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
@@ -1938,7 +1800,7 @@ pub async fn import_learning_rule_update_runtime_handler(
 }
 
 pub async fn import_learning_rule_delete_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(rule_id): Path<i64>,
     headers: HeaderMap,
 ) -> Response {
@@ -1964,7 +1826,7 @@ pub async fn import_learning_rule_delete_runtime_handler(
 }
 
 pub async fn llm_preview_recommend_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -2160,7 +2022,7 @@ pub async fn llm_preview_recommend_runtime_handler(
 }
 
 pub async fn llm_analyze_transactions_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -2473,7 +2335,7 @@ pub async fn llm_analyze_transactions_runtime_handler(
 }
 
 pub async fn llm_rule_synthesis_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -2784,7 +2646,7 @@ fn ensure_import_session_exists(
 }
 
 fn effective_llm_runtime_config(
-    state: &ProxyState,
+    state: &HttpAppState,
     runtime: &SqliteRuntime,
     user_id: i64,
 ) -> Result<Value, ImportV2RouteResponse> {
@@ -2862,7 +2724,7 @@ fn llm_provider_context_from_config(
 }
 
 async fn execute_llm_provider_request(
-    state: &ProxyState,
+    state: &HttpAppState,
     context: &LlmProviderRequestContext,
     prompt: &str,
 ) -> Result<LlmProviderRuntimeResponse, ImportV2RouteResponse> {
@@ -4002,7 +3864,7 @@ fn category_path(main_category: &str, sub_category: &str) -> String {
 }
 
 pub async fn llm_preview_recommend_accept_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -4017,7 +3879,7 @@ pub async fn llm_preview_recommend_accept_runtime_handler(
 }
 
 pub async fn llm_preview_recommend_reject_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -4032,7 +3894,7 @@ pub async fn llm_preview_recommend_reject_runtime_handler(
 }
 
 async fn llm_preview_recommend_review_response(
-    state: ProxyState,
+    state: HttpAppState,
     headers: HeaderMap,
     payload: Value,
     decision: ImportPreviewDecision,
@@ -4140,7 +4002,7 @@ async fn llm_preview_recommend_review_response(
 }
 
 pub async fn llm_memory_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Query(query): Query<LlmMemoryQuery>,
     headers: HeaderMap,
 ) -> Response {
@@ -4177,7 +4039,7 @@ pub async fn llm_memory_runtime_handler(
 }
 
 pub async fn llm_config_get_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     let user_id = match user_id_from_headers(&headers, &state.config) {
@@ -4207,7 +4069,7 @@ pub async fn llm_config_get_runtime_handler(
 }
 
 pub async fn llm_config_post_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -4253,7 +4115,7 @@ pub async fn llm_config_post_runtime_handler(
 }
 
 pub async fn llm_configs_list_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     let user_id = match user_id_from_headers(&headers, &state.config) {
@@ -4284,7 +4146,7 @@ pub async fn llm_configs_list_runtime_handler(
 }
 
 pub async fn llm_configs_create_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -4345,7 +4207,7 @@ pub async fn llm_configs_create_runtime_handler(
 }
 
 pub async fn llm_config_update_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(config_id): Path<i64>,
     headers: HeaderMap,
     body: Bytes,
@@ -4391,7 +4253,7 @@ pub async fn llm_config_update_runtime_handler(
 }
 
 pub async fn llm_config_delete_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(config_id): Path<i64>,
     headers: HeaderMap,
 ) -> Response {
@@ -4421,7 +4283,7 @@ pub async fn llm_config_delete_runtime_handler(
 }
 
 pub async fn llm_config_activate_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(config_id): Path<i64>,
     headers: HeaderMap,
 ) -> Response {
@@ -4454,7 +4316,7 @@ pub async fn llm_config_activate_runtime_handler(
 }
 
 pub async fn llm_candidates_list_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Query(query): Query<LlmCandidatesQuery>,
     headers: HeaderMap,
 ) -> Response {
@@ -4501,7 +4363,7 @@ pub async fn llm_candidates_list_runtime_handler(
 }
 
 pub async fn llm_candidate_get_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(candidate_id): Path<i64>,
     headers: HeaderMap,
 ) -> Response {
@@ -4537,7 +4399,7 @@ pub async fn llm_candidate_get_runtime_handler(
 }
 
 pub async fn llm_candidate_accept_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(candidate_id): Path<i64>,
     headers: HeaderMap,
 ) -> Response {
@@ -4569,7 +4431,7 @@ pub async fn llm_candidate_accept_runtime_handler(
 }
 
 pub async fn llm_candidate_reject_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(candidate_id): Path<i64>,
     headers: HeaderMap,
 ) -> Response {
@@ -4601,7 +4463,7 @@ pub async fn llm_candidate_reject_runtime_handler(
 }
 
 pub async fn ocr_config_get_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     if let Err(response) = user_id_from_headers(&headers, &state.config) {
@@ -4621,7 +4483,7 @@ pub async fn ocr_config_get_runtime_handler(
 }
 
 pub async fn ocr_config_put_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -4647,7 +4509,7 @@ pub async fn ocr_config_put_runtime_handler(
 }
 
 pub async fn ocr_recognition_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -4709,7 +4571,7 @@ pub async fn ocr_recognition_runtime_handler(
 }
 
 pub async fn learning_suggestions_list_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Query(query): Query<LearningCenterListQuery>,
     headers: HeaderMap,
 ) -> Response {
@@ -4748,7 +4610,7 @@ pub async fn learning_suggestions_list_runtime_handler(
 }
 
 pub async fn learning_suggestions_generate_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     let user_id = match user_id_from_headers(&headers, &state.config) {
@@ -4769,7 +4631,7 @@ pub async fn learning_suggestions_generate_runtime_handler(
 }
 
 pub async fn learning_suggestion_accept_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(suggestion_id): Path<i64>,
     headers: HeaderMap,
 ) -> Response {
@@ -4800,7 +4662,7 @@ pub async fn learning_suggestion_accept_runtime_handler(
 }
 
 pub async fn learning_suggestions_batch_accept_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -4878,7 +4740,7 @@ pub async fn learning_suggestions_batch_accept_runtime_handler(
 }
 
 pub async fn learning_suggestion_reject_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(suggestion_id): Path<i64>,
     headers: HeaderMap,
 ) -> Response {
@@ -4907,7 +4769,7 @@ pub async fn learning_suggestion_reject_runtime_handler(
 }
 
 pub async fn learning_rules_list_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Query(query): Query<LearningCenterListQuery>,
     headers: HeaderMap,
 ) -> Response {
@@ -4951,7 +4813,7 @@ pub async fn learning_rules_list_runtime_handler(
 }
 
 pub async fn learning_rule_toggle_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(rule_id): Path<i64>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
@@ -4985,7 +4847,7 @@ pub async fn learning_rule_toggle_runtime_handler(
 }
 
 pub async fn learning_rule_update_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(rule_id): Path<i64>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
@@ -5030,7 +4892,7 @@ pub async fn learning_rule_update_runtime_handler(
 }
 
 pub async fn learning_rule_delete_runtime_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     Path(rule_id): Path<i64>,
     headers: HeaderMap,
 ) -> Response {
@@ -5053,21 +4915,6 @@ pub async fn learning_rule_delete_runtime_handler(
         Ok(false) => route_response(learning_error_response(404, "rule_not_found")),
         Err(response) => route_response(response),
     }
-}
-
-pub fn not_yet_owned_response(method: &str, path: &str) -> ImportV2RouteResponse {
-    let deletion_allowed = can_delete_python_import_paths(ImportDeletionEvidence::default());
-    let mut response =
-        import_v2_error_response(StatusCode::NOT_IMPLEMENTED.as_u16(), NOT_YET_OWNED_ERROR);
-    response.body["data"] = json!({
-        "method": method,
-        "path": path,
-        "route_owner": "python_proxied",
-        "business_migration": "import_route_skeleton",
-        "db_write_allowed": false,
-        "python_import_deletion_allowed": deletion_allowed,
-    });
-    response
 }
 
 fn route_response(response: ImportV2RouteResponse) -> Response {
@@ -5100,7 +4947,7 @@ struct ImportParseRuntimeInput {
 }
 
 fn import_parse_json_runtime_response(
-    state: &ProxyState,
+    state: &HttpAppState,
     headers: &HeaderMap,
     payload: &Value,
     require_existing_session: bool,
@@ -5171,7 +5018,7 @@ fn import_parse_json_runtime_response(
 }
 
 fn import_parse_multipart_runtime_response(
-    state: &ProxyState,
+    state: &HttpAppState,
     headers: &HeaderMap,
     content_type: &str,
     body: &[u8],
@@ -5274,7 +5121,7 @@ fn import_parse_multipart_runtime_response(
 }
 
 fn persist_import_parse_runtime_response(
-    state: &ProxyState,
+    state: &HttpAppState,
     user_id: UserId,
     input: ImportParseRuntimeInput,
 ) -> Response {
@@ -9706,7 +9553,7 @@ fn preview_row_has_account(row: &&ImportPreviewRow) -> bool {
     row.preview_source_account_id.is_some() || row.preview_destination_account_id.is_some()
 }
 
-fn open_runtime(state: &ProxyState) -> Result<SqliteRuntime, ImportV2RouteResponse> {
+fn open_runtime(state: &HttpAppState) -> Result<SqliteRuntime, ImportV2RouteResponse> {
     let db_path = state.config.sqlite_db_path.as_deref().ok_or_else(|| {
         import_v2_error_response(
             503,
@@ -10032,7 +9879,7 @@ mod tests {
             crate::config::ImportRouteMode::ImportDbRuntime,
         )
         .expect("config");
-        let state = ProxyState::new(config).expect("state");
+        let state = HttpAppState::new(config).expect("state");
 
         assert!(execute_llm_provider_request(&state, &context, "ok")
             .await
@@ -10360,7 +10207,7 @@ mod tests {
             crate::config::ImportRouteMode::ImportDbRuntime,
         )
         .expect("config");
-        let state = ProxyState::new(config).expect("state");
+        let state = HttpAppState::new(config).expect("state");
         state.set_llm_runtime_config(42, json!({"enabled": false}));
         assert!(effective_llm_runtime_config(&state, &runtime, 42).is_err());
 

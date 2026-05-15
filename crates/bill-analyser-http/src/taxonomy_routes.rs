@@ -35,7 +35,7 @@ use serde_json::{json, Map, Number, Value};
 
 use crate::{
     auth::resolve_user_id_from_headers, bill_routes::recategorize_bills_with_category_rules,
-    config::HttpShellConfig, proxy::ProxyState,
+    config::HttpShellConfig, state::HttpAppState,
 };
 
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
@@ -70,8 +70,6 @@ pub const TAXONOMY_ACCOUNT_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/accounts/{account_id}/transactions/move"),
 ];
 
-pub const TAXONOMY_ACCOUNT_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
-
 pub const TAXONOMY_TAG_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/tags"),
     ("GET", "/api/tags/"),
@@ -84,8 +82,6 @@ pub const TAXONOMY_TAG_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("PUT", "/api/tags/display-orders"),
 ];
 
-pub const TAXONOMY_TAG_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
-
 pub const TAXONOMY_TEMPLATE_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/templates"),
     ("GET", "/api/templates/"),
@@ -96,8 +92,6 @@ pub const TAXONOMY_TEMPLATE_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("DELETE", "/api/templates/{template_id}"),
     ("PUT", "/api/templates/display-orders"),
 ];
-
-pub const TAXONOMY_TEMPLATE_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
 
 pub const TAXONOMY_CATEGORY_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/categories"),
@@ -121,8 +115,6 @@ pub const TAXONOMY_CATEGORY_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("DELETE", "/api/categories/{category_id}"),
 ];
 
-pub const TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
-
 pub const TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/category-rules/"),
     ("POST", "/api/category-rules/"),
@@ -134,11 +126,7 @@ pub const TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/category-rules/reorder"),
 ];
 
-pub const TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
-
 pub const TAXONOMY_RULE_CENTER_ROUTE_PATTERNS: &[(&str, &str)] = &[("GET", "/api/rules/overview")];
-
-pub const TAXONOMY_RULE_CENTER_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
 
 pub const TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/settings/encryption/status"),
@@ -154,9 +142,7 @@ pub const TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ),
 ];
 
-pub const TAXONOMY_SETTINGS_BUNDLE_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
-
-pub fn taxonomy_runtime_router() -> Router<ProxyState> {
+pub fn taxonomy_runtime_router() -> Router<HttpAppState> {
     Router::new()
         .route("/api/rules/overview", get(rules_overview_handler))
         .route(
@@ -348,7 +334,7 @@ async fn encryption_status_handler() -> Response {
     json_response(StatusCode::OK, encryption_status_response(&status))
 }
 
-async fn list_accounts_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+async fn list_accounts_handler(State(state): State<HttpAppState>, headers: HeaderMap) -> Response {
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -366,7 +352,7 @@ async fn list_accounts_handler(State(state): State<ProxyState>, headers: HeaderM
 }
 
 async fn get_account_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(account_id): Path<i64>,
 ) -> Response {
@@ -391,7 +377,7 @@ async fn get_account_handler(
 }
 
 async fn create_account_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -428,7 +414,7 @@ async fn create_account_handler(
 }
 
 async fn update_account_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(account_id): Path<i64>,
     body: Bytes,
@@ -481,7 +467,7 @@ async fn update_account_handler(
 }
 
 async fn delete_account_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(account_id): Path<i64>,
 ) -> Response {
@@ -517,7 +503,7 @@ async fn delete_account_handler(
 }
 
 async fn update_account_display_orders_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -562,7 +548,7 @@ async fn update_account_display_orders_handler(
 }
 
 async fn sync_account_balances_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     let user_id = match user_id_from_headers(&headers, &state.config) {
@@ -584,7 +570,7 @@ async fn sync_account_balances_handler(
 }
 
 async fn move_account_transactions_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(account_id): Path<i64>,
     body: Bytes,
@@ -704,7 +690,7 @@ async fn move_account_transactions_handler(
 }
 
 async fn clear_account_transactions_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(account_id): Path<i64>,
     body: Bytes,
@@ -807,7 +793,7 @@ async fn clear_account_transactions_handler(
     }
 }
 
-async fn list_tags_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+async fn list_tags_handler(State(state): State<HttpAppState>, headers: HeaderMap) -> Response {
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -825,7 +811,7 @@ async fn list_tags_handler(State(state): State<ProxyState>, headers: HeaderMap) 
 }
 
 async fn get_tag_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(tag_id): Path<i64>,
 ) -> Response {
@@ -849,7 +835,7 @@ async fn get_tag_handler(
 }
 
 async fn create_tag_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -890,7 +876,7 @@ async fn create_tag_handler(
 }
 
 async fn update_tag_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(tag_id): Path<i64>,
     body: Bytes,
@@ -928,7 +914,7 @@ async fn update_tag_handler(
 }
 
 async fn delete_tag_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(tag_id): Path<i64>,
 ) -> Response {
@@ -950,7 +936,7 @@ async fn delete_tag_handler(
 }
 
 async fn update_tag_display_orders_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -1003,7 +989,7 @@ async fn update_tag_display_orders_handler(
 }
 
 async fn batch_create_tags_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -1081,7 +1067,7 @@ async fn batch_create_tags_handler(
 }
 
 async fn list_templates_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BTreeMap<String, String>>,
 ) -> Response {
@@ -1103,7 +1089,7 @@ async fn list_templates_handler(
 }
 
 async fn get_template_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BTreeMap<String, String>>,
     Path(template_id): Path<i64>,
@@ -1127,7 +1113,7 @@ async fn get_template_handler(
 }
 
 async fn create_template_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BTreeMap<String, String>>,
     body: Bytes,
@@ -1163,7 +1149,7 @@ async fn create_template_handler(
 }
 
 async fn update_template_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BTreeMap<String, String>>,
     Path(template_id): Path<i64>,
@@ -1197,7 +1183,7 @@ async fn update_template_handler(
 }
 
 async fn delete_template_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BTreeMap<String, String>>,
     Path(template_id): Path<i64>,
@@ -1221,7 +1207,7 @@ async fn delete_template_handler(
 }
 
 async fn update_template_display_orders_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BTreeMap<String, String>>,
     body: Bytes,
@@ -1252,7 +1238,10 @@ async fn update_template_display_orders_handler(
     }
 }
 
-async fn list_categories_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+async fn list_categories_handler(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+) -> Response {
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -1269,7 +1258,10 @@ async fn list_categories_handler(State(state): State<ProxyState>, headers: Heade
     }
 }
 
-async fn flat_categories_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+async fn flat_categories_handler(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+) -> Response {
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -1286,7 +1278,7 @@ async fn flat_categories_handler(State(state): State<ProxyState>, headers: Heade
     }
 }
 
-async fn all_categories_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+async fn all_categories_handler(State(state): State<HttpAppState>, headers: HeaderMap) -> Response {
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -1305,7 +1297,7 @@ async fn all_categories_handler(State(state): State<ProxyState>, headers: Header
 
 async fn update_all_categories_handler(
     headers: HeaderMap,
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     body: Bytes,
 ) -> Response {
     if let Err(response) = user_id_from_headers(&headers, &state.config) {
@@ -1330,7 +1322,7 @@ async fn update_all_categories_handler(
 }
 
 async fn create_category_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -1422,7 +1414,7 @@ async fn create_category_handler(
 }
 
 async fn get_category_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(category_id): Path<String>,
 ) -> Response {
@@ -1472,7 +1464,7 @@ async fn get_category_handler(
 }
 
 async fn update_category_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(category_id): Path<String>,
     body: Bytes,
@@ -1507,7 +1499,7 @@ async fn update_category_handler(
 }
 
 async fn delete_category_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(category_id): Path<String>,
 ) -> Response {
@@ -1539,7 +1531,7 @@ async fn delete_category_handler(
 }
 
 async fn move_categories_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -1584,7 +1576,7 @@ async fn move_categories_handler(
 }
 
 async fn batch_create_categories_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -1673,7 +1665,7 @@ async fn batch_create_categories_handler(
 }
 
 async fn export_categories_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     let user_id = match user_id_from_headers(&headers, &state.config) {
@@ -1702,7 +1694,7 @@ async fn export_categories_handler(
 }
 
 async fn category_statistics_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<CategoryStatisticsQuery>,
 ) -> Response {
@@ -1731,7 +1723,7 @@ async fn category_statistics_handler(
 }
 
 async fn recategorize_all_bills_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -1766,7 +1758,7 @@ async fn recategorize_all_bills_handler(
 }
 
 async fn list_category_rules_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<CategoryRulesQuery>,
 ) -> Response {
@@ -1791,7 +1783,7 @@ async fn list_category_rules_handler(
 }
 
 async fn create_category_rule_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -1832,7 +1824,7 @@ async fn create_category_rule_handler(
 }
 
 async fn get_legacy_category_rules_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     let user_id = match user_id_from_headers(&headers, &state.config) {
@@ -1863,7 +1855,7 @@ async fn get_legacy_category_rules_handler(
 }
 
 async fn update_legacy_category_rules_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -1904,7 +1896,7 @@ async fn update_legacy_category_rules_handler(
 }
 
 async fn update_category_rule_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(rule_id): Path<i64>,
     body: Bytes,
@@ -1943,7 +1935,7 @@ async fn update_category_rule_handler(
 }
 
 async fn delete_category_rule_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(rule_id): Path<i64>,
 ) -> Response {
@@ -1965,7 +1957,7 @@ async fn delete_category_rule_handler(
 }
 
 async fn reorder_category_rules_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -2004,7 +1996,7 @@ async fn reorder_category_rules_handler(
 }
 
 async fn ensure_category_rule_defaults_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     let user_id = match user_id_from_headers(&headers, &state.config) {
@@ -2040,7 +2032,7 @@ async fn ensure_category_rule_defaults_handler(
 }
 
 async fn migrate_category_keywords_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     let user_id = match user_id_from_headers(&headers, &state.config) {
@@ -2069,7 +2061,7 @@ async fn migrate_category_keywords_handler(
 }
 
 async fn test_category_rule_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(rule_id): Path<i64>,
     body: Bytes,
@@ -2111,7 +2103,7 @@ async fn test_category_rule_handler(
     }
 }
 
-async fn rules_overview_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+async fn rules_overview_handler(State(state): State<HttpAppState>, headers: HeaderMap) -> Response {
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -2154,7 +2146,7 @@ async fn rules_overview_handler(State(state): State<ProxyState>, headers: Header
 }
 
 async fn export_settings_bundle_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     let user_id = match user_id_from_headers(&headers, &state.config) {
@@ -2173,7 +2165,7 @@ async fn export_settings_bundle_handler(
 }
 
 async fn export_settings_bundle_section_get_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(section_key): Path<String>,
 ) -> Response {
@@ -2187,7 +2179,7 @@ async fn export_settings_bundle_section_get_handler(
 }
 
 async fn export_settings_bundle_section_post_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(section_key): Path<String>,
     body: Bytes,
@@ -2238,7 +2230,7 @@ async fn export_settings_bundle_section_post_handler(
 }
 
 fn export_settings_bundle_section(
-    state: &ProxyState,
+    state: &HttpAppState,
     headers: &HeaderMap,
     section_key: &str,
 ) -> Response {
@@ -2261,7 +2253,7 @@ fn export_settings_bundle_section(
 }
 
 async fn preview_import_settings_bundle_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -2276,7 +2268,7 @@ async fn preview_import_settings_bundle_handler(
 }
 
 async fn import_settings_bundle_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -2291,7 +2283,7 @@ async fn import_settings_bundle_handler(
 }
 
 async fn preview_import_settings_bundle_section_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(section_key): Path<String>,
     body: Bytes,
@@ -2310,7 +2302,7 @@ async fn preview_import_settings_bundle_section_handler(
 }
 
 async fn import_settings_bundle_section_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(section_key): Path<String>,
     body: Bytes,
@@ -2329,7 +2321,7 @@ async fn import_settings_bundle_section_handler(
 }
 
 fn import_settings_bundle_section_response(
-    state: &ProxyState,
+    state: &HttpAppState,
     headers: &HeaderMap,
     section_key: &str,
     body: Bytes,
@@ -2352,7 +2344,7 @@ fn import_settings_bundle_section_response(
 }
 
 fn import_settings_bundle_response(
-    state: &ProxyState,
+    state: &HttpAppState,
     headers: &HeaderMap,
     body: Bytes,
     dry_run: bool,
@@ -2374,7 +2366,7 @@ fn import_settings_bundle_response(
 }
 
 fn import_settings_bundle_value_response(
-    state: &ProxyState,
+    state: &HttpAppState,
     headers: &HeaderMap,
     bundle: &Value,
     dry_run: bool,
@@ -2438,7 +2430,7 @@ fn settings_bundle_section_from_request(data: &Value, section_key: &str) -> Valu
 }
 
 async fn import_categories_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -4501,7 +4493,7 @@ fn parse_json_body(body: Bytes) -> RouteResult<Value> {
     serde_json::from_slice(&body).map_err(|_| Box::new(bad_request("Invalid JSON")))
 }
 
-fn open_runtime(state: &ProxyState, runtime_label: &str) -> RouteResult<SqliteRuntime> {
+fn open_runtime(state: &HttpAppState, runtime_label: &str) -> RouteResult<SqliteRuntime> {
     let db_path = state.config.sqlite_db_path.as_deref().ok_or_else(|| {
         Box::new(error_response(
             StatusCode::SERVICE_UNAVAILABLE,

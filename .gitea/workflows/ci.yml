@@ -13,21 +13,16 @@ on:
       - '.agents/**'
       - '.gitea/**'
       - '.omx/plans/**'
-      - 'docs/AI_WORKFLOW.md'
-      - 'scripts/hooks/**'
-      - 'scripts/agent_stack_health.py'
-      - 'src/bill_analyser/**'
+      - 'docs/**'
+      - 'scripts/**'
       - 'src/web/**'
-      - 'tests/**/*.py'
       - 'tests/fixtures/**'
       - 'tests/web/**'
-      - 'pytest.ini'
-      - 'pyproject.toml'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'crates/**'
-      - '.python-version'
-      - 'uv.lock'
+      - '*.ps1'
+      - '*.bat'
   pull_request:
     paths:
       - 'AGENTS.md'
@@ -38,21 +33,16 @@ on:
       - '.agents/**'
       - '.gitea/**'
       - '.omx/plans/**'
-      - 'docs/AI_WORKFLOW.md'
-      - 'scripts/hooks/**'
-      - 'scripts/agent_stack_health.py'
-      - 'src/bill_analyser/**'
+      - 'docs/**'
+      - 'scripts/**'
       - 'src/web/**'
-      - 'tests/**/*.py'
       - 'tests/fixtures/**'
       - 'tests/web/**'
-      - 'pytest.ini'
-      - 'pyproject.toml'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'crates/**'
-      - '.python-version'
-      - 'uv.lock'
+      - '*.ps1'
+      - '*.bat'
   workflow_dispatch:
 
 permissions:
@@ -64,20 +54,12 @@ env:
   BILL_ANALYSER_OPERATION_PASSWORD: ci-test-operation-password
 
 jobs:
-  # Gitea 官方 comparison 文档没有把顶层 concurrency 列为兼容语法；
-  # 这里改为单 workflow 内的独立 jobs，在可用 runner 上并发执行。
   backend-ci:
     name: backend-ci
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: https://github.com/actions/checkout@v4
-
-      - name: Setup Python 3.14
-        uses: https://github.com/actions/setup-python@v5
-        with:
-          python-version: '3.14'
-          allow-prereleases: true
 
       - name: Restore Rust toolchain cache
         id: rust-toolchain-cache
@@ -99,9 +81,22 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-rust-toolchain-slim-v2-
 
+      - name: Activate cached Rust tools
+        run: |
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
+          if command -v rustup >/dev/null 2>&1; then
+            rustup --version
+          fi
+          if command -v cargo >/dev/null 2>&1; then
+            cargo --version
+          fi
+
       - name: Setup Rust stable
         id: rust-toolchain
         uses: https://github.com/dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy,llvm-tools-preview
 
       - name: Restore Cargo cache
         uses: https://github.com/actions/cache@v4
@@ -117,37 +112,20 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-slim-v1-stable-
 
-      - name: Restore pip cache
-        uses: https://github.com/actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-slim-v1-${{ hashFiles('pyproject.toml', 'uv.lock', '.python-version') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-slim-v1-
+      - name: Check Cargo metadata
+        run: cargo metadata --locked --format-version 1 >/tmp/bill-analyser-cargo-metadata.json
 
-      - name: Upgrade pip
-        run: python -m pip install --upgrade pip
+      - name: Run Rust format check
+        run: cargo fmt --all -- --check
 
-      - name: Install project
-        run: python -m pip install -e .
+      - name: Run Rust clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Install test dependencies
-        run: python -m pip install pytest pytest-asyncio pytest-cov pytest-mock pytest-xdist pytest-timeout python-dateutil inline-snapshot
-
-      - name: Build Rust auth bridge
-        run: cargo build -p bill-analyser-core --bin bill_auth_bridge
-
-      - name: Build Rust category rule bridge
-        run: cargo build -p bill-analyser-core --bin bill_category_rule_bridge
-
-      - name: Build Rust taxonomy bridge
-        run: cargo build -p bill-analyser-db --bin bill_taxonomy_bridge
+      - name: Run Rust tests
+        run: cargo test --workspace
 
       - name: Build Rust HTTP server
         run: cargo build -p bill-analyser-http --bin bill_http_server
-
-      - name: Check Rust workspace dependency policy
-        run: python scripts/check_rust_workspace_dependencies.py --json
 
       - name: Install Rust coverage tool
         run: |
@@ -158,9 +136,6 @@ jobs:
 
       - name: Run Rust coverage
         run: cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90
-
-      - name: Run pytest coverage
-        run: python -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v -n auto --dist loadfile
 
       - name: Trim backend caches before cache save
         id: backend-cache-trim
@@ -178,7 +153,7 @@ jobs:
           }
 
           rm -rf target
-          rm -f workspace.lcov coverage.json .coverage .coverage.*
+          rm -f workspace.lcov /tmp/bill-analyser-cargo-metadata.json
 
           cargo_cache_mb="$(cache_size_mb ~/.cargo/registry ~/.cargo/git ~/.cargo/bin/cargo-llvm-cov)"
           if [ "$cargo_cache_mb" -gt 450 ]; then
@@ -187,11 +162,6 @@ jobs:
           cargo_cache_mb="$(cache_size_mb ~/.cargo/registry ~/.cargo/git ~/.cargo/bin/cargo-llvm-cov)"
           if [ "$cargo_cache_mb" -gt 450 ]; then
             rm -rf ~/.cargo/registry/cache ~/.cargo/git/db
-          fi
-
-          pip_cache_mb="$(cache_size_mb ~/.cache/pip)"
-          if [ "$pip_cache_mb" -gt 300 ]; then
-            python -m pip cache purge || rm -rf ~/.cache/pip
           fi
 
           rustup_cache_mb="$(cache_size_mb ~/.rustup/toolchains ~/.rustup/update-hashes ~/.rustup/settings.toml ~/.cargo/bin/rustup ~/.cargo/bin/cargo ~/.cargo/bin/cargo-clippy ~/.cargo/bin/cargo-fmt ~/.cargo/bin/clippy-driver ~/.cargo/bin/rustc ~/.cargo/bin/rustdoc ~/.cargo/bin/rustfmt)"
@@ -276,26 +246,41 @@ jobs:
             npm cache clean --force
           fi
 
-  agent-stack-health:
-    name: agent-stack-health
+  repo-governance:
+    name: repo-governance
     runs-on: ubuntu-latest
-    env:
-      PYTHONPATH: src
     steps:
       - name: Checkout repository
         uses: https://github.com/actions/checkout@v4
 
-      - name: Set up Python
-        uses: https://github.com/actions/setup-python@v5
-        with:
-          python-version: '3.14'
-          allow-prereleases: true
+      - name: Ensure tracked source tree is Rust-only
+        run: |
+          tracked_py="$(git ls-files '*.py')"
+          if [ -n "$tracked_py" ]; then
+            echo "$tracked_py"
+            echo "Tracked Python files are not allowed after the Rust-only cutover."
+            exit 1
+          fi
 
-      - name: Install test dependencies
-        run: python -m pip install --upgrade pip pytest
+          py_lower='python'
+          removed_files=".${py_lower}-version py""project.toml py""test.ini uv.lock"
+          for removed in $removed_files; do
+            if git ls-files --error-unmatch "$removed" >/dev/null 2>&1; then
+              echo "$removed should not be tracked after the Rust-only cutover."
+              exit 1
+            fi
+          done
 
-      - name: Run agent-stack health check
-        run: python scripts/agent_stack_health.py --mode repo
-
-      - name: Run agent-stack regression tests
-        run: python -m pytest tests/test_reviewer_agent_diff_contract.py tests/test_agent_stack_health.py tests/test_ai_workflow_docs.py tests/test_task_state.py tests/test_task_state_reader.py tests/test_gitea_workflows.py -v
+      - name: Check removed runtime/tooling references
+        run: |
+          paths="AGENTS.md CLAUDE.md .codex .gitea docs README.md scripts start_backend.ps1 一键启动.ps1 build_static.ps1 .omx/plans/rust-full-rewrite-total-plan.md"
+          py_word='Python'
+          py_lower='python'
+          agent_stack="agent_stack_health"".py"
+          rust_deps="check_rust_workspace_dependencies"".py"
+          plan_progress="omx_plan_progress"".py"
+          pattern="BILL_ANALYSER_${py_word^^}_UPSTREAM|${py_word}Proxied|setup-${py_lower}|py""project|\\.v""env|${py_lower}\\.exe|${agent_stack}|${rust_deps}|${plan_progress}"
+          if git grep -n -E "$pattern" -- $paths; then
+            echo "Removed runtime/tooling references are still present."
+            exit 1
+          fi

@@ -23,7 +23,7 @@ use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
-use crate::{auth::resolve_user_id_from_headers, config::HttpShellConfig, proxy::ProxyState};
+use crate::{auth::resolve_user_id_from_headers, config::HttpShellConfig, state::HttpAppState};
 
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
 
@@ -45,9 +45,7 @@ pub const BUDGET_CRUD_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/budgets/export"),
 ];
 
-pub const BUDGET_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
-
-pub fn budget_runtime_router() -> Router<ProxyState> {
+pub fn budget_runtime_router() -> Router<HttpAppState> {
     Router::new()
         .route("/api/budgets/execution", get(get_budget_execution_handler))
         .route("/api/budgets/forecast", get(get_budget_forecast_handler))
@@ -111,7 +109,7 @@ struct BudgetForecastQuery {
 }
 
 async fn list_budgets_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BudgetListQuery>,
 ) -> Response {
@@ -137,7 +135,7 @@ async fn list_budgets_handler(
 }
 
 async fn get_budget_execution_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BudgetExecutionQuery>,
 ) -> Response {
@@ -172,7 +170,7 @@ async fn get_budget_execution_handler(
 }
 
 async fn get_budget_forecast_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BudgetForecastQuery>,
 ) -> Response {
@@ -238,7 +236,7 @@ async fn get_budget_forecast_handler(
 }
 
 async fn get_budget_history_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BudgetExecutionQuery>,
 ) -> Response {
@@ -278,7 +276,7 @@ async fn get_budget_history_handler(
 }
 
 async fn create_budget_history_snapshot_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -309,7 +307,7 @@ async fn create_budget_history_snapshot_handler(
 }
 
 async fn get_budget_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(budget_id): Path<i64>,
 ) -> Response {
@@ -329,7 +327,7 @@ async fn get_budget_handler(
 }
 
 async fn create_budget_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -363,7 +361,7 @@ async fn create_budget_handler(
 }
 
 async fn update_budget_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(budget_id): Path<i64>,
     Json(payload): Json<Value>,
@@ -401,7 +399,7 @@ async fn update_budget_handler(
 }
 
 async fn delete_budget_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(budget_id): Path<i64>,
 ) -> Response {
@@ -423,7 +421,7 @@ async fn delete_budget_handler(
     }
 }
 
-async fn export_budgets_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+async fn export_budgets_handler(State(state): State<HttpAppState>, headers: HeaderMap) -> Response {
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -439,7 +437,7 @@ async fn export_budgets_handler(State(state): State<ProxyState>, headers: Header
 }
 
 async fn import_budgets_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -799,7 +797,7 @@ fn non_empty_string(value: Option<&String>) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn open_runtime(state: &ProxyState) -> RouteResult<SqliteRuntime> {
+fn open_runtime(state: &HttpAppState) -> RouteResult<SqliteRuntime> {
     let db_path = state.config.sqlite_db_path.as_deref().ok_or_else(|| {
         Box::new(error_response(
             StatusCode::SERVICE_UNAVAILABLE,

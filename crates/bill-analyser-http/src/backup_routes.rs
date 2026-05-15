@@ -47,7 +47,7 @@ use crate::{
         CloudBackupUploadResult,
     },
     config::HttpShellConfig,
-    proxy::ProxyState,
+    state::HttpAppState,
 };
 
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
@@ -128,9 +128,7 @@ pub const BACKUP_OPS_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/backup/sync"),
 ];
 
-pub const BACKUP_OPS_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
-
-pub fn backup_ops_runtime_router() -> Router<ProxyState> {
+pub fn backup_ops_runtime_router() -> Router<HttpAppState> {
     Router::new()
         .route("/api/backup/", get(list_backup_files_handler))
         .route("/api/backup/cleanup", post(cleanup_backups_handler))
@@ -159,18 +157,18 @@ pub fn backup_ops_runtime_router() -> Router<ProxyState> {
 }
 
 async fn list_backup_files_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     blocking_route(move || list_backup_files_response(&state, &headers)).await
 }
 
-async fn create_backup_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+async fn create_backup_handler(State(state): State<HttpAppState>, headers: HeaderMap) -> Response {
     blocking_route(move || create_backup_response(&state, &headers)).await
 }
 
 async fn sync_backup_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -215,7 +213,7 @@ async fn sync_backup_handler(
 }
 
 async fn verify_backup_restore_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -223,7 +221,7 @@ async fn verify_backup_restore_handler(
 }
 
 async fn download_backup_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     AxumPath(filename): AxumPath<String>,
 ) -> Response {
@@ -234,7 +232,7 @@ async fn download_backup_handler(
 }
 
 async fn delete_backup_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     AxumPath(filename): AxumPath<String>,
 ) -> Response {
@@ -242,7 +240,7 @@ async fn delete_backup_handler(
 }
 
 async fn restore_backup_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     AxumPath(filename): AxumPath<String>,
 ) -> Response {
@@ -250,19 +248,22 @@ async fn restore_backup_handler(
 }
 
 async fn cleanup_backups_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
     blocking_route(move || cleanup_backups_response(&state, &headers, body)).await
 }
 
-async fn list_backup_jobs_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+async fn list_backup_jobs_handler(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+) -> Response {
     blocking_route(move || list_backup_jobs_response(&state, &headers)).await
 }
 
 async fn save_backup_job_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -283,7 +284,7 @@ where
     }
 }
 
-fn list_backup_files_response(state: &ProxyState, headers: &HeaderMap) -> RouteResult<Response> {
+fn list_backup_files_response(state: &HttpAppState, headers: &HeaderMap) -> RouteResult<Response> {
     let auth_runtime = authenticated_backup_runtime(state, headers)?;
     ensure_sensitive_backup_auth(&auth_runtime, state, headers, None)?;
     let backup_dir = backup_dir(&state.config)?;
@@ -319,7 +320,7 @@ fn list_backup_files_response(state: &ProxyState, headers: &HeaderMap) -> RouteR
     ))
 }
 
-fn create_backup_response(state: &ProxyState, headers: &HeaderMap) -> RouteResult<Response> {
+fn create_backup_response(state: &HttpAppState, headers: &HeaderMap) -> RouteResult<Response> {
     let auth_runtime = authenticated_backup_runtime(state, headers)?;
     ensure_sensitive_backup_auth(&auth_runtime, state, headers, None)?;
     let backup_dir = backup_dir(&state.config)?;
@@ -431,7 +432,7 @@ fn create_backup_response(state: &ProxyState, headers: &HeaderMap) -> RouteResul
 }
 
 fn prepare_sync_backup_response(
-    state: &ProxyState,
+    state: &HttpAppState,
     headers: &HeaderMap,
     body: Bytes,
 ) -> RouteResult<PreparedCloudSync> {
@@ -610,7 +611,7 @@ fn prepare_sync_backup_response(
 }
 
 fn finish_sync_backup_response(
-    state: &ProxyState,
+    state: &HttpAppState,
     headers: &HeaderMap,
     prepared: PreparedCloudSync,
     upload_result: Result<CloudBackupUploadResult, CloudBackupUploadError>,
@@ -715,7 +716,7 @@ fn finish_sync_backup_response(
 }
 
 fn verify_backup_restore_response(
-    state: &ProxyState,
+    state: &HttpAppState,
     headers: &HeaderMap,
     body: Bytes,
 ) -> RouteResult<Response> {
@@ -829,7 +830,7 @@ fn verify_backup_restore_response(
 }
 
 fn prepare_download_backup_response(
-    state: &ProxyState,
+    state: &HttpAppState,
     headers: &HeaderMap,
     filename: &str,
 ) -> RouteResult<(File, String)> {
@@ -919,7 +920,7 @@ fn stream_backup_download_response(file: File, safe_filename: &str) -> Response 
 }
 
 fn delete_backup_response(
-    state: &ProxyState,
+    state: &HttpAppState,
     headers: &HeaderMap,
     filename: &str,
 ) -> RouteResult<Response> {
@@ -1004,7 +1005,7 @@ fn delete_backup_response(
 }
 
 fn restore_backup_response(
-    state: &ProxyState,
+    state: &HttpAppState,
     headers: &HeaderMap,
     filename: &str,
 ) -> RouteResult<Response> {
@@ -1092,7 +1093,7 @@ fn restore_backup_response(
 }
 
 fn cleanup_backups_response(
-    state: &ProxyState,
+    state: &HttpAppState,
     headers: &HeaderMap,
     body: Bytes,
 ) -> RouteResult<Response> {
@@ -1199,7 +1200,7 @@ fn cleanup_backups_response(
     ))
 }
 
-fn list_backup_jobs_response(state: &ProxyState, headers: &HeaderMap) -> RouteResult<Response> {
+fn list_backup_jobs_response(state: &HttpAppState, headers: &HeaderMap) -> RouteResult<Response> {
     let auth_runtime = authenticated_backup_runtime(state, headers)?;
     let jobs = list_backup_jobs(auth_runtime.runtime.connection(), auth_runtime.user_id)
         .map_err(|_| Box::new(db_error_response()))?;
@@ -1210,7 +1211,7 @@ fn list_backup_jobs_response(state: &ProxyState, headers: &HeaderMap) -> RouteRe
 }
 
 fn save_backup_job_response(
-    state: &ProxyState,
+    state: &HttpAppState,
     headers: &HeaderMap,
     body: Bytes,
 ) -> RouteResult<Response> {
@@ -1303,7 +1304,7 @@ fn save_backup_job_response(
 }
 
 fn authenticated_backup_runtime(
-    state: &ProxyState,
+    state: &HttpAppState,
     headers: &HeaderMap,
 ) -> RouteResult<AuthenticatedBackupRuntime> {
     let authenticated =
@@ -1322,7 +1323,7 @@ fn authenticated_backup_runtime(
     })
 }
 
-fn open_backup_ops_runtime(state: &ProxyState) -> RouteResult<SqliteRuntime> {
+fn open_backup_ops_runtime(state: &HttpAppState) -> RouteResult<SqliteRuntime> {
     let runtime = open_runtime(state)?;
     init_backup_ops_schema(runtime.connection()).map_err(|_| Box::new(db_error_response()))?;
     Ok(runtime)
@@ -1330,7 +1331,7 @@ fn open_backup_ops_runtime(state: &ProxyState) -> RouteResult<SqliteRuntime> {
 
 fn ensure_sensitive_backup_auth(
     auth_runtime: &AuthenticatedBackupRuntime,
-    state: &ProxyState,
+    state: &HttpAppState,
     headers: &HeaderMap,
     payload: Option<&Value>,
 ) -> RouteResult<()> {
@@ -1364,7 +1365,7 @@ fn backup_step_up_token(headers: &HeaderMap, payload: Option<&Value>) -> Option<
 
 fn validate_backup_step_up_token(
     token: &str,
-    state: &ProxyState,
+    state: &HttpAppState,
     expected_user_id: UserId,
 ) -> Result<(), &'static str> {
     let secret = state
@@ -2519,7 +2520,7 @@ fn json_string_field(value: &Value, key: &str) -> String {
         .to_string()
 }
 
-fn open_runtime(state: &ProxyState) -> RouteResult<SqliteRuntime> {
+fn open_runtime(state: &HttpAppState) -> RouteResult<SqliteRuntime> {
     let db_path = state.config.sqlite_db_path.as_deref().ok_or_else(|| {
         Box::new(error_response(
             StatusCode::SERVICE_UNAVAILABLE,

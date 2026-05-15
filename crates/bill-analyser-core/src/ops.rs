@@ -433,7 +433,7 @@ pub fn plan_backup_cleanup(
         .filter(|candidate| !kept_record_names.contains(&candidate.filename))
         .filter(|candidate| !active_record_names.contains(&candidate.filename))
         .collect::<Vec<_>>();
-    stray.sort_by(|left, right| right.modified_at.cmp(&left.modified_at));
+    stray.sort_by_key(|candidate| std::cmp::Reverse(candidate.modified_at));
 
     let remaining_slots = keep_count.saturating_sub(kept_record_names.len());
     for candidate in stray.iter().skip(remaining_slots) {

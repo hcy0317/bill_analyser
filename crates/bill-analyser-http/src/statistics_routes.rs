@@ -33,7 +33,7 @@ use chrono::{Datelike, Local, NaiveDate, TimeZone};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::{auth::resolve_user_id_from_headers, config::HttpShellConfig, proxy::ProxyState};
+use crate::{auth::resolve_user_id_from_headers, config::HttpShellConfig, state::HttpAppState};
 
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
 
@@ -57,9 +57,7 @@ pub const STATISTICS_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("DELETE", "/api/statistics/exchange-rates/custom/{currency}"),
 ];
 
-pub const STATISTICS_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
-
-pub fn statistics_runtime_router() -> Router<ProxyState> {
+pub fn statistics_runtime_router() -> Router<HttpAppState> {
     Router::new()
         .route(
             "/api/statistics/category-statistics",
@@ -158,7 +156,7 @@ struct UserCustomExchangeRateRequest {
 }
 
 async fn category_statistics_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<CategoryStatisticsQuery>,
 ) -> Response {
@@ -199,7 +197,7 @@ async fn category_statistics_handler(
 }
 
 async fn category_trends_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<CategoryTrendsQuery>,
 ) -> Response {
@@ -242,7 +240,7 @@ async fn category_trends_handler(
 }
 
 async fn asset_trends_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<CategoryStatisticsQuery>,
 ) -> Response {
@@ -282,7 +280,7 @@ async fn asset_trends_handler(
 }
 
 async fn category_pie_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BasicStatisticsQuery>,
 ) -> Response {
@@ -308,7 +306,7 @@ async fn category_pie_handler(
 }
 
 async fn top_merchants_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BasicStatisticsQuery>,
 ) -> Response {
@@ -336,7 +334,7 @@ async fn top_merchants_handler(
 }
 
 async fn transaction_amounts_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BasicStatisticsQuery>,
 ) -> Response {
@@ -385,7 +383,7 @@ async fn transaction_amounts_handler(
 }
 
 async fn analyzer_overview_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<AnalyzerStatisticsQuery>,
 ) -> Response {
@@ -405,7 +403,7 @@ async fn analyzer_overview_handler(
 }
 
 async fn analyzer_trends_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<AnalyzerStatisticsQuery>,
 ) -> Response {
@@ -430,7 +428,7 @@ async fn analyzer_trends_handler(
 }
 
 async fn analyzer_comparison_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<AnalyzerStatisticsQuery>,
 ) -> Response {
@@ -461,7 +459,7 @@ async fn analyzer_comparison_handler(
 }
 
 async fn analyzer_category_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<AnalyzerStatisticsQuery>,
 ) -> Response {
@@ -486,7 +484,7 @@ async fn analyzer_category_handler(
 }
 
 async fn analyzer_trend_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<AnalyzerStatisticsQuery>,
 ) -> Response {
@@ -511,7 +509,7 @@ async fn analyzer_trend_handler(
 }
 
 async fn insights_anomalies_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<InsightsAnomaliesQuery>,
 ) -> Response {
@@ -539,7 +537,7 @@ async fn insights_anomalies_handler(
 }
 
 async fn exchange_rates_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<ExchangeRatesQuery>,
 ) -> Response {
@@ -605,7 +603,7 @@ async fn exchange_rates_handler(
 }
 
 async fn update_user_custom_exchange_rate_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(body): Json<UserCustomExchangeRateRequest>,
 ) -> Response {
@@ -673,7 +671,7 @@ async fn update_user_custom_exchange_rate_handler(
 }
 
 async fn delete_user_custom_exchange_rate_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(currency): Path<String>,
 ) -> Response {
@@ -1279,7 +1277,7 @@ fn date_from_timestamp(value: i64) -> Option<NaiveDate> {
         .map(|datetime| datetime.date_naive())
 }
 
-fn open_runtime(state: &ProxyState) -> RouteResult<SqliteRuntime> {
+fn open_runtime(state: &HttpAppState) -> RouteResult<SqliteRuntime> {
     let db_path = state.config.sqlite_db_path.as_deref().ok_or_else(|| {
         Box::new(error_response(
             StatusCode::SERVICE_UNAVAILABLE,

@@ -15,7 +15,7 @@ use bill_analyser_db::{
     ImportSessionStatusUpdate, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
 use bill_analyser_http::{
-    build_router, HttpShellConfig, ImportRouteMode, ProxyState, IMPORT_SKELETON_ROUTE_PATTERNS,
+    build_router, HttpAppState, HttpShellConfig, ImportRouteMode, IMPORT_SKELETON_ROUTE_PATTERNS,
 };
 use chrono::{Duration as ChronoDuration, Local};
 use ring::hmac;
@@ -71,7 +71,7 @@ async fn import_db_runtime_reports_primary_http_import_runtime() -> Result<(), B
     let runtime_body = read_json(runtime).await;
     assert_eq!(
         runtime_body["runtime_boundary"],
-        "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+matching-recurring-calendar-networth-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+ai-llm-config-candidates-runtime+ai-llm-provider-generation-runtime+ai-ocr-recognition-runtime+auth-login-register-token-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime+backup-ops-sync-runtime"
+        "rust-http:rust-only-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+matching-recurring-calendar-networth-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+ai-llm-config-candidates-runtime+ai-llm-provider-generation-runtime+ai-ocr-recognition-runtime+auth-login-register-token-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime+backup-ops-sync-runtime"
     );
     assert_eq!(
         runtime_body["business_migration"],
@@ -99,7 +99,7 @@ async fn import_db_runtime_reports_primary_http_import_runtime() -> Result<(), B
 }
 
 #[tokio::test]
-async fn import_db_runtime_intercepts_all_deletion_blocked_first_phase_routes_without_proxy(
+async fn import_db_runtime_intercepts_all_deletion_blocked_first_phase_routes_without_fallback(
 ) -> Result<(), Box<dyn Error>> {
     let fixture = RuntimeFixture::new().await?;
     let app = runtime_router(&fixture);
@@ -121,7 +121,7 @@ async fn import_db_runtime_intercepts_all_deletion_blocked_first_phase_routes_wi
         assert_ne!(
             response.status(),
             StatusCode::BAD_GATEWAY,
-            "{method} {pattern} fell through to the Python proxy"
+            "{method} {pattern} fell through to legacy fallback routing"
         );
     }
     Ok(())
@@ -1393,7 +1393,7 @@ async fn import_db_runtime_accepts_frontend_multipart_parse_upload() -> Result<(
 }
 
 #[tokio::test]
-async fn import_db_runtime_parses_dedicated_xlsx_upload_without_python_proxy(
+async fn import_db_runtime_parses_dedicated_xlsx_upload_without_legacy_fallback(
 ) -> Result<(), Box<dyn Error>> {
     let fixture = RuntimeFixture::new().await?;
     let runtime = runtime_for(fixture.db_path())?;
@@ -3600,7 +3600,7 @@ fn runtime_router(fixture: &RuntimeFixture) -> Router {
     .with_sqlite_db_path(fixture.db_path.display().to_string())
     .with_trusted_user_header_secret(TEST_AUTH_SECRET)
     .with_auth_jwt_secret(TEST_AUTH_SECRET);
-    let state = ProxyState::new(config).expect("proxy state");
+    let state = HttpAppState::new(config).expect("http app state");
     build_router(state)
 }
 
@@ -3613,7 +3613,7 @@ fn runtime_router_without_auth_secret(fixture: &RuntimeFixture) -> Router {
     )
     .expect("config")
     .with_sqlite_db_path(fixture.db_path.display().to_string());
-    let state = ProxyState::new(config).expect("proxy state");
+    let state = HttpAppState::new(config).expect("http app state");
     build_router(state)
 }
 

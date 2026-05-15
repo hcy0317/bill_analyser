@@ -4,7 +4,7 @@ use axum::serve;
 use thiserror::Error;
 use tokio::net::TcpListener;
 
-use crate::{build_router, ProxyState};
+use crate::{build_router, HttpAppState};
 
 pub const DEFAULT_HTTP_BIND: &str = "127.0.0.1:5000";
 
@@ -23,7 +23,7 @@ pub fn bind_addr_from_env_with(
 
 pub async fn run_http_server(
     listener: TcpListener,
-    state: ProxyState,
+    state: HttpAppState,
 ) -> Result<(), std::io::Error> {
     serve(
         listener,

@@ -20,8 +20,7 @@ use axum::{
 };
 use base64::{engine::general_purpose, Engine as _};
 use bill_analyser_http::{
-    build_router, is_manifest_python_proxied_route, HttpShellConfig, ImportRouteMode, ProxyState,
-    BACKUP_OPS_PROXIED_ROUTE_PATTERNS, BACKUP_OPS_ROUTE_PATTERNS,
+    build_router, HttpAppState, HttpShellConfig, ImportRouteMode, BACKUP_OPS_ROUTE_PATTERNS,
 };
 use chrono::{Duration as ChronoDuration, Local};
 use ring::hmac;
@@ -71,16 +70,6 @@ async fn backup_jobs_runtime_serves_list_validation_create_and_update() -> Resul
     assert!(BACKUP_OPS_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/backup/jobs")));
-    assert!(BACKUP_OPS_PROXIED_ROUTE_PATTERNS.is_empty());
-    assert!(!is_manifest_python_proxied_route("GET", "/api/backup/jobs"));
-    assert!(!is_manifest_python_proxied_route(
-        "POST",
-        "/api/backup/jobs"
-    ));
-    assert!(!is_manifest_python_proxied_route(
-        "POST",
-        "/api/backup/restore/verify"
-    ));
 
     let fixture = RuntimeFixture::new()?;
     let app = runtime_router(&fixture);
@@ -277,7 +266,7 @@ async fn backup_jobs_runtime_requires_auth_and_sqlite_path() -> Result<(), Box<d
         ImportRouteMode::ImportDbRuntime,
     )?
     .with_trusted_user_header_secret(TEST_TRUST_SECRET);
-    let state = ProxyState::new(config)?;
+    let state = HttpAppState::new(config)?;
     let missing_db_app = build_router(state);
     let missing_db = missing_db_app
         .oneshot(authed_request(
@@ -319,7 +308,6 @@ async fn backup_file_runtime_creates_lists_downloads_deletes_and_cleans_up(
             .iter()
             .any(|item| item == &route));
     }
-    assert!(!is_manifest_python_proxied_route("GET", "/api/backup/"));
 
     let create_response = app
         .clone()
@@ -474,10 +462,6 @@ async fn backup_sync_runtime_rejects_invalid_config_before_creating_backup(
     assert!(BACKUP_OPS_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/backup/sync")));
-    assert!(!is_manifest_python_proxied_route(
-        "POST",
-        "/api/backup/sync"
-    ));
 
     for payload in [
         json!({}),
@@ -1272,7 +1256,7 @@ fn runtime_router_with_options(
     } else {
         config
     };
-    build_router(ProxyState::new(config).expect("state"))
+    build_router(HttpAppState::new(config).expect("state"))
 }
 
 fn authed_request(method: Method, uri: &str, body: Body) -> Request<Body> {

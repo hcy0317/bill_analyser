@@ -2,7 +2,7 @@
 
 Bill Analyser 是一个面向个人与家庭场景的账单分析系统，支持多来源账单导入、智能去重、自动分类、预算管理和统计分析。
 
-本项目基于 [ezbookkeeping](https://github.com/mayswind/ezbookkeeping) 的前端 UI 代码和设计，后端使用 Python/Flask 重写，数据库使用 SQLite + aiosqlite。
+本项目当前后端运行态是 Rust Axum `bill_http_server`，数据库使用 SQLite WAL，前端使用 Vue 3 + TypeScript + Vite。
 
 ## 核心能力
 
@@ -19,11 +19,11 @@ Bill Analyser 是一个面向个人与家庭场景的账单分析系统，支持
 
 | 技术 | 用途 |
 |------|------|
-| Python 3.14+ | 运行时 |
-| Flask | Web 框架，同步路由桥接 async 服务 |
-| aiosqlite | 异步 SQLite 访问 |
-| pandas | 数据处理与分析 |
-| PyJWT / bcrypt | 认证与密码加密 |
+| Rust stable | 后端运行时 |
+| Axum | HTTP API |
+| Tokio | 异步运行时 |
+| SQLx / SQLite | 数据访问 |
+| cargo-llvm-cov | 覆盖率门禁 |
 
 ### 前端
 
@@ -36,24 +36,16 @@ Bill Analyser 是一个面向个人与家庭场景的账单分析系统，支持
 | Pinia | 状态管理 |
 | ECharts | 图表可视化 |
 
-### 数据与运行
-
-- SQLite（WAL 模式）
-- 本地日志输出到 `logs/`
-- 默认数据库位于 `data/`
-
 ## 项目结构
 
 ```text
 bill_analyser/
+├── crates/                # Rust 后端 workspace
 ├── src/
-│   ├── bill_analyser/
-│   │   ├── api/           # Flask 应用、路由、鉴权
-│   │   ├── core/          # 导入、去重、分类、数据库、统计
-│   │   ├── parsers/       # 各账单解析器
-│   │   └── utils/         # 日志、工具函数、常量
 │   └── web/               # Vue 3 + TypeScript 前端
-├── tests/                 # pytest 测试
+├── tests/
+│   ├── fixtures/          # 导入样本与契约 fixtures
+│   └── web/               # 前端契约与组件测试
 ├── docs/                  # 项目文档
 ├── config/                # 配置文件
 ├── data/                  # 本地数据库与数据文件
@@ -67,18 +59,17 @@ bill_analyser/
 
 ### 环境要求
 
-- Python 3.14+
-- Node.js 18+（建议 20+）
+- Rust stable
+- Node.js 22+
 - Windows PowerShell
 
-### 安装后端依赖
+### 安装依赖
 
 ```powershell
-py -3.14 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e .
+.\scripts\install.ps1
 ```
 
-### 安装前端依赖
+也可以手动安装前端依赖：
 
 ```powershell
 cd src\web
@@ -87,8 +78,6 @@ cd ..\..
 ```
 
 ### 启动服务
-
-推荐使用一键启动：
 
 ```powershell
 .\一键启动.ps1
@@ -101,7 +90,7 @@ cd ..\..
 .\start_frontend.ps1
 ```
 
-### 访问地址
+访问地址：
 
 - 前端：`http://127.0.0.1:8081`
 - 后端 API：`http://127.0.0.1:5000/api`
@@ -109,12 +98,9 @@ cd ..\..
 
 ### 手动启动
 
-如果不使用脚本：
-
 ```powershell
 # 终端 1
-$env:PYTHONPATH = (Resolve-Path .\src).Path
-.\.venv\Scripts\python.exe -m bill_analyser.api.app
+cargo run -p bill-analyser-http --bin bill_http_server
 
 # 终端 2
 cd src\web
@@ -127,22 +113,15 @@ npm run dev
 .\停止服务器.ps1
 ```
 
-> **警告**：不要使用 `taskkill /f /im python.exe`，这会杀掉机器上所有 Python 进程。
-
 ## 开发指南
 
-### 后端测试
+### 后端检查
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/ -v -n auto --dist loadfile
-.\.venv\Scripts\python.exe -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v -n auto --dist loadfile
-.\scripts\trim_ci_caches.ps1
-```
-
-### Python 静态检查
-
-```powershell
-.\.venv\Scripts\python.exe -m pylint src/bill_analyser/core/*.py src/bill_analyser/api/routes/*.py
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90
 ```
 
 ### 前端检查
@@ -150,20 +129,14 @@ npm run dev
 ```powershell
 cd src\web
 npm run lint
-```
-
-### 前端测试
-
-```powershell
-cd src\web
 npm run test:coverage
+npm run build
 ```
 
-### 前端构建
+### 本地 CI
 
 ```powershell
-cd src\web
-npm run build
+.\scripts\run_ci_local.ps1
 ```
 
 ## 导入与处理流程
@@ -174,21 +147,18 @@ npm run build
 2. **去重预览**：执行智能去重、分类匹配、账户匹配
 3. **确认导入**：用户确认后写入正式账单表
 
-核心模块：
+核心 Rust 模块：
 
-- `src/bill_analyser/core/bills/`
-- `src/bill_analyser/core/smart_dedup/`
-- `src/bill_analyser/core/category_engine/`
+- `crates/bill-analyser-parsers/`
+- `crates/bill-analyser-db/`
+- `crates/bill-analyser-core/`
+- `crates/bill-analyser-http/`
 
 ## 重要开发约束
 
 ### REST 优先
 
-当前运行态以 REST 为主，不应为新功能重新引入 `/api/v1/*` 作为主链。
-
-### 异步桥接
-
-Flask 路由层保持同步入口，但核心服务和数据库访问必须保持 async。
+当前运行态以 `REST /api/...` 为主，不应为新功能重新引入 `/api/v1/*` 作为主链。
 
 ### 金额单位
 
@@ -198,15 +168,7 @@ Flask 路由层保持同步入口，但核心服务和数据库访问必须保�
 
 ## 前端构建产物说明
 
-`src/web/dist` 是 Vite + PWA 构建输出，包含：
-
-- 多入口 HTML
-- hashed JS/CSS 资源
-- `sw.js`
-- `manifest.json`
-- `workbox-*`
-
-这些文件属于部署产物，不是手工维护源码。
+`src/web/dist` 是 Vite + PWA 构建输出，属于部署产物，不是手工维护源码。
 
 ## AI 与仓库自动化资产
 
@@ -215,9 +177,8 @@ Flask 路由层保持同步入口，但核心服务和数据库访问必须保�
 - `.github/` — Copilot 指令、hooks、工作流
 - `.claude/` — Claude Code 规则与配置
 - `.agents/` — 跨工具共享 skills
+- `.codex/` — Codex 薄适配器
 - `mcp-configs/` — MCP 配置与辅助资产
-
-这些目录保存了 agent、skills、rules、commands、prompts 和 MCP 配置，不应被当作本地缓存或垃圾文件处理。
 
 ## 常见问题
 
@@ -228,37 +189,3 @@ Flask 路由层保持同步入口，但核心服务和数据库访问必须保�
 ### 数据库锁定
 
 停止所有后端实例和测试进程后重试，避免多个进程同时写 SQLite。
-
-### 导入结果不符合预期
-
-优先检查：
-
-- 对应解析器是否识别正确
-- 分类规则是否匹配到正确类型
-- 账户别名是否完整
-- 金额元/分转换是否一致
-
-## 参考文档
-
-- 项目总览：`docs/PROJECT_OVERVIEW.md`
-- Agent 入口：`AGENTS.md`
-- Copilot 约束：`.github/copilot-instructions.md`
-
-## 致谢
-
-本项目的前端 UI 代码和设计源自 [ezbookkeeping](https://github.com/mayswind/ezbookkeeping)（原作者：[mayswind](https://github.com/mayswind)）。ezbookkeeping 是一个轻量级、自托管的个人记账应用，采用 MIT 许可证发布。
-
-我们对 mayswind 及 ezbookkeeping 贡献者表示衷心感谢，感谢他们提供的优秀前端架构、UI 组件和设计理念。
-
-**ezbookkeeping 项目信息**：
-- 仓库地址：https://github.com/mayswind/ezbookkeeping
-- 许可证：MIT
-- 官方网站：https://ezbookkeeping.mayswind.net
-
-## 许可证
-
-MIT
-
-本项目基于 MIT 许可证发布，详见 [LICENSE](LICENSE) 文件。
-
-由于本项目使用了 ezbookkeeping 的前端代码，根据 MIT 许可证的要求，我们保留了原项目的版权声明和许可声明。

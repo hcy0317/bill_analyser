@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{any, delete, get, post, put},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use base64::{engine::general_purpose, Engine as _};
@@ -48,11 +48,7 @@ use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use serde::Deserialize;
 use serde_json::{json, Map, Number, Value};
 
-use crate::{
-    auth::resolve_user_id_from_headers,
-    config::HttpShellConfig,
-    proxy::{ownership_aware_proxy_handler, ProxyState},
-};
+use crate::{auth::resolve_user_id_from_headers, config::HttpShellConfig, state::HttpAppState};
 
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
 const DEFAULT_UTC_OFFSET_MINUTES: i32 = 480;
@@ -85,9 +81,7 @@ pub const BILL_CRUD_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/bills/pictures/unused"),
 ];
 
-pub const BILL_CRUD_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
-
-pub fn bill_runtime_router() -> Router<ProxyState> {
+pub fn bill_runtime_router() -> Router<HttpAppState> {
     Router::new()
         .route("/api/bills/export", get(export_bills_handler))
         .route(
@@ -97,10 +91,6 @@ pub fn bill_runtime_router() -> Router<ProxyState> {
         .route(
             "/api/bills/pictures/unused",
             post(remove_unused_transaction_picture_handler),
-        )
-        .route(
-            "/api/bills/pictures/*path",
-            any(ownership_aware_proxy_handler),
         )
         .route(
             "/api/bills/reconciliation_statements",
@@ -122,11 +112,6 @@ pub fn bill_runtime_router() -> Router<ProxyState> {
             "/api/bills/:bill_id/recurring-match",
             put(bind_recurring_match_handler).delete(unbind_recurring_match_handler),
         )
-        .route(
-            "/api/bills/category/*path",
-            any(ownership_aware_proxy_handler),
-        )
-        .route("/api/bills/category", any(ownership_aware_proxy_handler))
         .route(
             "/api/bills",
             get(list_bills_handler).post(create_bill_handler),
@@ -289,7 +274,7 @@ pub(crate) struct CategoryRecategorizeResult {
 }
 
 async fn list_bills_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BillsListQuery>,
 ) -> Response {
@@ -316,7 +301,7 @@ async fn list_bills_handler(
 }
 
 async fn bills_by_month_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BillsByMonthQuery>,
 ) -> Response {
@@ -350,7 +335,7 @@ async fn bills_by_month_handler(
 }
 
 async fn export_bills_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BillsExportQuery>,
 ) -> Response {
@@ -390,7 +375,7 @@ async fn export_bills_handler(
 }
 
 async fn reconciliation_statements_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<ReconciliationStatementsQuery>,
 ) -> Response {
@@ -424,7 +409,7 @@ async fn reconciliation_statements_handler(
 }
 
 async fn quick_add_category_keyword_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -465,7 +450,7 @@ async fn quick_add_category_keyword_handler(
 }
 
 async fn refresh_bill_categories_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -498,7 +483,7 @@ async fn refresh_bill_categories_handler(
 }
 
 async fn recurring_candidates_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(bill_id): Path<i64>,
     Query(query): Query<RecurringCandidatesQuery>,
@@ -528,7 +513,7 @@ async fn recurring_candidates_handler(
 }
 
 async fn bind_recurring_match_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(bill_id): Path<i64>,
     Json(payload): Json<Value>,
@@ -559,7 +544,7 @@ async fn bind_recurring_match_handler(
 }
 
 async fn unbind_recurring_match_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(bill_id): Path<i64>,
 ) -> Response {
@@ -579,7 +564,7 @@ async fn unbind_recurring_match_handler(
 }
 
 async fn upload_transaction_picture_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     mut multipart: axum::extract::Multipart,
 ) -> Response {
@@ -654,7 +639,7 @@ async fn upload_transaction_picture_handler(
 }
 
 async fn remove_unused_transaction_picture_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -685,7 +670,7 @@ async fn remove_unused_transaction_picture_handler(
 }
 
 async fn create_bill_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -713,7 +698,7 @@ async fn create_bill_handler(
 }
 
 async fn batch_create_bills_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -774,7 +759,7 @@ async fn batch_create_bills_handler(
 }
 
 async fn get_bill_query_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BillIdQuery>,
 ) -> Response {
@@ -785,14 +770,14 @@ async fn get_bill_query_handler(
 }
 
 async fn get_bill_path_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(bill_id): Path<i64>,
 ) -> Response {
     get_bill_response(state, headers, bill_id).await
 }
 
-async fn get_bill_response(state: ProxyState, headers: HeaderMap, bill_id: i64) -> Response {
+async fn get_bill_response(state: HttpAppState, headers: HeaderMap, bill_id: i64) -> Response {
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -809,7 +794,7 @@ async fn get_bill_response(state: ProxyState, headers: HeaderMap, bill_id: i64) 
 }
 
 async fn update_bill_path_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(bill_id): Path<i64>,
     Json(payload): Json<Value>,
@@ -846,7 +831,7 @@ async fn update_bill_path_handler(
 }
 
 async fn legacy_modify_bill_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -881,7 +866,7 @@ async fn legacy_modify_bill_handler(
 }
 
 async fn delete_bill_path_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(bill_id): Path<i64>,
 ) -> Response {
@@ -889,7 +874,7 @@ async fn delete_bill_path_handler(
 }
 
 async fn legacy_delete_bill_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -906,7 +891,7 @@ async fn legacy_delete_bill_handler(
 }
 
 async fn delete_bill_response(
-    state: ProxyState,
+    state: HttpAppState,
     headers: HeaderMap,
     bill_id: i64,
     success_body: Value,
@@ -927,7 +912,7 @@ async fn delete_bill_response(
 }
 
 async fn batch_update_bills_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -971,7 +956,7 @@ async fn batch_update_bills_handler(
 }
 
 async fn batch_delete_bills_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -2098,7 +2083,7 @@ fn crc32(data: &[u8]) -> u32 {
     !crc
 }
 
-fn open_runtime(state: &ProxyState) -> RouteResult<SqliteRuntime> {
+fn open_runtime(state: &HttpAppState) -> RouteResult<SqliteRuntime> {
     let db_path = state.config.sqlite_db_path.as_deref().ok_or_else(|| {
         Box::new(error_response(
             StatusCode::SERVICE_UNAVAILABLE,

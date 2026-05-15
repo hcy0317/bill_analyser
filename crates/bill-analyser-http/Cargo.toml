@@ -3,7 +3,7 @@ name = "bill-analyser-http"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Opt-in Rust HTTP ingress and proxy shell for Bill Analyser."
+description = "Rust HTTP runtime for Bill Analyser."
 publish = false
 
 [lib]

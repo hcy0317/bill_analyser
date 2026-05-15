@@ -4,12 +4,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{HttpShellConfig, ImportRouteMode};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProxyFallback {
-    Python,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HttpShellIdentity {
     pub crate_name: String,
@@ -17,23 +11,17 @@ pub struct HttpShellIdentity {
     pub runtime_boundary: String,
     pub business_migration: String,
     pub api_takeover: bool,
-    pub proxy_fallback: ProxyFallback,
 }
 
 impl HttpShellIdentity {
     pub fn current() -> Self {
-        Self::for_import_route_mode(ImportRouteMode::ProxyOnly)
+        Self::for_import_route_mode(ImportRouteMode::ImportDbRuntime)
     }
 
     pub fn for_import_route_mode(import_route_mode: ImportRouteMode) -> Self {
         let (runtime_boundary, business_migration) = match import_route_mode {
-            ImportRouteMode::ProxyOnly => ("rust-http-shell:proxy-only", "none"),
-            ImportRouteMode::ImportRouteSkeleton => (
-                "rust-http-shell:import-route-skeleton",
-                "import-route-skeleton-no-db",
-            ),
             ImportRouteMode::ImportDbRuntime => (
-                "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+matching-recurring-calendar-networth-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+ai-llm-config-candidates-runtime+ai-llm-provider-generation-runtime+ai-ocr-recognition-runtime+auth-login-register-token-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime+backup-ops-sync-runtime",
+                "rust-http:rust-only-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+matching-recurring-calendar-networth-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+ai-llm-config-candidates-runtime+ai-llm-provider-generation-runtime+ai-ocr-recognition-runtime+auth-login-register-token-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime+backup-ops-sync-runtime",
                 "import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+matching-recurring-calendar-networth-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+ai-llm-config-candidates-runtime+ai-llm-provider-generation-runtime+ai-ocr-recognition-runtime+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime+backup-ops-sync-runtime",
             ),
         };
@@ -44,7 +32,6 @@ impl HttpShellIdentity {
             runtime_boundary: runtime_boundary.to_string(),
             business_migration: business_migration.to_string(),
             api_takeover: true,
-            proxy_fallback: ProxyFallback::Python,
         }
     }
 }
@@ -60,34 +47,12 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
     let mut details = BTreeMap::new();
     details.insert(
         "owned_routes".to_string(),
-        if config.import_route_mode.intercepts_import_routes() {
-            if config.import_route_mode == ImportRouteMode::ImportDbRuntime {
-                "/api/health,/api/runtime,import/preview-adjacent runtime routes,bills CRUD runtime routes,bills picture runtime routes,bills export runtime route,bills recurring runtime routes,bills reconciliation runtime route,bills category actions runtime routes,budgets CRUD/execution/forecast/history/import runtime routes,matching/recurring/calendar/networth runtime routes,statistics read/analyzer/exchange runtime routes,taxonomy account CRUD/display-order/sync-balances/transaction-action runtime routes,taxonomy tag CRUD/display-order runtime routes,taxonomy category master-data/statistics/category-rule-list-test/rule-overview/settings-bundle import-export runtime routes,taxonomy templates CRUD/display-order runtime routes,global Learning Center suggestions/rules runtime routes,LLM config/candidates/provider-generation runtime routes,OCR config and receipt recognition runtime routes,auth login/register/token/account-recovery/OAuth2 authorize/profile/cloud/external-auth/system/user-data-statistics-export-clear/2fa-status/2fa-verify/2fa-recovery-verify/2fa-write/step-up runtime routes,backup ops runtime routes".to_string()
-            } else {
-                "/api/health,/api/runtime,import/preview-adjacent runtime routes".to_string()
-            }
-        } else {
-            "/api/health,/api/runtime".to_string()
-        },
-    );
-    details.insert(
-        "proxied_routes".to_string(),
-        if config.import_route_mode == ImportRouteMode::ProxyOnly {
-            "unowned /api/*".to_string()
-        } else {
-            "manifest PythonProxied endpoints only".to_string()
-        },
+        "/api/health,/api/runtime,import/preview-adjacent runtime routes,bills CRUD runtime routes,bills picture runtime routes,bills export runtime route,bills recurring runtime routes,bills reconciliation runtime route,bills category actions runtime routes,budgets CRUD/execution/forecast/history/import runtime routes,matching/recurring/calendar/networth runtime routes,statistics read/analyzer/exchange runtime routes,taxonomy account CRUD/display-order/sync-balances/transaction-action runtime routes,taxonomy tag CRUD/display-order runtime routes,taxonomy category master-data/statistics/category-rule-list-test/rule-overview/settings-bundle import-export runtime routes,taxonomy templates CRUD/display-order runtime routes,global Learning Center suggestions/rules runtime routes,LLM config/candidates/provider-generation runtime routes,OCR config and receipt recognition runtime routes,auth login/register/token/account-recovery/OAuth2 authorize/profile/cloud/external-auth/system/user-data-statistics-export-clear/2fa-status/2fa-verify/2fa-recovery-verify/2fa-write/step-up runtime routes,backup ops runtime routes".to_string(),
     );
     details.insert(
         "import_route_mode".to_string(),
         config.import_route_mode.as_str().to_string(),
     );
-    if config.import_route_mode.intercepts_import_routes() {
-        details.insert(
-            "import_skeleton_routes".to_string(),
-            "first-phase deletion-blocked import/preview-adjacent endpoints".to_string(),
-        );
-    }
     if config.import_route_mode == ImportRouteMode::ImportDbRuntime {
         details.insert(
             "sqlite_db_path_configured".to_string(),
@@ -123,25 +88,18 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
         );
         details.insert(
             "taxonomy_templates_runtime".to_string(),
-            "owned template list/detail/create/update/delete/display-order routes with user-scoped DB reads and writes; recurring matching/binding remains proxied".to_string(),
+            "owned template list/detail/create/update/delete/display-order routes with user-scoped DB reads and writes; recurring matching/binding is handled by Rust-owned matching routes".to_string(),
         );
         details.insert(
             "auth_token_runtime".to_string(),
-            "owned login, registration, token session list/revoke, API/MCP personal token generation, token refresh, logout, account-recovery email verification/resend/password forgot/reset, OAuth2 authorize disabled-safe/not-implemented, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification resend, system version, user-data statistics/export/clear, 2FA status, 2FA TOTP login verification, 2FA recovery-code login verification, 2FA write management, and step-up verification routes; no OAuth provider exchange proxy remains in the current workspace contract".to_string(),
+            "owned login, registration, token session list/revoke, API/MCP personal token generation, token refresh, logout, account-recovery email verification/resend/password forgot/reset, OAuth2 authorize disabled-safe/not-implemented, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification resend, system version, user-data statistics/export/clear, 2FA status, 2FA TOTP login verification, 2FA recovery-code login verification, 2FA write management, and step-up verification routes; no OAuth provider exchange fallback remains in the current workspace contract".to_string(),
         );
         details.insert(
             "backup_ops_runtime".to_string(),
             "owned backup file list/create/download/delete/restore/verify/cleanup, job list/save, and cloud sync routes backed by Rust zip/Fernet file I/O, SQLite backup_ops schema, backup_records updates, safe restore validation, OSS/S3/COS/Azure/WebDAV upload execution, and backup audit log writes".to_string(),
         );
     }
-    details.insert(
-        "python_upstream".to_string(),
-        config.python_upstream.clone(),
-    );
-    details.insert(
-        "business_api".to_string(),
-        "rust-primary-http; unmigrated domains reverse-proxied".to_string(),
-    );
+    details.insert("business_api".to_string(), "rust-only-http".to_string());
 
     HttpShellHealth {
         status: "ok".to_string(),

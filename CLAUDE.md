@@ -11,7 +11,7 @@ Shared repository rules live in [AGENTS.md](AGENTS.md); keep this file Claude-sp
 
 ## Project Summary
 
-- Backend: Rust Axum `bill_http_server` primary HTTP entry, with Python/Flask + aiosqlite sidecar only for remaining `PythonProxied` migration boundaries
+- Backend: Rust Axum `bill_http_server` is the sole HTTP runtime entry
 - Frontend: Vue 3, TypeScript, Vite
 - Database: SQLite in WAL mode
 - Core domains: bill import, categorization, budgeting, statistics, accounts, tags

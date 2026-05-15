@@ -1,2 +1,0 @@
-"""Budget database domain packages."""
-

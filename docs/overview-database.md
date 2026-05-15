@@ -1,34 +1,22 @@
-# Bill Analyser 数据库与数据流
+# 数据库与数据流
 
-## 6.1 主要业务表（由 `db.py` façade 通过 `DatabaseSchemaMixin` 初始化）
-- 交易域：`bills`
-- 匹配域：`bill_pair_links`、`bill_pair_feedback`
-- 分类域：`categories`
-- 账户域：`accounts`、`account_types`、`account_transfers`
-- 标签域：`tags`、`bill_tags`
-- 模板域：`bill_templates`、`recurring_bills`
-  - 普通文件库上的模板主数据 CRUD、排序、DTO 列表/详情和启用周期模板读取由 `core/template_rust_bridge.py` 调用 Rust `bill_taxonomy_bridge` 的 templates repository；settings bundle taxonomy sections 的 normalization、导出 DTO 构建、模板引用解析和 full/section import preview/commit 事务已由 Rust settings bundle runtime 处理，preview rollback 与 full import atomicity 使用同一 Rust SQLite transaction 语义；`recurring_suggestions` 读写、周期检测落库、accept 创建 `recurring_bills`、calendar projection 读取启用周期模板和正式账单 recurring match/bind 推进均由 Rust DB/runtime 处理；`:memory:` 与 SQLCipher 特殊库仍走 Python。
-- 预算域：`budgets`、`budget_history`
-  - `import_db_runtime` 下预算 CRUD/export/execution/forecast/history/snapshot/import 已由 Rust `crates/bill-analyser-db/src/budgets.rs` 访问普通应用 SQLite 文件，保持 `user_id` 隔离、yuan-style numeric 金额、父子预算自动上卷、月度到季度/年度父周期同步、旧 `categories.type=1` 支出归一、列表 category metadata 解析、export DTO、execution 只读聚合的日期窗口交集/账户标签过滤/`abs(sum(amount))`、forecast 历史窗口扩展/period grouping/当前周期花费/预算 primary-sub-total 映射/backtest MAPE、history canonical `filter_summary` 精确快照优先与 on-demand fallback、snapshot 对 `budget_history` 的同 user/filter/period replacement 写入，以及 import 按 `name + user_id` 更新或插入预算、单事务提交、逐项错误计数和默认 `period_type/alert_threshold/enabled` 处理。Rust `crates/bill-analyser-core/src/budgets.rs` 继续固定期间、金额口径、父子预算、历史过滤、导入校验和预测计算合同。
-- 用户与安全：`users`、`sessions`、`auth_logs`、`audit_logs`、`user_two_factor_recovery_codes`
-- 备份与恢复：`backup_records`、`backup_jobs`
-  - 默认 `import_db_runtime` 下，全部 backup ops REST 路由已由 Rust `backup` repository 与 HTTP runtime 读写普通应用 SQLite。`GET|POST /api/backup/jobs` 按 `user_id` 读写 `backup_jobs`，同一用户同一 `job_type` 保存会更新既有任务，跨用户或不存在的 `id` 不会被更新，并 best-effort 写入带 actor 与来源 IP 的 `backup_job_saved` 审计；备份创建/删除/恢复/cleanup 会 upsert 或更新 `backup_records`，记录 checksum、加密标记、zip 摘要、restore/cleanup 状态与审计元数据。若 `BILL_ANALYSER_SQLITE_DB_PATH` 位于 `data/` 内，Rust 创建备份时使用 SQLite `VACUUM INTO` 生成一致性数据库快照并跳过热 WAL/SHM sidecar。`POST /api/backup/sync` 会创建本地备份、上传到 OSS/S3/COS/Azure Blob/WebDAV，并把脱敏 provider config、object key、sync 状态写回 `backup_records` metadata 与 `backup_cloud_synced` 审计；默认 `import_db_runtime` 下，用户数据清理路由自身已由 Rust 写入 `user_data` 审计元数据。
-- 导入三阶段：`import_sessions`、`bills_parser_template`、`bills_preview`
-- 导入三阶段临时表当前还会持久化解析器元标签：`bills_parser_template.parser_tags_json` 保存解析阶段 tags，`bills_preview.preview_parser_tags_json` 保存预览阶段 tags
-- 迁移与索引补齐由 schema 子模块统一编排；运行态调用方不直接依赖某个单独 schema 文件
-- 领域持久化代码统一位于 `core/database/**`：runtime/shared/time/encryption 维护基础层，`schema/` 维护 schema 编排，accounts/bills/budgets/imports/llm/users 等语义 package 继续导出原 mixin 名称；`core/` 根层只保留 `db.py` 作为公共 Database façade
-- Rust DB runtime foundation 位于 `crates/bill-analyser-db`，提供 SQLite 连接 guard、WAL/foreign_keys PRAGMA 初始化、事务 helper、schema dry-run scaffold、auth/security 基础表幂等初始化与 user_id 参数化 scope；`import_db_runtime` 下账单/交易核心 CRUD 已经由 Rust `bills` repository 写入普通应用 SQLite 文件，create/update/delete/batch mutations 在单个事务内覆盖 `bills`、`bill_tags`、hash/duplicate 语义、pair/suppression cleanup 与受影响账户余额重算，仍显式保持前端分与 DB 元的边界；预算 CRUD/export/import 已由 Rust `budgets` repository 写入普通应用 SQLite 文件，create/update/delete 在单个事务内覆盖预算行、一级预算补全/上卷、季度/年度父预算补全与列表 category metadata，import 在单个事务内按 `name + user_id` upsert 并累计 item-level errors，预算 execution/forecast/history/snapshot 由同一 repository 聚合或写入 `budgets`、`budget_history`、`bills`、`bill_tags` 和 `categories`；统计读取由 Rust `statistics` repository 读取 `bills/accounts/categories`，生成 category statistics/trends、asset trends、category pie、top merchants 和 amounts 的 Flask-compatible payload。Flask/Python Database façade 仍保留未迁移域入口。账户 master-data 的 list/get/create/update/delete/subAccounts/display-order 在普通文件 SQLite 库上通过 `bill_taxonomy_bridge` 调用 Rust `taxonomy::accounts`，账户余额同步与交易迁移/清空也在 `import_db_runtime` 下由 Rust 事务处理；`:memory:` 与 SQLCipher 加密库的账户路径继续使用 Python。标签 master-data 的 list/get/create/update/delete/display-order 在普通文件 SQLite 库上通过 `bill_taxonomy_bridge` 调用 Rust `taxonomy::tags`，`:memory:` 与 SQLCipher 加密库继续使用 Python aiosqlite 路径；核心账单 CRUD 的 `bill_tags` 关联写入由 Rust bills runtime 维护，其他标签域操作仍由 Python 标签 mixin 维护。分类 master-data 的 HTTP list/tree/flat/all/get/create/batch-ensure/update/delete/move/import/export、legacy `GET|PUT /api/categories/rules` config/cache 在 `import_db_runtime` 下由 Rust taxonomy runtime 直接读写普通文件 SQLite 库或用户隔离 `app_settings` cache，并保留 categories 为空时从 bills 派生分类的旧 fallback；settings bundle taxonomy runtime 位于 Rust `taxonomy::settings_bundle`，提供 JSON 规范化、引用解析、导出投影，以及 accounts/categories/tags/templates/scheduled/category rules/LLM/OCR 的 full/section import preview/commit 事务；`:memory:`、SQLCipher、运行时 CategoryEngine matcher cache 和真实导入/学习流程中的规则匹配调用仍使用 Python 路径。
-- `GET /api/settings/encryption/status` 不打开业务数据库，由 Rust taxonomy/settings runtime 读取加密环境请求并结合当前 Rust runtime SQLCipher provider 可用性返回状态；普通 SQLite 文件仍由 Rust 打开，`:memory:` 与 SQLCipher 加密库连接/迁移继续作为 Python/后续 ops 切面保留。
+数据库运行态由 `crates/bill-analyser-db` 提供，默认使用 SQLite WAL 模式。
 
-## 6.1.1 模板域当前漂移清单
-- 前端期望字段：`templateType/categoryId/sourceAccountId/destinationAccountId/sourceAmount/destinationAmount/hideAmount/tagIds/displayOrder/hidden/scheduled*`。
-- 后端当前字段：`category/account/tag/description/is_favorite/use_count/last_used_at` 等旧模板语义。
-- 结果：已通过 DTO → 数据库映射完成首轮收口，但模板双表语义仍比账户/标签复杂，兼容层清理应继续分阶段推进。
+## 核心职责
 
-## 6.2 导入处理顺序（核心）
-1. 解析器识别并标准化账单
-2. 数据验证
-3. 智能去重
-4. 分类匹配（规则+类型过滤）
-5. 账户匹配（源/目标账户）
-6. 预览写入或正式入库
+- SQLite path guard、连接初始化、foreign keys、WAL 和事务 helper。
+- schema 幂等初始化与 legacy 约束补齐。
+- bills、accounts、categories、tags、templates、budgets、statistics、matching、backup、auth、import staging、LLM/OCR settings 等 repository。
+- user-scope 查询与写入。
+- 导入 session/preview staging 和 confirm 事务。
+
+## 数据流
+
+HTTP route 解析当前用户与请求 DTO 后调用 domain runtime；domain runtime 通过 repository 层开启事务并执行读写；响应由 HTTP 层投影为前端兼容 DTO。
+
+## 约束
+
+- 业务写入优先单事务完成。
+- 账户余额、账单、导入 confirm、预算 import、settings bundle import 等跨表行为必须保持 rollback-on-error。
+- 金额字段必须明确元/分边界。
+- 认证和业务审计为 best-effort，不应破坏主事务的关键业务结果。

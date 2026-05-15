@@ -161,16 +161,7 @@ $backendStarted = $false
 if (-not $FrontendOnly) {
     Write-Info "[步骤 2/3] 启动后端服务器..."
     Write-Host ""
-    
-    # 检查虚拟环境
-    $pythonPath = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
-    if (-not (Test-Path $pythonPath)) {
-        Write-Err "  ✗ 虚拟环境未找到！"
-        Write-Warn "  请运行: py -3.14 -m venv .venv"
-        Write-Warn "  然后安装依赖: .\.venv\Scripts\python.exe -m pip install -e ."
-        exit 1
-    }
-    
+
     # 启动后端（在新窗口中）
     $backendScript = Join-Path $ProjectRoot "start_backend.ps1"
     if (Test-Path $backendScript) {

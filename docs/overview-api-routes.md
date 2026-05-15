@@ -1,70 +1,22 @@
-# Bill Analyser API 路由与 REST 收口
+# API 路由与 REST 收口
 
-## 5.1 Flask 蓝图注册（`src/bill_analyser/api/app.py`）
-- RESTful 蓝图：
-  - `/api/statistics`
-  - `/api/backup`
-- 小票识图入口 `POST /api/ml/receipt-recognition` 与 `GET/PUT /api/ml/receipt-recognition/config` 在默认 `import_db_runtime` 下由 Rust 接管；Rust 读取 `receipt_ocr_config`，保持 disabled/cloud_stub typed error、tesseract provider 执行、限流、取消标记和支付宝 / 微信支付截图字段抽取语义。Flask sidecar 的 `receipt_ocr.py` 仍作为迁移期残留 route shell，运行态不再是该 API 的主 owner。
+当前运行态 API 主链为 Rust Axum `REST /api/...`。所有业务路由都在 `crates/bill-analyser-http/src/*_routes.rs` 中注册，未知 `/api/...` 请求由 Rust 返回结构化 404。
 
-## 5.1.1 当前 REST 收口进展（2026-03-06）
-- 账户域首批 legacy action 已收口到 REST：
-  - `PUT /api/accounts/<id>` 支持 `hidden` 可见性更新
-  - `PUT /api/accounts/display-orders` 支持批量排序
-  - 子账户删除统一通过 `DELETE /api/accounts/<id>`
-  - `POST /api/accounts/<id>/transactions/move` 支持账户间批量迁移交易
-  - `POST /api/accounts/<id>/transactions/clear` 支持按账户清空交易
-  - 账户主数据 REST URL、状态码与响应 envelope 保持兼容；`import_db_runtime` 下账户 list/get/create/update/delete/subAccounts/display-order、余额同步与账户交易 move/clear 路由由 Rust HTTP taxonomy runtime 直接接管，旧 Flask `accounts/` route package 已删除，并显式处理前端分与 SQLite 元的金额转换；交易迁移/清空会验证当前密码或操作密码回退，按当前用户更新/删除账单、转账与账单副作用，重新同步账户余额并 best-effort 写入账户审计日志。
-- 标签域首批 legacy action 已收口到 REST：
-  - `PUT /api/tags/<id>` 同时承担内容更新与 `hidden` 可见性更新
-  - `POST /api/tags/batch` 支持批量创建
-  - `PUT /api/tags/display-orders` 支持批量排序
-  - `import_db_runtime` 下标签 list/get/create/update/delete/display-order/batch-create 路由由 Rust HTTP taxonomy runtime 直接接管，旧 Flask `tags.py` route shell 已删除。
-- 前端 `services.ts` 与标签 store 已移除对应直连 v1 排序路径，改为统一走 REST 入口
-- 模板域已完成契约梳理，但被重新评估为非低风险域：
-  - 该域已完成首轮收口：前端模板调用统一走 REST，后端补齐 `templateType` 过滤、双表 DTO 映射、隐藏/排序与 `user_id` 收口；
-  - 模板 rewrite 映射、`templates.bp_v1` 注册与实现均已移除；
-  - `import_db_runtime` 下模板主数据 CRUD/display-order 路由由 Rust HTTP taxonomy runtime 直接接管，旧 Flask `templates.py` route shell 已删除；普通文件库上的模板主数据 CRUD/排序/DTO 读取经 Rust taxonomy runtime / `bill_taxonomy_bridge` 处理，settings bundle taxonomy sections 的 normalization、导出 DTO、模板引用解析与最终导入事务也通过 Rust helper/runtime；Rust HTTP 保持既有 route envelope，`:memory:` 与 SQLCipher 特殊连接仍由 Python 路径处理；formal matching、recurring suggestions、calendar 与 networth 入口见下方 Rust-owned matching/recurring/calendar/networth 小节。
-- 预算域主链已完成 REST 收口：
-  - 前端 `services.ts` 已将列表/详情/创建/更新/删除/执行统计/预测/导入导出统一切换到 `/api/budgets/*`；
-  - 服务层新增预算 REST ↔ 前端旧结构兼容映射，避免直接重写 `budget store` 与页面；
-  - `db.py` 已为预算 `forecast/import/export` 补齐 `user_id` 隔离；
-  - `app.py` 已移除预算蓝图注册；
-  - `src/bill_analyser/api/routes/budgets/` 旧 Flask route package 已完成物理删除；
-  - 预算 REST 主链运行时合同已迁移到 Rust `crates/bill-analyser-http/tests/budget_runtime_contract.rs`；`tests/new_ui/test_budgets_rest_api.py` 现在只覆盖 Flask sidecar route shell 已删除与 legacy 404 回归。
-- 账户域历史 rewrite 与旧 `/get` `/modify` `/hide` `/delete` `/move` 兼容路由已移除。
-- 标签域 `bp_v1` 注册与全部 v1 兼容实现已移除。
-- 设置包域使用 REST 主链提供统一 JSON 导入导出：
-  - `import_db_runtime` 下 `GET /api/settings/bundle/export` 由 Rust taxonomy runtime 导出账户、交易分类、交易标签、交易模板、定时交易、分类识别规则、LLM 配置骨架与 OCR 配置，保持 JSON attachment 响应与 LLM API Key 脱敏；
-  - `POST /api/settings/bundle/import/preview` 做 dry-run 预览，不写入目标库；
-  - `POST /api/settings/bundle/import` 按稳定键 merge/upsert，完成跨域 ID 重映射，不依赖 Python service reload；
-  - `GET|POST /api/settings/bundle/sections/<section_key>/export` 由 Rust taxonomy runtime 提供单 section JSON 导出；`POST /api/settings/bundle/sections/<section_key>/import/preview`、`POST /api/settings/bundle/sections/<section_key>/import` 也由 Rust 为账户、分类、标签、模板、定时交易、分类识别规则、LLM 配置和 OCR 配置页面提供 section 导入；section 导入只写当前 section，preview 使用 rollback-only 事务；
-  - `llmConfigs` 与 `ocrConfig` 的单 section 导出必须使用 `POST /sections/<section_key>/export` 并携带当前登录密码；Rust 导出不包含 API Key 明文，导入后不自动激活。
-  - 旧 Flask `settings_bundle.py` route shell 已删除，Flask sidecar 不再注册 `/api/settings/bundle` 蓝图。
-- 账单 Flask route package 已完成物理删除，`app.py` 不再注册 `/api/bills` 蓝图；导入、账单 CRUD、图片、导出、recurring、对账单与分类 quick actions 运行时均由 Rust HTTP 接管。
-- Rust 主 HTTP 服务在 `import_db_runtime` 模式下接管核心账单/交易 CRUD 写入口、legacy modify/delete、交易图片、账单导出、正式账单 recurring 匹配、账户对账单和账单分类 quick actions：
-  - Rust-owned：`GET/POST /api/bills`、`GET/POST /api/bills/`、`GET /api/bills/by-month`、`GET /api/bills/get`、`GET/PUT/DELETE /api/bills/<id>`、`POST /api/bills/modify`、`POST /api/bills/delete`、`POST /api/bills/batch`、`PUT /api/bills/batch/update`、`DELETE /api/bills/batch/delete`、`POST /api/bills/pictures`、`POST /api/bills/pictures/unused`、`GET /api/bills/export`、`GET /api/bills/reconciliation_statements`、`GET /api/bills/<id>/recurring-candidates`、`PUT/DELETE /api/bills/<id>/recurring-match`、`POST /api/bills/category/quick-add-keyword`、`POST /api/bills/category/refresh`；
-  - Rust-owned import：`POST /api/bills/import/v2/parse`、`POST /api/bills/import/v2/parse_generic`、`POST /api/bills/import/v2/dedup`、`POST /api/bills/import/v2/confirm`、session/preview 读取清理、preview update/reclassify、preview-item transfer/recurring、session learning suggestions/promote、legacy `/api/bills/import/*` 与 `/api/bills/parse_import` 也由 Rust `import_db_runtime` 接管；旧 Flask `bills/` import route package 已删除；
-  - Python-proxied：无 bills route set 内剩余代理项；未登记的 `/api/bills/pictures/*` 子路径在 manifest fallback 下返回 404；
-  - CRUD 响应保持前端交易 DTO 与 Flask-compatible `success/result` envelope，frontend cents 与 DB yuan 的转换在 Rust adapter 边界完成；交易图片上传/未使用清理由 Rust 使用 `BILL_ANALYSER_UPLOADS_DIR`（默认 `data/uploads`）保存和删除文件，响应保持 `pictureId/originalUrl` data URL 合同；账单导出由 Rust 生成带 BOM 的 CSV 或 XLSX 文件，保留旧文件名、空结果错误和公式型文本转义；recurring candidates/match 由 Rust 读取 `recurring_bills` 并维护 `bills.created_from_recurring` 与 `recurring_bills.next_date`；reconciliation statements 由 Rust 按账户、日期、分类、类型和关键词筛选账单，返回期初/期末余额、流入/流出、净流和带逐笔余额轨迹的交易列表；category quick actions 由 Rust 追加分类关键词并基于 canonical `category_rules` 刷新账单分类。
-- Rust 主 HTTP 服务在 `import_db_runtime` 模式下也接管预算 CRUD/export/execution/forecast/history/snapshot/import 入口：
-  - Rust-owned：`GET/POST /api/budgets`、`GET/POST /api/budgets/`、`GET/PUT/DELETE /api/budgets/<id>`、`GET /api/budgets/export`、`GET /api/budgets/execution`、`GET /api/budgets/forecast`、`GET /api/budgets/history`、`POST /api/budgets/history/snapshot`、`POST /api/budgets/import`；
-  - Python-proxied：无预算 route set 内剩余代理项；旧 Flask `budgets/` route package 已删除，Flask sidecar 不再注册 `/api/budgets` 蓝图；
-  - 预算金额继续使用 Python 既有 yuan-style numeric 合同，Rust DB 写入保持 `user_id` 隔离、父子预算自动上卷、旧 `categories.type=1` 支出归一；execution 只读聚合保持用户隔离、日期窗口交集、账户/标签过滤、`abs(sum(amount))`；forecast 只读聚合保持历史窗口扩展、period grouping、当前周期花费、预算 primary/sub-total 映射、backtest MAPE；history/snapshot 保持 canonical `filter_summary`、精确快照优先、on-demand fallback、`budget_history` replacement 写入；import 保持 Flask-compatible array payload 校验、按 `name + user_id` upsert、单事务提交和逐项 `error_details` 计数 envelope。
-- Rust 主 HTTP 服务在 `import_db_runtime` 模式下接管无外部 provider 依赖的统计读取入口与 Analyzer 统计聚合入口：
-  - Rust-owned：`GET /api/statistics/category-statistics`、`GET /api/statistics/category-statistics/trends`、`GET /api/statistics/asset-trends`、`GET /api/statistics/category-pie`、`GET /api/statistics/top-merchants`、`GET /api/statistics/amounts`；
-  - Rust-owned Analyzer/insights：`GET /api/statistics/overview`、`GET /api/statistics/trends`、`GET /api/statistics/comparison`、`GET /api/statistics/category`、`GET /api/statistics/trend`、`GET /api/insights/anomalies`；
-  - Rust-owned exchange：`GET /api/statistics/exchange-rates`、`PUT /api/statistics/exchange-rates/custom`、`DELETE /api/statistics/exchange-rates/custom/{currency}`，负责 provider 选择、实时 provider fallback、内置 fallback 与当前用户 custom rate 持久化；
-  - Python-proxied：无 statistics route package 内剩余 read/analyzer/exchange 代理项，`/api/insights/anomalies` 也不再进入 Python；旧 Flask `statistics` read/exchange/Analyzer route shell 已删除，Flask sidecar 仅保留空 `statistics.bp` 与 `insights.bp` 作为 package 兼容出口；
-  - 统计读取路径直接读 `bills/accounts/categories`，保持 `user_id` 隔离、timestamp/year-month/all-mode 范围解析、关键词过滤、资产趋势 365 天边界、category/amounts 响应分单位，以及 category-pie/top-merchants 响应元单位；Analyzer overview/trends/comparison/category/trend 由 Rust 复刻 Python `StatisticsAnalyzer` 的 period window、分类/类型聚合、趋势桶、top bills 与 Flask-compatible envelope；洞察异常由 Rust 读取当前用户近期账单并返回 `success/data` envelope。
-- Rust 主 HTTP 服务在 `import_db_runtime` 模式下接管 matching、recurring suggestions、calendar 与 networth 入口：
-  - Rust-owned：`GET /api/matching/candidates`、`GET /api/matching/sessions/<session_id>/candidates`、`GET /api/matching/bills/<bill_id>/candidates`、`GET /api/matching/bills/<bill_id>/feedback`、`GET /api/matching/reconciliation-candidates`、`GET /api/matching/pairs`、`POST /api/matching/manual-pair`、`DELETE /api/matching/pairs/<pair_id>`、`POST /api/matching/reconcile-history`、`POST /api/matching/candidates/<candidate_id>/accept|reject|clear`、`GET|PUT /api/matching/investment-settings`、`GET /api/recurring/suggestions`、`POST /api/recurring/suggestions/detect`、`POST /api/recurring/suggestions/<suggestion_id>/accept`、`POST /api/recurring/suggestions/<suggestion_id>/reject`、`GET /api/calendar/events`、`GET /api/networth/snapshot`；
-  - Python-proxied：无 matching/recurring/calendar/networth route set 内剩余代理项；
-  - formal matching 由 Rust 读写 `bill_pair_links`、`bill_pair_feedback`、transfer/investment/learning suppressions、import preview action payload 与 reconciliation projections；周期建议检测复用 Rust matching detector 并持久化 `recurring_suggestions`；accept 写入 `recurring_bills`，calendar 返回账单日聚合和 recurring projection，networth 按账户类型分组资产/负债；旧 Flask `matching/`、`recurring.py`、`calendar.py` 与 `networth.py` route shell 已删除。
-- Rust 主 HTTP 服务在 `import_db_runtime` 模式下接管备份文件、任务配置与云同步入口：
-  - Rust-owned：`GET /api/backup/`、`POST /api/backup/create`、`POST /api/backup/restore/verify`、`GET /api/backup/download/<filename>`、`DELETE /api/backup/delete/<filename>`、`POST /api/backup/restore/<filename>`、`POST /api/backup/cleanup`、`GET /api/backup/jobs`、`POST /api/backup/jobs`、`POST /api/backup/sync`；
-  - Python-proxied：无 backup ops route set 内剩余代理项；
-  - Rust backup ops runtime 负责本地 `data/` zip 备份、Fernet-compatible encrypted backup 公开 `.zip.enc` 文件名、恢复预验证、流式下载、删除、restore 前 `before_restore_*` 快照、record-first cleanup、`backup_records` 回写，以及 `backup_created/downloaded/deleted/restored/restore_verified/cleanup/job_saved/cloud_synced` 审计；`POST /api/backup/sync` 会先创建本地备份，再按脱敏 provider config 上传到 OSS/S3/COS/Azure Blob/WebDAV 并写回 sync metadata；Bearers 访问备份文件类入口时还需要短期 `step_up` token，可信内部用户头继续作为 runtime bridge 通道；jobs runtime 继续按当前 `user_id` 读写 `backup_jobs`，同一用户同一 `job_type` 保存会更新既有任务，跨用户或不存在的 `id` 不会被更新。
-- 分类主数据 REST URL、状态码与响应 envelope 保持兼容；`import_db_runtime` 下 Rust HTTP taxonomy runtime 直接接管普通文件 SQLite 库的分类 list/tree/flat/all/get/create/update/delete/batch/move/import/export master-data 持久化，旧 Flask `categories/` route package 已删除，并保持 default seed 的批量 ensure 语义；`GET /api/categories/statistics` 也由 Rust 读取当前用户账单并返回旧树形统计结果；`:memory:` 与 SQLCipher 仍由 Python 路径处理。
-- 分类规则列表 `GET /api/category-rules/`、创建/更新/删除 `POST /api/category-rules/`、`PUT|DELETE /api/category-rules/<rule_id>`、重排 `POST /api/category-rules/reorder`、默认种子 `POST /api/category-rules/defaults`、旧关键词迁移 `POST /api/category-rules/migrate`、无写副作用的 `POST /api/category-rules/<rule_id>/test`、legacy `GET|PUT /api/categories/rules` config/cache、规则中心概览 `GET /api/rules/overview` 与设置包导入/预览/导出路由已由 Rust taxonomy runtime 读写普通应用 SQLite，旧 Flask `category_rules.py` 与 `settings_bundle.py` route shell 已删除；保留 Flask-compatible envelope、当前用户隔离、分类规则筛选、默认分类/规则幂等补齐、legacy keywords/investment settings 到 canonical 规则的幂等迁移、规则表达式测试响应、规则计数、legacy rules payload 的用户隔离 `app_settings` cache、JSON attachment、LLM API Key 脱敏、敏感 section 当前密码校验、导入 preview rollback、跨 section upsert、LLM masked secret 保留与 OCR app_settings 写入。
-- 设置加密状态 `GET /api/settings/encryption/status` 已由 Rust taxonomy/settings runtime 直接响应，无鉴权，返回 Flask-compatible `success/data` SQLCipher 状态投影；当前 Rust SQLite runtime 未启用 SQLCipher provider，因此该状态会报告 `sqlcipher_available=false` 与 `encrypted=false`，真实 SQLCipher 连接/迁移仍由后续 ops 切面处理。
-- 主要 Python REST route 文件当前按同名 package 组织：`auth/`、`statistics/`、`backup/`、`llm/` 保留原 `bp` 导出与尚未迁移的 URL/method 契约；学习中心、账户、分类、分类规则、标签、模板、设置包、预算、账单、matching、recurring suggestions、calendar、networth 与 backup ops REST 主链由 Rust runtime 提供，不再保留 Flask `accounts/` / `categories/` / `budgets/` / `bills/` / `matching/` route package、`category_rules.py`、`tags.py`、`templates.py`、`settings_bundle.py`、`learning.py`、`recurring.py`、`calendar.py` 或 `networth.py` route shell；Flask backup package 已不再是 backup ops 主链 authority，Python `SyncManager` 只保留 CLI/兼容残留；统计 read/exchange/Analyzer 不再保留 Flask `statistics` route shell，洞察异常不再保留 Flask `insights.py` route handler，剩余 Python statistics-adjacent 运行时代码只保留非 HTTP 报告文件生成。
+## 主要 route modules
+
+- `auth_routes.rs`：login/register/token/profile/cloud/external-auth/system/user-data/2FA/step-up/OAuth2 disabled-safe 合同。
+- `bill_routes.rs`：账单 CRUD、导入入口、图片、导出、recurring、reconciliation、分类 quick actions。
+- `import_routes.rs`：parser-first 上传、JSON parse、未匹配文件列映射、session、preview、dedup、confirm、learning、LLM/OCR 入口。
+- `taxonomy_routes.rs`：账户、标签、分类、分类规则、模板、设置包、settings encryption status。
+- `budget_routes.rs`：预算 CRUD/export/execution/forecast/history/snapshot/import。
+- `statistics_routes.rs`：分类统计、资产趋势、饼图、top merchants、amounts、Analyzer、洞察、汇率。
+- `matching_routes.rs`：formal matching candidates、feedback、manual pairs、candidate actions、reconcile history、recurring/calendar/networth。
+- `backup_routes.rs`：backup list/create/verify/download/delete/restore/cleanup、jobs、sync。
+
+## Contract Notes
+
+- 响应 envelope 保持前端既有 `success/data` 或 `success/result` 兼容。
+- 认证路由按 Bearer access token 和 session 状态解析当前用户。
+- 账户、标签、分类、模板、预算、账单和导入 preview 写入必须保持 user-scope。
+- 金额相关路由继续显式处理元/分边界。
+- 前端路由使用 `src/web/src/contracts/rustRouteOwnership.generated.ts` 做 contract guard。

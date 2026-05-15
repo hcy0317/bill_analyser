@@ -6,7 +6,6 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$python = Join-Path $repoRoot ".venv\Scripts\python.exe"
 
 function Invoke-RepoCommand {
     param(
@@ -28,8 +27,10 @@ $runBackend = -not $FrontendOnly
 $runFrontend = -not $BackendOnly
 
 if ($runBackend) {
+    Invoke-RepoCommand "Rust fmt" "cargo fmt --all -- --check"
+    Invoke-RepoCommand "Rust clippy" "cargo clippy --workspace --all-targets -- -D warnings"
+    Invoke-RepoCommand "Rust tests" "cargo test --workspace"
     Invoke-RepoCommand "Rust coverage" "cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90"
-    Invoke-RepoCommand "Python coverage (xdist loadfile)" "& '$python' -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v -n auto --dist loadfile"
 }
 
 if ($runFrontend) {

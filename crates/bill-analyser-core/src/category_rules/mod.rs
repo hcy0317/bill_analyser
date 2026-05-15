@@ -543,10 +543,8 @@ fn collect_legacy_compiled_fields(node: &RuleExpressionNodeDto, compiled: &mut C
             }
         }
         "not" => {}
-        "clause" if node.operator == "OR" => {
-            if !node.patterns.is_empty() {
-                compiled.or_blocks.push(node.patterns.clone());
-            }
+        "clause" if node.operator == "OR" && !node.patterns.is_empty() => {
+            compiled.or_blocks.push(node.patterns.clone());
         }
         "clause" if node.operator == "AND" => {
             compiled.and_patterns.extend(node.patterns.clone());

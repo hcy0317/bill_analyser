@@ -2,7 +2,6 @@
 // Do not edit by hand; run the generator after changing Rust route ownership.
 
 export type RustRouteState =
-    | 'python_proxied'
     | 'rust_implemented'
     | 'rust_owned_verified'
     | 'python_deleted'
@@ -193,7 +192,6 @@ export const RUST_ROUTE_OWNERSHIP: readonly RustRouteOwnership[] = [
     {"method":"POST","pattern":"/api/category-rules/reorder","domain":"taxonomy-rules-settings","state":"python_deleted"},
     {"method":"GET","pattern":"/api/rules/overview","domain":"taxonomy-rules-settings","state":"python_deleted"},
     {"method":"GET","pattern":"/api/insights/anomalies","domain":"statistics-analyzer","state":"python_deleted"},
-    {"method":"POST","pattern":"/api/llm/induce-rules","domain":"ai-learning-llm","state":"python_proxied"},
     {"method":"GET","pattern":"/api/matching/bills/{bill_id}/candidates","domain":"matching-recurring-calendar-networth","state":"python_deleted"},
     {"method":"GET","pattern":"/api/matching/bills/{bill_id}/feedback","domain":"matching-recurring-calendar-networth","state":"python_deleted"},
     {"method":"GET","pattern":"/api/matching/candidates","domain":"matching-recurring-calendar-networth","state":"python_deleted"},

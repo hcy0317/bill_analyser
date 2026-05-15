@@ -1,7 +1,7 @@
 //! Internal SQLite runtime foundations for the Bill Analyser Rust migration.
 //!
 //! Rust-owned HTTP domains use this crate for their SQLite repositories while
-//! unmigrated domains continue through the Python/Flask database facade.
+//! domain repositories now execute through the Rust SQLite runtime.
 
 pub mod app_settings;
 pub mod auth;

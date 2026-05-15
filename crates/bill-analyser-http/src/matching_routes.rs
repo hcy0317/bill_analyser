@@ -32,7 +32,7 @@ use chrono::NaiveDate;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
-use crate::{auth::resolve_user_id_from_headers, config::HttpShellConfig, proxy::ProxyState};
+use crate::{auth::resolve_user_id_from_headers, config::HttpShellConfig, state::HttpAppState};
 
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
 
@@ -61,9 +61,7 @@ pub const MATCHING_RECURRING_CALENDAR_NETWORTH_ROUTE_PATTERNS: &[(&str, &str)] =
     ("POST", "/api/recurring/suggestions/{suggestion_id}/reject"),
 ];
 
-pub const MATCHING_RECURRING_CALENDAR_NETWORTH_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
-
-pub fn matching_recurring_calendar_networth_runtime_router() -> Router<ProxyState> {
+pub fn matching_recurring_calendar_networth_runtime_router() -> Router<HttpAppState> {
     Router::new()
         .route("/api/calendar/events", get(calendar_events_handler))
         .route(
@@ -164,7 +162,7 @@ struct ReconciliationCandidatesQuery {
 }
 
 async fn calendar_events_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<CalendarEventsQuery>,
 ) -> Response {
@@ -191,7 +189,7 @@ async fn calendar_events_handler(
 }
 
 async fn networth_snapshot_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     let user_id = match user_id_from_headers(&headers, &state.config) {
@@ -209,7 +207,7 @@ async fn networth_snapshot_handler(
 }
 
 async fn list_suggestions_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<RecurringSuggestionsQuery>,
 ) -> Response {
@@ -253,7 +251,7 @@ async fn list_suggestions_handler(
 }
 
 async fn detect_suggestions_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     let user_id = match user_id_from_headers(&headers, &state.config) {
@@ -289,7 +287,7 @@ async fn detect_suggestions_handler(
 }
 
 async fn accept_suggestion_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(suggestion_id): Path<i64>,
 ) -> Response {
@@ -309,7 +307,7 @@ async fn accept_suggestion_handler(
 }
 
 async fn reject_suggestion_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(suggestion_id): Path<i64>,
 ) -> Response {
@@ -329,7 +327,7 @@ async fn reject_suggestion_handler(
 }
 
 async fn matching_session_candidates_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(session_id): Path<String>,
 ) -> Response {
@@ -349,7 +347,7 @@ async fn matching_session_candidates_handler(
 }
 
 async fn matching_bill_candidates_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(bill_id): Path<i64>,
 ) -> Response {
@@ -357,7 +355,7 @@ async fn matching_bill_candidates_handler(
 }
 
 async fn matching_candidates_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<MatchingCandidatesQuery>,
 ) -> Response {
@@ -388,7 +386,7 @@ async fn matching_candidates_handler(
 }
 
 async fn matching_bill_feedback_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(bill_id): Path<i64>,
 ) -> Response {
@@ -408,7 +406,7 @@ async fn matching_bill_feedback_handler(
 }
 
 async fn reconciliation_candidates_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<ReconciliationCandidatesQuery>,
 ) -> Response {
@@ -432,7 +430,7 @@ async fn reconciliation_candidates_handler(
     }
 }
 
-async fn matching_pairs_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+async fn matching_pairs_handler(State(state): State<HttpAppState>, headers: HeaderMap) -> Response {
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -448,7 +446,7 @@ async fn matching_pairs_handler(State(state): State<ProxyState>, headers: Header
 }
 
 async fn create_manual_pair_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     payload: Option<Json<Value>>,
 ) -> Response {
@@ -481,7 +479,7 @@ async fn create_manual_pair_handler(
 }
 
 async fn delete_manual_pair_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(pair_id): Path<i64>,
 ) -> Response {
@@ -500,7 +498,7 @@ async fn delete_manual_pair_handler(
 }
 
 async fn accept_matching_candidate_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(candidate_id): Path<String>,
     payload: Option<Json<Value>>,
@@ -509,7 +507,7 @@ async fn accept_matching_candidate_handler(
 }
 
 async fn reject_matching_candidate_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(candidate_id): Path<String>,
     payload: Option<Json<Value>>,
@@ -518,7 +516,7 @@ async fn reject_matching_candidate_handler(
 }
 
 async fn clear_matching_candidate_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(candidate_id): Path<String>,
     payload: Option<Json<Value>>,
@@ -527,7 +525,7 @@ async fn clear_matching_candidate_handler(
 }
 
 async fn investment_settings_gone_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
     match user_id_from_headers(&headers, &state.config) {
@@ -540,7 +538,7 @@ async fn investment_settings_gone_handler(
 }
 
 async fn reconcile_history_handler(
-    State(state): State<ProxyState>,
+    State(state): State<HttpAppState>,
     headers: HeaderMap,
     payload: Option<Json<Value>>,
 ) -> Response {
@@ -621,7 +619,7 @@ async fn reconcile_history_handler(
     )
 }
 
-fn open_runtime(state: &ProxyState, label: &str) -> RouteResult<SqliteRuntime> {
+fn open_runtime(state: &HttpAppState, label: &str) -> RouteResult<SqliteRuntime> {
     let db_path = state.config.sqlite_db_path.as_deref().ok_or_else(|| {
         Box::new(error_response(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -692,7 +690,7 @@ fn parse_offset(value: Option<&str>) -> RouteResult<usize> {
 }
 
 fn matching_session_candidates_response(
-    state: &ProxyState,
+    state: &HttpAppState,
     headers: &HeaderMap,
     session_id: &str,
 ) -> Response {
@@ -712,7 +710,7 @@ fn matching_session_candidates_response(
 }
 
 fn matching_bill_candidates_response(
-    state: &ProxyState,
+    state: &HttpAppState,
     headers: &HeaderMap,
     bill_id: i64,
 ) -> Response {
@@ -732,7 +730,7 @@ fn matching_bill_candidates_response(
 }
 
 fn matching_candidate_action_response(
-    state: &ProxyState,
+    state: &HttpAppState,
     headers: &HeaderMap,
     candidate_id: String,
     action: &str,

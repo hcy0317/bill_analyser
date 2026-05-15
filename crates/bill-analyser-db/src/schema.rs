@@ -7,7 +7,7 @@ use crate::{DbError, DbResult, SqliteConnectionConfig, SqliteDbPath, SqliteRunti
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchemaResponsibility {
-    pub python_path: &'static str,
+    pub legacy_area: &'static str,
     pub rust_mapping: &'static str,
     pub status: &'static str,
 }
@@ -1127,53 +1127,53 @@ pub fn schema_inventory() -> SchemaInventory {
     SchemaInventory {
         responsibilities: vec![
             SchemaResponsibility {
-                python_path: "src/bill_analyser/core/database/runtime.py",
+                legacy_area: "runtime connection",
                 rust_mapping:
                     "crates/bill-analyser-db/src/connection.rs; crates/bill-analyser-db/src/path.rs",
                 status: "foundational",
             },
             SchemaResponsibility {
-                python_path: "src/bill_analyser/core/database/shared.py",
+                legacy_area: "user scope helpers",
                 rust_mapping: "crates/bill-analyser-db/src/user_scope.rs",
                 status: "foundational",
             },
             SchemaResponsibility {
-                python_path: "src/bill_analyser/core/database/time.py",
-                rust_mapping: "deferred to shared primitives and future domain migrations",
+                legacy_area: "time normalization",
+                rust_mapping: "crates/bill-analyser-core/src/time.rs",
+                status: "foundational",
+            },
+            SchemaResponsibility {
+                legacy_area: "encryption provider",
+                rust_mapping: "deferred SQLCipher provider integration",
                 status: "deferred",
             },
             SchemaResponsibility {
-                python_path: "src/bill_analyser/core/database/encryption.py",
-                rust_mapping: "deferred; SQLCipher remains Python runtime opt-in",
-                status: "deferred",
-            },
-            SchemaResponsibility {
-                python_path: "src/bill_analyser/core/database/schema/__init__.py",
+                legacy_area: "schema initializer",
                 rust_mapping: "crates/bill-analyser-db/src/schema.rs",
                 status: "foundational",
             },
             SchemaResponsibility {
-                python_path: "src/bill_analyser/core/database/schema/core/business.py",
-                rust_mapping: "deferred; table DDL remains Python-owned",
-                status: "deferred",
-            },
-            SchemaResponsibility {
-                python_path: "src/bill_analyser/core/database/schema/core/indexes.py",
-                rust_mapping: "deferred; index DDL remains Python-owned",
-                status: "deferred",
-            },
-            SchemaResponsibility {
-                python_path: "src/bill_analyser/core/database/schema/core/migrations.py",
-                rust_mapping: "deferred; legacy ALTER migrations remain Python-owned",
-                status: "deferred",
-            },
-            SchemaResponsibility {
-                python_path: "src/bill_analyser/core/database/schema/templates_imports",
-                rust_mapping: "crates/bill-analyser-db/src/import_staging.rs covers import session/preview staging subset; templates/learning remain later domain slices",
+                legacy_area: "business table DDL",
+                rust_mapping: "crates/bill-analyser-db/src/schema.rs",
                 status: "foundational",
             },
             SchemaResponsibility {
-                python_path: "src/bill_analyser/core/database/schema/users_security.py",
+                legacy_area: "core indexes",
+                rust_mapping: "crates/bill-analyser-db/src/schema.rs",
+                status: "foundational",
+            },
+            SchemaResponsibility {
+                legacy_area: "legacy ALTER migrations",
+                rust_mapping: "crates/bill-analyser-db/src/schema.rs",
+                status: "foundational",
+            },
+            SchemaResponsibility {
+                legacy_area: "templates and import staging",
+                rust_mapping: "crates/bill-analyser-db/src/import_staging.rs; crates/bill-analyser-db/src/taxonomy",
+                status: "foundational",
+            },
+            SchemaResponsibility {
+                legacy_area: "users and security schema",
                 rust_mapping: "crates/bill-analyser-db/src/schema.rs covers auth/security users/session/cloud schema; crates/bill-analyser-db/src/app_settings.rs covers app_settings/OCR config subset; crates/bill-analyser-db/src/backup.rs covers audit_logs/backup_records/backup_jobs for ops runtime",
                 status: "foundational",
             },

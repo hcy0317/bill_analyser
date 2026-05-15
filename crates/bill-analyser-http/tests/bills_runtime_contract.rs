@@ -8,8 +8,7 @@ use axum::{
 };
 use base64::Engine as _;
 use bill_analyser_http::{
-    build_router, HttpShellConfig, ImportRouteMode, ProxyState, BILL_CRUD_PROXIED_ROUTE_PATTERNS,
-    BILL_CRUD_ROUTE_PATTERNS,
+    build_router, HttpAppState, HttpShellConfig, ImportRouteMode, BILL_CRUD_ROUTE_PATTERNS,
 };
 use rusqlite::Connection;
 use serde_json::{json, Value};
@@ -282,7 +281,7 @@ async fn bills_runtime_covers_batch_month_filters_and_error_edges() -> Result<()
         assert_eq!(response.status(), status, "{path}");
     }
 
-    let missing_db_state = ProxyState::new(
+    let missing_db_state = HttpAppState::new(
         HttpShellConfig::new_with_import_route_mode(
             "http://127.0.0.1:9".to_string(),
             Duration::from_secs(1),
@@ -313,13 +312,11 @@ async fn bills_runtime_covers_batch_month_filters_and_error_edges() -> Result<()
 }
 
 #[tokio::test]
-async fn bills_runtime_exports_csv_and_xlsx_without_python_proxy() -> Result<(), Box<dyn Error>> {
+async fn bills_runtime_exports_csv_and_xlsx_without_legacy_fallback() -> Result<(), Box<dyn Error>>
+{
     assert!(BILL_CRUD_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("GET", "/api/bills/export")));
-    assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("GET", "/api/bills/export")));
     let fixture = RuntimeFixture::new()?;
     let app = runtime_router(&fixture);
 
@@ -441,14 +438,11 @@ async fn bills_runtime_exports_csv_and_xlsx_without_python_proxy() -> Result<(),
 }
 
 #[tokio::test]
-async fn bills_runtime_serves_reconciliation_statements_without_python_proxy(
+async fn bills_runtime_serves_reconciliation_statements_without_legacy_fallback(
 ) -> Result<(), Box<dyn Error>> {
     assert!(BILL_CRUD_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("GET", "/api/bills/reconciliation_statements")));
-    assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("GET", "/api/bills/reconciliation_statements")));
     let fixture = RuntimeFixture::new()?;
     seed_reconciliation_statement_data(&fixture.db_path)?;
     let app = runtime_router(&fixture);
@@ -552,7 +546,7 @@ async fn bills_runtime_serves_reconciliation_statements_without_python_proxy(
 }
 
 #[tokio::test]
-async fn bills_runtime_serves_recurring_candidates_and_match_without_python_proxy(
+async fn bills_runtime_serves_recurring_candidates_and_match_without_legacy_fallback(
 ) -> Result<(), Box<dyn Error>> {
     for route in [
         ("GET", "/api/bills/{bill_id}/recurring-candidates"),
@@ -560,9 +554,6 @@ async fn bills_runtime_serves_recurring_candidates_and_match_without_python_prox
         ("DELETE", "/api/bills/{bill_id}/recurring-match"),
     ] {
         assert!(BILL_CRUD_ROUTE_PATTERNS.iter().any(|item| item == &route));
-        assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
-            .iter()
-            .all(|item| item != &route));
     }
 
     let fixture = RuntimeFixture::new()?;
@@ -710,7 +701,7 @@ async fn bills_runtime_serves_recurring_candidates_and_match_without_python_prox
 }
 
 #[tokio::test]
-async fn bills_runtime_serves_category_quick_actions_without_python_proxy(
+async fn bills_runtime_serves_category_quick_actions_without_legacy_fallback(
 ) -> Result<(), Box<dyn Error>> {
     assert!(BILL_CRUD_ROUTE_PATTERNS
         .iter()
@@ -718,12 +709,6 @@ async fn bills_runtime_serves_category_quick_actions_without_python_proxy(
     assert!(BILL_CRUD_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/bills/category/refresh")));
-    assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("POST", "/api/bills/category/quick-add-keyword")));
-    assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("POST", "/api/bills/category/refresh")));
 
     let fixture = RuntimeFixture::new()?;
     seed_category_action_data(&fixture.db_path)?;
@@ -961,26 +946,14 @@ async fn bills_runtime_serves_category_quick_actions_without_python_proxy(
 }
 
 #[tokio::test]
-async fn bills_runtime_keeps_unmigrated_bill_subdomains_proxied() -> Result<(), Box<dyn Error>> {
+async fn bills_runtime_returns_not_found_for_unowned_bill_subdomains() -> Result<(), Box<dyn Error>>
+{
     assert!(BILL_CRUD_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/bills/pictures")));
-    assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("POST", "/api/bills/pictures")));
     assert!(BILL_CRUD_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/bills/pictures/unused")));
-    assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("POST", "/api/bills/pictures/unused")));
-    assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("GET", "/api/bills/reconciliation_statements")));
-    assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .all(|route| route != &("DELETE", "/api/bills/{bill_id}/recurring-match")));
-    assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS.is_empty());
 
     Ok(())
 }
@@ -1212,7 +1185,7 @@ async fn runtime_metadata_declares_import_and_bills_crud_boundary() -> Result<()
     let metadata = read_json(metadata_response).await;
     assert_eq!(
         metadata["runtime_boundary"],
-        "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+matching-recurring-calendar-networth-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+ai-llm-config-candidates-runtime+ai-llm-provider-generation-runtime+ai-ocr-recognition-runtime+auth-login-register-token-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime+backup-ops-sync-runtime"
+        "rust-http:rust-only-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+matching-recurring-calendar-networth-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+ai-llm-config-candidates-runtime+ai-llm-provider-generation-runtime+ai-ocr-recognition-runtime+auth-login-register-token-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime+backup-ops-sync-runtime"
     );
     assert_eq!(
         metadata["business_migration"],
@@ -1273,7 +1246,7 @@ async fn runtime_metadata_declares_import_and_bills_crud_boundary() -> Result<()
         .as_str()
         .expect("auth token runtime");
     assert!(auth_runtime.contains("OAuth2 authorize disabled-safe/not-implemented"));
-    assert!(auth_runtime.contains("no OAuth provider exchange proxy remains"));
+    assert!(auth_runtime.contains("no OAuth provider exchange fallback remains"));
 
     Ok(())
 }
@@ -1319,7 +1292,7 @@ fn runtime_router_with_uploads_dir(fixture: &RuntimeFixture, uploads_dir: &Path)
     .with_sqlite_db_path(fixture.db_path.display().to_string())
     .with_uploads_dir(uploads_dir.display().to_string())
     .with_trusted_user_header_secret(TEST_AUTH_SECRET);
-    let state = ProxyState::new(config).expect("proxy state");
+    let state = HttpAppState::new(config).expect("http app state");
     build_router(state)
 }
 

@@ -79,16 +79,6 @@ function readRoutes() {
     });
   }
 
-  for (const match of matrixSource.matchAll(/python_proxy_route!\(\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]+)"/g)) {
-    routes.push({
-      index: match.index ?? 0,
-      method: match[1],
-      pattern: match[2],
-      domain: match[3],
-      state: 'python_proxied',
-    });
-  }
-
   if (routes.length === 0) {
     throw new Error('No route ownership entries found in OWNERSHIP_MATRIX');
   }
@@ -107,7 +97,6 @@ function render(routes) {
 // Do not edit by hand; run the generator after changing Rust route ownership.
 
 export type RustRouteState =
-    | 'python_proxied'
     | 'rust_implemented'
     | 'rust_owned_verified'
     | 'python_deleted'
