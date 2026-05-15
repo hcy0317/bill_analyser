@@ -11,7 +11,7 @@
 - `budget_routes.rs`：预算 CRUD/export/execution/forecast/history/snapshot/import。
 - `statistics_routes/`：分类统计、资产趋势、饼图、top merchants、amounts、Analyzer、洞察、汇率。
 - `matching_routes.rs`：formal matching candidates、feedback、manual pairs、candidate actions、reconcile history、recurring/calendar/networth。
-- `backup_routes.rs`：backup list/create/verify/download/delete/restore/cleanup、jobs、sync。
+- `backup_routes/`：backup list/create/verify/download/delete/restore/cleanup、jobs、sync。
 
 ## Contract Notes
 

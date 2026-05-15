@@ -76,7 +76,7 @@ pub enum RouteHandlerId {
         rename = "src/backend/http/matching_routes.rs::matching_recurring_calendar_networth_runtime"
     )]
     MatchingRecurringCalendarNetworthRuntime,
-    #[serde(rename = "src/backend/http/backup_routes.rs::backup_ops_runtime")]
+    #[serde(rename = "src/backend/http/backup_routes/mod.rs::backup_ops_runtime")]
     BackupOpsRuntime,
     #[serde(rename = "src/backend/core/migration_governance.rs::contract_oracle")]
     DatabaseFacadeContractOracle,
@@ -118,7 +118,7 @@ impl RouteHandlerId {
             Self::MatchingRecurringCalendarNetworthRuntime => {
                 "src/backend/http/matching_routes.rs::matching_recurring_calendar_networth_runtime"
             }
-            Self::BackupOpsRuntime => "src/backend/http/backup_routes.rs::backup_ops_runtime",
+            Self::BackupOpsRuntime => "src/backend/http/backup_routes/mod.rs::backup_ops_runtime",
             Self::DatabaseFacadeContractOracle => {
                 "src/backend/core/migration_governance.rs::contract_oracle"
             }
@@ -2989,7 +2989,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "backup-ops",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "src/backend/http/backup_routes.rs",
+            "src/backend/http/backup_routes/mod.rs",
             "src/backend/http/backup_sync.rs",
             "src/backend/core/ops.rs",
             "src/backend/db/backup.rs",

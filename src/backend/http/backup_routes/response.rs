@@ -1,0 +1,86 @@
+use super::*;
+
+pub(super) fn open_runtime(state: &HttpAppState) -> RouteResult<SqliteRuntime> {
+    let db_path = state.config.sqlite_db_path.as_deref().ok_or_else(|| {
+        Box::new(error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Rust backup ops DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH",
+        ))
+    })?;
+    let db_path = SqliteDbPath::application_file(db_path).map_err(|error| {
+        Box::new(error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            error.to_string(),
+        ))
+    })?;
+    SqliteRuntime::open(SqliteConnectionConfig {
+        path: db_path,
+        create_if_missing: true,
+        busy_timeout: state.config.timeout,
+    })
+    .map_err(|_| Box::new(db_error_response()))
+}
+
+pub(super) fn status_or_internal(status: u16) -> StatusCode {
+    StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+pub(super) fn json_response(status: StatusCode, body: Value) -> Response {
+    (status, Json(body)).into_response()
+}
+
+pub(super) fn db_error_response() -> Response {
+    error_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Rust backup ops route runtime DB error",
+    )
+}
+
+pub(super) fn auth_error_response(error: crate::auth::RustRouteAuthError) -> Response {
+    error_response(status_or_internal(error.status), error.message)
+}
+
+pub(super) fn db_write_error_response(error: DbError) -> Response {
+    match error {
+        DbError::InvalidOperation(message) if message == "backup job not found" => {
+            error_response(StatusCode::NOT_FOUND, message)
+        }
+        _ => db_error_response(),
+    }
+}
+
+pub(super) fn file_error_response(error: BackupFileRuntimeError) -> Box<Response> {
+    Box::new(error_response(error.status, error.message))
+}
+
+pub(super) fn error_response(status: StatusCode, message: impl ToString) -> Response {
+    json_response(
+        status,
+        json!({
+            "success": false,
+            "error": message.to_string(),
+        }),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn response_helpers_preserve_status_and_error_mapping() {
+        assert_eq!(status_or_internal(404), StatusCode::NOT_FOUND);
+        assert_eq!(status_or_internal(99), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let not_found = db_write_error_response(DbError::InvalidOperation(
+            "backup job not found".to_string(),
+        ));
+        assert_eq!(not_found.status(), StatusCode::NOT_FOUND);
+
+        let db_error = db_error_response();
+        assert_eq!(db_error.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let file_error = file_error_response(BackupFileRuntimeError::bad_request("bad file"));
+        assert_eq!(file_error.status(), StatusCode::BAD_REQUEST);
+    }
+}

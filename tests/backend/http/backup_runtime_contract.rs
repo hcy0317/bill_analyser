@@ -100,6 +100,15 @@ async fn backup_jobs_runtime_serves_list_validation_create_and_update() -> Resul
         1
     );
 
+    let malformed_response = app
+        .clone()
+        .oneshot(raw_json_request(Method::POST, "/api/backup/jobs", "{"))
+        .await?;
+    assert_eq!(malformed_response.status(), StatusCode::BAD_REQUEST);
+    let malformed_body = read_json(malformed_response).await;
+    assert_eq!(malformed_body["success"], false);
+    assert_eq!(malformed_body["error"], "invalid JSON body");
+
     let create_response = app
         .clone()
         .oneshot(json_request(
@@ -445,6 +454,293 @@ async fn backup_file_runtime_creates_lists_downloads_deletes_and_cleans_up(
         ))
         .await?;
     assert_eq!(invalid_cleanup.status(), StatusCode::BAD_REQUEST);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn backup_file_runtime_reports_create_download_delete_edge_errors(
+) -> Result<(), Box<dyn Error>> {
+    let blocked_backup_dir_fixture = RuntimeFixture::new()?;
+    fs::remove_dir_all(&blocked_backup_dir_fixture.backup_dir)?;
+    fs::write(&blocked_backup_dir_fixture.backup_dir, b"not a directory")?;
+    let blocked_backup_dir_app = runtime_router(&blocked_backup_dir_fixture);
+    let blocked_backup_dir_response = blocked_backup_dir_app
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/backup/create",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(
+        blocked_backup_dir_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+
+    let missing_data_fixture = RuntimeFixture::new()?;
+    fs::remove_dir_all(&missing_data_fixture.data_dir)?;
+    let missing_data_app = runtime_router(&missing_data_fixture);
+    let no_data_response = missing_data_app
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/backup/create",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(no_data_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(no_data_response).await["error"],
+        "数据未变化，无需备份"
+    );
+
+    let data_file_fixture = RuntimeFixture::new()?;
+    fs::remove_dir_all(&data_file_fixture.data_dir)?;
+    fs::write(&data_file_fixture.data_dir, b"not a directory")?;
+    let data_file_app = runtime_router(&data_file_fixture);
+    let invalid_archive_response = data_file_app
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/backup/create",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(
+        invalid_archive_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    let invalid_archive_body = read_json(invalid_archive_response).await;
+    assert_eq!(invalid_archive_body["success"], false);
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let locked_source_fixture = RuntimeFixture::new()?;
+        let locked_path = locked_source_fixture.data_dir.join("locked.txt");
+        fs::write(&locked_path, b"locked")?;
+        let _locked_file = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&locked_path)?;
+        let locked_source_app = runtime_router(&locked_source_fixture);
+        let locked_source_response = locked_source_app
+            .oneshot(authed_request(
+                Method::POST,
+                "/api/backup/create",
+                Body::empty(),
+            ))
+            .await?;
+        assert_eq!(
+            locked_source_response.status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        let locked_source_body = read_json(locked_source_response).await;
+        assert_eq!(locked_source_body["success"], false);
+    }
+
+    let relative_data_dir_fixture = RuntimeFixture::new()?;
+    let relative_data_dir_app =
+        runtime_router_with_data_dir(&relative_data_dir_fixture, "Cargo.toml");
+    let archive_error_response = relative_data_dir_app
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/backup/create",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(
+        archive_error_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    assert_eq!(read_json(archive_error_response).await["success"], false);
+
+    let fixture = RuntimeFixture::new()?;
+    let app = runtime_router(&fixture);
+
+    write_zip_entries(
+        &fixture.backup_dir.join("backup_20260515_080000.zip"),
+        &[("data/older.txt", b"older".as_slice())],
+    )?;
+    write_zip_entries(
+        &fixture.backup_dir.join("backup_20260515_090000.zip"),
+        &[("data/newer.txt", b"newer".as_slice())],
+    )?;
+    let sorted_list = app
+        .clone()
+        .oneshot(authed_request(Method::GET, "/api/backup/", Body::empty()))
+        .await?;
+    assert_eq!(sorted_list.status(), StatusCode::OK);
+    let sorted_list_body = read_json(sorted_list).await;
+    let sorted_filenames = sorted_list_body["data"]
+        .as_array()
+        .expect("backup list")
+        .iter()
+        .filter_map(|item| item["filename"].as_str())
+        .collect::<Vec<_>>();
+    assert!(sorted_filenames.contains(&"backup_20260515_080000.zip"));
+    assert!(sorted_filenames.contains(&"backup_20260515_090000.zip"));
+
+    for (method, path) in [
+        (Method::GET, "/api/backup/download/evil.zip"),
+        (Method::DELETE, "/api/backup/delete/evil.zip"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(authed_request(method, path, Body::empty()))
+            .await?;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{path}");
+        assert_eq!(read_json(response).await["error"], "无效的文件名");
+    }
+
+    for (method, path) in [
+        (Method::GET, "/api/backup/download/backup_missing.zip"),
+        (Method::DELETE, "/api/backup/delete/backup_missing.zip"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(authed_request(method, path, Body::empty()))
+            .await?;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        assert_eq!(read_json(response).await["error"], "文件不存在");
+    }
+
+    let directory_backup = fixture.backup_dir.join("backup_directory.zip");
+    fs::create_dir_all(&directory_backup)?;
+    for (method, path) in [
+        (Method::GET, "/api/backup/download/backup_directory.zip"),
+        (Method::DELETE, "/api/backup/delete/backup_directory.zip"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(authed_request(method, path, Body::empty()))
+            .await?;
+        assert_eq!(
+            response.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "{path}"
+        );
+        assert_eq!(read_json(response).await["success"], false);
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let locked_download_path = fixture.backup_dir.join("backup_locked.zip");
+        write_zip_entries(
+            &locked_download_path,
+            &[("data/locked.txt", b"locked".as_slice())],
+        )?;
+        let _locked_download = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&locked_download_path)?;
+        let locked_download_response = app
+            .clone()
+            .oneshot(authed_request(
+                Method::GET,
+                "/api/backup/download/backup_locked.zip",
+                Body::empty(),
+            ))
+            .await?;
+        assert_eq!(
+            locked_download_response.status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(read_json(locked_download_response).await["success"], false);
+    }
+
+    let missing_verify_filename = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/backup/restore/verify",
+            json!({}),
+        ))
+        .await?;
+    assert_eq!(missing_verify_filename.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(missing_verify_filename).await["error"],
+        "filename is required"
+    );
+
+    let malformed_verify = app
+        .clone()
+        .oneshot(raw_json_request(
+            Method::POST,
+            "/api/backup/restore/verify",
+            "{",
+        ))
+        .await?;
+    assert_eq!(malformed_verify.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(read_json(malformed_verify).await["success"], false);
+
+    let invalid_verify_filename = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/backup/restore/verify",
+            json!({"filename": "evil.zip"}),
+        ))
+        .await?;
+    assert_eq!(invalid_verify_filename.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_verify_filename).await["error"],
+        "无效的文件名"
+    );
+
+    let invalid_restore_filename = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/backup/restore/evil.zip",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(invalid_restore_filename.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_restore_filename).await["error"],
+        "无效的文件名"
+    );
+
+    let missing_restore_path = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/backup/restore/backup_missing.zip",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(missing_restore_path.status(), StatusCode::NOT_FOUND);
+    assert_eq!(read_json(missing_restore_path).await["error"], "文件不存在");
+
+    write_zip_entries(
+        &fixture.backup_dir.join("backup_20260515_100000.zip"),
+        &[
+            ("data/restored.txt", b"restored".as_slice()),
+            ("../escape.txt", b"escape".as_slice()),
+        ],
+    )?;
+    let unsafe_restore = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/backup/restore/backup_20260515_100000.zip",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(unsafe_restore.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(read_json(unsafe_restore).await["success"], false);
+
+    let missing_restore_file = app
+        .oneshot(json_request(
+            Method::POST,
+            "/api/backup/restore/verify",
+            json!({"filename": "backup_missing.zip"}),
+        ))
+        .await?;
+    assert_eq!(missing_restore_file.status(), StatusCode::NOT_FOUND);
+    assert_eq!(read_json(missing_restore_file).await["error"], "文件不存在");
 
     Ok(())
 }
@@ -1229,6 +1525,21 @@ fn runtime_router_with_backup_key(fixture: &RuntimeFixture, backup_key: Option<&
 
 fn runtime_router_with_auth_secret(fixture: &RuntimeFixture) -> Router {
     runtime_router_with_options(fixture, None, Some(TEST_AUTH_SECRET))
+}
+
+fn runtime_router_with_data_dir(fixture: &RuntimeFixture, data_dir: &str) -> Router {
+    let config = HttpShellConfig::new_with_import_route_mode(
+        "http://127.0.0.1:5001",
+        Duration::from_secs(1),
+        1024 * 1024,
+        ImportRouteMode::ImportDbRuntime,
+    )
+    .expect("config")
+    .with_trusted_user_header_secret(TEST_TRUST_SECRET)
+    .with_sqlite_db_path(fixture.db_path.to_string_lossy().to_string())
+    .with_data_dir(data_dir.to_string())
+    .with_backup_dir(fixture.backup_dir.to_string_lossy().to_string());
+    build_router(HttpAppState::new(config).expect("state"))
 }
 
 fn runtime_router_with_options(
