@@ -21,8 +21,8 @@ Use this workflow when you want the next session to resume without guesswork.
 2. Summarize what is already done.
 3. List what is still pending.
 4. Call out blockers or assumptions explicitly.
-5. Refresh `.git/ai/task-state.json` with the current objective and status.
-   - Preferred command: `python scripts/hooks/task_state.py --trigger handoff --status handoff --title "<current objective>"`
+5. Refresh `.git/ai/task-state.json` with the current objective and status when the file exists.
+   - Update the JSON directly; the old `scripts/hooks/task_state.py` helper was removed in the Rust-only cutover.
 6. Ensure `.git/ai/last-session.md` is up to date.
 7. Produce a concise handoff summary in chat.
 

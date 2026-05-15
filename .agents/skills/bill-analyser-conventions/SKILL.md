@@ -40,8 +40,8 @@ Use this skill when you are:
 
 - `src/backend/**`: run focused `cargo test`, then `cargo clippy --workspace --all-targets -- -D warnings`; business Rust changes require `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90`.
 - `src/web/**`: at least run `npm run lint` in `src/web`; frontend delivery also requires `npm run test:coverage` and coverage above 90%.
-- `.gitea/**`: load `.agents/skills/gitea-ci-cache-discipline/SKILL.md`, then run `./.venv/Scripts/python.exe -m pytest tests/test_gitea_workflows.py -v`, YAML parsing for `.gitea/workflows/ci.yml`, and `./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo`.
-- `.github/**`, `.agents/**`, `.claude/**`, `.codex/**`, and `scripts/hooks/**`: run `./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo` plus relevant hook or health pytest.
+- `.gitea/**`: load `.agents/skills/gitea-ci-cache-discipline/SKILL.md`, then run YAML parsing for `.gitea/workflows/ci.yml` and the closest CI-equivalent command for the touched runtime area.
+- `.github/**`, `.agents/**`, `.claude/**`, `.codex/**`, and hook adapter changes: validate touched JSON files and confirm active hook configs do not reference deleted `scripts/hooks/**` or `scripts/agent_stack_health.py` entrypoints.
 - API route or contract changes require checking `src/web/src/lib/services.ts` and related stores.
 - Amount, statistics, and import-chain changes require manual yuan/cents and call-order review.
 

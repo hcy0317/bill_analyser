@@ -12,7 +12,7 @@ Use the shared workflow from `.agents/skills/session-handoff/SKILL.md`.
 2. Read `.agents/skills/session-handoff/SKILL.md`.
 3. Read `.git/ai/last-session.md` if it exists.
 4. Inspect `git status` and `git diff`.
-5. Refresh task state with `python scripts/hooks/task_state.py --trigger handoff --status handoff --title "<current objective>"` when command execution is available.
+5. If `.git/ai/task-state.json` exists, refresh it directly with the current objective and `handoff` status; do not call deleted `scripts/hooks/task_state.py`.
 6. Produce a concise handoff summary with the required sections from the shared workflow.
 
 ## Output rules

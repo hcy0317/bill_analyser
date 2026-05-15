@@ -29,8 +29,8 @@ Execute verification in this exact order:
    - If the UI or contract change is broad, add the smallest useful build/test verification
 
 4. **AI Customization / Hook Checks**
-   - For `.github/**`, `.agents/**`, `.claude/**`, `scripts/hooks/**`, or `scripts/agent_stack_health.py`, run `./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo`
-   - Run relevant hook / health pytest files for the changed scripts
+   - For `.github/**`, `.agents/**`, `.claude/**`, `.codex/**`, or hook adapter files, parse touched JSON files
+   - Confirm active hook configs do not reference deleted `scripts/hooks/**` or `scripts/agent_stack_health.py` entrypoints
 
 5. **Contract & Money Review**
    - If API routes changed, confirm `src/web/src/lib/services.ts` and related stores are still aligned

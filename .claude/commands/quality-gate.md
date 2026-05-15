@@ -33,7 +33,7 @@ This command mirrors hook behavior but stays intentionally narrower than `/verif
 
 - it does **not** replace full pytest audit acceptance
 - it does **not** replace API contract or yuan/cents manual review
-- it does **not** replace AI customization health checks for `.github/**`, `.agents/**`, `.claude/**`, or `scripts/hooks/**`
+- it does **not** replace AI customization health checks for `.github/**`, `.agents/**`, `.claude/**`, `.codex/**`, or hook adapter files
 
 ## Arguments
 

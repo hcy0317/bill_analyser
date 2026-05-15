@@ -20,7 +20,7 @@ Use the shared workflow from `.agents/skills/approved-plan-execution/SKILL.md`.
 3. Read the approved plan, checklist, or user-approved execution notes.
 4. Read `.git/ai/task-state.json` and `.git/ai/last-session.md` if they exist.
 5. Restate the execution goal in 1-2 sentences.
-6. Refresh task state with `python scripts/hooks/task_state.py --trigger approved-plan --status in_progress --title "<execution goal>"` when command execution is available.
+6. If `.git/ai/task-state.json` exists, refresh it directly with the execution goal and `in_progress` status; do not call deleted `scripts/hooks/task_state.py`.
 7. Break the approved plan into the smallest concrete execution slice and start implementing immediately.
 8. Run path-sensitive verification before moving to the next slice.
 9. If the approved plan is missing or stale relative to current diff, call it out before editing.

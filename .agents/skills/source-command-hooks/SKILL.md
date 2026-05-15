@@ -15,32 +15,30 @@ Use `/hooks` to inspect what hook surfaces are actually active for this reposito
 
 ## What This Command Checks
 
-1. Repository-native hooks under `.Codex/settings.json` (PreToolUse, PostToolUse, Stop)
-2. Repository-native hooks under `.github/hooks/*.json` (Copilot)
-3. Repo hook implementations under `scripts/hooks/*.py`
-4. Optional global Copilot hook bridge via `scripts/hooks/copilot_global_hook_bridge.py`
-5. Optional user-level global hooks under `~/.copilot/hooks/`
-6. Relevant health checks and validation commands
+1. Repository hook config adapters under `.codex/hooks.json`, `.claude/settings.json`, and `.github/hooks/*.json`
+2. Active command entrypoints referenced by those config files
+3. Whether each referenced entrypoint exists in the current checkout
+4. Optional user-level hooks under `~/.codex/hooks.json` or `~/.copilot/hooks/`
+5. Relevant static checks and validation commands
 
 ## Instructions
 
 When invoked, do the following in order:
 
-1. Read `.Codex/settings.json` and summarize active Codex hook stages:
+1. Read `.codex/hooks.json`, `.claude/settings.json`, and `.github/hooks/*.json` and summarize active hook stages:
    - `PreToolUse`
    - `PostToolUse`
    - `Stop`
-2. Read `.github/hooks/*.json` and summarize active Copilot hook stages.
-3. Confirm which repo scripts are wired directly.
-4. Confirm whether `scripts/hooks/copilot_global_hook_bridge.py` is wired and whether `~/.copilot/hooks/` exists.
-5. If global bridge is available, list bridged hooks by stage.
+2. Confirm which repo scripts are wired directly.
+3. If a config references `scripts/hooks/**` or another missing file, report that entry as **broken**, not active.
+4. If user-level hooks are relevant, list them separately from repo-local hooks.
 6. Explain the difference between:
    - automatic repo hooks
-   - optional bridged global hooks
-   - manual diagnostics such as `agent_stack_health`
+   - optional user-level hooks
+   - manual diagnostics
 7. If the user asks to validate behavior, run:
-   - `./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo`
-   - relevant hook pytest files
+   - JSON parsing for the hook adapter files
+   - a missing-entrypoint scan over `.codex`, `.claude`, and `.github/hooks`
 
 ## Output Format
 
@@ -55,7 +53,7 @@ Codex Stop:        [...]
 Copilot PreToolUse: [...]
 Copilot PostToolUse:[...]
 Copilot Stop:       [...]
-Global Bridge:    [ON/OFF]
+User Hooks:       [ON/OFF]
 Global Hooks:     [...]
 
 Usable Entry Points:

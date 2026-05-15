@@ -111,7 +111,7 @@ For an already large actcache directory:
    - keep jobs independent unless Gitea support is verified
 3. Add or update `tests/test_gitea_workflows.py` for every cache path, key, cleanup-order, or size-guard contract.
 4. Parse the workflow YAML after editing.
-5. Run the Gitea workflow tests and repo agent-stack health check.
+5. Run the Gitea workflow tests and validate AI adapter JSON if hook-adjacent assets changed.
 
 ## Verification
 
@@ -120,13 +120,15 @@ Minimum verification for CI cache workflow changes:
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests/test_gitea_workflows.py -v
 .\.venv\Scripts\python.exe -c "import pathlib, yaml; yaml.safe_load(pathlib.Path('.gitea/workflows/ci.yml').read_text(encoding='utf-8')); print('yaml parse ok')"
-.\.venv\Scripts\python.exe scripts\agent_stack_health.py --mode repo
 ```
 
-If AI workflow docs, skills, or hook-adjacent assets changed, also run the relevant agent-stack pytest set:
+If AI workflow docs, skills, or hook-adjacent assets changed, also parse adapter JSON and scan for deleted hook entrypoints:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/test_ai_workflow_docs.py tests/test_gitea_workflows.py tests/test_agent_stack_health.py -v
+Get-Content .codex/hooks.json | ConvertFrom-Json | Out-Null
+Get-Content .claude/settings.json | ConvertFrom-Json | Out-Null
+Get-ChildItem .github/hooks -Filter *.json | ForEach-Object { Get-Content $_.FullName | ConvertFrom-Json | Out-Null }
+rg -n "scripts[/\\]hooks|scripts[/\\]agent_stack_health\.py" .codex .claude .github/hooks
 ```
 
 ## Anti-patterns

@@ -18,19 +18,19 @@ Execute verification in this exact order:
 
 1. **Detect Scope First**
    - Inspect `git status`, staged diff, and unstaged diff
-   - Group changed files into `src/bill_analyser/**`, `src/web/**`, and AI customization / hook paths
+   - Group changed files into `src/backend/**`, `tests/backend/**`, `src/web/**`, and AI customization / hook paths
 
-2. **Python / Runtime Checks**
-   - For `src/bill_analyser/**` or Python runtime changes, run affected pytest and repository-baseline pylint
-   - If business runtime code changed, require full `./.venv/Scripts/python.exe -m pytest tests/ -v` before reporting PASS
+2. **Rust Runtime Checks**
+   - For `src/backend/**` or `tests/backend/**`, run affected `cargo test` first when useful
+   - If business runtime code changed, require `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90` before reporting PASS
 
 3. **Frontend Checks**
    - For `src/web/**`, run `npm run lint` inside `src/web`
    - If the UI or contract change is broad, add the smallest useful build/test verification
 
 4. **AI Customization / Hook Checks**
-   - For `.github/**`, `.agents/**`, `.claude/**`, `scripts/hooks/**`, or `scripts/agent_stack_health.py`, run `./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo`
-   - Run relevant hook / health pytest files for the changed scripts
+   - For `.github/**`, `.agents/**`, `.claude/**`, `.codex/**`, or hook adapter files, parse touched JSON files
+   - Confirm active hook configs do not reference deleted `scripts/hooks/**` or `scripts/agent_stack_health.py` entrypoints
 
 5. **Contract & Money Review**
    - If API routes changed, confirm `src/web/src/lib/services.ts` and related stores are still aligned
@@ -48,9 +48,9 @@ Produce a concise verification report:
 VERIFICATION: [PASS/FAIL]
 
 Scope:    [backend/frontend/ai-customization/mixed]
-Pylint:   [OK/FAIL/N-A]
+Rust:     [OK/FAIL/N-A]
 Frontend: [OK/FAIL/N-A]
-Pytest:   [OK/FAIL/N-A]
+Coverage: [OK/FAIL/N-A]
 Hooks:    [OK/FAIL/N-A]
 Contract: [OK/FAIL/N-A]
 

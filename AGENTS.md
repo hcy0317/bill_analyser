@@ -121,7 +121,7 @@ npm run test:coverage
 	- `crates/**`、`Cargo.toml`、`Cargo.lock`：先跑受影响 `cargo test`；共享 runtime/业务代码交付前必须运行 `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings` 与 `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90`
 	- `src/web/**`：至少运行 `npm run lint`；若交付前端代码，还必须运行 `npm run test:coverage`，并满足总覆盖率 > 90% 以及被改业务代码自身覆盖率 > 90%
 	- `.gitea/**`：先读 `.agents/skills/gitea-ci-cache-discipline/SKILL.md`，运行 YAML 解析、Rust-only source tree gate 与受影响 CI 本地等价命令
-	- `.github/**`、`.agents/**`、`.claude/**`、`scripts/**`：运行 Rust-only source tree gate 与相关静态检查；不要重新引入已删除的 sidecar/tooling 路径
+	- `.github/**`、`.agents/**`、`.claude/**`、`.codex/**`、`scripts/**`：运行 Rust-only source tree gate 与相关静态检查；对 hook/agent adapter 改动至少校验 JSON，并确认活跃配置没有引用已删除的 `scripts/hooks/**` 或 `scripts/agent_stack_health.py`；不要重新引入已删除的 sidecar/tooling 路径
 
 ## Audit gate for business-code changes
 

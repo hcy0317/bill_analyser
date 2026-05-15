@@ -13,7 +13,7 @@ applyTo: 'AGENTS.md,CLAUDE.md,README.md,Cargo.toml,Cargo.lock,*.ps1,*.bat,docs/*
 - Restore repository intent from `AGENTS.md` and `docs/PROJECT_OVERVIEW.md`.
 - Validate Rust backend runtime topology against `src/backend/**` and frontend runtime topology against `src/web/src/**`.
 - Treat `.github/**`, `.agents/**`, and `.claude/**` as committed AI customization surfaces, not `.tmp/**` or other unpacked copies.
-- Use `tests/test_repository_layout.py` and `scripts/hooks/pre_tool_repo_guard.py` as layout/governance evidence when deciding where code or artifacts should live.
+- Use `AGENTS.md`, `docs/PROJECT_OVERVIEW.md`, and the current Rust workspace/test manifests as layout/governance evidence when deciding where code or artifacts should live.
 - Rust runtime code belongs under `src/backend/**`. Do not reintroduce Python runtime code or top-level shadow directories such as `src/api/`, `src/core/`, `src/parsers/`, `src/utils/`, `src/data/`, or `src/uploads/`.
 - Runtime log artifacts belong in root `logs/`, not `src/logs/`.
 
@@ -54,7 +54,6 @@ applyTo: 'AGENTS.md,CLAUDE.md,README.md,Cargo.toml,Cargo.lock,*.ps1,*.bat,docs/*
   - `tests/quick_*`
   - `tests/manual_test_*`
   - `tests/e2e_*`
-  - `scripts/agent_stack_health.py`
   - `docs/AGENT_STACK_TESTING.md`
   - Useful for evidence and debugging, but not the sole source of truth for business behavior or repository policy.
 

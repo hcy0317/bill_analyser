@@ -113,4 +113,4 @@ Use this skill when you are:
 ## Validation
 
 - For normal `src/web/**` UI changes, in `src\web`: `npm run lint`
-- Only when the same task also changes `.agents/**`, `.github/**`, `.claude/**`, or `scripts/hooks/**`, from repo root run: `.\.venv\Scripts\python.exe scripts/agent_stack_health.py --mode repo`
+- Only when the same task also changes `.agents/**`, `.github/**`, `.claude/**`, `.codex/**`, or hook adapter files, parse touched JSON and scan active hook configs for deleted `scripts/hooks/**` entrypoints.

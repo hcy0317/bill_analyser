@@ -56,14 +56,17 @@ If the change is UI-heavy or contract-sensitive, add the smallest useful build o
 
 ### Phase 3: AI Customization / Hook Verification
 
-Run this when `.github/**`, `.agents/**`, `.claude/**`, `scripts/hooks/**`, or `scripts/agent_stack_health.py` changed:
+Run this when `.github/**`, `.agents/**`, `.claude/**`, `.codex/**`, or hook adapter files changed:
 
 ```powershell
-./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo
-./.venv/Scripts/python.exe -m pytest tests/test_agent_stack_health.py tests/test_pre_tool_repo_guard.py -v
+Get-Content .codex/hooks.json,.claude/settings.json,.github/hooks/*.json | Out-Null
+Get-Content .codex/hooks.json | ConvertFrom-Json | Out-Null
+Get-Content .claude/settings.json | ConvertFrom-Json | Out-Null
+Get-ChildItem .github/hooks -Filter *.json | ForEach-Object { Get-Content $_.FullName | ConvertFrom-Json | Out-Null }
+rg -n "scripts[/\\]hooks|scripts[/\\]agent_stack_health\.py" .codex .claude .github/hooks
 ```
 
-Add the most relevant hook-specific tests if post-tool or stop-hook behavior changed.
+The `rg` command should return no matches for active hook configs in the Rust-only repository shape. Add path-specific tests only when a real hook implementation exists.
 
 ### Phase 4: Contract and Money Review
 
