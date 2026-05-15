@@ -56,6 +56,30 @@ pub struct BackupAuditLogDraft {
     pub error_message: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupRecordDraft {
+    pub backup_name: String,
+    pub file_path: String,
+    pub checksum: String,
+    pub encrypted: bool,
+    pub status: String,
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BackupRecordRow {
+    pub id: i64,
+    pub backup_name: String,
+    pub storage_type: String,
+    pub file_path: String,
+    pub checksum: Option<String>,
+    pub encrypted: bool,
+    pub status: String,
+    pub metadata: Value,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 pub fn init_backup_ops_schema(connection: &Connection) -> DbResult<()> {
     connection.execute_batch(
         r#"
@@ -129,6 +153,112 @@ pub fn init_backup_ops_schema(connection: &Connection) -> DbResult<()> {
         [],
     )?;
     Ok(())
+}
+
+pub fn list_backup_records(connection: &Connection) -> DbResult<Vec<BackupRecordRow>> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT id, backup_name, storage_type, file_path, checksum, encrypted,
+               status, metadata_json, created_at, updated_at
+        FROM backup_records
+        ORDER BY created_at DESC, id DESC
+        "#,
+    )?;
+    let rows = statement.query_map([], |row| {
+        let metadata_json: Option<String> = row.get(7)?;
+        Ok(BackupRecordRow {
+            id: row.get(0)?,
+            backup_name: row.get(1)?,
+            storage_type: row.get(2)?,
+            file_path: row.get(3)?,
+            checksum: row.get(4)?,
+            encrypted: row.get::<_, i64>(5)? != 0,
+            status: row.get(6)?,
+            metadata: parse_metadata_json(metadata_json.as_deref()),
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
+        })
+    })?;
+
+    let mut records = Vec::new();
+    for row in rows {
+        records.push(row?);
+    }
+    Ok(records)
+}
+
+pub fn upsert_backup_record(connection: &Connection, draft: BackupRecordDraft) -> DbResult<i64> {
+    let now = utc_now_iso();
+    let backup_name = draft.backup_name;
+    connection.execute(
+        r#"
+        INSERT INTO backup_records (
+            backup_name, storage_type, file_path, checksum,
+            encrypted, status, metadata_json, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        ON CONFLICT(backup_name) DO UPDATE SET
+            storage_type = excluded.storage_type,
+            file_path = excluded.file_path,
+            checksum = excluded.checksum,
+            encrypted = excluded.encrypted,
+            status = excluded.status,
+            metadata_json = excluded.metadata_json,
+            updated_at = excluded.updated_at
+        "#,
+        params![
+            &backup_name,
+            "local",
+            draft.file_path,
+            draft.checksum,
+            if draft.encrypted { 1 } else { 0 },
+            draft.status,
+            draft.metadata.to_string(),
+            now,
+            now,
+        ],
+    )?;
+
+    backup_record_id_by_name(connection, &backup_name)?.ok_or_else(|| {
+        DbError::InvalidOperation("backup record upsert did not return a row".to_string())
+    })
+}
+
+pub fn update_backup_record_by_filename(
+    connection: &Connection,
+    filename: &str,
+    status: Option<&str>,
+    metadata_update: Value,
+) -> DbResult<bool> {
+    if filename.trim().is_empty() {
+        return Ok(false);
+    }
+
+    let existing_metadata = backup_record_metadata_by_name(connection, filename)?;
+    let merged_metadata = merge_metadata(existing_metadata, metadata_update);
+    let now = utc_now_iso();
+    let affected = if let Some(status) = status {
+        connection.execute(
+            r#"
+            UPDATE backup_records
+            SET status = ?1,
+                metadata_json = ?2,
+                updated_at = ?3
+            WHERE backup_name = ?4
+            "#,
+            params![status, merged_metadata.to_string(), now, filename],
+        )?
+    } else {
+        connection.execute(
+            r#"
+            UPDATE backup_records
+            SET metadata_json = ?1,
+                updated_at = ?2
+            WHERE backup_name = ?3
+            "#,
+            params![merged_metadata.to_string(), now, filename],
+        )?
+    };
+    Ok(affected > 0)
 }
 
 pub fn list_backup_jobs(connection: &Connection, user_id: UserId) -> DbResult<Vec<BackupJobRow>> {
@@ -275,6 +405,52 @@ fn find_backup_job_id_by_type(
     )?;
     let mut rows = statement.query(params![user_id, job_type])?;
     Ok(rows.next()?.map(|row| row.get(0)).transpose()?)
+}
+
+fn backup_record_id_by_name(connection: &Connection, backup_name: &str) -> DbResult<Option<i64>> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT id
+        FROM backup_records
+        WHERE backup_name = ?1
+        LIMIT 1
+        "#,
+    )?;
+    let mut rows = statement.query(params![backup_name])?;
+    Ok(rows.next()?.map(|row| row.get(0)).transpose()?)
+}
+
+fn backup_record_metadata_by_name(connection: &Connection, backup_name: &str) -> DbResult<Value> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT metadata_json
+        FROM backup_records
+        WHERE backup_name = ?1
+        LIMIT 1
+        "#,
+    )?;
+    let mut rows = statement.query(params![backup_name])?;
+    let Some(row) = rows.next()? else {
+        return Ok(Value::Object(Default::default()));
+    };
+    let metadata_json: Option<String> = row.get(0)?;
+    Ok(parse_metadata_json(metadata_json.as_deref()))
+}
+
+fn parse_metadata_json(raw_value: Option<&str>) -> Value {
+    raw_value
+        .and_then(|value| serde_json::from_str::<Value>(value).ok())
+        .unwrap_or_else(|| Value::Object(Default::default()))
+}
+
+fn merge_metadata(existing: Value, update: Value) -> Value {
+    let mut existing = existing.as_object().cloned().unwrap_or_default();
+    if let Some(update) = update.as_object() {
+        for (key, value) in update {
+            existing.insert(key.clone(), value.clone());
+        }
+    }
+    Value::Object(existing)
 }
 
 pub fn create_backup_audit_log_best_effort(connection: &Connection, draft: BackupAuditLogDraft) {

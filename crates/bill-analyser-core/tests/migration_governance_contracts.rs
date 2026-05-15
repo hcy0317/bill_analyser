@@ -397,32 +397,16 @@ fn bills_import_routes_are_python_deleted_and_provider_routes_are_rust_owned() {
 
 #[test]
 fn live_python_sidecar_routes_are_manifested_for_import_db_runtime_proxy() {
-    for (method, pattern, domain) in [
-        ("POST", "/api/llm/induce-rules", "ai-learning-llm"),
-        ("GET", "/api/backup/", "backup-ops"),
-    ] {
-        let endpoint = find_endpoint_ownership(method, pattern)
-            .unwrap_or_else(|| panic!("missing live Python sidecar endpoint {method} {pattern}"));
-        assert_eq!(endpoint.state, MigrationState::PythonProxied);
-        assert_eq!(endpoint.domain, domain);
-    }
+    let (method, pattern, domain) = ("POST", "/api/llm/induce-rules", "ai-learning-llm");
+    let endpoint = find_endpoint_ownership(method, pattern)
+        .unwrap_or_else(|| panic!("missing live Python sidecar endpoint {method} {pattern}"));
+    assert_eq!(endpoint.state, MigrationState::PythonProxied);
+    assert_eq!(endpoint.domain, domain);
 }
 
 #[test]
-fn backup_jobs_routes_are_rust_owned_while_file_ops_remain_proxied() {
+fn backup_ops_routes_are_rust_owned_after_file_runtime_cutover() {
     let manifest = expanded_route_manifest();
-    for endpoint in ["GET /api/backup/jobs", "POST /api/backup/jobs"] {
-        let entry = manifest
-            .iter()
-            .find(|entry| entry.endpoint == endpoint)
-            .unwrap_or_else(|| panic!("backup jobs route is present: {endpoint}"));
-        assert_eq!(entry.state, MigrationState::RustOwnedVerified);
-        assert_eq!(entry.handler, RouteHandlerId::BackupOpsRuntime);
-        assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessData);
-        assert!(entry.deletion_blockers.is_empty());
-        assert_eq!(entry.decision_required, DecisionRequired::None);
-    }
-
     for endpoint in [
         "GET /api/backup/",
         "POST /api/backup/create",
@@ -431,13 +415,22 @@ fn backup_jobs_routes_are_rust_owned_while_file_ops_remain_proxied() {
         "DELETE /api/backup/delete/{filename}",
         "POST /api/backup/restore/{filename}",
         "POST /api/backup/cleanup",
+        "GET /api/backup/jobs",
+        "POST /api/backup/jobs",
     ] {
         let entry = manifest
             .iter()
             .find(|entry| entry.endpoint == endpoint)
-            .unwrap_or_else(|| panic!("backup file route is present: {endpoint}"));
-        assert_eq!(entry.state, MigrationState::PythonProxied);
-        assert_eq!(entry.handler, RouteHandlerId::LegacyPythonProxyPassthrough);
+            .unwrap_or_else(|| panic!("backup ops route is present: {endpoint}"));
+        assert_eq!(entry.state, MigrationState::RustOwnedVerified);
+        assert_eq!(entry.handler, RouteHandlerId::BackupOpsRuntime);
+        if endpoint == "GET /api/backup/download/{filename}" {
+            assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskRawPassthrough);
+        } else {
+            assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessData);
+        }
+        assert!(entry.deletion_blockers.is_empty());
+        assert_eq!(entry.decision_required, DecisionRequired::None);
     }
 }
 

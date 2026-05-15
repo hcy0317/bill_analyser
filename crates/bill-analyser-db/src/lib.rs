@@ -56,7 +56,8 @@ pub use auth_registration::{
 };
 pub use backup::{
     create_backup_audit_log_best_effort, create_or_update_backup_job, init_backup_ops_schema,
-    list_backup_jobs, BackupAuditLogDraft, BackupJobDraft, BackupJobRow,
+    list_backup_jobs, list_backup_records, update_backup_record_by_filename, upsert_backup_record,
+    BackupAuditLogDraft, BackupJobDraft, BackupJobRow, BackupRecordDraft, BackupRecordRow,
 };
 pub use bills::{
     batch_create_bills, batch_delete_bills, batch_update_bills, bind_bill_to_recurring,

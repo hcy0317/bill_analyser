@@ -21,6 +21,7 @@ bytes = "1.9"
 calamine = { version = "0.35.0", default-features = false }
 csv = "1.3"
 encoding_rs = "0.8"
+fernet = { version = "0.2.2", default-features = false, features = ["rustcrypto"] }
 http = "1.2"
 md5 = "0.7"
 qrcodegen = "1.8"
@@ -32,12 +33,15 @@ serde_json = "1.0"
 sha1 = "0.10"
 sha2 = "0.10"
 thiserror = "2.0"
-tokio = { version = "1.42", features = ["macros", "net", "rt-multi-thread", "time"] }
+tokio = { version = "1.42", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "time"] }
+tokio-util = { version = "0.7", features = ["io"] }
 tower = { version = "0.5", features = ["util"] }
 unicode-normalization = "0.1"
 url = "2.5"
 rusqlite = { version = "0.32", features = ["bundled"] }
 tempfile = "3.14"
+walkdir = "2.5"
+zip = { version = "7.2.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

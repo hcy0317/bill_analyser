@@ -413,6 +413,10 @@ pub fn plan_backup_cleanup(
         .take(keep_count)
         .map(|record| record.backup_name.clone())
         .collect::<BTreeSet<_>>();
+    let active_record_names = active_records
+        .iter()
+        .map(|record| record.backup_name.clone())
+        .collect::<BTreeSet<_>>();
 
     let mut deleted_count = 0_usize;
     for record in active_records.iter().skip(keep_count) {
@@ -427,6 +431,7 @@ pub fn plan_backup_cleanup(
     let mut stray = stray_files
         .iter()
         .filter(|candidate| !kept_record_names.contains(&candidate.filename))
+        .filter(|candidate| !active_record_names.contains(&candidate.filename))
         .collect::<Vec<_>>();
     stray.sort_by(|left, right| right.modified_at.cmp(&left.modified_at));
 

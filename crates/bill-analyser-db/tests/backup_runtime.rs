@@ -3,7 +3,8 @@ use std::error::Error;
 use bill_analyser_core::UserId;
 use bill_analyser_db::{
     create_backup_audit_log_best_effort, create_or_update_backup_job, init_backup_ops_schema,
-    list_backup_jobs, BackupAuditLogDraft, BackupJobDraft,
+    list_backup_jobs, list_backup_records, update_backup_record_by_filename, upsert_backup_record,
+    BackupAuditLogDraft, BackupJobDraft, BackupRecordDraft,
 };
 use rusqlite::Connection;
 use serde_json::json;
@@ -230,6 +231,73 @@ fn backup_ops_schema_migrates_legacy_jobs_to_user_scoped_unique_rows() -> Result
     )?;
     assert_ne!(other_user_job_id, upserted_id);
     assert_eq!(list_backup_jobs(&connection, other_user_id)?.len(), 1);
+
+    Ok(())
+}
+
+#[test]
+fn backup_ops_repository_roundtrips_backup_records() -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open_in_memory()?;
+    init_backup_ops_schema(&connection)?;
+
+    let record_id = upsert_backup_record(
+        &connection,
+        BackupRecordDraft {
+            backup_name: "backup_20260515_120000.zip".to_string(),
+            file_path: "C:/repo/backup/backup_20260515_120000.zip".to_string(),
+            checksum: "abc123".to_string(),
+            encrypted: false,
+            status: "created".to_string(),
+            metadata: json!({
+                "valid_zip": true,
+                "ready_to_restore": true,
+                "entry_count": 1,
+            }),
+        },
+    )?;
+    assert_eq!(record_id, 1);
+
+    let same_record_id = upsert_backup_record(
+        &connection,
+        BackupRecordDraft {
+            backup_name: "backup_20260515_120000.zip".to_string(),
+            file_path: "C:/repo/backup/backup_20260515_120000.zip".to_string(),
+            checksum: "def456".to_string(),
+            encrypted: true,
+            status: "created".to_string(),
+            metadata: json!({
+                "valid_zip": true,
+                "ready_to_restore": true,
+                "entry_count": 2,
+            }),
+        },
+    )?;
+    assert_eq!(same_record_id, record_id);
+
+    let records = list_backup_records(&connection)?;
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].backup_name, "backup_20260515_120000.zip");
+    assert_eq!(records[0].checksum.as_deref(), Some("def456"));
+    assert!(records[0].encrypted);
+    assert_eq!(records[0].metadata["entry_count"], 2);
+
+    assert!(update_backup_record_by_filename(
+        &connection,
+        "backup_20260515_120000.zip",
+        Some("deleted"),
+        json!({"deleted_reason": "manual_delete"})
+    )?);
+    assert!(!update_backup_record_by_filename(
+        &connection,
+        "missing.zip",
+        Some("deleted"),
+        json!({"deleted_reason": "manual_delete"})
+    )?);
+
+    let updated = list_backup_records(&connection)?;
+    assert_eq!(updated[0].status, "deleted");
+    assert_eq!(updated[0].metadata["entry_count"], 2);
+    assert_eq!(updated[0].metadata["deleted_reason"], "manual_delete");
 
     Ok(())
 }

@@ -1,20 +1,32 @@
-use std::{error::Error, path::Path, time::Duration};
+use std::{
+    error::Error,
+    fs::{self, File},
+    io::Write,
+    path::Path,
+    time::Duration,
+};
 
 use axum::{
     body::{to_bytes, Body},
     http::{Method, Request, StatusCode},
     Router,
 };
+use base64::{engine::general_purpose, Engine as _};
 use bill_analyser_http::{
     build_router, is_manifest_python_proxied_route, HttpShellConfig, ImportRouteMode, ProxyState,
     BACKUP_OPS_PROXIED_ROUTE_PATTERNS, BACKUP_OPS_ROUTE_PATTERNS,
 };
+use chrono::{Duration as ChronoDuration, Local};
+use ring::hmac;
 use rusqlite::Connection;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 use tower::ServiceExt;
+use zip::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const TEST_TRUST_SECRET: &str = "backup-route-secret";
+const TEST_AUTH_SECRET: &str = "backup-auth-secret";
 const TEST_USER_ID: &str = "42";
 
 #[tokio::test]
@@ -26,15 +38,13 @@ async fn backup_jobs_runtime_serves_list_validation_create_and_update() -> Resul
     assert!(BACKUP_OPS_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/backup/jobs")));
-    assert!(BACKUP_OPS_PROXIED_ROUTE_PATTERNS
-        .iter()
-        .any(|route| route == &("POST", "/api/backup/restore/verify")));
+    assert!(BACKUP_OPS_PROXIED_ROUTE_PATTERNS.is_empty());
     assert!(!is_manifest_python_proxied_route("GET", "/api/backup/jobs"));
     assert!(!is_manifest_python_proxied_route(
         "POST",
         "/api/backup/jobs"
     ));
-    assert!(is_manifest_python_proxied_route(
+    assert!(!is_manifest_python_proxied_route(
         "POST",
         "/api/backup/restore/verify"
     ));
@@ -253,23 +263,443 @@ async fn backup_jobs_runtime_requires_auth_and_sqlite_path() -> Result<(), Box<d
     Ok(())
 }
 
+#[tokio::test]
+async fn backup_file_runtime_creates_lists_downloads_deletes_and_cleans_up(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    fs::create_dir_all(fixture.data_dir.join("nested"))?;
+    fs::write(
+        fixture.data_dir.join("nested").join("records.json"),
+        b"records",
+    )?;
+    let app = runtime_router(&fixture);
+
+    for route in [
+        ("GET", "/api/backup/"),
+        ("POST", "/api/backup/create"),
+        ("POST", "/api/backup/restore/verify"),
+        ("GET", "/api/backup/download/{filename}"),
+        ("DELETE", "/api/backup/delete/{filename}"),
+        ("POST", "/api/backup/cleanup"),
+    ] {
+        assert!(bill_analyser_http::BACKUP_OPS_ROUTE_PATTERNS
+            .iter()
+            .any(|item| item == &route));
+    }
+    assert!(!is_manifest_python_proxied_route("GET", "/api/backup/"));
+
+    let create_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/backup/create",
+            Body::empty(),
+        ))
+        .await?;
+    let create_status = create_response.status();
+    let create_body = read_json(create_response).await;
+    assert_eq!(
+        create_status,
+        StatusCode::OK,
+        "create backup response body: {create_body}"
+    );
+    let filename = create_body["data"]["filename"]
+        .as_str()
+        .expect("created filename")
+        .to_string();
+    assert!(filename.starts_with("backup_"));
+    assert!(filename.ends_with(".zip"));
+    assert_eq!(create_body["data"]["valid_zip"], true);
+    assert_eq!(create_body["data"]["ready_to_restore"], true);
+    assert_eq!(create_body["data"]["encrypted"], false);
+    assert!(fixture.backup_dir.join(&filename).exists());
+    assert_eq!(
+        audit_count(&fixture.db_path, "backup_created", "success")?,
+        1
+    );
+
+    let list_response = app
+        .clone()
+        .oneshot(authed_request(Method::GET, "/api/backup/", Body::empty()))
+        .await?;
+    assert_eq!(list_response.status(), StatusCode::OK);
+    let list_body = read_json(list_response).await;
+    assert_eq!(list_body["data"].as_array().expect("backups").len(), 1);
+    assert_eq!(list_body["data"][0]["filename"], filename);
+    assert_eq!(list_body["data"][0]["recordStatus"], "created");
+    assert_eq!(list_body["data"][0]["metadata_checksum_matched"], true);
+
+    let verify_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/backup/restore/verify",
+            json!({"filename": filename}),
+        ))
+        .await?;
+    assert_eq!(verify_response.status(), StatusCode::OK);
+    let verify_body = read_json(verify_response).await;
+    assert_eq!(verify_body["success"], true);
+    assert_eq!(verify_body["data"]["filename"], filename);
+
+    let download_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            &format!("/api/backup/download/{filename}"),
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(download_response.status(), StatusCode::OK);
+    let content_disposition = download_response
+        .headers()
+        .get("content-disposition")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    assert!(content_disposition.contains(&filename));
+    let downloaded = to_bytes(download_response.into_body(), 1024 * 1024).await?;
+    assert!(!downloaded.is_empty());
+
+    let delete_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::DELETE,
+            &format!("/api/backup/delete/{filename}"),
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(delete_response.status(), StatusCode::OK);
+    assert!(!fixture.backup_dir.join(&filename).exists());
+    assert_eq!(
+        audit_count(&fixture.db_path, "backup_deleted", "success")?,
+        1
+    );
+
+    let create_again_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/backup/create",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(create_again_response.status(), StatusCode::OK);
+    let create_again_body = read_json(create_again_response).await;
+    let second_filename = create_again_body["data"]["filename"]
+        .as_str()
+        .expect("second filename")
+        .to_string();
+    assert_ne!(second_filename, filename);
+
+    let invalid_json_cleanup = app
+        .clone()
+        .oneshot(raw_json_request(Method::POST, "/api/backup/cleanup", "{"))
+        .await?;
+    assert_eq!(invalid_json_cleanup.status(), StatusCode::BAD_REQUEST);
+    assert!(fixture.backup_dir.join(&second_filename).exists());
+
+    let cleanup_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/backup/cleanup",
+            json!({"keep_count": 0}),
+        ))
+        .await?;
+    assert_eq!(cleanup_response.status(), StatusCode::OK);
+    let cleanup_body = read_json(cleanup_response).await;
+    assert_eq!(cleanup_body["data"]["deleted_count"], 1);
+    assert_eq!(cleanup_body["data"]["kept_count"], 0);
+    assert_eq!(
+        audit_count(&fixture.db_path, "backup_cleanup", "success")?,
+        1
+    );
+
+    let invalid_cleanup = app
+        .oneshot(json_request(
+            Method::POST,
+            "/api/backup/cleanup",
+            json!({"keep_count": -1}),
+        ))
+        .await?;
+    assert_eq!(invalid_cleanup.status(), StatusCode::BAD_REQUEST);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn backup_file_runtime_requires_step_up_for_bearer_sessions() -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    fs::write(fixture.data_dir.join("records.json"), b"records")?;
+    let access_token = test_jwt(42, "access", ChronoDuration::hours(1));
+    let step_up_token = test_jwt(42, "step_up", ChronoDuration::hours(1));
+    seed_bearer_session(&fixture.db_path, 42, &access_token)?;
+    let app = runtime_router_with_auth_secret(&fixture);
+
+    let missing_step_up = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/backup/",
+            &access_token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(missing_step_up.status(), StatusCode::UNAUTHORIZED);
+    let missing_body = read_json(missing_step_up).await;
+    assert_eq!(
+        missing_body["error"],
+        "step-up token is required for backup file operation"
+    );
+
+    let listed = app
+        .clone()
+        .oneshot(bearer_request_with_step_up(
+            Method::GET,
+            "/api/backup/",
+            &access_token,
+            &step_up_token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(listed.status(), StatusCode::OK);
+
+    let foreign_step_up = test_jwt(77, "step_up", ChronoDuration::hours(1));
+    let rejected = app
+        .oneshot(bearer_request_with_step_up(
+            Method::GET,
+            "/api/backup/",
+            &access_token,
+            &foreign_step_up,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn backup_file_runtime_snapshots_sqlite_db_under_data_dir() -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new_with_db_in_data()?;
+    seed_source_marker_db(&fixture.db_path, "original")?;
+    fs::write(fixture.data_dir.join("note.txt"), b"original-note")?;
+    let app = runtime_router(&fixture);
+
+    let create_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/backup/create",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(create_response.status(), StatusCode::OK);
+    let create_body = read_json(create_response).await;
+    let filename = create_body["data"]["filename"]
+        .as_str()
+        .expect("created filename")
+        .to_string();
+    assert_backup_zip_contains_sqlite_marker(&fixture.backup_dir.join(&filename), "original")?;
+
+    seed_source_marker_db(&fixture.db_path, "mutated")?;
+    fs::write(fixture.data_dir.join("note.txt"), b"mutated-note")?;
+    let restore_response = app
+        .oneshot(authed_request(
+            Method::POST,
+            &format!("/api/backup/restore/{filename}"),
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(restore_response.status(), StatusCode::OK);
+    assert_eq!(source_marker(&fixture.db_path)?, "original");
+    assert_eq!(
+        fs::read(fixture.data_dir.join("note.txt"))?,
+        b"original-note"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn backup_file_runtime_restores_plain_zip_and_rejects_unsafe_archive(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    fs::write(fixture.data_dir.join("old.txt"), b"old")?;
+    let app = runtime_router(&fixture);
+    let backup_path = fixture.backup_dir.join("backup_20260515_120000.zip");
+    write_zip_entries(
+        &backup_path,
+        &[("data/restored.txt", b"restored".as_slice())],
+    )?;
+
+    let restore_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/backup/restore/backup_20260515_120000.zip",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(restore_response.status(), StatusCode::OK);
+    let restore_body = read_json(restore_response).await;
+    assert_eq!(restore_body["success"], true);
+    assert_eq!(
+        fs::read(fixture.data_dir.join("restored.txt"))?,
+        b"restored"
+    );
+    assert!(!fixture.data_dir.join("old.txt").exists());
+    assert!(fixture.backup_dir.read_dir()?.any(|entry| entry
+        .expect("entry")
+        .file_name()
+        .to_string_lossy()
+        .starts_with("before_restore_")));
+    assert_eq!(
+        audit_count(&fixture.db_path, "backup_restored", "success")?,
+        1
+    );
+
+    let unsafe_path = fixture.backup_dir.join("backup_20260515_130000.zip");
+    write_zip_entries(
+        &unsafe_path,
+        &[
+            ("data/restored.txt", b"restored".as_slice()),
+            ("../escape.txt", b"escape".as_slice()),
+        ],
+    )?;
+    let unsafe_verify = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/backup/restore/verify",
+            json!({"filename": "backup_20260515_130000.zip"}),
+        ))
+        .await?;
+    assert_eq!(unsafe_verify.status(), StatusCode::BAD_REQUEST);
+    let unsafe_body = read_json(unsafe_verify).await;
+    assert_eq!(unsafe_body["success"], false);
+    assert!(unsafe_body["data"]["error"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("不安全路径"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn backup_file_runtime_handles_encrypted_create_verify_and_restore(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    fs::write(fixture.data_dir.join("secret.txt"), b"original")?;
+    let app = runtime_router_with_backup_key(&fixture, Some("local-backup-secret"));
+
+    let create_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/backup/create",
+            Body::empty(),
+        ))
+        .await?;
+    let create_status = create_response.status();
+    let create_body = read_json(create_response).await;
+    assert_eq!(
+        create_status,
+        StatusCode::OK,
+        "encrypted create response body: {create_body}"
+    );
+    let filename = create_body["data"]["filename"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(filename.ends_with(".zip.enc"));
+    assert_eq!(create_body["data"]["encrypted"], true);
+    assert_eq!(create_body["data"]["ready_to_restore"], true);
+
+    fs::write(fixture.data_dir.join("secret.txt"), b"mutated")?;
+    let restore_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            &format!("/api/backup/restore/{filename}"),
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(restore_response.status(), StatusCode::OK);
+    assert_eq!(fs::read(fixture.data_dir.join("secret.txt"))?, b"original");
+
+    let app_without_key = runtime_router(&fixture);
+    let verify_without_key = app_without_key
+        .oneshot(json_request(
+            Method::POST,
+            "/api/backup/restore/verify",
+            json!({"filename": filename}),
+        ))
+        .await?;
+    assert_eq!(verify_without_key.status(), StatusCode::BAD_REQUEST);
+    let verify_without_key_body = read_json(verify_without_key).await;
+    assert_eq!(
+        verify_without_key_body["data"]["error"],
+        "backup encryption key is not configured"
+    );
+
+    Ok(())
+}
+
 struct RuntimeFixture {
     _temp: TempDir,
     db_path: std::path::PathBuf,
+    data_dir: std::path::PathBuf,
+    backup_dir: std::path::PathBuf,
 }
 
 impl RuntimeFixture {
     fn new() -> Result<Self, Box<dyn Error>> {
-        let temp = TempDir::new()?;
+        let fixture_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("target")
+            .join("backup-runtime-fixtures");
+        fs::create_dir_all(&fixture_root)?;
+        let temp = TempDir::new_in(fixture_root)?;
         let db_path = temp.path().join("backup-runtime.db");
+        let data_dir = temp.path().join("data");
+        let backup_dir = temp.path().join("backup");
+        fs::create_dir_all(&data_dir)?;
+        fs::create_dir_all(&backup_dir)?;
         Ok(Self {
             _temp: temp,
             db_path,
+            data_dir,
+            backup_dir,
         })
+    }
+
+    fn new_with_db_in_data() -> Result<Self, Box<dyn Error>> {
+        let mut fixture = Self::new()?;
+        fixture.db_path = fixture.data_dir.join("bills.db");
+        Ok(fixture)
     }
 }
 
 fn runtime_router(fixture: &RuntimeFixture) -> Router {
+    runtime_router_with_backup_key(fixture, None)
+}
+
+fn runtime_router_with_backup_key(fixture: &RuntimeFixture, backup_key: Option<&str>) -> Router {
+    runtime_router_with_options(fixture, backup_key, None)
+}
+
+fn runtime_router_with_auth_secret(fixture: &RuntimeFixture) -> Router {
+    runtime_router_with_options(fixture, None, Some(TEST_AUTH_SECRET))
+}
+
+fn runtime_router_with_options(
+    fixture: &RuntimeFixture,
+    backup_key: Option<&str>,
+    auth_secret: Option<&str>,
+) -> Router {
     let config = HttpShellConfig::new_with_import_route_mode(
         "http://127.0.0.1:5001",
         Duration::from_secs(1),
@@ -278,7 +708,19 @@ fn runtime_router(fixture: &RuntimeFixture) -> Router {
     )
     .expect("config")
     .with_sqlite_db_path(fixture.db_path.to_string_lossy().to_string())
+    .with_data_dir(fixture.data_dir.to_string_lossy().to_string())
+    .with_backup_dir(fixture.backup_dir.to_string_lossy().to_string())
     .with_trusted_user_header_secret(TEST_TRUST_SECRET);
+    let config = if let Some(backup_key) = backup_key {
+        config.with_backup_encryption_key(backup_key)
+    } else {
+        config
+    };
+    let config = if let Some(auth_secret) = auth_secret {
+        config.with_auth_jwt_secret(auth_secret)
+    } else {
+        config
+    };
     build_router(ProxyState::new(config).expect("state"))
 }
 
@@ -302,6 +744,45 @@ fn json_request(method: Method, uri: &str, payload: Value) -> Request<Body> {
     json_request_for_user(method, uri, payload, TEST_USER_ID)
 }
 
+fn raw_json_request(method: Method, uri: &str, payload: &str) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("x-bill-analyser-trusted-user-secret", TEST_TRUST_SECRET)
+        .header("x-user-id", TEST_USER_ID)
+        .header("user-agent", "backup-runtime-contract")
+        .header("content-type", "application/json")
+        .body(Body::from(payload.to_string()))
+        .expect("request")
+}
+
+fn bearer_request(method: Method, uri: &str, token: &str, body: Body) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("authorization", format!("Bearer {token}"))
+        .header("user-agent", "backup-runtime-contract")
+        .body(body)
+        .expect("request")
+}
+
+fn bearer_request_with_step_up(
+    method: Method,
+    uri: &str,
+    token: &str,
+    step_up_token: &str,
+    body: Body,
+) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("authorization", format!("Bearer {token}"))
+        .header("x-bill-analyser-step-up-token", step_up_token)
+        .header("user-agent", "backup-runtime-contract")
+        .body(body)
+        .expect("request")
+}
+
 fn json_request_for_user(
     method: Method,
     uri: &str,
@@ -318,6 +799,113 @@ fn json_request_for_user(
         .header("content-type", "application/json")
         .body(Body::from(payload.to_string()))
         .expect("request")
+}
+
+fn write_zip_entries(path: &Path, entries: &[(&str, &[u8])]) -> Result<(), Box<dyn Error>> {
+    let file = File::create(path)?;
+    let mut zip = ZipWriter::new(file);
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+    for (name, content) in entries {
+        zip.start_file(*name, options)?;
+        zip.write_all(content)?;
+    }
+    zip.finish()?;
+    Ok(())
+}
+
+fn test_jwt(user_id: i64, token_type: &str, exp_offset: ChronoDuration) -> String {
+    let now = Local::now();
+    let header = json!({"alg": "HS256", "typ": "JWT"});
+    let payload = json!({
+        "user_id": user_id,
+        "username": format!("user-{user_id}"),
+        "type": token_type,
+        "iat": now.timestamp(),
+        "exp": (now + exp_offset).timestamp(),
+    });
+    let encoded_header =
+        general_purpose::URL_SAFE_NO_PAD.encode(serde_json::to_vec(&header).expect("header json"));
+    let encoded_payload = general_purpose::URL_SAFE_NO_PAD
+        .encode(serde_json::to_vec(&payload).expect("payload json"));
+    let signing_input = format!("{encoded_header}.{encoded_payload}");
+    let key = hmac::Key::new(hmac::HMAC_SHA256, TEST_AUTH_SECRET.as_bytes());
+    let signature = hmac::sign(&key, signing_input.as_bytes());
+    let encoded_signature = general_purpose::URL_SAFE_NO_PAD.encode(signature.as_ref());
+    format!("{signing_input}.{encoded_signature}")
+}
+
+fn seed_bearer_session(path: &Path, user_id: i64, token: &str) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    bill_analyser_db::init_auth_security_schema(&connection)?;
+    let now = Local::now().naive_local();
+    let now_text = now.format("%Y-%m-%dT%H:%M:%S%.f").to_string();
+    let expires_at = (now + ChronoDuration::hours(1))
+        .format("%Y-%m-%dT%H:%M:%S%.f")
+        .to_string();
+    connection.execute(
+        r#"
+        INSERT INTO users(id, username, email, password_hash, is_active, created_at, updated_at)
+        VALUES (?1, ?2, ?3, ?4, 1, ?5, ?5)
+        "#,
+        (
+            user_id,
+            format!("user-{user_id}"),
+            format!("user-{user_id}@example.test"),
+            "",
+            &now_text,
+        ),
+    )?;
+    connection.execute(
+        r#"
+        INSERT INTO sessions(
+            user_id, token_hash, refresh_token_hash, expires_at, refresh_expires_at,
+            user_agent, ip_address, is_active, last_activity_at, created_at
+        ) VALUES (?1, ?2, NULL, ?3, ?3, 'test', '127.0.0.1', 1, ?4, ?4)
+        "#,
+        (user_id, sha256_hex(token), expires_at, now_text),
+    )?;
+    Ok(())
+}
+
+fn sha256_hex(value: &str) -> String {
+    format!("{:x}", Sha256::digest(value.as_bytes()))
+}
+
+fn seed_source_marker_db(path: &Path, marker: &str) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    connection.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS source_marker(value TEXT NOT NULL);
+        DELETE FROM source_marker;
+        ",
+    )?;
+    connection.execute("INSERT INTO source_marker(value) VALUES (?1)", [marker])?;
+    Ok(())
+}
+
+fn source_marker(path: &Path) -> Result<String, Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    Ok(
+        connection.query_row("SELECT value FROM source_marker LIMIT 1", [], |row| {
+            row.get(0)
+        })?,
+    )
+}
+
+fn assert_backup_zip_contains_sqlite_marker(
+    backup_path: &Path,
+    expected: &str,
+) -> Result<(), Box<dyn Error>> {
+    let file = File::open(backup_path)?;
+    let mut archive = ZipArchive::new(file)?;
+    let mut db_file = archive.by_name("data/bills.db")?;
+    let mut db_bytes = Vec::new();
+    std::io::copy(&mut db_file, &mut db_bytes)?;
+    let temp = TempDir::new()?;
+    let db_path = temp.path().join("snapshot.db");
+    fs::write(&db_path, db_bytes)?;
+    assert_eq!(source_marker(&db_path)?, expected);
+    Ok(())
 }
 
 async fn read_json(response: axum::response::Response) -> Value {

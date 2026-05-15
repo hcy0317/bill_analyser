@@ -159,6 +159,10 @@ fn backup_cleanup_plan_matches_record_first_retention_semantics() {
     ];
     let stray_files = vec![
         BackupFileCandidate {
+            filename: "backup_old.zip".to_string(),
+            modified_at: 300,
+        },
+        BackupFileCandidate {
             filename: "backup_stray_new.zip.enc".to_string(),
             modified_at: 200,
         },
