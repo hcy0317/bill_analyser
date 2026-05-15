@@ -417,6 +417,7 @@ fn backup_ops_routes_are_rust_owned_after_file_runtime_cutover() {
         "POST /api/backup/cleanup",
         "GET /api/backup/jobs",
         "POST /api/backup/jobs",
+        "POST /api/backup/sync",
     ] {
         let entry = manifest
             .iter()

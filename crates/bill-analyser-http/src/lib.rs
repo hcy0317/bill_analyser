@@ -7,6 +7,7 @@
 pub mod auth;
 pub mod auth_routes;
 pub mod backup_routes;
+mod backup_sync;
 pub mod bill_routes;
 pub mod budget_routes;
 pub mod config;

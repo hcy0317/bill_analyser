@@ -1,14 +1,18 @@
 use std::{
+    collections::BTreeMap,
     error::Error,
     fs::{self, File},
     io::Write,
     path::Path,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
 use axum::{
     body::{to_bytes, Body},
-    http::{Method, Request, StatusCode},
+    extract::State,
+    http::{HeaderMap, Method, Request, StatusCode, Uri},
+    routing::any,
     Router,
 };
 use base64::{engine::general_purpose, Engine as _};
@@ -424,6 +428,312 @@ async fn backup_file_runtime_creates_lists_downloads_deletes_and_cleans_up(
         ))
         .await?;
     assert_eq!(invalid_cleanup.status(), StatusCode::BAD_REQUEST);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn backup_sync_runtime_rejects_invalid_config_before_creating_backup(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    fs::write(fixture.data_dir.join("records.json"), b"records")?;
+    let app = runtime_router(&fixture);
+
+    assert!(BACKUP_OPS_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/backup/sync")));
+    assert!(!is_manifest_python_proxied_route(
+        "POST",
+        "/api/backup/sync"
+    ));
+
+    for payload in [
+        json!({}),
+        json!({"provider": "unknown", "endpoint": "http://127.0.0.1:9"}),
+        json!({
+            "provider": "s3",
+            "endpoint": "http://127.0.0.1:9",
+            "bucket": "bucket",
+            "access_key": "ak",
+            "secret_key": "sk",
+            "prefix": "../escape",
+        }),
+        json!({"provider": "webdav", "endpoint": "ftp://example.test"}),
+        json!({"provider": "webdav", "endpoint": "http://user:pass@127.0.0.1/"}),
+        json!({
+            "provider": "azure",
+            "endpoint": "http://127.0.0.1:9",
+            "bucket": "container",
+            "access_key": "account",
+            "secret_key": "not-base64",
+        }),
+        json!({
+            "provider": "s3",
+            "endpoint": "http://127.0.0.1:9",
+            "access_key": "ak",
+            "secret_key": "sk",
+        }),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(json_request(Method::POST, "/api/backup/sync", payload))
+            .await?;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = read_json(response).await;
+        assert_eq!(body["success"], false);
+    }
+
+    assert!(fixture.backup_dir.read_dir()?.next().is_none());
+    assert_eq!(
+        audit_count(&fixture.db_path, "backup_cloud_synced", "failed")?,
+        7
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn backup_sync_runtime_records_provider_failure_with_safe_payload(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    fs::write(fixture.data_dir.join("records.json"), b"records")?;
+    let server = FakeCloudServer::start_with_status(StatusCode::INTERNAL_SERVER_ERROR).await?;
+    let app = runtime_router(&fixture);
+
+    let response = app
+        .oneshot(json_request(
+            Method::POST,
+            "/api/backup/sync",
+            json!({
+                "provider": "s3",
+                "endpoint": server.endpoint(),
+                "bucket": "bucket",
+                "access_key": "ak",
+                "secret_key": "sk",
+                "prefix": "prefix",
+            }),
+        ))
+        .await?;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let body = read_json(response).await;
+    assert_eq!(body["success"], false);
+    assert_eq!(body["data"]["provider"], "s3");
+    assert_eq!(body["data"]["safe_config"]["secret_key"], "********");
+    assert!(body["error"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("s3 upload failed with status 500"));
+    assert_eq!(
+        audit_count(&fixture.db_path, "backup_created", "success")?,
+        1
+    );
+    assert_eq!(
+        audit_count(&fixture.db_path, "backup_cloud_synced", "failed")?,
+        1
+    );
+    assert!(server
+        .requests()
+        .iter()
+        .any(|request| request.method == "PUT"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn backup_sync_runtime_reports_payload_and_prepare_errors() -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    let app = runtime_router(&fixture);
+
+    let invalid_payload = app
+        .clone()
+        .oneshot(raw_json_request(Method::POST, "/api/backup/sync", "[]"))
+        .await?;
+    assert_eq!(invalid_payload.status(), StatusCode::BAD_REQUEST);
+    let invalid_body = read_json(invalid_payload).await;
+    assert_eq!(invalid_body["success"], false);
+    assert_eq!(invalid_body["error"], "JSON body must be an object");
+
+    let source_error_fixture = RuntimeFixture::new()?;
+    fs::remove_dir_all(&source_error_fixture.data_dir)?;
+    fs::write(&source_error_fixture.data_dir, b"not a directory")?;
+    let source_error_app = runtime_router(&source_error_fixture);
+    let source_error = source_error_app
+        .oneshot(json_request(
+            Method::POST,
+            "/api/backup/sync",
+            json!({
+                "provider": "webdav",
+                "endpoint": "http://127.0.0.1:9",
+                "prefix": "prepare/errors",
+            }),
+        ))
+        .await?;
+    assert_eq!(source_error.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let source_error_body = read_json(source_error).await;
+    assert_eq!(source_error_body["success"], false);
+    assert_eq!(
+        audit_count(&fixture.db_path, "backup_cloud_synced", "failed")?,
+        1
+    );
+    assert_eq!(
+        audit_count(
+            &source_error_fixture.db_path,
+            "backup_cloud_synced",
+            "failed"
+        )?,
+        1
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn backup_sync_runtime_uploads_to_webdav_and_redacts_secrets() -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    fs::write(fixture.data_dir.join("records.json"), b"records")?;
+    let server = FakeCloudServer::start().await?;
+    let app = runtime_router(&fixture);
+
+    let response = app
+        .oneshot(json_request(
+            Method::POST,
+            "/api/backup/sync",
+            json!({
+                "config": {
+                    "provider": "webdav",
+                    "endpoint": server.endpoint(),
+                    "access_key": "alice",
+                    "secret_key": "secret",
+                    "prefix": "remote/path",
+                },
+                "step_up_token": "trusted-header-auth-does-not-use-this-field",
+            }),
+        ))
+        .await?;
+    let status = response.status();
+    let body = read_json(response).await;
+    assert_eq!(status, StatusCode::OK, "sync response body: {body}");
+    assert_eq!(body["success"], true);
+    assert_eq!(body["data"]["provider"], "webdav");
+    assert_eq!(body["data"]["safe_config"]["access_key"], "********");
+    assert_eq!(body["data"]["safe_config"]["secret_key"], "********");
+    assert!(body["data"]["object_key"]
+        .as_str()
+        .unwrap_or_default()
+        .starts_with("remote/path/backup_"));
+
+    let requests = server.requests();
+    assert!(requests
+        .iter()
+        .any(|request| request.method == "MKCOL" && request.path == "/remote"));
+    assert!(requests
+        .iter()
+        .any(|request| request.method == "MKCOL" && request.path == "/remote/path"));
+    let put = requests
+        .iter()
+        .find(|request| request.method == "PUT")
+        .expect("PUT request");
+    assert!(put.path.starts_with("/remote/path/backup_"));
+    assert!(put.path.ends_with(".zip"));
+    assert!(put.body_len > 0);
+    assert_eq!(
+        put.headers.get("authorization").map(String::as_str),
+        Some("Basic YWxpY2U6c2VjcmV0")
+    );
+    assert_eq!(
+        audit_count(&fixture.db_path, "backup_created", "success")?,
+        1
+    );
+    assert_eq!(
+        audit_count(&fixture.db_path, "backup_cloud_synced", "success")?,
+        1
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn backup_sync_runtime_signs_object_storage_provider_requests() -> Result<(), Box<dyn Error>>
+{
+    for provider in ["oss", "s3", "cos", "azure"] {
+        let fixture = RuntimeFixture::new()?;
+        fs::write(
+            fixture.data_dir.join("records.json"),
+            format!("{provider}-records"),
+        )?;
+        let server = FakeCloudServer::start().await?;
+        let app = runtime_router(&fixture);
+        let secret_key = if provider == "azure" {
+            general_purpose::STANDARD.encode("azure-secret")
+        } else {
+            "sk".to_string()
+        };
+        let access_key = if provider == "azure" { "account" } else { "ak" };
+        let bucket = if provider == "azure" {
+            "container"
+        } else {
+            "bucket"
+        };
+        let response = app
+            .oneshot(json_request(
+                Method::POST,
+                "/api/backup/sync",
+                json!({
+                    "provider": provider,
+                    "endpoint": server.endpoint(),
+                    "bucket": bucket,
+                    "access_key": access_key,
+                    "secret_key": secret_key,
+                    "prefix": "prefix",
+                    "region": "ap-shanghai",
+                }),
+            ))
+            .await?;
+        let status = response.status();
+        let body = read_json(response).await;
+        assert_eq!(status, StatusCode::OK, "{provider} body: {body}");
+        assert_eq!(body["data"]["provider"], provider);
+        assert_eq!(body["data"]["safe_config"]["secret_key"], "********");
+
+        let requests = server.requests();
+        let put = requests
+            .iter()
+            .find(|request| request.method == "PUT")
+            .unwrap_or_else(|| panic!("{provider} PUT request"));
+        assert!(
+            put.path.contains("/prefix/backup_"),
+            "{provider}: {}",
+            put.path
+        );
+        assert!(put.body_len > 0);
+        let authorization = put
+            .headers
+            .get("authorization")
+            .map(String::as_str)
+            .unwrap_or_default();
+        match provider {
+            "oss" => assert!(authorization.starts_with("OSS ak:"), "{authorization}"),
+            "s3" => assert!(
+                authorization.starts_with("AWS4-HMAC-SHA256 Credential=ak/"),
+                "{authorization}"
+            ),
+            "cos" => assert!(
+                authorization.starts_with("q-sign-algorithm=sha1&q-ak=ak"),
+                "{authorization}"
+            ),
+            "azure" => {
+                assert!(
+                    authorization.starts_with("SharedKey account:"),
+                    "{authorization}"
+                );
+                assert_eq!(
+                    put.headers.get("x-ms-blob-type").map(String::as_str),
+                    Some("BlockBlob")
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
 
     Ok(())
 }
@@ -906,6 +1216,76 @@ fn assert_backup_zip_contains_sqlite_marker(
     fs::write(&db_path, db_bytes)?;
     assert_eq!(source_marker(&db_path)?, expected);
     Ok(())
+}
+
+#[derive(Clone)]
+struct FakeCloudServer {
+    endpoint: String,
+    requests: Arc<Mutex<Vec<RecordedCloudRequest>>>,
+}
+
+#[derive(Debug, Clone)]
+struct RecordedCloudRequest {
+    method: String,
+    path: String,
+    headers: BTreeMap<String, String>,
+    body_len: usize,
+}
+
+impl FakeCloudServer {
+    async fn start() -> Result<Self, Box<dyn Error>> {
+        Self::start_with_status(StatusCode::OK).await
+    }
+
+    async fn start_with_status(status: StatusCode) -> Result<Self, Box<dyn Error>> {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let endpoint = format!("http://{}", listener.local_addr()?);
+        let app = Router::new()
+            .fallback(any(record_cloud_request))
+            .with_state((requests.clone(), status));
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("fake cloud server");
+        });
+        Ok(Self { endpoint, requests })
+    }
+
+    fn endpoint(&self) -> String {
+        self.endpoint.clone()
+    }
+
+    fn requests(&self) -> Vec<RecordedCloudRequest> {
+        self.requests.lock().expect("requests").clone()
+    }
+}
+
+async fn record_cloud_request(
+    State((requests, status)): State<(Arc<Mutex<Vec<RecordedCloudRequest>>>, StatusCode)>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Body,
+) -> StatusCode {
+    let body = to_bytes(body, 1024 * 1024).await.expect("cloud body");
+    let headers = headers
+        .iter()
+        .filter_map(|(key, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|text| (key.as_str().to_string(), text.to_string()))
+        })
+        .collect::<BTreeMap<_, _>>();
+    requests
+        .lock()
+        .expect("requests")
+        .push(RecordedCloudRequest {
+            method: method.as_str().to_string(),
+            path: uri.path().to_string(),
+            headers,
+            body_len: body.len(),
+        });
+    status
 }
 
 async fn read_json(response: axum::response::Response) -> Value {

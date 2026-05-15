@@ -18,10 +18,10 @@ use axum::{
 use base64::{engine::general_purpose, Engine as _};
 use bill_analyser_core::{
     backup_archive_summary_from_entries, backup_restore_verify_response, build_backup_file_info,
-    derive_backup_fernet_key, invalid_backup_archive_summary, is_safe_backup_archive_member,
-    normalize_backup_job_payload, plan_backup_cleanup, resolve_backup_filename,
-    BackupCleanupDecision, BackupFileCandidate, BackupFileInfoContract, BackupFileInfoInput,
-    BackupRecordContract, UserId,
+    build_sync_config_contract, derive_backup_fernet_key, invalid_backup_archive_summary,
+    is_safe_backup_archive_member, normalize_backup_job_payload, plan_backup_cleanup,
+    resolve_backup_filename, BackupCleanupDecision, BackupFileCandidate, BackupFileInfoContract,
+    BackupFileInfoInput, BackupRecordContract, SyncConfigContract, UserId,
 };
 use bill_analyser_db::{
     create_backup_audit_log_best_effort, create_or_update_backup_job, init_backup_ops_schema,
@@ -40,7 +40,13 @@ use walkdir::WalkDir;
 use zip::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::{
-    auth::resolve_authenticated_user_from_headers, config::HttpShellConfig, proxy::ProxyState,
+    auth::resolve_authenticated_user_from_headers,
+    backup_sync::{
+        upload_backup_to_cloud, validate_sync_upload_config, CloudBackupUploadError,
+        CloudBackupUploadResult,
+    },
+    config::HttpShellConfig,
+    proxy::ProxyState,
 };
 
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
@@ -56,6 +62,15 @@ struct AuthenticatedBackupRuntime {
     runtime: SqliteRuntime,
     user_id: UserId,
     auth_kind: BackupAuthKind,
+}
+
+#[derive(Debug)]
+struct PreparedCloudSync {
+    config: Value,
+    contract: SyncConfigContract,
+    file_path: PathBuf,
+    backup_info: BackupFileInfoContract,
+    user_id: UserId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,6 +124,7 @@ pub const BACKUP_OPS_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/backup/jobs"),
     ("POST", "/api/backup/restore/{filename}"),
     ("POST", "/api/backup/restore/verify"),
+    ("POST", "/api/backup/sync"),
 ];
 
 pub const BACKUP_OPS_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
@@ -118,6 +134,7 @@ pub fn backup_ops_runtime_router() -> Router<ProxyState> {
         .route("/api/backup/", get(list_backup_files_handler))
         .route("/api/backup/cleanup", post(cleanup_backups_handler))
         .route("/api/backup/create", post(create_backup_handler))
+        .route("/api/backup/sync", post(sync_backup_handler))
         .route(
             "/api/backup/delete/:filename",
             delete(delete_backup_handler),
@@ -149,6 +166,51 @@ async fn list_backup_files_handler(
 
 async fn create_backup_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
     blocking_route(move || create_backup_response(&state, &headers)).await
+}
+
+async fn sync_backup_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let prepare_state = state.clone();
+    let prepare_headers = headers.clone();
+    let prepared = match tokio::task::spawn_blocking(move || {
+        prepare_sync_backup_response(&prepare_state, &prepare_headers, body)
+    })
+    .await
+    {
+        Ok(Ok(prepared)) => prepared,
+        Ok(Err(response)) => return *response,
+        Err(error) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("backup sync prepare task failed: {error}"),
+            );
+        }
+    };
+
+    let upload_result = upload_backup_to_cloud(
+        &prepared.config,
+        &prepared.contract,
+        &prepared.file_path,
+        state.config.timeout,
+    )
+    .await;
+    let finish_state = state.clone();
+    let finish_headers = headers.clone();
+    match tokio::task::spawn_blocking(move || {
+        finish_sync_backup_response(&finish_state, &finish_headers, prepared, upload_result)
+    })
+    .await
+    {
+        Ok(Ok(response)) => response,
+        Ok(Err(response)) => *response,
+        Err(error) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("backup sync finish task failed: {error}"),
+        ),
+    }
 }
 
 async fn verify_backup_restore_handler(
@@ -365,6 +427,288 @@ fn create_backup_response(state: &ProxyState, headers: &HeaderMap) -> RouteResul
         StatusCode::OK,
         json!({ "success": true, "data": backup_info }),
     ))
+}
+
+fn prepare_sync_backup_response(
+    state: &ProxyState,
+    headers: &HeaderMap,
+    body: Bytes,
+) -> RouteResult<PreparedCloudSync> {
+    let auth_runtime = authenticated_backup_runtime(state, headers)?;
+    let payload = match optional_json_body(&body) {
+        Ok(payload) => payload,
+        Err(message) => {
+            write_backup_sync_audit(
+                auth_runtime.runtime.connection(),
+                auth_runtime.user_id,
+                headers,
+                json!({}),
+                0,
+                "failed",
+                Some(message.clone()),
+            );
+            return Err(Box::new(error_response(StatusCode::BAD_REQUEST, message)));
+        }
+    };
+    ensure_sensitive_backup_auth(&auth_runtime, state, headers, Some(&payload))?;
+    let config = backup_sync_config_payload(&payload);
+    let provisional_contract =
+        match build_sync_config_contract(&config, "backup_19700101_000000.zip") {
+            Ok(contract) => contract,
+            Err(error) => {
+                write_backup_sync_audit(
+                    auth_runtime.runtime.connection(),
+                    auth_runtime.user_id,
+                    headers,
+                    sync_config_validation_audit_details(&config),
+                    0,
+                    "failed",
+                    Some(error.error.clone()),
+                );
+                return Err(Box::new(error_response(
+                    status_or_internal(error.status_code),
+                    error.message,
+                )));
+            }
+        };
+    if let Err(error) = validate_sync_upload_config(&config, &provisional_contract) {
+        write_backup_sync_audit(
+            auth_runtime.runtime.connection(),
+            auth_runtime.user_id,
+            headers,
+            sync_config_audit_details(&provisional_contract),
+            0,
+            "failed",
+            Some(error.message.clone()),
+        );
+        return Err(Box::new(error_response(
+            status_or_internal(error.status_code),
+            error.message,
+        )));
+    }
+
+    let backup_dir = backup_dir(&state.config)?;
+    let data_dir = data_dir(&state.config);
+    let sqlite_db_path = state.config.sqlite_db_path.as_deref().map(PathBuf::from);
+    let user_id = auth_runtime.user_id;
+    drop(auth_runtime);
+
+    let result = create_backup_file(
+        &data_dir,
+        &backup_dir,
+        sqlite_db_path.as_deref(),
+        state.config.backup_encryption_key.as_deref(),
+    );
+    let auth_runtime = authenticated_backup_runtime(state, headers)?;
+    let file_path = match result {
+        Ok(Some(path)) => path,
+        Ok(None) => {
+            write_backup_sync_audit(
+                auth_runtime.runtime.connection(),
+                user_id,
+                headers,
+                sync_config_audit_details(&provisional_contract),
+                0,
+                "failed",
+                Some("数据未变化，无需备份".to_string()),
+            );
+            return Err(Box::new(error_response(
+                StatusCode::BAD_REQUEST,
+                "数据未变化，无需备份",
+            )));
+        }
+        Err(error) => {
+            write_backup_sync_audit(
+                auth_runtime.runtime.connection(),
+                user_id,
+                headers,
+                sync_config_audit_details(&provisional_contract),
+                0,
+                "failed",
+                Some(error.message.clone()),
+            );
+            return Err(Box::new(error_response(error.status, error.message)));
+        }
+    };
+
+    let backup_info =
+        build_runtime_backup_info(&file_path, state.config.backup_encryption_key.as_deref())
+            .map_err(|error| {
+                write_backup_sync_audit(
+                    auth_runtime.runtime.connection(),
+                    user_id,
+                    headers,
+                    json!({
+                        "filename": backup_filename(&file_path),
+                        "path": public_backup_reference(&file_path),
+                        "sync": sync_config_audit_details(&provisional_contract),
+                    }),
+                    0,
+                    "failed",
+                    Some(error.message.clone()),
+                );
+                Box::new(error_response(error.status, error.message))
+            })?;
+
+    if !(backup_info.valid_zip && backup_info.ready_to_restore) {
+        let error_message = if backup_info.error.is_empty() {
+            "backup archive is not ready to restore".to_string()
+        } else {
+            backup_info.error.clone()
+        };
+        write_backup_sync_audit(
+            auth_runtime.runtime.connection(),
+            user_id,
+            headers,
+            json!({
+                "filename": backup_info.filename,
+                "path": backup_info.path,
+                "sync": sync_config_audit_details(&provisional_contract),
+            }),
+            0,
+            "failed",
+            Some(error_message.clone()),
+        );
+        return Err(Box::new(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error_message,
+        )));
+    }
+
+    let contract = build_sync_config_contract(&config, &backup_info.filename)
+        .expect("validated sync config and generated backup filename must remain valid");
+    validate_sync_upload_config(&config, &contract)
+        .expect("validated sync upload config must remain valid after backup creation");
+
+    upsert_backup_record_from_info(auth_runtime.runtime.connection(), &backup_info)
+        .map_err(|_| Box::new(db_error_response()))?;
+    write_backup_audit_event(
+        auth_runtime.runtime.connection(),
+        user_id,
+        headers,
+        "backup_created",
+        json!({
+            "filename": backup_info.filename.clone(),
+            "path": backup_info.path.clone(),
+            "checksum": backup_info.checksum.clone(),
+            "sync_provider": contract.provider.clone(),
+            "sync_object_key": contract.object_key.clone(),
+        }),
+        1,
+        "success",
+        None,
+    );
+
+    Ok(PreparedCloudSync {
+        config,
+        contract,
+        file_path,
+        backup_info,
+        user_id,
+    })
+}
+
+fn finish_sync_backup_response(
+    state: &ProxyState,
+    headers: &HeaderMap,
+    prepared: PreparedCloudSync,
+    upload_result: Result<CloudBackupUploadResult, CloudBackupUploadError>,
+) -> RouteResult<Response> {
+    let auth_runtime = authenticated_backup_runtime(state, headers)?;
+    let filename = prepared.backup_info.filename.clone();
+    match upload_result {
+        Ok(result) => {
+            update_backup_record_by_filename(
+                auth_runtime.runtime.connection(),
+                &filename,
+                None,
+                json!({
+                    "sync_provider": result.provider.clone(),
+                    "sync_object_key": result.object_key.clone(),
+                    "sync_status": "success",
+                    "sync_status_code": result.status_code,
+                    "sync_safe_config": prepared.contract.safe_config.clone(),
+                }),
+            )
+            .map_err(|_| Box::new(db_error_response()))?;
+            write_backup_sync_audit(
+                auth_runtime.runtime.connection(),
+                prepared.user_id,
+                headers,
+                json!({
+                    "filename": filename,
+                    "path": prepared.backup_info.path.clone(),
+                    "checksum": prepared.backup_info.checksum.clone(),
+                    "provider": result.provider.clone(),
+                    "object_key": result.object_key.clone(),
+                    "status_code": result.status_code,
+                    "safe_config": prepared.contract.safe_config.clone(),
+                }),
+                1,
+                "success",
+                None,
+            );
+            Ok(json_response(
+                StatusCode::OK,
+                json!({
+                    "success": true,
+                    "data": {
+                        "filename": prepared.backup_info.filename,
+                        "provider": result.provider,
+                        "object_key": result.object_key,
+                        "status_code": result.status_code,
+                        "safe_config": prepared.contract.safe_config,
+                        "backup": prepared.backup_info,
+                    }
+                }),
+            ))
+        }
+        Err(error) => {
+            update_backup_record_by_filename(
+                auth_runtime.runtime.connection(),
+                &filename,
+                None,
+                json!({
+                    "sync_provider": prepared.contract.provider.clone(),
+                    "sync_object_key": prepared.contract.object_key.clone(),
+                    "sync_status": "failed",
+                    "sync_error": error.message.clone(),
+                    "sync_safe_config": prepared.contract.safe_config.clone(),
+                }),
+            )
+            .map_err(|_| Box::new(db_error_response()))?;
+            write_backup_sync_audit(
+                auth_runtime.runtime.connection(),
+                prepared.user_id,
+                headers,
+                json!({
+                    "filename": filename,
+                    "path": prepared.backup_info.path.clone(),
+                    "provider": prepared.contract.provider.clone(),
+                    "object_key": prepared.contract.object_key.clone(),
+                    "status_code": error.response_status,
+                    "safe_config": prepared.contract.safe_config.clone(),
+                }),
+                0,
+                "failed",
+                Some(error.message.clone()),
+            );
+            Ok(json_response(
+                status_or_internal(error.status_code),
+                json!({
+                    "success": false,
+                    "error": error.message,
+                    "data": {
+                        "filename": prepared.backup_info.filename,
+                        "provider": prepared.contract.provider,
+                        "object_key": prepared.contract.object_key,
+                        "safe_config": prepared.contract.safe_config,
+                        "backup": prepared.backup_info,
+                    }
+                }),
+            ))
+        }
+    }
 }
 
 fn verify_backup_restore_response(
@@ -1941,6 +2285,43 @@ fn optional_json_body(body: &Bytes) -> Result<Value, String> {
     }
 }
 
+fn backup_sync_config_payload(payload: &Value) -> Value {
+    if let Some(config) = payload.get("config").filter(|value| value.is_object()) {
+        return config.clone();
+    }
+    let mut config = payload.as_object().cloned().unwrap_or_default();
+    for key in [
+        "stepUpToken",
+        "step_up_token",
+        "currentPassword",
+        "current_password",
+    ] {
+        config.remove(key);
+    }
+    Value::Object(config)
+}
+
+fn sync_config_validation_audit_details(config: &Value) -> Value {
+    json!({
+        "provider": audit_safe_json_field(config, "provider"),
+        "endpoint": audit_safe_json_field(config, "endpoint"),
+        "bucket": audit_safe_json_field(config, "bucket"),
+        "prefix": audit_safe_json_field(config, "prefix"),
+    })
+}
+
+fn sync_config_audit_details(contract: &SyncConfigContract) -> Value {
+    json!({
+        "provider": contract.provider.clone(),
+        "supported": contract.supported,
+        "endpoint": contract.endpoint.clone(),
+        "bucket": contract.bucket.clone(),
+        "prefix": contract.prefix.clone(),
+        "object_key": contract.object_key.clone(),
+        "safe_config": contract.safe_config.clone(),
+    })
+}
+
 fn validation_audit_details(payload: &Value) -> Value {
     json!({
         "job_type": audit_safe_json_field(payload, "job_type"),
@@ -1948,6 +2329,27 @@ fn validation_audit_details(payload: &Value) -> Value {
         "retention_days": audit_safe_json_field(payload, "retention_days"),
         "retention_count": audit_safe_json_field(payload, "retention_count"),
     })
+}
+
+fn write_backup_sync_audit(
+    connection: &rusqlite::Connection,
+    user_id: UserId,
+    headers: &HeaderMap,
+    details: Value,
+    affected_count: i64,
+    status: &str,
+    error_message: Option<String>,
+) {
+    write_backup_audit_event(
+        connection,
+        user_id,
+        headers,
+        "backup_cloud_synced",
+        details,
+        affected_count,
+        status,
+        error_message,
+    );
 }
 
 fn write_backup_job_audit(

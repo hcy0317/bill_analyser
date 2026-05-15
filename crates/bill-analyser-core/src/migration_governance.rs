@@ -1688,6 +1688,15 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         notes: "Rust backup ops runtime verifies backup archive structure and checksum metadata before restore, including encrypted archives when the configured Fernet key is present.",
     },
     EndpointOwnership {
+        method: "POST",
+        pattern: "/api/backup/sync",
+        domain: "backup-ops",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessData,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust backup ops runtime creates a local backup, validates redacted cloud sync config, and uploads to OSS, S3, COS, Azure Blob, or WebDAV without Python SDK execution.",
+    },
+    EndpointOwnership {
         method: "GET",
         pattern: "/api/calendar/events",
         domain: "matching-recurring-calendar-networth",
@@ -3080,11 +3089,11 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "backup-ops",
         python_owner_files: &[
             "src/bill_analyser/api/routes/backup",
-            "src/bill_analyser/core/backup",
-            "src/bill_analyser/core/ops",
+            "src/bill_analyser/core/sync.py",
         ],
         rust_owner_files: &[
             "crates/bill-analyser-http/src/backup_routes.rs",
+            "crates/bill-analyser-http/src/backup_sync.rs",
             "crates/bill-analyser-core/src/ops.rs",
             "crates/bill-analyser-db/src/backup.rs",
         ],
@@ -3096,10 +3105,10 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: EMPTY_STRINGS,
         coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
-        deletion_blockers: &["sync_provider_parity", "ops_runtime_config_parity"],
+        deletion_blockers: EMPTY_STRINGS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Backup file list/create/download/delete/restore/verify/cleanup and jobs runtime routes are Rust-owned; remaining P12 work is sync provider/runtime config parity and Python residual deletion.",
+            "Backup file list/create/download/delete/restore/verify/cleanup, jobs, and cloud sync provider runtime routes are Rust-owned; remaining Python SyncManager is CLI/backward-compatibility residue rather than a default REST runtime dependency.",
         decision_required: DecisionRequired::None,
         decision_owner: "migration-program",
         transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,

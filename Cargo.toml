@@ -25,7 +25,7 @@ fernet = { version = "0.2.2", default-features = false, features = ["rustcrypto"
 http = "1.2"
 md5 = "0.7"
 qrcodegen = "1.8"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 regex = "1.11"
 ring = "0.17.14"
 serde = { version = "1.0", features = ["derive"] }
