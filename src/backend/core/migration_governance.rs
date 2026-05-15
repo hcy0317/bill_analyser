@@ -62,11 +62,11 @@ pub enum RouteHandlerId {
     BudgetsHistoryRuntime,
     #[serde(rename = "src/backend/http/budget_routes.rs::budgets_import_runtime")]
     BudgetsImportRuntime,
-    #[serde(rename = "src/backend/http/statistics_routes.rs::statistics_read_runtime")]
+    #[serde(rename = "src/backend/http/statistics_routes/mod.rs::statistics_read_runtime")]
     StatisticsReadRuntime,
-    #[serde(rename = "src/backend/http/statistics_routes.rs::statistics_analyzer_runtime")]
+    #[serde(rename = "src/backend/http/statistics_routes/mod.rs::statistics_analyzer_runtime")]
     StatisticsAnalyzerRuntime,
-    #[serde(rename = "src/backend/http/statistics_routes.rs::statistics_exchange_runtime")]
+    #[serde(rename = "src/backend/http/statistics_routes/mod.rs::statistics_exchange_runtime")]
     StatisticsExchangeRuntime,
     #[serde(rename = "src/backend/http/auth_routes/mod.rs::auth_token_runtime")]
     AuthTokenRuntime,
@@ -105,13 +105,13 @@ impl RouteHandlerId {
                 "src/backend/http/budget_routes.rs::budgets_import_runtime"
             }
             Self::StatisticsReadRuntime => {
-                "src/backend/http/statistics_routes.rs::statistics_read_runtime"
+                "src/backend/http/statistics_routes/mod.rs::statistics_read_runtime"
             }
             Self::StatisticsAnalyzerRuntime => {
-                "src/backend/http/statistics_routes.rs::statistics_analyzer_runtime"
+                "src/backend/http/statistics_routes/mod.rs::statistics_analyzer_runtime"
             }
             Self::StatisticsExchangeRuntime => {
-                "src/backend/http/statistics_routes.rs::statistics_exchange_runtime"
+                "src/backend/http/statistics_routes/mod.rs::statistics_exchange_runtime"
             }
             Self::AuthTokenRuntime => "src/backend/http/auth_routes/mod.rs::auth_token_runtime",
             Self::TaxonomyRuntime => "src/backend/http/taxonomy_routes/mod.rs::taxonomy_runtime",
@@ -2849,7 +2849,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "statistics-read",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "src/backend/http/statistics_routes.rs",
+            "src/backend/http/statistics_routes/mod.rs",
             "src/backend/db/statistics.rs",
             "src/backend/core/statistics.rs",
         ],
@@ -2872,7 +2872,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "statistics-analyzer",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "src/backend/http/statistics_routes.rs",
+            "src/backend/http/statistics_routes/mod.rs",
             "src/backend/db/statistics.rs",
             "src/backend/core/statistics.rs",
         ],
@@ -2895,7 +2895,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         domain: "statistics-exchange",
         python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
-            "src/backend/http/statistics_routes.rs",
+            "src/backend/http/statistics_routes/mod.rs",
             "src/backend/core/statistics.rs",
             "src/backend/db/statistics.rs",
         ],

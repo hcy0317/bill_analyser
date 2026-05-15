@@ -11,7 +11,7 @@ Axum HTTP 入口，负责路由注册、认证上下文、请求解析、multipa
 - `import_routes/`
 - `taxonomy_routes/`
 - `budget_routes.rs`
-- `statistics_routes.rs`
+- `statistics_routes/`
 - `matching_routes.rs`
 - `backup_routes.rs`
 

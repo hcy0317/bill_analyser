@@ -1,6 +1,7 @@
 # 统计与汇率
 
 统计域由 Rust runtime 和 Rust repository 直接处理。
+HTTP route 层在 `statistics_routes/` 下按读取、Analyzer、汇率处理、汇率 provider 解析和查询/响应 helper 拆分；provider 解析保持纯函数测试，不依赖真实网络。
 
 ## API
 

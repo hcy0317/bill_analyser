@@ -1,0 +1,179 @@
+use axum::{
+    extract::{Query, State},
+    http::{HeaderMap, StatusCode},
+    response::Response,
+};
+use bill_analyser_core::statistics::{
+    build_overview_result_from_report, build_statistics_trend_response,
+};
+use bill_analyser_db::{
+    query_insight_anomaly_summary_payload, query_statistics_analyzer_category_payload,
+    query_statistics_analyzer_comparison_payload, query_statistics_analyzer_report_payload,
+    query_statistics_analyzer_trends_payload,
+};
+use chrono::Local;
+
+use crate::state::HttpAppState;
+
+use super::{
+    query::{
+        analyzer_period, insights_analyzed_months, AnalyzerStatisticsQuery, InsightsAnomaliesQuery,
+    },
+    response::{
+        db_error_response, insights_error, json_response, open_runtime, success_data,
+        success_result, user_id_from_headers,
+    },
+};
+pub(super) async fn analyzer_overview_handler(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    Query(query): Query<AnalyzerStatisticsQuery>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let period = analyzer_period(query.period.as_deref());
+    match query_statistics_analyzer_report_payload(runtime.connection(), user_id, &period) {
+        Ok(report) => success_result(StatusCode::OK, build_overview_result_from_report(&report)),
+        Err(_) => db_error_response(),
+    }
+}
+
+pub(super) async fn analyzer_trends_handler(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    Query(query): Query<AnalyzerStatisticsQuery>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let period = analyzer_period(query.period.as_deref());
+    match query_statistics_analyzer_trends_payload(
+        runtime.connection(),
+        user_id,
+        &period,
+        query.category.as_deref(),
+    ) {
+        Ok(result) => success_result(StatusCode::OK, result),
+        Err(_) => db_error_response(),
+    }
+}
+
+pub(super) async fn analyzer_comparison_handler(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    Query(query): Query<AnalyzerStatisticsQuery>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let period = analyzer_period(query.period.as_deref());
+    let compare_type = query
+        .compare_type
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("category")
+        .to_string();
+    match query_statistics_analyzer_comparison_payload(
+        runtime.connection(),
+        user_id,
+        &period,
+        &compare_type,
+    ) {
+        Ok(result) => success_result(StatusCode::OK, result),
+        Err(_) => db_error_response(),
+    }
+}
+
+pub(super) async fn analyzer_category_handler(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    Query(query): Query<AnalyzerStatisticsQuery>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let period = analyzer_period(query.period.as_deref());
+    match query_statistics_analyzer_category_payload(
+        runtime.connection(),
+        user_id,
+        &period,
+        query.main_category.as_deref(),
+    ) {
+        Ok(result) => success_data(StatusCode::OK, result),
+        Err(_) => db_error_response(),
+    }
+}
+
+pub(super) async fn analyzer_trend_handler(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    Query(query): Query<AnalyzerStatisticsQuery>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let period = analyzer_period(query.granularity.as_deref());
+    match query_statistics_analyzer_trends_payload(
+        runtime.connection(),
+        user_id,
+        &period,
+        query.category.as_deref(),
+    ) {
+        Ok(result) => json_response(StatusCode::OK, build_statistics_trend_response(&result)),
+        Err(_) => db_error_response(),
+    }
+}
+
+pub(super) async fn insights_anomalies_handler(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    Query(query): Query<InsightsAnomaliesQuery>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let analyzed_months = match insights_analyzed_months(query.months.as_deref()) {
+        Ok(value) => value,
+        Err(message) => return insights_error(message),
+    };
+    match query_insight_anomaly_summary_payload(
+        runtime.connection(),
+        user_id,
+        analyzed_months,
+        Local::now().date_naive(),
+    ) {
+        Ok(payload) => json_response(StatusCode::OK, payload),
+        Err(_) => db_error_response(),
+    }
+}

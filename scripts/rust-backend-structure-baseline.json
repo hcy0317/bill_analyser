@@ -122,13 +122,6 @@
       "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
     },
     {
-      "path": "src/backend/http/statistics_routes.rs",
-      "kind": "rust",
-      "area": "http",
-      "lines": 1406,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
       "path": "src/backend/db/taxonomy/category_rules.rs",
       "kind": "rust",
       "area": "db",

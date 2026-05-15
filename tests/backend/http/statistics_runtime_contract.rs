@@ -395,6 +395,39 @@ async fn statistics_runtime_covers_error_edges_auth_and_runtime_boundaries(
         StatusCode::SERVICE_UNAVAILABLE
     );
 
+    let missing_db_state = HttpAppState::new(
+        HttpShellConfig::new_with_import_route_mode(
+            "http://127.0.0.1:9".to_string(),
+            Duration::from_secs(1),
+            1024 * 1024,
+            ImportRouteMode::ImportDbRuntime,
+        )?
+        .with_trusted_user_header_secret(TEST_AUTH_SECRET),
+    )?;
+    let missing_db_app = build_router(missing_db_state);
+    for (method, path) in [
+        (Method::GET, "/api/statistics/exchange-rates"),
+        (Method::PUT, "/api/statistics/exchange-rates/custom"),
+        (Method::DELETE, "/api/statistics/exchange-rates/custom/USD"),
+        (Method::GET, "/api/statistics/overview"),
+        (Method::GET, "/api/statistics/trends"),
+        (Method::GET, "/api/statistics/comparison"),
+        (Method::GET, "/api/statistics/category"),
+        (Method::GET, "/api/statistics/trend"),
+        (Method::GET, "/api/insights/anomalies"),
+    ] {
+        let body = if method == Method::PUT {
+            Body::from(json!({"currency": "CAD", "rate": 5.1}).to_string())
+        } else {
+            Body::empty()
+        };
+        let response = missing_db_app
+            .clone()
+            .oneshot(authed_request(method.clone(), path, body))
+            .await?;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "{path}");
+    }
+
     let empty_fixture = RuntimeFixture::new_empty()?;
     let empty_app = runtime_router(&empty_fixture);
     let empty_trend_response = empty_app
@@ -495,6 +528,45 @@ async fn statistics_runtime_covers_error_edges_auth_and_runtime_boundaries(
         "rate must be greater than 0"
     );
 
+    for body in [
+        json!({"currency": "EUR"}),
+        json!({"currency": "EUR", "rate": "not-a-number"}),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(authed_request(
+                Method::PUT,
+                "/api/statistics/exchange-rates/custom",
+                Body::from(body.to_string()),
+            ))
+            .await?;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    let integral_upsert_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::PUT,
+            "/api/statistics/exchange-rates/custom",
+            Body::from(json!({"currency": "gbp", "rate": 2}).to_string()),
+        ))
+        .await?;
+    assert_eq!(integral_upsert_response.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(integral_upsert_response).await["result"]["rate"],
+        "2.0"
+    );
+
+    let blank_delete_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::DELETE,
+            "/api/statistics/exchange-rates/custom/%20",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(blank_delete_response.status(), StatusCode::BAD_REQUEST);
+
     let delete_response = app
         .clone()
         .oneshot(authed_request(
@@ -575,6 +647,7 @@ async fn statistics_runtime_covers_error_edges_auth_and_runtime_boundaries(
     );
 
     let trend_response = app
+        .clone()
         .oneshot(authed_request(
             Method::GET,
             "/api/statistics/trend?granularity=month",
@@ -585,6 +658,80 @@ async fn statistics_runtime_covers_error_edges_auth_and_runtime_boundaries(
     let trend_body = read_json(trend_response).await;
     assert_eq!(trend_body["success"], true);
     assert!(trend_body["data"].as_array().expect("trend data").len() >= 12);
+
+    for path in [
+        "/api/statistics/overview",
+        "/api/statistics/trends",
+        "/api/statistics/comparison",
+        "/api/statistics/category",
+        "/api/statistics/trend",
+        "/api/insights/anomalies",
+        "/api/statistics/exchange-rates",
+        "/api/statistics/exchange-rates/custom",
+        "/api/statistics/exchange-rates/custom/USD",
+    ] {
+        let method = if path.ends_with("/custom") {
+            Method::PUT
+        } else if path.ends_with("/USD") {
+            Method::DELETE
+        } else {
+            Method::GET
+        };
+        let body = if method == Method::PUT {
+            Body::from(json!({"currency": "CAD", "rate": 5.1}).to_string())
+        } else {
+            Body::empty()
+        };
+        let mut builder = Request::builder().method(method).uri(path);
+        if path.ends_with("/custom") {
+            builder = builder.header("content-type", "application/json");
+        }
+        let response = app.clone().oneshot(builder.body(body)?).await?;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{path}");
+    }
+
+    let broken_fixture = RuntimeFixture::new_broken_statistics()?;
+    let broken_app = runtime_router(&broken_fixture);
+    for path in [
+        "/api/statistics/overview",
+        "/api/statistics/trends",
+        "/api/statistics/comparison",
+        "/api/statistics/category",
+        "/api/statistics/trend",
+        "/api/insights/anomalies",
+    ] {
+        let response = broken_app
+            .clone()
+            .oneshot(authed_request(Method::GET, path, Body::empty()))
+            .await?;
+        assert_eq!(
+            response.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "{path}"
+        );
+    }
+    for (method, path, body) in [
+        (
+            Method::PUT,
+            "/api/statistics/exchange-rates/custom",
+            Body::from(json!({"currency": "AUD", "rate": 4.5}).to_string()),
+        ),
+        (
+            Method::DELETE,
+            "/api/statistics/exchange-rates/custom/AUD",
+            Body::empty(),
+        ),
+    ] {
+        let response = broken_app
+            .clone()
+            .oneshot(authed_request(method, path, body))
+            .await?;
+        assert_eq!(
+            response.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "{path}"
+        );
+    }
 
     Ok(())
 }
@@ -664,6 +811,17 @@ impl RuntimeFixture {
         let temp_dir = tempfile::tempdir()?;
         let db_path = temp_dir.path().join("statistics-minimal-http.db");
         init_minimal_schema(&db_path)?;
+        Ok(Self {
+            _temp_dir: temp_dir,
+            db_path,
+            upstream: "http://127.0.0.1:9".to_string(),
+        })
+    }
+
+    fn new_broken_statistics() -> Result<Self, Box<dyn Error>> {
+        let temp_dir = tempfile::tempdir()?;
+        let db_path = temp_dir.path().join("statistics-broken-http.db");
+        init_broken_statistics_schema(&db_path)?;
         Ok(Self {
             _temp_dir: temp_dir,
             db_path,
@@ -843,6 +1001,28 @@ fn init_minimal_schema(path: &Path) -> Result<(), Box<dyn Error>> {
         INSERT INTO accounts(id, user_id, name) VALUES (20, 42, 'legacy');
         INSERT INTO bills(user_id, date, type, amount)
         VALUES (42, '2026-03-10 08:00:00', '支出', -5.0);
+        ",
+    )?;
+    Ok(())
+}
+
+fn init_broken_statistics_schema(path: &Path) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    connection.execute_batch(
+        "
+        CREATE TABLE users(
+            id INTEGER PRIMARY KEY,
+            username TEXT NOT NULL,
+            default_currency TEXT DEFAULT 'CNY'
+        );
+        CREATE TABLE bills(
+            user_id INTEGER NOT NULL
+        );
+        CREATE TABLE user_exchange_rates(
+            id INTEGER PRIMARY KEY
+        );
+        INSERT INTO users(id, username, default_currency)
+        VALUES (42, 'owner', 'CNY');
         ",
     )?;
     Ok(())
