@@ -51,14 +51,14 @@
     {
       "path": "src/lib/services.ts",
       "kind": "ts",
-      "lines": 2538,
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+      "lines": 2554,
+      "reason": "accepted P1 baseline refresh for shared service facade; split deferred to avoid API contract churn"
     },
     {
       "path": "src/locales/helpers.ts",
       "kind": "ts",
-      "lines": 2472,
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+      "lines": 2514,
+      "reason": "accepted P1 baseline refresh for locale helper contracts; split deferred because source contracts are test-inspected"
     },
     {
       "path": "src/views/desktop/transactions/ListPage.vue",
@@ -102,10 +102,10 @@
     {
       "path": "src/views/desktop/transactions/import/ImportDialog.vue",
       "kind": "vue",
-      "lines": 1841,
+      "lines": 1833,
       "sections": {
         "template": 113,
-        "script": 1423,
+        "script": 1415,
         "style": 20
       },
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
@@ -343,17 +343,6 @@
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
-      "path": "src/components/BudgetManagementDialog.vue",
-      "kind": "vue",
-      "lines": 635,
-      "sections": {
-        "template": 93,
-        "script": 299,
-        "style": 9
-      },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
-    },
-    {
       "path": "src/components/desktop/TrendsChart.vue",
       "kind": "vue",
       "lines": 634,
@@ -371,17 +360,6 @@
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
-      "path": "src/views/desktop/accounts/list/dialogs/ReconciliationStatementDialog.vue",
-      "kind": "vue",
-      "lines": 619,
-      "sections": {
-        "template": 100,
-        "script": 359,
-        "style": 0
-      },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
-    },
-    {
       "path": "src/views/desktop/transactions/import/tabs/ImportTransactionDefineColumnTab.vue",
       "kind": "vue",
       "lines": 619,
@@ -389,6 +367,17 @@
         "template": 220,
         "script": 358,
         "style": 35
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/accounts/list/dialogs/ReconciliationStatementDialog.vue",
+      "kind": "vue",
+      "lines": 615,
+      "sections": {
+        "template": 100,
+        "script": 355,
+        "style": 0
       },
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
@@ -423,6 +412,17 @@
         "template": 27,
         "script": 337,
         "style": 12
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/components/BudgetManagementDialog.vue",
+      "kind": "vue",
+      "lines": 549,
+      "sections": {
+        "template": 93,
+        "script": 213,
+        "style": 9
       },
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },

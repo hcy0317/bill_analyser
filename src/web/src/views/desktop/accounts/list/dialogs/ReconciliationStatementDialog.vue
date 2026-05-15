@@ -284,6 +284,10 @@ import { Transaction, type TransactionReconciliationStatementResponseItem } from
 import { isEquals } from '@/lib/common.ts';
 import { getCurrentUnixTime } from '@/lib/datetime.ts';
 import { startDownloadFile } from '@/lib/ui/common.ts';
+import {
+    chartDataDateAggregationTypeIconMap,
+    chartTypeIconMap
+} from './reconciliationStatementDialogOptions.ts';
 
 import {
     mdiRefresh,
@@ -291,12 +295,6 @@ import {
     mdiTuneVertical,
     mdiDotsVertical,
     mdiCheck,
-    mdiChartBar,
-    mdiChartAreasplineVariant,
-    mdiChartWaterfall,
-    mdiCalendarTodayOutline,
-    mdiCalendarMonthOutline,
-    mdiLayersTripleOutline,
     mdiInvoiceTextPlusOutline,
     mdiInvoiceTextEditOutline,
     mdiComma,
@@ -348,20 +346,6 @@ const {
 const accountsStore = useAccountsStore();
 const transactionCategoriesStore = useTransactionCategoriesStore();
 const transactionsStore = useTransactionsStore();
-
-const chartTypeIconMap = {
-    [AccountBalanceTrendChartType.Column.type]: mdiChartBar,
-    [AccountBalanceTrendChartType.Area.type]: mdiChartAreasplineVariant,
-    [AccountBalanceTrendChartType.Candlestick.type]: mdiChartWaterfall,
-};
-
-const chartDataDateAggregationTypeIconMap = {
-    [ChartDateAggregationType.Day.type]: mdiCalendarTodayOutline,
-    [ChartDateAggregationType.Month.type]: mdiCalendarMonthOutline,
-    [ChartDateAggregationType.Quarter.type]: mdiLayersTripleOutline,
-    [ChartDateAggregationType.Year.type]: mdiLayersTripleOutline,
-    [ChartDateAggregationType.FiscalYear.type]: mdiLayersTripleOutline,
-};
 
 const amountInputDialog = useTemplateRef<AmountInputDialogType>('amountInputDialog');
 const snackbar = useTemplateRef<SnackBarType>('snackbar');

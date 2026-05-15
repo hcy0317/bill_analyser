@@ -11,19 +11,21 @@ describe('import stage timeout policy', () => {
     test('stage 1 parse uses the import parse timeout instead of generic upload timeout', () => {
         const apiSource = readSource('src/consts/api.ts');
         const dialogSource = readSource('src/views/desktop/transactions/import/ImportDialog.vue');
+        const apiHelperSource = readSource('src/views/desktop/transactions/import/importDialogApi.ts');
 
         expect(apiSource).toContain('DEFAULT_IMPORT_PARSE_API_TIMEOUT');
         expect(dialogSource).toContain('DEFAULT_IMPORT_PARSE_API_TIMEOUT');
-        expect(dialogSource).toContain('timeoutMs = DEFAULT_UPLOAD_API_TIMEOUT');
+        expect(apiHelperSource).toContain('timeoutMs = DEFAULT_UPLOAD_API_TIMEOUT');
         expect(dialogSource).toContain("}, '阶段1解析', DEFAULT_IMPORT_PARSE_API_TIMEOUT);");
     });
 
     test('abort errors include client-timeout context and cleanup remains in finally', () => {
         const dialogSource = readSource('src/views/desktop/transactions/import/ImportDialog.vue');
+        const apiHelperSource = readSource('src/views/desktop/transactions/import/importDialogApi.ts');
 
-        expect(dialogSource).toContain("error.name === 'AbortError'");
-        expect(dialogSource).toContain('客户端等待超时');
-        expect(dialogSource).toContain('后端 parser/import 日志');
+        expect(apiHelperSource).toContain("error.name === 'AbortError'");
+        expect(apiHelperSource).toContain('客户端等待超时');
+        expect(apiHelperSource).toContain('后端 parser/import 日志');
         expect(dialogSource).toMatch(/finally\s*\{\s*submitting\.value = false;\s*\}/);
     });
 });
