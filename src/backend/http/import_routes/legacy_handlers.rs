@@ -6,7 +6,8 @@ pub async fn import_parse_runtime_handler(
     let content_type = content_type_from_headers(&headers);
     let content_type_lower = content_type.to_ascii_lowercase();
     if content_type_lower.contains("multipart/form-data") {
-        return import_parse_multipart_runtime_response(&state, &headers, &content_type, &body);
+        return import_parse_multipart_runtime_response(&state, &headers, &content_type, &body)
+            .await;
     }
     if content_type_lower.contains("application/json") || content_type.is_empty() {
         let payload = match serde_json::from_slice::<Value>(&body) {

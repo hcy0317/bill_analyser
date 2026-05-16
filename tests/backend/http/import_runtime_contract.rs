@@ -1436,6 +1436,86 @@ async fn import_db_runtime_accepts_frontend_multipart_parse_upload() -> Result<(
 }
 
 #[tokio::test]
+async fn import_db_runtime_parallel_parse_keeps_multi_file_order_and_single_staging(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new().await?;
+    let runtime = runtime_for(fixture.db_path())?;
+    seed_users(&runtime, &[42])?;
+    let app = runtime_router(&fixture);
+    let boundary = "rust-import-parallel-upload-boundary";
+    let body = multipart_body(
+        boundary,
+        &[("parser_type", "auto")],
+        &[
+            (
+                "files",
+                "wechat-a.csv",
+                "text/csv",
+                "交易时间,收支类型,金额,商品,支付方式\n2026-05-04 09:00:00,支出,18.50,早餐,微信\n",
+            ),
+            (
+                "files",
+                "wechat-b.csv",
+                "text/csv",
+                "交易时间,收支类型,金额,商品,支付方式\n2026-05-05 12:30:00,支出,32.00,午餐,微信\n",
+            ),
+        ],
+    );
+
+    let parse = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/parse")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(parse.status(), StatusCode::OK);
+    let parse_body = read_json(parse).await;
+    assert_eq!(parse_body["success"], true);
+    assert_eq!(parse_body["data"]["parsed_count"], 2);
+    assert_eq!(
+        parse_body["data"]["unmatched_files"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    let files = parse_body["data"]["files"].as_array().expect("files");
+    assert_eq!(files.len(), 2);
+    assert_eq!(files[0]["filename"], "wechat-a.csv");
+    assert_eq!(files[1]["filename"], "wechat-b.csv");
+    assert!(files
+        .iter()
+        .all(|file| file["parser_id"].as_str() == Some("wechat")));
+    let session_id = parse_body["data"]["session_id"]
+        .as_str()
+        .expect("session id");
+
+    let db_runtime = runtime_for(fixture.db_path())?;
+    init_import_staging_schema(db_runtime.connection())?;
+    let session =
+        get_import_session(db_runtime.connection(), session_id, user_id(42))?.expect("session");
+    assert_eq!(session.file_count, 2);
+    assert_eq!(session.total_parsed, 2);
+    let templates =
+        get_parser_templates_by_session(db_runtime.connection(), session_id, user_id(42), None)?;
+    assert_eq!(templates.len(), 2);
+    assert!(templates
+        .iter()
+        .all(|template| template.parser_id == "wechat"));
+    Ok(())
+}
+
+#[tokio::test]
 async fn import_db_runtime_parses_dedicated_xlsx_upload_without_legacy_fallback(
 ) -> Result<(), Box<dyn Error>> {
     let fixture = RuntimeFixture::new().await?;

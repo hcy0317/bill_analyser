@@ -267,10 +267,32 @@ fn run_tesseract_ocr_blocking(
 }
 
 fn ocr_io_error_response(error: io::Error) -> AiRouteResponse {
+    if error.raw_os_error() == Some(299) {
+        return build_ocr_error_response(
+            "provider_unconfigured",
+            Some("tesseract provider unavailable"),
+        );
+    }
     build_ocr_error_response(
         "provider_unconfigured",
         Some(&format!("tesseract provider unavailable: {error}")),
     )
+}
+
+#[cfg(test)]
+mod ocr_io_error_tests {
+    use super::*;
+
+    #[test]
+    fn ocr_io_error_response_normalizes_windows_partial_copy() {
+        let response = ocr_io_error_response(io::Error::from_raw_os_error(299));
+        assert_eq!(response.status_code, 501);
+        assert_eq!(response.body["errorCode"], "provider_unconfigured");
+        assert_eq!(
+            response.body["message"],
+            "tesseract provider unavailable"
+        );
+    }
 }
 
 fn first_text_from_object(object: &Map<String, Value>, keys: &[&str]) -> Option<String> {

@@ -10,7 +10,7 @@ Rust HTTP runtime 直接接管账单导入三阶段链路、账单 CRUD/export/p
 
 ## 关键业务链路
 
-- **导入链路**：parser-first multipart 上传、JSON parse、未匹配文件列映射、session/preview/dedup/confirm、preview update/reclassify、transfer/recurring/learning decision 和 learning promotion 都在 Rust runtime 中完成；dedup 可不内联返回预览列表，但仍会落库供 preview index/page 分页读取。
+- **导入链路**：parser-first multipart 上传会并发解析多文件并保持响应顺序，JSON parse、未匹配文件列映射、session/preview/dedup/confirm、preview update/reclassify、transfer/recurring/learning decision 和 learning promotion 都在 Rust runtime 中完成；DB staging、dedup 与 confirm 仍保持明确事务边界，dedup 可不内联返回预览列表，但仍会落库供 preview index/page 分页读取。
 - **金额边界**：数据库核心金额通常按元存储，前端/API 交互存在分字段；涉及账单、账户、预算、统计或导入字段时必须人工复核元/分转换。
 - **预算层级**：预算按月/季/年层级同步，删除分类主预算或最后一个子预算时会同步清理自动派生的父周期预算，避免季度/年度空壳残留。
 - **认证安全**：Rust auth runtime 校验 Bearer access token，2FA、step-up、user-data clear、backup file 操作按当前用户和动作类型执行额外校验，并写入认证或业务审计。

@@ -31,6 +31,31 @@ struct ImportParseRuntimeInput {
     require_existing_session: bool,
 }
 
+#[derive(Debug)]
+struct ImportMultipartFileParseInput {
+    index: usize,
+    original_name: String,
+    body: Vec<u8>,
+    requested_parser: String,
+}
+
+#[derive(Debug)]
+struct ImportMultipartFileParseResult {
+    index: usize,
+    original_name: String,
+    body: Vec<u8>,
+    parsed: Option<ImportMultipartParsedFile>,
+    elapsed_ms: u128,
+}
+
+#[derive(Debug)]
+struct ImportMultipartParsedFile {
+    parser_id: String,
+    parsed_count: usize,
+    delimiter: Option<char>,
+    bills: Vec<StandardBill>,
+}
+
 fn import_parse_json_runtime_response(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -103,7 +128,7 @@ fn import_parse_json_runtime_response(
     )
 }
 
-fn import_parse_multipart_runtime_response(
+async fn import_parse_multipart_runtime_response(
     state: &HttpAppState,
     headers: &HeaderMap,
     content_type: &str,
@@ -144,27 +169,27 @@ fn import_parse_multipart_runtime_response(
     let mut unmatched_files = Vec::new();
     let mut first_detected_parser_id: Option<String> = None;
 
-    for part in file_parts {
-        let file_started_at = Instant::now();
-        let original_name = part
-            .filename
-            .clone()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| "import-file.csv".to_string());
-        let parsed = parse_dedicated_import_bytes(&original_name, &part.body, &requested_parser);
-        if let Some(parsed) = parsed.filter(|parsed| !parsed.bills.is_empty()) {
+    let parse_results =
+        match parse_multipart_import_files_parallel(file_parts, &requested_parser).await {
+            Ok(parse_results) => parse_results,
+            Err(response) => return route_response(response),
+        };
+
+    for result in parse_results {
+        let original_name = result.original_name;
+        if let Some(parsed) = result.parsed {
             first_detected_parser_id.get_or_insert_with(|| parsed.parser_id.clone());
-            let parsed_count = parsed.bills.len();
             eprintln!(
                 "[bill analyser import] stage1 dedicated parser matched user_id={} session_id={session_id} filename={original_name} parser_id={} parsed_count={parsed_count} elapsed_ms={}",
                 user_id.get(),
                 parsed.parser_id,
-                import_stage_elapsed_ms(file_started_at)
+                result.elapsed_ms,
+                parsed_count = parsed.parsed_count
             );
             files.push(json!({
                 "filename": original_name,
                 "parser_id": parsed.parser_id,
-                "parsed_count": parsed_count,
+                "parsed_count": parsed.parsed_count,
                 "delimiter": delimiter_to_response(parsed.delimiter),
             }));
             standard_bills.extend(parsed.bills);
@@ -179,7 +204,7 @@ fn import_parse_multipart_runtime_response(
                 user_id,
                 &session_id,
                 &original_name,
-                &part.body,
+                &result.body,
             ) {
                 Ok(path) => path,
                 Err(response) => return route_response(response),
@@ -226,6 +251,60 @@ fn import_parse_multipart_runtime_response(
         },
         request_started_at,
     )
+}
+
+async fn parse_multipart_import_files_parallel(
+    file_parts: Vec<&MultipartPart>,
+    requested_parser: &str,
+) -> Result<Vec<ImportMultipartFileParseResult>, ImportV2RouteResponse> {
+    let mut handles = Vec::with_capacity(file_parts.len());
+    for (index, part) in file_parts.into_iter().enumerate() {
+        let input = ImportMultipartFileParseInput {
+            index,
+            original_name: part
+                .filename
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "import-file.csv".to_string()),
+            body: part.body.clone(),
+            requested_parser: requested_parser.to_string(),
+        };
+        handles.push(tokio::task::spawn_blocking(move || {
+            parse_multipart_import_file(input)
+        }));
+    }
+
+    let mut results = Vec::with_capacity(handles.len());
+    for handle in handles {
+        let result = handle.await.map_err(|error| {
+            import_v2_error_response(500, &format!("Import parser worker failed: {error}"))
+        })?;
+        results.push(result);
+    }
+    results.sort_by_key(|result| result.index);
+    Ok(results)
+}
+
+fn parse_multipart_import_file(
+    input: ImportMultipartFileParseInput,
+) -> ImportMultipartFileParseResult {
+    let started_at = Instant::now();
+    let parsed =
+        parse_dedicated_import_bytes(&input.original_name, &input.body, &input.requested_parser)
+            .filter(|parsed| !parsed.bills.is_empty())
+            .map(|parsed| ImportMultipartParsedFile {
+                parser_id: parsed.parser_id,
+                parsed_count: parsed.bills.len(),
+                delimiter: parsed.delimiter,
+                bills: parsed.bills,
+            });
+    ImportMultipartFileParseResult {
+        index: input.index,
+        original_name: input.original_name,
+        body: input.body,
+        parsed,
+        elapsed_ms: import_stage_elapsed_ms(started_at),
+    }
 }
 
 fn persist_import_parse_runtime_response(
