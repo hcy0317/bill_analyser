@@ -10,18 +10,18 @@ Axum HTTP 入口，负责路由注册、认证上下文、请求解析、multipa
 - `bill_routes/`
 - `import_routes/`
 - `taxonomy_routes/`
-- `budget_routes.rs`
+- `budget_routes.rs` facade + `budget_routes/`
 - `statistics_routes/`
 - `matching_routes.rs`
 - `backup_routes/`
 
 ## `src/backend/db`
 
-SQLite repository 层，负责 WAL/FK 连接配置、schema 初始化、事务 helper、user-scope 查询、业务表 CRUD 和导入 preview/session staging。Import staging repository 由 `import_staging.rs` facade 聚合 `import_staging/` 下的 session/template/preview/decision/LLM memory/confirm/row helper 模块；matching repository 由 `matching.rs` facade 聚合 `matching/` 下的 schema/actions/candidate query/reconciliation/serialization/helper 模块。
+SQLite repository 层，负责 WAL/FK 连接配置、schema 初始化、事务 helper、user-scope 查询、业务表 CRUD 和导入 preview/session staging。Import staging repository 由 `import_staging.rs` facade 聚合 `import_staging/` 下的 session/template/preview/decision/LLM memory/confirm/row helper 模块；matching repository 由 `matching.rs` facade 聚合 `matching/` 下的 schema/actions/candidate query/reconciliation/serialization/helper 模块；budget repository 由 `budgets.rs` facade 聚合 `budgets/` 下的 CRUD/import/execution/history/forecast/hierarchy/row helper 模块。
 
 ## `src/backend/core`
 
-共享业务合同与治理层，包含迁移治理清单、金额/时间/统计/分类相关公共规则、matching candidate/learning/investment/recurring 规则、auth/security/ops/import pipeline 合同和 CLI bridge 测试目标。
+共享业务合同与治理层，包含迁移治理清单、金额/时间/统计/分类相关公共规则、预算 period/category/history/forecast/export 合同、matching candidate/learning/investment/recurring 规则、auth/security/ops/import pipeline 合同和 CLI bridge 测试目标。
 
 ## `src/backend/parsers`
 

@@ -564,6 +564,38 @@ async fn budgets_runtime_covers_error_edges_and_auth() -> Result<(), Box<dyn Err
         "Invalid data format. Expected array of budgets."
     );
 
+    let valid_budget_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/budgets/",
+            json!({
+                "category": "餐饮",
+                "sub_category": "午餐",
+                "period_type": "monthly",
+                "amount": 10.0,
+                "start_date": "2026-03-01"
+            }),
+        ))
+        .await?;
+    assert_eq!(valid_budget_response.status(), StatusCode::CREATED);
+    let valid_budget_id = read_json(valid_budget_response).await["result"]["id"]
+        .as_i64()
+        .expect("created budget id");
+    let invalid_update_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            &format!("/api/budgets/{valid_budget_id}"),
+            json!({"unknown_field": true}),
+        ))
+        .await?;
+    assert_eq!(invalid_update_response.status(), StatusCode::BAD_REQUEST);
+    assert!(read_json(invalid_update_response).await["error"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("invalid budget update field"));
+
     let missing_db_state = HttpAppState::new(
         HttpShellConfig::new_with_import_route_mode(
             "http://127.0.0.1:9".to_string(),
@@ -593,7 +625,36 @@ async fn budgets_runtime_covers_error_edges_and_auth() -> Result<(), Box<dyn Err
         StatusCode::SERVICE_UNAVAILABLE
     );
 
-    let missing_db_import_response = build_router(missing_db_state)
+    for (method, path, body) in [
+        (Method::GET, "/api/budgets/forecast", Value::Null),
+        (Method::GET, "/api/budgets/history", Value::Null),
+        (
+            Method::POST,
+            "/api/budgets/history/snapshot",
+            json!({"period_type": "monthly", "start_date": "2026-03-01", "end_date": "2026-03-31"}),
+        ),
+        (Method::GET, "/api/budgets/999", Value::Null),
+        (
+            Method::POST,
+            "/api/budgets/",
+            json!({"category": "餐饮", "period_type": "monthly", "amount": 1.0, "start_date": "2026-03-01"}),
+        ),
+        (Method::PUT, "/api/budgets/999", json!({"amount": 2.0})),
+        (Method::DELETE, "/api/budgets/999", Value::Null),
+        (Method::GET, "/api/budgets/export", Value::Null),
+    ] {
+        let request = if body.is_null() {
+            authed_request(method, path, Body::empty())
+        } else {
+            json_request(method, path, body)
+        };
+        let response = build_router(missing_db_state.clone())
+            .oneshot(request)
+            .await?;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "{path}");
+    }
+
+    let missing_db_import_response = build_router(missing_db_state.clone())
         .oneshot(json_request(
             Method::POST,
             "/api/budgets/import",
@@ -609,6 +670,50 @@ async fn budgets_runtime_covers_error_edges_and_auth() -> Result<(), Box<dyn Err
     assert_eq!(
         missing_db_import_response.status(),
         StatusCode::SERVICE_UNAVAILABLE
+    );
+
+    let invalid_parent = fixture
+        ._temp_dir
+        .path()
+        .join("missing-parent")
+        .join("budget.db");
+    let invalid_path_state = HttpAppState::new(
+        HttpShellConfig::new_with_import_route_mode(
+            "http://127.0.0.1:9".to_string(),
+            Duration::from_secs(1),
+            1024 * 1024,
+            ImportRouteMode::ImportDbRuntime,
+        )?
+        .with_sqlite_db_path(invalid_parent.display().to_string())
+        .with_trusted_user_header_secret(TEST_AUTH_SECRET),
+    )?;
+    let invalid_path_response = build_router(invalid_path_state)
+        .oneshot(authed_request(Method::GET, "/api/budgets/", Body::empty()))
+        .await?;
+    assert_eq!(
+        invalid_path_response.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+
+    let empty_schema_dir = tempfile::tempdir()?;
+    let empty_schema_path = empty_schema_dir.path().join("empty-budget.db");
+    Connection::open(&empty_schema_path)?;
+    let empty_schema_state = HttpAppState::new(
+        HttpShellConfig::new_with_import_route_mode(
+            "http://127.0.0.1:9".to_string(),
+            Duration::from_secs(1),
+            1024 * 1024,
+            ImportRouteMode::ImportDbRuntime,
+        )?
+        .with_sqlite_db_path(empty_schema_path.display().to_string())
+        .with_trusted_user_header_secret(TEST_AUTH_SECRET),
+    )?;
+    let empty_schema_response = build_router(empty_schema_state)
+        .oneshot(authed_request(Method::GET, "/api/budgets/", Body::empty()))
+        .await?;
+    assert_eq!(
+        empty_schema_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
     );
 
     let unauthenticated_response = app

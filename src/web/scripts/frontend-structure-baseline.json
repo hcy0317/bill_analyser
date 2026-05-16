@@ -52,13 +52,13 @@
       "path": "src/lib/services.ts",
       "kind": "ts",
       "lines": 2554,
-      "reason": "accepted P1 baseline refresh for shared service facade; split deferred to avoid API contract churn"
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
       "path": "src/locales/helpers.ts",
       "kind": "ts",
       "lines": 2514,
-      "reason": "accepted P1 baseline refresh for locale helper contracts; split deferred because source contracts are test-inspected"
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
       "path": "src/views/desktop/transactions/ListPage.vue",
@@ -412,17 +412,6 @@
         "template": 27,
         "script": 337,
         "style": 12
-      },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
-    },
-    {
-      "path": "src/components/BudgetManagementDialog.vue",
-      "kind": "vue",
-      "lines": 549,
-      "sections": {
-        "template": 93,
-        "script": 213,
-        "style": 9
       },
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },

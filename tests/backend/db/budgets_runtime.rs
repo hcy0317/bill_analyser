@@ -1,6 +1,9 @@
 use std::error::Error;
 
-use bill_analyser_core::UserId;
+use bill_analyser_core::{
+    budgets::{build_budget_history_filter_summary, BudgetHistoryFilterSummaryInput},
+    UserId,
+};
 use bill_analyser_db::{
     create_budget, create_budget_execution_snapshots, delete_budget, export_budgets,
     get_budget_by_id, import_budgets, query_budget_execution_details,
@@ -525,6 +528,125 @@ fn budget_execution_details_are_user_scoped_filtered_and_deduped() -> Result<(),
 }
 
 #[test]
+fn budget_execution_edges_cover_missing_tables_and_candidate_branches() -> Result<(), Box<dyn Error>>
+{
+    let temp_dir = tempfile::tempdir()?;
+    let runtime = runtime_for(&temp_dir.path().join("budgets-execution-edges.db"))?;
+    init_schema(&runtime)?;
+
+    runtime.connection().execute(
+        "INSERT INTO budgets(id, user_id, name, category, sub_category, period_type, amount, start_date, end_date, alert_threshold, enabled, created_at, updated_at)
+         VALUES (10, 42, '低额午餐', '餐饮', '午餐', 'monthly', 50.0, '2026-03-01', '2026-03-31', 80, 1, 'now', 'now'),
+                (11, 42, '高额午餐', '餐饮', '午餐', 'monthly', 120.0, '2026-03-01', '2026-03-31', 80, 1, 'now', 'now'),
+                (12, 42, '空开始晚餐', '餐饮', '晚餐', 'monthly', 0.0, '', NULL, 80, 1, 'now', 'now')",
+        [],
+    )?;
+    runtime.connection().execute(
+        "INSERT INTO bills(user_id, type, amount, date, main_category, sub_category, source_account_id, destination_account_id)
+         VALUES (42, '支出', -30.0, '2026-03-10 12:00:00', '餐饮', '午餐', 10, NULL)",
+        [],
+    )?;
+    runtime
+        .connection()
+        .execute("INSERT INTO bill_tags(bill_id, tag_id) VALUES (1, 8)", [])?;
+
+    let deduped = query_budget_execution_details(
+        runtime.connection(),
+        user_id(42),
+        &BudgetExecutionFilters {
+            budget_type: 3,
+            period_type: Some("monthly".to_string()),
+            ..BudgetExecutionFilters::default()
+        },
+    )?;
+    assert!(deduped.iter().any(|item| item["id"] == 11));
+    assert!(!deduped.iter().any(|item| item["id"] == 10));
+
+    let by_budget_id = query_budget_execution_details(
+        runtime.connection(),
+        user_id(42),
+        &BudgetExecutionFilters {
+            budget_type: 3,
+            budget_id: Some(11),
+            ..BudgetExecutionFilters::default()
+        },
+    )?;
+    assert_eq!(by_budget_id.len(), 1);
+    assert_eq!(by_budget_id[0]["id"], 11);
+
+    let date_filtered = query_budget_execution_details(
+        runtime.connection(),
+        user_id(42),
+        &BudgetExecutionFilters {
+            budget_type: 3,
+            period_type: Some("monthly".to_string()),
+            start_date: Some("2026-03-01".to_string()),
+            end_date: Some("2026-03-31".to_string()),
+            ..BudgetExecutionFilters::default()
+        },
+    )?;
+    assert!(date_filtered.iter().any(|item| item["id"] == 12));
+    assert_eq!(
+        date_filtered
+            .iter()
+            .find(|item| item["id"] == 12)
+            .expect("zero amount budget")["execution_rate"],
+        0.0
+    );
+
+    let investment_filter = query_budget_execution_details(
+        runtime.connection(),
+        user_id(42),
+        &BudgetExecutionFilters {
+            budget_type: 5,
+            period_type: Some("monthly".to_string()),
+            ..BudgetExecutionFilters::default()
+        },
+    )?;
+    assert!(investment_filter.is_empty());
+
+    runtime.connection().execute("DROP TABLE bill_tags", [])?;
+    let tag_without_table = query_budget_execution_details(
+        runtime.connection(),
+        user_id(42),
+        &BudgetExecutionFilters {
+            budget_type: 3,
+            tag_ids: Some(vec![8]),
+            ..BudgetExecutionFilters::default()
+        },
+    )?;
+    assert!(tag_without_table
+        .iter()
+        .all(|item| item["spent_amount"] == 0.0));
+
+    runtime.connection().execute("DROP TABLE bills", [])?;
+    let without_bills = query_budget_execution_details(
+        runtime.connection(),
+        user_id(42),
+        &BudgetExecutionFilters {
+            budget_type: 3,
+            budget_id: Some(11),
+            ..BudgetExecutionFilters::default()
+        },
+    )?;
+    assert_eq!(without_bills[0]["spent_amount"], 0.0);
+
+    runtime.connection().execute("DROP TABLE categories", [])?;
+    let missing_category_table = query_budget_execution_details(
+        runtime.connection(),
+        user_id(42),
+        &BudgetExecutionFilters {
+            budget_type: 3,
+            category_id: Some(1),
+            ..BudgetExecutionFilters::default()
+        },
+    )?;
+    assert!(missing_category_table.is_empty());
+
+    Ok(())
+}
+
+#[test]
 fn budget_history_snapshots_prefer_exact_rows_and_fall_back_on_demand() -> Result<(), Box<dyn Error>>
 {
     let temp_dir = tempfile::tempdir()?;
@@ -612,6 +734,107 @@ fn budget_history_snapshots_prefer_exact_rows_and_fall_back_on_demand() -> Resul
         .expect("on-demand lunch history");
     assert_eq!(february_lunch["id"], "1_2026-02-01_2026-02-28");
     assert_eq!(february_lunch["spent_amount"], 20.0);
+
+    Ok(())
+}
+
+#[test]
+fn budget_history_edges_merge_stored_on_demand_and_missing_tables() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("budgets-history-edges.db"))?;
+    init_schema(&runtime)?;
+
+    let budget_id = create_budget(
+        runtime.connection_mut(),
+        user_id(42),
+        &BudgetCreateDraft {
+            fields: budget_fields("餐饮", "午餐", 100.0, "2026-01-01"),
+        },
+    )?;
+    runtime.connection().execute(
+        "INSERT INTO bills(user_id, type, amount, date, main_category, sub_category, source_account_id, destination_account_id)
+         VALUES (42, '支出', -10.0, '2026-01-15 12:00:00', '餐饮', '午餐', 10, NULL),
+                (42, '支出', -20.0, '2026-02-15 12:00:00', '餐饮', '午餐', 10, NULL)",
+        [],
+    )?;
+
+    let broad_filters = BudgetExecutionFilters {
+        budget_type: 3,
+        period_type: Some("monthly".to_string()),
+        start_date: Some("2026-01-01".to_string()),
+        end_date: Some("2026-02-28".to_string()),
+        ..BudgetExecutionFilters::default()
+    };
+    let broad_summary = build_budget_history_filter_summary(&BudgetHistoryFilterSummaryInput {
+        budget_type: broad_filters.budget_type,
+        period_type: broad_filters.period_type.clone(),
+        budget_id: broad_filters.budget_id,
+        category_id: broad_filters.category_id,
+        account_ids: broad_filters.account_ids.clone(),
+        tag_ids: broad_filters.tag_ids.clone(),
+    });
+    runtime.connection().execute(
+        "INSERT INTO budget_history(user_id, budget_id, period_start, period_end, budget_amount, spent_amount, remaining_amount, execution_rate, status, filter_summary, calculated_at)
+         VALUES (42, ?1, '2026-01-01', '2026-01-31', 100.0, 10.0, 90.0, 10.0, 'within_budget', ?2, '2026-03-01 00:00:00')",
+        rusqlite::params![budget_id, broad_summary],
+    )?;
+
+    let merged_history =
+        query_budget_execution_history(runtime.connection(), user_id(42), &broad_filters)?;
+    assert!(merged_history
+        .iter()
+        .any(|item| item["period_start"] == "2026-01-01" && item["spent_amount"] == 10.0));
+    assert!(merged_history
+        .iter()
+        .any(|item| item["period_start"] == "2026-02-01" && item["spent_amount"] == 20.0));
+
+    let no_date_filters = BudgetExecutionFilters {
+        budget_type: 3,
+        period_type: Some("monthly".to_string()),
+        ..BudgetExecutionFilters::default()
+    };
+    let no_date_summary = build_budget_history_filter_summary(&BudgetHistoryFilterSummaryInput {
+        budget_type: no_date_filters.budget_type,
+        period_type: no_date_filters.period_type.clone(),
+        budget_id: no_date_filters.budget_id,
+        category_id: no_date_filters.category_id,
+        account_ids: no_date_filters.account_ids.clone(),
+        tag_ids: no_date_filters.tag_ids.clone(),
+    });
+    runtime.connection().execute(
+        "INSERT INTO budget_history(user_id, budget_id, period_start, period_end, budget_amount, spent_amount, remaining_amount, execution_rate, status, filter_summary, calculated_at)
+         VALUES (42, ?1, '', '', 100.0, 0.0, 100.0, 0.0, 'within_budget', ?2, '2026-03-02 00:00:00')",
+        rusqlite::params![budget_id, no_date_summary],
+    )?;
+    let no_date_history =
+        query_budget_execution_history(runtime.connection(), user_id(42), &no_date_filters)?;
+    assert!(no_date_history
+        .iter()
+        .any(|item| item["period_start"] == "" && item["budget_id"] == budget_id));
+
+    runtime
+        .connection()
+        .execute("DROP TABLE budget_history", [])?;
+    let missing_history_table =
+        query_budget_execution_history(runtime.connection(), user_id(42), &broad_filters)?;
+    assert!(missing_history_table
+        .iter()
+        .any(|item| item["period_start"] == "2026-02-01"));
+
+    runtime.connection().execute("DROP TABLE bills", [])?;
+    let empty_forecast = query_budget_forecast(
+        runtime.connection(),
+        user_id(42),
+        &BudgetForecastFilters {
+            budget_type: 3,
+            period_type: "monthly".to_string(),
+            start_date: "2026-03-01".to_string(),
+            end_date: "2026-03-31".to_string(),
+            forecast_strategy: "historical_average".to_string(),
+            history_periods: 3,
+        },
+    )?;
+    assert!(empty_forecast.is_empty());
 
     Ok(())
 }

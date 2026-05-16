@@ -8,7 +8,7 @@
 - `bill_routes/`：账单 CRUD、批量写入、图片、导出、recurring、reconciliation、分类 quick actions。
 - `import_routes/`：parser-first 上传、JSON parse、未匹配文件列映射、session、preview、dedup、confirm、learning、LLM/OCR 入口。
 - `taxonomy_routes/`：账户、标签、分类、分类规则、模板、设置包、settings encryption status。
-- `budget_routes.rs`：预算 CRUD/export/execution/forecast/history/snapshot/import。
+- `budget_routes.rs` facade + `budget_routes/`：预算 CRUD/export/execution/forecast/history/snapshot/import。
 - `statistics_routes/`：分类统计、资产趋势、饼图、top merchants、amounts、Analyzer、洞察、汇率。
 - `matching_routes.rs`：formal matching candidates、feedback、manual pairs、candidate actions、reconcile history、recurring/calendar/networth。
 - `backup_routes/`：backup list/create/verify/download/delete/restore/cleanup、jobs、sync。

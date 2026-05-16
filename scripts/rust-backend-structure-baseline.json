@@ -17,13 +17,6 @@
       "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
     },
     {
-      "path": "src/backend/db/budgets.rs",
-      "kind": "rust",
-      "area": "db",
-      "lines": 2409,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
       "path": "src/backend/db/auth.rs",
       "kind": "rust",
       "area": "db",
@@ -94,13 +87,6 @@
       "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
     },
     {
-      "path": "src/backend/core/budgets.rs",
-      "kind": "rust",
-      "area": "core",
-      "lines": 1264,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
       "path": "src/backend/db/schema.rs",
       "kind": "rust",
       "area": "db",
@@ -168,13 +154,6 @@
       "kind": "rust",
       "area": "core",
       "lines": 878,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/http/budget_routes.rs",
-      "kind": "rust",
-      "area": "http",
-      "lines": 873,
       "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
     },
     {
