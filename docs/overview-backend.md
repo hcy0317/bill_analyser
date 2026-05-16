@@ -17,7 +17,7 @@ Axum HTTP 入口，负责路由注册、认证上下文、请求解析、multipa
 
 ## `src/backend/db`
 
-SQLite repository 层，负责 WAL/FK 连接配置、schema 初始化、事务 helper、user-scope 查询、业务表 CRUD 和导入 preview/session staging。
+SQLite repository 层，负责 WAL/FK 连接配置、schema 初始化、事务 helper、user-scope 查询、业务表 CRUD 和导入 preview/session staging。Import staging repository 由 `import_staging.rs` facade 聚合 `import_staging/` 下的 session/template/preview/decision/LLM memory/confirm/row helper 模块。
 
 ## `src/backend/core`
 

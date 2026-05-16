@@ -17,13 +17,6 @@
       "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
     },
     {
-      "path": "src/backend/db/import_staging.rs",
-      "kind": "rust",
-      "area": "db",
-      "lines": 3095,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
       "path": "src/backend/db/matching.rs",
       "kind": "rust",
       "area": "db",

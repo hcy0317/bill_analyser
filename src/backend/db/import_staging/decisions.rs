@@ -1,0 +1,314 @@
+pub fn apply_preview_transfer_decision(
+    connection: &mut Connection,
+    preview_id: i64,
+    user_id: UserId,
+    decision: ImportPreviewDecision,
+    reviewed_type: &str,
+    expected_state: Option<&ImportPreviewExpectedState>,
+) -> DbResult<ImportPreviewDecisionResult> {
+    run_transaction(connection, |tx| {
+        let Some(preview) = get_preview_bill_by_id(tx, preview_id, user_id)? else {
+            return Ok(preview_decision_not_found());
+        };
+        if !preview_matches_expected_state(&preview, expected_state) {
+            return Ok(preview_decision_state_conflict());
+        }
+
+        let mut feedback = preview.preview_matching_feedback.clone();
+        ensure_json_object(&mut feedback);
+        let transfer_feedback = feedback
+            .get("transfer")
+            .filter(|value| value.is_object())
+            .cloned()
+            .unwrap_or_else(|| Value::Object(Default::default()));
+        let previous_snapshot = transfer_feedback
+            .get("previous_preview")
+            .and_then(normalize_transfer_snapshot);
+        let current_review_status = transfer_feedback
+            .get("review_status")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        let should_restore =
+            current_review_status == "accepted" && previous_snapshot.as_ref().is_some();
+
+        let mut patch = ImportPreviewPatch::new(preview_id);
+        match decision {
+            ImportPreviewDecision::Accept => {
+                let snapshot =
+                    previous_snapshot.unwrap_or_else(|| build_transfer_previous_snapshot(&preview));
+                patch = patch
+                    .with_change(
+                        ImportPreviewPatchField::Type,
+                        ImportPreviewPatchValue::Text(reviewed_type.to_string()),
+                    )
+                    .with_change(
+                        ImportPreviewPatchField::MainCategory,
+                        ImportPreviewPatchValue::Text(String::new()),
+                    )
+                    .with_change(
+                        ImportPreviewPatchField::SubCategory,
+                        ImportPreviewPatchValue::Text(String::new()),
+                    )
+                    .with_change(
+                        ImportPreviewPatchField::RecurringId,
+                        ImportPreviewPatchValue::Null,
+                    )
+                    .with_change(
+                        ImportPreviewPatchField::RecurringName,
+                        ImportPreviewPatchValue::Text(String::new()),
+                    )
+                    .with_change(
+                        ImportPreviewPatchField::RecurringCandidateCount,
+                        ImportPreviewPatchValue::Integer(0),
+                    )
+                    .with_change(
+                        ImportPreviewPatchField::RecurringMatchScore,
+                        ImportPreviewPatchValue::Real(0.0),
+                    )
+                    .with_change(
+                        ImportPreviewPatchField::RecurringMatchReasons,
+                        ImportPreviewPatchValue::Text(String::new()),
+                    )
+                    .with_change(
+                        ImportPreviewPatchField::RecurringMatchedDate,
+                        ImportPreviewPatchValue::Text(String::new()),
+                    );
+                feedback["transfer"] = serde_json::json!({
+                    "review_status": "accepted",
+                    "reviewed_type": reviewed_type,
+                    "suppressed": false,
+                    "previous_preview": snapshot,
+                });
+            }
+            ImportPreviewDecision::Reject => {
+                if should_restore {
+                    if let Some(snapshot) = previous_snapshot.as_ref() {
+                        patch = patch.with_changes(transfer_snapshot_restore_changes(snapshot));
+                    }
+                }
+                feedback["transfer"] = serde_json::json!({
+                    "review_status": "rejected",
+                    "reviewed_type": "",
+                    "suppressed": true,
+                });
+            }
+            ImportPreviewDecision::Clear => {
+                if should_restore {
+                    if let Some(snapshot) = previous_snapshot.as_ref() {
+                        patch = patch.with_changes(transfer_snapshot_restore_changes(snapshot));
+                    }
+                }
+                remove_json_object_key(&mut feedback, "transfer");
+            }
+        }
+
+        patch = patch.with_change(
+            ImportPreviewPatchField::MatchingFeedback,
+            ImportPreviewPatchValue::Text(serialize_preview_matching_feedback(&feedback)),
+        );
+        if execute_preview_patch(tx, &preview.session_id, user_id, &patch)? < 1 {
+            return Ok(preview_decision_not_found());
+        }
+        Ok(ImportPreviewDecisionResult {
+            preview: get_preview_bill_by_id(tx, preview_id, user_id)?,
+            state_conflict: false,
+            invalid_recurring_id: false,
+        })
+    })
+}
+
+pub fn update_preview_recurring_match_decision(
+    connection: &mut Connection,
+    preview_id: i64,
+    user_id: UserId,
+    update: &ImportPreviewRecurringMatchUpdate,
+    expected_state: Option<&ImportPreviewExpectedState>,
+) -> DbResult<ImportPreviewDecisionResult> {
+    run_transaction(connection, |tx| {
+        let Some(preview) = get_preview_bill_by_id(tx, preview_id, user_id)? else {
+            return Ok(preview_decision_not_found());
+        };
+        if !preview_matches_expected_state(&preview, expected_state) {
+            return Ok(preview_decision_state_conflict());
+        }
+
+        let target_candidate = match update.recurring_id {
+            Some(recurring_id) => match update.target_candidate.as_ref() {
+                Some(candidate) if candidate.id == recurring_id => Some(candidate),
+                _ => {
+                    return Ok(ImportPreviewDecisionResult {
+                        preview: None,
+                        state_conflict: false,
+                        invalid_recurring_id: true,
+                    })
+                }
+            },
+            None => None,
+        };
+
+        let mut feedback = preview.preview_matching_feedback.clone();
+        if preview.preview_recurring_id != update.recurring_id {
+            remove_json_object_key(&mut feedback, "transfer");
+        }
+        let patch = ImportPreviewPatch::new(preview_id)
+            .with_change(
+                ImportPreviewPatchField::RecurringId,
+                update
+                    .recurring_id
+                    .map(ImportPreviewPatchValue::Integer)
+                    .unwrap_or(ImportPreviewPatchValue::Null),
+            )
+            .with_change(
+                ImportPreviewPatchField::RecurringName,
+                ImportPreviewPatchValue::Text(
+                    target_candidate
+                        .map(|candidate| candidate.name.clone())
+                        .unwrap_or_default(),
+                ),
+            )
+            .with_change(
+                ImportPreviewPatchField::RecurringCandidateCount,
+                ImportPreviewPatchValue::Integer(update.candidate_count),
+            )
+            .with_change(
+                ImportPreviewPatchField::RecurringMatchScore,
+                ImportPreviewPatchValue::Real(
+                    target_candidate
+                        .map(|candidate| candidate.match_score)
+                        .unwrap_or_default(),
+                ),
+            )
+            .with_change(
+                ImportPreviewPatchField::RecurringMatchReasons,
+                ImportPreviewPatchValue::Text(
+                    target_candidate
+                        .map(|candidate| candidate.match_reasons.join("|"))
+                        .unwrap_or_default(),
+                ),
+            )
+            .with_change(
+                ImportPreviewPatchField::RecurringMatchedDate,
+                ImportPreviewPatchValue::Text(
+                    target_candidate
+                        .map(|candidate| candidate.matched_occurrence_date.clone())
+                        .unwrap_or_default(),
+                ),
+            )
+            .with_change(
+                ImportPreviewPatchField::MatchingFeedback,
+                ImportPreviewPatchValue::Text(serialize_preview_matching_feedback(&feedback)),
+            );
+        if execute_preview_patch(tx, &preview.session_id, user_id, &patch)? < 1 {
+            return Ok(preview_decision_not_found());
+        }
+        Ok(ImportPreviewDecisionResult {
+            preview: get_preview_bill_by_id(tx, preview_id, user_id)?,
+            state_conflict: false,
+            invalid_recurring_id: false,
+        })
+    })
+}
+
+pub fn apply_preview_learning_decision(
+    connection: &mut Connection,
+    preview_id: i64,
+    user_id: UserId,
+    decision: ImportPreviewDecision,
+    applied_result: Option<&ImportPreviewLearningApply>,
+    expected_state: Option<&ImportPreviewExpectedState>,
+) -> DbResult<ImportPreviewDecisionResult> {
+    run_transaction(connection, |tx| {
+        let Some(preview) = get_preview_bill_by_id(tx, preview_id, user_id)? else {
+            return Ok(preview_decision_not_found());
+        };
+        if !preview_matches_expected_state(&preview, expected_state) {
+            return Ok(preview_decision_state_conflict());
+        }
+
+        let mut feedback = preview.preview_matching_feedback.clone();
+        ensure_json_object(&mut feedback);
+        let learning_feedback = feedback
+            .get("learning")
+            .filter(|value| value.is_object())
+            .cloned()
+            .unwrap_or_else(|| Value::Object(Default::default()));
+        let previous_snapshot = learning_feedback
+            .get("previous_preview")
+            .and_then(normalize_learning_snapshot);
+        let applied_snapshot = learning_feedback
+            .get("applied_preview")
+            .and_then(normalize_learning_snapshot);
+        let current_review_status = learning_feedback
+            .get("review_status")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        let should_restore = current_review_status == "accepted"
+            && previous_snapshot.as_ref().is_some()
+            && applied_snapshot
+                .as_ref()
+                .is_none_or(|snapshot| learning_preview_matches_snapshot(&preview, snapshot));
+
+        let mut patch = ImportPreviewPatch::new(preview_id);
+        match decision {
+            ImportPreviewDecision::Accept => {
+                let previous =
+                    previous_snapshot.unwrap_or_else(|| build_learning_previous_snapshot(&preview));
+                let applied = learning_accept_preview_snapshot(applied_result, &preview);
+                patch = patch.with_changes(learning_snapshot_restore_changes(&applied));
+                feedback["learning"] = serde_json::json!({
+                    "review_status": "accepted",
+                    "suppressed": false,
+                    "previous_preview": previous,
+                    "applied_preview": applied,
+                });
+                if let Some(rule_id) =
+                    applied_result.and_then(|value| normalize_rule_id(value.rule_id))
+                {
+                    feedback["learning"]["rule_id"] = serde_json::json!(rule_id);
+                }
+            }
+            ImportPreviewDecision::Reject => {
+                if should_restore {
+                    if let Some(snapshot) = previous_snapshot.as_ref() {
+                        patch = patch.with_changes(learning_snapshot_restore_changes(snapshot));
+                    }
+                }
+                feedback["learning"] = serde_json::json!({
+                    "review_status": "rejected",
+                    "suppressed": true,
+                });
+                let rule_id = applied_result
+                    .and_then(|value| normalize_rule_id(value.rule_id))
+                    .or_else(|| feedback_rule_id(&learning_feedback));
+                if let Some(rule_id) = rule_id {
+                    feedback["learning"]["rule_id"] = serde_json::json!(rule_id);
+                }
+            }
+            ImportPreviewDecision::Clear => {
+                if should_restore {
+                    if let Some(snapshot) = previous_snapshot.as_ref() {
+                        patch = patch.with_changes(learning_snapshot_restore_changes(snapshot));
+                    }
+                }
+                remove_json_object_key(&mut feedback, "learning");
+            }
+        }
+
+        patch = patch.with_change(
+            ImportPreviewPatchField::MatchingFeedback,
+            ImportPreviewPatchValue::Text(serialize_preview_matching_feedback(&feedback)),
+        );
+        if execute_preview_patch(tx, &preview.session_id, user_id, &patch)? < 1 {
+            return Ok(preview_decision_not_found());
+        }
+        Ok(ImportPreviewDecisionResult {
+            preview: get_preview_bill_by_id(tx, preview_id, user_id)?,
+            state_conflict: false,
+            invalid_recurring_id: false,
+        })
+    })
+}
