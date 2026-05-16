@@ -19,5 +19,6 @@
 ## 仓库治理
 
 - CI 的 `repo-governance` job 校验受追踪源码树保持 Rust-only。
+- Gitea Actions 的 push / pull_request path filter 覆盖 `src/backend/**`、`tests/backend/**`、`src/web/**`、`tests/web/**`、`tests/fixtures/**` 与治理/文档入口；`tests/backend/core/migration_governance_contracts.rs` 断言后端契约测试路径不会从 CI 过滤器中漂移。
 - 调整启动、CI、agent 或 docs 入口时，先跑 `git ls-files *.py` 确认没有重新加入已删除源码类型。
 - 改动 `.gitea/workflows/ci.yml` 时同步检查 Gitea Actions 语法与缓存体量。

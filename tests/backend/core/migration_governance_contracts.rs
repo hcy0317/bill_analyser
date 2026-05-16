@@ -9,7 +9,7 @@ use bill_analyser_core::{
     MigrationBlockedStatus, MigrationState, ResponseEnvelopeFamily, RouteHandlerId,
 };
 use serde::Deserialize;
-use std::path::Path;
+use std::{fs, path::Path};
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -24,6 +24,24 @@ struct FrontendRouteOwnership {
     pattern: String,
     domain: String,
     state: MigrationState,
+}
+
+#[test]
+fn gitea_ci_path_filters_cover_backend_contract_tests() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let workflow = fs::read_to_string(repo_root.join(".gitea/workflows/ci.yml"))
+        .expect("Gitea CI workflow is readable");
+
+    assert_eq!(
+        workflow.matches("- 'tests/backend/**'").count(),
+        2,
+        "backend contract tests must trigger CI for both push and pull_request"
+    );
+    assert_eq!(
+        workflow.matches("- 'tests/web/**'").count(),
+        2,
+        "frontend contract tests must trigger CI for both push and pull_request"
+    );
 }
 
 #[test]
