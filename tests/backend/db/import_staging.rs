@@ -103,6 +103,14 @@ fn table_indexes(
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
+fn query_plan_details(runtime: &SqliteRuntime, sql: &str) -> Result<Vec<String>, Box<dyn Error>> {
+    let mut statement = runtime
+        .connection()
+        .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(3))?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
 fn foreign_key_targets(
     runtime: &SqliteRuntime,
     table: &str,
@@ -1732,6 +1740,60 @@ fn preview_batch_insert_rolls_back_on_staging_error() -> Result<(), Box<dyn Erro
     assert_eq!(
         count_preview_by_session(runtime.connection(), "session-rollback", user_id(42), false)?,
         0
+    );
+    Ok(())
+}
+
+#[test]
+fn import_preview_page_queries_use_ordered_composite_indexes() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let runtime = runtime_for(&temp_dir.path().join("preview_page_indexes.db"))?;
+    init_import_staging_schema(runtime.connection())?;
+
+    let preview_indexes = table_indexes(&runtime, "bills_preview")?;
+    assert!(preview_indexes
+        .iter()
+        .any(|(name, _)| name == "idx_preview_session_user_order"));
+    assert!(preview_indexes
+        .iter()
+        .any(|(name, _)| name == "idx_preview_session_user_selected_order"));
+
+    let page_plan = query_plan_details(
+        &runtime,
+        "SELECT * FROM bills_preview \
+         WHERE session_id = 'session-large' AND user_id = 42 \
+         ORDER BY preview_date ASC, id ASC LIMIT 100 OFFSET 0",
+    )?;
+    assert!(
+        page_plan
+            .iter()
+            .any(|detail| detail.contains("idx_preview_session_user_order")),
+        "preview page query should use the ordered session/user index: {page_plan:?}"
+    );
+    assert!(
+        page_plan
+            .iter()
+            .all(|detail| !detail.contains("TEMP B-TREE")),
+        "preview page query should not need a temporary sort: {page_plan:?}"
+    );
+
+    let selected_page_plan = query_plan_details(
+        &runtime,
+        "SELECT * FROM bills_preview \
+         WHERE session_id = 'session-large' AND user_id = 42 AND preview_selected = 1 \
+         ORDER BY preview_date ASC, id ASC LIMIT 100 OFFSET 0",
+    )?;
+    assert!(
+        selected_page_plan
+            .iter()
+            .any(|detail| detail.contains("idx_preview_session_user_selected_order")),
+        "selected preview page query should use the selected ordered index: {selected_page_plan:?}"
+    );
+    assert!(
+        selected_page_plan
+            .iter()
+            .all(|detail| !detail.contains("TEMP B-TREE")),
+        "selected preview page query should not need a temporary sort: {selected_page_plan:?}"
     );
     Ok(())
 }

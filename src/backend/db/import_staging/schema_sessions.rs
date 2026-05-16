@@ -54,6 +54,10 @@ pub fn init_import_staging_schema(connection: &Connection) -> DbResult<()> {
         CREATE INDEX IF NOT EXISTS idx_preview_selected ON bills_preview(preview_selected);
         CREATE INDEX IF NOT EXISTS idx_preview_type ON bills_preview(preview_type);
         CREATE INDEX IF NOT EXISTS idx_preview_date ON bills_preview(preview_date);
+        CREATE INDEX IF NOT EXISTS idx_preview_session_user_order
+            ON bills_preview(session_id, user_id, preview_date, id);
+        CREATE INDEX IF NOT EXISTS idx_preview_session_user_selected_order
+            ON bills_preview(session_id, user_id, preview_selected, preview_date, id);
 
         CREATE TABLE IF NOT EXISTS bills_parser_template (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
