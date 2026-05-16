@@ -4,7 +4,7 @@
 
 ## 主要 route modules
 
-- `auth_routes/`：login/register/token/profile/cloud/external-auth/system/user-data/2FA/step-up/OAuth2 disabled-safe 合同。
+- `auth_routes/`：login/register/token/profile/cloud/external-auth/system/user-data/2FA/step-up/OAuth2 disabled-safe 合同；handler/helper 按 public auth、profile/user-data、2FA/token、JWT/TOTP、payload、audit/response 分片。
 - `bill_routes/`：账单 CRUD、批量写入、图片、导出、recurring、reconciliation、分类 quick actions。
 - `import_routes/`：parser-first 上传、JSON parse、未匹配文件列映射、session、preview、dedup、confirm、learning、LLM/OCR 入口。
 - `taxonomy_routes/`：账户、标签、分类、分类规则、模板、设置包、settings encryption status。

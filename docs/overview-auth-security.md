@@ -1,6 +1,6 @@
 # 认证与安全
 
-认证安全域由 Rust runtime 接管。
+认证安全域由 Rust runtime 接管。HTTP `auth_routes/` 保持 facade 注册路由，内部按 public auth、profile/user-data、2FA/token、JWT/TOTP、payload、audit/response helper 分片；DB `auth.rs` 保持 repository facade，内部按 user、session、profile、cloud settings、2FA、log 与 row helper 分片。
 
 ## 覆盖范围
 

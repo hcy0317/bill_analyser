@@ -17,13 +17,6 @@
       "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
     },
     {
-      "path": "src/backend/db/auth.rs",
-      "kind": "rust",
-      "area": "db",
-      "lines": 2262,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
       "path": "src/backend/db/taxonomy/settings_bundle.rs",
       "kind": "rust",
       "area": "db",
@@ -73,13 +66,6 @@
       "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
     },
     {
-      "path": "src/backend/db/auth_registration.rs",
-      "kind": "rust",
-      "area": "db",
-      "lines": 1479,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
       "path": "src/backend/db/taxonomy/category_rules.rs",
       "kind": "rust",
       "area": "db",
@@ -94,24 +80,10 @@
       "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
     },
     {
-      "path": "src/backend/http/auth_routes/profile_data_handlers.rs",
-      "kind": "rust",
-      "area": "http",
-      "lines": 1125,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
       "path": "src/backend/db/taxonomy/templates.rs",
       "kind": "rust",
       "area": "db",
       "lines": 1103,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/http/auth_routes/runtime_audit_helpers.rs",
-      "kind": "rust",
-      "area": "http",
-      "lines": 1088,
       "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
     },
     {
@@ -157,13 +129,6 @@
       "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
     },
     {
-      "path": "src/backend/http/auth_routes/jwt_totp_helpers.rs",
-      "kind": "rust",
-      "area": "http",
-      "lines": 854,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
       "path": "src/backend/db/statistics.rs",
       "kind": "rust",
       "area": "db",
@@ -189,20 +154,6 @@
       "kind": "rust",
       "area": "http",
       "lines": 818,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/http/auth_routes/profile_payload_helpers.rs",
-      "kind": "rust",
-      "area": "http",
-      "lines": 775,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/http/auth_routes/two_factor_handlers.rs",
-      "kind": "rust",
-      "area": "http",
-      "lines": 773,
       "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
     },
     {

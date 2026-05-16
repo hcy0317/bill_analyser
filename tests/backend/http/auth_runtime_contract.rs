@@ -1028,6 +1028,156 @@ async fn auth_two_factor_write_runtime_manages_setup_recovery_and_disable(
 }
 
 #[tokio::test]
+async fn auth_two_factor_write_runtime_covers_missing_runtime_and_user_edges(
+) -> Result<(), Box<dyn Error>> {
+    let secret = "JBSWY3DPEHPK3PXP";
+    let passcode = totp_passcode(secret, Local::now().timestamp());
+
+    let auth_app = runtime_router_without_sqlite_path();
+    let unauthenticated_enable_request = auth_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/2fa/enable/request")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(
+        unauthenticated_enable_request.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let unauthenticated_enable_confirm = auth_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/2fa/enable/confirm")
+                .body(Body::from(
+                    json!({"secret": secret, "passcode": passcode.clone()}).to_string(),
+                ))?,
+        )
+        .await?;
+    assert_eq!(
+        unauthenticated_enable_confirm.status(),
+        StatusCode::UNAUTHORIZED
+    );
+
+    let no_db_app = runtime_router_without_sqlite_path();
+    let no_db_enable_request = no_db_app
+        .clone()
+        .oneshot(trusted_request(
+            Method::POST,
+            "/api/2fa/enable/request",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(
+        no_db_enable_request.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+
+    let no_db_confirm = no_db_app
+        .clone()
+        .oneshot(trusted_user_json_request(
+            42,
+            Method::POST,
+            "/api/2fa/enable/confirm",
+            json!({"secret": secret, "passcode": passcode}),
+        ))
+        .await?;
+    assert_eq!(no_db_confirm.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let no_db_disable = no_db_app
+        .clone()
+        .oneshot(trusted_user_json_request(
+            42,
+            Method::POST,
+            "/api/2fa/disable",
+            json!({"password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(no_db_disable.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let no_db_regenerate = no_db_app
+        .clone()
+        .oneshot(trusted_user_json_request(
+            42,
+            Method::POST,
+            "/api/2fa/recovery/regenerate",
+            json!({"password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(no_db_regenerate.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let fixture = RuntimeFixture::new()?;
+    let token = test_access_token(42, TEST_AUTH_SECRET);
+    seed_auth_db(fixture.db_path(), &token)?;
+    let app = runtime_router(&fixture);
+
+    let missing_user_enable_request = app
+        .clone()
+        .oneshot(trusted_user_json_request(
+            999,
+            Method::POST,
+            "/api/2fa/enable/request",
+            json!({}),
+        ))
+        .await?;
+    assert_eq!(missing_user_enable_request.status(), StatusCode::NOT_FOUND);
+
+    let missing_user_confirm = app
+        .clone()
+        .oneshot(trusted_user_json_request(
+            999,
+            Method::POST,
+            "/api/2fa/enable/confirm",
+            json!({"secret": secret, "passcode": totp_passcode(secret, Local::now().timestamp())}),
+        ))
+        .await?;
+    assert_eq!(missing_user_confirm.status(), StatusCode::NOT_FOUND);
+
+    let missing_user_disable = app
+        .clone()
+        .oneshot(trusted_user_json_request(
+            999,
+            Method::POST,
+            "/api/2fa/disable",
+            json!({"password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(missing_user_disable.status(), StatusCode::NOT_FOUND);
+
+    let missing_user_regenerate = app
+        .clone()
+        .oneshot(trusted_user_json_request(
+            999,
+            Method::POST,
+            "/api/2fa/recovery/regenerate",
+            json!({"password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(missing_user_regenerate.status(), StatusCode::NOT_FOUND);
+
+    let regenerate_without_2fa = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/recovery/regenerate",
+            &token,
+            json!({"password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(regenerate_without_2fa.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(regenerate_without_2fa).await["message"],
+        "Two-factor authentication is not enabled"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn auth_step_up_runtime_issues_short_lived_tokens_for_password_or_totp(
 ) -> Result<(), Box<dyn Error>> {
     let route = ("POST", "/api/security/step-up/verify");
@@ -1709,6 +1859,46 @@ async fn auth_profile_cloud_runtime_preserves_flask_contracts() -> Result<(), Bo
     seed_auth_db(fixture.db_path(), &token)?;
     let app = runtime_router(&fixture);
 
+    let unauthenticated_profile_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/profile")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(
+        unauthenticated_profile_response.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let unauthenticated_profile_update_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::PUT)
+                .uri("/api/profile")
+                .body(Body::from(r#"{"nickname":"No Auth"}"#))?,
+        )
+        .await?;
+    assert_eq!(
+        unauthenticated_profile_update_response.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let unauthenticated_avatar_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri("/api/profile/avatar")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(
+        unauthenticated_avatar_response.status(),
+        StatusCode::UNAUTHORIZED
+    );
+
     let oauth_response = app
         .clone()
         .oneshot(
@@ -1840,6 +2030,24 @@ async fn auth_profile_cloud_runtime_preserves_flask_contracts() -> Result<(), Bo
         "Invalid password"
     );
 
+    let missing_unlink_password_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/profile/external-auths/unlink",
+            &token,
+            json!({"externalAuthType": "github"}),
+        ))
+        .await?;
+    assert_eq!(
+        missing_unlink_password_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(missing_unlink_password_response).await["message"],
+        "password is required"
+    );
+
     let unlink_response = app
         .clone()
         .oneshot(bearer_json_request(
@@ -1871,6 +2079,17 @@ async fn auth_profile_cloud_runtime_preserves_flask_contracts() -> Result<(), Bo
         read_json(missing_link_response).await["message"],
         "Third-party login is not linked"
     );
+
+    let missing_user_unlink_response = app
+        .clone()
+        .oneshot(trusted_user_json_request(
+            999,
+            Method::POST,
+            "/api/profile/external-auths/unlink",
+            json!({"externalAuthType": "github", "password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(missing_user_unlink_response.status(), StatusCode::NOT_FOUND);
 
     let profile_response = app
         .clone()
@@ -1939,6 +2158,61 @@ async fn auth_profile_cloud_runtime_preserves_flask_contracts() -> Result<(), Bo
         updated_user["investmentPlatformKeywords"],
         json!(["蚂蚁财富", "雪球"])
     );
+    assert_profile_db_values(fixture.db_path())?;
+
+    let comprehensive_update_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &token,
+            json!({
+                "email": "alice@example.test",
+                "fiscalYearStart": "4",
+                "dateDisplayType": 2,
+                "longDateFormat": 3,
+                "shortDateFormat": 4,
+                "longTimeFormat": 5,
+                "shortTimeFormat": 6,
+                "fiscalYearFormat": 7,
+                "currencyDisplayType": 8,
+                "numeralSystem": 9,
+                "decimalSeparator": 10,
+                "digitGroupingSymbol": 11,
+                "digitGrouping": 12,
+                "coordinateDisplayType": 13,
+                "expenseAmountColor": 14,
+                "incomeAmountColor": 15,
+                "cashAccountId": "100",
+                "cashTransferCategoryId": "200",
+                "importLearningEnabled": 1
+            }),
+        ))
+        .await?;
+    assert_eq!(comprehensive_update_response.status(), StatusCode::OK);
+    let comprehensive_user =
+        read_json(comprehensive_update_response).await["result"]["user"].clone();
+    assert_eq!(comprehensive_user["email"], "alice@example.test");
+    assert_eq!(comprehensive_user["fiscalYearStart"], 4);
+    assert_eq!(comprehensive_user["dateDisplayType"], 2);
+    assert_eq!(comprehensive_user["cashAccountId"], "100");
+    assert_eq!(comprehensive_user["cashTransferCategoryId"], "200");
+    assert_eq!(comprehensive_user["importLearningEnabled"], true);
+
+    let restore_profile_baseline_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &token,
+            json!({
+                "calendarDisplayType": 1,
+                "cashAccountId": "",
+                "importLearningEnabled": false
+            }),
+        ))
+        .await?;
+    assert_eq!(restore_profile_baseline_response.status(), StatusCode::OK);
     assert_profile_db_values(fixture.db_path())?;
 
     let malformed_numeric_response = app
@@ -2020,6 +2294,78 @@ async fn auth_profile_cloud_runtime_preserves_flask_contracts() -> Result<(), Bo
     assert_eq!(
         read_json(malformed_account_response).await["message"],
         "defaultAccountId is invalid"
+    );
+
+    let cross_user_cash_account_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &token,
+            json!({"cashAccountId": "101"}),
+        ))
+        .await?;
+    assert_eq!(
+        cross_user_cash_account_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(cross_user_cash_account_response).await["message"],
+        "cashAccountId is invalid"
+    );
+
+    let cross_user_cash_transfer_category_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &token,
+            json!({"cashTransferCategoryId": "201"}),
+        ))
+        .await?;
+    assert_eq!(
+        cross_user_cash_transfer_category_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(cross_user_cash_transfer_category_response).await["message"],
+        "cashTransferCategoryId is invalid"
+    );
+
+    let malformed_cash_transfer_category_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &token,
+            json!({"cashTransferCategoryId": "abc"}),
+        ))
+        .await?;
+    assert_eq!(
+        malformed_cash_transfer_category_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(malformed_cash_transfer_category_response).await["message"],
+        "cashTransferCategoryId is invalid"
+    );
+
+    let malformed_numeric_bool_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &token,
+            json!({"importLearningEnabled": 2}),
+        ))
+        .await?;
+    assert_eq!(
+        malformed_numeric_bool_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(malformed_numeric_bool_response).await["message"],
+        "importLearningEnabled is invalid"
     );
 
     let avatar_in_profile_response = app
@@ -2324,6 +2670,26 @@ async fn auth_profile_cloud_runtime_preserves_flask_contracts() -> Result<(), Bo
     assert_eq!(read_json(delete_cloud_response).await["result"], true);
     assert_eq!(cloud_setting_count(fixture.db_path(), 42)?, 0);
 
+    let no_db_app = runtime_router_without_sqlite_path();
+    for (method, uri, body) in [
+        (Method::GET, "/api/profile", Body::empty()),
+        (
+            Method::PUT,
+            "/api/profile",
+            Body::from(r#"{"nickname":"No DB"}"#),
+        ),
+        (Method::DELETE, "/api/profile/avatar", Body::empty()),
+        (Method::GET, "/api/profile/cloud-settings", Body::empty()),
+        (Method::DELETE, "/api/profile/cloud-settings", Body::empty()),
+        (Method::GET, "/api/profile/external-auths", Body::empty()),
+    ] {
+        let response = no_db_app
+            .clone()
+            .oneshot(trusted_request(method, uri, body))
+            .await?;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
     Ok(())
 }
 
@@ -2332,6 +2698,15 @@ async fn auth_user_data_statistics_runtime_preserves_flask_contract() -> Result<
 {
     let route = ("GET", "/api/data/statistics");
     assert!(AUTH_TOKEN_ROUTE_PATTERNS.iter().any(|item| item == &route));
+
+    let no_db_response = runtime_router_without_sqlite_path()
+        .oneshot(trusted_request(
+            Method::GET,
+            "/api/data/statistics",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(no_db_response.status(), StatusCode::SERVICE_UNAVAILABLE);
 
     let fixture = RuntimeFixture::new()?;
     let token = test_access_token(42, TEST_AUTH_SECRET);
@@ -2375,6 +2750,37 @@ async fn auth_user_data_export_and_clear_runtime_preserve_flask_contracts(
     seed_auth_db(fixture.db_path(), &token)?;
     seed_user_data_management_rows(fixture.db_path())?;
     let app = runtime_router(&fixture);
+
+    let no_db_app = runtime_router_without_sqlite_path();
+    let no_db_export = no_db_app
+        .clone()
+        .oneshot(trusted_request(
+            Method::GET,
+            "/api/data/export.csv",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(no_db_export.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let no_db_clear = no_db_app
+        .clone()
+        .oneshot(trusted_user_json_request(
+            42,
+            Method::POST,
+            "/api/data/clear/transactions",
+            json!({"password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(no_db_clear.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let missing_user_clear = app
+        .clone()
+        .oneshot(trusted_user_json_request(
+            999,
+            Method::POST,
+            "/api/data/clear/all",
+            json!({"password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(missing_user_clear.status(), StatusCode::NOT_FOUND);
 
     let unsupported_export = app
         .clone()
@@ -2599,6 +3005,76 @@ async fn auth_account_recovery_runtime_preserves_flask_contracts() -> Result<(),
         "Forget password is currently disabled"
     );
 
+    let no_db_email_app = runtime_router_without_sqlite_path();
+    let no_db_verify_token = test_action_token(
+        42,
+        "alice",
+        "alice@example.test",
+        "verify_email",
+        TEST_AUTH_SECRET,
+        ChronoDuration::hours(1),
+    );
+    let no_db_verify_response = no_db_email_app
+        .clone()
+        .oneshot(json_post(
+            "/api/auth/email/verify",
+            json!({"token": no_db_verify_token}),
+        ))
+        .await?;
+    assert_eq!(
+        no_db_verify_response.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    let no_db_resend_response = no_db_email_app
+        .clone()
+        .oneshot(json_post(
+            "/api/auth/email/resend-verification",
+            json!({"email": "alice@example.test", "password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(
+        no_db_resend_response.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+
+    let missing_parent = disabled_fixture
+        .db_path()
+        .parent()
+        .expect("fixture parent")
+        .join("missing-parent")
+        .join("auth.db");
+    let invalid_password_reset_app = runtime_router_with_password_reset(&missing_parent, true);
+    let no_db_forgot_response = invalid_password_reset_app
+        .clone()
+        .oneshot(json_post(
+            "/api/auth/password/forgot",
+            json!({"email": "alice@example.test"}),
+        ))
+        .await?;
+    assert_eq!(
+        no_db_forgot_response.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    let no_db_reset_token = test_action_token(
+        42,
+        "alice",
+        "alice@example.test",
+        "reset_password",
+        TEST_AUTH_SECRET,
+        ChronoDuration::hours(1),
+    );
+    let no_db_reset_response = invalid_password_reset_app
+        .clone()
+        .oneshot(json_post(
+            "/api/auth/password/reset",
+            json!({"email": "alice@example.test", "password": "new-password", "token": no_db_reset_token}),
+        ))
+        .await?;
+    assert_eq!(
+        no_db_reset_response.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+
     let fixture = RuntimeFixture::new()?;
     seed_auth_db(fixture.db_path(), &test_access_token(42, TEST_AUTH_SECRET))?;
     set_email_verified(fixture.db_path(), 42, false)?;
@@ -2640,6 +3116,23 @@ async fn auth_account_recovery_runtime_preserves_flask_contracts() -> Result<(),
     );
     assert!(!email_verified(fixture.db_path(), 42)?);
     set_user_email(fixture.db_path(), 42, "alice@example.test")?;
+
+    let missing_user_verify_token = test_action_token(
+        999,
+        "ghost",
+        "ghost@example.test",
+        "verify_email",
+        TEST_AUTH_SECRET,
+        ChronoDuration::hours(1),
+    );
+    let missing_user_verify_response = app
+        .clone()
+        .oneshot(json_post(
+            "/api/auth/email/verify",
+            json!({"token": missing_user_verify_token}),
+        ))
+        .await?;
+    assert_eq!(missing_user_verify_response.status(), StatusCode::NOT_FOUND);
 
     let verify_token = test_action_token(
         42,
@@ -2767,6 +3260,23 @@ async fn auth_account_recovery_runtime_preserves_flask_contracts() -> Result<(),
         read_json(mismatch_reset_response).await["message"],
         "Reset password token does not match email"
     );
+
+    let missing_user_reset_token = test_action_token(
+        999,
+        "ghost",
+        "ghost@example.test",
+        "reset_password",
+        TEST_AUTH_SECRET,
+        ChronoDuration::hours(1),
+    );
+    let missing_user_reset_response = app
+        .clone()
+        .oneshot(json_post(
+            "/api/auth/password/reset",
+            json!({"email": "ghost@example.test", "password": "new-password", "token": missing_user_reset_token}),
+        ))
+        .await?;
+    assert_eq!(missing_user_reset_response.status(), StatusCode::NOT_FOUND);
 
     set_user_updated_at(fixture.db_path(), 42, "2026-01-01T00:00:00")?;
     let reset_response = app
