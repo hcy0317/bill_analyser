@@ -179,4 +179,4 @@ include!("auth/logs.rs");
 include!("auth/two_factor.rs");
 include!("auth/login_security.rs");
 include!("auth/rows_helpers.rs");
-include!("auth/tests.rs");
+include!("../../../tests/backend/db/internal/auth.rs");

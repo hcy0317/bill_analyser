@@ -94,4 +94,4 @@ include!("auth_registration/default_templates.rs");
 include!("auth_registration/registration.rs");
 include!("auth_registration/categories.rs");
 include!("auth_registration/accounts.rs");
-include!("auth_registration/tests.rs");
+include!("../../../tests/backend/db/internal/auth_registration.rs");

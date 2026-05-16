@@ -8,15 +8,19 @@ function readSource(relativePath: string): string {
 }
 
 describe('import stage timeout policy', () => {
-    test('stage 1 parse uses the import parse timeout instead of generic upload timeout', () => {
+    test('long-running import stages use import timeouts instead of generic upload timeout', () => {
         const apiSource = readSource('src/consts/api.ts');
         const dialogSource = readSource('src/views/desktop/transactions/import/ImportDialog.vue');
         const apiHelperSource = readSource('src/views/desktop/transactions/import/importDialogApi.ts');
 
         expect(apiSource).toContain('DEFAULT_IMPORT_PARSE_API_TIMEOUT');
+        expect(apiSource).toContain('DEFAULT_IMPORT_API_TIMEOUT');
         expect(dialogSource).toContain('DEFAULT_IMPORT_PARSE_API_TIMEOUT');
+        expect(dialogSource).toContain('DEFAULT_IMPORT_API_TIMEOUT');
         expect(apiHelperSource).toContain('timeoutMs = DEFAULT_UPLOAD_API_TIMEOUT');
         expect(dialogSource).toContain("}, '阶段1解析', DEFAULT_IMPORT_PARSE_API_TIMEOUT);");
+        expect(dialogSource).toContain("}, '阶段2去重', DEFAULT_IMPORT_API_TIMEOUT);");
+        expect(dialogSource).toContain("}, '阶段3确认导入', DEFAULT_IMPORT_API_TIMEOUT);");
     });
 
     test('abort errors include client-timeout context and cleanup remains in finally', () => {

@@ -1,0 +1,59 @@
+use crate::{post_process_raw_bills, RawBill, StandardBill};
+
+use super::common::{csv_records_from_text, decode_text, file_suffix, get, RowMap};
+
+pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
+    let suffix = file_suffix(filename);
+    match suffix.as_str() {
+        "csv" | "txt" => parse_csv(bytes),
+        _ => Vec::new(),
+    }
+}
+
+fn parse_csv(bytes: &[u8]) -> Vec<StandardBill> {
+    let text = decode_text(bytes);
+    let probe = text.lines().take(15).collect::<Vec<_>>().join("\n");
+    if ![
+        "支付宝",
+        "alipay",
+        "支付宝账户",
+        "支付宝（中国）网络技术有限公司",
+    ]
+    .iter()
+    .any(|indicator| probe.to_lowercase().contains(&indicator.to_lowercase()))
+    {
+        return Vec::new();
+    }
+    let Some((rows, _)) = csv_records_from_text(&text, |line| {
+        line.contains("交易时间") && line.contains("交易")
+    }) else {
+        return Vec::new();
+    };
+    post_process_raw_bills(
+        "alipay",
+        &rows.iter().filter_map(raw_alipay).collect::<Vec<_>>(),
+    )
+}
+
+fn raw_alipay(row: &RowMap) -> Option<RawBill> {
+    let date = get(row, &["交易时间", "交易创建时间"]);
+    if date.is_empty() || date.contains('共') {
+        return None;
+    }
+    Some(RawBill {
+        trade_time: date,
+        transaction_type: get(row, &["收/支"]),
+        counterparty: get(row, &["交易对方", "对方"]),
+        opponent_account: get(row, &["对方账号"]),
+        description: get(row, &["商品说明", "商品名称"]),
+        goods: get(row, &["商品说明", "商品名称"]),
+        amount: get(row, &["金额", "金额(元)"]),
+        payment_method: get(row, &["收/付款方式"]),
+        status: get(row, &["交易状态"]),
+        transaction_id: get(row, &["交易订单号"]),
+        merchant_id: get(row, &["商家订单号"]),
+        remark: get(row, &["备注"]),
+        original_category: get(row, &["交易分类"]),
+        ..Default::default()
+    })
+}

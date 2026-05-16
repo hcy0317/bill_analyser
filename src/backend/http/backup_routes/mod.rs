@@ -158,6 +158,7 @@ pub fn backup_ops_runtime_router() -> Router<HttpAppState> {
 
 mod archive;
 #[cfg(test)]
+#[path = "../../../../tests/backend/http/internal/backup_archive_tests.rs"]
 mod archive_tests;
 mod audit;
 mod auth;

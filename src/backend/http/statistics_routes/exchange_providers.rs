@@ -401,4 +401,5 @@ pub(super) fn json_number(value: &Value) -> Option<f64> {
 }
 
 #[cfg(test)]
+#[path = "../../../../tests/backend/http/internal/statistics_exchange_providers.rs"]
 mod tests;

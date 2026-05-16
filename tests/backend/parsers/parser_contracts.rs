@@ -42,6 +42,32 @@ fn parser_registry_preserves_python_detection_order_and_metadata() {
 }
 
 #[test]
+fn dedicated_parser_sources_are_split_by_source_family() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let dedicated_dir = manifest_dir.join("dedicated");
+
+    for filename in [
+        "WeChat.rs",
+        "Alipay.rs",
+        "ICBC.rs",
+        "CMBC.rs",
+        "ABC.rs",
+        "CCB.rs",
+        "common.rs",
+        "mod.rs",
+    ] {
+        assert!(
+            dedicated_dir.join(filename).exists(),
+            "{filename} should live in dedicated parser modules"
+        );
+    }
+    assert!(
+        !manifest_dir.join("dedicated.rs").exists(),
+        "dedicated parser runtime should not fall back to a monolithic source file"
+    );
+}
+
+#[test]
 fn parser_tags_match_python_contract_defaults_and_dedupe() {
     assert_eq!(
         normalize_parser_tags(["parser:WeChat", "channel:wallet", "parser:wechat"]),
@@ -281,6 +307,94 @@ fn dedicated_rust_parser_rejects_generic_csv_fixture() {
     let bytes = std::fs::read(import_sample_path(filename)).expect("fixture reads");
 
     assert!(parse_dedicated_import_bytes(filename, &bytes, "auto").is_none());
+}
+
+#[test]
+fn dedicated_dispatcher_respects_requested_parser_and_rejects_non_dedicated_ids() {
+    let filename = "wechat_statement_sample.csv";
+    let bytes = std::fs::read(import_sample_path(filename)).expect("fixture reads");
+
+    let parsed = parse_dedicated_import_bytes(filename, &bytes, "wechat")
+        .expect("requested parser should parse matching WeChat fixture");
+    assert_eq!(parsed.parser_id, "wechat");
+
+    assert!(parse_dedicated_import_bytes(filename, &bytes, "generic").is_none());
+    assert!(parse_dedicated_import_bytes(filename, &bytes, "unknown-parser").is_none());
+    assert!(parse_dedicated_import_bytes(filename, &bytes, "abc").is_none());
+}
+
+#[test]
+fn abc_parser_edges_are_source_local_before_standardization() {
+    assert!(
+        parse_dedicated_import_bytes("abc_statement_sample.json", b"{}", "abc").is_none(),
+        "ABC should reject unsupported extensions before content probing"
+    );
+    assert!(
+        parse_dedicated_import_bytes(
+            "abc_missing_header.csv",
+            "农业银行\n无表头".as_bytes(),
+            "abc"
+        )
+        .is_none(),
+        "ABC should require a recognizable header"
+    );
+    assert!(
+        parse_dedicated_import_bytes("abc_bad.xlsx", b"not a workbook", "abc").is_none(),
+        "ABC xlsx parser should reject unreadable workbooks"
+    );
+
+    let csv = "\
+农业银行
+交易日期,交易时间,交易金额,对手信息,交易用途
+,09:00:00,1.00,缺少日期,跳过
+2026-02-01,,12.50,收款方,单金额收入
+2026-02-02,,-3.00,付款方,单金额支出
+2026-02-03,,0,零金额,跳过
+2026-02-04,,,缺少金额,跳过
+";
+    let parsed = parse_dedicated_import_bytes("abc_edge_statement.csv", csv.as_bytes(), "abc")
+        .expect("ABC edge sample should parse valid rows");
+
+    assert_eq!(parsed.parser_id, "abc");
+    assert_eq!(parsed.bills.len(), 2);
+    assert_eq!(parsed.bills[0].transaction_type, "收入");
+    assert_eq!(parsed.bills[0].amount.to_yuan_string(), "12.50");
+    assert_eq!(parsed.bills[1].transaction_type, "支出");
+    assert_eq!(parsed.bills[1].amount.to_yuan_string(), "-3.00");
+}
+
+#[test]
+fn ccb_parser_edges_are_source_local_before_standardization() {
+    assert!(
+        parse_dedicated_import_bytes(
+            "ccb_bad.xls",
+            b"<table><tr><td>not a statement</td></tr></table>",
+            "ccb",
+        )
+        .is_none(),
+        "CCB should reject content without bank markers or required columns"
+    );
+
+    let html = "\
+<table>
+  <tr><th>记账日</th><th>交易日期</th><th>交易时间</th><th>支出</th><th>收入</th><th>摘要</th><th>对方户名</th></tr>
+  <tr><td></td><td></td><td></td><td></td><td>1.00</td><td>缺少日期</td><td>跳过</td></tr>
+  <tr><td>20260201</td><td></td><td></td><td></td><td></td><td>缺少金额</td><td>跳过</td></tr>
+  <tr><td>20260202</td><td></td><td></td><td></td><td>8.00</td><td>工资</td><td></td></tr>
+  <tr><td></td><td>20260203</td><td>123456</td><td>3.00</td><td></td><td>消费</td><td>商户</td></tr>
+</table>
+";
+    let parsed = parse_dedicated_import_bytes("ccb_edge_statement.xls", html.as_bytes(), "ccb")
+        .expect("CCB edge html should parse valid rows");
+
+    assert_eq!(parsed.parser_id, "ccb");
+    assert_eq!(parsed.bills.len(), 2);
+    assert_eq!(parsed.bills[0].date, "2026-02-02 00:00:00");
+    assert_eq!(parsed.bills[0].counterparty, "工资");
+    assert_eq!(parsed.bills[0].amount.to_yuan_string(), "8.00");
+    assert_eq!(parsed.bills[1].date, "2026-02-03 12:34:56");
+    assert_eq!(parsed.bills[1].counterparty, "商户");
+    assert_eq!(parsed.bills[1].amount.to_yuan_string(), "-3.00");
 }
 
 fn import_sample_path(filename: &str) -> PathBuf {

@@ -432,7 +432,7 @@ import { ImportTransaction, type ImportTransactionResponse } from '@/models/impo
 import { getCurrentToken } from '@/lib/userstate.ts';
 import services from '@/lib/services.ts';
 import logger from '@/lib/logger.ts';
-import { DEFAULT_IMPORT_PARSE_API_TIMEOUT } from '@/consts/api.ts';
+import { DEFAULT_IMPORT_API_TIMEOUT, DEFAULT_IMPORT_PARSE_API_TIMEOUT } from '@/consts/api.ts';
 
 import {
     mdiFilterOutline,
@@ -1337,7 +1337,7 @@ async function executeStage2Dedup(): Promise<void> {
             session_id: serverSessionId.value,
             include_preview: false
         })
-    }, '阶段2去重');
+    }, '阶段2去重', DEFAULT_IMPORT_API_TIMEOUT);
 
     if (!stage2Response.ok) {
         const errorText = await stage2Response.text();
@@ -1739,7 +1739,7 @@ function submit(): void {
                     session_id: serverSessionId.value,
                     preview_updates: previewUpdates
                 })
-            }, '阶段3确认导入');
+            }, '阶段3确认导入', DEFAULT_IMPORT_API_TIMEOUT);
 
             if (!response.ok) {
                 const errorText = await response.text();
