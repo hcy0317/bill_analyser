@@ -5,6 +5,7 @@ use bill_analyser_core::{
     ReconciliationCandidateType, SmartDeduplicationEngine,
 };
 use serde_json::json;
+use std::time::{Duration, Instant};
 
 fn money(yuan: &str) -> Money {
     Money::from_yuan_str(yuan).unwrap()
@@ -234,6 +235,43 @@ fn python_shaped_hidden_fields_round_trip_and_match_dedup_source_ids() {
     assert_eq!(serialized["_parser_id"], "wechat");
     assert_eq!(serialized["_template_id"], "101");
     assert_eq!(serialized["amount"], -20.5);
+}
+
+#[test]
+fn same_source_large_import_skips_cross_source_quadratic_work() {
+    let bills = (0..4_000)
+        .map(|index| {
+            let day = (index % 28) + 1;
+            let hour = (index / 28) % 24;
+            let minute = (index / (28 * 24)) % 60;
+            let second = index % 60;
+            let amount_cents = 100 + (index % 50_000);
+            let amount = format!("-{}.{:02}", amount_cents / 100, amount_cents % 100);
+            let mut item = bill(
+                "alipay",
+                &format!("2026-02-{day:02} {hour:02}:{minute:02}:{second:02}"),
+                &amount,
+            );
+            item.counterparty = format!("商户{index}");
+            item.payment_method = "支付宝".to_string();
+            item.description = format!("批量导入交易{index}");
+            item
+        })
+        .collect::<Vec<_>>();
+
+    let started_at = Instant::now();
+    let result = SmartDeduplicationEngine.process(bills);
+    let elapsed = started_at.elapsed();
+
+    assert_eq!(result.original_count, 4_000);
+    assert_eq!(result.kept_bills.len(), 4_000);
+    assert!(result.transfer_pairs.is_empty());
+    assert!(result.duplicate_groups.is_empty());
+    assert!(result.split_groups.is_empty());
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "same-source import dedup should skip cross-source quadratic passes, elapsed={elapsed:?}"
+    );
 }
 
 #[test]

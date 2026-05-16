@@ -690,60 +690,68 @@ fn find_exact_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup> {
 
 fn find_platform_bank_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup> {
     let mut groups = Vec::new();
+    let source_types: Vec<String> = bills.iter().map(DedupBill::source_type).collect();
+    let datetimes: Vec<Option<NaiveDateTime>> = bills.iter().map(bill_datetime).collect();
+    let timestamps = timestamps_from_datetimes(&datetimes);
     let platform_indices: Vec<usize> = bills
         .iter()
         .enumerate()
         .filter_map(|(index, bill)| {
-            (!bill.removed && is_platform_source(&bill.source_type())).then_some(index)
+            (!bill.removed && is_platform_source(&source_types[index])).then_some(index)
         })
         .collect();
     let bank_indices: Vec<usize> = bills
         .iter()
         .enumerate()
         .filter_map(|(index, bill)| {
-            (!bill.removed && is_bank_source(&bill.source_type())).then_some(index)
+            (!bill.removed && is_bank_source(&source_types[index])).then_some(index)
         })
         .collect();
 
+    if platform_indices.is_empty() || bank_indices.is_empty() {
+        return groups;
+    }
+
+    let bank_time_buckets = build_time_buckets(bank_indices, &timestamps);
     let mut matched_bank_indices = HashSet::new();
     for platform_index in platform_indices {
-        let Some(platform_dt) = bill_datetime(&bills[platform_index]) else {
+        let Some(platform_ts) = timestamps[platform_index] else {
+            continue;
+        };
+        let Some(platform_dt) = datetimes[platform_index] else {
             continue;
         };
 
-        for bank_index in &bank_indices {
-            if matched_bank_indices.contains(bank_index) || bills[*bank_index].removed {
+        for bank_index in nearby_time_indices(&bank_time_buckets, platform_ts) {
+            if matched_bank_indices.contains(&bank_index) || bills[bank_index].removed {
                 continue;
             }
-            let Some(bank_dt) = bill_datetime(&bills[*bank_index]) else {
+            let Some(bank_dt) = datetimes[bank_index] else {
                 continue;
             };
             if !time_close(platform_dt, bank_dt, TIME_TOLERANCE_SECONDS)
-                || !abs_amount_close(bills[platform_index].amount, bills[*bank_index].amount)
-                || !is_platform_bank_duplicate_candidate(
-                    &bills[platform_index],
-                    &bills[*bank_index],
-                )
+                || !abs_amount_close(bills[platform_index].amount, bills[bank_index].amount)
+                || !is_platform_bank_duplicate_candidate(&bills[platform_index], &bills[bank_index])
             {
                 continue;
             }
 
-            matched_bank_indices.insert(*bank_index);
-            bills[*bank_index].removed = true;
-            let bank_bill = bills[*bank_index].clone();
+            matched_bank_indices.insert(bank_index);
+            bills[bank_index].removed = true;
+            let bank_bill = bills[bank_index].clone();
             merge_bill_fields(&mut bills[platform_index], &bank_bill, true);
             bills[platform_index].dedup_type =
                 Some(DeduplicationType::PlatformBank.as_str().to_string());
-            let bill_indices = vec![platform_index, *bank_index];
+            let bill_indices = vec![platform_index, bank_index];
             groups.push(DuplicateGroup {
                 dedup_type: DeduplicationType::PlatformBank,
                 bill_indices,
                 keep_index: platform_index,
-                remove_indices: vec![*bank_index],
+                remove_indices: vec![bank_index],
                 reason: format!(
                     "支付平台({})与银行({})重复，金额={}，保留平台账单",
                     bills[platform_index].source_type(),
-                    bills[*bank_index].source_type(),
+                    bills[bank_index].source_type(),
                     bills[platform_index].amount.to_yuan_string()
                 ),
             });
@@ -755,6 +763,14 @@ fn find_platform_bank_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup>
 
 fn find_transfer_pairs(bills: &mut [DedupBill]) -> Vec<TransferPair> {
     let mut pairs = Vec::new();
+    if !has_multiple_active_sources(bills, DedupBill::source_identifier) {
+        return pairs;
+    }
+
+    let source_identifiers: Vec<String> = bills.iter().map(DedupBill::source_identifier).collect();
+    let datetimes: Vec<Option<NaiveDateTime>> = bills.iter().map(bill_datetime).collect();
+    let timestamps = timestamps_from_datetimes(&datetimes);
+    let time_buckets = build_time_buckets(0..bills.len(), &timestamps);
     let mut matched_indices = HashSet::new();
 
     for left_index in 0..bills.len() {
@@ -764,28 +780,37 @@ fn find_transfer_pairs(bills: &mut [DedupBill]) -> Vec<TransferPair> {
         {
             continue;
         }
-        let Some(left_dt) = bill_datetime(&bills[left_index]) else {
+        let left_source = &source_identifiers[left_index];
+        if left_source.is_empty() {
+            continue;
+        }
+        let Some(left_ts) = timestamps[left_index] else {
             continue;
         };
-        for right_index in (left_index + 1)..bills.len() {
+        let Some(left_dt) = datetimes[left_index] else {
+            continue;
+        };
+        for right_index in nearby_time_indices(&time_buckets, left_ts) {
+            if right_index <= left_index {
+                continue;
+            }
             if bills[right_index].removed
                 || matched_indices.contains(&right_index)
                 || bills[right_index].amount == Money::ZERO
             {
                 continue;
             }
-            let Some(right_dt) = bill_datetime(&bills[right_index]) else {
-                continue;
-            };
-            if !time_close(left_dt, right_dt, TIME_TOLERANCE_SECONDS)
-                || !amount_opposite(bills[left_index].amount, bills[right_index].amount)
-            {
+            let right_source = &source_identifiers[right_index];
+            if right_source.is_empty() || right_source == left_source {
                 continue;
             }
-
-            let left_source = bills[left_index].source_identifier();
-            let right_source = bills[right_index].source_identifier();
-            if left_source.is_empty() || right_source.is_empty() || left_source == right_source {
+            if !amount_opposite(bills[left_index].amount, bills[right_index].amount) {
+                continue;
+            }
+            let Some(right_dt) = datetimes[right_index] else {
+                continue;
+            };
+            if !time_close(left_dt, right_dt, TIME_TOLERANCE_SECONDS) {
                 continue;
             }
 
@@ -836,30 +861,48 @@ fn find_transfer_pairs(bills: &mut [DedupBill]) -> Vec<TransferPair> {
 
 fn find_similar_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup> {
     let mut groups = Vec::new();
+    if !has_multiple_active_sources(bills, DedupBill::source_type) {
+        return groups;
+    }
+
+    let source_types: Vec<String> = bills.iter().map(DedupBill::source_type).collect();
+    let datetimes: Vec<Option<NaiveDateTime>> = bills.iter().map(bill_datetime).collect();
+    let timestamps = timestamps_from_datetimes(&datetimes);
+    let time_buckets = build_time_buckets(0..bills.len(), &timestamps);
     let mut matched_indices = HashSet::new();
 
     for left_index in 0..bills.len() {
         if bills[left_index].removed || matched_indices.contains(&left_index) {
             continue;
         }
-        let Some(left_dt) = bill_datetime(&bills[left_index]) else {
+        let left_source = &source_types[left_index];
+        if left_source.is_empty() {
+            continue;
+        }
+        let Some(left_ts) = timestamps[left_index] else {
             continue;
         };
-        for right_index in (left_index + 1)..bills.len() {
+        let Some(left_dt) = datetimes[left_index] else {
+            continue;
+        };
+        for right_index in nearby_time_indices(&time_buckets, left_ts) {
+            if right_index <= left_index {
+                continue;
+            }
             if bills[right_index].removed || matched_indices.contains(&right_index) {
                 continue;
             }
-            let Some(right_dt) = bill_datetime(&bills[right_index]) else {
-                continue;
-            };
-            let left_source = bills[left_index].source_type();
-            let right_source = bills[right_index].source_type();
+            let right_source = &source_types[right_index];
             if left_source.is_empty() || right_source.is_empty() || left_source == right_source {
                 continue;
             }
-            if !time_close(left_dt, right_dt, TIME_TOLERANCE_SECONDS)
-                || !amount_equal_same_direction(bills[left_index].amount, bills[right_index].amount)
-            {
+            if !amount_equal_same_direction(bills[left_index].amount, bills[right_index].amount) {
+                continue;
+            }
+            let Some(right_dt) = datetimes[right_index] else {
+                continue;
+            };
+            if !time_close(left_dt, right_dt, TIME_TOLERANCE_SECONDS) {
                 continue;
             }
 
@@ -878,7 +921,7 @@ fn find_similar_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup> {
             }
 
             let (keep_index, remove_index) =
-                if source_priority(&left_source) <= source_priority(&right_source) {
+                if source_priority(left_source) <= source_priority(right_source) {
                     (left_index, right_index)
                 } else {
                     (right_index, left_index)
@@ -904,48 +947,60 @@ fn find_similar_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup> {
 
 fn find_split_bills(bills: &mut [DedupBill]) -> Vec<SplitGroup> {
     let mut groups = Vec::new();
+    if !has_multiple_active_sources(bills, |bill| normalized_source(&bill.source_account_id)) {
+        return groups;
+    }
+
+    let source_account_ids: Vec<String> = bills
+        .iter()
+        .map(|bill| normalized_source(&bill.source_account_id))
+        .collect();
+    let datetimes: Vec<Option<NaiveDateTime>> = bills.iter().map(bill_datetime).collect();
+    let timestamps = timestamps_from_datetimes(&datetimes);
     let mut matched_indices = HashSet::new();
     let active_indices: Vec<usize> = bills
         .iter()
         .enumerate()
         .filter_map(|(index, bill)| (!bill.removed && bill.amount != Money::ZERO).then_some(index))
         .collect();
+    let time_buckets = build_time_buckets(active_indices.iter().copied(), &timestamps);
 
     for total_index in &active_indices {
         if matched_indices.contains(total_index) || abs_cents(bills[*total_index].amount) < 1_000 {
             continue;
         }
-        let Some(total_dt) = bill_datetime(&bills[*total_index]) else {
+        let Some(total_ts) = timestamps[*total_index] else {
             continue;
         };
-        let total_source = normalized_source(&bills[*total_index].source_account_id);
+        let Some(total_dt) = datetimes[*total_index] else {
+            continue;
+        };
+        let total_source = &source_account_ids[*total_index];
         if total_source.is_empty() {
             continue;
         }
 
         let mut candidates = Vec::new();
         let mut candidate_sources = HashSet::new();
-        for candidate_index in &active_indices {
-            if candidate_index == total_index || matched_indices.contains(candidate_index) {
+        for candidate_index in nearby_time_indices(&time_buckets, total_ts) {
+            if candidate_index == *total_index || matched_indices.contains(&candidate_index) {
                 continue;
             }
-            let Some(candidate_dt) = bill_datetime(&bills[*candidate_index]) else {
-                continue;
-            };
-            if !time_close(total_dt, candidate_dt, TIME_TOLERANCE_SECONDS)
-                || !amount_same_direction(
-                    bills[*total_index].amount,
-                    bills[*candidate_index].amount,
-                )
-            {
-                continue;
-            }
-            let candidate_source = normalized_source(&bills[*candidate_index].source_account_id);
+            let candidate_source = &source_account_ids[candidate_index];
             if candidate_source.is_empty() || candidate_source == total_source {
                 continue;
             }
-            candidates.push(*candidate_index);
-            candidate_sources.insert(candidate_source);
+            if !amount_same_direction(bills[*total_index].amount, bills[candidate_index].amount) {
+                continue;
+            }
+            let Some(candidate_dt) = datetimes[candidate_index] else {
+                continue;
+            };
+            if !time_close(total_dt, candidate_dt, TIME_TOLERANCE_SECONDS) {
+                continue;
+            }
+            candidates.push(candidate_index);
+            candidate_sources.insert(candidate_source.clone());
         }
 
         if candidates.len() < 2 || candidate_sources.len() != 1 {
@@ -981,6 +1036,68 @@ fn find_split_bills(bills: &mut [DedupBill]) -> Vec<SplitGroup> {
     }
 
     groups
+}
+
+fn has_multiple_active_sources<F>(bills: &[DedupBill], mut source_for: F) -> bool
+where
+    F: FnMut(&DedupBill) -> String,
+{
+    let mut first_source: Option<String> = None;
+    for bill in bills {
+        if bill.removed {
+            continue;
+        }
+        let source = source_for(bill);
+        if source.is_empty() {
+            continue;
+        }
+        match &first_source {
+            Some(existing) if existing != &source => return true,
+            Some(_) => {}
+            None => first_source = Some(source),
+        }
+    }
+    false
+}
+
+fn timestamps_from_datetimes(datetimes: &[Option<NaiveDateTime>]) -> Vec<Option<i64>> {
+    datetimes
+        .iter()
+        .map(|datetime| datetime.map(|value| value.and_utc().timestamp()))
+        .collect()
+}
+
+fn build_time_buckets<I>(indices: I, timestamps: &[Option<i64>]) -> HashMap<i64, Vec<usize>>
+where
+    I: IntoIterator<Item = usize>,
+{
+    let mut buckets: HashMap<i64, Vec<usize>> = HashMap::new();
+    for index in indices {
+        if let Some(timestamp) = timestamps.get(index).and_then(|value| *value) {
+            buckets
+                .entry(time_bucket_key(timestamp))
+                .or_default()
+                .push(index);
+        }
+    }
+    buckets
+}
+
+fn nearby_time_indices(buckets: &HashMap<i64, Vec<usize>>, timestamp: i64) -> Vec<usize> {
+    let bucket = time_bucket_key(timestamp);
+    let mut indices = Vec::new();
+    for nearby_bucket in (bucket - 1)..=(bucket + 1) {
+        if let Some(values) = buckets.get(&nearby_bucket) {
+            indices.extend(values.iter().copied());
+        }
+    }
+    indices.sort_unstable();
+    indices.dedup();
+    indices
+}
+
+fn time_bucket_key(timestamp: i64) -> i64 {
+    timestamp.div_euclid(TIME_TOLERANCE_SECONDS.max(1) + 1)
 }
 
 fn dedup_key(bill: &DedupBill) -> String {

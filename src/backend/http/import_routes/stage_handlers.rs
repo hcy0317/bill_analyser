@@ -30,14 +30,34 @@ pub async fn import_dedup_runtime_handler(
         Err(error) => return route_response(db_error_response(error)),
     }
 
+    let stage_started_at = Instant::now();
+    let template_query_started_at = Instant::now();
     let templates =
         match get_unprocessed_templates_for_dedup(runtime.connection(), &session_id, user_id) {
             Ok(templates) => templates,
             Err(error) => return route_response(db_error_response(error)),
         };
+    eprintln!(
+        "[bill analyser import] stage2 templates loaded user_id={} session_id={} templates={} elapsed_ms={}",
+        user_id.get(),
+        session_id,
+        templates.len(),
+        import_stage_elapsed_ms(template_query_started_at)
+    );
+    let dedup_started_at = Instant::now();
     let dedup_input = dedup_bills_from_parser_templates(&templates);
     let dedup_result = SmartDeduplicationEngine.process(dedup_input);
+    eprintln!(
+        "[bill analyser import] stage2 smart dedup complete user_id={} session_id={} original={} kept={} removed={} dedup_elapsed_ms={}",
+        user_id.get(),
+        session_id,
+        dedup_result.original_count,
+        dedup_result.kept_bills.len(),
+        dedup_result.removed_count,
+        import_stage_elapsed_ms(dedup_started_at)
+    );
     let preview_drafts = preview_drafts_from_dedup_bills(&dedup_result.kept_bills);
+    let preview_insert_started_at = Instant::now();
     let inserted_preview = match insert_preview_bills_batch(
         runtime.connection_mut(),
         &session_id,
@@ -47,10 +67,18 @@ pub async fn import_dedup_runtime_handler(
         Ok(inserted) => inserted,
         Err(error) => return route_response(db_error_response(error)),
     };
+    eprintln!(
+        "[bill analyser import] stage2 preview inserted user_id={} session_id={} preview_rows={} insert_elapsed_ms={}",
+        user_id.get(),
+        session_id,
+        inserted_preview,
+        import_stage_elapsed_ms(preview_insert_started_at)
+    );
     let template_ids = templates
         .iter()
         .map(|template| template.id)
         .collect::<Vec<_>>();
+    let status_update_started_at = Instant::now();
     if let Err(error) =
         update_parser_template_status(runtime.connection_mut(), &template_ids, true, None, user_id)
     {
@@ -69,6 +97,14 @@ pub async fn import_dedup_runtime_handler(
     ) {
         return route_response(db_error_response(error));
     }
+    eprintln!(
+        "[bill analyser import] stage2 status updated user_id={} session_id={} template_rows={} total_elapsed_ms={} status_elapsed_ms={}",
+        user_id.get(),
+        session_id,
+        template_ids.len(),
+        import_stage_elapsed_ms(stage_started_at),
+        import_stage_elapsed_ms(status_update_started_at)
+    );
     let preview = if include_preview {
         match get_preview_by_session(runtime.connection(), &session_id, user_id, false) {
             Ok(rows) => rows.into_iter().map(preview_row_to_value).collect(),

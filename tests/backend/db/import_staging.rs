@@ -1757,6 +1757,10 @@ fn import_preview_page_queries_use_ordered_composite_indexes() -> Result<(), Box
     assert!(preview_indexes
         .iter()
         .any(|(name, _)| name == "idx_preview_session_user_selected_order"));
+    let parser_indexes = table_indexes(&runtime, "bills_parser_template")?;
+    assert!(parser_indexes
+        .iter()
+        .any(|(name, _)| name == "idx_parser_template_session_user_processed_order"));
 
     let page_plan = query_plan_details(
         &runtime,
@@ -1794,6 +1798,25 @@ fn import_preview_page_queries_use_ordered_composite_indexes() -> Result<(), Box
             .iter()
             .all(|detail| !detail.contains("TEMP B-TREE")),
         "selected preview page query should not need a temporary sort: {selected_page_plan:?}"
+    );
+
+    let parser_template_plan = query_plan_details(
+        &runtime,
+        "SELECT * FROM bills_parser_template \
+         WHERE session_id = 'session-large' AND user_id = 42 AND parser_is_processed = '0' \
+         ORDER BY parser_date ASC, id ASC",
+    )?;
+    assert!(
+        parser_template_plan
+            .iter()
+            .any(|detail| detail.contains("idx_parser_template_session_user_processed_order")),
+        "stage2 parser template query should use the session/user/processed ordered index: {parser_template_plan:?}"
+    );
+    assert!(
+        parser_template_plan
+            .iter()
+            .all(|detail| !detail.contains("TEMP B-TREE")),
+        "stage2 parser template query should not need a temporary sort: {parser_template_plan:?}"
     );
     Ok(())
 }

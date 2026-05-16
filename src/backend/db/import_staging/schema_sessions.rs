@@ -82,6 +82,8 @@ pub fn init_import_staging_schema(connection: &Connection) -> DbResult<()> {
         CREATE INDEX IF NOT EXISTS idx_parser_template_processed ON bills_parser_template(parser_is_processed);
         CREATE INDEX IF NOT EXISTS idx_parser_template_date ON bills_parser_template(parser_date);
         CREATE INDEX IF NOT EXISTS idx_parser_template_parser_id ON bills_parser_template(parser_id);
+        CREATE INDEX IF NOT EXISTS idx_parser_template_session_user_processed_order
+            ON bills_parser_template(session_id, user_id, parser_is_processed, parser_date, id);
 
         CREATE TABLE IF NOT EXISTS import_annotation_samples (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
