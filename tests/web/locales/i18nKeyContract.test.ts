@@ -8,6 +8,7 @@ import {
     DEFAULT_LANGUAGE,
     getCompleteLanguageMessages
 } from '@/locales/index.ts';
+import { buildImportPreviewSignalViewModel } from '@/views/desktop/transactions/import/checkDataMatching.ts';
 
 function readSource(relativePath: string): string {
     return fs.readFileSync(path.resolve(process.cwd(), relativePath), 'utf-8');
@@ -150,6 +151,36 @@ describe('i18n key contract for reported warning surfaces', () => {
         for (const languageKey of Object.keys(ALL_LANGUAGES)) {
             const messages = completedMessages[languageKey] as Record<string, unknown>;
             const missingKeys = staticTranslationKeys.filter(key => !hasLocaleKey(messages, key));
+
+            expect(missingKeys).toEqual([]);
+        }
+    });
+
+    test('import preview dynamic signal label keys exist in active locales', () => {
+        const signalViews = [
+            buildImportPreviewSignalViewModel({ transferStatus: 'pending' }),
+            buildImportPreviewSignalViewModel({ transferStatus: 'accepted' }),
+            buildImportPreviewSignalViewModel({ transferStatus: 'rejected' }),
+            buildImportPreviewSignalViewModel({ learningStatus: 'pending' }),
+            buildImportPreviewSignalViewModel({ learningStatus: 'pending', learningMode: 'blue' }),
+            buildImportPreviewSignalViewModel({ learningStatus: 'accepted', learningAutoApplied: true }),
+            buildImportPreviewSignalViewModel({ learningStatus: 'rejected' }),
+            buildImportPreviewSignalViewModel({ llmStatus: 'pending' }),
+            buildImportPreviewSignalViewModel({ llmStatus: 'accepted' }),
+            buildImportPreviewSignalViewModel({ llmStatus: 'rejected' })
+        ];
+        const keys = Array.from(new Set(signalViews.flatMap(view => [
+            view.transferSuggestion?.labelKey,
+            ...(view.transferSuggestion?.actions.map(action => action.labelKey) ?? []),
+            view.learning?.labelKey,
+            ...(view.learning?.actions.map(action => action.labelKey) ?? []),
+            view.llm?.labelKey,
+            ...(view.llm?.actions.map(action => action.labelKey) ?? [])
+        ].filter((key): key is string => !!key)))).sort();
+
+        for (const locale of activeLocales) {
+            const messages = readLocale(locale);
+            const missingKeys = keys.filter(key => !hasLocaleKey(messages, key));
 
             expect(missingKeys).toEqual([]);
         }

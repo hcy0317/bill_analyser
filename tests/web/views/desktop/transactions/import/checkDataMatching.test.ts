@@ -577,7 +577,7 @@ describe('checkDataMatching helpers', () => {
         ]);
     });
 
-    test('keeps blue learning suggestions highlighted and supports rejected review rendering', () => {
+    test('keeps blue learning suggestions highlighted and supports review rendering', () => {
         const bluePending = buildImportPreviewSignalViewModel({
             learningStatus: 'pending',
             learningMode: 'blue',
@@ -601,8 +601,29 @@ describe('checkDataMatching helpers', () => {
                 accountRouteLabel: '账户链路'
             }
         });
+        const acceptedBlue = buildImportPreviewSignalViewModel({
+            learningStatus: 'accepted',
+            learningAutoApplied: true,
+            learningSummary: '支出 | 餐饮/咖啡'
+        }, {
+            infoLabels: {
+                sourceLabel: '来源',
+                duplicateSourcesLabel: '重复来源',
+                recommendedCategoryLabel: '推荐分类',
+                accountRouteLabel: '账户链路'
+            }
+        });
 
         expect(bluePending.learning?.color).toBe('primary');
+        expect(bluePending.learning?.labelKey).toBe('Blue Learning Auto Apply');
+        expect(bluePending.learning?.actions.map(action => action.labelKey)).toStrictEqual([
+            'Apply Suggestion',
+            'Reject Learning Suggestion'
+        ]);
+        expect(acceptedBlue.learning?.labelKey).toBe('Blue Learning Applied');
+        expect(acceptedBlue.learning?.actions).toStrictEqual([
+            { decision: 'clear', labelKey: 'Undo Learning Auto Apply', color: 'primary' }
+        ]);
         expect(rejected.learning?.labelKey).toBe('Learning Suggestion Rejected');
         expect(rejected.learning?.color).toBe('error');
     });
