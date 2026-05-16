@@ -7,12 +7,13 @@ use axum::{
     Router,
 };
 use base64::{engine::general_purpose, Engine as _};
-use bill_analyser_core::UserId;
+use bill_analyser_core::{build_composite_match_features, composite_hash_from_features, UserId};
 use bill_analyser_db::{
     create_import_session, get_import_session, get_parser_templates_by_session,
-    get_preview_by_session, init_import_staging_schema, insert_preview_bills_batch,
-    update_import_session_status, ImportPreviewDraft, ImportPreviewRow, ImportSessionDraft,
-    ImportSessionStatusUpdate, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
+    get_preview_by_session, init_import_staging_schema, insert_parser_templates_batch,
+    insert_preview_bills_batch, update_import_session_status, ImportParserTemplateDraft,
+    ImportPreviewDraft, ImportPreviewRow, ImportSessionDraft, ImportSessionStatusUpdate,
+    SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
 use bill_analyser_http::{
     build_router, HttpAppState, HttpShellConfig, ImportRouteMode, IMPORT_SKELETON_ROUTE_PATTERNS,
@@ -1511,6 +1512,231 @@ async fn import_db_runtime_parallel_parse_keeps_multi_file_order_and_single_stag
     assert!(templates
         .iter()
         .all(|template| template.parser_id == "wechat"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn import_db_runtime_parallel_parse_preserves_per_file_parser_identity(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new().await?;
+    let runtime = runtime_for(fixture.db_path())?;
+    seed_users(&runtime, &[42])?;
+    let app = runtime_router(&fixture);
+    let boundary = "rust-import-mixed-parser-upload-boundary";
+    let body = multipart_body(
+        boundary,
+        &[("parser_type", "auto")],
+        &[
+            (
+                "files",
+                "alipay.csv",
+                "text/csv",
+                "交易时间,交易分类,交易对方,对方账号,商品说明,收/支,金额,收/付款方式,交易状态,交易订单号,商家订单号,备注\n2026-05-04 09:00:00,餐饮,支付宝咖啡店,,拿铁,支出,21.00,支付宝余额,交易成功,ali-1,,\n",
+            ),
+            (
+                "files",
+                "wechat.csv",
+                "text/csv",
+                "交易时间,收支类型,金额,商品,支付方式\n2026-05-05 12:30:00,支出,32.00,午餐,微信\n",
+            ),
+        ],
+    );
+
+    let parse = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/parse")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(parse.status(), StatusCode::OK);
+    let parse_body = read_json(parse).await;
+    let files = parse_body["data"]["files"].as_array().expect("files");
+    assert_eq!(files[0]["parser_id"], "alipay");
+    assert_eq!(files[1]["parser_id"], "wechat");
+    let session_id = parse_body["data"]["session_id"]
+        .as_str()
+        .expect("session id");
+
+    let db_runtime = runtime_for(fixture.db_path())?;
+    init_import_staging_schema(db_runtime.connection())?;
+    let templates =
+        get_parser_templates_by_session(db_runtime.connection(), session_id, user_id(42), None)?;
+    assert_eq!(templates.len(), 2);
+    assert_eq!(templates[0].parser_id, "alipay");
+    assert_eq!(templates[1].parser_id, "wechat");
+    assert!(templates[0]
+        .parser_tags
+        .iter()
+        .any(|tag| tag == "parser:alipay"));
+    assert!(!templates[0]
+        .parser_tags
+        .iter()
+        .any(|tag| tag == "parser:wechat"));
+    assert!(templates[1]
+        .parser_tags
+        .iter()
+        .any(|tag| tag == "parser:wechat"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn import_db_runtime_stage2_restores_import_intelligence_chain() -> Result<(), Box<dyn Error>>
+{
+    let fixture = RuntimeFixture::new().await?;
+    let mut runtime = runtime_for(fixture.db_path())?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+    seed_import_intelligence_tables(&runtime)?;
+    let session_id = "session-stage2-intelligence";
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: session_id.to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+    insert_parser_templates_batch(
+        runtime.connection_mut(),
+        session_id,
+        user_id(42),
+        &[
+            ImportParserTemplateDraft {
+                parser_date: "2026-05-04 09:00:00".to_string(),
+                parser_amount: -21.0,
+                parser_type: "支出".to_string(),
+                parser_description: "拿铁".to_string(),
+                parser_id: "alipay".to_string(),
+                parser_tags: Some(json!(["parser:alipay", "channel:wallet"])),
+                parser_counterparty: "支付宝咖啡店".to_string(),
+                parser_payment_method: "支付宝余额".to_string(),
+                parser_original_type: "支出".to_string(),
+                parser_original_category: String::new(),
+                parser_account_id: "alipay".to_string(),
+            },
+            ImportParserTemplateDraft {
+                parser_date: "2026-05-05 12:30:00".to_string(),
+                parser_amount: -45.0,
+                parser_type: "支出".to_string(),
+                parser_description: "会员日采购".to_string(),
+                parser_id: "wechat".to_string(),
+                parser_tags: Some(json!(["parser:wechat", "channel:wallet"])),
+                parser_counterparty: "学习超市".to_string(),
+                parser_payment_method: "微信支付".to_string(),
+                parser_original_type: "支出".to_string(),
+                parser_original_category: String::new(),
+                parser_account_id: "wechat".to_string(),
+            },
+        ],
+    )?;
+    drop(runtime);
+
+    let app = runtime_router(&fixture);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/dedup")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"session_id": session_id, "include_preview": true}).to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    assert_eq!(body["success"], true);
+    assert_eq!(body["data"]["match_stats"]["provider_bypassed"], false);
+    assert_eq!(body["data"]["match_stats"]["category_matched"], 2);
+    assert_eq!(body["data"]["match_stats"]["account_matched"], 2);
+    assert_eq!(body["data"]["match_stats"]["learning_applied"], 1);
+    let preview = body["data"]["preview"].as_array().expect("preview");
+    assert_eq!(preview.len(), 2);
+
+    let coffee = preview
+        .iter()
+        .find(|item| item["preview_counterparty"] == "支付宝咖啡店")
+        .expect("coffee preview");
+    assert_eq!(coffee["preview_main_category"], "餐饮");
+    assert_eq!(coffee["preview_sub_category"], "咖啡");
+    assert_eq!(coffee["preview_source_account_id"], 1001);
+    assert_eq!(coffee["matching"]["parser"]["parser_id"], "alipay");
+    assert_eq!(coffee["matching"]["recurring"]["id"], 3001);
+    let coffee_id = coffee["id"].as_i64().expect("coffee preview id");
+    let recurring_candidates = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/bills/import/v2/preview-item/{coffee_id}/recurring-candidates"
+                ))
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(recurring_candidates.status(), StatusCode::OK);
+    let recurring_candidates_body = read_json(recurring_candidates).await;
+    assert_eq!(
+        recurring_candidates_body["data"]["provider_bypassed"],
+        false
+    );
+    assert_eq!(recurring_candidates_body["data"]["candidate_count"], 1);
+    assert_eq!(
+        recurring_candidates_body["data"]["candidates"][0]["id"],
+        3001
+    );
+
+    let learned = preview
+        .iter()
+        .find(|item| item["preview_counterparty"] == "学习超市")
+        .expect("learned preview");
+    assert_eq!(learned["preview_main_category"], "生活");
+    assert_eq!(learned["preview_sub_category"], "超市");
+    assert_eq!(learned["preview_source_account_id"], 1002);
+    assert_eq!(learned["matching"]["learning"]["rule_id"], 7001);
+    assert_eq!(learned["matching"]["learning"]["auto_apply"], true);
+    let learning_suggestions = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/bills/import/v2/learning/{session_id}/suggestions"
+                ))
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(learning_suggestions.status(), StatusCode::OK);
+    let learning_suggestions_body = read_json(learning_suggestions).await;
+    assert_eq!(
+        learning_suggestions_body["data"]["provider_bypassed"],
+        false
+    );
+    assert_eq!(learning_suggestions_body["data"]["count"], 1);
+    assert_eq!(
+        learning_suggestions_body["data"]["suggestions"][0]["rule_id"],
+        7001
+    );
     Ok(())
 }
 
@@ -3318,7 +3544,8 @@ async fn import_db_runtime_handles_legacy_confirm_session_batch_and_recurring_ca
     assert_eq!(candidates.status(), StatusCode::OK);
     let candidates_body = read_json(candidates).await;
     assert_eq!(candidates_body["data"]["previewId"], row.id);
-    assert_eq!(candidates_body["data"]["provider_bypassed"], true);
+    assert_eq!(candidates_body["data"]["provider_bypassed"], false);
+    assert_eq!(candidates_body["data"]["candidate_count"], 0);
 
     let confirm = app
         .clone()
@@ -3838,6 +4065,127 @@ fn seed_import_session(path: &Path, session_id: &str) -> Result<(), Box<dyn Erro
             total_preview: Some(2),
             total_confirmed: None,
         },
+    )?;
+    Ok(())
+}
+
+fn seed_import_intelligence_tables(runtime: &SqliteRuntime) -> Result<(), Box<dyn Error>> {
+    runtime.connection().execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            type INTEGER DEFAULT 1,
+            main_category TEXT NOT NULL,
+            sub_category TEXT NOT NULL,
+            priority INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT '',
+            UNIQUE(user_id, main_category, sub_category)
+        );
+        CREATE TABLE IF NOT EXISTS category_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            category_id INTEGER NOT NULL,
+            name TEXT NOT NULL DEFAULT '',
+            priority INTEGER NOT NULL DEFAULT 100,
+            rule_expression TEXT NOT NULL,
+            regex_enabled INTEGER DEFAULT 0,
+            enabled INTEGER DEFAULT 1,
+            applied_count INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            type INTEGER DEFAULT 1,
+            aliases TEXT,
+            display_order INTEGER DEFAULT 0,
+            hidden INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS import_learning_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            match_type TEXT NOT NULL,
+            match_value TEXT NOT NULL,
+            normalized_match_value TEXT NOT NULL,
+            learned_type TEXT,
+            learned_category_id INTEGER,
+            learned_source_account_id INTEGER,
+            learned_destination_account_id INTEGER,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            parser_id TEXT,
+            composite_match_hash TEXT,
+            match_features_json TEXT,
+            applied_count INTEGER NOT NULL DEFAULT 0,
+            last_applied_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, match_type, normalized_match_value)
+        );
+        CREATE TABLE IF NOT EXISTS recurring_bills (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            template_id INTEGER,
+            name TEXT NOT NULL,
+            description TEXT,
+            type TEXT NOT NULL,
+            category TEXT,
+            amount REAL NOT NULL,
+            destination_amount REAL DEFAULT 0,
+            account TEXT,
+            counterparty TEXT,
+            tag TEXT,
+            comment TEXT,
+            frequency TEXT,
+            scheduled_frequency_type INTEGER DEFAULT 0,
+            start_date TEXT,
+            end_date TEXT,
+            next_date TEXT,
+            enabled INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL DEFAULT ''
+        );
+        ",
+    )?;
+    runtime.connection().execute(
+        "INSERT INTO categories(id, user_id, type, main_category, sub_category, priority)
+         VALUES (900, 42, 3, '餐饮', '咖啡', 10), (901, 42, 3, '生活', '超市', 20)",
+        [],
+    )?;
+    runtime.connection().execute(
+        "INSERT INTO category_rules(user_id, category_id, name, priority, rule_expression, regex_enabled, enabled)
+         VALUES (42, 900, '咖啡规则', 10, 'OR={咖啡}', 0, 1)",
+        [],
+    )?;
+    runtime.connection().execute(
+        "INSERT INTO accounts(id, user_id, name, aliases)
+         VALUES
+         (1001, 42, '支付宝账户', '[\"alipay\",\"支付宝\",\"支付宝余额\"]'),
+         (1002, 42, '微信账户', '[\"wechat\",\"微信\",\"微信支付\"]')",
+        [],
+    )?;
+    runtime.connection().execute(
+        "INSERT INTO recurring_bills(
+            id, user_id, name, type, amount, account, counterparty, frequency, start_date,
+            next_date, enabled, created_at, updated_at
+         ) VALUES (3001, 42, '咖啡月付', '支出', 2100, '1001', '', 'monthly', '2026-04-04', '2026-05-04', 1, '2026-05-01', '2026-05-01')",
+        [],
+    )?;
+
+    let features = build_composite_match_features("wechat", "学习超市", "会员日采购", "微信支付")
+        .expect("learning features");
+    let composite_hash = composite_hash_from_features(&features);
+    runtime.connection().execute(
+        "INSERT INTO import_learning_rules(
+            id, user_id, match_type, match_value, normalized_match_value, learned_type,
+            learned_category_id, learned_source_account_id, learned_destination_account_id,
+            enabled, parser_id, composite_match_hash, match_features_json, created_at, updated_at
+         ) VALUES (7001, 42, 'composite', ?1, ?1, '支出', 901, 1002, NULL, 1, 'wechat', ?1, ?2, '2026-05-01', '2026-05-01')",
+        [composite_hash, serde_json::to_string(&features)?],
     )?;
     Ok(())
 }

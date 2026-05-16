@@ -24,11 +24,17 @@ fn import_stage_elapsed_ms(started_at: Instant) -> u128 {
 struct ImportParseRuntimeInput {
     session_id: String,
     parser_id: String,
-    standard_bills: Vec<StandardBill>,
+    standard_bills: Vec<ImportParsedStandardBill>,
     file_count: i64,
     files: Vec<Value>,
     unmatched_files: Vec<Value>,
     require_existing_session: bool,
+}
+
+#[derive(Debug)]
+struct ImportParsedStandardBill {
+    parser_id: String,
+    bill: StandardBill,
 }
 
 #[derive(Debug)]
@@ -80,7 +86,7 @@ fn import_parse_json_runtime_response(
     };
     let parser_id = parser_id_from_payload(object);
     let mut files = Vec::new();
-    let standard_bills = if let Some(temp_path) =
+    let raw_standard_bills = if let Some(temp_path) =
         first_text_from_object(object, &["temp_path", "tempPath"])
     {
         let standard_bills =
@@ -105,9 +111,11 @@ fn import_parse_json_runtime_response(
             Err(response) => return route_response(response),
         }
     };
-    if standard_bills.is_empty() {
+    if raw_standard_bills.is_empty() {
         return route_response(import_v2_error_response(400, "No valid bills to parse"));
     }
+    let standard_bills =
+        parsed_standard_bills_from_standard_bills(raw_standard_bills, &parser_id);
     let file_count = first_value(object, &["file_count", "fileCount"])
         .and_then(value_to_i64)
         .filter(|value| *value > 0)
@@ -192,7 +200,15 @@ async fn import_parse_multipart_runtime_response(
                 "parsed_count": parsed.parsed_count,
                 "delimiter": delimiter_to_response(parsed.delimiter),
             }));
-            standard_bills.extend(parsed.bills);
+            standard_bills.extend(
+                parsed
+                    .bills
+                    .into_iter()
+                    .map(|bill| ImportParsedStandardBill {
+                        parser_id: parsed.parser_id.clone(),
+                        bill,
+                    }),
+            );
         } else {
             let unmatched_started_at = Instant::now();
             let unmatched_parser_id = if requested_parser == "auto" {
@@ -320,8 +336,13 @@ fn persist_import_parse_runtime_response(
     if let Err(response) = init_import_runtime_schema(&runtime) {
         return route_response(response);
     }
-    let drafts =
-        parser_template_drafts_from_standard_bills(&input.standard_bills, &input.parser_id);
+    let drafts = input
+        .standard_bills
+        .iter()
+        .map(|parsed_bill| {
+            parser_template_draft_from_standard_bill(&parsed_bill.bill, &parsed_bill.parser_id)
+        })
+        .collect::<Vec<_>>();
     let staging_started_at = Instant::now();
     let staging_result = match stage_import_parser_templates(
         runtime.connection_mut(),
@@ -356,6 +377,19 @@ fn persist_import_parse_runtime_response(
         unmatched_files: input.unmatched_files,
         errors: Vec::new(),
     }))
+}
+
+fn parsed_standard_bills_from_standard_bills(
+    standard_bills: Vec<StandardBill>,
+    parser_id: &str,
+) -> Vec<ImportParsedStandardBill> {
+    standard_bills
+        .into_iter()
+        .map(|bill| ImportParsedStandardBill {
+            parser_id: parser_id.to_string(),
+            bill,
+        })
+        .collect()
 }
 
 fn required_session_id_from_payload(

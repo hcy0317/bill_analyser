@@ -318,11 +318,23 @@ pub fn build_import_preview_filter_index_item(
         dedup_type: string_field_from_map(preview_item, "dedup_type"),
         dedup_source_ids: parse_dedup_source_ids(preview_item.get("dedup_source_ids")),
         transfer_status: resolve_import_preview_transfer_signal_status(preview_item),
-        transfer_title: string_field_from_map(preview_item, "transfer_suggestion_reason"),
+        transfer_title: matching_section_string_field(preview_item, "transfer", "reason")
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| string_field_from_map(preview_item, "transfer_suggestion_reason")),
         learning_status: resolve_import_preview_learning_signal_status(preview_item),
-        learning_title: string_field_from_map(preview_item, "learning_recommendation_reason"),
-        learning_summary: string_field_from_map(preview_item, "learning_recommendation_summary"),
-        learning_mode: string_field_from_map(preview_item, "learning_recommendation_mode"),
+        learning_title: matching_section_string_field(preview_item, "learning", "reason")
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| {
+                string_field_from_map(preview_item, "learning_recommendation_reason")
+            }),
+        learning_summary: matching_section_string_field(preview_item, "learning", "summary")
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| {
+                string_field_from_map(preview_item, "learning_recommendation_summary")
+            }),
+        learning_mode: matching_section_string_field(preview_item, "learning", "mode")
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| string_field_from_map(preview_item, "learning_recommendation_mode")),
         recurring_template_id: normalize_id_text(preview_item.get("preview_recurring_id")),
         recurring_candidate_count: integer_field_from_map(
             preview_item,
@@ -342,7 +354,7 @@ pub fn build_import_preview_filter_index_item(
 pub fn resolve_import_preview_transfer_signal_status(
     preview_item: &Map<String, Value>,
 ) -> Option<String> {
-    let matching = object_field_from_map(preview_item, "matching");
+    let matching = preview_matching_payload(preview_item);
     let transfer_matching = matching.and_then(|matching| object_field(matching.get("transfer")));
     let review_status = transfer_matching
         .and_then(|matching| matching.get("review_status"))
@@ -351,6 +363,13 @@ pub fn resolve_import_preview_transfer_signal_status(
     if matches!(review_status.as_str(), "accepted" | "rejected") {
         return Some(review_status);
     }
+    let transfer_has_candidate = transfer_matching.is_some_and(|matching| {
+        !string_field_from_map(matching, "candidate_type")
+            .trim()
+            .is_empty()
+            || float_field_from_map(matching, "score") > 0.0
+            || !string_field_from_map(matching, "reason").trim().is_empty()
+    });
 
     let suggested_preview_type =
         string_field_from_map(preview_item, "suggested_preview_type").to_lowercase();
@@ -361,9 +380,9 @@ pub fn resolve_import_preview_transfer_signal_status(
         .map(python_truthy)
         .unwrap_or(false);
 
-    if matches!(suggested_preview_type.trim(), "转账" | "transfer")
+    if (transfer_has_candidate || matches!(suggested_preview_type.trim(), "转账" | "transfer"))
         && !matches!(preview_type.trim(), "转账" | "transfer")
-        && transfer_score > 0.0
+        && (transfer_score > 0.0 || transfer_has_candidate)
         && !transfer_suppressed
     {
         Some("pending".to_string())
@@ -375,7 +394,7 @@ pub fn resolve_import_preview_transfer_signal_status(
 pub fn resolve_import_preview_learning_signal_status(
     preview_item: &Map<String, Value>,
 ) -> Option<String> {
-    let matching = object_field_from_map(preview_item, "matching");
+    let matching = preview_matching_payload(preview_item);
     let learning_matching = matching.and_then(|matching| object_field(matching.get("learning")));
     let review_status = learning_matching
         .and_then(|matching| matching.get("review_status"))
@@ -411,6 +430,21 @@ pub fn resolve_import_preview_learning_signal_status(
     } else {
         None
     }
+}
+
+fn preview_matching_payload(preview_item: &Map<String, Value>) -> Option<&Map<String, Value>> {
+    object_field_from_map(preview_item, "matching")
+        .or_else(|| object_field_from_map(preview_item, "preview_matching_feedback"))
+}
+
+fn matching_section_string_field(
+    preview_item: &Map<String, Value>,
+    section: &str,
+    key: &str,
+) -> Option<String> {
+    preview_matching_payload(preview_item)
+        .and_then(|matching| object_field(matching.get(section)))
+        .map(|section| string_field_from_map(section, key))
 }
 
 pub fn map_import_preview_type_to_frontend_value(preview_type: Option<&Value>) -> i64 {

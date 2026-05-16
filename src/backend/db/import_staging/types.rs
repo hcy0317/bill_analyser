@@ -59,6 +59,7 @@ pub struct ImportPreviewDraft {
     pub preview_recurring_matched_date: String,
     pub dedup_type: Option<String>,
     pub dedup_source_ids: Vec<i64>,
+    pub preview_matching_feedback: Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -210,8 +211,50 @@ pub fn preview_draft_from_dedup_bill(bill: &DedupBill) -> ImportPreviewDraft {
             .iter()
             .filter_map(|value| parse_positive_i64(value))
             .collect(),
+        preview_matching_feedback: preview_matching_feedback_from_dedup_bill(bill),
         ..ImportPreviewDraft::default()
     }
+}
+
+fn preview_matching_feedback_from_dedup_bill(bill: &DedupBill) -> Value {
+    let dedup_type = bill
+        .dedup_type
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("remaining");
+    let mut feedback = serde_json::Map::new();
+    feedback.insert(
+        "parser".to_string(),
+        serde_json::json!({
+            "parser_id": bill.parser_id,
+            "parser_tags": &bill.parser_tags,
+            "payment_method": bill.payment_method,
+            "counterparty": bill.counterparty,
+        }),
+    );
+    feedback.insert(
+        "dedup".to_string(),
+        serde_json::json!({
+            "type": dedup_type,
+            "source_ids": bill.dedup_source_ids(),
+            "source_count": bill.dedup_source_ids().len(),
+        }),
+    );
+    if dedup_type == "transfer" || dedup_type == "transfer_cross_batch" {
+        feedback.insert(
+            "transfer".to_string(),
+            serde_json::json!({
+                "candidate_type": dedup_type,
+                "score": 1.0,
+                "level": "high",
+                "reason": "smart_dedup transfer pair",
+                "review_status": "pending",
+                "pair_order": bill.transfer_pair_order,
+                "source_chain": &bill.transfer_pair_sources,
+            }),
+        );
+    }
+    Value::Object(feedback)
 }
 
 pub fn preview_drafts_from_dedup_bills(bills: &[DedupBill]) -> Vec<ImportPreviewDraft> {
@@ -242,6 +285,7 @@ impl Default for ImportPreviewDraft {
             preview_recurring_matched_date: String::new(),
             dedup_type: None,
             dedup_source_ids: Vec::new(),
+            preview_matching_feedback: Value::Object(Default::default()),
         }
     }
 }

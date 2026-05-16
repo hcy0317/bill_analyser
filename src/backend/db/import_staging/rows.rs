@@ -9,8 +9,9 @@ const INSERT_PREVIEW_BILL_SQL: &str = "
             preview_recurring_id, preview_recurring_name,
             preview_recurring_candidate_count, preview_recurring_match_score,
             preview_recurring_match_reasons, preview_recurring_matched_date,
-            preview_selected, dedup_type, dedup_source_ids, created_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, 1, ?22, ?23, ?24)
+            preview_selected, dedup_type, dedup_source_ids,
+            preview_matching_feedback_json, created_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, 1, ?22, ?23, ?24, ?25)
         ";
 
 fn insert_preview_bill_on_connection(
@@ -74,6 +75,7 @@ fn insert_preview_bill_with_statement(
             draft.preview_recurring_matched_date,
             draft.dedup_type,
             dedup_source_ids,
+            serialize_preview_matching_feedback(&draft.preview_matching_feedback),
             created_at,
         ],
     )?;

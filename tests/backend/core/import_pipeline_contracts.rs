@@ -171,6 +171,52 @@ fn preview_filter_index_item_preserves_lightweight_index_shape() {
 }
 
 #[test]
+fn preview_filter_index_item_reads_signals_from_matching_feedback_payload() {
+    let preview = json!({
+        "id": 77,
+        "preview_date": "2026-05-02 08:00:00",
+        "preview_type": "支出",
+        "preview_amount": 21.0,
+        "preview_description": "咖啡",
+        "preview_counterparty": "咖啡店",
+        "preview_payment_method": "支付宝",
+        "preview_parser_id": "alipay",
+        "preview_parser_tags": ["parser:alipay", "channel:wallet"],
+        "dedup_type": "transfer",
+        "preview_matching_feedback": {
+            "transfer": {
+                "candidate_type": "cash_transfer",
+                "score": 0.91,
+                "reason": "same amount",
+                "review_status": "pending"
+            },
+            "learning": {
+                "rule_id": 9,
+                "score": 1.0,
+                "reason": "composite exact",
+                "summary": "餐饮/咖啡 | 支付宝",
+                "mode": "exact",
+                "review_status": "pending"
+            }
+        }
+    });
+    let preview = preview.as_object().unwrap();
+
+    let item = build_import_preview_filter_index_item(
+        preview,
+        &BTreeMap::<i64, CategoryLookup>::new(),
+        &BTreeMap::<i64, AccountLookup>::new(),
+    );
+
+    assert_eq!(item.transfer_status.as_deref(), Some("pending"));
+    assert_eq!(item.transfer_title, "same amount");
+    assert_eq!(item.learning_status.as_deref(), Some("pending"));
+    assert_eq!(item.learning_title, "composite exact");
+    assert_eq!(item.learning_summary, "餐饮/咖啡 | 支付宝");
+    assert_eq!(item.learning_mode, "exact");
+}
+
+#[test]
 fn route_envelopes_and_expected_state_match_v2_error_surface() {
     assert_eq!(
         map_import_preview_type_to_frontend_value(Some(&json!("income"))),
