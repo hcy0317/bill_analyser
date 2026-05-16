@@ -425,6 +425,129 @@ fn matching_runtime_repository_covers_bill_preview_and_reconciliation_flows(
 }
 
 #[test]
+fn matching_runtime_candidate_action_error_edges_are_mapped() -> Result<(), Box<dyn Error>> {
+    let mut connection = Connection::open_in_memory()?;
+    seed_matching_fixture(&mut connection)?;
+    let user_id = user_id();
+
+    let missing_pair_bill = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "bill:101:transfer:999",
+        "reject",
+        &PreviewMatchingActionRequest::default(),
+    )
+    .expect_err("missing pair bill");
+    assert_eq!(missing_pair_bill.status_code(), 404);
+    assert_eq!(missing_pair_bill.message(), "Bill not found");
+
+    create_manual_matching_pair(
+        &mut connection,
+        user_id,
+        101,
+        102,
+        "transfer",
+        Some("bill:101:transfer:102"),
+    )?;
+    let already_paired = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "bill:101:transfer:102",
+        "reject",
+        &PreviewMatchingActionRequest::default(),
+    )
+    .expect_err("already paired rejection");
+    assert_eq!(already_paired.status_code(), 409);
+    assert_eq!(
+        already_paired.message(),
+        "Bills already belong to an existing transfer pair"
+    );
+
+    connection.execute(
+        "
+        INSERT INTO bills(
+            id, user_id, date, type, amount, counterparty, description, payment_method,
+            main_category, sub_category, source_account_id, destination_account_id, destination_amount,
+            created_at, updated_at
+        ) VALUES
+            (501, 42, '2026-04-09T09:00:00', 'expense', -70.0, 'Same Account', 'Out', 'cash', 'Transfer', '', 10, 0, 0, 'now', 'now'),
+            (502, 42, '2026-04-09T09:05:00', 'income', 70.0, 'Same Account', 'In', 'cash', 'Transfer', '', 10, 0, 0, 'now', 'now')
+        ",
+        [],
+    )?;
+    let ineligible_pair = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "bill:501:transfer:502",
+        "reject",
+        &PreviewMatchingActionRequest::default(),
+    )
+    .expect_err("ineligible pair");
+    assert_eq!(ineligible_pair.status_code(), 409);
+    assert_eq!(
+        ineligible_pair.message(),
+        "Bills are not eligible for transfer pairing"
+    );
+
+    let stale_learning = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "bill:302:learning:8:stale",
+        "reject",
+        &PreviewMatchingActionRequest::default(),
+    )
+    .expect_err("stale learning candidate");
+    assert_eq!(stale_learning.status_code(), 400);
+    assert_eq!(stale_learning.message(), "Learning candidate not available");
+
+    let invalid_preview_action = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "preview:1:transfer",
+        "archive",
+        &PreviewMatchingActionRequest::default(),
+    )
+    .expect_err("invalid preview action");
+    assert_eq!(invalid_preview_action.status_code(), 400);
+    assert_eq!(
+        invalid_preview_action.message(),
+        "Candidate family not supported"
+    );
+
+    let invalid_reconciliation_action = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        &reconciliation_id(),
+        "archive",
+        &PreviewMatchingActionRequest::default(),
+    )
+    .expect_err("invalid reconciliation action");
+    assert_eq!(invalid_reconciliation_action.status_code(), 400);
+    assert_eq!(
+        invalid_reconciliation_action.message(),
+        "Candidate family not supported"
+    );
+
+    let preview_array_payload = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "preview:1:transfer",
+        "reject",
+        &PreviewMatchingActionRequest::default(),
+    )?;
+    assert!(preview_array_payload["preview"].is_array());
+    assert!(preview_array_payload.get("preview_item").is_none());
+
+    let invalid_pair_type =
+        create_manual_matching_pair(&mut connection, user_id, 103, 104, "dup", None)
+            .expect_err("invalid pair type");
+    assert_eq!(invalid_pair_type.status_code(), 400);
+    assert_eq!(invalid_pair_type.message(), "Invalid pairType");
+
+    Ok(())
+}
+
+#[test]
 fn matching_bill_candidates_tolerate_legacy_learning_rule_shape() -> Result<(), Box<dyn Error>> {
     let mut connection = Connection::open_in_memory()?;
     seed_matching_fixture(&mut connection)?;

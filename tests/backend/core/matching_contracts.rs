@@ -3,16 +3,19 @@ use std::collections::{BTreeMap, BTreeSet};
 use bill_analyser_core::{
     bill_pair_feedback_payload_is_related, build_bill_pair_feedback_payload,
     build_formal_investment_candidate_id, build_formal_learning_candidate_id,
-    build_formal_transfer_candidate_id, build_investment_pair_candidates,
+    build_formal_transfer_candidate_id, build_investment_pair_candidate,
+    build_investment_pair_candidates, build_learning_candidate_for_bill,
     build_learning_candidates_for_bill, build_learning_rule_revision,
     build_matching_candidate_action_payload, build_matching_session_candidates,
-    build_transfer_pair_candidates, build_user_investment_keyword_settings,
-    classify_investment_pnl_change, compute_recurring_pattern_hash, detect_recurring_frequency,
+    build_transfer_pair_candidate, build_transfer_pair_candidates,
+    build_user_investment_keyword_settings, classify_investment_pnl_change,
+    compute_recurring_pattern_hash, detect_recurring_frequency,
     detect_recurring_patterns_with_today, estimate_next_recurring_date, extract_investment_profile,
     is_ordinary_bank_interest_income, normalize_keyword_list, normalize_learning_rule_revision,
     normalize_reconcile_history_families, normalize_transfer_pair_bill_ids,
     parse_manual_pair_request, parse_matching_candidate_id, parse_reconciliation_candidates_query,
-    score_investment_candidate, serialize_keyword_list, serialize_recurring_suggestion,
+    parse_recurring_date, score_investment_candidate, serialize_keyword_list,
+    serialize_recurring_suggestion,
 };
 use chrono::NaiveDate;
 use serde_json::{json, Map, Value};
@@ -143,6 +146,41 @@ fn transfer_candidates_preserve_python_pair_rules_and_stable_sort() {
         normalize_transfer_pair_bill_ids(12, 12),
         Err("billId and candidateBillId must be different")
     );
+
+    let same_id = object(json!({
+        "id": 10,
+        "date": "2026-05-01 10:10:00",
+        "type": "收入",
+        "amount": 100.0,
+        "source_account_id": 2
+    }));
+    assert!(build_transfer_pair_candidate(&anchor, &same_id).is_none());
+
+    let same_sign = object(json!({
+        "id": 15,
+        "date": "2026-05-01 10:10:00",
+        "type": "收入",
+        "amount": -100.0,
+        "source_account_id": 2
+    }));
+    assert!(build_transfer_pair_candidate(&anchor, &same_sign).is_none());
+
+    let tie_a = json!({
+        "id": 16,
+        "date": "2026-05-01 10:30:00",
+        "type": "收入",
+        "amount": 100.0,
+        "source_account_id": 2
+    });
+    let tie_b = json!({
+        "id": 15,
+        "date": "2026-05-01 10:30:00",
+        "type": "收入",
+        "amount": 100.0,
+        "source_account_id": 2
+    });
+    let tied_candidates = build_transfer_pair_candidates(&anchor, &[tie_a, tie_b]);
+    assert_eq!(tied_candidates[0]["candidate_id"], "bill:10:transfer:15");
 }
 
 #[test]
@@ -180,6 +218,39 @@ fn historical_investment_and_learning_candidates_pin_formal_bill_contracts() {
     assert_eq!(
         investment_candidates[0]["bill"]["source_account_id"],
         json!(2)
+    );
+
+    let far_candidate = object(json!({
+        "id": 22,
+        "date": "2026-05-03 10:00:00",
+        "type": "投资",
+        "amount": 100.0,
+        "source_account_id": 2,
+        "counterparty": "天天基金",
+        "description": "卖出 沪深300ETF 赎回"
+    }));
+    let near_candidate = object(json!({
+        "id": 23,
+        "date": "2026-05-01 10:20:00",
+        "type": "投资",
+        "amount": 100.0,
+        "source_account_id": 2,
+        "counterparty": "天天基金",
+        "description": "卖出 沪深300ETF 赎回"
+    }));
+    assert_eq!(
+        build_investment_pair_candidate(&anchor, &far_candidate, None)
+            .expect("far investment pair")["reason"],
+        "investment_keyword|opposite_amount|different_source_account|date_window"
+    );
+    let sorted_investments = build_investment_pair_candidates(
+        &anchor,
+        &[json!(far_candidate), json!(near_candidate)],
+        None,
+    );
+    assert_eq!(
+        sorted_investments[0]["candidate_id"],
+        "bill:20:investment:23"
     );
 
     let bill = object(json!({
@@ -274,59 +345,117 @@ fn historical_investment_and_learning_candidates_pin_formal_bill_contracts() {
         transfer_candidates[0]["summary"],
         "转账 | 支付宝 → 招商银行"
     );
+
+    let income_bill = object(json!({
+        "id": 32,
+        "counterparty": "Coffee Shop",
+        "description": "Latte",
+        "payment_method": "card"
+    }));
+    let income_rule = object(json!({
+        "id": 11,
+        "match_type": "composite",
+        "match_features_json": "{\"counterparty\":\"Coffee Shop\",\"description\":\"Latte\",\"payment_method\":\"card\"}",
+        "learned_type": "income",
+        "learned_category_id": 7,
+        "learned_source_account_id": null,
+        "learned_destination_account_id": 3,
+        "composite_match_hash": "income-rule"
+    }));
+    let income_categories = vec![json!({"id": 7, "main_category": "Income", "sub_category": ""})];
+    let income_candidate = build_learning_candidate_for_bill(
+        &income_bill,
+        &income_rule,
+        None,
+        &income_categories,
+        &accounts,
+    )
+    .expect("income learning candidate");
+    assert_eq!(income_candidate["summary"], "income | Income | 招商银行");
+
+    let duplicate_rule = object(json!({
+        "id": 12,
+        "match_type": "composite",
+        "match_features_json": "{\"counterparty\":\"Coffee Shop\",\"description\":\"Latte\",\"payment_method\":\"card\"}",
+        "learned_type": "income",
+        "composite_match_hash": "income-rule-2"
+    }));
+    let sorted_learning = build_learning_candidates_for_bill(
+        &income_bill,
+        &[json!(income_rule.clone()), json!(duplicate_rule)],
+        &BTreeMap::new(),
+        &income_categories,
+        &accounts,
+    );
+    assert_eq!(sorted_learning[0]["rule_id"], 12);
+    assert!(build_learning_candidate_for_bill(
+        &income_bill,
+        &object(json!({
+            "id": 13,
+            "match_type": "composite",
+            "match_features_json": "{bad json"
+        })),
+        None,
+        &[],
+        &[]
+    )
+    .is_none());
 }
 
 #[test]
 fn session_candidates_project_preview_families_without_legacy_investment() {
-    let previews = vec![json!({
-        "id": 8,
-        "preview_date": "2026-05-01",
-        "preview_type": "支出",
-        "preview_amount": -18.5,
-        "preview_counterparty": "超市",
-        "preview_description": "午餐",
-        "matching": {
-            "reconciliation": {
-                "candidate_id": "reconcile:import:duplicate:bill:42:abc",
-                "candidate_type": "duplicate",
-                "score": 0.91,
-                "level": "high",
-                "reason": "duplicate",
-                "status": "pending"
-            },
-            "transfer": {
-                "candidate_type": "transfer",
-                "score": 0.88,
-                "level": "medium",
-                "reason": "opposite_amount",
-                "review_status": "accepted",
-                "suppressed": false
-            },
-            "learning": {
-                "rule_id": 5,
-                "score": 0.72,
-                "level": "medium",
-                "reason": "rule",
-                "recommended_type": "支出",
-                "summary": "rule summary"
-            },
-            "recurring": {
-                "id": 99,
-                "name": "会员",
-                "candidate_count": 3,
-                "match_score": 0.93,
-                "match_reasons": "monthly",
-                "matched_date": "2026-05-01"
-            },
-            "investment": {
-                "score": 1.0
+    let previews = vec![
+        json!("bad-preview"),
+        json!({
+            "id": 8,
+            "preview_date": "2026-05-01",
+            "preview_type": "支出",
+            "preview_amount": -18.5,
+            "preview_counterparty": "超市",
+            "preview_description": "午餐",
+            "matching": {
+                "reconciliation": {
+                    "candidate_id": "reconcile:import:duplicate:bill:42:abc",
+                    "candidate_type": "duplicate",
+                    "score": 0.91,
+                    "level": "high",
+                    "reason": "duplicate",
+                    "status": "pending"
+                },
+                "transfer": {
+                    "candidate_type": "transfer",
+                    "score": 0.88,
+                    "level": "medium",
+                    "reason": "opposite_amount",
+                    "review_status": "accepted",
+                    "suppressed": false
+                },
+                "learning": {
+                    "rule_id": 5,
+                    "score": 0.72,
+                    "level": "medium",
+                    "reason": "rule",
+                    "recommended_type": "支出",
+                    "summary": "rule summary"
+                },
+                "recurring": {
+                    "id": 99,
+                    "name": "会员",
+                    "candidate_count": 3,
+                    "match_score": 0.93,
+                    "match_reasons": "monthly",
+                    "matched_date": "2026-05-01"
+                },
+                "investment": {
+                    "score": 1.0
+                }
             }
-        }
-    })];
+        }),
+    ];
 
     let payload = build_matching_session_candidates("session-a", &previews);
     assert_eq!(payload["session_id"], "session-a");
-    assert_eq!(payload["summary"]["preview_count"], 1);
+    assert_eq!(payload["summary"]["preview_count"], 2);
     assert_eq!(payload["summary"]["candidate_count"], 4);
     assert_eq!(payload["summary"]["counts_by_kind"]["reconciliation"], 1);
 
@@ -447,6 +576,10 @@ fn investment_keywords_profiles_scores_and_pnl_match_python_fixtures() {
         normalize_keyword_list(Some(&json!("基金, ETF，基金|黄金；股票、债券")), &[]),
         vec!["基金", "ETF", "黄金", "股票", "债券"]
     );
+    assert_eq!(
+        normalize_keyword_list(Some(&json!("")), &["fallback"]),
+        vec!["fallback"]
+    );
     let serialized = serialize_keyword_list(Some(&json!(["基金", " ETF ", "基金"])));
     assert_eq!(
         serde_json::from_str::<Vec<String>>(&serialized).unwrap(),
@@ -465,6 +598,9 @@ fn investment_keywords_profiles_scores_and_pnl_match_python_fixtures() {
     let generic_profile = extract_investment_profile("基金销售平台 账户服务费", None);
     assert_eq!(generic_profile.platform, "基金销售平台");
     assert_eq!(generic_profile.product, "");
+    let empty_profile = extract_investment_profile("", None);
+    assert_eq!(empty_profile.platform, "");
+    assert_eq!(empty_profile.product, "");
 
     let investment_bill = object(json!({
         "type": "支出",
@@ -479,6 +615,19 @@ fn investment_keywords_profiles_scores_and_pnl_match_python_fixtures() {
         signal.reason,
         "platform:天天基金, product:沪深300ETF/基金/ETF"
     );
+    assert!(score_investment_candidate(
+        &object(json!({"type": "transfer", "description": "天天基金 ETF"})),
+        true,
+        None
+    )
+    .is_none());
+    assert!(score_investment_candidate(
+        &object(json!({"type": "投资", "description": "天天基金 ETF"})),
+        false,
+        None
+    )
+    .is_none());
+    assert!(score_investment_candidate(&object(json!({"type": "支出"})), false, None).is_none());
 
     let alias_profile = extract_investment_profile("天天基金 指数增强 申购", None);
     assert_eq!(alias_profile.product, "指数增强");
@@ -498,6 +647,12 @@ fn investment_keywords_profiles_scores_and_pnl_match_python_fixtures() {
         "description": "账户服务费"
     }));
     assert!(score_investment_candidate(&service_fee, false, None).is_none());
+    let fee_with_product = object(json!({
+        "type": "支出",
+        "counterparty": "天天基金",
+        "description": "买入 沪深300ETF 账户服务费 申购"
+    }));
+    assert!(score_investment_candidate(&fee_with_product, false, None).is_none());
 
     let bank_interest = object(json!({
         "type": "收入",
@@ -506,6 +661,14 @@ fn investment_keywords_profiles_scores_and_pnl_match_python_fixtures() {
     }));
     assert!(is_ordinary_bank_interest_income(&bank_interest, None));
     assert!(score_investment_candidate(&bank_interest, false, None).is_none());
+    assert!(!is_ordinary_bank_interest_income(
+        &object(json!({
+            "type": "expense",
+            "counterparty": "招商银行",
+            "description": "利息扣款"
+        })),
+        None
+    ));
 
     let pnl_gain = object(json!({
         "type": "投资",
@@ -516,6 +679,23 @@ fn investment_keywords_profiles_scores_and_pnl_match_python_fixtures() {
     assert_eq!(pnl_signal.signal_type.as_deref(), Some("pnl_change"));
     assert_eq!(pnl_signal.direction.as_deref(), Some("gain"));
     assert!(score_investment_candidate(&pnl_gain, true, Some(&settings)).is_none());
+    let pnl_loss = object(json!({
+        "type": "投资",
+        "counterparty": "天天基金",
+        "description": "沪深300ETF 亏损调整"
+    }));
+    let loss_signal = classify_investment_pnl_change(&pnl_loss, Some(&settings)).expect("loss");
+    assert_eq!(loss_signal.direction.as_deref(), Some("loss"));
+    assert!(classify_investment_pnl_change(
+        &object(json!({"type": "transfer", "description": "天天基金 收益"})),
+        Some(&settings)
+    )
+    .is_none());
+    assert!(classify_investment_pnl_change(
+        &object(json!({"type": "支出", "description": "收益"})),
+        Some(&settings)
+    )
+    .is_none());
 }
 
 #[test]
@@ -538,14 +718,51 @@ fn recurring_detection_preserves_python_hash_frequency_and_suggestion_shape() {
         detect_recurring_frequency(&[7.0, 30.0, 90.0]).frequency,
         "irregular"
     );
+    let unknown = detect_recurring_frequency(&[]);
+    assert_eq!(unknown.frequency, "unknown");
+    assert_eq!(unknown.confidence, 0.0);
 
     let last = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
     assert_eq!(
         estimate_next_recurring_date(last, "monthly", 30.0),
         NaiveDate::from_ymd_opt(2026, 5, 31).unwrap()
     );
+    assert_eq!(
+        estimate_next_recurring_date(last, "weekly", 0.0),
+        NaiveDate::from_ymd_opt(2026, 5, 8).unwrap()
+    );
+    assert_eq!(
+        estimate_next_recurring_date(last, "annual", 0.0),
+        NaiveDate::from_ymd_opt(2027, 5, 1).unwrap()
+    );
+    assert_eq!(
+        estimate_next_recurring_date(last, "custom", 45.0),
+        NaiveDate::from_ymd_opt(2026, 6, 15).unwrap()
+    );
+    assert_eq!(
+        estimate_next_recurring_date(last, "custom", 0.0),
+        NaiveDate::from_ymd_opt(2026, 5, 31).unwrap()
+    );
+    assert!(parse_recurring_date(&json!(7)).is_none());
 
     let bills = vec![
+        json!("bad-row"),
+        json!({
+            "id": 98,
+            "date": "bad-date",
+            "type": "支出",
+            "amount": -19.99,
+            "source_account_id": 3,
+            "counterparty": "Netflix"
+        }),
+        json!({
+            "id": 97,
+            "date": "2026-01-01",
+            "type": "",
+            "amount": 0.0,
+            "source_account_id": 3,
+            "counterparty": ""
+        }),
         json!({
             "id": 1,
             "date": "2026-01-01",
@@ -584,6 +801,33 @@ fn recurring_detection_preserves_python_hash_frequency_and_suggestion_shape() {
             "source_account_id": 3,
             "counterparty": "ignored"
         }),
+        json!({
+            "id": 4,
+            "date": "2026-04-01",
+            "type": "支出",
+            "amount": -9.99,
+            "source_account_id": 3,
+            "counterparty": "Weekly",
+            "description": "weekly subscription"
+        }),
+        json!({
+            "id": 5,
+            "date": "2026-04-08",
+            "type": "支出",
+            "amount": -9.99,
+            "source_account_id": 3,
+            "counterparty": "Weekly",
+            "description": "weekly subscription"
+        }),
+        json!({
+            "id": 6,
+            "date": "2026-04-15",
+            "type": "支出",
+            "amount": -9.99,
+            "source_account_id": 3,
+            "counterparty": "Weekly",
+            "description": "weekly subscription"
+        }),
     ];
     let patterns = detect_recurring_patterns_with_today(
         &bills,
@@ -591,17 +835,20 @@ fn recurring_detection_preserves_python_hash_frequency_and_suggestion_shape() {
         &BTreeSet::new(),
         NaiveDate::from_ymd_opt(2026, 5, 7).unwrap(),
     );
-    assert_eq!(patterns.len(), 1);
-    assert_eq!(patterns[0].counterparty, "Netflix");
-    assert_eq!(patterns[0].frequency, "monthly");
-    assert_eq!(patterns[0].amount, 19.99);
-    assert_eq!(patterns[0].sample_count, 3);
-    assert_eq!(patterns[0].sample_bill_ids, vec![1, 2, 3]);
-    assert_eq!(patterns[0].suggested_next_date, "2026-04-01");
+    assert_eq!(patterns.len(), 2);
+    let netflix = patterns
+        .iter()
+        .find(|pattern| pattern.counterparty == "Netflix")
+        .expect("netflix pattern");
+    assert_eq!(netflix.frequency, "monthly");
+    assert_eq!(netflix.amount, 19.99);
+    assert_eq!(netflix.sample_count, 3);
+    assert_eq!(netflix.sample_bill_ids, vec![1, 2, 3]);
+    assert_eq!(netflix.suggested_next_date, "2026-04-01");
 
     let serialized = serialize_recurring_suggestion(&object(json!({
         "id": 7,
-        "pattern_hash": patterns[0].pattern_hash,
+        "pattern_hash": netflix.pattern_hash,
         "name": "Netflix",
         "description": "subscription",
         "type": "支出",
@@ -621,7 +868,7 @@ fn recurring_detection_preserves_python_hash_frequency_and_suggestion_shape() {
         "created_at": "2026-05-07T10:00:00",
         "updated_at": "2026-05-07T10:00:00"
     })));
-    assert_eq!(serialized["patternHash"], patterns[0].pattern_hash);
+    assert_eq!(serialized["patternHash"], netflix.pattern_hash);
     assert_eq!(serialized["sampleBillIds"], json!([1, 2, 3]));
     assert_eq!(serialized["sourceAccountId"], "3");
     assert_eq!(serialized["destinationAccountId"], "");
@@ -632,7 +879,7 @@ fn recurring_detection_preserves_python_hash_frequency_and_suggestion_shape() {
     let skipped = detect_recurring_patterns_with_today(
         &bills,
         3,
-        &BTreeSet::from([2]),
+        &BTreeSet::from([2, 5]),
         NaiveDate::from_ymd_opt(2026, 5, 7).unwrap(),
     );
     assert!(skipped.is_empty());
