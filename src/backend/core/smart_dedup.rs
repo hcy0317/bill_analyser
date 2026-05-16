@@ -1010,6 +1010,7 @@ fn find_split_bills(bills: &mut [DedupBill]) -> Vec<SplitGroup> {
         &amount_cents,
         &source_account_ids,
     );
+    let split_group_ranges = build_split_group_ranges(&split_groups_by_source, &amount_cents);
 
     for total_index in &active_indices {
         if matched_indices.contains(total_index) || abs_cents(bills[*total_index].amount) < 1_000 {
@@ -1035,6 +1036,7 @@ fn find_split_bills(bills: &mut [DedupBill]) -> Vec<SplitGroup> {
         };
         let Some((candidates, source_splits)) = find_split_candidates_for_total(
             &split_groups_by_source,
+            &split_group_ranges,
             &amount_cents,
             &datetimes,
             &matched_indices,
@@ -1113,6 +1115,12 @@ struct SplitTotalCandidate<'a> {
     datetime: NaiveDateTime,
     source: &'a str,
     amount_cents: i128,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SplitAmountRange {
+    min_possible_sum: i128,
+    max_possible_sum: i128,
 }
 
 fn amount_cents_for_bills(bills: &[DedupBill]) -> Vec<i128> {
@@ -1201,8 +1209,70 @@ where
     groups
 }
 
+fn build_split_group_ranges(
+    groups: &HashMap<SplitSourceKey, Vec<usize>>,
+    amount_cents: &[i128],
+) -> HashMap<SplitSourceKey, SplitAmountRange> {
+    groups
+        .iter()
+        .filter_map(|(key, indices)| {
+            split_group_possible_sum_range(indices, amount_cents).map(|range| (key.clone(), range))
+        })
+        .collect()
+}
+
+fn split_group_possible_sum_range(
+    indices: &[usize],
+    amount_cents: &[i128],
+) -> Option<SplitAmountRange> {
+    if indices.len() < 2 {
+        return None;
+    }
+
+    let mut values = indices
+        .iter()
+        .map(|index| amount_cents[*index])
+        .collect::<Vec<_>>();
+    values.sort_unstable();
+
+    let full_sum = values.iter().sum::<i128>();
+    let first = *values.first()?;
+    let second = values.get(1).copied()?;
+    let last = *values.last()?;
+    let before_last = values.get(values.len().saturating_sub(2)).copied()?;
+
+    if last < 0 {
+        Some(SplitAmountRange {
+            min_possible_sum: full_sum,
+            max_possible_sum: before_last + last,
+        })
+    } else if first > 0 {
+        Some(SplitAmountRange {
+            min_possible_sum: first + second,
+            max_possible_sum: full_sum,
+        })
+    } else {
+        None
+    }
+}
+
+fn split_group_range_can_match(
+    ranges: &HashMap<SplitSourceKey, SplitAmountRange>,
+    key: &SplitSourceKey,
+    target_amount_cents: i128,
+) -> bool {
+    ranges
+        .get(key)
+        .map(|range| {
+            target_amount_cents >= range.min_possible_sum - AMOUNT_TOLERANCE_CENTS
+                && target_amount_cents <= range.max_possible_sum + AMOUNT_TOLERANCE_CENTS
+        })
+        .unwrap_or(false)
+}
+
 fn find_split_candidates_for_total(
     groups: &HashMap<SplitSourceKey, Vec<usize>>,
+    group_ranges: &HashMap<SplitSourceKey, SplitAmountRange>,
     amount_cents: &[i128],
     datetimes: &[Option<NaiveDateTime>],
     matched_indices: &HashSet<usize>,
@@ -1239,6 +1309,9 @@ fn find_split_candidates_for_total(
     });
 
     for key in source_keys {
+        if !split_group_range_can_match(group_ranges, key, total.amount_cents) {
+            continue;
+        }
         let candidates = groups
             .get(key)?
             .iter()

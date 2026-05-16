@@ -158,6 +158,47 @@ fn similar_duplicates_and_split_groups_preserve_python_contract_edges() {
 }
 
 #[test]
+fn income_split_groups_preserve_split_contract_edges() {
+    let total = DedupBill {
+        source_account_id: "bank-total".to_string(),
+        parser_id: "icbc".to_string(),
+        source: "icbc".to_string(),
+        counterparty: "合并收入".to_string(),
+        description: "收入总账单".to_string(),
+        ..bill("", "2026-01-03 19:00:00", "30.00")
+    };
+    let split_a = DedupBill {
+        source_account_id: "wallet-splits".to_string(),
+        parser_id: "wechat".to_string(),
+        source: "wechat".to_string(),
+        description: "收入分账 A".to_string(),
+        ..bill("", "2026-01-03 19:00:05", "10.00")
+    };
+    let split_b = DedupBill {
+        source_account_id: "wallet-splits".to_string(),
+        parser_id: "wechat".to_string(),
+        source: "wechat".to_string(),
+        description: "收入分账 B".to_string(),
+        ..bill("", "2026-01-03 19:00:10", "20.00")
+    };
+
+    let split_result = SmartDeduplicationEngine.process(vec![total, split_a, split_b]);
+
+    assert_eq!(split_result.split_groups.len(), 1);
+    assert_eq!(split_result.split_groups[0].total_index, 0);
+    assert_eq!(split_result.split_groups[0].split_indices, vec![1, 2]);
+    assert_eq!(
+        serde_json::to_value(&split_result.split_groups[0]).unwrap()["total_amount"],
+        30.0
+    );
+    assert_eq!(split_result.kept_bills.len(), 2);
+    assert!(split_result
+        .kept_bills
+        .iter()
+        .all(|item| item.dedup_type.as_deref() == Some("split")));
+}
+
+#[test]
 fn database_duplicate_and_cross_batch_transfer_helpers_match_existing_contract() {
     let mut imported = bill("wechat", "2026-01-04 08:00:00", "-12.50");
     let mut existing = bill("icbc", "2026-01-04 08:03:00", "12.50");
