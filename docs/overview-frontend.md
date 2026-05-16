@@ -20,7 +20,7 @@
 
 ## 4.4 服务层（`src/web/src/lib/services.ts`）
 - 统一 axios 请求、鉴权头注入、401 刷新 token、REST 主链调用封装
-- `src/web/scripts/generate-rust-route-fixture.mjs` 会从 Rust `migration_governance.rs::OWNERSHIP_MATRIX` 生成 `src/web/src/contracts/rustRouteOwnership.generated.ts`；`tests/web/contracts/frontendRustRouteContract.test.ts` 扫描 `services.ts` 与 Vue/TS 中的 axios/fetch `/api/...` 调用，要求前端运行态请求只能落到 Rust `RustOwnedVerified` 或 `PythonDeleted` 路由，并阻止重新引用 `/api/v1/*`。
+- `src/web/scripts/generate-rust-route-fixture.mjs` 会从 Rust `governance_manifest_snapshot().routes` 快照生成 `src/web/src/contracts/rustRouteOwnership.manifest.generated.json`，再渲染 `rustRouteOwnership.generated.ts`；后端 governance 契约测试校验 JSON 快照与 Rust manifest 同步，`tests/web/contracts/frontendRustRouteContract.test.ts` 扫描 `services.ts` 与 Vue/TS 中的 axios/fetch `/api/...` 调用，要求前端运行态请求只能落到 Rust `RustOwnedVerified` 或 `PythonDeleted` 路由，并阻止重新引用 `/api/v1/*`。
 
 ## 4.5 分类图标
 - 分类图标统一由 `src/web/src/lib/icon.ts` 的 resolver 归一化，支持数字 preset id、Line Awesome class 与历史 `mdi-*` 分类图标值；`ItemIconBase` 只消费 resolver 输出，未知/空图标统一回落到默认分类图标。

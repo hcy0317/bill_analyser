@@ -14,7 +14,7 @@
 
 - `src/web` 下运行 `npm run lint` 或 CI 等价的 `npm run lint:ci`。
 - 前端代码交付补 `npm run test:coverage` 和 `npm run build`。
-- `tests/web/contracts/frontendRustRouteContract.test.ts` 校验由 Rust route ownership 生成的前端 fixture 未过期，并扫描 Vue/TS axios/fetch 调用，确保当前前端 `/api/...` 请求不依赖旧运行时边界或 `/api/v1/*` 路由。
+- `tests/backend/core/migration_governance_contracts.rs` 校验前端 route ownership JSON 快照与 Rust `governance_manifest_snapshot().routes` 同步；`tests/web/contracts/frontendRustRouteContract.test.ts` 校验由该快照生成的前端 fixture 未过期，并扫描 Vue/TS axios/fetch 调用，确保当前前端 `/api/...` 请求不依赖旧运行时边界或 `/api/v1/*` 路由。
 
 ## 仓库治理
 

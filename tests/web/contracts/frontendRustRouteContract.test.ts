@@ -148,7 +148,7 @@ function findRuntimeRoute(use: FrontendRouteUse): string | null {
 describe('frontend Rust route contract', () => {
     test('keeps the generated Rust route fixture in sync with migration governance', () => {
         expect(RUST_ROUTE_OWNERSHIP_GENERATED_FROM)
-            .toBe('src/backend/core/migration_governance.rs::OWNERSHIP_MATRIX');
+            .toBe('bill_migration_manifest::governance_manifest_snapshot.routes');
         childProcess.execFileSync(
             process.execPath,
             ['scripts/generate-rust-route-fixture.mjs', '--check'],

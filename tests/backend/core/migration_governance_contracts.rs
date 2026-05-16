@@ -8,6 +8,23 @@ use bill_analyser_core::{
     DbWriterMode, DecisionRequired, ImportDeletionEvidence, ImportDeletionGate,
     MigrationBlockedStatus, MigrationState, ResponseEnvelopeFamily, RouteHandlerId,
 };
+use serde::Deserialize;
+use std::path::Path;
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct FrontendRouteOwnershipManifest {
+    generated_from: String,
+    routes: Vec<FrontendRouteOwnership>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+struct FrontendRouteOwnership {
+    method: String,
+    pattern: String,
+    domain: String,
+    state: MigrationState,
+}
 
 #[test]
 fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_import_runtime() {
@@ -1411,4 +1428,35 @@ fn governance_snapshot_joins_route_and_domain_manifests() {
         rust_http_shell_ownership_matrix().len()
     );
     assert_eq!(snapshot.domains.len(), domain_governance_policies().len());
+}
+
+#[test]
+fn generated_frontend_route_ownership_manifest_matches_governance_snapshot() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .canonicalize()
+        .expect("repo root should resolve from core crate manifest dir");
+    let manifest_path =
+        repo_root.join("src/web/src/contracts/rustRouteOwnership.manifest.generated.json");
+    let manifest_text = std::fs::read_to_string(&manifest_path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", manifest_path.display()));
+    let manifest: FrontendRouteOwnershipManifest = serde_json::from_str(&manifest_text)
+        .expect("frontend route ownership manifest should parse");
+
+    assert_eq!(
+        manifest.generated_from,
+        "bill_migration_manifest::governance_manifest_snapshot.routes"
+    );
+
+    let expected: Vec<_> = governance_manifest_snapshot()
+        .routes
+        .iter()
+        .map(|route| FrontendRouteOwnership {
+            method: route.method.to_string(),
+            pattern: route.pattern.to_string(),
+            domain: route.domain.to_string(),
+            state: route.state,
+        })
+        .collect();
+    assert_eq!(manifest.routes, expected);
 }

@@ -1,15 +1,18 @@
+import childProcess from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '..', '..', '..');
-const rustManifestPath = path.join(
+const generatedFrom = 'bill_migration_manifest::governance_manifest_snapshot.routes';
+const manifestPath = path.join(
   repoRoot,
   'src',
-  'backend',
-  'core',
-  'migration_governance.rs',
+  'web',
+  'src',
+  'contracts',
+  'rustRouteOwnership.manifest.generated.json',
 );
 const targetPath = path.join(
   repoRoot,
@@ -20,81 +23,69 @@ const targetPath = path.join(
   'rustRouteOwnership.generated.ts',
 );
 
-function snakeCase(value) {
-  return value.replace(/[A-Z]/g, (char, index) => `${index === 0 ? '' : '_'}${char.toLowerCase()}`);
+function requireString(value, field, route) {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`Invalid ${field} in route ownership manifest entry: ${JSON.stringify(route)}`);
+  }
+  return value;
 }
 
-function rustString(field, block) {
-  const match = block.match(new RegExp(`${field}:\\s*"([^"]+)"`));
-  if (!match) {
-    throw new Error(`Missing ${field} in EndpointOwnership block:\n${block}`);
-  }
-  return match[1];
+function normalizeRoute(route) {
+  return {
+    method: requireString(route.method, 'method', route),
+    pattern: requireString(route.pattern, 'pattern', route),
+    domain: requireString(route.domain, 'domain', route),
+    state: requireString(route.state, 'state', route),
+  };
 }
 
-function rustState(block) {
-  const match = block.match(/state:\s*MigrationState::([A-Za-z]+)/);
-  if (!match) {
-    throw new Error(`Missing state in EndpointOwnership block:\n${block}`);
+function readManifest() {
+  if (!fs.existsSync(manifestPath)) {
+    throw new Error(`${path.relative(repoRoot, manifestPath)} is missing; run node src/web/scripts/generate-rust-route-fixture.mjs --refresh-manifest`);
   }
-  return snakeCase(match[1]);
+
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  if (manifest.generatedFrom !== generatedFrom) {
+    throw new Error(`Unexpected route ownership manifest source: ${manifest.generatedFrom}`);
+  }
+  if (!Array.isArray(manifest.routes) || manifest.routes.length === 0) {
+    throw new Error('No route ownership entries found in route ownership manifest');
+  }
+
+  return {
+    generatedFrom: manifest.generatedFrom,
+    routes: manifest.routes.map(normalizeRoute),
+  };
 }
 
-function extractOwnershipMatrix(source) {
-  const startMarker = 'const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[';
-  const start = source.indexOf(startMarker);
-  if (start < 0) {
-    throw new Error('Unable to find OWNERSHIP_MATRIX in Rust migration governance source');
+function buildManifestFromRust() {
+  const output = childProcess.execFileSync(
+    'cargo',
+    ['run', '--quiet', '-p', 'bill-analyser-core', '--bin', 'bill_migration_manifest'],
+    { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] },
+  );
+  const snapshot = JSON.parse(output);
+  if (!Array.isArray(snapshot.routes) || snapshot.routes.length === 0) {
+    throw new Error('Rust governance manifest did not emit route entries');
   }
-  const end = source.indexOf('\n];', start);
-  if (end < 0) {
-    throw new Error('Unable to find end of OWNERSHIP_MATRIX in Rust migration governance source');
-  }
-  return source.slice(start + startMarker.length, end);
+  return {
+    generatedFrom,
+    routes: snapshot.routes.map(normalizeRoute),
+  };
 }
 
-function readRoutes() {
-  const source = fs.readFileSync(rustManifestPath, 'utf8');
-  const matrixSource = extractOwnershipMatrix(source);
-  const routes = [];
-
-  for (const match of matrixSource.matchAll(/EndpointOwnership\s*\{([\s\S]*?)\n\s*\}/g)) {
-    const block = match[1];
-    routes.push({
-      index: match.index ?? 0,
-      method: rustString('method', block),
-      pattern: rustString('pattern', block),
-      domain: rustString('domain', block),
-      state: rustState(block),
-    });
-  }
-
-  for (const match of matrixSource.matchAll(/python_deleted_route!\(\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]+)"/g)) {
-    routes.push({
-      index: match.index ?? 0,
-      method: match[1],
-      pattern: match[2],
-      domain: match[3],
-      state: 'python_deleted',
-    });
-  }
-
-  if (routes.length === 0) {
-    throw new Error('No route ownership entries found in OWNERSHIP_MATRIX');
-  }
-
-  return routes
-    .sort((left, right) => left.index - right.index)
-    .map(({ index: _index, ...route }) => route);
+function writeManifest(manifest) {
+  fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 }
 
-function render(routes) {
-  const entries = routes
+function render(manifest) {
+  const entries = manifest.routes
     .map((route) => `    ${JSON.stringify(route)},`)
     .join('\n');
 
-  return `// Generated by src/web/scripts/generate-rust-route-fixture.mjs from src/backend/core/migration_governance.rs.
-// Do not edit by hand; run the generator after changing Rust route ownership.
+  return `// Generated by src/web/scripts/generate-rust-route-fixture.mjs from ${manifest.generatedFrom}.
+// Do not edit by hand; refresh the manifest after changing Rust route ownership.
 
 export type RustRouteState =
     | 'rust_implemented'
@@ -111,7 +102,7 @@ export interface RustRouteOwnership {
 }
 
 export const RUST_ROUTE_OWNERSHIP_GENERATED_FROM =
-    'src/backend/core/migration_governance.rs::OWNERSHIP_MATRIX';
+    '${manifest.generatedFrom}';
 
 export const RUST_ROUTE_OWNERSHIP: readonly RustRouteOwnership[] = [
 ${entries}
@@ -121,7 +112,12 @@ ${entries}
 
 function main() {
   const checkOnly = process.argv.includes('--check');
-  const rendered = render(readRoutes());
+  const refreshManifest = process.argv.includes('--refresh-manifest');
+  if (refreshManifest) {
+    writeManifest(buildManifestFromRust());
+  }
+
+  const rendered = render(readManifest());
 
   if (checkOnly) {
     const current = fs.existsSync(targetPath) ? fs.readFileSync(targetPath, 'utf8') : '';
