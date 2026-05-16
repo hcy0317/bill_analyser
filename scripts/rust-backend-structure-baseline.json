@@ -17,13 +17,6 @@
       "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
     },
     {
-      "path": "src/backend/db/taxonomy/settings_bundle.rs",
-      "kind": "rust",
-      "area": "db",
-      "lines": 2180,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
       "path": "src/backend/core/statistics.rs",
       "kind": "rust",
       "area": "core",
@@ -91,13 +84,6 @@
       "kind": "rust",
       "area": "core",
       "lines": 1052,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/http/taxonomy_routes/account_category_formatters.rs",
-      "kind": "rust",
-      "area": "http",
-      "lines": 1041,
       "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
     },
     {

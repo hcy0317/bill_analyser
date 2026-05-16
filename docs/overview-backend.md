@@ -9,7 +9,7 @@ Axum HTTP 入口，负责路由注册、认证上下文、请求解析、multipa
 - `auth_routes/` facade + auth route helper shards
 - `bill_routes/`
 - `import_routes/`
-- `taxonomy_routes/`
+- `taxonomy_routes/` facade + taxonomy route helper shards for accounts/tags, category mutations, category formatters, settings bundle handlers, serialization, audit/rule helpers and common helpers
 - `budget_routes.rs` facade + `budget_routes/`
 - `statistics_routes/`
 - `matching_routes.rs`
@@ -17,7 +17,7 @@ Axum HTTP 入口，负责路由注册、认证上下文、请求解析、multipa
 
 ## `src/backend/db`
 
-SQLite repository 层，负责 WAL/FK 连接配置、schema 初始化、事务 helper、user-scope 查询、业务表 CRUD 和导入 preview/session staging。Auth repository 由 `auth.rs` facade 聚合 `auth/` 下的 user/session/profile/cloud settings/2FA/log/row helper 模块；auth registration 由 `auth_registration.rs` facade 聚合默认 seed、注册、分类、账户与测试模块；import staging repository 由 `import_staging.rs` facade 聚合 `import_staging/` 下的 session/template/preview/decision/LLM memory/confirm/row helper 模块；matching repository 由 `matching.rs` facade 聚合 `matching/` 下的 schema/actions/candidate query/reconciliation/serialization/helper 模块；budget repository 由 `budgets.rs` facade 聚合 `budgets/` 下的 CRUD/import/execution/history/forecast/hierarchy/row helper 模块。
+SQLite repository 层，负责 WAL/FK 连接配置、schema 初始化、事务 helper、user-scope 查询、业务表 CRUD 和导入 preview/session staging。Auth repository 由 `auth.rs` facade 聚合 `auth/` 下的 user/session/profile/cloud settings/2FA/log/row helper 模块；auth registration 由 `auth_registration.rs` facade 聚合默认 seed、注册、分类、账户与测试模块；import staging repository 由 `import_staging.rs` facade 聚合 `import_staging/` 下的 session/template/preview/decision/LLM memory/confirm/row helper 模块；matching repository 由 `matching.rs` facade 聚合 `matching/` 下的 schema/actions/candidate query/reconciliation/serialization/helper 模块；budget repository 由 `budgets.rs` facade 聚合 `budgets/` 下的 CRUD/import/execution/history/forecast/hierarchy/row helper 模块；taxonomy settings bundle repository 由 `taxonomy/settings_bundle/mod.rs` facade 聚合导入、导出、规范化和 JSON helper 分片。
 
 ## `src/backend/core`
 
