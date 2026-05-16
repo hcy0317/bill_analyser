@@ -3,6 +3,12 @@ import path from 'node:path';
 
 import { describe, expect, test } from '@jest/globals';
 
+import {
+    ALL_LANGUAGES,
+    DEFAULT_LANGUAGE,
+    getCompleteLanguageMessages
+} from '@/locales/index.ts';
+
 function readSource(relativePath: string): string {
     return fs.readFileSync(path.resolve(process.cwd(), relativePath), 'utf-8');
 }
@@ -23,8 +29,95 @@ function extractSimpleTranslationKeys(source: string): string[] {
     return Array.from(keys).sort();
 }
 
+function listSourceFiles(relativeDirectory: string): string[] {
+    const absoluteDirectory = path.resolve(process.cwd(), relativeDirectory);
+    const sourceFiles: string[] = [];
+
+    for (const entry of fs.readdirSync(absoluteDirectory, { withFileTypes: true })) {
+        const relativePath = path.join(relativeDirectory, entry.name);
+
+        if (entry.isDirectory()) {
+            sourceFiles.push(...listSourceFiles(relativePath));
+        } else if (/\.(vue|ts|tsx|js|jsx)$/.test(entry.name)) {
+            sourceFiles.push(relativePath);
+        }
+    }
+
+    return sourceFiles.sort();
+}
+
+function parseStringLiteral(rawLiteral: string): string | null {
+    try {
+        if (rawLiteral.startsWith('"')) {
+            return JSON.parse(rawLiteral) as string;
+        }
+
+        const literalBody = rawLiteral.slice(1, -1);
+
+        if (rawLiteral.startsWith('`') && literalBody.includes('${')) {
+            return null;
+        }
+
+        const jsonStringBody = literalBody
+            .replace(/"/g, '\\"')
+            .replace(/\\'/g, "'")
+            .replace(/\\`/g, '`');
+
+        return JSON.parse(`"${jsonStringBody}"`) as string;
+    } catch {
+        return null;
+    }
+}
+
+function extractStaticTranslationKeys(source: string): string[] {
+    const keys = new Set<string>();
+    const pattern = /(?:\btt|\bt|\$t)\(\s*((?:'[^'\\]*(?:\\.[^'\\]*)*')|(?:"[^"\\]*(?:\\.[^"\\]*)*")|(?:`[^`\\]*(?:\\.[^`\\]*)*`))/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = pattern.exec(source)) !== null) {
+        const nextToken = source.slice(pattern.lastIndex).match(/^\s*(.)/);
+
+        if (nextToken?.[1] === '+') {
+            continue;
+        }
+
+        const key = parseStringLiteral(match[1]!);
+
+        if (key) {
+            keys.add(key);
+        }
+    }
+
+    return Array.from(keys).sort();
+}
+
+function extractStaticTranslationKeysFromSource(relativePath: string): string[] {
+    return extractStaticTranslationKeys(readSource(relativePath));
+}
+
+function hasLocaleKey(messages: Record<string, unknown>, key: string): boolean {
+    if (Object.prototype.hasOwnProperty.call(messages, key)) {
+        return true;
+    }
+
+    let current: unknown = messages;
+
+    for (const part of key.split('.')) {
+        if (!current || typeof current !== 'object' || !Object.prototype.hasOwnProperty.call(current, part)) {
+            return false;
+        }
+
+        current = (current as Record<string, unknown>)[part];
+    }
+
+    return true;
+}
+
 describe('i18n key contract for reported warning surfaces', () => {
     const activeLocales = ['en', 'zh_Hans', 'zh_Hant'];
+    const staticTranslationKeys = Array.from(new Set(
+        listSourceFiles('src').flatMap(file => extractStaticTranslationKeysFromSource(file))
+    )).sort();
 
     test('reported budget history and rule builder keys exist in active locales', () => {
         const sourceFiles = [
@@ -40,6 +133,42 @@ describe('i18n key contract for reported warning surfaces', () => {
                 expect(messages).toHaveProperty(key);
             }
         }
+    });
+
+    test('default locale contains every statically referenced translation key', () => {
+        const defaultMessages = readLocale(DEFAULT_LANGUAGE);
+        const missingKeys = staticTranslationKeys.filter(key => !hasLocaleKey(defaultMessages, key));
+
+        expect(missingKeys).toEqual([]);
+    });
+
+    test('runtime i18n messages complete supported locales from default locale', () => {
+        const completedMessages = getCompleteLanguageMessages();
+
+        expect(completedMessages['zh']).toBe(completedMessages['zh-Hans']);
+
+        for (const languageKey of Object.keys(ALL_LANGUAGES)) {
+            const messages = completedMessages[languageKey] as Record<string, unknown>;
+            const missingKeys = staticTranslationKeys.filter(key => !hasLocaleKey(messages, key));
+
+            expect(missingKeys).toEqual([]);
+        }
+    });
+
+    test('static key scanner covers quoted literals without accepting dynamic keys', () => {
+        const source = [
+            "tt('Single Quoted Key')",
+            't("Double Quoted Key")',
+            '$t(`Backtick Quoted Key`)',
+            'tt(`Dynamic ${key}`)',
+            "tt('Dynamic Prefix' + suffix)"
+        ].join('\n');
+
+        expect(extractStaticTranslationKeys(source)).toEqual([
+            'Backtick Quoted Key',
+            'Double Quoted Key',
+            'Single Quoted Key'
+        ]);
     });
 
     test('category rule builder callers pass translation keys, not translated labels', () => {

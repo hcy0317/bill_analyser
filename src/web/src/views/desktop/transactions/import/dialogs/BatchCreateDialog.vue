@@ -52,7 +52,7 @@
                             v-model="allFilteredItemsSelected"
                         />
                         <span class="text-body-2 text-medium-emphasis">
-                            {{ tt('selectedCount', { count: selectedNames.length, totalCount: invalidItems?.length || 0 }) }}
+                            {{ tt('format.misc.selectedCount', { count: selectedNames.length, totalCount: invalidItems?.length || 0 }) }}
                         </span>
                     </div>
                 </div>
@@ -84,7 +84,7 @@
                                 </td>
                                 <td>
                                     <v-chip size="small" color="warning" variant="tonal">
-                                        {{ tt('Ready to Create') }}
+                                        {{ tt('format.misc.Ready to Create') }}
                                     </v-chip>
                                 </td>
                             </tr>

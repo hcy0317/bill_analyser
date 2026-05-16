@@ -8,7 +8,8 @@ import {
     type LanguageInfo,
     type LanguageOption,
     ALL_LANGUAGES,
-    DEFAULT_LANGUAGE
+    DEFAULT_LANGUAGE,
+    getCompleteLanguageMessages
 } from '@/locales/index.ts';
 
 import {
@@ -266,15 +267,7 @@ export function getI18nOptions(): object {
         locale: DEFAULT_LANGUAGE,
         fallbackLocale: DEFAULT_LANGUAGE,
         formatFallbackMessages: true,
-        messages: (function () {
-            const messages: Record<string, object> = {};
-
-            for (const [languageKey, languageInfo] of entries(ALL_LANGUAGES)) {
-                messages[languageKey] = languageInfo.content;
-            }
-
-            return messages;
-        })()
+        messages: getCompleteLanguageMessages()
     };
 }
 

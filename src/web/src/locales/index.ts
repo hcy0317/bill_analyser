@@ -29,6 +29,12 @@ export interface LanguageOption {
     readonly nativeDisplayName: string;
 }
 
+type LocaleMessageValue = string | number | boolean | null | LocaleMessageValue[] | LocaleMessageObject;
+
+interface LocaleMessageObject {
+    [key: string]: LocaleMessageValue;
+}
+
 export const DEFAULT_LANGUAGE: string = 'en';
 
 // To add new languages, please refer to https://bill_analyser.mayswind.net/translating
@@ -128,7 +134,7 @@ export const ALL_LANGUAGES: Record<string, LanguageInfo> = {
         name: 'Chinese (Simplified)',
         displayName: '中文 (简体)',
         alternativeLanguageTag: 'zh-CN',
-        aliases: ['zh-CHS', 'zh-CN', 'zh-SG', 'zh_Hans', 'zh_CN', 'zh_SG'],
+        aliases: ['zh', 'zh-CHS', 'zh-CN', 'zh-SG', 'zh_Hans', 'zh_CN', 'zh_SG'],
         textDirection: 'ltr',
         content: zhHans
     },
@@ -141,3 +147,75 @@ export const ALL_LANGUAGES: Record<string, LanguageInfo> = {
         content: zhHant
     },
 };
+
+function isLocaleMessageObject(value: LocaleMessageValue | object): value is LocaleMessageObject {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function cloneLocaleMessageValue(value: LocaleMessageValue): LocaleMessageValue {
+    if (Array.isArray(value)) {
+        return value.map(item => cloneLocaleMessageValue(item));
+    }
+
+    if (isLocaleMessageObject(value)) {
+        const cloned: LocaleMessageObject = {};
+
+        for (const [key, childValue] of Object.entries(value)) {
+            cloned[key] = cloneLocaleMessageValue(childValue);
+        }
+
+        return cloned;
+    }
+
+    return value;
+}
+
+function mergeMissingLocaleMessages(content: object, fallbackContent: object): LocaleMessageObject {
+    const merged: LocaleMessageObject = {};
+    const currentMessages = content as Record<string, LocaleMessageValue>;
+    const fallbackMessages = fallbackContent as Record<string, LocaleMessageValue>;
+
+    for (const [key, value] of Object.entries(currentMessages)) {
+        merged[key] = cloneLocaleMessageValue(value);
+    }
+
+    for (const [key, fallbackValue] of Object.entries(fallbackMessages)) {
+        const currentValue = merged[key];
+
+        if (currentValue === undefined) {
+            merged[key] = cloneLocaleMessageValue(fallbackValue);
+        } else if (isLocaleMessageObject(currentValue) && isLocaleMessageObject(fallbackValue)) {
+            merged[key] = mergeMissingLocaleMessages(currentValue, fallbackValue);
+        }
+    }
+
+    return merged;
+}
+
+export function getCompleteLanguageMessages(): Record<string, object> {
+    const fallbackLanguage = ALL_LANGUAGES[DEFAULT_LANGUAGE];
+
+    if (!fallbackLanguage) {
+        throw new Error(`Default language ${DEFAULT_LANGUAGE} is not configured`);
+    }
+
+    const messages: Record<string, object> = {};
+
+    for (const [languageKey, languageInfo] of Object.entries(ALL_LANGUAGES)) {
+        const completedContent = languageKey === DEFAULT_LANGUAGE
+            ? cloneLocaleMessageValue(languageInfo.content as LocaleMessageValue) as object
+            : mergeMissingLocaleMessages(languageInfo.content, fallbackLanguage.content);
+
+        messages[languageKey] = completedContent;
+
+        for (const alias of languageInfo.aliases ?? []) {
+            const normalizedAlias = alias.replaceAll('_', '-');
+
+            if (!messages[normalizedAlias]) {
+                messages[normalizedAlias] = completedContent;
+            }
+        }
+    }
+
+    return messages;
+}
