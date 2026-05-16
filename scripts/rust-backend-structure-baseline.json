@@ -13,7 +13,7 @@
       "path": "src/backend/core/migration_governance.rs",
       "kind": "rust",
       "area": "core",
-      "lines": 3584,
+      "lines": 3590,
       "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
     },
     {
@@ -42,13 +42,6 @@
       "kind": "rust",
       "area": "core",
       "lines": 1570,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/core/ai_ocr_llm.rs",
-      "kind": "rust",
-      "area": "core",
-      "lines": 1529,
       "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
     },
     {

@@ -21,7 +21,7 @@ SQLite repository 层，负责 WAL/FK 连接配置、schema 初始化、事务 h
 
 ## `src/backend/core`
 
-共享业务合同与治理层，包含迁移治理清单、金额/时间/统计/分类相关公共规则、预算 period/category/history/forecast/export 合同、matching candidate/learning/investment/recurring 规则、auth/security/ops/import pipeline 合同和 CLI bridge 测试目标。
+共享业务合同与治理层，包含迁移治理清单、金额/时间/统计/分类相关公共规则、预算 period/category/history/forecast/export 合同、matching candidate/learning/investment/recurring 规则、按 LLM config/provider/prompt/response 与 OCR config/parser 分片的 `ai_ocr_llm` 合同、auth/security/ops/import pipeline 合同和 CLI bridge 测试目标。
 
 ## `src/backend/parsers`
 
