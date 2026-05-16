@@ -1261,8 +1261,7 @@ async fn import_db_runtime_parse_dedup_confirm_writes_import_chain() -> Result<(
                 .header("content-type", "application/json")
                 .body(Body::from(
                     json!({
-                        "session_id": session_id,
-                        "include_preview": false
+                        "session_id": session_id
                     })
                     .to_string(),
                 ))

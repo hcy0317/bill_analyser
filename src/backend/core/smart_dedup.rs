@@ -693,6 +693,7 @@ fn find_platform_bank_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup>
     let source_types: Vec<String> = bills.iter().map(DedupBill::source_type).collect();
     let datetimes: Vec<Option<NaiveDateTime>> = bills.iter().map(bill_datetime).collect();
     let timestamps = timestamps_from_datetimes(&datetimes);
+    let amount_cents = amount_cents_for_bills(bills);
     let platform_indices: Vec<usize> = bills
         .iter()
         .enumerate()
@@ -712,7 +713,8 @@ fn find_platform_bank_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup>
         return groups;
     }
 
-    let bank_time_buckets = build_time_buckets(bank_indices, &timestamps);
+    let bank_time_amount_buckets =
+        build_time_amount_buckets(bank_indices, &timestamps, |index| amount_cents[index].abs());
     let mut matched_bank_indices = HashSet::new();
     for platform_index in platform_indices {
         let Some(platform_ts) = timestamps[platform_index] else {
@@ -722,39 +724,46 @@ fn find_platform_bank_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup>
             continue;
         };
 
-        for bank_index in nearby_time_indices(&bank_time_buckets, platform_ts) {
-            if matched_bank_indices.contains(&bank_index) || bills[bank_index].removed {
-                continue;
-            }
-            let Some(bank_dt) = datetimes[bank_index] else {
-                continue;
-            };
-            if !time_close(platform_dt, bank_dt, TIME_TOLERANCE_SECONDS)
-                || !abs_amount_close(bills[platform_index].amount, bills[bank_index].amount)
-                || !is_platform_bank_duplicate_candidate(&bills[platform_index], &bills[bank_index])
+        for target_amount in amount_tolerance_values(amount_cents[platform_index].abs()) {
+            for bank_index in
+                nearby_time_amount_indices(&bank_time_amount_buckets, platform_ts, target_amount)
             {
-                continue;
-            }
+                if matched_bank_indices.contains(&bank_index) || bills[bank_index].removed {
+                    continue;
+                }
+                let Some(bank_dt) = datetimes[bank_index] else {
+                    continue;
+                };
+                if !time_close(platform_dt, bank_dt, TIME_TOLERANCE_SECONDS)
+                    || !abs_amount_close(bills[platform_index].amount, bills[bank_index].amount)
+                    || !is_platform_bank_duplicate_candidate(
+                        &bills[platform_index],
+                        &bills[bank_index],
+                    )
+                {
+                    continue;
+                }
 
-            matched_bank_indices.insert(bank_index);
-            bills[bank_index].removed = true;
-            let bank_bill = bills[bank_index].clone();
-            merge_bill_fields(&mut bills[platform_index], &bank_bill, true);
-            bills[platform_index].dedup_type =
-                Some(DeduplicationType::PlatformBank.as_str().to_string());
-            let bill_indices = vec![platform_index, bank_index];
-            groups.push(DuplicateGroup {
-                dedup_type: DeduplicationType::PlatformBank,
-                bill_indices,
-                keep_index: platform_index,
-                remove_indices: vec![bank_index],
-                reason: format!(
-                    "支付平台({})与银行({})重复，金额={}，保留平台账单",
-                    bills[platform_index].source_type(),
-                    bills[bank_index].source_type(),
-                    bills[platform_index].amount.to_yuan_string()
-                ),
-            });
+                matched_bank_indices.insert(bank_index);
+                bills[bank_index].removed = true;
+                let bank_bill = bills[bank_index].clone();
+                merge_bill_fields(&mut bills[platform_index], &bank_bill, true);
+                bills[platform_index].dedup_type =
+                    Some(DeduplicationType::PlatformBank.as_str().to_string());
+                let bill_indices = vec![platform_index, bank_index];
+                groups.push(DuplicateGroup {
+                    dedup_type: DeduplicationType::PlatformBank,
+                    bill_indices,
+                    keep_index: platform_index,
+                    remove_indices: vec![bank_index],
+                    reason: format!(
+                        "支付平台({})与银行({})重复，金额={}，保留平台账单",
+                        bills[platform_index].source_type(),
+                        bills[bank_index].source_type(),
+                        bills[platform_index].amount.to_yuan_string()
+                    ),
+                });
+            }
         }
     }
 
@@ -770,7 +779,9 @@ fn find_transfer_pairs(bills: &mut [DedupBill]) -> Vec<TransferPair> {
     let source_identifiers: Vec<String> = bills.iter().map(DedupBill::source_identifier).collect();
     let datetimes: Vec<Option<NaiveDateTime>> = bills.iter().map(bill_datetime).collect();
     let timestamps = timestamps_from_datetimes(&datetimes);
-    let time_buckets = build_time_buckets(0..bills.len(), &timestamps);
+    let amount_cents = amount_cents_for_bills(bills);
+    let time_amount_buckets =
+        build_time_amount_buckets(0..bills.len(), &timestamps, |index| amount_cents[index]);
     let mut matched_indices = HashSet::new();
 
     for left_index in 0..bills.len() {
@@ -790,70 +801,81 @@ fn find_transfer_pairs(bills: &mut [DedupBill]) -> Vec<TransferPair> {
         let Some(left_dt) = datetimes[left_index] else {
             continue;
         };
-        for right_index in nearby_time_indices(&time_buckets, left_ts) {
-            if right_index <= left_index {
-                continue;
-            }
-            if bills[right_index].removed
-                || matched_indices.contains(&right_index)
-                || bills[right_index].amount == Money::ZERO
+        let mut matched_right_index = None;
+        for target_amount in amount_tolerance_values(-amount_cents[left_index]) {
+            for right_index in
+                nearby_time_amount_indices(&time_amount_buckets, left_ts, target_amount)
             {
-                continue;
+                if right_index <= left_index {
+                    continue;
+                }
+                if bills[right_index].removed
+                    || matched_indices.contains(&right_index)
+                    || bills[right_index].amount == Money::ZERO
+                {
+                    continue;
+                }
+                let right_source = &source_identifiers[right_index];
+                if right_source.is_empty() || right_source == left_source {
+                    continue;
+                }
+                if !amount_opposite(bills[left_index].amount, bills[right_index].amount) {
+                    continue;
+                }
+                let Some(right_dt) = datetimes[right_index] else {
+                    continue;
+                };
+                if !time_close(left_dt, right_dt, TIME_TOLERANCE_SECONDS) {
+                    continue;
+                }
+                matched_right_index = Some(right_index);
+                break;
             }
-            let right_source = &source_identifiers[right_index];
-            if right_source.is_empty() || right_source == left_source {
-                continue;
+            if matched_right_index.is_some() {
+                break;
             }
-            if !amount_opposite(bills[left_index].amount, bills[right_index].amount) {
-                continue;
-            }
-            let Some(right_dt) = datetimes[right_index] else {
-                continue;
-            };
-            if !time_close(left_dt, right_dt, TIME_TOLERANCE_SECONDS) {
-                continue;
-            }
-
-            let (outgoing_index, incoming_index) = if bills[left_index].amount.is_negative() {
-                (left_index, right_index)
-            } else {
-                (right_index, left_index)
-            };
-            matched_indices.insert(outgoing_index);
-            matched_indices.insert(incoming_index);
-            bills[outgoing_index].transaction_type = "转账".to_string();
-            bills[outgoing_index].dedup_type =
-                Some(DeduplicationType::Transfer.as_str().to_string());
-            bills[incoming_index].transaction_type = "转账".to_string();
-            bills[incoming_index].removed = true;
-            bills[incoming_index].merged_into = bills[outgoing_index].template_id.clone();
-            let incoming_bill = bills[incoming_index].clone();
-            bills[outgoing_index].transfer_pair_order = Some("outgoing_first".to_string());
-            bills[outgoing_index].transfer_pair_sources = vec![
-                build_transfer_source_snapshot(&bills[outgoing_index], "outgoing"),
-                build_transfer_source_snapshot(&incoming_bill, "incoming"),
-            ];
-            bills[outgoing_index].destination_parser_id = incoming_bill.parser_id.clone();
-            bills[outgoing_index].destination_payment_method = incoming_bill.payment_method.clone();
-            bills[outgoing_index].destination_counterparty = incoming_bill.counterparty.clone();
-            bills[outgoing_index].destination_account_id =
-                Some(incoming_bill.source_account_id.clone()).filter(|value| !value.is_empty());
-            bills[outgoing_index].destination_account_name = first_non_empty([
-                incoming_bill.account_name.as_str(),
-                incoming_bill.payment_method.as_str(),
-            ]);
-            merge_template_ids_from_bill(&mut bills[outgoing_index], &incoming_bill);
-            bills[outgoing_index].description = merge_field_values(
-                &bills[outgoing_index].description,
-                &incoming_bill.description,
-            );
-            pairs.push(TransferPair {
-                outgoing_index,
-                incoming_index,
-                cross_batch_db_id: None,
-            });
-            break;
         }
+
+        let Some(right_index) = matched_right_index else {
+            continue;
+        };
+        let (outgoing_index, incoming_index) = if bills[left_index].amount.is_negative() {
+            (left_index, right_index)
+        } else {
+            (right_index, left_index)
+        };
+        matched_indices.insert(outgoing_index);
+        matched_indices.insert(incoming_index);
+        bills[outgoing_index].transaction_type = "转账".to_string();
+        bills[outgoing_index].dedup_type = Some(DeduplicationType::Transfer.as_str().to_string());
+        bills[incoming_index].transaction_type = "转账".to_string();
+        bills[incoming_index].removed = true;
+        bills[incoming_index].merged_into = bills[outgoing_index].template_id.clone();
+        let incoming_bill = bills[incoming_index].clone();
+        bills[outgoing_index].transfer_pair_order = Some("outgoing_first".to_string());
+        bills[outgoing_index].transfer_pair_sources = vec![
+            build_transfer_source_snapshot(&bills[outgoing_index], "outgoing"),
+            build_transfer_source_snapshot(&incoming_bill, "incoming"),
+        ];
+        bills[outgoing_index].destination_parser_id = incoming_bill.parser_id.clone();
+        bills[outgoing_index].destination_payment_method = incoming_bill.payment_method.clone();
+        bills[outgoing_index].destination_counterparty = incoming_bill.counterparty.clone();
+        bills[outgoing_index].destination_account_id =
+            Some(incoming_bill.source_account_id.clone()).filter(|value| !value.is_empty());
+        bills[outgoing_index].destination_account_name = first_non_empty([
+            incoming_bill.account_name.as_str(),
+            incoming_bill.payment_method.as_str(),
+        ]);
+        merge_template_ids_from_bill(&mut bills[outgoing_index], &incoming_bill);
+        bills[outgoing_index].description = merge_field_values(
+            &bills[outgoing_index].description,
+            &incoming_bill.description,
+        );
+        pairs.push(TransferPair {
+            outgoing_index,
+            incoming_index,
+            cross_batch_db_id: None,
+        });
     }
 
     pairs
@@ -868,7 +890,9 @@ fn find_similar_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup> {
     let source_types: Vec<String> = bills.iter().map(DedupBill::source_type).collect();
     let datetimes: Vec<Option<NaiveDateTime>> = bills.iter().map(bill_datetime).collect();
     let timestamps = timestamps_from_datetimes(&datetimes);
-    let time_buckets = build_time_buckets(0..bills.len(), &timestamps);
+    let amount_cents = amount_cents_for_bills(bills);
+    let time_amount_buckets =
+        build_time_amount_buckets(0..bills.len(), &timestamps, |index| amount_cents[index]);
     let mut matched_indices = HashSet::new();
 
     for left_index in 0..bills.len() {
@@ -885,61 +909,77 @@ fn find_similar_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup> {
         let Some(left_dt) = datetimes[left_index] else {
             continue;
         };
-        for right_index in nearby_time_indices(&time_buckets, left_ts) {
-            if right_index <= left_index {
-                continue;
-            }
-            if bills[right_index].removed || matched_indices.contains(&right_index) {
-                continue;
-            }
-            let right_source = &source_types[right_index];
-            if left_source.is_empty() || right_source.is_empty() || left_source == right_source {
-                continue;
-            }
-            if !amount_equal_same_direction(bills[left_index].amount, bills[right_index].amount) {
-                continue;
-            }
-            let Some(right_dt) = datetimes[right_index] else {
-                continue;
-            };
-            if !time_close(left_dt, right_dt, TIME_TOLERANCE_SECONDS) {
-                continue;
-            }
-
-            let counterparty_similarity = normalized_similarity(
-                &bills[left_index].counterparty,
-                &bills[right_index].counterparty,
-            );
-            let payment_similarity = normalized_similarity(
-                &bills[left_index].payment_method,
-                &bills[right_index].payment_method,
-            );
-            if counterparty_similarity < SIMILARITY_THRESHOLD
-                && payment_similarity < SIMILARITY_THRESHOLD
+        let mut matched_right_index = None;
+        for candidate_amount in amount_tolerance_values(amount_cents[left_index]) {
+            for right_index in
+                nearby_time_amount_indices(&time_amount_buckets, left_ts, candidate_amount)
             {
-                continue;
-            }
-
-            let (keep_index, remove_index) =
-                if source_priority(left_source) <= source_priority(right_source) {
-                    (left_index, right_index)
-                } else {
-                    (right_index, left_index)
+                if right_index <= left_index {
+                    continue;
+                }
+                if bills[right_index].removed || matched_indices.contains(&right_index) {
+                    continue;
+                }
+                let right_source = &source_types[right_index];
+                if left_source.is_empty() || right_source.is_empty() || left_source == right_source
+                {
+                    continue;
+                }
+                if !amount_equal_same_direction(bills[left_index].amount, bills[right_index].amount)
+                {
+                    continue;
+                }
+                let Some(right_dt) = datetimes[right_index] else {
+                    continue;
                 };
-            matched_indices.insert(keep_index);
-            matched_indices.insert(remove_index);
-            bills[remove_index].removed = true;
-            let remove_bill = bills[remove_index].clone();
-            merge_bill_fields(&mut bills[keep_index], &remove_bill, false);
-            bills[keep_index].dedup_type = Some(DeduplicationType::Similar.as_str().to_string());
-            groups.push(DuplicateGroup {
-                dedup_type: DeduplicationType::Similar,
-                bill_indices: vec![left_index, right_index],
-                keep_index,
-                remove_indices: vec![remove_index],
-                reason: "类似账单去重".to_string(),
-            });
+                if !time_close(left_dt, right_dt, TIME_TOLERANCE_SECONDS) {
+                    continue;
+                }
+                matched_right_index = Some(right_index);
+                break;
+            }
+            if matched_right_index.is_some() {
+                break;
+            }
         }
+
+        let Some(right_index) = matched_right_index else {
+            continue;
+        };
+        let counterparty_similarity = normalized_similarity(
+            &bills[left_index].counterparty,
+            &bills[right_index].counterparty,
+        );
+        let payment_similarity = normalized_similarity(
+            &bills[left_index].payment_method,
+            &bills[right_index].payment_method,
+        );
+        if counterparty_similarity < SIMILARITY_THRESHOLD
+            && payment_similarity < SIMILARITY_THRESHOLD
+        {
+            continue;
+        }
+
+        let right_source = &source_types[right_index];
+        let (keep_index, remove_index) =
+            if source_priority(left_source) <= source_priority(right_source) {
+                (left_index, right_index)
+            } else {
+                (right_index, left_index)
+            };
+        matched_indices.insert(keep_index);
+        matched_indices.insert(remove_index);
+        bills[remove_index].removed = true;
+        let remove_bill = bills[remove_index].clone();
+        merge_bill_fields(&mut bills[keep_index], &remove_bill, false);
+        bills[keep_index].dedup_type = Some(DeduplicationType::Similar.as_str().to_string());
+        groups.push(DuplicateGroup {
+            dedup_type: DeduplicationType::Similar,
+            bill_indices: vec![left_index, right_index],
+            keep_index,
+            remove_indices: vec![remove_index],
+            reason: "类似账单去重".to_string(),
+        });
     }
 
     groups
@@ -957,13 +997,19 @@ fn find_split_bills(bills: &mut [DedupBill]) -> Vec<SplitGroup> {
         .collect();
     let datetimes: Vec<Option<NaiveDateTime>> = bills.iter().map(bill_datetime).collect();
     let timestamps = timestamps_from_datetimes(&datetimes);
+    let amount_cents = amount_cents_for_bills(bills);
     let mut matched_indices = HashSet::new();
     let active_indices: Vec<usize> = bills
         .iter()
         .enumerate()
         .filter_map(|(index, bill)| (!bill.removed && bill.amount != Money::ZERO).then_some(index))
         .collect();
-    let time_buckets = build_time_buckets(active_indices.iter().copied(), &timestamps);
+    let split_groups_by_source = build_split_source_groups(
+        active_indices.iter().copied(),
+        &timestamps,
+        &amount_cents,
+        &source_account_ids,
+    );
 
     for total_index in &active_indices {
         if matched_indices.contains(total_index) || abs_cents(bills[*total_index].amount) < 1_000 {
@@ -980,43 +1026,23 @@ fn find_split_bills(bills: &mut [DedupBill]) -> Vec<SplitGroup> {
             continue;
         }
 
-        let mut candidates = Vec::new();
-        let mut candidate_sources = HashSet::new();
-        for candidate_index in nearby_time_indices(&time_buckets, total_ts) {
-            if candidate_index == *total_index || matched_indices.contains(&candidate_index) {
-                continue;
-            }
-            let candidate_source = &source_account_ids[candidate_index];
-            if candidate_source.is_empty() || candidate_source == total_source {
-                continue;
-            }
-            if !amount_same_direction(bills[*total_index].amount, bills[candidate_index].amount) {
-                continue;
-            }
-            let Some(candidate_dt) = datetimes[candidate_index] else {
-                continue;
-            };
-            if !time_close(total_dt, candidate_dt, TIME_TOLERANCE_SECONDS) {
-                continue;
-            }
-            candidates.push(candidate_index);
-            candidate_sources.insert(candidate_source.clone());
-        }
-
-        if candidates.len() < 2 || candidate_sources.len() != 1 {
+        let total = SplitTotalCandidate {
+            index: *total_index,
+            timestamp: total_ts,
+            datetime: total_dt,
+            source: total_source,
+            amount_cents: amount_cents[*total_index],
+        };
+        let Some((candidates, source_splits)) = find_split_candidates_for_total(
+            &split_groups_by_source,
+            &amount_cents,
+            &datetimes,
+            &matched_indices,
+            total,
+        ) else {
             continue;
-        }
-        let split_sum: i128 = candidates
-            .iter()
-            .map(|index| i128::from(bills[*index].amount.to_cents()))
-            .sum();
-        if (split_sum - i128::from(bills[*total_index].amount.to_cents())).abs()
-            > AMOUNT_TOLERANCE_CENTS
-        {
-            continue;
-        }
+        };
 
-        let source_splits = candidate_sources.into_iter().next().unwrap_or_default();
         bills[*total_index].removed = true;
         matched_indices.insert(*total_index);
         let total_template_id = bills[*total_index].template_id.clone();
@@ -1067,15 +1093,52 @@ fn timestamps_from_datetimes(datetimes: &[Option<NaiveDateTime>]) -> Vec<Option<
         .collect()
 }
 
-fn build_time_buckets<I>(indices: I, timestamps: &[Option<i64>]) -> HashMap<i64, Vec<usize>>
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+struct TimeAmountKey {
+    bucket: i64,
+    amount_cents: i128,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+struct SplitSourceKey {
+    bucket: i64,
+    direction: i8,
+    source: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SplitTotalCandidate<'a> {
+    index: usize,
+    timestamp: i64,
+    datetime: NaiveDateTime,
+    source: &'a str,
+    amount_cents: i128,
+}
+
+fn amount_cents_for_bills(bills: &[DedupBill]) -> Vec<i128> {
+    bills
+        .iter()
+        .map(|bill| i128::from(bill.amount.to_cents()))
+        .collect()
+}
+
+fn build_time_amount_buckets<I, F>(
+    indices: I,
+    timestamps: &[Option<i64>],
+    mut amount_for: F,
+) -> HashMap<TimeAmountKey, Vec<usize>>
 where
     I: IntoIterator<Item = usize>,
+    F: FnMut(usize) -> i128,
 {
-    let mut buckets: HashMap<i64, Vec<usize>> = HashMap::new();
+    let mut buckets: HashMap<TimeAmountKey, Vec<usize>> = HashMap::new();
     for index in indices {
         if let Some(timestamp) = timestamps.get(index).and_then(|value| *value) {
             buckets
-                .entry(time_bucket_key(timestamp))
+                .entry(TimeAmountKey {
+                    bucket: time_bucket_key(timestamp),
+                    amount_cents: amount_for(index),
+                })
                 .or_default()
                 .push(index);
         }
@@ -1083,17 +1146,134 @@ where
     buckets
 }
 
-fn nearby_time_indices(buckets: &HashMap<i64, Vec<usize>>, timestamp: i64) -> Vec<usize> {
+fn nearby_time_amount_indices(
+    buckets: &HashMap<TimeAmountKey, Vec<usize>>,
+    timestamp: i64,
+    amount_cents: i128,
+) -> impl Iterator<Item = usize> + '_ {
     let bucket = time_bucket_key(timestamp);
-    let mut indices = Vec::new();
-    for nearby_bucket in (bucket - 1)..=(bucket + 1) {
-        if let Some(values) = buckets.get(&nearby_bucket) {
-            indices.extend(values.iter().copied());
+    (bucket - 1..=bucket + 1).flat_map(move |nearby_bucket| {
+        buckets
+            .get(&TimeAmountKey {
+                bucket: nearby_bucket,
+                amount_cents,
+            })
+            .into_iter()
+            .flat_map(|values| values.iter().copied())
+    })
+}
+
+fn amount_tolerance_values(amount_cents: i128) -> impl Iterator<Item = i128> {
+    (amount_cents - AMOUNT_TOLERANCE_CENTS)..=(amount_cents + AMOUNT_TOLERANCE_CENTS)
+}
+
+fn build_split_source_groups<I>(
+    indices: I,
+    timestamps: &[Option<i64>],
+    amount_cents: &[i128],
+    source_account_ids: &[String],
+) -> HashMap<SplitSourceKey, Vec<usize>>
+where
+    I: IntoIterator<Item = usize>,
+{
+    let mut groups: HashMap<SplitSourceKey, Vec<usize>> = HashMap::new();
+    for index in indices {
+        let Some(timestamp) = timestamps.get(index).and_then(|value| *value) else {
+            continue;
+        };
+        let source = source_account_ids[index].clone();
+        if source.is_empty() {
+            continue;
+        }
+        let direction = amount_direction(amount_cents[index]);
+        if direction == 0 {
+            continue;
+        }
+        groups
+            .entry(SplitSourceKey {
+                bucket: time_bucket_key(timestamp),
+                direction,
+                source,
+            })
+            .or_default()
+            .push(index);
+    }
+    groups
+}
+
+fn find_split_candidates_for_total(
+    groups: &HashMap<SplitSourceKey, Vec<usize>>,
+    amount_cents: &[i128],
+    datetimes: &[Option<NaiveDateTime>],
+    matched_indices: &HashSet<usize>,
+    total: SplitTotalCandidate<'_>,
+) -> Option<(Vec<usize>, String)> {
+    let direction = amount_direction(total.amount_cents);
+    if direction == 0 {
+        return None;
+    }
+    let total_bucket = time_bucket_key(total.timestamp);
+    let mut source_keys = groups
+        .keys()
+        .filter(|key| {
+            key.direction == direction
+                && key.source != total.source
+                && (total_bucket - 1..=total_bucket + 1).contains(&key.bucket)
+        })
+        .collect::<Vec<_>>();
+    source_keys.sort_by(|left, right| {
+        let left_first = groups
+            .get(*left)
+            .and_then(|indices| indices.iter().min())
+            .copied()
+            .unwrap_or(usize::MAX);
+        let right_first = groups
+            .get(*right)
+            .and_then(|indices| indices.iter().min())
+            .copied()
+            .unwrap_or(usize::MAX);
+        left_first
+            .cmp(&right_first)
+            .then_with(|| left.bucket.cmp(&right.bucket))
+            .then_with(|| left.source.cmp(&right.source))
+    });
+
+    for key in source_keys {
+        let candidates = groups
+            .get(key)?
+            .iter()
+            .copied()
+            .filter(|candidate_index| {
+                *candidate_index != total.index && !matched_indices.contains(candidate_index)
+            })
+            .filter(|candidate_index| {
+                datetimes[*candidate_index]
+                    .map(|candidate_dt| {
+                        time_close(total.datetime, candidate_dt, TIME_TOLERANCE_SECONDS)
+                    })
+                    .unwrap_or(false)
+            })
+            .collect::<Vec<_>>();
+        if candidates.len() < 2 {
+            continue;
+        }
+        let split_sum = candidates
+            .iter()
+            .map(|index| amount_cents[*index])
+            .sum::<i128>();
+        if (split_sum - total.amount_cents).abs() <= AMOUNT_TOLERANCE_CENTS {
+            return Some((candidates, key.source.clone()));
         }
     }
-    indices.sort_unstable();
-    indices.dedup();
-    indices
+    None
+}
+
+fn amount_direction(amount_cents: i128) -> i8 {
+    match amount_cents.cmp(&0) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
 }
 
 fn time_bucket_key(timestamp: i64) -> i64 {

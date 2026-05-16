@@ -16,7 +16,7 @@ pub async fn import_dedup_runtime_handler(
         Err(response) => return route_response(response),
     };
     let include_preview =
-        bool_field_from_object(object, &["include_preview", "includePreview"]).unwrap_or(true);
+        bool_field_from_object(object, &["include_preview", "includePreview"]).unwrap_or(false);
     let mut runtime = match open_runtime(&state) {
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),
@@ -74,16 +74,15 @@ pub async fn import_dedup_runtime_handler(
         inserted_preview,
         import_stage_elapsed_ms(preview_insert_started_at)
     );
-    let template_ids = templates
-        .iter()
-        .map(|template| template.id)
-        .collect::<Vec<_>>();
     let status_update_started_at = Instant::now();
-    if let Err(error) =
-        update_parser_template_status(runtime.connection_mut(), &template_ids, true, None, user_id)
-    {
-        return route_response(db_error_response(error));
-    }
+    let updated_templates = match mark_unprocessed_parser_templates_processed_for_session(
+        runtime.connection_mut(),
+        &session_id,
+        user_id,
+    ) {
+        Ok(updated) => updated,
+        Err(error) => return route_response(db_error_response(error)),
+    };
     if let Err(error) = update_import_session_status(
         runtime.connection(),
         &ImportSessionStatusUpdate {
@@ -98,10 +97,11 @@ pub async fn import_dedup_runtime_handler(
         return route_response(db_error_response(error));
     }
     eprintln!(
-        "[bill analyser import] stage2 status updated user_id={} session_id={} template_rows={} total_elapsed_ms={} status_elapsed_ms={}",
+        "[bill analyser import] stage2 status updated user_id={} session_id={} template_rows={} updated_template_rows={} total_elapsed_ms={} status_elapsed_ms={}",
         user_id.get(),
         session_id,
-        template_ids.len(),
+        templates.len(),
+        updated_templates,
         import_stage_elapsed_ms(stage_started_at),
         import_stage_elapsed_ms(status_update_started_at)
     );
@@ -359,7 +359,8 @@ pub async fn import_preview_index_runtime_handler(
         Ok(None) => return route_response(import_session_not_found_response()),
         Err(error) => return route_response(db_error_response(error)),
     }
-    let rows = match get_preview_by_session(runtime.connection(), &session_id, user_id, false) {
+    let rows = match get_preview_filter_index_by_session(runtime.connection(), &session_id, user_id)
+    {
         Ok(rows) => rows,
         Err(error) => return route_response(db_error_response(error)),
     };
@@ -367,7 +368,7 @@ pub async fn import_preview_index_runtime_handler(
     let accounts_by_id = BTreeMap::new();
     let items = rows
         .into_iter()
-        .filter_map(|row| preview_row_to_value(row).as_object().cloned())
+        .filter_map(|row| serde_json::to_value(row).ok()?.as_object().cloned())
         .map(|row| build_import_preview_filter_index_item(&row, &categories_by_id, &accounts_by_id))
         .collect::<Vec<_>>();
     route_response(import_preview_index_success(ImportPreviewIndexData {

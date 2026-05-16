@@ -150,6 +150,25 @@ pub fn update_parser_template_status(
     })
 }
 
+pub fn mark_unprocessed_parser_templates_processed_for_session(
+    connection: &mut Connection,
+    session_id: &str,
+    user_id: UserId,
+) -> DbResult<usize> {
+    let user_id = user_id_i64(user_id)?;
+    run_transaction(connection, |tx| {
+        tx.execute(
+            "
+            UPDATE bills_parser_template
+            SET parser_is_processed = '1'
+            WHERE session_id = ?1 AND user_id = ?2 AND parser_is_processed = '0'
+            ",
+            params![session_id, user_id],
+        )
+        .map_err(DbError::from)
+    })
+}
+
 #[cfg(test)]
 mod parser_template_tests {
     use super::*;

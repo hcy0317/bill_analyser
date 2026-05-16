@@ -1,8 +1,40 @@
+const INSERT_PREVIEW_BILL_SQL: &str = "
+        INSERT INTO bills_preview (
+            session_id, user_id, preview_date, preview_type,
+            preview_amount, preview_destination_amount,
+            preview_main_category, preview_sub_category,
+            preview_source_account_id, preview_destination_account_id,
+            preview_counterparty, preview_payment_method, preview_description,
+            preview_parser_id, preview_parser_tags_json,
+            preview_recurring_id, preview_recurring_name,
+            preview_recurring_candidate_count, preview_recurring_match_score,
+            preview_recurring_match_reasons, preview_recurring_matched_date,
+            preview_selected, dedup_type, dedup_source_ids, created_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, 1, ?22, ?23, ?24)
+        ";
+
 fn insert_preview_bill_on_connection(
     connection: &Connection,
     session_id: &str,
     user_id: UserId,
     draft: &ImportPreviewDraft,
+) -> DbResult<()> {
+    let mut statement = connection.prepare(INSERT_PREVIEW_BILL_SQL)?;
+    insert_preview_bill_with_statement(
+        &mut statement,
+        session_id,
+        user_id_i64(user_id)?,
+        draft,
+        &now_text(),
+    )
+}
+
+fn insert_preview_bill_with_statement(
+    statement: &mut rusqlite::Statement<'_>,
+    session_id: &str,
+    user_id: i64,
+    draft: &ImportPreviewDraft,
+    created_at: &str,
 ) -> DbResult<()> {
     let parser_tags_json = serialize_parser_tags(
         draft.preview_parser_tags.as_ref(),
@@ -17,24 +49,10 @@ fn insert_preview_bill_on_connection(
         .collect::<Vec<_>>()
         .join(",");
 
-    connection.execute(
-        "
-        INSERT INTO bills_preview (
-            session_id, user_id, preview_date, preview_type,
-            preview_amount, preview_destination_amount,
-            preview_main_category, preview_sub_category,
-            preview_source_account_id, preview_destination_account_id,
-            preview_counterparty, preview_payment_method, preview_description,
-            preview_parser_id, preview_parser_tags_json,
-            preview_recurring_id, preview_recurring_name,
-            preview_recurring_candidate_count, preview_recurring_match_score,
-            preview_recurring_match_reasons, preview_recurring_matched_date,
-            preview_selected, dedup_type, dedup_source_ids, created_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, 1, ?22, ?23, ?24)
-        ",
+    statement.execute(
         params![
             session_id,
-            user_id_i64(user_id)?,
+            user_id,
             normalize_bill_date_text(&draft.preview_date),
             draft.preview_type,
             draft.preview_amount,
@@ -56,7 +74,7 @@ fn insert_preview_bill_on_connection(
             draft.preview_recurring_matched_date,
             draft.dedup_type,
             dedup_source_ids,
-            now_text(),
+            created_at,
         ],
     )?;
     Ok(())
@@ -309,5 +327,59 @@ fn preview_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImportPreviewRo
         dedup_source_ids: parse_i64_csv(dedup_source_ids.as_deref()),
         preview_matching_feedback: parse_json_object(feedback_json.as_deref()),
         created_at: row.get("created_at")?,
+    })
+}
+
+fn preview_filter_index_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ImportPreviewFilterIndexRow> {
+    let parser_tags_json: Option<String> = row.get("preview_parser_tags_json")?;
+    let dedup_source_ids: Option<String> = row.get("dedup_source_ids")?;
+    let feedback_json: Option<String> = row.get("preview_matching_feedback_json")?;
+    Ok(ImportPreviewFilterIndexRow {
+        id: row.get("id")?,
+        preview_date: row.get("preview_date")?,
+        preview_type: row.get("preview_type")?,
+        preview_amount: row.get("preview_amount")?,
+        preview_main_category: row
+            .get::<_, Option<String>>("preview_main_category")?
+            .unwrap_or_default(),
+        preview_sub_category: row
+            .get::<_, Option<String>>("preview_sub_category")?
+            .unwrap_or_default(),
+        preview_source_account_id: row.get("preview_source_account_id")?,
+        preview_destination_account_id: row.get("preview_destination_account_id")?,
+        preview_counterparty: row
+            .get::<_, Option<String>>("preview_counterparty")?
+            .unwrap_or_default(),
+        preview_payment_method: row
+            .get::<_, Option<String>>("preview_payment_method")?
+            .unwrap_or_default(),
+        preview_description: row
+            .get::<_, Option<String>>("preview_description")?
+            .unwrap_or_default(),
+        preview_parser_id: row
+            .get::<_, Option<String>>("preview_parser_id")?
+            .unwrap_or_default(),
+        preview_parser_tags: parse_string_vec(parser_tags_json.as_deref()),
+        preview_recurring_id: row.get("preview_recurring_id")?,
+        preview_recurring_candidate_count: row
+            .get::<_, Option<i64>>("preview_recurring_candidate_count")?
+            .unwrap_or_default(),
+        preview_recurring_match_reasons: row
+            .get::<_, Option<String>>("preview_recurring_match_reasons")?
+            .unwrap_or_default(),
+        preview_recurring_matched_date: row
+            .get::<_, Option<String>>("preview_recurring_matched_date")?
+            .unwrap_or_default(),
+        preview_selected: row
+            .get::<_, Option<i64>>("preview_selected")?
+            .unwrap_or(1)
+            != 0,
+        dedup_type: row
+            .get::<_, Option<String>>("dedup_type")?
+            .unwrap_or_default(),
+        dedup_source_ids: parse_i64_csv(dedup_source_ids.as_deref()),
+        preview_matching_feedback: parse_json_object(feedback_json.as_deref()),
     })
 }

@@ -277,6 +277,31 @@ pub struct ImportPreviewRow {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportPreviewFilterIndexRow {
+    pub id: i64,
+    pub preview_date: String,
+    pub preview_type: String,
+    pub preview_amount: f64,
+    pub preview_main_category: String,
+    pub preview_sub_category: String,
+    pub preview_source_account_id: Option<i64>,
+    pub preview_destination_account_id: Option<i64>,
+    pub preview_counterparty: String,
+    pub preview_payment_method: String,
+    pub preview_description: String,
+    pub preview_parser_id: String,
+    pub preview_parser_tags: Vec<String>,
+    pub preview_recurring_id: Option<i64>,
+    pub preview_recurring_candidate_count: i64,
+    pub preview_recurring_match_reasons: String,
+    pub preview_recurring_matched_date: String,
+    pub preview_selected: bool,
+    pub dedup_type: String,
+    pub dedup_source_ids: Vec<i64>,
+    pub preview_matching_feedback: Value,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportPreviewPatchField {
     Date,

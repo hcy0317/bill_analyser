@@ -275,6 +275,37 @@ fn same_source_large_import_skips_cross_source_quadratic_work() {
 }
 
 #[test]
+fn dense_multi_source_same_timestamp_import_uses_amount_narrowed_candidates() {
+    let sources = ["alipay", "wechat", "icbc", "abc"];
+    let bills = (0..4_000)
+        .map(|index| {
+            let source = sources[index % sources.len()];
+            let amount_cents = 100_000 + index * 10;
+            let amount = format!("-{}.{:02}", amount_cents / 100, amount_cents % 100);
+            let mut item = bill(source, "2026-02-01 12:00:00", &amount);
+            item.counterparty = format!("密集商户{index}");
+            item.payment_method = source.to_string();
+            item.description = format!("同一秒导入交易{index}");
+            item
+        })
+        .collect::<Vec<_>>();
+
+    let started_at = Instant::now();
+    let result = SmartDeduplicationEngine.process(bills);
+    let elapsed = started_at.elapsed();
+
+    assert_eq!(result.original_count, 4_000);
+    assert_eq!(result.kept_bills.len(), 4_000);
+    assert!(result.transfer_pairs.is_empty());
+    assert!(result.duplicate_groups.is_empty());
+    assert!(result.split_groups.is_empty());
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "dense multi-source same-timestamp import should stay near-linear, elapsed={elapsed:?}"
+    );
+}
+
+#[test]
 fn db_and_cross_batch_helpers_skip_removed_and_in_batch_transfers() {
     let mut removed = bill("wechat", "2026-01-06 08:00:00", "-11.00");
     let mut already_transfer = bill("wechat", "2026-01-06 09:00:00", "-22.00");

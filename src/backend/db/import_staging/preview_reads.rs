@@ -19,8 +19,11 @@ pub fn insert_preview_bills_batch(
     }
 
     run_transaction(connection, |tx| {
+        let created_at = now_text();
+        let user_id = user_id_i64(user_id)?;
+        let mut statement = tx.prepare(INSERT_PREVIEW_BILL_SQL)?;
         for draft in drafts {
-            insert_preview_bill_on_connection(tx, session_id, user_id, draft)?;
+            insert_preview_bill_with_statement(&mut statement, session_id, user_id, draft, &created_at)?;
         }
         Ok(drafts.len())
     })
@@ -103,6 +106,47 @@ pub fn get_preview_page_by_session(
         preview_from_row,
     )?;
     Ok((rows.collect::<Result<Vec<_>, _>>()?, total))
+}
+
+pub fn get_preview_filter_index_by_session(
+    connection: &Connection,
+    session_id: &str,
+    user_id: UserId,
+) -> DbResult<Vec<ImportPreviewFilterIndexRow>> {
+    let mut statement = connection.prepare(
+        "
+        SELECT
+            id,
+            preview_date,
+            preview_type,
+            preview_amount,
+            preview_main_category,
+            preview_sub_category,
+            preview_source_account_id,
+            preview_destination_account_id,
+            preview_counterparty,
+            preview_payment_method,
+            preview_description,
+            preview_parser_id,
+            preview_parser_tags_json,
+            preview_recurring_id,
+            preview_recurring_candidate_count,
+            preview_recurring_match_reasons,
+            preview_recurring_matched_date,
+            preview_selected,
+            dedup_type,
+            dedup_source_ids,
+            preview_matching_feedback_json
+        FROM bills_preview
+        WHERE session_id = ?1 AND user_id = ?2
+        ORDER BY preview_date ASC, id ASC
+        ",
+    )?;
+    let rows = statement.query_map(
+        params![session_id, user_id_i64(user_id)?],
+        preview_filter_index_from_row,
+    )?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
 }
 
 pub fn get_preview_bill_by_id(

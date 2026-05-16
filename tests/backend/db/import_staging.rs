@@ -8,8 +8,10 @@ use bill_analyser_db::{
     count_preview_by_session, create_import_session, dedup_bills_from_parser_templates,
     get_import_annotation_samples, get_import_session, get_llm_memory_events,
     get_parser_templates_by_session, get_preview_bill_by_id, get_preview_by_ids,
-    get_preview_by_session, get_preview_page_by_session, get_unprocessed_templates_for_dedup,
-    init_import_staging_schema, insert_parser_templates_batch, insert_preview_bills_batch,
+    get_preview_by_session, get_preview_filter_index_by_session, get_preview_page_by_session,
+    get_unprocessed_templates_for_dedup, init_import_staging_schema, insert_parser_templates_batch,
+    insert_preview_bill, insert_preview_bills_batch,
+    mark_unprocessed_parser_templates_processed_for_session,
     parser_template_drafts_from_standard_bills, preview_drafts_from_dedup_bills,
     reset_session_preview_selection, review_preview_llm_recommendation,
     save_import_annotation_samples, stage_import_parser_templates, update_import_session_status,
@@ -266,6 +268,18 @@ fn preview_batch_insert_read_page_selection_and_clear_match_staging_semantics(
     assert_eq!(previews[0].preview_parser_tags, vec!["wechat", "card"]);
     assert_eq!(previews[0].dedup_source_ids, vec![11, 12]);
     assert!(previews.iter().all(|preview| preview.preview_selected));
+
+    let filter_index =
+        get_preview_filter_index_by_session(runtime.connection(), "session-preview", user_id(42))?;
+    assert_eq!(
+        filter_index
+            .iter()
+            .map(|preview| preview.preview_description.as_str())
+            .collect::<Vec<_>>(),
+        vec!["first", "second"]
+    );
+    assert_eq!(filter_index[0].preview_parser_tags, vec!["wechat", "card"]);
+    assert_eq!(filter_index[0].dedup_source_ids, vec![11, 12]);
 
     let id_order = previews
         .iter()
@@ -1254,6 +1268,68 @@ fn parser_templates_round_trip_processed_filter_and_user_scope() -> Result<(), B
 }
 
 #[test]
+fn parser_templates_can_be_marked_processed_by_session_scope() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("parser_templates_session_update.db"))?;
+    seed_users(&runtime, &[42, 77])?;
+    init_import_staging_schema(runtime.connection())?;
+
+    insert_parser_templates_batch(
+        runtime.connection_mut(),
+        "session-main",
+        user_id(42),
+        &[
+            parser_template_draft("2026-05-01", -9.25, "first"),
+            parser_template_draft("2026-05-02", -18.5, "second"),
+            parser_template_draft("2026-05-03", -27.75, "third"),
+        ],
+    )?;
+    insert_parser_templates_batch(
+        runtime.connection_mut(),
+        "session-other",
+        user_id(42),
+        &[parser_template_draft("2026-05-01", -9.25, "other-session")],
+    )?;
+    insert_parser_templates_batch(
+        runtime.connection_mut(),
+        "session-main",
+        user_id(77),
+        &[parser_template_draft("2026-05-01", -9.25, "other-user")],
+    )?;
+
+    let changed = mark_unprocessed_parser_templates_processed_for_session(
+        runtime.connection_mut(),
+        "session-main",
+        user_id(42),
+    )?;
+    assert_eq!(changed, 3);
+    assert_eq!(
+        get_unprocessed_templates_for_dedup(runtime.connection(), "session-main", user_id(42))?
+            .len(),
+        0
+    );
+    assert_eq!(
+        get_unprocessed_templates_for_dedup(runtime.connection(), "session-other", user_id(42))?
+            .len(),
+        1
+    );
+    assert_eq!(
+        get_unprocessed_templates_for_dedup(runtime.connection(), "session-main", user_id(77))?
+            .len(),
+        1
+    );
+    assert_eq!(
+        mark_unprocessed_parser_templates_processed_for_session(
+            runtime.connection_mut(),
+            "session-main",
+            user_id(42),
+        )?,
+        0
+    );
+    Ok(())
+}
+
+#[test]
 fn standard_bills_convert_to_parser_templates_for_stage1_parse() -> Result<(), Box<dyn Error>> {
     let temp_dir = tempfile::tempdir()?;
     let mut runtime = runtime_for(&temp_dir.path().join("standard_bill_templates.db"))?;
@@ -1479,6 +1555,37 @@ fn parse_staging_rolls_back_session_templates_and_status_on_error() -> Result<()
         None,
     )?
     .is_empty());
+    Ok(())
+}
+
+#[test]
+fn preview_single_insert_uses_shared_preview_insert_projection() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let runtime = runtime_for(&temp_dir.path().join("preview_single_insert.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: "session-single-preview".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+
+    let inserted_id = insert_preview_bill(
+        runtime.connection(),
+        "session-single-preview",
+        user_id(42),
+        &preview_draft("2026-05-03", 27.75, "single"),
+    )?;
+    assert!(inserted_id > 0);
+
+    let preview = get_preview_bill_by_id(runtime.connection(), inserted_id, user_id(42))?
+        .expect("single preview is visible");
+    assert_eq!(preview.preview_description, "single");
+    assert_eq!(preview.preview_parser_tags, vec!["wechat", "card"]);
+    assert_eq!(preview.dedup_source_ids, vec![11, 12]);
     Ok(())
 }
 
@@ -1781,6 +1888,33 @@ fn import_preview_page_queries_use_ordered_composite_indexes() -> Result<(), Box
         "preview page query should not need a temporary sort: {page_plan:?}"
     );
 
+    let preview_index_plan = query_plan_details(
+        &runtime,
+        "SELECT id, preview_date, preview_type, preview_amount,
+                preview_main_category, preview_sub_category,
+                preview_source_account_id, preview_destination_account_id,
+                preview_counterparty, preview_payment_method, preview_description,
+                preview_parser_id, preview_parser_tags_json, preview_recurring_id,
+                preview_recurring_candidate_count, preview_recurring_match_reasons,
+                preview_recurring_matched_date, preview_selected, dedup_type,
+                dedup_source_ids, preview_matching_feedback_json
+         FROM bills_preview
+         WHERE session_id = 'session-large' AND user_id = 42
+         ORDER BY preview_date ASC, id ASC",
+    )?;
+    assert!(
+        preview_index_plan
+            .iter()
+            .any(|detail| detail.contains("idx_preview_session_user_order")),
+        "preview filter index query should use the ordered session/user index: {preview_index_plan:?}"
+    );
+    assert!(
+        preview_index_plan
+            .iter()
+            .all(|detail| !detail.contains("TEMP B-TREE")),
+        "preview filter index query should not need a temporary sort: {preview_index_plan:?}"
+    );
+
     let selected_page_plan = query_plan_details(
         &runtime,
         "SELECT * FROM bills_preview \
@@ -1817,6 +1951,18 @@ fn import_preview_page_queries_use_ordered_composite_indexes() -> Result<(), Box
             .iter()
             .all(|detail| !detail.contains("TEMP B-TREE")),
         "stage2 parser template query should not need a temporary sort: {parser_template_plan:?}"
+    );
+    let parser_template_update_plan = query_plan_details(
+        &runtime,
+        "UPDATE bills_parser_template
+         SET parser_is_processed = '1'
+         WHERE session_id = 'session-large' AND user_id = 42 AND parser_is_processed = '0'",
+    )?;
+    assert!(
+        parser_template_update_plan
+            .iter()
+            .any(|detail| detail.contains("idx_parser_template_session_user_processed_order")),
+        "stage2 parser template status update should use the session/user/processed index: {parser_template_update_plan:?}"
     );
     Ok(())
 }
