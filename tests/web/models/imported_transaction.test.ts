@@ -92,11 +92,70 @@ describe('ImportTransaction model', () => {
         expect(transaction.matching?.parser.tags).toStrictEqual(['parser:wechat', 'channel:wallet']);
         expect(transaction.matching?.annotation.is_manually_annotated).toBe(true);
         expect(transaction.isManuallyAnnotated).toBe(true);
+        expect(transaction.hasMatchingContextSummary()).toBe(true);
+        expect(transaction.getMatchingDedupSummary()).toBe('transfer | 1|2');
+        expect(transaction.getMatchingParserTagText()).toBe('parser:wechat · channel:wallet');
         expect(transaction.actualCategoryName).toBe('餐饮');
         expect(transaction.actualSourceAccountName).toBe('微信零钱');
         expect(transaction.index).toBe(3);
         expect(transaction.selected).toBe(false);
         expect(transaction.valid).toBe(true);
+    });
+
+    test('partial matching payloads are normalized without throwing', () => {
+        const parserOnly = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            parserSource: '',
+            parserTags: [],
+            matching: {
+                parser: {
+                    parser_id: 'alipay',
+                    parser_tags: ['parser:alipay']
+                },
+                dedup: {
+                    type: 'remaining',
+                    source_ids: []
+                }
+            } as unknown as ImportTransactionResponse['matching']
+        }, 4);
+        const dedupOnly = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            matching: {
+                dedup: {
+                    type: 'duplicate',
+                    source_ids: '7, 8'
+                }
+            } as unknown as ImportTransactionResponse['matching']
+        }, 5);
+
+        expect(parserOnly.parserSource).toBe('alipay');
+        expect(parserOnly.parserTags).toStrictEqual(['parser:alipay']);
+        expect(parserOnly.matching?.transfer.candidate_type).toBe('');
+        expect(parserOnly.matching?.learning.rule_id).toBeNull();
+        expect(parserOnly.hasTransferSuggestion()).toBe(false);
+
+        expect(dedupOnly.dedupType).toBe('duplicate');
+        expect(dedupOnly.dedupSourceIds).toStrictEqual([7, 8]);
+        expect(dedupOnly.matching?.annotation.is_manually_annotated).toBe(false);
+    });
+
+    test('missing matching payload keeps flat fields and decision reset safe', () => {
+        const transaction = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            matching: undefined,
+            suggestedType: TransactionType.Transfer,
+            transferSuggestionScore: 0.8,
+            dedupType: 'duplicate',
+            dedupSourceIds: '9, 10'
+        }, 6);
+
+        expect(transaction.matching).toBeUndefined();
+        expect(transaction.parserSource).toBe('wechat');
+        expect(transaction.parserTags).toStrictEqual(['parser:wechat', 'channel:wallet']);
+        expect(transaction.dedupType).toBe('duplicate');
+        expect(transaction.dedupSourceIds).toStrictEqual([9, 10]);
+        expect(() => transaction.resetTransferSuggestionDecisionState()).not.toThrow();
+        expect(transaction.hasMatchingContextSummary()).toBe(true);
     });
 
     test('destination-account requirements apply to transfer and investment transactions', () => {
@@ -513,6 +572,10 @@ describe('ImportTransaction model', () => {
             type: TransactionType.ModifyBalance,
             categoryId: '0'
         }, 0);
+        const missingCategory = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            categoryId: ''
+        }, 6);
         const missingSource = ImportTransaction.of({
             ...BASE_RESPONSE,
             sourceAccountId: '0'
@@ -540,6 +603,7 @@ describe('ImportTransaction model', () => {
 
         expect(modifyBalance.valid).toBe(true);
         expect(modifyBalance.isTransactionValid()).toBe(true);
+        expect(missingCategory.valid).toBe(false);
         expect(missingSource.valid).toBe(false);
         expect(blankSource.valid).toBe(false);
         expect(missingDestination.valid).toBe(false);

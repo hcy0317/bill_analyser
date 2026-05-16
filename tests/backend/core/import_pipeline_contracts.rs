@@ -1,11 +1,12 @@
 use std::collections::BTreeMap;
 
 use bill_analyser_core::{
-    build_import_preview_filter_index_item, coerce_preview_selected_value,
-    expected_preview_state_is_valid, import_preview_index_success, import_preview_page_success,
-    import_session_cancel_missing_response, import_session_cancel_success_response,
-    import_session_not_found_response, import_session_success, import_stage_confirm_success,
-    import_stage_dedup_success, import_stage_parse_success, import_v2_invalid_request_response,
+    build_import_preview_filter_index_item, build_import_preview_matching_payload,
+    coerce_preview_selected_value, expected_preview_state_is_valid, import_preview_index_success,
+    import_preview_page_success, import_session_cancel_missing_response,
+    import_session_cancel_success_response, import_session_not_found_response,
+    import_session_success, import_stage_confirm_success, import_stage_dedup_success,
+    import_stage_parse_success, import_v2_invalid_request_response,
     import_v2_missing_session_id_response, map_import_preview_type_to_frontend_value,
     normalize_import_preview_page_query, normalize_import_preview_page_sort_direction,
     normalize_import_preview_page_sort_key, normalize_page, normalize_page_size,
@@ -91,6 +92,94 @@ fn preview_selection_keys_preserve_confirm_update_contract() {
 
     let empty = Map::new();
     assert!(preview_update_is_selected(&empty, true));
+}
+
+#[test]
+fn preview_matching_payload_normalizes_empty_feedback_from_flat_fields() {
+    let preview = json!({
+        "preview_matching_feedback": {},
+        "preview_parser_id": "wechat",
+        "preview_parser_tags": ["parser:wechat", "channel:wallet"],
+        "dedup_type": "remaining",
+        "dedup_source_ids": [7, 8],
+        "preview_recurring_id": 12,
+        "preview_recurring_name": "月度午餐",
+        "preview_recurring_candidate_count": 2,
+        "preview_recurring_match_score": 0.91,
+        "preview_recurring_match_reasons": "amount|date",
+        "preview_recurring_matched_date": "2026-05-01",
+        "preview_is_manually_annotated": 1
+    });
+    let matching = build_import_preview_matching_payload(preview.as_object().unwrap());
+
+    for key in [
+        "transfer",
+        "investment",
+        "learning",
+        "llm",
+        "recurring",
+        "dedup",
+        "parser",
+        "annotation",
+        "reconciliation",
+    ] {
+        assert!(matching.get(key).is_some(), "missing section {key}");
+    }
+    assert_eq!(matching["transfer"]["candidate_type"], "");
+    assert_eq!(matching["parser"]["id"], "wechat");
+    assert_eq!(matching["parser"]["parser_id"], "wechat");
+    assert_eq!(matching["parser"]["tags"][0], "parser:wechat");
+    assert_eq!(matching["parser"]["parser_tags"][1], "channel:wallet");
+    assert_eq!(matching["dedup"]["type"], "remaining");
+    assert_eq!(matching["dedup"]["source_count"], 2);
+    assert_eq!(matching["recurring"]["id"], 12);
+    assert_eq!(matching["recurring"]["match_score"], 0.91);
+    assert_eq!(matching["annotation"]["is_manually_annotated"], true);
+}
+
+#[test]
+fn preview_matching_payload_preserves_sparse_feedback_extras_and_parser_aliases() {
+    let preview = json!({
+        "preview_parser_id": "flat-parser",
+        "preview_parser_tags": ["flat"],
+        "dedup_type": "remaining",
+        "dedup_source_ids": [1],
+        "preview_matching_feedback": {
+            "parser": {
+                "parser_id": "alipay",
+                "parser_tags": ["parser:alipay"],
+                "payment_method": "支付宝"
+            },
+            "dedup": {
+                "type": "duplicate",
+                "source_ids": [99]
+            },
+            "learning": {
+                "mode": "exact",
+                "auto_apply": true,
+                "model_version": "v2"
+            },
+            "reconciliation": {
+                "candidate_type": "duplicate",
+                "candidate_id": "rc-1"
+            }
+        }
+    });
+    let matching = build_import_preview_matching_payload(preview.as_object().unwrap());
+
+    assert_eq!(matching["transfer"]["candidate_type"], "");
+    assert_eq!(matching["parser"]["id"], "alipay");
+    assert_eq!(matching["parser"]["parser_id"], "alipay");
+    assert_eq!(matching["parser"]["tags"][0], "parser:alipay");
+    assert_eq!(matching["parser"]["parser_tags"][0], "parser:alipay");
+    assert_eq!(matching["parser"]["payment_method"], "支付宝");
+    assert_eq!(matching["dedup"]["type"], "duplicate");
+    assert_eq!(matching["dedup"]["source_ids"][0], 99);
+    assert_eq!(matching["dedup"]["source_count"], 1);
+    assert_eq!(matching["learning"]["mode"], "exact");
+    assert_eq!(matching["learning"]["auto_apply"], true);
+    assert_eq!(matching["learning"]["model_version"], "v2");
+    assert_eq!(matching["reconciliation"]["candidate_type"], "duplicate");
 }
 
 #[test]

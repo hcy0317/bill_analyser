@@ -1272,16 +1272,75 @@ pub async fn import_preview_page_runtime_handler(
         Ok(None) => return route_response(import_session_not_found_response()),
         Err(error) => return route_response(db_error_response(error)),
     }
-    let page = query.page.unwrap_or(1).max(1);
-    let page_size = query
-        .page_size
-        .or(query.page_size_camel)
-        .unwrap_or(100)
-        .clamp(1, 500);
+    let requested_preview_ids =
+        parse_preview_page_query_ids(query.preview_ids.as_deref().or(query.preview_ids_camel.as_deref()));
+    let normalized_query = normalize_import_preview_page_query(
+        query.page.map(|value| value as i64),
+        query
+            .page_size
+            .or(query.page_size_camel)
+            .map(|value| value as i64),
+        query.sort_by.as_deref().or(query.sort_by_camel.as_deref()),
+        query
+            .sort_direction
+            .as_deref()
+            .or(query.sort_direction_camel.as_deref()),
+        requested_preview_ids.as_slice(),
+    );
+    let page = normalized_query.page;
+    let page_size = normalized_query.page_size.min(500);
     let selected_only = query
         .selected_only
         .or(query.selected_only_camel)
         .unwrap_or(false);
+    let sort_by = (!normalized_query.sort_by.is_empty()).then_some(normalized_query.sort_by.as_str());
+    let sort_direction = Some(normalized_query.sort_direction.as_str());
+    if !normalized_query.preview_ids.is_empty() {
+        return match get_preview_by_ids(
+            runtime.connection(),
+            &session_id,
+            normalized_query.preview_ids.as_slice(),
+            user_id,
+        ) {
+            Ok(preview) => {
+                let preview = preview
+                    .into_iter()
+                    .map(preview_row_to_value)
+                    .collect::<Vec<_>>();
+                let preview = sort_import_preview_page_items(&preview, sort_by, sort_direction);
+                route_response(import_preview_page_success(ImportPreviewPageData {
+                    total: preview.len(),
+                    preview,
+                    page,
+                    page_size,
+                }))
+            }
+            Err(error) => route_response(db_error_response(error)),
+        };
+    }
+    if sort_by.is_some() {
+        return match get_preview_by_session(runtime.connection(), &session_id, user_id, selected_only) {
+            Ok(preview) => {
+                let total = preview.len();
+                let preview = preview
+                    .into_iter()
+                    .map(preview_row_to_value)
+                    .collect::<Vec<_>>();
+                let preview = sort_import_preview_page_items(&preview, sort_by, sort_direction)
+                    .into_iter()
+                    .skip(page.saturating_sub(1) * page_size)
+                    .take(page_size)
+                    .collect::<Vec<_>>();
+                route_response(import_preview_page_success(ImportPreviewPageData {
+                    preview,
+                    total,
+                    page,
+                    page_size,
+                }))
+            }
+            Err(error) => route_response(db_error_response(error)),
+        };
+    }
     match get_preview_page_by_session(
         runtime.connection(),
         &session_id,
@@ -1294,7 +1353,8 @@ pub async fn import_preview_page_runtime_handler(
             let preview = preview
                 .into_iter()
                 .map(preview_row_to_value)
-                .collect();
+                .collect::<Vec<_>>();
+            let preview = sort_import_preview_page_items(&preview, sort_by, sort_direction);
             route_response(import_preview_page_success(ImportPreviewPageData {
                 preview,
                 total: non_negative_usize(total),
@@ -1304,6 +1364,14 @@ pub async fn import_preview_page_runtime_handler(
         }
         Err(error) => route_response(db_error_response(error)),
     }
+}
+
+fn parse_preview_page_query_ids(value: Option<&str>) -> Vec<i64> {
+    value
+        .unwrap_or("")
+        .split(',')
+        .filter_map(|item| item.trim().parse::<i64>().ok())
+        .collect()
 }
 
 pub async fn import_preview_index_runtime_handler(

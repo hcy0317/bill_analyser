@@ -192,6 +192,64 @@ async fn import_db_runtime_reads_and_clears_import_session_preview_rows(
         preview_body["data"]["preview"][0]["preview_description"],
         "first preview row"
     );
+    let preview_matching = &preview_body["data"]["preview"][0]["matching"];
+    for section in [
+        "transfer",
+        "investment",
+        "learning",
+        "llm",
+        "recurring",
+        "dedup",
+        "parser",
+        "annotation",
+        "reconciliation",
+    ] {
+        assert!(
+            preview_matching.get(section).is_some(),
+            "missing matching section {section}"
+        );
+    }
+    assert_eq!(preview_matching["transfer"]["candidate_type"], "");
+    assert_eq!(preview_matching["parser"]["id"], "wechat");
+    assert_eq!(preview_matching["parser"]["parser_id"], "wechat");
+
+    let preview_by_ids = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/bills/import/v2/preview/session-a?preview_ids=2,1&page=1&page_size=2")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(preview_by_ids.status(), StatusCode::OK);
+    let preview_by_ids_body = read_json(preview_by_ids).await;
+    assert_eq!(preview_by_ids_body["data"]["total"], 2);
+    let preview_by_ids_rows = preview_by_ids_body["data"]["preview"]
+        .as_array()
+        .expect("preview ids rows");
+    assert_eq!(preview_by_ids_rows[0]["id"], 2);
+    assert_eq!(preview_by_ids_rows[1]["id"], 1);
+
+    let preview_sorted = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/bills/import/v2/preview/session-a?sort_by=sourceAmount&sort_direction=asc&page=1&page_size=1")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(preview_sorted.status(), StatusCode::OK);
+    let preview_sorted_body = read_json(preview_sorted).await;
+    assert_eq!(preview_sorted_body["data"]["total"], 2);
+    assert_eq!(preview_sorted_body["data"]["preview"][0]["id"], 2);
 
     let cancel = app
         .oneshot(
@@ -1675,7 +1733,9 @@ async fn import_db_runtime_stage2_restores_import_intelligence_chain() -> Result
     assert_eq!(coffee["preview_main_category"], "餐饮");
     assert_eq!(coffee["preview_sub_category"], "咖啡");
     assert_eq!(coffee["preview_source_account_id"], 1001);
+    assert_eq!(coffee["matching"]["parser"]["id"], "alipay");
     assert_eq!(coffee["matching"]["parser"]["parser_id"], "alipay");
+    assert!(coffee["matching"]["transfer"].is_object());
     assert_eq!(coffee["matching"]["recurring"]["id"], 3001);
     let coffee_id = coffee["id"].as_i64().expect("coffee preview id");
     let recurring_candidates = app

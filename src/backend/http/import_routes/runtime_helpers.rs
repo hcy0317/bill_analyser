@@ -106,6 +106,15 @@ pub struct PreviewPageQuery {
     page_size: Option<usize>,
     #[serde(rename = "pageSize")]
     page_size_camel: Option<usize>,
+    sort_by: Option<String>,
+    #[serde(rename = "sortBy")]
+    sort_by_camel: Option<String>,
+    sort_direction: Option<String>,
+    #[serde(rename = "sortDirection")]
+    sort_direction_camel: Option<String>,
+    preview_ids: Option<String>,
+    #[serde(rename = "previewIds")]
+    preview_ids_camel: Option<String>,
     selected_only: Option<bool>,
     #[serde(rename = "selectedOnly")]
     selected_only_camel: Option<bool>,

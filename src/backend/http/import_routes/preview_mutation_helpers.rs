@@ -807,12 +807,7 @@ fn response_mode_is_preview_item(object: &Map<String, Value>) -> bool {
 fn preview_row_to_value(row: ImportPreviewRow) -> Value {
     let mut value = serde_json::to_value(row).unwrap_or_else(|_| json!({}));
     if let Some(object) = value.as_object_mut() {
-        let feedback = object
-            .get("preview_matching_feedback")
-            .cloned()
-            .filter(Value::is_object)
-            .unwrap_or_else(|| json!({}));
-        object.insert("matching".to_string(), feedback);
+        attach_import_preview_matching_payload(object);
     }
     value
 }

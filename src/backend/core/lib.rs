@@ -62,7 +62,8 @@ pub use import_learning::{
     POLICY_VERSION,
 };
 pub use import_pipeline::{
-    build_import_preview_filter_index_item, coerce_preview_selected_value,
+    attach_import_preview_matching_payload, build_import_preview_filter_index_item,
+    build_import_preview_matching_payload, coerce_preview_selected_value,
     expected_preview_state_from_value, expected_preview_state_is_valid,
     import_preview_index_success, import_preview_page_success,
     import_session_cancel_missing_response, import_session_cancel_success_response,
