@@ -6,7 +6,7 @@ Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预
 
 Rust HTTP runtime 直接接管账单导入三阶段链路、账单 CRUD/export/picture/recurring/reconciliation/category actions、账户/标签/分类/分类规则/模板/设置包、预算 CRUD/export/execution/forecast/history/snapshot/import、统计读取/Analyzer/洞察/汇率、matching/recurring/calendar/networth、auth/profile/token/2FA/step-up/user-data、LLM 配置/候选/provider 生成、OCR recognition、backup file/jobs/sync 等主链路。数据库以 SQLite 文件为默认运行库，保持 WAL、foreign keys、user-scope、事务原子性和关键审计 best-effort 写入。
 
-前端服务层的运行态 `/api/...` 调用由 Rust `governance_manifest_snapshot().routes` 生成的 route ownership fixture 校验；`src/web/src/contracts/rustRouteOwnership.manifest.generated.json` 保存 Rust 快照映射，`rustRouteOwnership.generated.ts` 提供前端测试导入，`tests/web/contracts/frontendRustRouteContract.test.ts` 扫描 `services.ts`、Vue 与 TypeScript 里的 axios/fetch 调用，确保前端不依赖旧运行时边界或 `/api/v1/*` 路由。
+前端服务层的运行态 `/api/...` 调用由 Rust `governance_manifest_snapshot().routes` 生成的 route ownership fixture 校验；`src/web/src/lib/services.ts` 保持统一 axios facade，预算 REST 查询参数、元/分适配与 response mapper 拆在 `src/web/src/lib/services/budget.ts`；`src/web/src/contracts/rustRouteOwnership.manifest.generated.json` 保存 Rust 快照映射，`rustRouteOwnership.generated.ts` 提供前端测试导入，`tests/web/contracts/frontendRustRouteContract.test.ts` 扫描 `services.ts`、Vue 与 TypeScript 里的 axios/fetch 调用，确保前端不依赖旧运行时边界或 `/api/v1/*` 路由。
 
 ## 关键业务链路
 

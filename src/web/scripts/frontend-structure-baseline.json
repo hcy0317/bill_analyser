@@ -49,15 +49,15 @@
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
-      "path": "src/lib/services.ts",
-      "kind": "ts",
-      "lines": 2554,
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
-    },
-    {
       "path": "src/locales/helpers.ts",
       "kind": "ts",
       "lines": 2514,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/lib/services.ts",
+      "kind": "ts",
+      "lines": 2214,
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {

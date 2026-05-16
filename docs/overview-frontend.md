@@ -19,7 +19,7 @@
 - `core/` 承载轻量、偏纯函数的前端领域工具与适配器，例如 `api.ts`、`currency.ts`、`color.ts`、`calendar.ts`、`datetime.ts`、`import_transaction.ts`、`statistics.ts`、`template.ts` 等；这些模块用于金额/时间/颜色/日历/导入交易等前端内聚转换，避免页面和 store 重复散落格式化逻辑
 
 ## 4.4 服务层（`src/web/src/lib/services.ts`）
-- 统一 axios 请求、鉴权头注入、401 刷新 token、REST 主链调用封装
+- `services.ts` 保持统一 axios 请求、鉴权头注入、401 刷新 token、REST 主链调用 facade；预算 REST 查询参数、元/分适配与 response mapper 拆在 `src/web/src/lib/services/budget.ts`
 - `src/web/scripts/generate-rust-route-fixture.mjs` 会从 Rust `governance_manifest_snapshot().routes` 快照生成 `src/web/src/contracts/rustRouteOwnership.manifest.generated.json`，再渲染 `rustRouteOwnership.generated.ts`；后端 governance 契约测试校验 JSON 快照与 Rust manifest 同步，`tests/web/contracts/frontendRustRouteContract.test.ts` 扫描 `services.ts` 与 Vue/TS 中的 axios/fetch `/api/...` 调用，要求前端运行态请求只能落到 Rust `RustOwnedVerified` 或 `PythonDeleted` 路由，并阻止重新引用 `/api/v1/*`。
 
 ## 4.5 分类图标

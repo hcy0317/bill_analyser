@@ -309,6 +309,8 @@ downloads/
 eggs/
 .eggs/
 lib/
+!src/web/src/lib/
+!src/web/src/lib/**
 !tests/web/lib/
 lib64/
 parts/
