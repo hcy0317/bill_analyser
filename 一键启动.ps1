@@ -1,8 +1,8 @@
 <# 
     Bill Analyser - 一键启动脚本
-    功能：自动清除旧进程 + 启动后端和前端服务器
-    版本：v6.74
-    日期：2025-12-11
+    功能：按端口清理旧服务，启动 Rust 后端和 Vite 前端，并等待 HTTP 就绪
+    版本：v7.0
+    日期：2026-05-16
 #>
 
 param(
@@ -23,6 +23,67 @@ function Write-Warn { param($msg) Write-Host $msg -ForegroundColor Yellow }
 function Write-Err { param($msg) Write-Host $msg -ForegroundColor Red }
 function Write-Gray { param($msg) Write-Host $msg -ForegroundColor Gray }
 
+function Get-PortFromBind {
+    param(
+        [string]$Bind,
+        [int]$DefaultPort
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Bind)) {
+        return $DefaultPort
+    }
+
+    $lastColon = $Bind.LastIndexOf(":")
+    if ($lastColon -lt 0 -or $lastColon -eq ($Bind.Length - 1)) {
+        Write-Warn "无法从 BILL_ANALYSER_HTTP_BIND='$Bind' 解析端口，使用默认端口 $DefaultPort"
+        return $DefaultPort
+    }
+
+    $portText = $Bind.Substring($lastColon + 1)
+    $port = 0
+    if ([int]::TryParse($portText, [ref]$port) -and $port -gt 0 -and $port -le 65535) {
+        return $port
+    }
+
+    Write-Warn "无法从 BILL_ANALYSER_HTTP_BIND='$Bind' 解析端口，使用默认端口 $DefaultPort"
+    return $DefaultPort
+}
+
+function Get-ProbeHostFromBind {
+    param(
+        [string]$Bind,
+        [string]$DefaultHost
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Bind)) {
+        return $DefaultHost
+    }
+
+    $hostText = $DefaultHost
+    if ($Bind.StartsWith("[")) {
+        $endBracket = $Bind.IndexOf("]")
+        if ($endBracket -gt 1) {
+            $hostText = $Bind.Substring(1, $endBracket - 1)
+        }
+    } else {
+        $lastColon = $Bind.LastIndexOf(":")
+        if ($lastColon -gt 0) {
+            $hostText = $Bind.Substring(0, $lastColon)
+        }
+    }
+
+    $hostText = $hostText.Trim()
+    if ([string]::IsNullOrWhiteSpace($hostText) -or $hostText -in @("0.0.0.0", "::", "*")) {
+        return "127.0.0.1"
+    }
+
+    if ($hostText.Contains(":") -and -not $hostText.StartsWith("[")) {
+        return "[$hostText]"
+    }
+
+    return $hostText
+}
+
 function Get-PreferredShell {
     $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
     if ($pwshCmd) {
@@ -32,6 +93,20 @@ function Get-PreferredShell {
     $powershellCmd = Get-Command powershell -ErrorAction SilentlyContinue
     if ($powershellCmd) {
         return $powershellCmd.Source
+    }
+
+    return $null
+}
+
+function Get-NpmCommand {
+    $npmCmd = Get-Command npm.cmd -ErrorAction SilentlyContinue
+    if ($npmCmd) {
+        return $npmCmd.Source
+    }
+
+    $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+    if ($npmCmd) {
+        return $npmCmd.Source
     }
 
     return $null
@@ -47,11 +122,19 @@ if (-not $ShellExe) {
     exit 1
 }
 
+$BackendBind = if ($env:BILL_ANALYSER_HTTP_BIND) { $env:BILL_ANALYSER_HTTP_BIND } else { "127.0.0.1:5000" }
+$BackendPort = Get-PortFromBind -Bind $BackendBind -DefaultPort 5000
+$BackendProbeHost = Get-ProbeHostFromBind -Bind $BackendBind -DefaultHost "127.0.0.1"
+$FrontendPort = 8081
+$BackendBaseUrl = "http://${BackendProbeHost}:$BackendPort"
+$BackendHealthUrl = "$BackendBaseUrl/api/health"
+$FrontendUrl = "http://127.0.0.1:$FrontendPort"
+
 # 打印横幅
 Write-Host ""
 Write-Host "╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
 Write-Host "║          Bill Analyser - 账单分析系统一键启动器              ║" -ForegroundColor Cyan
-Write-Host "║                       v6.74 (2025-12-11)                     ║" -ForegroundColor Cyan
+Write-Host "║                       v7.0 (2026-05-16)                      ║" -ForegroundColor Cyan
 Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host ""
 
@@ -96,21 +179,25 @@ function Stop-ServiceByPort {
 }
 
 # ============================================================
-# 函数：检查端口是否正在监听
+# 函数：检查 HTTP 服务是否可访问
 # ============================================================
-function Test-PortListening {
-    param([int]$Port)
-    
-    $connection = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-    return $null -ne $connection
+function Test-HttpEndpoint {
+    param([string]$Url)
+
+    try {
+        $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+        return ($response.StatusCode -ge 200 -and $response.StatusCode -lt 400)
+    } catch {
+        return $false
+    }
 }
 
 # ============================================================
-# 函数：等待端口可用
+# 函数：等待 HTTP 服务就绪
 # ============================================================
-function Wait-ForPort {
+function Wait-ForHttpEndpoint {
     param(
-        [int]$Port,
+        [string]$Url,
         [int]$TimeoutSeconds = 30,
         [string]$ServiceName
     )
@@ -118,11 +205,11 @@ function Wait-ForPort {
     $startTime = Get-Date
     $timeout = New-TimeSpan -Seconds $TimeoutSeconds
     
-    Write-Gray "  等待 $ServiceName 启动 (端口 $Port)..."
+    Write-Gray "  等待 $ServiceName 就绪 ($Url)..."
     
     while ((Get-Date) - $startTime -lt $timeout) {
-        if (Test-PortListening -Port $Port) {
-            Write-Success "  ✓ $ServiceName 已就绪 (端口 $Port)"
+        if (Test-HttpEndpoint -Url $Url) {
+            Write-Success "  ✓ $ServiceName 已就绪"
             return $true
         }
         Start-Sleep -Milliseconds 500
@@ -140,11 +227,11 @@ if (-not $NoAutoStop) {
     Write-Host ""
     
     if (-not $FrontendOnly) {
-        $null = Stop-ServiceByPort -Port 5000 -ServiceName "后端服务器"
+        $null = Stop-ServiceByPort -Port $BackendPort -ServiceName "后端服务器"
     }
     
     if (-not $BackendOnly) {
-        $null = Stop-ServiceByPort -Port 8081 -ServiceName "前端服务器"
+        $null = Stop-ServiceByPort -Port $FrontendPort -ServiceName "前端服务器"
     }
     
     Write-Host ""
@@ -165,11 +252,11 @@ if (-not $FrontendOnly) {
     # 启动后端（在新窗口中）
     $backendScript = Join-Path $ProjectRoot "start_backend.ps1"
     if (Test-Path $backendScript) {
-        Start-Process $ShellExe -ArgumentList "-ExecutionPolicy", "Bypass", "-File", $backendScript -WorkingDirectory $ProjectRoot -WindowStyle Normal
+        Start-Process $ShellExe -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $backendScript -WorkingDirectory $ProjectRoot -WindowStyle Normal
         Write-Gray "  后端服务器窗口已启动"
         
         # 等待后端就绪
-        if (Wait-ForPort -Port 5000 -TimeoutSeconds 30 -ServiceName "后端服务器") {
+        if (Wait-ForHttpEndpoint -Url $BackendHealthUrl -TimeoutSeconds 45 -ServiceName "后端服务器") {
             $backendStarted = $true
         } else {
             Write-Err "  ✗ 后端服务器启动失败"
@@ -195,24 +282,35 @@ if (-not $BackendOnly) {
     Write-Info "[步骤 3/3] 启动前端服务器..."
     Write-Host ""
     
+    $npmCmd = Get-NpmCommand
+    if (-not $npmCmd) {
+        Write-Err "  ✗ 未找到 npm，请先安装 Node.js 22+"
+        exit 1
+    }
+
     # 检查node_modules
     $nodeModulesPath = Join-Path $ProjectRoot "src\web\node_modules"
     if (-not (Test-Path $nodeModulesPath)) {
         Write-Warn "  正在安装前端依赖..."
         $webPath = Join-Path $ProjectRoot "src\web"
         Push-Location $webPath
-        npm install
+        & $npmCmd install
+        if ($LASTEXITCODE -ne 0) {
+            Pop-Location
+            Write-Err "  ✗ 前端依赖安装失败"
+            exit 1
+        }
         Pop-Location
     }
     
     # 启动前端（在新窗口中）
     $frontendScript = Join-Path $ProjectRoot "start_frontend.ps1"
     if (Test-Path $frontendScript) {
-        Start-Process $ShellExe -ArgumentList "-ExecutionPolicy", "Bypass", "-File", $frontendScript -WorkingDirectory $ProjectRoot -WindowStyle Normal
+        Start-Process $ShellExe -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $frontendScript -WorkingDirectory $ProjectRoot -WindowStyle Normal
         Write-Gray "  前端服务器窗口已启动"
         
         # 等待前端就绪
-        if (Wait-ForPort -Port 8081 -TimeoutSeconds 60 -ServiceName "前端服务器") {
+        if (Wait-ForHttpEndpoint -Url $FrontendUrl -TimeoutSeconds 60 -ServiceName "前端服务器") {
             $frontendStarted = $true
         } else {
             Write-Err "  ✗ 前端服务器启动失败"
@@ -238,12 +336,12 @@ Write-Host "╚═════════════════════�
 Write-Host ""
 
 if ($backendStarted -or -not $FrontendOnly) {
-    Write-Success "  ✓ 后端服务器: http://127.0.0.1:5000"
-    Write-Gray "    健康检查:   http://127.0.0.1:5000/api/health"
+    Write-Success "  ✓ 后端服务器: $BackendBaseUrl"
+    Write-Gray "    健康检查:   $BackendHealthUrl"
 }
 
 if ($frontendStarted -or -not $BackendOnly) {
-    Write-Success "  ✓ 前端应用:   http://127.0.0.1:8081"
+    Write-Success "  ✓ 前端应用:   $FrontendUrl"
 }
 
 Write-Host ""
@@ -254,9 +352,9 @@ Write-Host ""
 # 自动打开浏览器
 if (-not $NoBrowser -and $frontendStarted) {
     Write-Info "正在打开浏览器..."
-    Start-Process "http://127.0.0.1:8081"
+    Start-Process $FrontendUrl
 }
 
-# v6.79: 启动完成后自动退出，无需等待按键
+# v7.0: 启动完成后自动退出，无需等待按键
 Write-Host "启动完成，此窗口将自动关闭..." -ForegroundColor Gray
 Start-Sleep -Seconds 2

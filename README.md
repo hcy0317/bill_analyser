@@ -2,7 +2,7 @@
 
 Bill Analyser 是一个面向个人与家庭场景的账单分析系统，支持多来源账单导入、智能去重、自动分类、预算管理和统计分析。
 
-本项目当前后端运行态是 Rust Axum `bill_http_server`，数据库使用 SQLite WAL，前端使用 Vue 3 + TypeScript + Vite。
+本项目当前后端运行态是 Rust Axum `bill_http_server`，Rust workspace 位于 `src/backend/*`，数据库使用 SQLite WAL，前端使用 Vue 3 + TypeScript + Vite。
 
 ## 核心能力
 
@@ -22,7 +22,7 @@ Bill Analyser 是一个面向个人与家庭场景的账单分析系统，支持
 | Rust stable | 后端运行时 |
 | Axum | HTTP API |
 | Tokio | 异步运行时 |
-| SQLx / SQLite | 数据访问 |
+| Rusqlite / SQLite WAL | 数据访问 |
 | cargo-llvm-cov | 覆盖率门禁 |
 
 ### 前端
@@ -40,10 +40,11 @@ Bill Analyser 是一个面向个人与家庭场景的账单分析系统，支持
 
 ```text
 bill_analyser/
-├── crates/                # Rust 后端 workspace
 ├── src/
+│   ├── backend/           # Rust 后端 workspace
 │   └── web/               # Vue 3 + TypeScript 前端
 ├── tests/
+│   ├── backend/           # Rust 集成与契约测试
 │   ├── fixtures/          # 导入样本与契约 fixtures
 │   └── web/               # 前端契约与组件测试
 ├── docs/                  # 项目文档
@@ -83,6 +84,17 @@ cd ..\..
 .\一键启动.ps1
 ```
 
+一键启动脚本会按端口清理旧服务，构建并启动 Rust HTTP 后端，启动 Vite 前端，并分别等待后端健康检查和前端首页可访问。
+
+常用参数：
+
+```powershell
+.\一键启动.ps1 -BackendOnly   # 只启动 Rust 后端
+.\一键启动.ps1 -FrontendOnly  # 只启动前端
+.\一键启动.ps1 -NoAutoStop    # 不自动停止旧服务
+.\一键启动.ps1 -NoBrowser     # 启动完成后不自动打开浏览器
+```
+
 也可以分别启动：
 
 ```powershell
@@ -96,10 +108,18 @@ cd ..\..
 - 后端 API：`http://127.0.0.1:5000/api`
 - 健康检查：`http://127.0.0.1:5000/api/health`
 
+启动脚本默认配置：
+
+- `BILL_ANALYSER_HTTP_BIND=127.0.0.1:5000`
+- `BILL_ANALYSER_SQLITE_DB_PATH=data\bills.db`
+- `BILL_ANALYSER_RUST_HTTP_SERVER` 可指定已构建的 `bill_http_server` 可执行文件，未指定时脚本会自动构建 debug 版本
+
 ### 手动启动
 
 ```powershell
 # 终端 1
+$env:BILL_ANALYSER_SQLITE_DB_PATH = "data\bills.db"
+$env:BILL_ANALYSER_HTTP_BIND = "127.0.0.1:5000"
 cargo run -p bill-analyser-http --bin bill_http_server
 
 # 终端 2
@@ -149,16 +169,16 @@ npm run build
 
 核心 Rust 模块：
 
-- `crates/bill-analyser-parsers/`
-- `crates/bill-analyser-db/`
-- `crates/bill-analyser-core/`
-- `crates/bill-analyser-http/`
+- `src/backend/parsers/`
+- `src/backend/db/`
+- `src/backend/core/`
+- `src/backend/http/`
 
 ## 重要开发约束
 
 ### REST 优先
 
-当前运行态以 `REST /api/...` 为主，不应为新功能重新引入 `/api/v1/*` 作为主链。
+Rust `bill_http_server` 是唯一 HTTP 运行时入口。当前运行态以 `REST /api/...` 为主，不应为新功能重新引入 `/api/v1/*`、Python/Flask sidecar 或旧式代理兜底作为主链。
 
 ### 金额单位
 
@@ -184,7 +204,7 @@ npm run build
 
 ### 端口被占用
 
-先运行 `.\停止服务器.ps1`，再重新启动。
+先运行 `.\停止服务器.ps1`，再重新启动。`.\一键启动.ps1` 默认也会按后端和前端端口清理旧服务；如果手动设置了 `BILL_ANALYSER_HTTP_BIND`，脚本会从该地址解析后端端口。
 
 ### 数据库锁定
 
