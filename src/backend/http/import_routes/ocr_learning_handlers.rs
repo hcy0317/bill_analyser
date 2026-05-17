@@ -99,11 +99,109 @@ pub async fn ocr_recognition_runtime_handler(
             Ok(result) => result,
             Err(response) => return ai_route_response(response),
         };
-    ai_route_response(build_ocr_recognition_success_response(
+    let draft_context = match load_receipt_draft_context(runtime.connection(), user_id_value) {
+        Ok(context) => context,
+        Err(response) => return route_response(response),
+    };
+    ai_route_response(build_ocr_recognition_success_response_with_context(
         &config.provider,
         &provider_result,
         &request_id,
+        &draft_context,
     ))
+}
+
+fn load_receipt_draft_context(
+    connection: &Connection,
+    user_id: i64,
+) -> Result<ReceiptDraftContext, ImportV2RouteResponse> {
+    let categories = load_import_intelligence_categories(connection, user_id)
+        .map_err(db_error_response)?;
+    let categories_by_id = categories
+        .iter()
+        .map(|category| (category.id, category.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let category_rules =
+        load_import_intelligence_category_rules(connection, user_id, &categories_by_id)
+            .map_err(db_error_response)?;
+    let accounts = load_import_intelligence_accounts(connection, user_id)
+        .map_err(db_error_response)?;
+    let tags = load_receipt_draft_tags(connection, user_id).map_err(db_error_response)?;
+    Ok(ReceiptDraftContext {
+        categories: categories
+            .into_iter()
+            .map(|category| ReceiptDraftCategory {
+                id: category.id.to_string(),
+                type_code: category.type_code,
+                label: category_label(&category.main_category, &category.sub_category),
+            })
+            .collect(),
+        category_rules: category_rules
+            .into_iter()
+            .map(|rule| ReceiptDraftCategoryRule {
+                id: rule.id.to_string(),
+                category_id: rule.category_id.to_string(),
+                category_type: rule.category_type,
+                label: category_label(&rule.main_category, &rule.sub_category),
+                priority: rule.priority,
+                rule_expression: rule.rule_expression,
+                regex_enabled: rule.regex_enabled,
+            })
+            .collect(),
+        accounts: accounts
+            .into_iter()
+            .map(|account| ReceiptDraftAccount {
+                id: account.id.to_string(),
+                name: account.name,
+                aliases: account.aliases,
+            })
+            .collect(),
+        tags,
+    })
+}
+
+fn category_label(main_category: &str, sub_category: &str) -> String {
+    let main_category = main_category.trim();
+    let sub_category = sub_category.trim();
+    if main_category.is_empty() {
+        sub_category.to_string()
+    } else if sub_category.is_empty() {
+        main_category.to_string()
+    } else {
+        format!("{main_category} / {sub_category}")
+    }
+}
+
+fn load_receipt_draft_tags(
+    connection: &Connection,
+    user_id: i64,
+) -> rusqlite::Result<Vec<ReceiptDraftTag>> {
+    if !import_intelligence_table_exists(connection, "tags")? {
+        return Ok(Vec::new());
+    }
+    let has_hidden = table_has_column(connection, "tags", "hidden")?;
+    let display_order_expr = sql_column_or_default(connection, "tags", "display_order", "0")?;
+    let hidden_expr = if has_hidden {
+        "hidden".to_string()
+    } else {
+        "0 AS hidden".to_string()
+    };
+    let hidden_filter = if has_hidden { "hidden = 0" } else { "1 = 1" };
+    let mut statement = connection.prepare(&format!(
+        "
+        SELECT id, name, {hidden_expr}, {display_order_expr}
+        FROM tags
+        WHERE user_id = ?1 AND {hidden_filter}
+        ORDER BY display_order ASC, id ASC
+        "
+    ))?;
+    let rows = statement.query_map(params![user_id], |row| {
+        Ok(ReceiptDraftTag {
+            id: row.get::<_, i64>("id")?.to_string(),
+            name: row.get::<_, Option<String>>("name")?.unwrap_or_default(),
+        })
+    })?;
+    rows.collect()
 }
 
 pub async fn learning_suggestions_list_runtime_handler(

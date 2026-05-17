@@ -7,6 +7,7 @@ function readSource(relativePath: string): string {
 
 const EDIT_DIALOG_PATH = 'src/views/desktop/transactions/list/dialogs/EditDialog.vue';
 const PICTURES_PANEL_PATH = 'src/views/desktop/transactions/list/dialogs/TransactionPicturesPanel.vue';
+const RECEIPT_DRAFT_HELPER_PATH = 'src/lib/receiptDraft.ts';
 
 describe('EditDialog picture OCR wiring', () => {
     test('add-mode picture uploads call OCR and keep the uploaded picture in the same client session', () => {
@@ -19,11 +20,26 @@ describe('EditDialog picture OCR wiring', () => {
 
     test('recognized receipt payload fills current add form using frontend cents contract', () => {
         const source = readSource(EDIT_DIALOG_PATH);
+        const helperSource = readSource(RECEIPT_DRAFT_HELPER_PATH);
 
-        expect(source).toContain('Math.round(result.amount * 100)');
-        expect(source).toContain('transaction.value.time = Math.floor(parsedMs / 1000);');
-        expect(source).toContain('transaction.value.comment = result.description;');
+        expect(source).toContain('applyReceiptDraftAutoFillToTransaction(transaction.value, result);');
+        expect(helperSource).toContain('receiptDraftAmountToCents(field)');
+        expect(helperSource).toContain('transaction.sourceAmount = Math.round(result.amount * 100)');
+        expect(helperSource).toContain('transaction.time = Math.floor(parsedMs / 1000);');
+        expect(helperSource).toContain('transaction.comment = result.description;');
         expect(source).toContain("activeTab.value = 'basicInfo';");
+    });
+
+    test('keeps low-confidence OCR fields as explicit candidates', () => {
+        const source = readSource(EDIT_DIALOG_PATH);
+        const helperSource = readSource(RECEIPT_DRAFT_HELPER_PATH);
+
+        expect(source).toContain('receiptDraftCandidateHints');
+        expect(source).toContain('buildReceiptDraftCandidateHints(result.draft)');
+        expect(source).toContain('@click="applyReceiptDraftCandidate(candidate)"');
+        expect(source).toContain('applyReceiptDraftFieldToTransaction(transaction.value, candidate.key, candidate.field)');
+        expect(helperSource).toContain('transaction.setCategoryId(categoryId);');
+        expect(helperSource).toContain('transaction.tagIds = Array.from(new Set([...transaction.tagIds, ...tagIds]));');
     });
 
     test('OCR errors surface typed messages instead of silently swallowing the upload result', () => {

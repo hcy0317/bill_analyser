@@ -1,9 +1,10 @@
 use serde_json::{json, Value};
 
 use super::ocr_parser::parse_payment_screenshot_text;
+use super::receipt_draft::build_receipt_transaction_draft;
 use super::types::{
-    AiRouteResponse, OcrConfigContract, OcrProviderTextResult, OCR_AVAILABLE_PROVIDERS,
-    OCR_DEFAULT_LANG, OCR_DISABLED_PROVIDER_NAME,
+    AiRouteResponse, OcrConfigContract, OcrProviderTextResult, ReceiptDraftContext,
+    OCR_AVAILABLE_PROVIDERS, OCR_DEFAULT_LANG, OCR_DISABLED_PROVIDER_NAME,
 };
 
 const OCR_ERROR_PROVIDER_UNCONFIGURED: &str = "provider_unconfigured";
@@ -122,7 +123,22 @@ pub fn build_ocr_recognition_success_response(
     provider_result: &OcrProviderTextResult,
     request_id: &str,
 ) -> AiRouteResponse {
+    build_ocr_recognition_success_response_with_context(
+        provider_name,
+        provider_result,
+        request_id,
+        &ReceiptDraftContext::default(),
+    )
+}
+
+pub fn build_ocr_recognition_success_response_with_context(
+    provider_name: &str,
+    provider_result: &OcrProviderTextResult,
+    request_id: &str,
+    draft_context: &ReceiptDraftContext,
+) -> AiRouteResponse {
     let parsed = parse_payment_screenshot_text(&provider_result.text);
+    let draft = build_receipt_transaction_draft(&parsed, provider_result, draft_context);
     let confidence = provider_result
         .confidence
         .max(parsed.confidence)
@@ -142,6 +158,7 @@ pub fn build_ocr_recognition_success_response(
                     "request_id": request_id,
                 },
                 "confidence": confidence,
+                "draft": draft,
                 "raw_provider_response": provider_result.raw_provider_response,
             },
         }),

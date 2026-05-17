@@ -15,7 +15,7 @@ Rust HTTP runtime 直接接管账单导入三阶段链路、账单 CRUD/export/p
 - **预算层级**：预算按月/季/年层级同步，删除分类主预算或最后一个子预算时会同步清理自动派生的父周期预算，避免季度/年度空壳残留。
 - **认证安全**：Rust auth runtime 校验 Bearer access token，2FA、step-up、user-data clear、backup file 操作按当前用户和动作类型执行额外校验，并写入认证或业务审计。
 - **备份运维**：Rust backup runtime 负责本地 zip 备份、加密备份公开名、下载、删除、恢复、cleanup、jobs 与 cloud sync；恢复前先创建 `before_restore_*` 快照，并拒绝不安全 zip 成员。
-- **LLM/OCR**：LLM 临时配置保存在 Rust 进程内 user-scoped map，saved config 落库并脱敏；provider 生成保留 allowlist/SSRF 防护、响应体上限、候选截断和 rate limit；OCR recognition 默认 disabled，配置后通过对应 provider 返回结构化识别结果。
+- **LLM/OCR**：LLM 临时配置保存在 Rust 进程内 user-scoped map，saved config 落库并脱敏；provider 生成保留 allowlist/SSRF 防护、响应体上限、候选截断和 rate limit；OCR recognition 默认 disabled，配置后通过 `cloud_stub`、`tesseract` 或本地 `local_json_ocr` provider 返回结构化识别结果，并在新增交易草稿里按置信度输出交易类型、金额、时间、描述、分类、账户和标签：高置信字段自动填入，低置信或冲突字段只作为候选提示。
 
 ## 验证基线
 

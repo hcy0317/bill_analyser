@@ -181,6 +181,54 @@ describe('useTransactionsStore.recognizeReceiptImage', () => {
         expect(result.provenance.model).toBeUndefined();
     });
 
+    test('normalizes receipt transaction draft auto-fill and candidate fields', async () => {
+        mockRecognizeReceiptImage.mockResolvedValue({
+            data: {
+                success: true,
+                result: {
+                    amount: 18.5,
+                    trade_time: '2026-04-01T08:30:00Z',
+                    description: 'Coffee',
+                    payment_platform: 'wechat_pay',
+                    provenance: { provider: 'local_json_ocr', request_id: 'req-2' },
+                    confidence: 0.88,
+                    draft: {
+                        auto_fill: {
+                            type: { value: 'expense', confidence: 0.9, reason: 'payment keyword', evidence: ['支付'] },
+                            amount: { value: 18.5, confidence: 0.95, reason: 'largest amount', evidence: ['18.50'], unit: 'yuan' },
+                            category_id: { value: 900, confidence: 0.92, reason: 'rule', evidence: ['coffee'], label: 'Food / Coffee' },
+                            source_account_id: { value: '1001', confidence: 0.88, reason: 'alias', evidence: ['wechat'] },
+                            tag_ids: { value: [77, '88'], confidence: 0.82, reason: 'tags', evidence: ['coffee'] }
+                        },
+                        candidates: {
+                            category_id: [
+                                { value: '901', confidence: 0.62, reason: 'name', evidence: ['latte'], label: 'Food / Drink' }
+                            ],
+                            source_account_id: [
+                                { value: 1002, confidence: 0.58, reason: 'alias', evidence: ['pay'] }
+                            ],
+                            tag_ids: [
+                                { value: ['99'], confidence: 0.6, reason: 'tag', evidence: ['receipt'] }
+                            ]
+                        }
+                    }
+                }
+            }
+        });
+
+        const store = useTransactionsStore();
+        const result = await store.recognizeReceiptImage({ imageFile: fakeFile() });
+
+        expect(result.draft?.autoFill.type?.value).toBe('expense');
+        expect(result.draft?.autoFill.amount).toMatchObject({ value: 18.5, unit: 'yuan' });
+        expect(result.draft?.autoFill.categoryId).toMatchObject({ value: '900', label: 'Food / Coffee' });
+        expect(result.draft?.autoFill.sourceAccountId?.value).toBe('1001');
+        expect(result.draft?.autoFill.tagIds?.value).toStrictEqual(['77', '88']);
+        expect(result.draft?.candidates.categoryId?.[0]).toMatchObject({ value: '901', label: 'Food / Drink' });
+        expect(result.draft?.candidates.sourceAccountId?.[0]).toMatchObject({ value: '1002' });
+        expect(result.draft?.candidates.tagIds?.[0]).toMatchObject({ value: ['99'] });
+    });
+
     test('rejects with unknown when payload missing success flag', async () => {
         mockRecognizeReceiptImage.mockResolvedValue({ data: { success: false } });
 

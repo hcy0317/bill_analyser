@@ -653,6 +653,131 @@ async fn import_db_runtime_owns_receipt_ocr_recognition_tesseract_payload(
         body["result"]["raw_provider_response"]["engine"],
         "tesseract"
     );
+    assert_eq!(
+        body["result"]["draft"]["auto_fill"]["amount"]["unit"],
+        "yuan"
+    );
+    assert_eq!(
+        body["result"]["draft"]["auto_fill"]["type"]["value"],
+        "expense"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn import_db_runtime_owns_receipt_ocr_recognition_local_json_payload(
+) -> Result<(), Box<dyn Error>> {
+    let _env_guard = OCR_ENV_LOCK.lock().await;
+    clear_fake_ocr_env();
+    let fixture = RuntimeFixture::new().await?;
+    let runtime = runtime_for(fixture.db_path())?;
+    seed_import_intelligence_tables(&runtime)?;
+    runtime.connection().execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            display_order INTEGER DEFAULT 0,
+            hidden INTEGER DEFAULT 0
+        );
+        INSERT INTO tags(id, user_id, name, display_order, hidden)
+        VALUES (77, 42, '咖啡', 0, 0);
+        ",
+    )?;
+    let app = runtime_router(&fixture);
+    let fixture_json = fixture._temp_dir.path().join("ocr-lines.json");
+    fs::write(
+        &fixture_json,
+        json!({
+            "model": "fake-paddleocr",
+            "lines": [
+                {"text": "支付宝", "score": 0.96, "box": [[0, 0], [10, 0], [10, 10], [0, 10]]},
+                {"text": "付款方式 支付宝余额", "score": 0.95},
+                {"text": "商品: 瑞幸咖啡 拿铁", "score": 0.94},
+                {"text": "付款金额 12.34", "score": 0.98},
+                {"text": "2025-01-02 10:30", "score": 0.93}
+            ]
+        })
+        .to_string(),
+    )?;
+    let script = write_fake_local_json_ocr_script(fixture._temp_dir.path())?;
+    env::set_var("BILL_ANALYSER_RUST_OCR_LOCAL_JSON_FIXTURE", &fixture_json);
+    configure_fake_local_json_ocr_command(&script);
+    env::set_var("BILL_ANALYSER_RUST_OCR_LOCAL_JSON_TIMEOUT_MS", "1000");
+
+    let put_config = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::PUT)
+                .uri("/api/ml/receipt-recognition/config")
+                .header("content-type", "application/json")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from(
+                    json!({"provider": "local_json_ocr", "lang": "eng"}).to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(put_config.status(), StatusCode::OK);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/ml/receipt-recognition")
+                .header("content-type", "image/png")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from("fake-image-bytes"))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    clear_fake_ocr_env();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    assert_eq!(body["success"], true);
+    assert_eq!(body["result"]["provenance"]["provider"], "local_json_ocr");
+    assert_eq!(body["result"]["provenance"]["model"], "fake-paddleocr");
+    assert_eq!(
+        body["result"]["draft"]["auto_fill"]["category_id"]["value"],
+        "900"
+    );
+    assert_eq!(
+        body["result"]["draft"]["auto_fill"]["source_account_id"]["value"],
+        "1001"
+    );
+    assert_eq!(
+        body["result"]["draft"]["auto_fill"]["tag_ids"]["value"],
+        json!(["77"])
+    );
+
+    fs::write(&fixture_json, "not json")?;
+    env::set_var("BILL_ANALYSER_RUST_OCR_LOCAL_JSON_FIXTURE", &fixture_json);
+    configure_fake_local_json_ocr_command(&script);
+    env::set_var("BILL_ANALYSER_RUST_OCR_LOCAL_JSON_TIMEOUT_MS", "1000");
+    let malformed = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/ml/receipt-recognition")
+                .header("content-type", "image/png")
+                .header("x-user-id", "51")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::from("fake-image-bytes"))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    clear_fake_ocr_env();
+    assert_eq!(malformed.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let malformed_body = read_json(malformed).await;
+    assert_eq!(malformed_body["errorCode"], "parse_error");
     Ok(())
 }
 
@@ -5012,11 +5137,64 @@ fn configure_fake_tesseract_command(script: &Path) {
     }
 }
 
-fn clear_fake_tesseract_env() {
+fn write_fake_local_json_ocr_script(dir: &Path) -> Result<std::path::PathBuf, Box<dyn Error>> {
+    #[cfg(windows)]
+    {
+        let script = dir.join("fake-local-json-ocr.cmd");
+        fs::write(
+            &script,
+            "@echo off\r\ntype \"%BILL_ANALYSER_RUST_OCR_LOCAL_JSON_FIXTURE%\"\r\n",
+        )?;
+        Ok(script)
+    }
+    #[cfg(not(windows))]
+    {
+        let script = dir.join("fake-local-json-ocr.sh");
+        fs::write(
+            &script,
+            "#!/bin/sh\ncat \"$BILL_ANALYSER_RUST_OCR_LOCAL_JSON_FIXTURE\"\n",
+        )?;
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&script)?.permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions)?;
+        Ok(script)
+    }
+}
+
+fn configure_fake_local_json_ocr_command(script: &Path) {
+    #[cfg(windows)]
+    {
+        env::set_var("BILL_ANALYSER_RUST_OCR_LOCAL_JSON_COMMAND", "cmd");
+        env::set_var(
+            "BILL_ANALYSER_RUST_OCR_LOCAL_JSON_COMMAND_ARGS",
+            format!("/C;{}", script.display()),
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        env::set_var("BILL_ANALYSER_RUST_OCR_LOCAL_JSON_COMMAND", "sh");
+        env::set_var(
+            "BILL_ANALYSER_RUST_OCR_LOCAL_JSON_COMMAND_ARGS",
+            script.display().to_string(),
+        );
+    }
+}
+
+fn clear_fake_ocr_env() {
     env::remove_var("BILL_ANALYSER_RUST_OCR_FIXTURE_TEXT");
     env::remove_var("BILL_ANALYSER_RUST_OCR_TESSERACT_COMMAND");
     env::remove_var("BILL_ANALYSER_RUST_OCR_TESSERACT_COMMAND_ARGS");
     env::remove_var("BILL_ANALYSER_RUST_OCR_TIMEOUT_MS");
+    env::remove_var("BILL_ANALYSER_RUST_OCR_LOCAL_JSON_FIXTURE");
+    env::remove_var("BILL_ANALYSER_RUST_OCR_LOCAL_JSON_COMMAND");
+    env::remove_var("BILL_ANALYSER_RUST_OCR_LOCAL_JSON_COMMAND_ARGS");
+    env::remove_var("BILL_ANALYSER_RUST_OCR_LOCAL_JSON_INPUT_MODE");
+    env::remove_var("BILL_ANALYSER_RUST_OCR_LOCAL_JSON_TIMEOUT_MS");
+}
+
+fn clear_fake_tesseract_env() {
+    clear_fake_ocr_env();
 }
 
 async fn read_json(response: axum::response::Response) -> Value {

@@ -100,6 +100,20 @@
                                         v-model="transaction.name"
                                     />
                                 </v-col>
+                                <v-col cols="12" v-if="receiptDraftCandidateHints.length">
+                                    <v-alert type="info" variant="tonal" density="comfortable" class="pa-3">
+                                        <div class="d-flex flex-wrap ga-2">
+                                            <v-chip size="small"
+                                                    variant="tonal"
+                                                    class="cursor-pointer"
+                                                    :key="candidate.id"
+                                                    v-for="candidate in receiptDraftCandidateHints"
+                                                    @click="applyReceiptDraftCandidate(candidate)">
+                                                {{ `${tt(candidate.titleKey)}: ${getReceiptDraftCandidateDisplayValue(candidate.field)}` }}
+                                            </v-chip>
+                                        </div>
+                                    </v-alert>
+                                </v-col>
                                 <v-col cols="12" :md="transaction.type === TransactionType.Transfer || transaction.type === TransactionType.Investment ? 6 : 12">
                                     <amount-input class="transaction-edit-amount font-weight-bold"
                                                   :color="sourceAmountColor"
@@ -709,6 +723,13 @@ import {
 } from '@/lib/category.ts';
 import { type SetTransactionOptions, setTransactionModelByTransaction } from '@/lib/transaction.ts';
 import {
+    type ReceiptDraftCandidateHint,
+    applyReceiptDraftAutoFillToTransaction,
+    applyReceiptDraftFieldToTransaction,
+    buildReceiptDraftCandidateHints,
+    getReceiptDraftCandidateDisplayValue
+} from '@/lib/receiptDraft.ts';
+import {
     isTransactionPicturesEnabled,
     getMapProvider
 } from '@/lib/server_settings.ts';
@@ -833,6 +854,7 @@ const geoMenuState = ref<boolean>(false);
 const tagSearchContent = ref<string>('');
 const removingPictureId = ref<string>('');
 const recognizingPicture = ref<boolean>(false);
+const receiptDraftCandidateHints = ref<ReceiptDraftCandidateHint[]>([]);
 const addingDefaultCategories = ref<boolean>(false);
 const loadingRecurringCandidates = ref<boolean>(false);
 const recurringBindingSubmitting = ref<boolean>(false);
@@ -1146,6 +1168,7 @@ function open(options: TransactionEditOptions): Promise<TransactionEditResponse 
     setGeoLocationByClickMap.value = false;
     originalTransactionEditable.value = false;
     noTransactionDraft.value = options.noTransactionDraft || false;
+    receiptDraftCandidateHints.value = [];
     resetBillRecurringState();
 
     initAmount.value = options.amount;
@@ -1662,21 +1685,17 @@ function shouldRecognizeUploadedPicture(): boolean {
     return props.type === TransactionEditPageType.Transaction && mode.value === TransactionEditPageMode.Add;
 }
 
+function applyReceiptDraftCandidate(candidate: ReceiptDraftCandidateHint): void {
+    if (!applyReceiptDraftFieldToTransaction(transaction.value, candidate.key, candidate.field)) {
+        return;
+    }
+
+    receiptDraftCandidateHints.value = receiptDraftCandidateHints.value.filter(item => item.id !== candidate.id);
+}
+
 function applyReceiptRecognitionResult(result: RecognizedReceiptImageResponse): void {
-    if (typeof result.amount === 'number' && Number.isFinite(result.amount)) {
-        transaction.value.sourceAmount = Math.round(result.amount * 100);
-    }
-
-    if (result.tradeTime) {
-        const parsedMs = Date.parse(result.tradeTime);
-        if (!Number.isNaN(parsedMs)) {
-            transaction.value.time = Math.floor(parsedMs / 1000);
-        }
-    }
-
-    if (result.description) {
-        transaction.value.comment = result.description;
-    }
+    receiptDraftCandidateHints.value = buildReceiptDraftCandidateHints(result.draft);
+    applyReceiptDraftAutoFillToTransaction(transaction.value, result);
 
     if (result.confidence !== null && result.confidence < RECEIPT_IMAGE_LOW_CONFIDENCE_THRESHOLD) {
         snackbar.value?.showMessage('Low confidence recognition, please verify');

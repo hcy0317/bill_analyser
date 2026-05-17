@@ -65,6 +65,19 @@
                 v-if="pageTypeAndMode?.type === TransactionEditPageType.Template && transaction instanceof TransactionTemplate"
             ></f7-list-input>
 
+            <f7-list-item :header="tt('Suggestions')" v-if="receiptDraftCandidateHints.length">
+                <template #footer>
+                    <f7-block class="margin-top-half no-padding no-margin">
+                        <f7-chip class="transaction-edit-tag receipt-draft-candidate"
+                                 :text="`${tt(candidate.titleKey)}: ${getReceiptDraftCandidateDisplayValue(candidate.field)}`"
+                                 :key="candidate.id"
+                                 v-for="candidate in receiptDraftCandidateHints"
+                                 @click="applyReceiptDraftCandidate(candidate)">
+                        </f7-chip>
+                    </f7-block>
+                </template>
+            </f7-list-item>
+
             <f7-list-item
                 class="transaction-edit-amount"
                 link="#" no-chevron
@@ -581,6 +594,13 @@ import {
     localizedPresetCategoriesToTransactionCategoryCreateWithSubCategories
 } from '@/lib/category.ts';
 import { setTransactionModelByTransaction } from '@/lib/transaction.ts';
+import {
+    type ReceiptDraftCandidateHint,
+    applyReceiptDraftAutoFillToTransaction,
+    applyReceiptDraftFieldToTransaction,
+    buildReceiptDraftCandidateHints,
+    getReceiptDraftCandidateDisplayValue
+} from '@/lib/receiptDraft.ts';
 import { getMapProvider, isTransactionPicturesEnabled } from '@/lib/server_settings.ts';
 import logger from '@/lib/logger.ts';
 
@@ -689,6 +709,7 @@ const showGeoLocationMapSheet = ref<boolean>(false);
 const showTransactionTagSheet = ref<boolean>(false);
 const addingDefaultCategories = ref<boolean>(false);
 const recognizingPicture = ref<boolean>(false);
+const receiptDraftCandidateHints = ref<ReceiptDraftCandidateHint[]>([]);
 const showTransactionPictures = ref<boolean>(pageTypeAndMode?.type === TransactionEditPageType.Transaction
     && (pageTypeAndMode?.mode === TransactionEditPageMode.Add || pageTypeAndMode?.mode === TransactionEditPageMode.Edit)
     && isTransactionPicturesEnabled());
@@ -978,6 +999,7 @@ function init(): void {
     }
 
     loading.value = true;
+    receiptDraftCandidateHints.value = [];
 
     const promises: Promise<unknown>[] = [
         accountsStore.loadAllAccounts({ force: false }),
@@ -1303,21 +1325,17 @@ function shouldRecognizeUploadedPicture(): boolean {
         && mode.value === TransactionEditPageMode.Add;
 }
 
+function applyReceiptDraftCandidate(candidate: ReceiptDraftCandidateHint): void {
+    if (!applyReceiptDraftFieldToTransaction(transaction.value, candidate.key, candidate.field)) {
+        return;
+    }
+
+    receiptDraftCandidateHints.value = receiptDraftCandidateHints.value.filter(item => item.id !== candidate.id);
+}
+
 function applyReceiptRecognitionResult(result: RecognizedReceiptImageResponse): void {
-    if (typeof result.amount === 'number' && Number.isFinite(result.amount)) {
-        transaction.value.sourceAmount = Math.round(result.amount * 100);
-    }
-
-    if (result.tradeTime) {
-        const parsedMs = Date.parse(result.tradeTime);
-        if (!Number.isNaN(parsedMs)) {
-            transaction.value.time = Math.floor(parsedMs / 1000);
-        }
-    }
-
-    if (result.description) {
-        transaction.value.comment = result.description;
-    }
+    receiptDraftCandidateHints.value = buildReceiptDraftCandidateHints(result.draft);
+    applyReceiptDraftAutoFillToTransaction(transaction.value, result);
 
     if (result.confidence !== null && result.confidence < RECEIPT_IMAGE_LOW_CONFIDENCE_THRESHOLD) {
         showToast('Low confidence recognition, please verify');

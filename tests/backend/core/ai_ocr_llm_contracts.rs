@@ -6,12 +6,14 @@ use bill_analyser_core::ai_ocr_llm::{
     build_llm_provider_config, build_llm_rule_expression_synthesis_prompt,
     build_llm_rule_induction_prompt, build_ocr_config_response_payload,
     build_ocr_config_success_response, build_ocr_error_response,
-    build_ocr_recognition_success_response, build_runtime_llm_config_from_saved_config,
-    build_unknown_ocr_provider_response, copy_runtime_llm_config, llm_available_providers,
-    llm_review_endpoint_requires_live_provider, normalize_llm_advanced_settings,
-    normalize_llm_provider_name, normalize_ocr_config, ocr_available_providers_with_disabled,
-    ocr_error_http_status, parse_llm_json_array_response, parse_payment_screenshot_text,
-    render_llm_prompt_template, safe_llm_config_payload, OcrProviderTextResult,
+    build_ocr_recognition_success_response, build_ocr_recognition_success_response_with_context,
+    build_runtime_llm_config_from_saved_config, build_unknown_ocr_provider_response,
+    copy_runtime_llm_config, llm_available_providers, llm_review_endpoint_requires_live_provider,
+    normalize_llm_advanced_settings, normalize_llm_provider_name, normalize_ocr_config,
+    ocr_available_providers_with_disabled, ocr_error_http_status, parse_llm_json_array_response,
+    parse_payment_screenshot_text, render_llm_prompt_template, safe_llm_config_payload,
+    OcrProviderTextLine, OcrProviderTextResult, ReceiptDraftAccount, ReceiptDraftCategory,
+    ReceiptDraftCategoryRule, ReceiptDraftContext, ReceiptDraftTag,
 };
 use serde_json::{json, Value};
 use std::env;
@@ -54,14 +56,14 @@ fn ocr_config_and_disabled_safe_errors_match_receipt_routes() {
     assert_eq!(configured.lang, "eng+chi_sim");
     assert_eq!(
         ocr_available_providers_with_disabled(),
-        vec!["disabled", "cloud_stub", "tesseract"]
+        vec!["disabled", "cloud_stub", "tesseract", "local_json_ocr"]
     );
     assert_eq!(
         build_ocr_config_response_payload(&configured),
         json!({
             "provider": "tesseract",
             "lang": "eng+chi_sim",
-            "available_providers": ["disabled", "cloud_stub", "tesseract"],
+            "available_providers": ["disabled", "cloud_stub", "tesseract", "local_json_ocr"],
             "configured": true,
         })
     );
@@ -161,6 +163,7 @@ fn ocr_recognition_success_response_matches_receipt_route_payload() {
             "engine": "tesseract",
             "lang": "chi_sim+eng",
         }),
+        lines: Vec::new(),
     };
     let response =
         build_ocr_recognition_success_response("tesseract", &provider_result, "rust-ocr-7");
@@ -184,6 +187,93 @@ fn ocr_recognition_success_response_matches_receipt_route_payload() {
         "tesseract"
     );
     assert_eq!(response.body["result"]["confidence"], 1.0);
+    assert_eq!(
+        response.body["result"]["draft"]["auto_fill"]["amount"]["unit"],
+        "yuan"
+    );
+    assert_eq!(
+        response.body["result"]["draft"]["auto_fill"]["type"]["value"],
+        "expense"
+    );
+    assert!(response.body["result"]["draft"]["auto_fill"]["category_id"].is_null());
+}
+
+#[test]
+fn ocr_recognition_success_response_maps_taxonomy_to_auto_fill_and_candidates() {
+    let provider_result = OcrProviderTextResult {
+        text: "支付宝\n付款方式 招商银行\n商品: 瑞幸咖啡 拿铁\n付款金额 12.34\n2025-01-02 10:30"
+            .to_string(),
+        confidence: 0.72,
+        model: "local-json-fixture".to_string(),
+        raw_provider_response: json!({"engine": "local_json_ocr"}),
+        lines: vec![
+            OcrProviderTextLine {
+                text: "付款方式 招商银行".to_string(),
+                confidence: Some(0.96),
+                bbox: None,
+            },
+            OcrProviderTextLine {
+                text: "商品: 瑞幸咖啡 拿铁".to_string(),
+                confidence: Some(0.95),
+                bbox: None,
+            },
+        ],
+    };
+    let context = ReceiptDraftContext {
+        categories: vec![
+            ReceiptDraftCategory {
+                id: "10".to_string(),
+                type_code: 3,
+                label: "餐饮 / 咖啡".to_string(),
+            },
+            ReceiptDraftCategory {
+                id: "11".to_string(),
+                type_code: 3,
+                label: "购物 / 超市".to_string(),
+            },
+        ],
+        category_rules: vec![ReceiptDraftCategoryRule {
+            id: "501".to_string(),
+            category_id: "10".to_string(),
+            category_type: 3,
+            label: "餐饮 / 咖啡".to_string(),
+            priority: 1,
+            rule_expression: "OR:瑞幸|拿铁".to_string(),
+            regex_enabled: false,
+        }],
+        accounts: vec![ReceiptDraftAccount {
+            id: "200".to_string(),
+            name: "招商银行".to_string(),
+            aliases: vec!["招商银行".to_string(), "招行".to_string()],
+        }],
+        tags: vec![ReceiptDraftTag {
+            id: "7".to_string(),
+            name: "咖啡".to_string(),
+        }],
+    };
+    let response = build_ocr_recognition_success_response_with_context(
+        "local_json_ocr",
+        &provider_result,
+        "rust-ocr-8",
+        &context,
+    );
+    assert_eq!(response.status_code, 200);
+    assert_eq!(
+        response.body["result"]["draft"]["auto_fill"]["category_id"]["value"],
+        "10"
+    );
+    assert_eq!(
+        response.body["result"]["draft"]["auto_fill"]["source_account_id"]["value"],
+        "200"
+    );
+    assert_eq!(
+        response.body["result"]["draft"]["auto_fill"]["tag_ids"]["value"],
+        json!(["7"])
+    );
+    assert_eq!(
+        response.body["result"]["draft"]["auto_fill"]["amount"]["unit"],
+        "yuan"
+    );
 }
 
 #[test]

@@ -19,7 +19,7 @@ use bill_analyser_core::{
     build_llm_contract_error_response, build_llm_import_preview_recommendation_prompt,
     build_llm_provider_config, build_llm_rule_expression_synthesis_prompt,
     build_llm_rule_induction_prompt, build_ocr_config_success_response, build_ocr_error_response,
-    build_ocr_recognition_success_response, build_unknown_ocr_provider_response,
+    build_ocr_recognition_success_response_with_context, build_unknown_ocr_provider_response,
     category_rules::match_rule_expression, coerce_preview_selected_value,
     composite_hash_from_features, copy_runtime_llm_config, import_preview_index_success,
     import_preview_page_success, import_session_cancel_missing_response,
@@ -30,9 +30,10 @@ use bill_analyser_core::{
     preview_state_conflict_response, render_llm_prompt_template, safe_llm_config_payload,
     score_learning_rule_similarity, AiRouteResponse, ImportPreviewIndexData, ImportPreviewPageData,
     ImportSessionSummary, ImportStageConfirmData, ImportStageDedupData, ImportStageParseData,
-    ImportV2RouteResponse, LlmProviderConfigContract, OcrConfigContract, OcrProviderTextResult,
-    SmartDeduplicationEngine, UserId, IMPORT_PREVIEW_SORT_KEYS, LLM_SYSTEM_PROMPT,
-    OCR_DISABLED_PROVIDER_NAME,
+    ImportV2RouteResponse, LlmProviderConfigContract, OcrConfigContract, OcrProviderTextLine,
+    OcrProviderTextResult, ReceiptDraftAccount, ReceiptDraftCategory, ReceiptDraftCategoryRule,
+    ReceiptDraftContext, ReceiptDraftTag, SmartDeduplicationEngine, UserId,
+    IMPORT_PREVIEW_SORT_KEYS, LLM_SYSTEM_PROMPT, OCR_DISABLED_PROVIDER_NAME,
 };
 use bill_analyser_db::{
     accept_llm_candidate, activate_llm_config, apply_preview_llm_recommendation,
