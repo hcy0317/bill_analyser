@@ -3,26 +3,28 @@ use std::{collections::BTreeSet, error::Error};
 use bill_analyser_core::{SmartDeduplicationEngine, UserId};
 use bill_analyser_db::{
     apply_preview_learning_decision, apply_preview_llm_recommendation,
-    apply_preview_transfer_decision, batch_update_preview_classification,
-    calculate_import_bill_hash, clear_session_data, confirm_preview_to_bills,
-    count_preview_by_session, create_import_session, dedup_bills_from_parser_templates,
-    get_import_annotation_samples, get_import_session, get_llm_memory_events,
-    get_parser_templates_by_session, get_preview_bill_by_id, get_preview_by_ids,
-    get_preview_by_session, get_preview_filter_index_by_session, get_preview_page_by_session,
-    get_unprocessed_templates_for_dedup, init_import_staging_schema, insert_parser_templates_batch,
-    insert_preview_bill, insert_preview_bills_batch,
+    apply_preview_patches_preserving_selection, apply_preview_transfer_decision,
+    batch_update_preview_classification, calculate_import_bill_hash, clear_session_data,
+    confirm_preview_to_bills, count_preview_by_session, create_import_session,
+    dedup_bills_from_parser_templates, get_import_annotation_samples, get_import_session,
+    get_llm_memory_events, get_parser_templates_by_session, get_preview_bill_by_id,
+    get_preview_by_ids, get_preview_by_session, get_preview_filter_index_by_session,
+    get_preview_page_by_session, get_unprocessed_templates_for_dedup, init_import_staging_schema,
+    insert_parser_templates_batch, insert_preview_bill, insert_preview_bills_batch,
     mark_unprocessed_parser_templates_processed_for_session,
     parser_template_drafts_from_standard_bills, preview_drafts_from_dedup_bills,
-    reset_session_preview_selection, review_preview_llm_recommendation,
-    save_import_annotation_samples, stage_import_parser_templates, update_import_session_status,
-    update_parser_template_status, update_preview_bill, update_preview_bills_batch,
-    update_preview_recurring_match_decision, update_preview_selection, ImportAnnotationSampleDraft,
-    ImportParserTemplateDraft, ImportPreviewClassificationUpdate, ImportPreviewDecision,
-    ImportPreviewDraft, ImportPreviewExpectedState, ImportPreviewLearningApply,
-    ImportPreviewLlmApplyRequest, ImportPreviewLlmReviewRequest, ImportPreviewLlmSuggestion,
+    query_preview_page_by_session, reset_session_preview_selection,
+    review_preview_llm_recommendation, save_import_annotation_samples,
+    stage_import_parser_templates, update_import_session_status, update_parser_template_status,
+    update_preview_bill, update_preview_bills_batch, update_preview_recurring_match_decision,
+    update_preview_selection, ImportAnnotationSampleDraft, ImportParserTemplateDraft,
+    ImportPreviewClassificationUpdate, ImportPreviewDecision, ImportPreviewDraft,
+    ImportPreviewExpectedState, ImportPreviewLearningApply, ImportPreviewLlmApplyRequest,
+    ImportPreviewLlmReviewRequest, ImportPreviewLlmSuggestion, ImportPreviewPageRequest,
     ImportPreviewPatch, ImportPreviewPatchField, ImportPreviewPatchValue,
-    ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate, ImportSessionDraft,
-    ImportSessionStatusUpdate, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
+    ImportPreviewQueryFilters, ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate,
+    ImportSessionDraft, ImportSessionStatusUpdate, SqliteConnectionConfig, SqliteDbPath,
+    SqliteRuntime,
 };
 use bill_analyser_parsers::{post_process_raw_bills, RawBill};
 use serde_json::json;
@@ -350,9 +352,438 @@ fn preview_batch_insert_read_page_selection_and_clear_match_staging_semantics(
     assert_eq!(cleared.parser_count, 1);
     assert_eq!(cleared.preview_count, 2);
     assert_eq!(cleared.annotation_count, 1);
+    assert_eq!(cleared.session_count, 1);
     assert_eq!(
         count_preview_by_session(runtime.connection(), "session-preview", user_id(42), false)?,
         0
+    );
+    assert!(get_import_session(runtime.connection(), "session-preview", user_id(42))?.is_none());
+    Ok(())
+}
+
+#[test]
+fn preview_query_filters_sort_and_metadata_are_session_global() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("preview_query.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: "session-query".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+
+    let mut first = preview_draft("2026-05-01 09:00:00", 30.0, "alpha coffee");
+    first.preview_sub_category = "咖啡".to_string();
+    first.preview_source_account_id = Some(1001);
+    first.preview_parser_tags = Some(json!(["parser:alipay", "channel:wallet"]));
+    first.preview_matching_feedback = json!({
+        "dedup": {"type": "remaining"},
+        "annotation": {"status": "invalid"},
+        "learning": {"review_status": "auto_applied"}
+    });
+    let mut second = preview_draft("2026-05-02 09:00:00", 10.0, "beta lunch target");
+    second.preview_sub_category = "餐饮".to_string();
+    second.preview_source_account_id = Some(1002);
+    second.preview_parser_tags = Some(json!(["parser:wechat", "channel:wallet"]));
+    second.preview_matching_feedback = json!({
+        "dedup": {"type": "remaining"},
+        "annotation": {"status": "valid"},
+        "parser": {"parser_id": "wechat"}
+    });
+    let mut third = preview_draft("2026-05-03 09:00:00", 20.0, "target groceries");
+    third.preview_sub_category = "购物".to_string();
+    third.preview_source_account_id = Some(1003);
+    third.preview_parser_tags = Some(json!(["parser:cmbc", "channel:bank"]));
+    third.preview_matching_feedback = json!({
+        "dedup": {"type": "transfer"},
+        "transfer": {"review_status": "pending"}
+    });
+    insert_preview_bills_batch(
+        runtime.connection_mut(),
+        "session-query",
+        user_id(42),
+        &[first, second, third],
+    )?;
+
+    let page = query_preview_page_by_session(
+        runtime.connection(),
+        "session-query",
+        user_id(42),
+        &ImportPreviewPageRequest {
+            page: 2,
+            page_size: 1,
+            sort_by: "sourceAmount".to_string(),
+            sort_direction: "asc".to_string(),
+            filters: ImportPreviewQueryFilters {
+                description: Some("target".to_string()),
+                tag: Some("channel:wallet".to_string()),
+                selected_only: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    )?;
+    assert_eq!(page.total, 1);
+    assert!(
+        page.rows.is_empty(),
+        "page 2 is empty but total is session-global"
+    );
+    assert_eq!(page.metadata.counts.total, 1);
+    assert_eq!(page.metadata.facets.tags[0].value, "channel:wallet");
+
+    let sorted = query_preview_page_by_session(
+        runtime.connection(),
+        "session-query",
+        user_id(42),
+        &ImportPreviewPageRequest {
+            page: 1,
+            page_size: 2,
+            sort_by: "sourceAmount".to_string(),
+            sort_direction: "asc".to_string(),
+            filters: ImportPreviewQueryFilters {
+                description: Some("target".to_string()),
+                selected_only: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    )?;
+    assert_eq!(sorted.total, 2);
+    assert_eq!(sorted.rows[0].preview_description, "beta lunch target");
+    assert_eq!(sorted.rows[1].preview_description, "target groceries");
+    assert_eq!(sorted.metadata.counts.selected, 3);
+    assert_eq!(sorted.metadata.counts.selected_invalid, 2);
+    assert_eq!(
+        sorted.metadata.counts.annotations.get("needs-review"),
+        Some(&1)
+    );
+    assert_eq!(
+        sorted.metadata.counts.annotations.get("no-issues"),
+        Some(&1)
+    );
+    assert!(sorted.metadata.counts.signals.contains_key("dedup"));
+
+    let annotation = query_preview_page_by_session(
+        runtime.connection(),
+        "session-query",
+        user_id(42),
+        &ImportPreviewPageRequest {
+            page: 1,
+            page_size: 10,
+            filters: ImportPreviewQueryFilters {
+                annotation: Some("invalid".to_string()),
+                selected_only: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    )?;
+    assert_eq!(annotation.total, 1);
+    assert_eq!(annotation.rows[0].preview_description, "alpha coffee");
+
+    let signal = query_preview_page_by_session(
+        runtime.connection(),
+        "session-query",
+        user_id(42),
+        &ImportPreviewPageRequest {
+            page: 1,
+            page_size: 10,
+            filters: ImportPreviewQueryFilters {
+                signal: Some("transfer".to_string()),
+                selected_only: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    )?;
+    assert_eq!(signal.total, 1);
+    assert_eq!(signal.rows[0].preview_description, "target groceries");
+
+    let needs_review = query_preview_page_by_session(
+        runtime.connection(),
+        "session-query",
+        user_id(42),
+        &ImportPreviewPageRequest {
+            page: 1,
+            page_size: 10,
+            filters: ImportPreviewQueryFilters {
+                annotation: Some("needs-review".to_string()),
+                account: Some("__invalid__".to_string()),
+                selected_only: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    )?;
+    assert_eq!(needs_review.total, 0);
+    Ok(())
+}
+
+#[test]
+fn preview_query_filter_branches_cover_sql_and_preview_id_paths() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("preview_query_branches.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: "session-query-branches".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+
+    let mut empty = preview_draft("2026-05-01 08:00:00", 1.0, "");
+    empty.preview_type = String::new();
+    empty.preview_main_category = String::new();
+    empty.preview_sub_category = String::new();
+    empty.preview_source_account_id = None;
+    empty.preview_destination_account_id = None;
+    empty.preview_counterparty = String::new();
+    empty.preview_payment_method = String::new();
+    empty.preview_parser_id = String::new();
+    empty.preview_parser_tags = Some(json!([]));
+    empty.dedup_type = None;
+
+    let mut income = preview_draft("2026-05-02 09:00:00", 2.0, "salary target");
+    income.preview_type = "收入".to_string();
+    income.preview_main_category = "收入".to_string();
+    income.preview_sub_category = "工资".to_string();
+    income.preview_source_account_id = Some(1001);
+    income.preview_counterparty = "company".to_string();
+    income.preview_payment_method = "bank".to_string();
+    income.preview_parser_id = "cmbc".to_string();
+    income.preview_parser_tags = Some(json!(["parser:cmbc", "salary"]));
+    income.preview_matching_feedback = json!({
+        "annotation": {"status": "needs_attention"},
+        "learning": {"review_status": "auto_applied"}
+    });
+
+    let mut transfer = preview_draft("2026-05-03 10:00:00", 3.0, "transfer nested");
+    transfer.preview_type = "转账".to_string();
+    transfer.preview_main_category = String::new();
+    transfer.preview_sub_category = String::new();
+    transfer.preview_source_account_id = Some(1002);
+    transfer.preview_destination_account_id = Some(1002);
+    transfer.preview_counterparty = "wallet".to_string();
+    transfer.preview_payment_method = "balance".to_string();
+    transfer.preview_parser_tags = Some(json!(["wallet"]));
+    transfer.dedup_type = Some("platform_bank".to_string());
+    transfer.preview_matching_feedback = json!({
+        "transfer": {"review_status": "pending"},
+        "custom": {"nested": "needle"}
+    });
+
+    let mut investment = preview_draft("2026-05-04 11:00:00", 4.0, "invest memo");
+    investment.preview_type = "投资".to_string();
+    investment.preview_source_account_id = Some(1003);
+    investment.preview_destination_account_id = Some(1004);
+    investment.preview_parser_tags = Some(json!(["fund"]));
+    investment.preview_matching_feedback = json!({"annotation": "manual-review"});
+
+    insert_preview_bills_batch(
+        runtime.connection_mut(),
+        "session-query-branches",
+        user_id(42),
+        &[empty, income, transfer, investment],
+    )?;
+    let previews = get_preview_by_session(
+        runtime.connection(),
+        "session-query-branches",
+        user_id(42),
+        false,
+    )?;
+    let preview_ids = previews.iter().map(|row| row.id).collect::<Vec<_>>();
+
+    for sort_by in [
+        "time",
+        "type",
+        "sourceAmount",
+        "counterparty",
+        "paymentMethod",
+        "comment",
+        "unknown",
+    ] {
+        let sorted = query_preview_page_by_session(
+            runtime.connection(),
+            "session-query-branches",
+            user_id(42),
+            &ImportPreviewPageRequest {
+                page: 1,
+                page_size: 10,
+                sort_by: sort_by.to_string(),
+                sort_direction: "desc".to_string(),
+                preview_ids: preview_ids.clone(),
+                ..Default::default()
+            },
+        )?;
+        assert_eq!(sorted.total, 4);
+    }
+
+    let preview_id_filters = [
+        ImportPreviewQueryFilters {
+            transaction_type: Some("__none__".to_string()),
+            ..Default::default()
+        },
+        ImportPreviewQueryFilters {
+            transaction_type: Some("收入".to_string()),
+            category: Some("工资".to_string()),
+            account: Some("1001".to_string()),
+            tag: Some("salary".to_string()),
+            description: Some("target".to_string()),
+            signal: Some("learning".to_string()),
+            annotation: Some("needs_attention".to_string()),
+            ..Default::default()
+        },
+        ImportPreviewQueryFilters {
+            category: Some("__invalid__".to_string()),
+            account: Some("__invalid__".to_string()),
+            signal: Some("transfer".to_string()),
+            annotation: Some("needs-review".to_string()),
+            ..Default::default()
+        },
+        ImportPreviewQueryFilters {
+            category: Some("__none__".to_string()),
+            account: Some("__none__".to_string()),
+            tag: Some("__none__".to_string()),
+            description: Some("__none__".to_string()),
+            signal: Some("parser".to_string()),
+            annotation: Some("no-issues".to_string()),
+            ..Default::default()
+        },
+        ImportPreviewQueryFilters {
+            signal: Some("needle".to_string()),
+            annotation: Some("missing".to_string()),
+            ..Default::default()
+        },
+    ];
+    for filters in preview_id_filters {
+        let _ = query_preview_page_by_session(
+            runtime.connection(),
+            "session-query-branches",
+            user_id(42),
+            &ImportPreviewPageRequest {
+                page: 1,
+                page_size: 10,
+                preview_ids: preview_ids.clone(),
+                filters,
+                ..Default::default()
+            },
+        )?;
+    }
+
+    let sql_filters = [
+        ImportPreviewQueryFilters {
+            min_datetime: Some("2026-05-02 00:00:00".to_string()),
+            max_datetime: Some("2026-05-04 23:59:59".to_string()),
+            transaction_type: Some("支出".to_string()),
+            category: Some("餐饮".to_string()),
+            account: Some("1003".to_string()),
+            tag: Some("fund".to_string()),
+            description: Some("memo".to_string()),
+            ..Default::default()
+        },
+        ImportPreviewQueryFilters {
+            transaction_type: Some("__invalid__".to_string()),
+            category: Some("__none__".to_string()),
+            account: Some("__none__".to_string()),
+            tag: Some("__none__".to_string()),
+            description: Some("__none__".to_string()),
+            signal: Some("parser".to_string()),
+            ..Default::default()
+        },
+        ImportPreviewQueryFilters {
+            transaction_type: Some("custom-type".to_string()),
+            category: Some("__invalid__".to_string()),
+            account: Some("__invalid__".to_string()),
+            signal: Some("platform_duplicate".to_string()),
+            annotation: Some("no-issues".to_string()),
+            ..Default::default()
+        },
+        ImportPreviewQueryFilters {
+            signal: Some("needle".to_string()),
+            annotation: Some("manual-review".to_string()),
+            ..Default::default()
+        },
+    ];
+    for filters in sql_filters {
+        let _ = query_preview_page_by_session(
+            runtime.connection(),
+            "session-query-branches",
+            user_id(42),
+            &ImportPreviewPageRequest {
+                page: 1,
+                page_size: 2,
+                sort_by: "sourceAmount".to_string(),
+                sort_direction: "desc".to_string(),
+                filters,
+                ..Default::default()
+            },
+        )?;
+    }
+
+    Ok(())
+}
+
+#[test]
+fn preview_partial_patches_preserve_unvisited_selection_state() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("preview_partial_selection.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: "session-partial-selection".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+    insert_preview_bills_batch(
+        runtime.connection_mut(),
+        "session-partial-selection",
+        user_id(42),
+        &[
+            preview_draft("2026-05-01", 1.0, "page one"),
+            preview_draft("2026-05-02", 2.0, "page two"),
+            preview_draft("2026-05-03", 3.0, "page three"),
+        ],
+    )?;
+    let previews = get_preview_by_session(
+        runtime.connection(),
+        "session-partial-selection",
+        user_id(42),
+        false,
+    )?;
+
+    let changed = apply_preview_patches_preserving_selection(
+        runtime.connection_mut(),
+        "session-partial-selection",
+        user_id(42),
+        &[ImportPreviewPatch::new(previews[0].id).with_changes([(
+            ImportPreviewPatchField::Selected,
+            ImportPreviewPatchValue::Bool(false),
+        )])],
+    )?;
+    assert_eq!(changed, 1);
+
+    let selected = get_preview_by_session(
+        runtime.connection(),
+        "session-partial-selection",
+        user_id(42),
+        true,
+    )?;
+    assert_eq!(
+        selected
+            .iter()
+            .map(|preview| preview.preview_description.as_str())
+            .collect::<Vec<_>>(),
+        vec!["page two", "page three"]
     );
     Ok(())
 }
@@ -1679,25 +2110,20 @@ fn confirm_preview_to_bills_inserts_selected_rows_and_marks_session_completed(
         )
     );
 
-    let session = get_import_session(runtime.connection(), "session-confirm", user_id(42))?
-        .expect("session remains visible");
-    assert_eq!(session.status, "completed");
-    assert_eq!(session.total_confirmed, 1);
+    assert!(get_import_session(runtime.connection(), "session-confirm", user_id(42))?.is_none());
+    assert!(
+        get_preview_by_session(runtime.connection(), "session-confirm", user_id(42), false)?
+            .is_empty()
+    );
 
-    let retry = confirm_preview_to_bills(runtime.connection_mut(), "session-confirm", user_id(42))?;
-    assert_eq!(retry.confirmed_count, 1);
-    assert_eq!(retry.duplicate_count, 0);
-    assert!(retry.errors.is_empty());
+    let retry = confirm_preview_to_bills(runtime.connection_mut(), "session-confirm", user_id(42));
+    assert!(retry.is_err());
     let total_after_retry: i64 = runtime.connection().query_row(
         "SELECT COUNT(*) FROM bills WHERE user_id = ?1",
         [42],
         |row| row.get(0),
     )?;
     assert_eq!(total_after_retry, 1);
-    let session_after_retry =
-        get_import_session(runtime.connection(), "session-confirm", user_id(42))?
-            .expect("session remains visible");
-    assert_eq!(session_after_retry.total_confirmed, 1);
     Ok(())
 }
 
@@ -1755,9 +2181,14 @@ fn confirm_preview_to_bills_counts_duplicates_and_continues() -> Result<(), Box<
         |row| row.get(0),
     )?;
     assert_eq!(total, 2);
-    let session = get_import_session(runtime.connection(), "session-duplicate", user_id(42))?
-        .expect("session remains visible");
-    assert_eq!(session.total_confirmed, 1);
+    assert!(get_import_session(runtime.connection(), "session-duplicate", user_id(42))?.is_none());
+    assert!(get_preview_by_session(
+        runtime.connection(),
+        "session-duplicate",
+        user_id(42),
+        false
+    )?
+    .is_empty());
     Ok(())
 }
 
@@ -1886,6 +2317,46 @@ fn import_preview_page_queries_use_ordered_composite_indexes() -> Result<(), Box
             .iter()
             .all(|detail| !detail.contains("TEMP B-TREE")),
         "preview page query should not need a temporary sort: {page_plan:?}"
+    );
+    let filtered_page_plan = query_plan_details(
+        &runtime,
+        "SELECT * FROM bills_preview \
+         WHERE session_id = 'session-large' AND user_id = 42 \
+         AND preview_type = '支出' \
+         AND LOWER(COALESCE(preview_description, '')) LIKE '%target%' \
+         ORDER BY preview_date ASC, id ASC LIMIT 100 OFFSET 0",
+    )?;
+    assert!(
+        filtered_page_plan
+            .iter()
+            .any(|detail| detail.contains("idx_preview_session_user_order")),
+        "filtered preview page query should keep page bounds on the ordered session/user index: {filtered_page_plan:?}"
+    );
+    assert!(
+        filtered_page_plan
+            .iter()
+            .all(|detail| !detail.contains("TEMP B-TREE")),
+        "filtered preview page query should not need a temporary sort: {filtered_page_plan:?}"
+    );
+    let signal_filtered_page_plan = query_plan_details(
+        &runtime,
+        "SELECT * FROM bills_preview \
+         WHERE session_id = 'session-large' AND user_id = 42 \
+         AND (LOWER(COALESCE(dedup_type, '')) LIKE '%transfer%' \
+              OR json_type(CASE WHEN json_valid(COALESCE(preview_matching_feedback_json, '')) THEN preview_matching_feedback_json ELSE '{}' END, '$.transfer') IS NOT NULL) \
+         ORDER BY preview_date ASC, id ASC LIMIT 100 OFFSET 0",
+    )?;
+    assert!(
+        signal_filtered_page_plan
+            .iter()
+            .any(|detail| detail.contains("idx_preview_session_user_order")),
+        "signal-filtered preview page query should still keep page bounds on the ordered session/user index: {signal_filtered_page_plan:?}"
+    );
+    assert!(
+        signal_filtered_page_plan
+            .iter()
+            .all(|detail| !detail.contains("TEMP B-TREE")),
+        "signal-filtered preview page query should not need a temporary sort: {signal_filtered_page_plan:?}"
     );
 
     let preview_index_plan = query_plan_details(

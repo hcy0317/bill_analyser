@@ -132,8 +132,8 @@ describe('import preview server-paged reset guards', () => {
         expect(source).toContain('await fetchPreviewPage(normalizedPage, normalizedPageSize, {');
         expect(source).toContain("logger.error('[三阶段导入-预览分页] Check Data 加载失败:', error);");
         expect(source).toContain("snackbar.value?.showError(`导入失败: ${error}`);");
-        expect(source).toContain('previewIds: sortOptions?.previewIds,');
-        expect(source).toContain('totalCount: sortOptions?.totalCount,');
+        expect(source).toContain('filters: sortOptions?.filters,');
+        expect(source).toContain('appendPreviewPageFilters(searchParams, sortOptions.filters);');
         expect(source).not.toContain('void fetchPreviewPage(1, 10, {');
 
         const pendingIndex = source.indexOf('pendingInitialCheckDataPageRequest.value = {');
@@ -160,5 +160,19 @@ describe('import preview server-paged reset guards', () => {
         expect(resetBlock).toContain('tableSortBy.value = [];');
         expect(resetBlock).toContain("currentSortKey.value = '';");
         expect(resetBlock).toContain("currentSortDirection.value = 'asc';");
+    });
+
+    test('check-data server paging no longer fetches a full preview index before filtering', () => {
+        const parentSource = readSource('src/views/desktop/transactions/import/ImportDialog.vue');
+        const tabSource = readSource('src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue');
+
+        expect(parentSource).toContain(':preview-metadata="previewMetadata"');
+        expect(parentSource).toContain('preserve_unpatched_selection: serverPagedPreviewMode.value');
+        expect(tabSource).toContain('buildServerPreviewQueryFilters()');
+        expect(tabSource).toContain("emit('requestPage', normalizedPage, normalizedPageSize, getCurrentServerPagedRequestOptions());");
+        expect(tabSource).toContain('return serverPagedMode.value ? buildTrackedPreviewUpdates() : buildSelectedPreviewUpdates();');
+        expect(tabSource).toContain('previewMetadata.value.counts?.selected_invalid');
+        expect(tabSource).not.toContain('/index');
+        expect(tabSource).not.toContain('loadServerPagedPreviewIndex');
     });
 });

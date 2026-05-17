@@ -50,10 +50,6 @@ fn is_sqlite_constraint_error(error: &rusqlite::Error) -> bool {
     )
 }
 
-fn i64_to_usize_saturating(value: i64) -> usize {
-    usize::try_from(value.max(0)).unwrap_or(usize::MAX)
-}
-
 fn usize_to_i64_saturating(value: usize) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }

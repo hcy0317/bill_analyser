@@ -864,6 +864,10 @@ pub struct ImportPreviewPageData {
     pub total: usize,
     pub page: usize,
     pub page_size: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

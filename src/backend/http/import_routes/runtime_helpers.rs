@@ -101,6 +101,7 @@ impl LearningCenterListQuery {
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct PreviewPageQuery {
     page: Option<usize>,
     page_size: Option<usize>,
@@ -118,6 +119,21 @@ pub struct PreviewPageQuery {
     selected_only: Option<bool>,
     #[serde(rename = "selectedOnly")]
     selected_only_camel: Option<bool>,
+    min_datetime: Option<String>,
+    #[serde(rename = "minDatetime")]
+    min_datetime_camel: Option<String>,
+    max_datetime: Option<String>,
+    #[serde(rename = "maxDatetime")]
+    max_datetime_camel: Option<String>,
+    transaction_type: Option<String>,
+    #[serde(rename = "transactionType")]
+    transaction_type_camel: Option<String>,
+    category: Option<String>,
+    account: Option<String>,
+    tag: Option<String>,
+    signal: Option<String>,
+    annotation: Option<String>,
+    description: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]

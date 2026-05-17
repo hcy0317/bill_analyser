@@ -8,7 +8,7 @@
 - schema 幂等初始化与 legacy 约束补齐。
 - bills、accounts、categories、tags、templates、budgets、statistics、matching、backup、auth、import staging、LLM/OCR settings 等 repository；其中 auth repository 已按 user/session/profile/cloud settings/2FA/log/row helper 拆分，auth registration 已按默认 seed/注册/分类/账户拆分，import staging repository 已按 session/template/preview/decision/LLM memory/confirm/row helper 拆分，matching repository 已按 schema/actions/candidate query/reconciliation/serialization/helper 拆分，budget repository 已按 CRUD/import/execution/history/forecast/hierarchy/row helper 拆分。
 - user-scope 查询与写入。
-- 导入 session/preview staging 和 confirm 事务。
+- 导入 session/template/preview staging 只保存当前导入过程所需临时数据，preview page 查询负责按条件分页和返回轻量 facets/counts；confirm、cancel、失败后新建 session 会清理对应用户的 import staging，未完成导入不作为可续传数据保留。
 
 ## 数据流
 

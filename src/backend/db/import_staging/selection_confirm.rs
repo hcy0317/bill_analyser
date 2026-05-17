@@ -52,6 +52,23 @@ pub fn replace_preview_selection_with_patches(
     })
 }
 
+pub fn apply_preview_patches_preserving_selection(
+    connection: &mut Connection,
+    session_id: &str,
+    user_id: UserId,
+    patches: &[ImportPreviewPatch],
+) -> DbResult<usize> {
+    run_transaction(connection, |tx| {
+        let mut updated_count = 0;
+        for patch in patches {
+            if execute_preview_patch(tx, session_id, user_id, patch)? > 0 {
+                updated_count += 1;
+            }
+        }
+        Ok(updated_count)
+    })
+}
+
 pub fn save_import_annotation_samples(
     connection: &mut Connection,
     session_id: &str,
@@ -143,10 +160,15 @@ pub fn clear_session_data(
             "DELETE FROM import_annotation_samples WHERE session_id = ?1 AND user_id = ?2",
             params![session_id, user_id],
         )?;
+        let session_count = tx.execute(
+            "DELETE FROM import_sessions WHERE session_id = ?1 AND user_id = ?2",
+            params![session_id, user_id],
+        )?;
         Ok(ClearSessionDataResult {
             parser_count,
             preview_count,
             annotation_count,
+            session_count,
         })
     })
 }
@@ -162,15 +184,10 @@ pub fn confirm_preview_to_bills(
     let batch_id = Utc::now().format("%Y%m%d%H%M%S").to_string();
 
     run_transaction(connection, |tx| {
-        if let Some(session) = get_import_session(tx, session_id, user_scope)? {
-            if session.status == "completed" {
-                return Ok(ConfirmPreviewResult {
-                    confirmed_count: i64_to_usize_saturating(session.total_confirmed),
-                    skipped_count: 0,
-                    duplicate_count: 0,
-                    errors: Vec::new(),
-                });
-            }
+        if get_import_session(tx, session_id, user_scope)?.is_none() {
+            return Err(DbError::InvalidOperation(
+                "import session not found or already cleaned".to_string(),
+            ));
         }
         let previews = get_preview_by_session(tx, session_id, user_scope, true)?;
         let mut result = ConfirmPreviewResult {
@@ -229,14 +246,20 @@ pub fn confirm_preview_to_bills(
         }
 
         tx.execute(
-            "
-            UPDATE import_sessions
-            SET status = 'completed',
-                updated_at = ?1,
-                total_confirmed = MAX(total_confirmed, ?2)
-            WHERE session_id = ?3 AND user_id = ?4
-            ",
-            params![now, result.confirmed_count as i64, session_id, user_id],
+            "DELETE FROM import_annotation_samples WHERE session_id = ?1 AND user_id = ?2",
+            params![session_id, user_id],
+        )?;
+        tx.execute(
+            "DELETE FROM bills_preview WHERE session_id = ?1 AND user_id = ?2",
+            params![session_id, user_id],
+        )?;
+        tx.execute(
+            "DELETE FROM bills_parser_template WHERE session_id = ?1 AND user_id = ?2",
+            params![session_id, user_id],
+        )?;
+        tx.execute(
+            "DELETE FROM import_sessions WHERE session_id = ?1 AND user_id = ?2",
+            params![session_id, user_id],
         )?;
         Ok(result)
     })
@@ -247,4 +270,5 @@ pub struct ClearSessionDataResult {
     pub parser_count: usize,
     pub preview_count: usize,
     pub annotation_count: usize,
+    pub session_count: usize,
 }

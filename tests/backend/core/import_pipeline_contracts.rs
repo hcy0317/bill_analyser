@@ -491,6 +491,8 @@ fn success_envelopes_keep_session_and_preview_page_data_keys() {
         total: 1,
         page: 1,
         page_size: 50,
+        query: Some(json!({"page": 1, "page_size": 50})),
+        metadata: Some(json!({"counts": {"total": 1}})),
     });
     assert_eq!(
         page.body,
@@ -500,7 +502,9 @@ fn success_envelopes_keep_session_and_preview_page_data_keys() {
                 "preview": [{"id": 1}],
                 "total": 1,
                 "page": 1,
-                "page_size": 50
+                "page_size": 50,
+                "query": {"page": 1, "page_size": 50},
+                "metadata": {"counts": {"total": 1}}
             }
         })
     );

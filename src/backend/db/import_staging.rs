@@ -2,7 +2,9 @@ use bill_analyser_core::{normalize_bill_date_text, DedupBill, Money, UserId};
 use bill_analyser_parsers::{serialize_parser_tags, StandardBill};
 use chrono::Utc;
 use rusqlite::ffi::{SQLITE_CONSTRAINT_PRIMARYKEY, SQLITE_CONSTRAINT_UNIQUE};
-use rusqlite::{params, types::Value as SqlValue, Connection, ErrorCode, OptionalExtension};
+use rusqlite::{
+    params, params_from_iter, types::Value as SqlValue, Connection, ErrorCode, OptionalExtension,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

@@ -46,6 +46,48 @@ export interface ImportPreviewIndexPageResult {
 
 export type PreviewTableSortDirection = 'asc' | 'desc';
 
+export const PREVIEW_FILTER_NONE_VALUE = '__none__';
+export const PREVIEW_FILTER_INVALID_VALUE = '__invalid__';
+
+export interface ImportPreviewFacetEntry {
+    value: string;
+    label?: string | null;
+    count: number;
+}
+
+export interface ImportPreviewMetadata {
+    facets?: {
+        categories?: ImportPreviewFacetEntry[];
+        accounts?: ImportPreviewFacetEntry[];
+        tags?: ImportPreviewFacetEntry[];
+    };
+    counts?: {
+        annotations?: Record<string, number>;
+        signals?: Record<string, number>;
+        selected?: number;
+        selected_invalid?: number;
+        total?: number;
+    };
+}
+
+export interface ImportPreviewServerQueryFilters {
+    minDatetime?: string;
+    maxDatetime?: string;
+    transactionType?: string;
+    category?: string;
+    account?: string;
+    tag?: string;
+    signal?: string;
+    annotation?: string;
+    description?: string;
+}
+
+export interface PreviewPageRequestOptions {
+    sortBy?: string | null;
+    sortDirection?: PreviewTableSortDirection | null;
+    filters?: ImportPreviewServerQueryFilters;
+}
+
 export interface PreviewTableSortInputItem {
     key?: string;
     value?: string;
@@ -173,6 +215,94 @@ export function normalizePreviewTableSortDirection(
 export function normalizeServerPagedSortKey(value: string | null | undefined): string {
     const normalizedValue = String(value || '').trim();
     return SERVER_PAGED_SORTABLE_COLUMNS.has(normalizedValue) ? normalizedValue : '';
+}
+
+export function formatPreviewServerFilterDatetime(value: number | null | undefined): string | undefined {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return undefined;
+    }
+
+    return new Date(value * 1000).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function previewTypeFilterValue(value: number | null | undefined): string | undefined {
+    switch (value) {
+        case TransactionType.Income:
+            return '收入';
+        case TransactionType.Expense:
+            return '支出';
+        case TransactionType.Transfer:
+            return '转账';
+        case TransactionType.Investment:
+            return '投资';
+        default:
+            return undefined;
+    }
+}
+
+function namedFilterValue(
+    value: string | null | undefined,
+    aliases: Record<string, string | number | undefined> = {}
+): string | undefined {
+    if (value === null) {
+        return undefined;
+    }
+
+    if (value === undefined) {
+        return PREVIEW_FILTER_INVALID_VALUE;
+    }
+
+    if (value === '') {
+        return PREVIEW_FILTER_NONE_VALUE;
+    }
+
+    return String(aliases[value] ?? value);
+}
+
+export function buildImportPreviewServerQueryFilters(
+    filters: ImportCheckDataFilterLike,
+    context: {
+        accountIdByName?: Record<string, string | number | undefined>;
+    } = {}
+): ImportPreviewServerQueryFilters {
+    const query: ImportPreviewServerQueryFilters = {};
+    const minDatetime = formatPreviewServerFilterDatetime(filters.minDatetime);
+    const maxDatetime = formatPreviewServerFilterDatetime(filters.maxDatetime);
+    const transactionType = previewTypeFilterValue(filters.transactionType);
+    const category = namedFilterValue(filters.category);
+    const account = namedFilterValue(filters.account, context.accountIdByName);
+    const tag = namedFilterValue(filters.tag);
+    const description = namedFilterValue(filters.description);
+
+    if (minDatetime) {
+        query.minDatetime = minDatetime;
+    }
+    if (maxDatetime) {
+        query.maxDatetime = maxDatetime;
+    }
+    if (transactionType) {
+        query.transactionType = transactionType;
+    }
+    if (category) {
+        query.category = category;
+    }
+    if (account) {
+        query.account = account;
+    }
+    if (tag) {
+        query.tag = tag;
+    }
+    if (filters.signal) {
+        query.signal = filters.signal;
+    }
+    if (filters.annotation) {
+        query.annotation = filters.annotation;
+    }
+    if (description) {
+        query.description = description;
+    }
+
+    return query;
 }
 
 export function normalizePreviewTableSortItems(

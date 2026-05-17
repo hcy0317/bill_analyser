@@ -1,6 +1,9 @@
 import { describe, expect, test } from '@jest/globals';
 
 import {
+    PREVIEW_FILTER_INVALID_VALUE,
+    PREVIEW_FILTER_NONE_VALUE,
+    buildImportPreviewServerQueryFilters,
     collectImportPreviewIndexAnnotationIssues,
     isImportPreviewServerPagedSortableColumn,
     mapImportPreviewIndexResponseItem,
@@ -194,5 +197,34 @@ describe('import preview index helpers', () => {
             { key: 'actualCategoryName', order: 'desc' },
             { key: 'time', order: 'desc' }
         ]);
+    });
+
+    test('maps check-data filters into backend preview query parameters', () => {
+        const filters = buildImportPreviewServerQueryFilters({
+            minDatetime: 1777636800,
+            maxDatetime: null,
+            transactionType: 3,
+            category: undefined,
+            account: '支付宝',
+            tag: '',
+            signal: 'learning',
+            annotation: 'needs-review',
+            description: '早餐',
+        }, {
+            accountIdByName: {
+                支付宝: '200'
+            }
+        });
+
+        expect(filters).toMatchObject({
+            minDatetime: '2026-05-01 12:00:00',
+            transactionType: '支出',
+            category: PREVIEW_FILTER_INVALID_VALUE,
+            account: '200',
+            tag: PREVIEW_FILTER_NONE_VALUE,
+            signal: 'learning',
+            annotation: 'needs-review',
+            description: '早餐'
+        });
     });
 });

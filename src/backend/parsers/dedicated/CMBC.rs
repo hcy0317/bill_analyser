@@ -2,14 +2,16 @@ use crate::{post_process_raw_bills, RawBill, StandardBill};
 
 use super::common::{
     contains_all_text, csv_records_from_text, decode_text, file_suffix, get, html_rows,
-    parse_amount, positive_amount_text, rows_to_maps, workbook_rows, RowMap,
+    looks_like_html_table_payload, parse_amount, positive_amount_text, rows_to_maps, workbook_rows,
+    RowMap,
 };
 
 pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     let suffix = file_suffix(filename);
     match suffix.as_str() {
         "csv" | "txt" => parse_csv(bytes),
-        "xlsx" | "xls" => parse_sheet_or_html(bytes),
+        "xlsx" => parse_sheet_or_html(bytes, false),
+        "xls" => parse_sheet_or_html(bytes, true),
         _ => Vec::new(),
     }
 }
@@ -34,8 +36,12 @@ fn parse_csv(bytes: &[u8]) -> Vec<StandardBill> {
     )
 }
 
-fn parse_sheet_or_html(bytes: &[u8]) -> Vec<StandardBill> {
-    let rows = workbook_rows(bytes).unwrap_or_else(|| html_rows(bytes));
+fn parse_sheet_or_html(bytes: &[u8], allow_html_fast_path: bool) -> Vec<StandardBill> {
+    let rows = if allow_html_fast_path && looks_like_html_table_payload(bytes) {
+        html_rows(bytes)
+    } else {
+        workbook_rows(bytes).unwrap_or_else(|| html_rows(bytes))
+    };
     let content = rows.iter().flatten().cloned().collect::<Vec<_>>().join(" ");
     if !content.contains("民生银行")
         && !content.contains("个人账户对账单")

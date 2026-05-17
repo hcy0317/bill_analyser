@@ -817,18 +817,17 @@ import {
 } from '../importPreview.ts';
 import { cloneImportPreviewDraftTransaction } from '../importPreviewDrafts.ts';
 import {
-    collectImportPreviewIndexAnnotationIssues,
+    buildImportPreviewServerQueryFilters,
     isImportPreviewServerPagedSortableColumn,
-    mapImportPreviewIndexResponseItem,
-    matchesImportPreviewIndexItemFilters,
     normalizePreviewPage,
     normalizePreviewPageSize,
     normalizePreviewTableSortDirection,
     normalizePreviewTableSortItems,
     normalizeServerPagedSortKey,
-    resolveImportPreviewIndexPage,
-    sortImportPreviewIndexItems,
-    type ImportPreviewIndexItem,
+    type ImportPreviewFacetEntry,
+    type ImportPreviewMetadata,
+    type ImportPreviewServerQueryFilters,
+    type PreviewPageRequestOptions,
     type PreviewTableSortDirection,
     type PreviewTableSortInputItem,
     type PreviewTableSortItem
@@ -963,6 +962,7 @@ const props = defineProps<{
     sessionId?: string;  // v6.55: 导入会话ID，用于调用重新分类API
     serverPaged?: boolean;
     totalImportTransactionCount?: number;
+    previewMetadata?: ImportPreviewMetadata | null;
 }>();
 
 // v6.55: 定义事件，用于通知父组件数据刷新
@@ -975,8 +975,7 @@ const emit = defineEmits<{
         sortOptions?: {
             sortBy?: string | null;
             sortDirection?: PreviewTableSortDirection | null;
-            previewIds?: number[];
-            totalCount?: number;
+            filters?: ImportPreviewServerQueryFilters;
         }
     ): void;
 }>();
@@ -1033,8 +1032,10 @@ const tableSortBy = ref<PreviewTableSortItem[]>([]);
 const currentSortKey = ref<string>('');
 const currentSortDirection = ref<PreviewTableSortDirection>('asc');
 const serverPagedDrafts = ref<Map<number, ImportTransaction>>(new Map());
-const serverPagedPreviewIndex = ref<ImportPreviewIndexItem[]>([]);
-const serverPagedPreviewIndexLoaded = ref<boolean>(false);
+const serverPagedSelectionBaselines = ref<Map<number, {
+    selected: boolean;
+    invalid: boolean;
+}>>(new Map());
 const showCustomDateRangeDialog = ref<boolean>(false);
 const showCustomDescriptionDialog = ref<boolean>(false);
 const currentDescriptionFilterValue = ref<string | null>(null);
@@ -1057,27 +1058,8 @@ const isMatchingDecisionBusy = computed<boolean>(() => transferDecisionLoadingId
 const llmSessionSignalMemory = ref<Map<number, LLMSignalMemoryState>>(new Map());
 const serverPagedMode = computed<boolean>(() => !!props.serverPaged && !!props.sessionId);
 const importTransactions = computed<ImportTransaction[]>(() => props.importTransactions || []);
-const filteredServerPagedPreviewIndex = computed<ImportPreviewIndexItem[]>(() => {
-    if (!serverPagedMode.value || !serverPagedPreviewIndexLoaded.value) {
-        return [];
-    }
-
-    const filteredItems = serverPagedPreviewIndex.value.filter(item => matchesImportPreviewIndexItemFilters(item, filters.value, {
-        tagNameById: allTagsMap.value,
-    }));
-
-    return sortImportPreviewIndexItems(
-        filteredItems,
-        currentSortKey.value,
-        currentSortDirection.value,
-    );
-});
 const totalImportTransactionCount = computed<number>(() => serverPagedMode.value
-    ? (
-        serverPagedPreviewIndexLoaded.value
-            ? filteredServerPagedPreviewIndex.value.length
-            : Math.max(props.totalImportTransactionCount || 0, 0)
-    )
+    ? Math.max(props.totalImportTransactionCount || 0, 0)
     : importTransactions.value.length);
 const tablePage = computed<number>(() => serverPagedMode.value ? 1 : currentPage.value);
 const tableItemsPerPage = computed<number>(() => serverPagedMode.value
@@ -2810,10 +2792,6 @@ async function reclassifySelected(): Promise<void> {
         logger.info(`[重新分类] 后端返回成功，preview数量: ${result.data?.preview?.length || 0}, ` +
             `session_samples_saved=${result.data?.session_samples_saved || 0}, annotation_applied=${result.data?.annotation_applied || 0}`);
 
-        if (serverPagedMode.value) {
-            await loadServerPagedPreviewIndex();
-        }
-
         // 通知父组件使用新数据
         // 父组件 ImportDialog.vue 监听 @reclassified 事件并更新 importTransactions
         if (result.data?.preview && result.data.preview.length > 0) {
@@ -2833,9 +2811,11 @@ async function reclassifySelected(): Promise<void> {
     }
 }
 
-function buildSelectedPreviewUpdates(): Record<string, unknown>[] {
+function buildPreviewUpdates(options: { selectedOnly: boolean }): Record<string, unknown>[] {
     cacheCurrentPageDrafts();
-    const selectedTransactions = getTrackedTransactionsForSelection().filter(transaction => transaction.selected);
+    const transactions = getTrackedTransactionsForSelection().filter(transaction => (
+        !options.selectedOnly || transaction.selected
+    ));
     const typeReverseMap: Record<number, string> = {
         2: '收入',
         3: '支出',
@@ -2843,7 +2823,7 @@ function buildSelectedPreviewUpdates(): Record<string, unknown>[] {
         5: '投资'
     };
 
-    return selectedTransactions.map(transaction => {
+    return transactions.map(transaction => {
         return {
             id: (transaction as { _previewId?: number })._previewId,
             preview_type: typeReverseMap[transaction.type] || '支出',
@@ -2862,6 +2842,14 @@ function buildSelectedPreviewUpdates(): Record<string, unknown>[] {
             selected: transaction.selected
         };
     }).filter(item => !!item.id);
+}
+
+function buildSelectedPreviewUpdates(): Record<string, unknown>[] {
+    return buildPreviewUpdates({ selectedOnly: true });
+}
+
+function buildTrackedPreviewUpdates(): Record<string, unknown>[] {
+    return buildPreviewUpdates({ selectedOnly: false });
 }
 
 function getTrackedTransactionByPreviewId(previewId: number): ImportTransaction | null {
@@ -3307,85 +3295,53 @@ function applyBatchAccount(): void {
 const isEditing = computed<boolean>(() => !!editingTransaction.value);
 const canImport = computed<boolean>(() => selectedImportTransactionCount.value > 0 && selectedInvalidTransactionCount.value < 1);
 
-async function loadServerPagedPreviewIndex(): Promise<void> {
-    if (!serverPagedMode.value || !props.sessionId) {
-        serverPagedPreviewIndex.value = [];
-        serverPagedPreviewIndexLoaded.value = false;
-        return;
+const previewMetadata = computed<ImportPreviewMetadata>(() => props.previewMetadata || {});
+
+function metadataFacetLabels(entries: ImportPreviewFacetEntry[] | undefined): string[] {
+    if (!Array.isArray(entries) || entries.length < 1) {
+        return [];
     }
 
-    serverPagedPreviewIndexLoaded.value = false;
-    serverPagedPreviewIndex.value = [];
-
-    const token = getCurrentToken();
-    const headers: Record<string, string> = {};
-    if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
+    const labels: Record<string, boolean> = {};
+    for (const entry of entries) {
+        const label = String(entry.label || entry.value || '').trim();
+        if (label) {
+            labels[label] = true;
+        }
     }
-
-    const response = await fetch(`/api/bills/import/v2/preview/${encodeURIComponent(props.sessionId)}/index`, {
-        method: 'GET',
-        headers,
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`获取预览筛选索引失败: ${errorText}`);
-    }
-
-    const result = await response.json();
-    if (!result.success) {
-        throw new Error(result.error || '获取预览筛选索引失败');
-    }
-
-    const items = Array.isArray(result.data?.items) ? result.data.items : [];
-    serverPagedPreviewIndex.value = items.map(mapImportPreviewIndexResponseItem);
-    serverPagedPreviewIndexLoaded.value = true;
+    return objectFieldToArrayItem(labels);
 }
 
-function syncPreviewFilterIndexFromTransaction(transaction: ImportTransaction): void {
-    if (!serverPagedMode.value) {
-        return;
+function metadataAccountFacetLabels(entries: ImportPreviewFacetEntry[] | undefined): string[] {
+    if (!Array.isArray(entries) || entries.length < 1) {
+        return [];
     }
 
-    const previewId = getPreviewId(transaction);
-    if (previewId === null) {
-        return;
+    const labels: Record<string, boolean> = {};
+    for (const entry of entries) {
+        const account = allAccountsMap.value[String(entry.value || '')];
+        const label = String(account?.name || entry.label || entry.value || '').trim();
+        if (label) {
+            labels[label] = true;
+        }
     }
+    return objectFieldToArrayItem(labels);
+}
 
-    const target = serverPagedPreviewIndex.value.find(item => item.id === previewId);
-    if (!target) {
-        return;
+function buildAccountIdByName(): Record<string, string> {
+    const accountIds: Record<string, string> = {};
+    for (const account of allAccounts.value) {
+        if (account?.name) {
+            accountIds[account.name] = String(account.id);
+        }
     }
+    return accountIds;
+}
 
-    target.time = transaction.time;
-    target.type = transaction.type;
-    target.actualCategoryName = transaction.actualCategoryName || '';
-    target.categoryId = transaction.categoryId || '';
-    target.actualSourceAccountName = transaction.actualSourceAccountName || '';
-    target.actualDestinationAccountName = transaction.actualDestinationAccountName || '';
-    target.sourceAccountId = transaction.sourceAccountId || '';
-    target.destinationAccountId = transaction.destinationAccountId || '';
-    target.comment = transaction.comment || '';
-    target.isManuallyAnnotated = !!transaction.isManuallyAnnotated;
-    target.selected = !!transaction.selected;
-    target.sourceAmount = Number(transaction.sourceAmount || 0);
-    target.counterparty = transaction.counterparty || '';
-    target.paymentMethod = transaction.paymentMethod || '';
-    target.parserSource = transaction.parserSource || '';
-    target.parserTags = [...(transaction.parserTags || [])];
-    target.dedupType = transaction.dedupType || '';
-    target.dedupSourceIds = [...(transaction.dedupSourceIds || [])];
-    target.transferStatus = getTransferSignalStatus(transaction);
-    target.transferTitle = transaction.transferSuggestionReason || '';
-    target.learningStatus = getLearningSignalStatus(transaction);
-    target.learningTitle = transaction.learningRecommendationReason || '';
-    target.learningSummary = transaction.learningRecommendationSummary || '';
-    target.learningMode = transaction.matching?.learning.mode || '';
-    target.recurringTemplateId = transaction.recurringTemplateId || '';
-    target.recurringCandidateCount = Number(transaction.recurringCandidateCount || 0);
-    target.recurringMatchReasons = transaction.recurringMatchReasons || '';
-    target.recurringMatchedDate = transaction.recurringMatchedDate || '';
+function buildServerPreviewQueryFilters(): ImportPreviewServerQueryFilters {
+    return buildImportPreviewServerQueryFilters(filters.value, {
+        accountIdByName: buildAccountIdByName()
+    });
 }
 
 function cloneImportTransaction(transaction: ImportTransaction): ImportTransaction {
@@ -3448,6 +3404,60 @@ function getTrackedTransactionsForSelection(): ImportTransaction[] {
     return Array.from(trackedTransactions.values());
 }
 
+function getUniqueTrackedServerPagedTransactions(): ImportTransaction[] {
+    const trackedTransactions = new Map<number, ImportTransaction>();
+    for (const [previewId, transaction] of serverPagedDrafts.value.entries()) {
+        trackedTransactions.set(previewId, cloneImportTransaction(transaction));
+    }
+    for (const transaction of importTransactions.value) {
+        const previewId = getPreviewId(transaction);
+        if (previewId !== null) {
+            trackedTransactions.set(previewId, transaction);
+        }
+    }
+    return Array.from(trackedTransactions.values());
+}
+
+function recordServerPagedSelectionBaselines(transactions: ImportTransaction[]): void {
+    if (!serverPagedMode.value) {
+        return;
+    }
+
+    const nextBaselines = new Map(serverPagedSelectionBaselines.value);
+    for (const transaction of transactions) {
+        const previewId = getPreviewId(transaction);
+        if (previewId === null || nextBaselines.has(previewId)) {
+            continue;
+        }
+        nextBaselines.set(previewId, {
+            selected: !!transaction.selected,
+            invalid: collectAnnotationIssues(transaction).length > 0
+        });
+    }
+    serverPagedSelectionBaselines.value = nextBaselines;
+}
+
+function getServerPagedSelectionDelta(): { selected: number; selectedInvalid: number } {
+    let selected = 0;
+    let selectedInvalid = 0;
+    for (const transaction of getUniqueTrackedServerPagedTransactions()) {
+        const previewId = getPreviewId(transaction);
+        if (previewId === null) {
+            continue;
+        }
+        const baseline = serverPagedSelectionBaselines.value.get(previewId) || {
+            selected: !!transaction.selected,
+            invalid: collectAnnotationIssues(transaction).length > 0
+        };
+        const currentSelected = !!transaction.selected;
+        const currentInvalid = collectAnnotationIssues(transaction).length > 0;
+        selected += Number(currentSelected) - Number(baseline.selected);
+        selectedInvalid += Number(currentSelected && currentInvalid)
+            - Number(baseline.selected && baseline.invalid);
+    }
+    return { selected, selectedInvalid };
+}
+
 function getCurrentServerPagedSortRequest(): {
     sortBy: string | null;
     sortDirection: PreviewTableSortDirection | null;
@@ -3455,6 +3465,13 @@ function getCurrentServerPagedSortRequest(): {
     return {
         sortBy: currentSortKey.value || null,
         sortDirection: currentSortKey.value ? currentSortDirection.value : null
+    };
+}
+
+function getCurrentServerPagedRequestOptions(): PreviewPageRequestOptions {
+    return {
+        ...getCurrentServerPagedSortRequest(),
+        filters: buildServerPreviewQueryFilters()
     };
 }
 
@@ -3474,20 +3491,7 @@ function emitServerPagedRequest(
     const normalizedSortDirection = normalizePreviewTableSortDirection(
         options.sortDirection ?? currentSortDirection.value
     );
-    const filteredPreviewIndexItems = sortImportPreviewIndexItems(
-        serverPagedPreviewIndex.value.filter(item => matchesImportPreviewIndexItemFilters(item, filters.value, {
-            tagNameById: allTagsMap.value,
-        })),
-        normalizedSortKey,
-        normalizedSortDirection,
-    );
-    const resolvedPageState = resolveImportPreviewIndexPage(
-        filteredPreviewIndexItems,
-        normalizedPage,
-        normalizedPageSize,
-    );
-    const effectivePage = resolvedPageState.page;
-    const pageChanged = currentPage.value !== effectivePage;
+    const pageChanged = currentPage.value !== normalizedPage;
     const pageSizeChanged = countPerPage.value !== normalizedPageSize;
     const sortChanged = currentSortKey.value !== normalizedSortKey
         || currentSortDirection.value !== normalizedSortDirection;
@@ -3500,15 +3504,11 @@ function emitServerPagedRequest(
         cacheCurrentPageDrafts();
     }
 
-    currentPage.value = effectivePage;
+    currentPage.value = normalizedPage;
     countPerPage.value = normalizedPageSize;
     currentSortKey.value = normalizedSortKey;
     currentSortDirection.value = normalizedSortDirection;
-    emit('requestPage', effectivePage, normalizedPageSize, {
-        ...getCurrentServerPagedSortRequest(),
-        previewIds: resolvedPageState.previewIds,
-        totalCount: resolvedPageState.totalCount,
-    });
+    emit('requestPage', normalizedPage, normalizedPageSize, getCurrentServerPagedRequestOptions());
 }
 
 function updatePreviewTablePage(page: number): void {
@@ -3554,13 +3554,13 @@ function updatePreviewTableSort(sortBy: PreviewTableSortInputItem[] = []): void 
 watch(
     () => props.importTransactions,
     transactions => {
+        recordServerPagedSelectionBaselines(transactions || []);
         rehydrateCurrentPageDrafts();
         (transactions || []).forEach(transaction => {
             syncTransferDecisionBaseline(transaction);
-            syncLearningDecisionBaseline(transaction);
-        });
-        applyLLMSignalMemoryToTransactions(transactions || []);
-        (transactions || []).forEach(transaction => syncPreviewFilterIndexFromTransaction(transaction));
+        syncLearningDecisionBaseline(transaction);
+    });
+    applyLLMSignalMemoryToTransactions(transactions || []);
     },
     { immediate: true }
 );
@@ -3583,8 +3583,7 @@ watch(
     ([isServerPaged]) => {
         if (!isServerPaged) {
             serverPagedDrafts.value = new Map();
-            serverPagedPreviewIndex.value = [];
-            serverPagedPreviewIndexLoaded.value = false;
+            serverPagedSelectionBaselines.value = new Map();
             currentSortKey.value = '';
             currentSortDirection.value = 'asc';
             return;
@@ -3594,17 +3593,10 @@ watch(
         const activeSort = tableSortBy.value[0];
         currentSortKey.value = normalizeServerPagedSortKey(activeSort?.key ?? '');
         currentSortDirection.value = normalizePreviewTableSortDirection(activeSort?.order);
-        void loadServerPagedPreviewIndex()
-            .then(() => {
-                emitServerPagedRequest(1, countPerPage.value > 0 ? countPerPage.value : 10, {
-                    cacheDrafts: false,
-                    force: true
-                });
-            })
-            .catch(error => {
-                logger.error('[导入预览索引] 加载失败:', error);
-                snackbar.value?.showError(`导入失败: ${error}`);
-            });
+        emitServerPagedRequest(1, countPerPage.value > 0 ? countPerPage.value : 10, {
+            cacheDrafts: false,
+            force: true
+        });
     },
     { immediate: true }
 );
@@ -3612,7 +3604,7 @@ watch(
 watch(
     () => JSON.stringify(filters.value),
     () => {
-        if (!serverPagedMode.value || !serverPagedPreviewIndexLoaded.value) {
+        if (!serverPagedMode.value) {
             return;
         }
 
@@ -4138,7 +4130,9 @@ const totalPageCount = computed<number>(() => {
     return Math.ceil(filteredImportTransactions.value.length / countPerPage.value);
 });
 
-const filteredImportTransactions = computed<ImportTransaction[]>(() => importTransactions.value.filter(importTransaction => isTransactionDisplayed(importTransaction)));
+const filteredImportTransactions = computed<ImportTransaction[]>(() => serverPagedMode.value
+    ? importTransactions.value
+    : importTransactions.value.filter(importTransaction => isTransactionDisplayed(importTransaction)));
 
 const currentPageTransactions = computed<ImportTransaction[]>(() => getImportCheckVisibleTransactions(
     filteredImportTransactions.value,
@@ -4154,20 +4148,30 @@ const tableTransactions = computed<ImportTransaction[]>(() => serverPagedMode.va
     ? currentPageTransactions.value
     : filteredImportTransactions.value);
 
-const selectedImportTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.selectedCount);
+const selectedImportTransactionCount = computed<number>(() => {
+    if (!serverPagedMode.value) {
+        return importTransactionSelectionSummary.value.selectedCount;
+    }
+    const delta = getServerPagedSelectionDelta();
+    return Math.max(Number(previewMetadata.value.counts?.selected || 0) + delta.selected, 0);
+});
 const selectedExpenseTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.selectedExpenseCount);
 const selectedIncomeTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.selectedIncomeCount);
 const selectedTransferTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.selectedTransferCount);
 const selectedRecurringMatchCount = computed<number>(() => importTransactionSelectionSummary.value.selectedRecurringMatchCount);
-const selectedInvalidTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.selectedInvalidCount);
+const selectedInvalidTransactionCount = computed<number>(() => {
+    if (!serverPagedMode.value) {
+        return importTransactionSelectionSummary.value.selectedInvalidCount;
+    }
+    const delta = getServerPagedSelectionDelta();
+    return Math.max(Number(previewMetadata.value.counts?.selected_invalid || 0) + delta.selectedInvalid, 0);
+});
 const annotationTransactionCount = computed<number>(() => {
-    if (!serverPagedMode.value || !serverPagedPreviewIndexLoaded.value) {
-        return importTransactionSelectionSummary.value.annotationCount;
+    if (serverPagedMode.value) {
+        return Number(previewMetadata.value.counts?.annotations?.['needs-review'] || 0);
     }
 
-    return filteredServerPagedPreviewIndex.value.filter(
-        transaction => collectImportPreviewIndexAnnotationIssues(transaction).length > 0,
-    ).length;
+    return importTransactionSelectionSummary.value.annotationCount;
 });
 const selectedAnnotationTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.selectedAnnotationCount);
 const selectedAnnotationTransactions = computed<ImportTransaction[]>(() => importTransactionSelectionSummary.value.selectedAnnotationTransactions);
@@ -4180,9 +4184,11 @@ const allTransactionSelected = computed<boolean>(() => currentPageTransactions.v
     && currentPageTransactions.value.every(transaction => transaction.selected));
 
 const allUsedCategoryNames = computed<string[]>(() => {
-    const sourceItems = serverPagedMode.value && serverPagedPreviewIndexLoaded.value
-        ? serverPagedPreviewIndex.value
-        : importTransactions.value;
+    if (serverPagedMode.value) {
+        return metadataFacetLabels(previewMetadata.value.facets?.categories);
+    }
+
+    const sourceItems = importTransactions.value;
 
     if (sourceItems.length < 1) {
         return [];
@@ -4200,9 +4206,11 @@ const allUsedCategoryNames = computed<string[]>(() => {
 });
 
 const allUsedAccountNames = computed<string[]>(() => {
-    const sourceItems = serverPagedMode.value && serverPagedPreviewIndexLoaded.value
-        ? serverPagedPreviewIndex.value
-        : importTransactions.value;
+    if (serverPagedMode.value) {
+        return metadataAccountFacetLabels(previewMetadata.value.facets?.accounts);
+    }
+
+    const sourceItems = importTransactions.value;
 
     if (sourceItems.length < 1) {
         return [];
@@ -4224,9 +4232,11 @@ const allUsedAccountNames = computed<string[]>(() => {
 });
 
 const allUsedTagNames = computed<string[]>(() => {
-    const sourceItems = serverPagedMode.value && serverPagedPreviewIndexLoaded.value
-        ? serverPagedPreviewIndex.value
-        : importTransactions.value;
+    if (serverPagedMode.value) {
+        return metadataFacetLabels(previewMetadata.value.facets?.tags);
+    }
+
+    const sourceItems = importTransactions.value;
 
     if (sourceItems.length < 1) {
         return [];
@@ -4660,7 +4670,6 @@ function updateTransactionData(transaction: ImportTransaction): void {
         transaction.actualDestinationAccountName = '';
     }
 
-    syncPreviewFilterIndexFromTransaction(transaction);
 }
 
 function showBatchReplaceDialog(type: BatchReplaceDialogDataType, allSourceTagItems?: NameValue[]): void {
@@ -5155,6 +5164,7 @@ function onShowDateRangeError(message: string): void {
 
 function reset(): void {
     serverPagedDrafts.value = new Map();
+    serverPagedSelectionBaselines.value = new Map();
     editingTransaction.value = null;
     editingTags.value = [];
     filters.value.minDatetime = null;
@@ -5178,7 +5188,7 @@ function setCountPerPage(count: number): void {
 }
 
 function getSelectedPreviewUpdates(): Record<string, unknown>[] {
-    return buildSelectedPreviewUpdates();
+    return serverPagedMode.value ? buildTrackedPreviewUpdates() : buildSelectedPreviewUpdates();
 }
 
 function getSelectedPreviewCount(): number {
@@ -5203,7 +5213,8 @@ defineExpose({
     getSelectedPreviewUpdates,
     getSelectedPreviewCount,
     getCurrentPreviewPage,
-    getCurrentPreviewPageSize
+    getCurrentPreviewPageSize,
+    getCurrentServerPagedRequestOptions
 });
 </script>
 

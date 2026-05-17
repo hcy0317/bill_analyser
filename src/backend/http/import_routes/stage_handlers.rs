@@ -1151,12 +1151,28 @@ pub async fn import_confirm_runtime_handler(
             }
             patches.push(build_preview_patch_from_payload(preview_id, item));
         }
-        if let Err(error) = replace_preview_selection_with_patches(
-            runtime.connection_mut(),
-            &session_id,
-            user_id,
-            &patches,
-        ) {
+        let preserve_unpatched_selection = first_value(
+            object,
+            &["preserve_unpatched_selection", "preserveUnpatchedSelection"],
+        )
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+        let patch_result = if preserve_unpatched_selection {
+            apply_preview_patches_preserving_selection(
+                runtime.connection_mut(),
+                &session_id,
+                user_id,
+                &patches,
+            )
+        } else {
+            replace_preview_selection_with_patches(
+                runtime.connection_mut(),
+                &session_id,
+                user_id,
+                &patches,
+            )
+        };
+        if let Err(error) = patch_result {
             return route_response(db_error_response(error));
         }
     } else if let Some(selected_ids) =
@@ -1272,6 +1288,9 @@ pub async fn import_preview_page_runtime_handler(
         Ok(None) => return route_response(import_session_not_found_response()),
         Err(error) => return route_response(db_error_response(error)),
     }
+    if let Some(response) = invalid_import_preview_query_response(&query) {
+        return route_response(response);
+    }
     let requested_preview_ids =
         parse_preview_page_query_ids(query.preview_ids.as_deref().or(query.preview_ids_camel.as_deref()));
     let normalized_query = normalize_import_preview_page_query(
@@ -1287,83 +1306,81 @@ pub async fn import_preview_page_runtime_handler(
             .or(query.sort_direction_camel.as_deref()),
         requested_preview_ids.as_slice(),
     );
-    let page = normalized_query.page;
-    let page_size = normalized_query.page_size.min(500);
-    let selected_only = query
-        .selected_only
-        .or(query.selected_only_camel)
-        .unwrap_or(false);
-    let sort_by = (!normalized_query.sort_by.is_empty()).then_some(normalized_query.sort_by.as_str());
-    let sort_direction = Some(normalized_query.sort_direction.as_str());
-    if !normalized_query.preview_ids.is_empty() {
-        return match get_preview_by_ids(
-            runtime.connection(),
-            &session_id,
-            normalized_query.preview_ids.as_slice(),
-            user_id,
-        ) {
-            Ok(preview) => {
-                let preview = preview
-                    .into_iter()
-                    .map(preview_row_to_value)
-                    .collect::<Vec<_>>();
-                let preview = sort_import_preview_page_items(&preview, sort_by, sort_direction);
-                route_response(import_preview_page_success(ImportPreviewPageData {
-                    total: preview.len(),
-                    preview,
-                    page,
-                    page_size,
-                }))
-            }
-            Err(error) => route_response(db_error_response(error)),
-        };
-    }
-    if sort_by.is_some() {
-        return match get_preview_by_session(runtime.connection(), &session_id, user_id, selected_only) {
-            Ok(preview) => {
-                let total = preview.len();
-                let preview = preview
-                    .into_iter()
-                    .map(preview_row_to_value)
-                    .collect::<Vec<_>>();
-                let preview = sort_import_preview_page_items(&preview, sort_by, sort_direction)
-                    .into_iter()
-                    .skip(page.saturating_sub(1) * page_size)
-                    .take(page_size)
-                    .collect::<Vec<_>>();
-                route_response(import_preview_page_success(ImportPreviewPageData {
-                    preview,
-                    total,
-                    page,
-                    page_size,
-                }))
-            }
-            Err(error) => route_response(db_error_response(error)),
-        };
-    }
-    match get_preview_page_by_session(
+    let request = ImportPreviewPageRequest {
+        page: normalized_query.page,
+        page_size: normalized_query.page_size,
+        sort_by: normalized_query.sort_by,
+        sort_direction: normalized_query.sort_direction.as_str().to_string(),
+        preview_ids: normalized_query.preview_ids,
+        filters: ImportPreviewQueryFilters {
+            min_datetime: query.min_datetime.or(query.min_datetime_camel),
+            max_datetime: query.max_datetime.or(query.max_datetime_camel),
+            transaction_type: query.transaction_type.or(query.transaction_type_camel),
+            category: query.category,
+            account: query.account,
+            tag: query.tag,
+            signal: query.signal,
+            annotation: query.annotation,
+            description: query.description,
+            selected_only: query
+                .selected_only
+                .or(query.selected_only_camel)
+                .unwrap_or(false),
+        },
+    };
+    match query_preview_page_by_session(
         runtime.connection(),
         &session_id,
         user_id,
-        page as i64,
-        page_size as i64,
-        selected_only,
+        &request,
     ) {
-        Ok((preview, total)) => {
-            let preview = preview
+        Ok(result) => {
+            let preview = result
+                .rows
                 .into_iter()
                 .map(preview_row_to_value)
                 .collect::<Vec<_>>();
-            let preview = sort_import_preview_page_items(&preview, sort_by, sort_direction);
+            let query = serde_json::to_value(&request).ok();
+            let metadata = serde_json::to_value(result.metadata).ok();
             route_response(import_preview_page_success(ImportPreviewPageData {
                 preview,
-                total: non_negative_usize(total),
-                page,
-                page_size,
+                total: result.total,
+                page: result.page,
+                page_size: result.page_size,
+                query,
+                metadata,
             }))
         }
         Err(error) => route_response(db_error_response(error)),
     }
+}
+
+fn invalid_import_preview_query_response(query: &PreviewPageQuery) -> Option<ImportV2RouteResponse> {
+    let sort_by = query
+        .sort_by
+        .as_deref()
+        .or(query.sort_by_camel.as_deref())
+        .unwrap_or("")
+        .trim();
+    if !sort_by.is_empty() && !IMPORT_PREVIEW_SORT_KEYS.contains(&sort_by) {
+        return Some(import_v2_error_response(400, "Unsupported preview sort key"));
+    }
+    let sort_direction = query
+        .sort_direction
+        .as_deref()
+        .or(query.sort_direction_camel.as_deref())
+        .unwrap_or("")
+        .trim();
+    if !sort_direction.is_empty()
+        && !sort_direction.eq_ignore_ascii_case("asc")
+        && !sort_direction.eq_ignore_ascii_case("desc")
+    {
+        return Some(import_v2_error_response(
+            400,
+            "Unsupported preview sort direction",
+        ));
+    }
+    None
 }
 
 fn parse_preview_page_query_ids(value: Option<&str>) -> Vec<i64> {

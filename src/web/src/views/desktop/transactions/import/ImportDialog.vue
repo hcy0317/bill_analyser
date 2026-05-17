@@ -216,6 +216,7 @@
                         :import-transactions="importTransactions"
                         :server-paged="serverPagedPreviewMode"
                         :total-import-transaction-count="previewTotalCount"
+                        :preview-metadata="previewMetadata"
                         :disabled="loading || submitting"
                         :session-id="serverSessionId"
                         @reclassified="onReclassified"
@@ -406,6 +407,11 @@ import {
     resolveImportPreviewCategoryId,
     type ImportPreviewRecord
 } from './importPreview.ts';
+import type {
+    ImportPreviewMetadata,
+    ImportPreviewServerQueryFilters,
+    PreviewPageRequestOptions
+} from './importPreviewIndex.ts';
 import {
     extractApiErrorMessage,
     fetchImportStage
@@ -564,6 +570,7 @@ const importData = ref<string>('');
 const parsedFileData = ref<string[][] | undefined>(undefined);
 const importTransactions = ref<ImportTransaction[] | undefined>(undefined);
 const previewTotalCount = ref<number>(0);
+const previewMetadata = ref<ImportPreviewMetadata | null>(null);
 const serverPagedPreviewMode = ref<boolean>(false);
 const previewPageSortBy = ref<string>('');
 const previewPageSortDirection = ref<'asc' | 'desc'>('asc');
@@ -825,6 +832,7 @@ function open(): Promise<void> {
     importTransactionExecuteCustomScriptTab.value?.reset();
     importTransactions.value = undefined;
     previewTotalCount.value = 0;
+    previewMetadata.value = null;
     serverPagedPreviewMode.value = false;
     previewPageSortBy.value = '';
     previewPageSortDirection.value = 'asc';
@@ -1211,12 +1219,33 @@ function normalizePreviewPageSortDirection(value: string | null | undefined): 'a
     return String(value || '').toLowerCase() === 'desc' ? 'desc' : 'asc';
 }
 
-type PreviewPageRequestOptions = {
-    sortBy?: string | null;
-    sortDirection?: 'asc' | 'desc' | null;
-    previewIds?: number[];
-    totalCount?: number;
+const PREVIEW_PAGE_FILTER_PARAM_NAMES: Record<keyof ImportPreviewServerQueryFilters, string> = {
+    minDatetime: 'min_datetime',
+    maxDatetime: 'max_datetime',
+    transactionType: 'transaction_type',
+    category: 'category',
+    account: 'account',
+    tag: 'tag',
+    signal: 'signal',
+    annotation: 'annotation',
+    description: 'description',
 };
+
+function appendPreviewPageFilters(
+    searchParams: URLSearchParams,
+    filters: ImportPreviewServerQueryFilters | undefined
+): void {
+    if (!filters) {
+        return;
+    }
+
+    for (const [key, value] of Object.entries(filters)) {
+        if (typeof value !== 'string') {
+            continue;
+        }
+        searchParams.set(PREVIEW_PAGE_FILTER_PARAM_NAMES[key as keyof ImportPreviewServerQueryFilters], value);
+    }
+}
 
 async function fetchPreviewPage(
     page: number = 1,
@@ -1233,9 +1262,6 @@ async function fetchPreviewPage(
     const normalizedSortDirection = normalizePreviewPageSortDirection(
         sortOptions.sortDirection ?? previewPageSortDirection.value
     );
-    const normalizedPreviewIds = Array.isArray(sortOptions.previewIds)
-        ? sortOptions.previewIds.map(value => Number(value)).filter(value => Number.isFinite(value) && value > 0)
-        : [];
     const token = getCurrentToken();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) {
@@ -1253,9 +1279,7 @@ async function fetchPreviewPage(
         searchParams.set('sort_by', normalizedSortBy);
         searchParams.set('sort_direction', normalizedSortDirection);
     }
-    if (normalizedPreviewIds.length > 0) {
-        searchParams.set('preview_ids', normalizedPreviewIds.join(','));
-    }
+    appendPreviewPageFilters(searchParams, sortOptions.filters);
 
     const response = await fetchImportStage(
         `/api/bills/import/v2/preview/${encodeURIComponent(serverSessionId.value)}?${searchParams.toString()}`,
@@ -1278,11 +1302,10 @@ async function fetchPreviewPage(
 
     const previewData = Array.isArray(result.data?.preview) ? result.data.preview as ImportPreviewRecord[] : [];
     importTransactions.value = previewData.map((item, idx) => convertPreviewToImportTransaction(item, idx));
-    previewTotalCount.value = typeof sortOptions.totalCount === 'number'
-        ? Math.max(sortOptions.totalCount, 0)
-        : Number(result.data?.total || 0);
+    previewTotalCount.value = Number(result.data?.total || 0);
+    previewMetadata.value = (result.data?.metadata || null) as ImportPreviewMetadata | null;
     logger.info(
-        `[三阶段导入-预览分页] 加载 page=${normalizedPage}, page_size=${normalizedPageSize}, sort_by=${normalizedSortBy || 'default'}, sort_direction=${normalizedSortDirection}, preview_ids=${normalizedPreviewIds.length}, rows=${previewData.length}, total=${previewTotalCount.value}`
+        `[三阶段导入-预览分页] 加载 page=${normalizedPage}, page_size=${normalizedPageSize}, sort_by=${normalizedSortBy || 'default'}, sort_direction=${normalizedSortDirection}, filters=${Object.keys(sortOptions.filters || {}).length}, rows=${previewData.length}, total=${previewTotalCount.value}`
     );
 }
 
@@ -1311,8 +1334,7 @@ async function onCheckDataPageRequested(
         await fetchPreviewPage(normalizedPage, normalizedPageSize, {
             sortBy: normalizedSortBy,
             sortDirection: normalizedSortDirection,
-            previewIds: sortOptions?.previewIds,
-            totalCount: sortOptions?.totalCount,
+            filters: sortOptions?.filters,
         });
     } catch (error) {
         logger.error('[三阶段导入-预览分页] Check Data 加载失败:', error);
@@ -1353,6 +1375,7 @@ async function executeStage2Dedup(): Promise<void> {
 
     logger.info(`[三阶段导入-阶段2] 去重统计: ${JSON.stringify(stage2Result.data?.dedup_stats || {})}`);
     previewTotalCount.value = Number(stage2Result.data?.after_dedup || stage2Result.data?.preview_count || 0);
+    previewMetadata.value = null;
     serverPagedPreviewMode.value = true;
     previewPageSortBy.value = '';
     previewPageSortDirection.value = 'asc';
@@ -1565,7 +1588,8 @@ function onReclassified(previewData: ImportPreviewRecord[]): void {
     if (serverPagedPreviewMode.value) {
         const page = importTransactionCheckDataTab.value?.getCurrentPreviewPage?.() || 1;
         const pageSize = importTransactionCheckDataTab.value?.getCurrentPreviewPageSize?.() || 10;
-        void fetchPreviewPage(page, pageSize);
+        const requestOptions = importTransactionCheckDataTab.value?.getCurrentServerPagedRequestOptions?.() || {};
+        void fetchPreviewPage(page, pageSize, requestOptions);
         return;
     }
 
@@ -1609,6 +1633,7 @@ async function cleanupServerSession(): Promise<void> {
     }
 
     serverSessionId.value = '';
+    previewMetadata.value = null;
 }
 
 function submit(): void {
@@ -1737,6 +1762,7 @@ function submit(): void {
                 headers: headers,
                 body: JSON.stringify({
                     session_id: serverSessionId.value,
+                    preserve_unpatched_selection: serverPagedPreviewMode.value,
                     preview_updates: previewUpdates
                 })
             }, '阶段3确认导入', DEFAULT_IMPORT_API_TIMEOUT);
@@ -1762,6 +1788,7 @@ function submit(): void {
             serverSessionId.value = '';
             serverPagedPreviewMode.value = false;
             previewTotalCount.value = 0;
+            previewMetadata.value = null;
             previewPageSortBy.value = '';
             previewPageSortDirection.value = 'asc';
 
@@ -1797,6 +1824,7 @@ function close(completed: boolean): void {
 
     importTransactions.value = undefined;
     previewTotalCount.value = 0;
+    previewMetadata.value = null;
     serverPagedPreviewMode.value = false;
     previewPageSortBy.value = '';
     previewPageSortDirection.value = 'asc';

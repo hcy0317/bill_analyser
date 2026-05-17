@@ -142,6 +142,7 @@ pub fn init_import_staging_schema(connection: &Connection) -> DbResult<()> {
 pub fn create_import_session(connection: &Connection, draft: &ImportSessionDraft) -> DbResult<i64> {
     let now = now_text();
     let user_id = user_id_i64(draft.user_id)?;
+    clear_user_import_staging_data(connection, user_id)?;
     connection.execute(
         "
         INSERT INTO import_sessions (
@@ -153,6 +154,19 @@ pub fn create_import_session(connection: &Connection, draft: &ImportSessionDraft
         params![draft.session_id, user_id, draft.file_count, now],
     )?;
     Ok(connection.last_insert_rowid())
+}
+
+pub fn clear_user_import_staging_data(connection: &Connection, user_id: i64) -> DbResult<usize> {
+    let annotation_count = connection.execute(
+        "DELETE FROM import_annotation_samples WHERE user_id = ?1",
+        [user_id],
+    )?;
+    let preview_count = connection.execute("DELETE FROM bills_preview WHERE user_id = ?1", [user_id])?;
+    let parser_count =
+        connection.execute("DELETE FROM bills_parser_template WHERE user_id = ?1", [user_id])?;
+    let session_count =
+        connection.execute("DELETE FROM import_sessions WHERE user_id = ?1", [user_id])?;
+    Ok(annotation_count + preview_count + parser_count + session_count)
 }
 
 pub fn update_import_session_status(

@@ -187,6 +187,11 @@ async fn import_db_runtime_reads_and_clears_import_session_preview_rows(
     assert_eq!(preview_body["data"]["total"], 2);
     assert_eq!(preview_body["data"]["page"], 1);
     assert_eq!(preview_body["data"]["page_size"], 1);
+    assert_eq!(preview_body["data"]["query"]["page"], 1);
+    assert_eq!(preview_body["data"]["query"]["page_size"], 1);
+    assert_eq!(preview_body["data"]["metadata"]["counts"]["total"], 2);
+    assert_eq!(preview_body["data"]["metadata"]["counts"]["selected"], 2);
+    assert!(preview_body["data"]["metadata"]["facets"]["tags"].is_array());
     assert_eq!(preview_body["data"]["preview"].as_array().unwrap().len(), 1);
     assert_eq!(
         preview_body["data"]["preview"][0]["preview_description"],
@@ -251,6 +256,20 @@ async fn import_db_runtime_reads_and_clears_import_session_preview_rows(
     assert_eq!(preview_sorted_body["data"]["total"], 2);
     assert_eq!(preview_sorted_body["data"]["preview"][0]["id"], 2);
 
+    let invalid_sort = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/bills/import/v2/preview/session-a?sort_by=unknown")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(invalid_sort.status(), StatusCode::BAD_REQUEST);
+
     let cancel = app
         .oneshot(
             Request::builder()
@@ -272,6 +291,7 @@ async fn import_db_runtime_reads_and_clears_import_session_preview_rows(
     init_import_staging_schema(runtime.connection())?;
     let rows = get_preview_by_session(runtime.connection(), "session-a", user_id(42), false)?;
     assert!(rows.is_empty());
+    assert!(get_import_session(runtime.connection(), "session-a", user_id(42))?.is_none());
     Ok(())
 }
 
@@ -1427,9 +1447,7 @@ async fn import_db_runtime_parse_dedup_confirm_writes_import_chain() -> Result<(
     )?;
     assert_eq!(bill_type, "支出");
     assert_eq!(bill_amount, -12.5);
-    let session = get_import_session(db_runtime.connection(), &session_id, user_id(42))?
-        .expect("session remains");
-    assert_eq!(session.total_confirmed, 1);
+    assert!(get_import_session(db_runtime.connection(), &session_id, user_id(42))?.is_none());
     Ok(())
 }
 
@@ -3063,6 +3081,77 @@ async fn import_db_runtime_serves_preview_index_and_legacy_parser_catalog(
     assert!(parser_ids.contains(&"auto"));
     assert!(parser_ids.contains(&"wechat"));
     assert!(parser_ids.contains(&"ccb"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn import_db_runtime_preview_query_and_confirm_preserve_server_paged_selection(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new().await?;
+    seed_import_session(fixture.db_path(), "session-preserve")?;
+    let app = runtime_router(&fixture);
+    let runtime = runtime_for(fixture.db_path())?;
+    init_bills_schema(&runtime)?;
+    let previews =
+        get_preview_by_session(runtime.connection(), "session-preserve", user_id(42), false)?;
+    assert_eq!(previews.len(), 2);
+
+    let invalid_sort = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/bills/import/v2/preview/session-preserve?page=1&page_size=1&sort_direction=sideways")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(invalid_sort.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_sort).await["error"],
+        "Unsupported preview sort direction"
+    );
+
+    let confirm = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/confirm")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "session_id": "session-preserve",
+                        "preserve_unpatched_selection": true,
+                        "preview_updates": [{
+                            "id": previews[0].id,
+                            "selected": false
+                        }]
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(confirm.status(), StatusCode::OK);
+    let confirm_body = read_json(confirm).await;
+    assert_eq!(confirm_body["success"], true);
+    assert_eq!(confirm_body["data"]["imported_count"], 1);
+
+    let imported_descriptions = {
+        let mut statement = runtime.connection().prepare(
+            "SELECT description FROM bills WHERE user_id = ?1 ORDER BY date ASC, id ASC",
+        )?;
+        let rows = statement
+            .query_map([42], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows
+    };
+    assert_eq!(imported_descriptions, vec!["second preview row"]);
     Ok(())
 }
 

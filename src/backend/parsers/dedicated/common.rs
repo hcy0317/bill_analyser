@@ -84,6 +84,27 @@ pub(super) fn workbook_rows(bytes: &[u8]) -> Option<Vec<Vec<String>>> {
     )
 }
 
+pub(super) fn looks_like_html_table_payload(bytes: &[u8]) -> bool {
+    let mut probe = bytes;
+    if probe.starts_with(&[0xef, 0xbb, 0xbf]) {
+        probe = &probe[3..];
+    }
+    probe = probe
+        .iter()
+        .position(|byte| !byte.is_ascii_whitespace())
+        .map(|index| &probe[index..])
+        .unwrap_or_default();
+    starts_with_ignore_ascii_case(probe, b"<html")
+        || starts_with_ignore_ascii_case(probe, b"<!doctype html")
+        || starts_with_ignore_ascii_case(probe, b"<table")
+}
+
+fn starts_with_ignore_ascii_case(value: &[u8], prefix: &[u8]) -> bool {
+    value
+        .get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+}
+
 fn cell_to_string(cell: &Data) -> String {
     match cell {
         Data::Empty => String::new(),
@@ -225,5 +246,30 @@ pub(super) fn compact_time(time: &str) -> String {
         format!("{}:{}:{}", &part[0..2], &part[2..4], &part[4..6])
     } else {
         text.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::looks_like_html_table_payload;
+
+    #[test]
+    fn html_payload_detection_accepts_html_table_prefixes() {
+        assert!(looks_like_html_table_payload(
+            b"<html><body><table></table>"
+        ));
+        assert!(looks_like_html_table_payload(b" \r\n\t<TABLE><tr></tr>"));
+        assert!(looks_like_html_table_payload(
+            b"\xef\xbb\xbf<!DOCTYPE html><html></html>"
+        ));
+    }
+
+    #[test]
+    fn html_payload_detection_rejects_binary_or_plain_payloads() {
+        assert!(!looks_like_html_table_payload(
+            b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+        ));
+        assert!(!looks_like_html_table_payload(b"transaction,date,amount\n"));
+        assert!(!looks_like_html_table_payload(b""));
     }
 }
