@@ -11,7 +11,17 @@ const INSERT_PREVIEW_BILL_SQL: &str = "
             preview_recurring_match_reasons, preview_recurring_matched_date,
             preview_selected, dedup_type, dedup_source_ids,
             preview_matching_feedback_json, created_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, 1, ?22, ?23, ?24, ?25)
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
+        ";
+
+const INSERT_PARSER_TEMPLATE_SQL: &str = "
+        INSERT INTO bills_parser_template (
+            session_id, user_id, parser_date, parser_amount,
+            parser_type, parser_description, parser_id,
+            parser_tags_json, parser_counterparty, parser_payment_method,
+            parser_original_type, parser_original_category,
+            parser_account_id, parser_is_processed, created_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, '0', ?14)
         ";
 
 fn insert_preview_bill_on_connection(
@@ -73,6 +83,7 @@ fn insert_preview_bill_with_statement(
             draft.preview_recurring_match_score,
             draft.preview_recurring_match_reasons,
             draft.preview_recurring_matched_date,
+            if draft.preview_selected { 1 } else { 0 },
             draft.dedup_type,
             dedup_source_ids,
             serialize_preview_matching_feedback(&draft.preview_matching_feedback),
@@ -88,25 +99,34 @@ fn insert_parser_template_on_connection(
     user_id: UserId,
     draft: &ImportParserTemplateDraft,
 ) -> DbResult<()> {
+    let mut statement = connection.prepare(INSERT_PARSER_TEMPLATE_SQL)?;
+    insert_parser_template_with_statement(
+        &mut statement,
+        session_id,
+        user_id_i64(user_id)?,
+        draft,
+        &now_text(),
+    )
+}
+
+fn insert_parser_template_with_statement(
+    statement: &mut rusqlite::Statement<'_>,
+    session_id: &str,
+    user_id: i64,
+    draft: &ImportParserTemplateDraft,
+    created_at: &str,
+) -> DbResult<()> {
     let parser_tags_json = serialize_parser_tags(
         draft.parser_tags.as_ref(),
         &draft.parser_id,
         &draft.parser_payment_method,
         "",
     );
-    connection.execute(
-        "
-        INSERT INTO bills_parser_template (
-            session_id, user_id, parser_date, parser_amount,
-            parser_type, parser_description, parser_id,
-            parser_tags_json, parser_counterparty, parser_payment_method,
-            parser_original_type, parser_original_category,
-            parser_account_id, parser_is_processed, created_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, '0', ?14)
-        ",
+
+    statement.execute(
         params![
             session_id,
-            user_id_i64(user_id)?,
+            user_id,
             normalize_bill_date_text(&draft.parser_date),
             draft.parser_amount,
             draft.parser_type,
@@ -118,7 +138,7 @@ fn insert_parser_template_on_connection(
             draft.parser_original_type,
             draft.parser_original_category,
             draft.parser_account_id,
-            now_text(),
+            created_at,
         ],
     )?;
     Ok(())

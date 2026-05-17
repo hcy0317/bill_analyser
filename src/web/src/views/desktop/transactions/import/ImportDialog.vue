@@ -89,17 +89,47 @@
                                         </v-list-item>
                                     </template>
 
-                                    <v-list-item
+                                    <template
                                         v-for="(menu, index) in group.items"
                                         :key="`${group.title}_${index}`"
-                                        :prepend-icon="menu.prependIcon"
-                                        :title="menu.title"
-                                        :subtitle="menu.subTitle"
-                                        :append-icon="menu.appendIcon"
-                                        :disabled="menu.disabled"
-                                        class="import-check-data-filter-menu__item"
-                                        @click="menu.onClick()"
-                                    />
+                                    >
+                                        <v-list-group
+                                            v-if="menu.items?.length"
+                                            :value="`${group.title}_${menu.title}`"
+                                        >
+                                            <template #activator="{ props: childGroupActivatorProps }">
+                                                <v-list-item
+                                                    v-bind="childGroupActivatorProps"
+                                                    :prepend-icon="menu.prependIcon"
+                                                    :title="menu.title"
+                                                    :subtitle="menu.subTitle"
+                                                    :disabled="menu.disabled"
+                                                    class="import-check-data-filter-menu__item"
+                                                />
+                                            </template>
+                                            <v-list-item
+                                                v-for="(childMenu, childIndex) in menu.items"
+                                                :key="`${group.title}_${menu.title}_${childIndex}`"
+                                                :prepend-icon="childMenu.prependIcon"
+                                                :title="childMenu.title"
+                                                :subtitle="childMenu.subTitle"
+                                                :append-icon="childMenu.appendIcon"
+                                                :disabled="childMenu.disabled"
+                                                class="import-check-data-filter-menu__item"
+                                                @click="childMenu.onClick?.()"
+                                            />
+                                        </v-list-group>
+                                        <v-list-item
+                                            v-else
+                                            :prepend-icon="menu.prependIcon"
+                                            :title="menu.title"
+                                            :subtitle="menu.subTitle"
+                                            :append-icon="menu.appendIcon"
+                                            :disabled="menu.disabled"
+                                            class="import-check-data-filter-menu__item"
+                                            @click="menu.onClick?.()"
+                                        />
+                                    </template>
                                 </v-list-group>
                             </v-list>
                         </v-menu>
@@ -117,7 +147,7 @@
                                                  :subtitle="menu.subTitle"
                                                  :append-icon="menu.appendIcon"
                                                  :disabled="menu.disabled"
-                                                 @click="menu.onClick()" />
+                                                 @click="menu.onClick?.()" />
                                 </template>
                             </v-list>
                         </v-menu>
@@ -1566,7 +1596,8 @@ function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: num
         parserSource: item.preview_parser_id || '',
         parserTags: item.preview_parser_tags || [],
         matching: item.matching,
-        isManuallyAnnotated: !!item.preview_is_manually_annotated
+        isManuallyAnnotated: !!item.preview_is_manually_annotated,
+        selected: !!(item.preview_selected ?? item.selected)
     };
 
     // 添加预览表ID和解析器来源，用于阶段3确认导入

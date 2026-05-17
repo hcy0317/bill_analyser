@@ -25,7 +25,8 @@ export interface ImportTransactionCheckDataMenu {
     appendIcon?: string;
     disabled?: boolean;
     divider?: boolean;
-    onClick: () => void;
+    items?: ImportTransactionCheckDataMenu[];
+    onClick?: () => void;
 }
 
 export interface RecurringCandidateItem {

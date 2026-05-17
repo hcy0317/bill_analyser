@@ -65,6 +65,7 @@ pub async fn import_dedup_runtime_handler(
         Ok(stats) => stats,
         Err(error) => return route_response(db_error_response(error)),
     };
+    enforce_import_preview_invariants(preview_drafts.as_mut_slice());
     let preview_insert_started_at = Instant::now();
     let inserted_preview = match insert_preview_bills_batch(
         runtime.connection_mut(),
@@ -835,6 +836,19 @@ fn apply_learning_rule_match(
     category_values: &[Value],
     account_values: &[Value],
 ) -> Option<i64> {
+    if is_transfer_protected_preview(draft) {
+        matching_feedback_object_mut(draft).insert(
+            "learning".to_string(),
+            json!({
+                "review_status": "skipped",
+                "auto_apply": false,
+                "reason": "transfer preview is protected from learning type/category overrides",
+                "source": "import_learning_rules",
+            }),
+        );
+        return None;
+    }
+
     let features = build_composite_match_features(
         &draft.preview_parser_id,
         &draft.preview_counterparty,
@@ -862,7 +876,7 @@ fn apply_learning_rule_match(
                     .get("score")
                     .and_then(Value::as_f64)
                     .unwrap_or_default();
-                (score_value >= 0.72).then(|| {
+                (score_value >= 0.72 && learning_similarity_has_semantic_anchor(&score)).then(|| {
                     let reason = score
                         .get("reason_parts")
                         .cloned()
@@ -883,19 +897,41 @@ fn apply_learning_rule_match(
         }
     }
     let (rule, score, mode, reason) = best?;
-    if let Some(learned_type) = rule
+    let learned_type = rule
         .learned_type
         .as_deref()
-        .and_then(normalize_transaction_type_text)
-    {
+        .and_then(normalize_transaction_type_text);
+    let candidate_preview_type = learned_type
+        .as_deref()
+        .unwrap_or_else(|| draft.preview_type.trim());
+    let learned_category = if let Some(category_id) = rule.learned_category_id {
+        let Some(category) = categories_by_id.get(&category_id) else {
+            annotate_learning_rule_skip(
+                draft,
+                rule.id,
+                "learned category is missing from current category table",
+            );
+            return None;
+        };
+        if !category_type_matches_preview(category.type_code, candidate_preview_type) {
+            annotate_learning_rule_skip(
+                draft,
+                rule.id,
+                "learned category type is incompatible with preview type",
+            );
+            return None;
+        }
+        Some(category)
+    } else {
+        None
+    };
+    if let Some(learned_type) = learned_type {
         draft.preview_type = learned_type;
     }
-    if let Some(category_id) = rule.learned_category_id {
-        if let Some(category) = categories_by_id.get(&category_id) {
-            draft.preview_main_category = category.main_category.clone();
-            draft.preview_sub_category = category.sub_category.clone();
-            normalize_preview_type_for_category(draft, category.type_code);
-        }
+    if let Some(category) = learned_category {
+        draft.preview_main_category = category.main_category.clone();
+        draft.preview_sub_category = category.sub_category.clone();
+        normalize_preview_type_for_category(draft, category.type_code);
     }
     if let Some(account_id) = rule.learned_source_account_id {
         draft.preview_source_account_id = Some(account_id);
@@ -933,6 +969,82 @@ fn apply_learning_rule_match(
         }),
     );
     Some(rule.id)
+}
+
+fn learning_similarity_has_semantic_anchor(score: &Value) -> bool {
+    score
+        .get("matched_fields")
+        .and_then(Value::as_array)
+        .is_some_and(|fields| {
+            fields.iter().filter_map(Value::as_str).any(|field| {
+                matches!(field, "counterparty" | "description")
+            })
+        })
+}
+
+fn annotate_learning_rule_skip(draft: &mut ImportPreviewDraft, rule_id: i64, reason: &str) {
+    matching_feedback_object_mut(draft).insert(
+        "learning".to_string(),
+        json!({
+            "rule_id": rule_id,
+            "review_status": "skipped",
+            "auto_apply": false,
+            "reason": reason,
+            "source": "import_learning_rules",
+        }),
+    );
+}
+
+fn is_transfer_protected_preview(draft: &ImportPreviewDraft) -> bool {
+    draft.preview_type.trim() == "转账"
+        || draft
+            .dedup_type
+            .as_deref()
+            .map(|value| value.trim().to_ascii_lowercase().contains("transfer"))
+            .unwrap_or(false)
+        || draft.preview_matching_feedback.get("transfer").is_some()
+}
+
+fn enforce_import_preview_invariants(drafts: &mut [ImportPreviewDraft]) {
+    for draft in drafts {
+        if !is_transfer_protected_preview(draft) {
+            continue;
+        }
+
+        draft.preview_type = "转账".to_string();
+        if transfer_preview_requires_account_review(draft) {
+            draft.preview_selected = false;
+            annotate_transfer_account_review(draft);
+        }
+    }
+}
+
+fn transfer_preview_requires_account_review(draft: &ImportPreviewDraft) -> bool {
+    draft.preview_source_account_id.is_none()
+        || draft.preview_destination_account_id.is_none()
+        || draft.preview_source_account_id == draft.preview_destination_account_id
+}
+
+fn annotate_transfer_account_review(draft: &mut ImportPreviewDraft) {
+    if draft
+        .preview_matching_feedback
+        .pointer("/annotation/type")
+        .and_then(Value::as_str)
+        .is_some_and(|value| value == "no_income_expenditure")
+    {
+        return;
+    }
+
+    matching_feedback_object_mut(draft).insert(
+        "annotation".to_string(),
+        json!({
+            "status": "needs_review",
+            "type": "transfer_account_direction",
+            "review_status": "requires_account_review",
+            "suppressed": true,
+            "reason": "transfer preview is missing source or destination account",
+        }),
+    );
 }
 
 fn best_recurring_candidate_for_draft(
@@ -1231,6 +1343,7 @@ fn import_preview_draft_from_row(row: &ImportPreviewRow) -> ImportPreviewDraft {
         preview_recurring_match_score: row.preview_recurring_match_score,
         preview_recurring_match_reasons: row.preview_recurring_match_reasons.clone(),
         preview_recurring_matched_date: row.preview_recurring_matched_date.clone(),
+        preview_selected: row.preview_selected,
         dedup_type: (!row.dedup_type.trim().is_empty()).then(|| row.dedup_type.clone()),
         dedup_source_ids: row.dedup_source_ids.clone(),
         preview_matching_feedback: row.preview_matching_feedback.clone(),
@@ -1286,6 +1399,10 @@ fn import_preview_patch_from_draft(preview_id: i64, draft: &ImportPreviewDraft) 
         (
             ImportPreviewPatchField::MatchingFeedback,
             ImportPreviewPatchValue::Json(draft.preview_matching_feedback.clone()),
+        ),
+        (
+            ImportPreviewPatchField::Selected,
+            ImportPreviewPatchValue::Bool(draft.preview_selected),
         ),
     ])
 }
@@ -1772,6 +1889,7 @@ pub async fn import_reclassify_runtime_handler(
     ) {
         return route_response(db_error_response(error));
     }
+    enforce_import_preview_invariants(intelligent_drafts.as_mut_slice());
     let intelligence_patches = preview
         .iter()
         .zip(intelligent_drafts.iter())

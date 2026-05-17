@@ -589,17 +589,12 @@
                 <h4 class="text-h5">{{ tt('Select Category to Edit') }}</h4>
             </v-card-title>
             <v-card-text>
-                <p class="text-body-2 text-medium-emphasis mb-4">
-                    {{ tt('Select a category to edit its rule expression and settings') }}
-                </p>
-                <!-- 分类类型切换 -->
                 <v-tabs v-model="manageCategoryType" class="mb-4">
                     <v-tab :value="CategoryType.Expense">{{ tt('Expense') }}</v-tab>
                     <v-tab :value="CategoryType.Income">{{ tt('Income') }}</v-tab>
                     <v-tab :value="CategoryType.Transfer">{{ tt('Transfer') }}</v-tab>
                     <v-tab :value="CategoryType.Investment">{{ tt('Investment') }}</v-tab>
                 </v-tabs>
-                <!-- 分类选择器 -->
                 <two-column-select
                     :label="tt('Category')"
                     :placeholder="tt('Select Category')"
@@ -625,6 +620,12 @@
                 />
             </v-card-text>
             <v-card-actions class="justify-center gap-4">
+                <v-btn color="default" variant="outlined" @click="openManagedPrimaryCategoryCreateDialog">
+                    {{ tt('Add Primary Category') }}
+                </v-btn>
+                <v-btn color="default" variant="outlined" :disabled="!getSelectedManagePrimaryCategory()" @click="openManagedSecondaryCategoryCreateDialog">
+                    {{ tt('Add Secondary Category') }}
+                </v-btn>
                 <v-btn color="primary" :disabled="!manageCategoryId" @click="openSelectedCategoryEditDialog">
                     {{ tt('Edit') }}
                 </v-btn>
@@ -645,31 +646,35 @@
                 <h4 class="text-h5">{{ tt('Select Account to Edit') }}</h4>
             </v-card-title>
             <v-card-text>
-                <p class="text-body-2 text-medium-emphasis mb-4">
-                    {{ tt('Select an account to edit its aliases and settings') }}
-                </p>
-                <!-- 账户选择器 -->
-                <v-select
+                <two-column-select
                     :label="tt('Account')"
                     :placeholder="tt('Select Account')"
-                    :items="allDisplayAccounts"
-                    item-title="name"
-                    item-value="id"
-                    :no-data-text="tt('No available account')"
+                    :items="allManageCategorizedAccounts"
+                    primary-key-field="id"
+                    primary-value-field="category"
+                    primary-title-field="name"
+                    primary-footer-field="displayBalance"
+                    primary-icon-field="icon"
+                    primary-icon-type="account"
+                    primary-sub-items-field="accounts"
+                    :primary-title-i18n="true"
+                    secondary-key-field="id"
+                    secondary-value-field="id"
+                    secondary-title-field="name"
+                    secondary-footer-field="displayBalance"
+                    secondary-icon-field="icon"
+                    secondary-icon-type="account"
+                    secondary-color-field="color"
+                    :enable-filter="true"
+                    :filter-placeholder="tt('Find account')"
+                    :filter-no-items-text="tt('No available account')"
                     v-model="manageAccountId"
-                >
-                    <template #item="{ props, item }">
-                        <v-list-item v-bind="props">
-                            <template #prepend>
-                                <ItemIcon class="me-2" icon-type="account"
-                                          :icon-id="item.raw.icon"
-                                          :color="item.raw.color" />
-                            </template>
-                        </v-list-item>
-                    </template>
-                </v-select>
+                />
             </v-card-text>
             <v-card-actions class="justify-center gap-4">
+                <v-btn color="default" variant="outlined" @click="openManagedAccountCreateDialog">
+                    {{ tt('Add Account') }}
+                </v-btn>
                 <v-btn color="primary" :disabled="!manageAccountId" @click="openSelectedAccountEditDialog">
                     {{ tt('Edit') }}
                 </v-btn>
@@ -819,12 +824,15 @@ import {
 import { cloneImportPreviewDraftTransaction } from '../importPreviewDrafts.ts';
 import {
     buildImportPreviewServerQueryFilters,
+    groupImportPreviewAccountFilterLabels,
+    groupImportPreviewCategoryFilterLabels,
     isImportPreviewServerPagedSortableColumn,
     normalizePreviewPage,
     normalizePreviewPageSize,
     normalizePreviewTableSortDirection,
     normalizePreviewTableSortItems,
     normalizeServerPagedSortKey,
+    resolveServerPagedSelectionCount,
     type ImportPreviewFacetEntry,
     type ImportPreviewMetadata,
     type ImportPreviewServerQueryFilters,
@@ -895,6 +903,7 @@ import { type NameValue, type NameNumeralValue, itemAndIndex, reversed, keys } f
 import { DateRange } from '@/core/datetime.ts';
 import { type NumeralSystem } from '@/core/numeral.ts';
 import { CategoryType } from '@/core/category.ts';
+import { AccountCategory } from '@/core/account.ts';
 import { TransactionType } from '@/core/transaction.ts';
 
 import { Account, type CategorizedAccountWithDisplayBalance } from '@/models/account.ts';
@@ -3240,6 +3249,83 @@ const allDisplayAccounts = computed<Account[]>(() => {
     return allAccounts;
 });
 
+const allManageCategorizedAccounts = computed<CategorizedAccountWithDisplayBalance[]>(() => getCategorizedAccountsWithDisplayBalance(
+    accountsStore.allAccounts,
+    false
+));
+
+function getSelectedManagePrimaryCategory(): TransactionCategory | undefined {
+    if (!manageCategoryId.value) {
+        return undefined;
+    }
+
+    const selectedCategory = allCategoriesMap.value[manageCategoryId.value];
+    if (!selectedCategory) {
+        return undefined;
+    }
+
+    if (!selectedCategory.parentId || selectedCategory.parentId === '0') {
+        return selectedCategory;
+    }
+
+    return allCategoriesMap.value[selectedCategory.parentId];
+}
+
+function openManagedPrimaryCategoryCreateDialog(): void {
+    categoryEditDialog.value?.open({
+        parentId: '0',
+        type: manageCategoryType.value
+    }).then(result => {
+        if (result?.category?.id) {
+            manageCategoryId.value = result.category.id;
+        }
+        transactionCategoriesStore.loadAllCategories({ force: true });
+    }).catch((error: unknown) => {
+        if (error && typeof error === 'object' && 'processed' in error && !(error as { processed: boolean }).processed) {
+            logger.error(`[分类新增] 失败: ${error}`);
+        }
+    });
+}
+
+function openManagedSecondaryCategoryCreateDialog(): void {
+    const primaryCategory = getSelectedManagePrimaryCategory();
+    if (!primaryCategory) {
+        return;
+    }
+
+    categoryEditDialog.value?.open({
+        parentId: primaryCategory.id,
+        type: manageCategoryType.value,
+        color: primaryCategory.color,
+        icon: primaryCategory.icon
+    }).then(result => {
+        if (result?.category?.id) {
+            manageCategoryId.value = result.category.id;
+        }
+        transactionCategoriesStore.loadAllCategories({ force: true });
+    }).catch((error: unknown) => {
+        if (error && typeof error === 'object' && 'processed' in error && !(error as { processed: boolean }).processed) {
+            logger.error(`[子分类新增] 失败: ${error}`);
+        }
+    });
+}
+
+function openManagedAccountCreateDialog(): void {
+    accountEditDialog.value?.open({
+        category: allDisplayAccounts.value.find(account => account.id === manageAccountId.value)?.category
+            ?? AccountCategory.Default.type
+    }).then(result => {
+        if (result?.account?.id) {
+            manageAccountId.value = result.account.id;
+        }
+        accountsStore.loadAllAccounts({ force: true });
+    }).catch((error: unknown) => {
+        if (error && typeof error === 'object' && 'processed' in error && !(error as { processed: boolean }).processed) {
+            logger.error(`[账户新增] 失败: ${error}`);
+        }
+    });
+}
+
 // v6.34: 打开选中分类的编辑对话框
 function openSelectedCategoryEditDialog(): void {
     if (!manageCategoryId.value) return;
@@ -3771,6 +3857,22 @@ function getDescriptionFilterSummary(): string {
     return filters.value.description;
 }
 
+function buildGroupedFilterMenuItems(
+    groups: Array<{ title: string; labels: string[] }>,
+    selectedValue: string | null | undefined,
+    onSelect: (value: string) => void,
+    localizeGroupTitle = false
+): ImportTransactionCheckDataMenu[] {
+    return groups.map(group => ({
+        title: localizeGroupTitle ? tt(group.title) : group.title,
+        items: group.labels.map(label => ({
+            title: label,
+            appendIcon: selectedValue === label ? mdiCheck : undefined,
+            onClick: () => onSelect(label)
+        }))
+    }));
+}
+
 const filterMenus = computed<ImportTransactionCheckDataMenuGroup[]>(() => [
     {
         title: getAnnotationFilterTitle(),
@@ -3906,11 +4008,11 @@ const filterMenus = computed<ImportTransactionCheckDataMenuGroup[]>(() => [
                 appendIcon: filters.value.category === '' ? mdiCheck : undefined,
                 onClick: () => filters.value.category = ''
             },
-            ...allUsedCategoryNames.value.map(name => ({
-                title: name,
-                appendIcon: filters.value.category === name ? mdiCheck : undefined,
-                onClick: () => filters.value.category = name
-            }))
+            ...buildGroupedFilterMenuItems(
+                allUsedCategoryFilterGroups.value,
+                filters.value.category,
+                value => filters.value.category = value
+            )
         ]
     },
     {
@@ -3932,11 +4034,12 @@ const filterMenus = computed<ImportTransactionCheckDataMenuGroup[]>(() => [
                 appendIcon: filters.value.account === '' ? mdiCheck : undefined,
                 onClick: () => filters.value.account = ''
             },
-            ...allUsedAccountNames.value.map(name => ({
-                title: name,
-                appendIcon: filters.value.account === name ? mdiCheck : undefined,
-                onClick: () => filters.value.account = name
-            }))
+            ...buildGroupedFilterMenuItems(
+                allUsedAccountFilterGroups.value,
+                filters.value.account,
+                value => filters.value.account = value,
+                true
+            )
         ]
     },
     {
@@ -4211,7 +4314,11 @@ const selectedImportTransactionCount = computed<number>(() => {
         return importTransactionSelectionSummary.value.selectedCount;
     }
     const delta = getServerPagedSelectionDelta();
-    return Math.max(Number(previewMetadata.value.counts?.selected || 0) + delta.selected, 0);
+    return resolveServerPagedSelectionCount({
+        total: previewMetadata.value.counts?.total ?? totalImportTransactionCount.value,
+        selected: previewMetadata.value.counts?.selected,
+        delta: delta.selected
+    });
 });
 const selectedExpenseTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.selectedExpenseCount);
 const selectedIncomeTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.selectedIncomeCount);
@@ -4222,7 +4329,11 @@ const selectedInvalidTransactionCount = computed<number>(() => {
         return importTransactionSelectionSummary.value.selectedInvalidCount;
     }
     const delta = getServerPagedSelectionDelta();
-    return Math.max(Number(previewMetadata.value.counts?.selected_invalid || 0) + delta.selectedInvalid, 0);
+    return resolveServerPagedSelectionCount({
+        total: selectedImportTransactionCount.value,
+        selected: previewMetadata.value.counts?.selected_invalid,
+        delta: delta.selectedInvalid
+    });
 });
 const annotationTransactionCount = computed<number>(() => {
     if (serverPagedMode.value) {
@@ -4288,6 +4399,18 @@ const allUsedAccountNames = computed<string[]>(() => {
 
     return objectFieldToArrayItem(accountNames);
 });
+
+const allUsedCategoryFilterGroups = computed(() => groupImportPreviewCategoryFilterLabels(
+    allUsedCategoryNames.value,
+    allCategories.value,
+    tt('Other')
+));
+const allUsedAccountFilterGroups = computed(() => groupImportPreviewAccountFilterLabels(
+    allUsedAccountNames.value,
+    accountsStore.allAccounts,
+    AccountCategory.values(),
+    'Other'
+));
 
 const allUsedTagNames = computed<string[]>(() => {
     if (serverPagedMode.value) {

@@ -19,8 +19,17 @@ pub fn insert_parser_templates_batch(
     }
 
     run_transaction(connection, |tx| {
+        let user_id_value = user_id_i64(user_id)?;
+        let created_at = now_text();
+        let mut statement = tx.prepare(INSERT_PARSER_TEMPLATE_SQL)?;
         for draft in drafts {
-            insert_parser_template_on_connection(tx, session_id, user_id, draft)?;
+            insert_parser_template_with_statement(
+                &mut statement,
+                session_id,
+                user_id_value,
+                draft,
+                &created_at,
+            )?;
         }
         Ok(drafts.len())
     })
@@ -48,9 +57,18 @@ pub fn stage_import_parser_templates(
         if existing_session.is_none() {
             create_import_session(tx, session)?;
         }
+        let user_id_value = user_id_i64(session.user_id)?;
+        let created_at = now_text();
+        let mut statement = tx.prepare(INSERT_PARSER_TEMPLATE_SQL)?;
         let mut inserted_count = 0;
         for draft in drafts {
-            insert_parser_template_on_connection(tx, &session.session_id, session.user_id, draft)?;
+            insert_parser_template_with_statement(
+                &mut statement,
+                &session.session_id,
+                user_id_value,
+                draft,
+                &created_at,
+            )?;
             inserted_count += 1;
         }
         let total_parsed = previous_parsed.saturating_add(usize_to_i64_saturating(inserted_count));

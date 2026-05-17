@@ -5,6 +5,8 @@ import {
     PREVIEW_FILTER_NONE_VALUE,
     buildImportPreviewServerQueryFilters,
     collectImportPreviewIndexAnnotationIssues,
+    groupImportPreviewAccountFilterLabels,
+    groupImportPreviewCategoryFilterLabels,
     isImportPreviewServerPagedSortableColumn,
     mapImportPreviewIndexResponseItem,
     matchesImportPreviewIndexItemFilters,
@@ -12,6 +14,7 @@ import {
     normalizePreviewPageSize,
     normalizePreviewTableSortDirection,
     normalizePreviewTableSortItems,
+    resolveServerPagedSelectionCount,
     resolveImportPreviewIndexPage,
     sortImportPreviewIndexItems,
     type ImportPreviewIndexItem,
@@ -171,6 +174,78 @@ describe('import preview index helpers', () => {
             transferStatus: 'accepted',
             recurringCandidateCount: 2
         });
+    });
+
+    test('clamps server-paged selected count to the preview total', () => {
+        expect(resolveServerPagedSelectionCount({
+            total: 13195,
+            selected: 13195,
+            delta: 3
+        })).toBe(13195);
+
+        expect(resolveServerPagedSelectionCount({
+            total: 13195,
+            selected: 13195,
+            delta: -1
+        })).toBe(13194);
+
+        expect(resolveServerPagedSelectionCount({
+            total: 13195,
+            selected: 0,
+            delta: -5
+        })).toBe(0);
+    });
+
+    test('groups category and account filters under their management parents', () => {
+        expect(groupImportPreviewCategoryFilterLabels([
+            '餐饮',
+            '工资',
+            '未知分类'
+        ], {
+            1: [
+                {
+                    name: '日常支出',
+                    subCategories: [
+                        { name: '餐饮' },
+                        { name: '交通' }
+                    ]
+                }
+            ],
+            2: [
+                {
+                    name: '工作收入',
+                    subCategories: [
+                        { name: '工资' }
+                    ]
+                }
+            ]
+        }, 'Other')).toStrictEqual([
+            { title: '日常支出', labels: ['餐饮'] },
+            { title: '工作收入', labels: ['工资'] },
+            { title: 'Other', labels: ['未知分类'] }
+        ]);
+
+        expect(groupImportPreviewAccountFilterLabels([
+            '招商银行卡',
+            '余额宝',
+            '未知账户'
+        ], [
+            { name: '招商银行卡', category: 2 },
+            {
+                name: '支付宝',
+                category: 4,
+                subAccounts: [
+                    { name: '余额宝' }
+                ]
+            }
+        ], [
+            { type: 2, name: 'Checking Account' },
+            { type: 4, name: 'Virtual Account' }
+        ], 'Other')).toStrictEqual([
+            { title: 'Checking Account', labels: ['招商银行卡'] },
+            { title: 'Virtual Account', labels: ['余额宝'] },
+            { title: 'Other', labels: ['未知账户'] }
+        ]);
     });
 
     test('normalizes server-paged table page and sort request state', () => {

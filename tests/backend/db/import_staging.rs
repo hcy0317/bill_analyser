@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, error::Error};
 
-use bill_analyser_core::{SmartDeduplicationEngine, UserId};
+use bill_analyser_core::{DedupBill, Money, SmartDeduplicationEngine, UserId};
 use bill_analyser_db::{
     apply_preview_learning_decision, apply_preview_llm_recommendation,
     apply_preview_patches_preserving_selection, apply_preview_transfer_decision,
@@ -2113,6 +2113,164 @@ fn parser_templates_flow_through_smart_dedup_into_preview_drafts() -> Result<(),
         previews[0].preview_parser_tags,
         vec!["parser:abc", "channel:bank", "parser:cmbc"]
     );
+    Ok(())
+}
+
+#[test]
+fn no_income_expenditure_transfer_pair_is_suppressed_and_skipped_on_confirm(
+) -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("no_income_suppression.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_bills_schema(&runtime)?;
+    init_import_staging_schema(runtime.connection())?;
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: "session-no-income".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+
+    let mut outgoing = parser_template_draft("2019-02-09 11:52:47", -813.22, "花呗自动还款");
+    outgoing.parser_id = "cmbc".to_string();
+    outgoing.parser_payment_method = "跨行支付".to_string();
+    outgoing.parser_account_id = "1001".to_string();
+    outgoing.parser_original_type = "支出".to_string();
+
+    let mut incoming = parser_template_draft("2019-02-09 11:52:40", 813.22, "余额宝还款");
+    incoming.parser_type = "转账".to_string();
+    incoming.parser_id = "alipay".to_string();
+    incoming.parser_payment_method = "支付宝".to_string();
+    incoming.parser_account_id = "1002".to_string();
+    incoming.parser_original_type = "不计收支".to_string();
+    incoming.parser_original_category = "信用借还".to_string();
+
+    insert_parser_templates_batch(
+        runtime.connection_mut(),
+        "session-no-income",
+        user_id(42),
+        &[outgoing, incoming],
+    )?;
+    let templates = get_parser_templates_by_session(
+        runtime.connection(),
+        "session-no-income",
+        user_id(42),
+        None,
+    )?;
+    let dedup_result =
+        SmartDeduplicationEngine.process(dedup_bills_from_parser_templates(&templates));
+    assert_eq!(dedup_result.transfer_pairs.len(), 1);
+    let preview_drafts = preview_drafts_from_dedup_bills(&dedup_result.kept_bills);
+    assert_eq!(preview_drafts.len(), 1);
+    assert_eq!(preview_drafts[0].preview_type, "转账");
+    assert!(!preview_drafts[0].preview_selected);
+    assert_eq!(
+        preview_drafts[0]
+            .preview_matching_feedback
+            .pointer("/annotation/type")
+            .and_then(|value| value.as_str()),
+        Some("no_income_expenditure")
+    );
+
+    insert_preview_bills_batch(
+        runtime.connection_mut(),
+        "session-no-income",
+        user_id(42),
+        &preview_drafts,
+    )?;
+    let previews = get_preview_by_session(
+        runtime.connection(),
+        "session-no-income",
+        user_id(42),
+        false,
+    )?;
+    assert_eq!(previews.len(), 1);
+    assert!(!previews[0].preview_selected);
+
+    update_preview_selection(
+        runtime.connection_mut(),
+        &[previews[0].id],
+        true,
+        user_id(42),
+    )?;
+    let result =
+        confirm_preview_to_bills(runtime.connection_mut(), "session-no-income", user_id(42))?;
+    assert_eq!(result.confirmed_count, 0);
+    assert_eq!(result.skipped_count, 1);
+    let bill_count: i64 = runtime.connection().query_row(
+        "SELECT COUNT(*) FROM bills WHERE user_id = ?1",
+        [42],
+        |row| row.get(0),
+    )?;
+    assert_eq!(bill_count, 0);
+    Ok(())
+}
+
+#[test]
+fn transfer_pair_missing_destination_account_is_review_blocked() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("transfer_account_review.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_bills_schema(&runtime)?;
+    init_import_staging_schema(runtime.connection())?;
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: "session-transfer-review".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+
+    let transfer_bill = DedupBill {
+        date: "2026-05-04 10:00:00".to_string(),
+        amount: Money::from_yuan_str("-100.00").expect("amount"),
+        transaction_type: "转账".to_string(),
+        source_account_id: "101".to_string(),
+        destination_account_id: Some("wallet".to_string()),
+        dedup_type: Some("transfer".to_string()),
+        template_id: Some("1".to_string()),
+        merged_template_ids: vec!["2".to_string()],
+        ..DedupBill::default()
+    };
+    let preview_drafts = preview_drafts_from_dedup_bills(&[transfer_bill]);
+    assert_eq!(preview_drafts[0].preview_type, "转账");
+    assert!(!preview_drafts[0].preview_selected);
+    assert_eq!(
+        preview_drafts[0]
+            .preview_matching_feedback
+            .pointer("/annotation/type")
+            .and_then(|value| value.as_str()),
+        Some("transfer_account_direction")
+    );
+
+    insert_preview_bills_batch(
+        runtime.connection_mut(),
+        "session-transfer-review",
+        user_id(42),
+        &preview_drafts,
+    )?;
+    let previews = get_preview_by_session(
+        runtime.connection(),
+        "session-transfer-review",
+        user_id(42),
+        false,
+    )?;
+    update_preview_selection(
+        runtime.connection_mut(),
+        &[previews[0].id],
+        true,
+        user_id(42),
+    )?;
+    let result = confirm_preview_to_bills(
+        runtime.connection_mut(),
+        "session-transfer-review",
+        user_id(42),
+    )?;
+    assert_eq!(result.confirmed_count, 0);
+    assert_eq!(result.skipped_count, 1);
     Ok(())
 }
 

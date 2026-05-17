@@ -102,6 +102,20 @@ describe('ImportTransaction model', () => {
         expect(transaction.valid).toBe(true);
     });
 
+    test('ImportTransaction.of preserves backend preview selected state', () => {
+        const selected = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            selected: true
+        }, 4);
+        const unselected = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            selected: false
+        }, 5);
+
+        expect(selected.selected).toBe(true);
+        expect(unselected.selected).toBe(false);
+    });
+
     test('partial matching payloads are normalized without throwing', () => {
         const parserOnly = ImportTransaction.of({
             ...BASE_RESPONSE,

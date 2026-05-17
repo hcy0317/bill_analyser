@@ -2007,6 +2007,259 @@ async fn import_db_runtime_parses_dedicated_xlsx_upload_without_legacy_fallback(
 }
 
 #[tokio::test]
+async fn import_db_runtime_stage2_learning_does_not_override_transfer_pair_type(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new().await?;
+    let mut runtime = runtime_for(fixture.db_path())?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+    seed_import_intelligence_tables(&runtime)?;
+    runtime.connection().execute(
+        "INSERT INTO categories(id, user_id, type, main_category, sub_category, priority)
+         VALUES (902, 42, 2, '其他收入', '原路退款', 30)",
+        [],
+    )?;
+    let features = build_composite_match_features(
+        "cmbc",
+        "支付宝（中国）网络技术有限公司客户备付金",
+        "支付宝快捷支付",
+        "网络银行",
+    )
+    .expect("transfer learning features");
+    let composite_hash = composite_hash_from_features(&features);
+    runtime.connection().execute(
+        "INSERT INTO import_learning_rules(
+            id, user_id, match_type, match_value, normalized_match_value, learned_type,
+            learned_category_id, learned_source_account_id, learned_destination_account_id,
+            enabled, parser_id, composite_match_hash, match_features_json, created_at, updated_at
+         ) VALUES (7101, 42, 'composite', ?1, ?1, '收入', 902, 1002, NULL, 1, 'cmbc', ?1, ?2, '2026-05-01', '2026-05-01')",
+        [composite_hash, serde_json::to_string(&features)?],
+    )?;
+    let session_id = "session-stage2-transfer-learning-guard";
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: session_id.to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+    insert_parser_templates_batch(
+        runtime.connection_mut(),
+        session_id,
+        user_id(42),
+        &[
+            ImportParserTemplateDraft {
+                parser_date: "2016-09-01 12:22:16".to_string(),
+                parser_amount: -6000.0,
+                parser_type: "支出".to_string(),
+                parser_description: "支付宝快捷支付".to_string(),
+                parser_id: "cmbc".to_string(),
+                parser_tags: Some(json!(["parser:cmbc", "channel:bank"])),
+                parser_counterparty: "支付宝（中国）网络技术有限公司客户备付金".to_string(),
+                parser_payment_method: "网络银行".to_string(),
+                parser_original_type: "支出".to_string(),
+                parser_original_category: String::new(),
+                parser_account_id: "1001".to_string(),
+            },
+            ImportParserTemplateDraft {
+                parser_date: "2016-09-01 12:22:11".to_string(),
+                parser_amount: 6000.0,
+                parser_type: "收入".to_string(),
+                parser_description: String::new(),
+                parser_id: "alipay".to_string(),
+                parser_tags: Some(json!(["parser:alipay", "channel:wallet"])),
+                parser_counterparty: String::new(),
+                parser_payment_method: String::new(),
+                parser_original_type: "不计收支".to_string(),
+                parser_original_category: "转账红包".to_string(),
+                parser_account_id: "1002".to_string(),
+            },
+        ],
+    )?;
+    drop(runtime);
+
+    let app = runtime_router(&fixture);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/dedup")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"session_id": session_id, "include_preview": true}).to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    let preview = body["data"]["preview"].as_array().expect("preview rows");
+    assert_eq!(preview.len(), 1);
+    let transfer = &preview[0];
+
+    assert_eq!(transfer["dedup_type"], "transfer");
+    assert_eq!(transfer["preview_type"], "转账");
+    assert_ne!(transfer["preview_main_category"], "其他收入");
+    assert_ne!(transfer["preview_sub_category"], "原路退款");
+    assert_ne!(transfer["matching"]["learning"]["auto_apply"], true);
+    Ok(())
+}
+
+#[tokio::test]
+async fn import_db_runtime_stage2_learning_rejects_unknown_or_incompatible_categories(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new().await?;
+    let mut runtime = runtime_for(fixture.db_path())?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+    seed_import_intelligence_tables(&runtime)?;
+    runtime.connection().execute(
+        "INSERT INTO categories(id, user_id, type, main_category, sub_category, priority)
+         VALUES (903, 42, 2, '其他收入', '原路退款', 30)",
+        [],
+    )?;
+
+    for (rule_id, counterparty, description, category_id) in [
+        (7201, "无效分类商户", "无效分类学习", 999_999),
+        (7202, "错类商户", "错类学习", 903),
+    ] {
+        let features =
+            build_composite_match_features("wechat", counterparty, description, "微信支付")
+                .expect("learning features");
+        let composite_hash = composite_hash_from_features(&features);
+        runtime.connection().execute(
+            "INSERT INTO import_learning_rules(
+                id, user_id, match_type, match_value, normalized_match_value, learned_type,
+                learned_category_id, learned_source_account_id, learned_destination_account_id,
+                enabled, parser_id, composite_match_hash, match_features_json, created_at, updated_at
+             ) VALUES (?1, 42, 'composite', ?2, ?2, '支出', ?3, 1002, NULL, 1, 'wechat', ?2, ?4, '2026-05-01', '2026-05-01')",
+            rusqlite::params![rule_id, composite_hash, category_id, serde_json::to_string(&features)?],
+        )?;
+    }
+    let overbroad_features = build_composite_match_features(
+        "cmbc",
+        "网银在线（北京）科技有限公司客户备付金",
+        "快捷支付退货 | 网银在线（北京）科技有限公司客户备付金 | 网络银行 | 695438343",
+        "网络银行",
+    )
+    .expect("overbroad learning features");
+    let overbroad_hash = composite_hash_from_features(&overbroad_features);
+    runtime.connection().execute(
+        "INSERT INTO import_learning_rules(
+            id, user_id, match_type, match_value, normalized_match_value, learned_type,
+            learned_category_id, learned_source_account_id, learned_destination_account_id,
+            enabled, parser_id, composite_match_hash, match_features_json, created_at, updated_at
+         ) VALUES (7203, 42, 'composite', ?1, ?1, '收入', 903, 1002, NULL, 1, 'cmbc', ?1, ?2, '2026-05-01', '2026-05-01')",
+        [overbroad_hash, serde_json::to_string(&overbroad_features)?],
+    )?;
+
+    let session_id = "session-stage2-learning-category-guard";
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: session_id.to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+    insert_parser_templates_batch(
+        runtime.connection_mut(),
+        session_id,
+        user_id(42),
+        &[
+            ImportParserTemplateDraft {
+                parser_date: "2026-05-06 10:00:00".to_string(),
+                parser_amount: -18.0,
+                parser_type: "支出".to_string(),
+                parser_description: "无效分类学习".to_string(),
+                parser_id: "wechat".to_string(),
+                parser_tags: Some(json!(["parser:wechat", "channel:wallet"])),
+                parser_counterparty: "无效分类商户".to_string(),
+                parser_payment_method: "微信支付".to_string(),
+                parser_original_type: "支出".to_string(),
+                parser_original_category: String::new(),
+                parser_account_id: "wechat".to_string(),
+            },
+            ImportParserTemplateDraft {
+                parser_date: "2026-05-06 11:00:00".to_string(),
+                parser_amount: -19.0,
+                parser_type: "支出".to_string(),
+                parser_description: "错类学习".to_string(),
+                parser_id: "wechat".to_string(),
+                parser_tags: Some(json!(["parser:wechat", "channel:wallet"])),
+                parser_counterparty: "错类商户".to_string(),
+                parser_payment_method: "微信支付".to_string(),
+                parser_original_type: "支出".to_string(),
+                parser_original_category: String::new(),
+                parser_account_id: "wechat".to_string(),
+            },
+            ImportParserTemplateDraft {
+                parser_date: "2016-06-18 16:27:07".to_string(),
+                parser_amount: -0.78,
+                parser_type: "支出".to_string(),
+                parser_description: "快捷支付 | 财付通支付科技有限公司客户备付金 | 网络银行 | 支出 | 1820014210000931".to_string(),
+                parser_id: "cmbc".to_string(),
+                parser_tags: Some(json!(["parser:cmbc", "channel:bank"])),
+                parser_counterparty: "财付通支付科技有限公司客户备付金".to_string(),
+                parser_payment_method: "网络银行".to_string(),
+                parser_original_type: "支出".to_string(),
+                parser_original_category: String::new(),
+                parser_account_id: "wechat".to_string(),
+            },
+        ],
+    )?;
+    drop(runtime);
+
+    let app = runtime_router(&fixture);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/dedup")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"session_id": session_id, "include_preview": true}).to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    assert_eq!(body["data"]["match_stats"]["learning_applied"], 0);
+    let preview = body["data"]["preview"].as_array().expect("preview rows");
+    assert_eq!(preview.len(), 3);
+
+    for item in preview
+        .iter()
+        .filter(|item| item["preview_counterparty"] != "财付通支付科技有限公司客户备付金")
+    {
+        assert_ne!(item["matching"]["learning"]["auto_apply"], true);
+        let reason = item["matching"]["learning"]["reason"]
+            .as_str()
+            .expect("learning skip reason");
+        assert!(reason.contains("category"));
+        assert_ne!(item["preview_main_category"], "其他收入");
+        assert_ne!(item["preview_sub_category"], "原路退款");
+    }
+    let overbroad = preview
+        .iter()
+        .find(|item| item["preview_counterparty"] == "财付通支付科技有限公司客户备付金")
+        .expect("overbroad preview");
+    assert_ne!(overbroad["matching"]["learning"]["auto_apply"], true);
+    assert_eq!(overbroad["preview_type"], "支出");
+    assert_ne!(overbroad["preview_main_category"], "其他收入");
+    assert_ne!(overbroad["preview_sub_category"], "原路退款");
+    Ok(())
+}
+
+#[tokio::test]
 async fn import_db_runtime_previews_temp_file_and_parses_column_mapping(
 ) -> Result<(), Box<dyn Error>> {
     let fixture = RuntimeFixture::new().await?;

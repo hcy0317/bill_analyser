@@ -87,6 +87,8 @@ pub struct TransferSourceSnapshot {
     #[serde(default, deserialize_with = "deserialize_stringish")]
     pub role: String,
     #[serde(default, deserialize_with = "deserialize_stringish")]
+    pub original_type: String,
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     pub parser_id: String,
     #[serde(default, deserialize_with = "deserialize_stringish")]
     pub payment_method: String,
@@ -132,6 +134,8 @@ pub struct DedupBill {
     pub payment_method: String,
     #[serde(default, deserialize_with = "deserialize_stringish")]
     pub description: String,
+    #[serde(default, deserialize_with = "deserialize_stringish")]
+    pub original_type: String,
     #[serde(default, deserialize_with = "deserialize_stringish")]
     pub original_category: String,
     #[serde(default, deserialize_with = "deserialize_stringish")]
@@ -269,6 +273,7 @@ impl Default for DedupBill {
             counterparty: String::new(),
             payment_method: String::new(),
             description: String::new(),
+            original_type: String::new(),
             original_category: String::new(),
             main_category: String::new(),
             sub_category: String::new(),
@@ -1471,6 +1476,7 @@ fn normalized_parser_tags(bill: &DedupBill) -> Vec<String> {
 fn build_transfer_source_snapshot(bill: &DedupBill, role: &str) -> TransferSourceSnapshot {
     TransferSourceSnapshot {
         role: role.to_string(),
+        original_type: bill.original_type.clone(),
         parser_id: bill.parser_id.clone(),
         payment_method: bill.payment_method.clone(),
         counterparty: bill.counterparty.clone(),

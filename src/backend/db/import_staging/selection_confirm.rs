@@ -199,6 +199,14 @@ pub fn confirm_preview_to_bills(
 
         for preview in &previews {
             let bill_type = normalize_confirm_bill_type(&preview.preview_type);
+            if confirm_preview_requires_review(preview, &bill_type) {
+                result.skipped_count += 1;
+                result.errors.push(format!(
+                    "preview {} requires review before confirm",
+                    preview.id
+                ));
+                continue;
+            }
             let preview_date_text = normalize_bill_date_text(&preview.preview_date);
             let amount = confirm_amount_for_type(&bill_type, preview.preview_amount);
             let bill_hash = calculate_import_bill_hash(
@@ -263,6 +271,22 @@ pub fn confirm_preview_to_bills(
         )?;
         Ok(result)
     })
+}
+
+fn confirm_preview_requires_review(preview: &ImportPreviewRow, bill_type: &str) -> bool {
+    if bill_type == "转账"
+        && (preview.preview_source_account_id.is_none()
+            || preview.preview_destination_account_id.is_none()
+            || preview.preview_source_account_id == preview.preview_destination_account_id)
+    {
+        return true;
+    }
+
+    preview
+        .preview_matching_feedback
+        .pointer("/annotation/suppressed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

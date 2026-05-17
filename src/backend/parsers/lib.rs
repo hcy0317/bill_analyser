@@ -351,7 +351,9 @@ pub fn post_process_raw_bills(parser_id: &str, raw_bills: &[RawBill]) -> Vec<Sta
             "支出".to_string()
         } else {
             let normalized = normalize_transaction_type(&raw_bill.transaction_type);
-            if matches!(normalized.as_str(), "投资" | "转账") {
+            if normalized == "转账" && raw_bill.transaction_type.trim().contains("不计收支") {
+                normalized
+            } else if matches!(normalized.as_str(), "投资" | "转账") {
                 if amount.is_negative() {
                     "支出".to_string()
                 } else {

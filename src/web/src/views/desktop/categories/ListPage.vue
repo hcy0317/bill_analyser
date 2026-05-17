@@ -42,7 +42,21 @@
                                             </v-btn>
                                             <span>{{ tt('Transaction Categories') }}</span>
                                             <v-btn class="ms-3" color="default" variant="outlined"
-                                                   :disabled="loading || updating" @click="add">{{ tt('Add') }}</v-btn>
+                                                   :prepend-icon="mdiShapePlusOutline"
+                                                   :disabled="loading || updating">
+                                                {{ tt('Add') }}
+                                                <v-menu activator="parent">
+                                                    <v-list>
+                                                        <v-list-item :title="tt('Add Primary Category')"
+                                                                     :prepend-icon="mdiShapePlusOutline"
+                                                                     @click="addPrimaryCategory"></v-list-item>
+                                                        <v-list-item :title="tt('Add Secondary Category')"
+                                                                     :prepend-icon="mdiShapePlusOutline"
+                                                                     :disabled="!canAddSecondaryCategory"
+                                                                     @click="addSecondaryCategory"></v-list-item>
+                                                    </v-list>
+                                                </v-menu>
+                                            </v-btn>
                                             <settings-json-import-export-button
                                                 section-key="transactionCategories"
                                                 filename-prefix="transaction-categories"
@@ -236,7 +250,8 @@ import {
     mdiEyeOutline,
     mdiDeleteOutline,
     mdiDrag,
-    mdiDotsVertical
+    mdiDotsVertical,
+    mdiShapePlusOutline
 } from '@mdi/js';
 
 type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
@@ -297,6 +312,7 @@ const categories = computed<TransactionCategory[]>(() => {
 const noAvailableCategory = computed<boolean>(() => isNoAvailableCategory(categories.value, showHidden.value));
 const noCategory = computed<boolean>(() => categories.value.length < 1);
 const availableCategoryCount = computed<number>(() => getAvailableCategoryCount(categories.value, showHidden.value));
+const canAddSecondaryCategory = computed<boolean>(() => !!currentPrimaryCategory.value && primaryCategoryId.value !== '0');
 
 function updateCardMinHeight(): void {
     nextTick(() => {
@@ -359,12 +375,17 @@ function reload(force: boolean): void {
     });
 }
 
-function add(): void {
+function openCreateCategoryDialog(options: {
+    parentId: string;
+    type: CategoryType;
+    color?: TransactionCategory['color'];
+    icon?: string;
+}): void {
     editDialog.value?.open({
-        type: activeCategoryType.value,
-        parentId: primaryCategoryId.value,
-        color: currentPrimaryCategory.value?.color,
-        icon: currentPrimaryCategory.value?.icon
+        type: options.type,
+        parentId: options.parentId,
+        color: options.color,
+        icon: options.icon
     }).then(result => {
         if (result && result.message) {
             snackbar.value?.showMessage(result.message);
@@ -375,6 +396,26 @@ function add(): void {
         if (error) {
             snackbar.value?.showError(error);
         }
+    });
+}
+
+function addPrimaryCategory(): void {
+    openCreateCategoryDialog({
+        type: activeCategoryType.value,
+        parentId: '0'
+    });
+}
+
+function addSecondaryCategory(): void {
+    if (!currentPrimaryCategory.value) {
+        return;
+    }
+
+    openCreateCategoryDialog({
+        type: activeCategoryType.value,
+        parentId: currentPrimaryCategory.value.id,
+        color: currentPrimaryCategory.value.color,
+        icon: currentPrimaryCategory.value.icon
     });
 }
 

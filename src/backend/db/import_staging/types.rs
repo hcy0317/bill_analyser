@@ -57,6 +57,7 @@ pub struct ImportPreviewDraft {
     pub preview_recurring_match_score: f64,
     pub preview_recurring_match_reasons: String,
     pub preview_recurring_matched_date: String,
+    pub preview_selected: bool,
     pub dedup_type: Option<String>,
     pub dedup_source_ids: Vec<i64>,
     pub preview_matching_feedback: Value,
@@ -164,6 +165,7 @@ pub fn dedup_bill_from_parser_template(template: &ImportParserTemplateRow) -> De
         counterparty: template.parser_counterparty.clone(),
         payment_method,
         description: template.parser_description.clone(),
+        original_type: template.parser_original_type.clone(),
         original_category: template.parser_original_category.clone(),
         template_id: Some(template.id.to_string()),
         parser_tags: template.parser_tags.clone(),
@@ -183,6 +185,13 @@ pub fn preview_draft_from_dedup_bill(bill: &DedupBill) -> ImportPreviewDraft {
     let amount = money_to_yuan_f64(bill.amount);
     let preview_payment_method =
         first_non_empty([bill.payment_method.as_str(), bill.parser_id.as_str()]);
+    let no_income_expenditure = dedup_bill_has_no_income_expenditure_source(bill);
+    let transfer_requires_review = dedup_bill_transfer_requires_review(bill);
+    let preview_matching_feedback = preview_matching_feedback_from_dedup_bill(
+        bill,
+        no_income_expenditure,
+        transfer_requires_review,
+    );
     ImportPreviewDraft {
         preview_date: bill.date.clone(),
         preview_type: bill.transaction_type.clone(),
@@ -200,6 +209,7 @@ pub fn preview_draft_from_dedup_bill(bill: &DedupBill) -> ImportPreviewDraft {
         preview_description: bill.description.clone(),
         preview_parser_id: bill.parser_id.clone(),
         preview_parser_tags: dedup_bill_parser_tags_value(bill),
+        preview_selected: !(no_income_expenditure || transfer_requires_review),
         dedup_type: Some(
             bill.dedup_type
                 .clone()
@@ -211,12 +221,16 @@ pub fn preview_draft_from_dedup_bill(bill: &DedupBill) -> ImportPreviewDraft {
             .iter()
             .filter_map(|value| parse_positive_i64(value))
             .collect(),
-        preview_matching_feedback: preview_matching_feedback_from_dedup_bill(bill),
+        preview_matching_feedback,
         ..ImportPreviewDraft::default()
     }
 }
 
-fn preview_matching_feedback_from_dedup_bill(bill: &DedupBill) -> Value {
+fn preview_matching_feedback_from_dedup_bill(
+    bill: &DedupBill,
+    no_income_expenditure: bool,
+    transfer_requires_review: bool,
+) -> Value {
     let dedup_type = bill
         .dedup_type
         .as_deref()
@@ -254,7 +268,55 @@ fn preview_matching_feedback_from_dedup_bill(bill: &DedupBill) -> Value {
             }),
         );
     }
+    if no_income_expenditure {
+        feedback.insert(
+            "annotation".to_string(),
+            serde_json::json!({
+                "status": "needs_review",
+                "type": "no_income_expenditure",
+                "review_status": "suppressed",
+                "suppressed": true,
+                "reason": "original parser type is no-income-expenditure",
+            }),
+        );
+    }
+    if transfer_requires_review {
+        feedback.insert(
+            "annotation".to_string(),
+            serde_json::json!({
+                "status": "needs_review",
+                "type": "transfer_account_direction",
+                "review_status": "requires_account_review",
+                "suppressed": true,
+                "reason": "transfer preview is missing source or destination account",
+            }),
+        );
+    }
     Value::Object(feedback)
+}
+
+fn dedup_bill_has_no_income_expenditure_source(bill: &DedupBill) -> bool {
+    bill.original_type.trim().contains("不计收支")
+        || bill
+            .transfer_pair_sources
+            .iter()
+            .any(|source| source.original_type.trim().contains("不计收支"))
+}
+
+fn dedup_bill_transfer_requires_review(bill: &DedupBill) -> bool {
+    let is_transfer = bill
+        .dedup_type
+        .as_deref()
+        .is_some_and(|value| value.trim().to_ascii_lowercase().contains("transfer"));
+    if !is_transfer {
+        return false;
+    }
+    let source = parse_positive_i64(&bill.source_account_id);
+    let destination = bill
+        .destination_account_id
+        .as_deref()
+        .and_then(parse_positive_i64);
+    source.is_none() || destination.is_none() || source == destination
 }
 
 pub fn preview_drafts_from_dedup_bills(bills: &[DedupBill]) -> Vec<ImportPreviewDraft> {
@@ -283,6 +345,7 @@ impl Default for ImportPreviewDraft {
             preview_recurring_match_score: 0.0,
             preview_recurring_match_reasons: String::new(),
             preview_recurring_matched_date: String::new(),
+            preview_selected: true,
             dedup_type: None,
             dedup_source_ids: Vec::new(),
             preview_matching_feedback: Value::Object(Default::default()),

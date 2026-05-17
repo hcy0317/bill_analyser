@@ -291,7 +291,7 @@ export class ImportTransaction implements ImportTransactionResponse {
         this.actualSourceAccountName = response.originalSourceAccountName;
         this.actualDestinationAccountName = response.originalDestinationAccountName;
         this.index = index;
-        this.selected = false;
+        this.selected = !!response.selected;
         this.valid = this.isTransactionValid();
     }
 
@@ -573,6 +573,7 @@ export interface ImportTransactionResponse {
     readonly dedupSourceIds?: Array<number | string> | string;
     readonly matching?: ImportMatchingPayload;
     readonly isManuallyAnnotated?: boolean;
+    readonly selected?: boolean;
 }
 
 export interface ImportTransactionResponsePageWrapper {

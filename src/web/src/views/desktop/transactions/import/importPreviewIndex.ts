@@ -55,6 +55,27 @@ export interface ImportPreviewFacetEntry {
     count: number;
 }
 
+export interface ImportPreviewFilterGroup {
+    title: string;
+    labels: string[];
+}
+
+export interface ImportPreviewFilterCategoryLike {
+    name: string;
+    subCategories?: ImportPreviewFilterCategoryLike[];
+}
+
+export interface ImportPreviewFilterAccountLike {
+    name: string;
+    category?: number | string;
+    subAccounts?: ImportPreviewFilterAccountLike[];
+}
+
+export interface ImportPreviewFilterAccountCategoryLike {
+    type: number;
+    name: string;
+}
+
 export interface ImportPreviewMetadata {
     facets?: {
         categories?: ImportPreviewFacetEntry[];
@@ -97,6 +118,138 @@ export interface PreviewTableSortInputItem {
 export interface PreviewTableSortItem {
     key: string;
     order?: PreviewTableSortDirection | boolean;
+}
+
+function normalizeCount(value: number | string | null | undefined): number {
+    const normalizedValue = Number(value);
+    if (!Number.isFinite(normalizedValue)) {
+        return 0;
+    }
+    return Math.max(Math.floor(normalizedValue), 0);
+}
+
+export function resolveServerPagedSelectionCount(options: {
+    total?: number | string | null;
+    selected?: number | string | null;
+    delta?: number | string | null;
+}): number {
+    const total = normalizeCount(options.total);
+    const selected = normalizeCount(options.selected);
+    const delta = Math.trunc(Number(options.delta || 0));
+    const nextSelected = Number.isFinite(delta) ? selected + delta : selected;
+    return Math.min(Math.max(nextSelected, 0), total);
+}
+
+function uniqueFilterLabels(labels: string[]): string[] {
+    const seen = new Set<string>();
+    const uniqueLabels: string[] = [];
+    for (const label of labels) {
+        const normalizedLabel = String(label || '').trim();
+        if (!normalizedLabel || seen.has(normalizedLabel)) {
+            continue;
+        }
+        seen.add(normalizedLabel);
+        uniqueLabels.push(normalizedLabel);
+    }
+    return uniqueLabels;
+}
+
+function pushGroupedLabel(
+    groupedLabels: Map<string, string[]>,
+    matchedLabels: Set<string>,
+    groupTitle: string,
+    label: string,
+    availableLabels: Set<string>
+): void {
+    if (!availableLabels.has(label) || matchedLabels.has(label)) {
+        return;
+    }
+    const labels = groupedLabels.get(groupTitle) || [];
+    labels.push(label);
+    groupedLabels.set(groupTitle, labels);
+    matchedLabels.add(label);
+}
+
+export function groupImportPreviewCategoryFilterLabels(
+    labels: string[],
+    categoriesByType: Record<string | number, ImportPreviewFilterCategoryLike[]>,
+    fallbackTitle: string
+): ImportPreviewFilterGroup[] {
+    const uniqueLabels = uniqueFilterLabels(labels);
+    const availableLabels = new Set(uniqueLabels);
+    const matchedLabels = new Set<string>();
+    const groupedLabels = new Map<string, string[]>();
+
+    for (const categories of Object.values(categoriesByType)) {
+        for (const primaryCategory of categories || []) {
+            if (!primaryCategory?.name) {
+                continue;
+            }
+            pushGroupedLabel(groupedLabels, matchedLabels, primaryCategory.name, primaryCategory.name, availableLabels);
+            for (const subCategory of primaryCategory.subCategories || []) {
+                if (subCategory?.name) {
+                    pushGroupedLabel(groupedLabels, matchedLabels, primaryCategory.name, subCategory.name, availableLabels);
+                }
+            }
+        }
+    }
+
+    const groups = Array.from(groupedLabels, ([title, groupLabels]) => ({
+        title,
+        labels: groupLabels
+    }));
+    const ungroupedLabels = uniqueLabels.filter(label => !matchedLabels.has(label));
+    if (ungroupedLabels.length > 0) {
+        groups.push({
+            title: fallbackTitle,
+            labels: ungroupedLabels
+        });
+    }
+    return groups;
+}
+
+export function groupImportPreviewAccountFilterLabels(
+    labels: string[],
+    accounts: ImportPreviewFilterAccountLike[],
+    accountCategories: ImportPreviewFilterAccountCategoryLike[],
+    fallbackTitle: string
+): ImportPreviewFilterGroup[] {
+    const uniqueLabels = uniqueFilterLabels(labels);
+    const availableLabels = new Set(uniqueLabels);
+    const matchedLabels = new Set<string>();
+    const groupedLabels = new Map<string, string[]>();
+    const categoryTitleByType = new Map<number, string>();
+    for (const category of accountCategories) {
+        categoryTitleByType.set(Number(category.type), category.name);
+    }
+
+    const visitAccount = (account: ImportPreviewFilterAccountLike, inheritedCategory?: number): void => {
+        const categoryType = Number(account.category ?? inheritedCategory ?? NaN);
+        const groupTitle = categoryTitleByType.get(categoryType) || fallbackTitle;
+        if (account?.name) {
+            pushGroupedLabel(groupedLabels, matchedLabels, groupTitle, account.name, availableLabels);
+        }
+        for (const subAccount of account.subAccounts || []) {
+            visitAccount(subAccount, categoryType);
+        }
+    };
+
+    for (const account of accounts || []) {
+        visitAccount(account);
+    }
+
+    const groups = Array.from(groupedLabels, ([title, groupLabels]) => ({
+        title,
+        labels: groupLabels
+    }));
+    const ungroupedLabels = uniqueLabels.filter(label => !matchedLabels.has(label));
+    if (ungroupedLabels.length > 0) {
+        groups.push({
+            title: fallbackTitle,
+            labels: ungroupedLabels
+        });
+    }
+    return groups;
 }
 
 export interface ImportPreviewIndexResponseItem {

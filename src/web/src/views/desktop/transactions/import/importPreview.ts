@@ -74,6 +74,8 @@ export interface ImportPreviewRecord {
     preview_parser_tags?: string[];
     matching?: ImportPreviewMatchingPayload;
     preview_is_manually_annotated?: boolean;
+    preview_selected?: boolean;
+    selected?: boolean;
 }
 
 function normalizePreviewCategoryId(rawCategoryId: number | string | null | undefined): string {
