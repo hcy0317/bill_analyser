@@ -3,7 +3,11 @@ import path from 'node:path';
 
 import { describe, expect, test } from '@jest/globals';
 
-import { resolveImportPreviewCategoryId } from '@/views/desktop/transactions/import/importPreview.ts';
+import { CategoryType } from '@/core/category.ts';
+import {
+    resolveImportPreviewCategoryId,
+    resolveImportPreviewCategoryPath
+} from '@/views/desktop/transactions/import/importPreview.ts';
 
 function readSource(relativePath: string): string {
     return fs.readFileSync(path.resolve(process.cwd(), relativePath), 'utf-8');
@@ -120,6 +124,63 @@ describe('import preview category resolution', () => {
             ...categoriesById
         })).toBe('12');
     });
+
+    test('does not resolve same-name categories from another transaction type', () => {
+        const typedCategoriesById = {
+            expenseParent: {
+                id: 'expenseParent',
+                name: '餐饮',
+                parentId: '0',
+                type: CategoryType.Expense
+            },
+            expenseSub: {
+                id: 'expenseSub',
+                name: '咖啡',
+                parentId: 'expenseParent',
+                type: CategoryType.Expense
+            },
+            transferParent: {
+                id: 'transferParent',
+                name: '账户互转',
+                parentId: '0',
+                type: CategoryType.Transfer
+            },
+            transferSub: {
+                id: 'transferSub',
+                name: '咖啡',
+                parentId: 'transferParent',
+                type: CategoryType.Transfer
+            }
+        };
+
+        expect(resolveImportPreviewCategoryId({
+            id: 10,
+            category_id: 'expenseSub',
+            preview_type: '转账',
+            preview_main_category: '账户互转',
+            preview_sub_category: '咖啡'
+        }, typedCategoriesById)).toBe('transferSub');
+
+        expect(resolveImportPreviewCategoryId({
+            id: 11,
+            preview_type: '转账',
+            preview_main_category: '餐饮',
+            preview_sub_category: '咖啡'
+        }, typedCategoriesById)).toBe('');
+    });
+
+    test('resolves canonical category path from the taxonomy id', () => {
+        expect(resolveImportPreviewCategoryPath('11', categoriesById)).toEqual({
+            id: '11',
+            mainCategory: '餐饮',
+            subCategory: '咖啡',
+            displayCategory: '咖啡',
+            type: null
+        });
+
+        expect(resolveImportPreviewCategoryPath('missing', categoriesById)).toBeNull();
+        expect(resolveImportPreviewCategoryPath('tagLikeName', categoriesById)).toBeNull();
+    });
 });
 
 describe('import preview server-paged reset guards', () => {
@@ -160,6 +221,26 @@ describe('import preview server-paged reset guards', () => {
         expect(resetBlock).toContain('tableSortBy.value = [];');
         expect(resetBlock).toContain("currentSortKey.value = '';");
         expect(resetBlock).toContain("currentSortDirection.value = 'asc';");
+    });
+
+    test('check-data decision sync tolerates matching payloads without annotation section', () => {
+        const source = readSource('src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue');
+
+        expect(source).toContain('previewData.matching?.annotation?.is_manually_annotated');
+    });
+
+    test('transfer decision expected state tracks source and destination accounts', () => {
+        const typeSource = readSource('src/views/desktop/transactions/import/checkDataTypes.ts');
+        const tabSource = readSource('src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue');
+
+        expect(typeSource).toContain('sourceAccountId: string;');
+        expect(typeSource).toContain('destinationAccountId: string;');
+        expect(tabSource).toContain("sourceAccountId: item.sourceAccountId || '',");
+        expect(tabSource).toContain("destinationAccountId: item.destinationAccountId || '',");
+        expect(tabSource).toContain("|| baseline.sourceAccountId !== (item.sourceAccountId || '')");
+        expect(tabSource).toContain("|| baseline.destinationAccountId !== (item.destinationAccountId || '')");
+        expect(tabSource).toContain('sourceAccountId: item.sourceAccountId,');
+        expect(tabSource).toContain('destinationAccountId: item.destinationAccountId');
     });
 
     test('check-data server paging no longer fetches a full preview index before filtering', () => {

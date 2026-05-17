@@ -19,7 +19,9 @@ describe('checkDataCandidateReview helpers', () => {
             reviewStatus: 'accepted',
             previewType: '投资',
             categoryId: 42,
-            recurringId: null
+            recurringId: null,
+            sourceAccountId: null,
+            destinationAccountId: null
         });
     });
 
@@ -30,7 +32,7 @@ describe('checkDataCandidateReview helpers', () => {
             type: TransactionType.Transfer,
             categoryId: '',
             recurringTemplateId: '18',
-            sourceAccountId: '11',
+            sourceAccountId: '0',
             destinationAccountId: '19'
         })).toStrictEqual({
             sessionId: 'session-learning-review',
@@ -38,7 +40,7 @@ describe('checkDataCandidateReview helpers', () => {
             previewType: '转账',
             categoryId: null,
             recurringId: 18,
-            sourceAccountId: 11,
+            sourceAccountId: null,
             destinationAccountId: 19
         });
     });

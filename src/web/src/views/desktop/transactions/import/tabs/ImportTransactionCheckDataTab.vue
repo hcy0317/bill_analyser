@@ -812,6 +812,7 @@ import BatchCreateDialog, { type BatchCreateDialogDataType } from '../dialogs/Ba
 import ImportLearningSuggestionDialog from '../dialogs/ImportLearningSuggestionDialog.vue';
 import {
     type ImportPreviewLLMMatchingPayload,
+    resolveImportPreviewCategoryPath,
     resolveImportPreviewCategoryId,
     type ImportPreviewRecord
 } from '../importPreview.ts';
@@ -833,6 +834,7 @@ import {
     type PreviewTableSortItem
 } from '../importPreviewIndex.ts';
 import {
+    collectTrackedImportTransactionsForSelection,
     collectImportTransactionSelectionSummary,
     type AnnotationReasonSummary,
     type ImportTransactionSelectionSummary
@@ -914,6 +916,7 @@ import {
     getAccountMapByName
 } from '@/lib/account.ts';
 import {
+    getFirstAvailableCategoryId,
     transactionTypeToCategoryType,
     getSecondaryTransactionMapByName,
     getTransactionPrimaryCategoryName,
@@ -1153,6 +1156,53 @@ function getCategoriesForType(type: number): TransactionCategory[] {
     };
     const categoryType = typeToCategory[type];
     return categoryType !== undefined ? (allCategories.value[categoryType] || []) : [];
+}
+
+function getAcceptedCategoryPathForTransaction(transaction: ImportTransaction): ReturnType<typeof resolveImportPreviewCategoryPath> {
+    const categoryPath = resolveImportPreviewCategoryPath(transaction.categoryId, allCategoriesMap.value);
+    if (!categoryPath) {
+        return null;
+    }
+
+    const expectedCategoryType = transactionTypeToCategoryType(transaction.type as TransactionType);
+    if (expectedCategoryType === null || categoryPath.type === null) {
+        return categoryPath;
+    }
+
+    return categoryPath.type === expectedCategoryType ? categoryPath : null;
+}
+
+function isTransactionCategoryAccepted(transaction: ImportTransaction): boolean {
+    if (transaction.type === TransactionType.ModifyBalance) {
+        return true;
+    }
+
+    return !!getAcceptedCategoryPathForTransaction(transaction);
+}
+
+function setTransactionCategoryFromId(transaction: ImportTransaction, categoryId: string): void {
+    transaction.categoryId = categoryId;
+    const categoryPath = getAcceptedCategoryPathForTransaction(transaction);
+    if (categoryPath) {
+        transaction.originalCategoryName = categoryPath.displayCategory;
+        transaction.actualCategoryName = categoryPath.displayCategory;
+    } else {
+        transaction.categoryId = '';
+        transaction.originalCategoryName = '';
+        transaction.actualCategoryName = '';
+    }
+}
+
+function getDefaultCategoryIdForTransactionType(transactionType: number): string {
+    if (transactionType === TransactionType.Transfer) {
+        const cashTransferCategoryId = userStore.currentUserCashTransferCategoryId;
+        const cashTransferCategory = resolveImportPreviewCategoryPath(cashTransferCategoryId, allCategoriesMap.value);
+        if (cashTransferCategory?.type === CategoryType.Transfer) {
+            return cashTransferCategory.id;
+        }
+    }
+
+    return getFirstAvailableCategoryId(getCategoriesForType(transactionType));
 }
 
 // 检查指定交易类型是否有可用的分类
@@ -1481,6 +1531,8 @@ function buildTransferDecisionBaseline(item: ImportTransaction): TransferDecisio
     return {
         type: item.type,
         categoryId: item.categoryId || '',
+        sourceAccountId: item.sourceAccountId || '',
+        destinationAccountId: item.destinationAccountId || '',
         recurringTemplateId: item.recurringTemplateId || '',
         recurringTemplateName: item.recurringTemplateName || '',
         recurringCandidateCount: Number(item.recurringCandidateCount || 0),
@@ -1696,9 +1748,10 @@ function syncTransactionFromLLMPreviewPayload(
 ): void {
     const previewData = payload.preview;
     if (previewData) {
-        item.categoryId = resolveImportPreviewCategoryId(previewData, allCategoriesMap.value);
-        item.originalCategoryName = previewData.preview_sub_category || previewData.preview_main_category || '';
-        item.actualCategoryName = item.originalCategoryName;
+        setTransactionCategoryFromId(
+            item,
+            resolveImportPreviewCategoryId(previewData, allCategoriesMap.value)
+        );
         item.sourceAccountId = previewData.preview_source_account_id ? String(previewData.preview_source_account_id) : '';
         item.destinationAccountId = previewData.preview_destination_account_id ? String(previewData.preview_destination_account_id) : '';
         item.comment = previewData.preview_description || item.comment;
@@ -1781,6 +1834,8 @@ function hasTransferDecisionRelevantDraftChanges(item: ImportTransaction): boole
 
     return baseline.type !== item.type
         || baseline.categoryId !== (item.categoryId || '')
+        || baseline.sourceAccountId !== (item.sourceAccountId || '')
+        || baseline.destinationAccountId !== (item.destinationAccountId || '')
         || baseline.recurringTemplateId !== (item.recurringTemplateId || '')
         || baseline.recurringTemplateName !== (item.recurringTemplateName || '')
         || baseline.recurringCandidateCount !== Number(item.recurringCandidateCount || 0)
@@ -1911,7 +1966,9 @@ function getTransferDecisionExpectedState(item: ImportTransaction): Record<strin
         reviewStatus: item.getTransferSuggestionReviewStatus(),
         type: item.type,
         categoryId: item.categoryId,
-        recurringTemplateId: item.recurringTemplateId
+        recurringTemplateId: item.recurringTemplateId,
+        sourceAccountId: item.sourceAccountId,
+        destinationAccountId: item.destinationAccountId
     });
 }
 
@@ -2014,14 +2071,19 @@ function resolvePreviewDecisionItem(
 }
 
 function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData: ImportPreviewRecord): void {
+    const previousType = item.type;
     const nextType = getPreviewTransactionTypeNumber(previewData.preview_type);
     if (nextType !== undefined) {
         item.type = nextType;
     }
 
-    item.categoryId = resolvePreviewCategoryId(previewData);
-    item.originalCategoryName = previewData.preview_sub_category || previewData.preview_main_category || '';
-    item.actualCategoryName = item.originalCategoryName;
+    const resolvedCategoryId = resolvePreviewCategoryId(previewData)
+        || (item.type === TransactionType.Transfer ? getDefaultCategoryIdForTransactionType(item.type) : '');
+    setTransactionCategoryFromId(item, resolvedCategoryId);
+    if (!resolvedCategoryId && nextType === undefined && previousType === item.type) {
+        item.originalCategoryName = previewData.preview_sub_category || previewData.preview_main_category || '';
+        item.actualCategoryName = item.originalCategoryName;
+    }
     item.sourceAccountId = previewData.preview_source_account_id ? String(previewData.preview_source_account_id) : '';
     item.destinationAccountId = previewData.preview_destination_account_id ? String(previewData.preview_destination_account_id) : '';
     item.sourceAmount = convertImportPreviewAmountToCents(previewData.preview_amount, item.sourceAmount || 0);
@@ -2048,7 +2110,7 @@ function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData
         ? previewData.dedup_source_ids
         : item.dedupSourceIds;
     item.matching = mergePreviewMatchingPayload(item.matching, previewData.matching) as unknown as typeof item.matching;
-    item.isManuallyAnnotated = !!previewData.preview_is_manually_annotated || !!previewData.matching?.annotation.is_manually_annotated;
+    item.isManuallyAnnotated = !!previewData.preview_is_manually_annotated || !!previewData.matching?.annotation?.is_manually_annotated;
 
     item.recurringTemplateId = previewData.preview_recurring_id ? String(previewData.preview_recurring_id) : '';
     item.recurringTemplateName = previewData.preview_recurring_name || '';
@@ -2678,7 +2740,7 @@ function getImportTransactionRowKey(item: ImportTransaction): string {
 function collectAnnotationIssues(item: ImportTransaction): string[] {
     const reasons: string[] = [];
 
-    if (item.type !== TransactionType.ModifyBalance && (!item.categoryId || item.categoryId === '0')) {
+    if (item.type !== TransactionType.ModifyBalance && !isTransactionCategoryAccepted(item)) {
         reasons.push(tt('Missing Category'));
     }
 
@@ -2824,6 +2886,7 @@ function buildPreviewUpdates(options: { selectedOnly: boolean }): Record<string,
     };
 
     return transactions.map(transaction => {
+        const categoryPath = getAcceptedCategoryPathForTransaction(transaction);
         return {
             id: (transaction as { _previewId?: number })._previewId,
             preview_type: typeReverseMap[transaction.type] || '支出',
@@ -2837,7 +2900,9 @@ function buildPreviewUpdates(options: { selectedOnly: boolean }): Record<string,
             preview_recurring_match_score: transaction.recurringMatchScore || 0,
             preview_recurring_match_reasons: transaction.recurringMatchReasons || '',
             preview_recurring_matched_date: transaction.recurringMatchedDate || '',
-            category_id: transaction.categoryId ? parseInt(transaction.categoryId, 10) : null,
+            category_id: categoryPath ? parseInt(categoryPath.id, 10) : null,
+            preview_main_category: categoryPath?.mainCategory || '',
+            preview_sub_category: categoryPath?.subCategory || '',
             clear_transfer_decision: shouldClearTransferDecisionOnSync(transaction),
             selected: transaction.selected
         };
@@ -3390,18 +3455,11 @@ function getTrackedTransactionsForSelection(): ImportTransaction[] {
         return importTransactions.value;
     }
 
-    const trackedTransactions = new Map<number, ImportTransaction>();
-    for (const [previewId, transaction] of serverPagedDrafts.value.entries()) {
-        trackedTransactions.set(previewId, cloneImportTransaction(transaction));
-    }
-    for (const transaction of importTransactions.value) {
-        const previewId = getPreviewId(transaction);
-        if (previewId === null) {
-            continue;
-        }
-        trackedTransactions.set(previewId, cloneImportTransaction(transaction));
-    }
-    return Array.from(trackedTransactions.values());
+    return collectTrackedImportTransactionsForSelection(
+        serverPagedDrafts.value.entries(),
+        importTransactions.value,
+        getPreviewId
+    );
 }
 
 function getUniqueTrackedServerPagedTransactions(): ImportTransaction[] {
@@ -4650,11 +4708,12 @@ function editFirstAnnotationTransaction(): void {
 }
 
 function updateTransactionData(transaction: ImportTransaction): void {
-    transaction.valid = transaction.isTransactionValid();
+    transaction.valid = transaction.isTransactionValid() && isTransactionCategoryAccepted(transaction);
 
-    if (transaction.categoryId && allCategoriesMap.value[transaction.categoryId]) {
-        transaction.actualCategoryName = allCategoriesMap.value[transaction.categoryId]!.name;
-    } else if (!transaction.categoryId || transaction.categoryId === '0' || !allCategoriesMap.value[transaction.categoryId]) {
+    const categoryPath = getAcceptedCategoryPathForTransaction(transaction);
+    if (categoryPath) {
+        transaction.actualCategoryName = categoryPath.displayCategory;
+    } else {
         transaction.actualCategoryName = '';
     }
 

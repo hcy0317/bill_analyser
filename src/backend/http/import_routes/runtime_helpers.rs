@@ -223,6 +223,72 @@ mod tests {
         }
     }
 
+    fn patch_text_value(
+        patch: &ImportPreviewPatch,
+        field: ImportPreviewPatchField,
+    ) -> Option<&str> {
+        patch
+            .changes
+            .iter()
+            .rev()
+            .find_map(|(current_field, value)| {
+                if *current_field != field {
+                    return None;
+                }
+                match value {
+                    ImportPreviewPatchValue::Text(text) => Some(text.as_str()),
+                    _ => None,
+                }
+            })
+    }
+
+    #[test]
+    fn preview_payload_category_id_overwrites_generated_category_text() {
+        let connection = Connection::open_in_memory().expect("sqlite");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE categories(
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    type INTEGER,
+                    main_category TEXT,
+                    sub_category TEXT
+                );
+                INSERT INTO categories(id, user_id, type, main_category, sub_category)
+                    VALUES (9, 42, 4, '账户互转', '银行卡互转');
+                ",
+            )
+            .expect("categories");
+        let payload = json!({
+            "category_id": 9,
+            "preview_type": "支出",
+            "preview_main_category": "餐饮",
+            "preview_sub_category": "同名但未建分类",
+        });
+        let object = payload.as_object().expect("payload object");
+        let patch = build_preview_patch_from_payload_with_category_lookup(
+            &connection,
+            UserId::new(42).expect("user id"),
+            100,
+            object,
+        )
+        .expect("patch");
+
+        assert_eq!(
+            patch_text_value(&patch, ImportPreviewPatchField::Type),
+            Some("转账")
+        );
+        assert_eq!(
+            patch_text_value(&patch, ImportPreviewPatchField::MainCategory),
+            Some("账户互转")
+        );
+        assert_eq!(
+            patch_text_value(&patch, ImportPreviewPatchField::SubCategory),
+            Some("银行卡互转")
+        );
+    }
+
     #[test]
     fn llm_provider_payloads_responses_and_limits_cover_provider_edges() {
         let openai = provider_context(

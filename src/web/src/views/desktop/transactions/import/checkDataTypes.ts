@@ -57,6 +57,8 @@ export interface MatchingSessionCandidateItem {
 export interface TransferDecisionPreviewBaseline {
     type: number;
     categoryId: string;
+    sourceAccountId: string;
+    destinationAccountId: string;
     recurringTemplateId: string;
     recurringTemplateName: string;
     recurringCandidateCount: number;

@@ -1,4 +1,6 @@
 fn preview_patches_from_payload(
+    connection: &Connection,
+    user_id: UserId,
     payload: &Value,
     limit: usize,
 ) -> Result<Vec<ImportPreviewPatch>, ImportV2RouteResponse> {
@@ -6,7 +8,12 @@ fn preview_patches_from_payload(
         .into_iter()
         .map(|object| {
             let preview_id = preview_id_from_payload(object)?;
-            Ok(build_preview_patch_from_payload(preview_id, object))
+            build_preview_patch_from_payload_with_category_lookup(
+                connection,
+                user_id,
+                preview_id,
+                object,
+            )
         })
         .collect()
 }

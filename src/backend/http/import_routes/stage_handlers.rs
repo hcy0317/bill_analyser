@@ -253,6 +253,9 @@ fn apply_import_intelligence_chain(
         if apply_category_rule_match(draft, &category_rules) {
             stats.category_matched += 1;
         }
+        if apply_transfer_pair_account_match(draft, &accounts) {
+            stats.account_matched += 1;
+        }
         if apply_account_alias_match(draft, &accounts) {
             stats.account_matched += 1;
         }
@@ -633,6 +636,196 @@ fn apply_account_alias_match(
         }),
     );
     true
+}
+
+fn apply_transfer_pair_account_match(
+    draft: &mut ImportPreviewDraft,
+    accounts: &[ImportIntelligenceAccount],
+) -> bool {
+    let Some(source_chain) = draft
+        .preview_matching_feedback
+        .get("transfer")
+        .and_then(|transfer| transfer.get("source_chain"))
+        .and_then(Value::as_array)
+        .cloned()
+        .filter(|chain| !chain.is_empty())
+    else {
+        return false;
+    };
+
+    let outgoing = transfer_chain_entry_for_roles(
+        &source_chain,
+        &["outgoing", "source", "from", "debit", "out"],
+        Some(0),
+    );
+    let incoming = transfer_chain_entry_for_roles(
+        &source_chain,
+        &["incoming", "destination", "to", "credit", "in"],
+        Some(1),
+    );
+    let resolved_source = draft.preview_source_account_id.or_else(|| {
+        outgoing.and_then(|entry| resolve_transfer_account_from_entry(entry, accounts))
+    });
+    let resolved_destination = draft.preview_destination_account_id.or_else(|| {
+        incoming.and_then(|entry| resolve_transfer_account_from_entry(entry, accounts))
+    });
+    let next_source = draft.preview_source_account_id.is_none().then_some(resolved_source).flatten();
+    let effective_source = draft.preview_source_account_id.or(next_source);
+    let next_destination = draft
+        .preview_destination_account_id
+        .is_none()
+        .then_some(resolved_destination)
+        .flatten()
+        .filter(|destination| effective_source.is_none_or(|source| source != *destination));
+
+    let mut changed = false;
+    if let Some(source_account_id) = next_source {
+        draft.preview_source_account_id = Some(source_account_id);
+        changed = true;
+    }
+    if let Some(destination_account_id) = next_destination {
+        draft.preview_destination_account_id = Some(destination_account_id);
+        changed = true;
+    }
+    if !changed {
+        return false;
+    }
+
+    let feedback = matching_feedback_object_mut(draft);
+    let transfer = feedback
+        .entry("transfer".to_string())
+        .or_insert_with(|| json!({}));
+    if !transfer.is_object() {
+        *transfer = json!({});
+    }
+    if let Some(transfer_object) = transfer.as_object_mut() {
+        transfer_object.insert("account_resolution".to_string(), json!("source_chain"));
+        if let Some(source_account_id) = next_source {
+            transfer_object.insert(
+                "resolved_source_account_id".to_string(),
+                json!(source_account_id),
+            );
+        }
+        if let Some(destination_account_id) = next_destination {
+            transfer_object.insert(
+                "resolved_destination_account_id".to_string(),
+                json!(destination_account_id),
+            );
+        }
+    }
+    true
+}
+
+fn transfer_chain_entry_for_roles<'a>(
+    source_chain: &'a [Value],
+    roles: &[&str],
+    fallback_index: Option<usize>,
+) -> Option<&'a Value> {
+    source_chain
+        .iter()
+        .find(|entry| {
+            let role = transfer_entry_text(entry.get("role"))
+                .map(|value| value.trim().to_ascii_lowercase())
+                .unwrap_or_default();
+            roles.iter().any(|candidate| role == *candidate)
+        })
+        .or_else(|| fallback_index.and_then(|index| source_chain.get(index)))
+}
+
+fn resolve_transfer_account_from_entry(
+    entry: &Value,
+    accounts: &[ImportIntelligenceAccount],
+) -> Option<i64> {
+    for field in [
+        "source_account_id",
+        "account_id",
+        "id",
+        "preview_source_account_id",
+        "preview_destination_account_id",
+    ] {
+        if let Some(account_id) = entry
+            .get(field)
+            .and_then(transfer_account_id_from_value)
+            .filter(|account_id| {
+                accounts.is_empty() || accounts.iter().any(|account| account.id == *account_id)
+            })
+        {
+            return Some(account_id);
+        }
+    }
+
+    let tokens = transfer_account_tokens_from_entry(entry);
+    if tokens.is_empty() {
+        return None;
+    }
+    accounts
+        .iter()
+        .find(|account| account_matches_tokens(account, &tokens))
+        .map(|account| account.id)
+}
+
+fn transfer_account_id_from_value(value: &Value) -> Option<i64> {
+    if let Some(number) = value.as_i64() {
+        return (number > 0).then_some(number);
+    }
+    value.as_str().and_then(|text| text.trim().parse::<i64>().ok().filter(|value| *value > 0))
+}
+
+fn transfer_account_tokens_from_entry(entry: &Value) -> Vec<String> {
+    let mut tokens = Vec::new();
+    for field in [
+        "account_name",
+        "payment_method",
+        "parser_id",
+        "counterparty",
+        "source_account_id",
+        "account_id",
+        "name",
+        "label",
+        "parser_label",
+    ] {
+        if let Some(text) = transfer_entry_text(entry.get(field)) {
+            tokens.extend(expand_transfer_account_token(&text));
+        }
+    }
+    if let Some(tags) = entry.get("tags").and_then(Value::as_array) {
+        for tag in tags {
+            if let Some(text) = transfer_entry_text(Some(tag)) {
+                tokens.extend(expand_transfer_account_token(&text));
+            }
+        }
+    }
+    tokens
+}
+
+fn expand_transfer_account_token(value: &str) -> Vec<String> {
+    let normalized = normalize_account_match_text(value);
+    if normalized.is_empty() {
+        return Vec::new();
+    }
+    let mut tokens = vec![normalized.clone()];
+    for prefix in ["parser:", "channel:", "account:", "source:"] {
+        if let Some(stripped) = normalized.strip_prefix(prefix) {
+            if !stripped.is_empty() {
+                tokens.push(stripped.to_string());
+            }
+        }
+    }
+    tokens
+}
+
+fn transfer_entry_text(value: Option<&Value>) -> Option<String> {
+    let value = value?;
+    if let Some(text) = value.as_str() {
+        return Some(text.to_string());
+    }
+    if let Some(number) = value.as_i64() {
+        return Some(number.to_string());
+    }
+    if let Some(number) = value.as_u64() {
+        return Some(number.to_string());
+    }
+    value.as_f64().map(|number| number.to_string())
 }
 
 fn apply_learning_rule_match(
@@ -1149,7 +1342,15 @@ pub async fn import_confirm_runtime_handler(
                 }
                 Err(error) => return route_response(db_error_response(error)),
             }
-            patches.push(build_preview_patch_from_payload(preview_id, item));
+            patches.push(match build_preview_patch_from_payload_with_category_lookup(
+                runtime.connection(),
+                user_id,
+                preview_id,
+                item,
+            ) {
+                Ok(patch) => patch,
+                Err(response) => return route_response(response),
+            });
         }
         let preserve_unpatched_selection = first_value(
             object,
@@ -1467,7 +1668,15 @@ pub async fn import_preview_update_runtime_handler(
         }
         Err(error) => return route_response(db_error_response(error)),
     };
-    let patch = build_preview_patch_from_payload(preview.id, object);
+    let patch = match build_preview_patch_from_payload_with_category_lookup(
+        runtime.connection(),
+        user_id,
+        preview.id,
+        object,
+    ) {
+        Ok(patch) => patch,
+        Err(response) => return route_response(response),
+    };
     let updated = match update_preview_bill(runtime.connection(), &session_id, user_id, &patch) {
         Ok(updated) => updated,
         Err(error) => return route_response(db_error_response(error)),
@@ -1529,7 +1738,15 @@ pub async fn import_reclassify_runtime_handler(
             }
             Err(error) => return route_response(db_error_response(error)),
         }
-        patches.push(build_preview_patch_from_payload(preview_id, item));
+        patches.push(match build_preview_patch_from_payload_with_category_lookup(
+            runtime.connection(),
+            user_id,
+            preview_id,
+            item,
+        ) {
+            Ok(patch) => patch,
+            Err(response) => return route_response(response),
+        });
     }
     let updated = match update_preview_bills_batch(
         runtime.connection_mut(),
@@ -2093,6 +2310,145 @@ pub async fn import_learning_rule_delete_runtime_handler(
         }),
         Ok(false) => route_response(import_v2_error_response(404, "Rule not found")),
         Err(response) => route_response(response),
+    }
+}
+
+#[cfg(test)]
+mod stage_handler_transfer_account_tests {
+    use super::*;
+
+    fn transfer_accounts() -> Vec<ImportIntelligenceAccount> {
+        vec![
+            ImportIntelligenceAccount {
+                id: 100,
+                name: "工资卡".to_string(),
+                aliases: vec!["工资卡".to_string(), "农业银行".to_string(), "abc".to_string()],
+            },
+            ImportIntelligenceAccount {
+                id: 200,
+                name: "零钱".to_string(),
+                aliases: vec!["零钱".to_string(), "微信钱包".to_string(), "wallet".to_string()],
+            },
+        ]
+    }
+
+    #[test]
+    fn transfer_pair_account_match_fills_source_and_destination_from_source_chain() {
+        let mut draft = ImportPreviewDraft {
+            preview_matching_feedback: json!({
+                "transfer": {
+                    "pair_order": "outgoing_first",
+                    "source_chain": [
+                        {
+                            "role": "outgoing",
+                            "parser_id": "abc",
+                            "payment_method": "农业银行",
+                            "account_name": "工资卡",
+                            "source_account_id": "abc",
+                            "tags": ["parser:abc"]
+                        },
+                        {
+                            "role": "incoming",
+                            "payment_method": "微信钱包",
+                            "account_name": "零钱",
+                            "source_account_id": "wallet",
+                            "tags": ["channel:wallet"]
+                        }
+                    ]
+                }
+            }),
+            ..ImportPreviewDraft::default()
+        };
+
+        assert!(apply_transfer_pair_account_match(&mut draft, &transfer_accounts()));
+        assert_eq!(draft.preview_source_account_id, Some(100));
+        assert_eq!(draft.preview_destination_account_id, Some(200));
+        assert_eq!(
+            draft
+                .preview_matching_feedback
+                .pointer("/transfer/resolved_source_account_id")
+                .and_then(Value::as_i64),
+            Some(100)
+        );
+        assert_eq!(
+            draft
+                .preview_matching_feedback
+                .pointer("/transfer/resolved_destination_account_id")
+                .and_then(Value::as_i64),
+            Some(200)
+        );
+    }
+
+    #[test]
+    fn transfer_pair_account_match_does_not_fill_same_destination_account() {
+        let mut draft = ImportPreviewDraft {
+            preview_matching_feedback: json!({
+                "transfer": {
+                    "source_chain": [
+                        {"role": "outgoing", "source_account_id": 100},
+                        {"role": "incoming", "source_account_id": 100}
+                    ]
+                }
+            }),
+            ..ImportPreviewDraft::default()
+        };
+
+        assert!(apply_transfer_pair_account_match(&mut draft, &transfer_accounts()));
+        assert_eq!(draft.preview_source_account_id, Some(100));
+        assert_eq!(draft.preview_destination_account_id, None);
+    }
+
+    #[test]
+    fn transfer_pair_account_match_runs_before_generic_alias_match_in_chain() -> rusqlite::Result<()>
+    {
+        let mut connection = Connection::open_in_memory()?;
+        connection.execute_batch(
+            "
+            CREATE TABLE accounts (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                aliases TEXT,
+                hidden INTEGER DEFAULT 0
+            );
+            INSERT INTO accounts(id, user_id, name, aliases, hidden)
+            VALUES
+                (1, 42, '零钱', '[\"微信钱包\", \"wallet\"]', 0),
+                (100, 42, '工资卡', '[\"农业银行\", \"abc\"]', 0);
+            ",
+        )?;
+        let mut drafts = vec![ImportPreviewDraft {
+            preview_parser_id: "wechat".to_string(),
+            preview_payment_method: "微信钱包".to_string(),
+            preview_parser_tags: Some(json!(["parser:abc", "parser:wechat", "channel:wallet"])),
+            preview_matching_feedback: json!({
+                "transfer": {
+                    "pair_order": "outgoing_first",
+                    "source_chain": [
+                        {
+                            "role": "outgoing",
+                            "parser_id": "abc",
+                            "payment_method": "农业银行",
+                            "account_name": "工资卡",
+                            "source_account_id": "abc"
+                        },
+                        {
+                            "role": "incoming",
+                            "payment_method": "微信钱包",
+                            "account_name": "零钱",
+                            "source_account_id": "wallet"
+                        }
+                    ]
+                }
+            }),
+            ..ImportPreviewDraft::default()
+        }];
+
+        apply_import_intelligence_chain(&mut connection, UserId::new(42).unwrap(), &mut drafts)?;
+
+        assert_eq!(drafts[0].preview_source_account_id, Some(100));
+        assert_eq!(drafts[0].preview_destination_account_id, Some(1));
+        Ok(())
     }
 }
 

@@ -54,6 +54,110 @@ fn seed_users(runtime: &SqliteRuntime, user_ids: &[i64]) -> Result<(), Box<dyn E
     Ok(())
 }
 
+fn seed_category(
+    runtime: &SqliteRuntime,
+    id: i64,
+    user_id: i64,
+    category_type: i64,
+    main_category: &str,
+    sub_category: &str,
+) -> Result<(), Box<dyn Error>> {
+    runtime.connection().execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            type INTEGER DEFAULT 1,
+            main_category TEXT,
+            sub_category TEXT,
+            priority INTEGER DEFAULT 0,
+            created_at TEXT
+        );
+        ",
+    )?;
+    runtime.connection().execute(
+        "
+        INSERT OR REPLACE INTO categories(
+            id, user_id, type, main_category, sub_category, priority, created_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '2026-05-01T00:00:00')
+        ",
+        (id, user_id, category_type, main_category, sub_category, id),
+    )?;
+    Ok(())
+}
+
+fn set_cash_transfer_category(
+    runtime: &SqliteRuntime,
+    user_id: i64,
+    category_id: i64,
+) -> Result<(), Box<dyn Error>> {
+    if !table_columns(runtime, "users")?.contains("cash_transfer_category_id") {
+        runtime.connection().execute(
+            "ALTER TABLE users ADD COLUMN cash_transfer_category_id INTEGER",
+            [],
+        )?;
+    }
+    runtime.connection().execute(
+        "UPDATE users SET cash_transfer_category_id = ?1 WHERE id = ?2",
+        (category_id, user_id),
+    )?;
+    Ok(())
+}
+
+fn seed_account(
+    runtime: &SqliteRuntime,
+    id: i64,
+    user_id: i64,
+    name: &str,
+    aliases: &str,
+) -> Result<(), Box<dyn Error>> {
+    runtime.connection().execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS accounts (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            aliases TEXT,
+            hidden INTEGER DEFAULT 0
+        );
+        ",
+    )?;
+    runtime.connection().execute(
+        "
+        INSERT OR REPLACE INTO accounts(id, user_id, name, aliases, hidden)
+        VALUES (?1, ?2, ?3, ?4, 0)
+        ",
+        (id, user_id, name, aliases),
+    )?;
+    Ok(())
+}
+
+fn seed_import_learning_rule(
+    runtime: &SqliteRuntime,
+    id: i64,
+    user_id: i64,
+    category_id: i64,
+) -> Result<(), Box<dyn Error>> {
+    runtime.connection().execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS import_learning_rules (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            learned_category_id INTEGER,
+            enabled INTEGER DEFAULT 1
+        );
+        ",
+    )?;
+    runtime.connection().execute(
+        "
+        INSERT OR REPLACE INTO import_learning_rules(id, user_id, learned_category_id, enabled)
+        VALUES (?1, ?2, ?3, 1)
+        ",
+        (id, user_id, category_id),
+    )?;
+    Ok(())
+}
+
 fn init_bills_schema(runtime: &SqliteRuntime) -> Result<(), Box<dyn Error>> {
     runtime.connection().execute_batch(
         "
@@ -1090,6 +1194,10 @@ fn preview_transfer_decision_restores_snapshot_and_detects_state_conflict(
     let mut runtime = runtime_for(&temp_dir.path().join("preview_transfer_decision.db"))?;
     seed_users(&runtime, &[42])?;
     init_import_staging_schema(runtime.connection())?;
+    seed_category(&runtime, 40, 42, 4, "账户互转", "银行卡互转")?;
+    set_cash_transfer_category(&runtime, 42, 40)?;
+    seed_account(&runtime, 100, 42, "工资卡", r#"["农业银行", "abc"]"#)?;
+    seed_account(&runtime, 200, 42, "零钱", r#"["微信钱包", "wallet"]"#)?;
 
     let mut draft = preview_draft("2026-05-01", 100.0, "maybe transfer");
     draft.preview_recurring_id = Some(5);
@@ -1098,6 +1206,34 @@ fn preview_transfer_decision_restores_snapshot_and_detects_state_conflict(
     draft.preview_recurring_match_score = 0.92;
     draft.preview_recurring_match_reasons = "amount|date".to_string();
     draft.preview_recurring_matched_date = "2026-05-01".to_string();
+    draft.preview_matching_feedback = json!({
+        "transfer": {
+            "candidate_type": "transfer",
+            "score": 1.0,
+            "level": "high",
+            "reason": "smart_dedup transfer pair",
+            "review_status": "pending",
+            "pair_order": "outgoing_first",
+            "source_chain": [
+                {
+                    "role": "outgoing",
+                    "parser_id": "abc",
+                    "payment_method": "农业银行",
+                    "account_name": "工资卡",
+                    "source_account_id": "abc",
+                    "tags": ["parser:abc", "channel:bank"]
+                },
+                {
+                    "role": "incoming",
+                    "parser_id": "wechat",
+                    "payment_method": "微信钱包",
+                    "account_name": "零钱",
+                    "source_account_id": "wallet",
+                    "tags": ["parser:wechat", "channel:wallet"]
+                }
+            ]
+        }
+    });
     insert_preview_bills_batch(
         runtime.connection_mut(),
         "session-transfer-decision",
@@ -1126,8 +1262,11 @@ fn preview_transfer_decision_restores_snapshot_and_detects_state_conflict(
     )?;
     let accepted_preview = accepted.preview.expect("accepted decision returns preview");
     assert_eq!(accepted_preview.preview_type, "转账");
-    assert_eq!(accepted_preview.preview_main_category, "");
+    assert_eq!(accepted_preview.preview_main_category, "账户互转");
+    assert_eq!(accepted_preview.preview_sub_category, "银行卡互转");
     assert_eq!(accepted_preview.preview_recurring_id, None);
+    assert_eq!(accepted_preview.preview_source_account_id, Some(100));
+    assert_eq!(accepted_preview.preview_destination_account_id, Some(200));
     assert_eq!(
         accepted_preview
             .preview_matching_feedback
@@ -1141,6 +1280,20 @@ fn preview_transfer_decision_restores_snapshot_and_detects_state_conflict(
             .pointer("/transfer/previous_preview/preview_recurring_id")
             .and_then(serde_json::Value::as_i64),
         Some(5)
+    );
+    assert_eq!(
+        accepted_preview
+            .preview_matching_feedback
+            .pointer("/transfer/resolved_source_account_id")
+            .and_then(serde_json::Value::as_i64),
+        Some(100)
+    );
+    assert_eq!(
+        accepted_preview
+            .preview_matching_feedback
+            .pointer("/transfer/resolved_destination_account_id")
+            .and_then(serde_json::Value::as_i64),
+        Some(200)
     );
 
     let conflict = apply_preview_transfer_decision(
@@ -1172,6 +1325,8 @@ fn preview_transfer_decision_restores_snapshot_and_detects_state_conflict(
     assert_eq!(rejected_preview.preview_main_category, "餐饮");
     assert_eq!(rejected_preview.preview_sub_category, "午餐");
     assert_eq!(rejected_preview.preview_recurring_id, Some(5));
+    assert_eq!(rejected_preview.preview_source_account_id, None);
+    assert_eq!(rejected_preview.preview_destination_account_id, None);
     assert_eq!(
         rejected_preview
             .preview_matching_feedback
@@ -1317,6 +1472,8 @@ fn preview_learning_decision_applies_rejects_and_clears_with_snapshot_restore(
     let mut runtime = runtime_for(&temp_dir.path().join("preview_learning_decision.db"))?;
     seed_users(&runtime, &[42])?;
     init_import_staging_schema(runtime.connection())?;
+    seed_category(&runtime, 21, 42, 2, "工资", "奖金")?;
+    seed_import_learning_rule(&runtime, 12, 42, 21)?;
     let mut draft = preview_draft("2026-05-01", 88.0, "learning candidate");
     draft.preview_source_account_id = Some(100);
     insert_preview_bills_batch(
@@ -1335,8 +1492,8 @@ fn preview_learning_decision_applies_rejects_and_clears_with_snapshot_restore(
 
     let applied = ImportPreviewLearningApply {
         preview_type: Some("收入".to_string()),
-        preview_main_category: Some("工资".to_string()),
-        preview_sub_category: Some("奖金".to_string()),
+        preview_main_category: Some("AI生成工资".to_string()),
+        preview_sub_category: Some("同名奖金".to_string()),
         preview_source_account_id: Some(None),
         preview_destination_account_id: Some(Some(200)),
         rule_id: Some(12),
@@ -1458,6 +1615,60 @@ fn preview_learning_decision_applies_rejects_and_clears_with_snapshot_restore(
     assert_eq!(cleared_preview.preview_source_account_id, Some(100));
     assert_eq!(cleared_preview.preview_destination_account_id, None);
     assert_eq!(cleared_preview.preview_matching_feedback, json!({}));
+    Ok(())
+}
+
+#[test]
+fn preview_learning_decision_clears_generated_category_names_without_taxonomy_match(
+) -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("preview_learning_invalid_category.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+    seed_category(&runtime, 31, 42, 3, "餐饮", "午餐")?;
+    insert_preview_bills_batch(
+        runtime.connection_mut(),
+        "session-learning-invalid-category",
+        user_id(42),
+        &[preview_draft(
+            "2026-05-01",
+            18.0,
+            "learning generated category",
+        )],
+    )?;
+    let preview = get_preview_by_session(
+        runtime.connection(),
+        "session-learning-invalid-category",
+        user_id(42),
+        false,
+    )?
+    .remove(0);
+
+    let applied = ImportPreviewLearningApply {
+        preview_type: Some("支出".to_string()),
+        preview_main_category: Some("餐饮".to_string()),
+        preview_sub_category: Some("同名但未建分类".to_string()),
+        ..ImportPreviewLearningApply::default()
+    };
+    let accepted = apply_preview_learning_decision(
+        runtime.connection_mut(),
+        preview.id,
+        user_id(42),
+        ImportPreviewDecision::Accept,
+        Some(&applied),
+        None,
+    )?;
+    let accepted_preview = accepted.preview.expect("accept returns preview");
+    assert_eq!(accepted_preview.preview_type, "支出");
+    assert_eq!(accepted_preview.preview_main_category, "");
+    assert_eq!(accepted_preview.preview_sub_category, "");
+    assert_eq!(
+        accepted_preview
+            .preview_matching_feedback
+            .pointer("/learning/applied_preview/preview_main_category")
+            .and_then(serde_json::Value::as_str),
+        Some("")
+    );
     Ok(())
 }
 

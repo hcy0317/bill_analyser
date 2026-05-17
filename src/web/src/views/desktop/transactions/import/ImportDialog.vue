@@ -404,6 +404,7 @@ import ImportTransactionDefineColumnTab from './tabs/ImportTransactionDefineColu
 import ImportTransactionExecuteCustomScriptTab from './tabs/ImportTransactionExecuteCustomScriptTab.vue';
 import ImportTransactionCheckDataTab from './tabs/ImportTransactionCheckDataTab.vue';
 import {
+    resolveImportPreviewCategoryPath,
     resolveImportPreviewCategoryId,
     type ImportPreviewRecord
 } from './importPreview.ts';
@@ -1730,6 +1731,15 @@ function submit(): void {
                     5: '投资'
                 };
 
+                const rawCategoryPath = resolveImportPreviewCategoryPath(
+                    t.categoryId,
+                    transactionCategoriesStore.allTransactionCategoriesMap
+                );
+                const categoryPath = rawCategoryPath
+                    && (rawCategoryPath.type === null || rawCategoryPath.type === t.type)
+                    ? rawCategoryPath
+                    : null;
+
                 return {
                     id: (t as ImportTransactionWithPreviewId)._previewId,
                     preview_type: typeReverseMap[t.type] || '支出',
@@ -1743,7 +1753,9 @@ function submit(): void {
                     preview_recurring_match_score: t.recurringMatchScore || 0,
                     preview_recurring_match_reasons: t.recurringMatchReasons || '',
                     preview_recurring_matched_date: t.recurringMatchedDate || '',
-                    category_id: t.categoryId ? parseInt(t.categoryId) : null,
+                    category_id: categoryPath ? parseInt(categoryPath.id, 10) : null,
+                    preview_main_category: categoryPath?.mainCategory || '',
+                    preview_sub_category: categoryPath?.subCategory || '',
                     clear_transfer_decision: !!(t as ImportTransactionWithPreviewId)._shouldClearTransferDecision,
                     selected: t.selected
                 };

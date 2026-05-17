@@ -61,7 +61,12 @@ pub async fn llm_analyze_transactions_runtime_handler(
             if let Err(response) = validate_llm_preview_selection_limits(&payload, limit) {
                 return route_response(response);
             }
-            let patches = match preview_patches_from_payload(&payload, limit) {
+            let patches = match preview_patches_from_payload(
+                runtime.connection(),
+                user_id,
+                &payload,
+                limit,
+            ) {
                 Ok(patches) => patches,
                 Err(response) => return route_response(response),
             };

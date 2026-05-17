@@ -102,3 +102,25 @@ export function collectImportTransactionSelectionSummary(
         annotationReasonSummaries: Object.values(annotationReasonSummaryMap).sort((left, right) => right.count - left.count)
     };
 }
+
+export function collectTrackedImportTransactionsForSelection(
+    serverPagedDrafts: Iterable<[number, ImportTransaction]>,
+    currentTransactions: ImportTransaction[],
+    getPreviewId: (transaction: ImportTransaction) => number | null
+): ImportTransaction[] {
+    const trackedTransactions = new Map<number, ImportTransaction>();
+    for (const [previewId, transaction] of serverPagedDrafts) {
+        trackedTransactions.set(previewId, transaction);
+    }
+
+    for (const transaction of currentTransactions) {
+        const previewId = getPreviewId(transaction);
+        if (previewId === null) {
+            continue;
+        }
+
+        trackedTransactions.set(previewId, transaction);
+    }
+
+    return Array.from(trackedTransactions.values());
+}

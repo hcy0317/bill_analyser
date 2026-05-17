@@ -1,4 +1,5 @@
 import type { ImportMatchingPayload } from '@/models/import_matching.ts';
+import { TransactionType } from '@/core/transaction.ts';
 
 export interface ImportPreviewLLMMatchingPayload {
     suggested_main_category?: string;
@@ -19,9 +20,18 @@ export interface ImportPreviewCategoryLike {
     id?: string;
     name: string;
     parentId?: string | null;
+    type?: number | null;
 }
 
 export type ImportPreviewCategoryMap = Record<string, ImportPreviewCategoryLike | undefined>;
+
+export interface ImportPreviewResolvedCategoryPath {
+    id: string;
+    mainCategory: string;
+    subCategory: string;
+    displayCategory: string;
+    type: number | null;
+}
 
 export interface ImportPreviewRecord {
     id: number;
@@ -79,12 +89,97 @@ function normalizePreviewCategoryId(rawCategoryId: number | string | null | unde
     return '';
 }
 
+function getImportPreviewTransactionType(previewType?: string): TransactionType | null {
+    const normalizedPreviewType = (previewType || '').trim().toLowerCase();
+    switch (normalizedPreviewType) {
+        case '收入':
+        case 'income':
+        case '2':
+            return TransactionType.Income;
+        case '支出':
+        case 'expense':
+        case '3':
+            return TransactionType.Expense;
+        case '转账':
+        case 'transfer':
+        case '4':
+            return TransactionType.Transfer;
+        case '投资':
+        case 'investment':
+        case '5':
+            return TransactionType.Investment;
+        default:
+            return null;
+    }
+}
+
+function categoryMatchesPreviewType(
+    category: ImportPreviewCategoryLike | undefined,
+    previewTransactionType: TransactionType | null
+): boolean {
+    if (!category || previewTransactionType === null || typeof category.type !== 'number') {
+        return true;
+    }
+
+    return category.type === previewTransactionType;
+}
+
+export function resolveImportPreviewCategoryPath(
+    categoryId: number | string | null | undefined,
+    categoriesById: ImportPreviewCategoryMap
+): ImportPreviewResolvedCategoryPath | null {
+    const normalizedCategoryId = normalizePreviewCategoryId(categoryId);
+    if (!normalizedCategoryId) {
+        return null;
+    }
+
+    const category = categoriesById[normalizedCategoryId];
+    if (!category) {
+        return null;
+    }
+
+    const parentId = category.parentId || '';
+    if (parentId && parentId !== '0') {
+        const parentCategory = categoriesById[parentId];
+        if (!parentCategory) {
+            return null;
+        }
+
+        return {
+            id: normalizedCategoryId,
+            mainCategory: parentCategory.name,
+            subCategory: category.name,
+            displayCategory: category.name,
+            type: typeof category.type === 'number'
+                ? category.type
+                : (typeof parentCategory.type === 'number' ? parentCategory.type : null)
+        };
+    }
+
+    return {
+        id: normalizedCategoryId,
+        mainCategory: category.name,
+        subCategory: '',
+        displayCategory: category.name,
+        type: typeof category.type === 'number' ? category.type : null
+    };
+}
+
 export function resolveImportPreviewCategoryId(
     previewData: ImportPreviewRecord,
     categoriesById: ImportPreviewCategoryMap
 ): string {
+    const previewTransactionType = getImportPreviewTransactionType(previewData.preview_type);
     const persistedCategoryId = normalizePreviewCategoryId(previewData.category_id ?? previewData.categoryId);
-    if (persistedCategoryId && categoriesById[persistedCategoryId]) {
+    const persistedCategory = resolveImportPreviewCategoryPath(persistedCategoryId, categoriesById);
+    if (
+        persistedCategory
+        && (
+            previewTransactionType === null
+            || persistedCategory.type === null
+            || persistedCategory.type === previewTransactionType
+        )
+    ) {
         return persistedCategoryId;
     }
 
@@ -99,13 +194,20 @@ export function resolveImportPreviewCategoryId(
             continue;
         }
 
+        if (!categoryMatchesPreviewType(category, previewTransactionType)) {
+            continue;
+        }
+
         if (subCategory) {
             if (category.name !== subCategory || !category.parentId || category.parentId === '0') {
                 continue;
             }
 
             const parentCategory = categoriesById[category.parentId];
-            if (parentCategory?.name === mainCategory) {
+            if (
+                parentCategory?.name === mainCategory
+                && categoryMatchesPreviewType(parentCategory, previewTransactionType)
+            ) {
                 return categoryId;
             }
             continue;

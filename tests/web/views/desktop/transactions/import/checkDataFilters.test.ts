@@ -4,7 +4,10 @@ import { DateRange } from '@/core/datetime.ts';
 import { TransactionType } from '@/core/transaction.ts';
 import type { ImportTransaction } from '@/models/imported_transaction.ts';
 import { buildImportPreviewSignalViewModel } from '@/views/desktop/transactions/import/checkDataMatching.ts';
-import { collectImportTransactionSelectionSummary } from '@/views/desktop/transactions/import/checkDataSelection.ts';
+import {
+    collectTrackedImportTransactionsForSelection,
+    collectImportTransactionSelectionSummary
+} from '@/views/desktop/transactions/import/checkDataSelection.ts';
 import {
     getImportCheckVisibleTransactions,
     IMPORT_CHECK_FILTER_MENU_ORDER,
@@ -58,6 +61,11 @@ function selectionRow(
         valid: options.valid ?? true,
         hasRecurringMatch: () => !!options.recurring
     } as ImportTransaction;
+}
+
+function previewIdOf(transaction: ImportTransaction): number | null {
+    const previewId = (transaction as { _previewId?: number })._previewId;
+    return typeof previewId === 'number' ? previewId : null;
 }
 
 describe('checkDataFilters helpers', () => {
@@ -203,5 +211,26 @@ describe('checkDataFilters helpers', () => {
             { key: 'Missing Category', label: 'Missing Category', count: 2 },
             { key: 'Missing Source Account', label: 'Missing Source Account', count: 1 }
         ]);
+    });
+
+    test('keeps current-page selection objects live over cached server-paged drafts', () => {
+        const cachedDraft = selectionRow(1, TransactionType.Expense, true);
+        (cachedDraft as { _previewId?: number })._previewId = 101;
+        const currentPageTransaction = selectionRow(2, TransactionType.Expense, false);
+        (currentPageTransaction as { _previewId?: number })._previewId = 101;
+
+        const trackedTransactions = collectTrackedImportTransactionsForSelection(
+            [[101, cachedDraft]],
+            [currentPageTransaction],
+            previewIdOf
+        );
+
+        expect(trackedTransactions).toHaveLength(1);
+        expect(trackedTransactions[0]).toBe(currentPageTransaction);
+        expect(collectImportTransactionSelectionSummary(trackedTransactions, () => []).selectedCount).toBe(0);
+
+        currentPageTransaction.selected = true;
+
+        expect(collectImportTransactionSelectionSummary(trackedTransactions, () => []).selectedCount).toBe(1);
     });
 });

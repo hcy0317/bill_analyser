@@ -38,18 +38,34 @@ pub fn apply_preview_transfer_decision(
             ImportPreviewDecision::Accept => {
                 let snapshot =
                     previous_snapshot.unwrap_or_else(|| build_transfer_previous_snapshot(&preview));
+                let transfer_category = transfer_decision_category(tx, user_id)?;
+                let transfer_type = transfer_category
+                    .as_ref()
+                    .and_then(|category| preview_type_name_for_category_type(category.type_code))
+                    .unwrap_or(reviewed_type)
+                    .to_string();
+                let transfer_main_category = transfer_category
+                    .as_ref()
+                    .map(|category| category.main_category.clone())
+                    .unwrap_or_default();
+                let transfer_sub_category = transfer_category
+                    .as_ref()
+                    .map(|category| category.sub_category.clone())
+                    .unwrap_or_default();
+                let account_resolution =
+                    resolve_transfer_accounts_for_preview(tx, user_id, &preview)?;
                 patch = patch
                     .with_change(
                         ImportPreviewPatchField::Type,
-                        ImportPreviewPatchValue::Text(reviewed_type.to_string()),
+                        ImportPreviewPatchValue::Text(transfer_type.clone()),
                     )
                     .with_change(
                         ImportPreviewPatchField::MainCategory,
-                        ImportPreviewPatchValue::Text(String::new()),
+                        ImportPreviewPatchValue::Text(transfer_main_category),
                     )
                     .with_change(
                         ImportPreviewPatchField::SubCategory,
-                        ImportPreviewPatchValue::Text(String::new()),
+                        ImportPreviewPatchValue::Text(transfer_sub_category),
                     )
                     .with_change(
                         ImportPreviewPatchField::RecurringId,
@@ -75,12 +91,41 @@ pub fn apply_preview_transfer_decision(
                         ImportPreviewPatchField::RecurringMatchedDate,
                         ImportPreviewPatchValue::Text(String::new()),
                     );
-                feedback["transfer"] = serde_json::json!({
+                if let Some(source_account_id) = account_resolution.source_account_id {
+                    patch = patch.with_change(
+                        ImportPreviewPatchField::SourceAccountId,
+                        ImportPreviewPatchValue::Integer(source_account_id),
+                    );
+                }
+                if let Some(destination_account_id) = account_resolution.destination_account_id {
+                    patch = patch.with_change(
+                        ImportPreviewPatchField::DestinationAccountId,
+                        ImportPreviewPatchValue::Integer(destination_account_id),
+                    );
+                }
+                let mut transfer_review = serde_json::json!({
                     "review_status": "accepted",
-                    "reviewed_type": reviewed_type,
+                    "reviewed_type": transfer_type,
                     "suppressed": false,
                     "previous_preview": snapshot,
                 });
+                if let Some(category) = transfer_category.as_ref() {
+                    transfer_review["category_id"] = serde_json::json!(category.id);
+                }
+                if let Some(source_account_id) = account_resolution.source_account_id {
+                    transfer_review["resolved_source_account_id"] =
+                        serde_json::json!(source_account_id);
+                }
+                if let Some(destination_account_id) = account_resolution.destination_account_id {
+                    transfer_review["resolved_destination_account_id"] =
+                        serde_json::json!(destination_account_id);
+                }
+                if account_resolution.source_account_id.is_some()
+                    || account_resolution.destination_account_id.is_some()
+                {
+                    transfer_review["account_resolution"] = serde_json::json!("source_chain");
+                }
+                feedback["transfer"] = transfer_review;
             }
             ImportPreviewDecision::Reject => {
                 if should_restore {
@@ -257,7 +302,17 @@ pub fn apply_preview_learning_decision(
             ImportPreviewDecision::Accept => {
                 let previous =
                     previous_snapshot.unwrap_or_else(|| build_learning_previous_snapshot(&preview));
-                let applied = learning_accept_preview_snapshot(applied_result, &preview);
+                let rule_id = applied_result.and_then(|value| normalize_rule_id(value.rule_id));
+                let rule_category = match rule_id {
+                    Some(rule_id) => learning_rule_category(tx, user_id, rule_id)?,
+                    None => None,
+                };
+                let mut applied = learning_accept_preview_snapshot(applied_result, &preview);
+                if let Some(category) = rule_category.as_ref() {
+                    apply_category_to_learning_snapshot(&mut applied, category);
+                } else {
+                    canonicalize_learning_snapshot_category(tx, user_id, &mut applied)?;
+                }
                 patch = patch.with_changes(learning_snapshot_restore_changes(&applied));
                 feedback["learning"] = serde_json::json!({
                     "review_status": "accepted",
@@ -265,10 +320,11 @@ pub fn apply_preview_learning_decision(
                     "previous_preview": previous,
                     "applied_preview": applied,
                 });
-                if let Some(rule_id) =
-                    applied_result.and_then(|value| normalize_rule_id(value.rule_id))
-                {
+                if let Some(rule_id) = rule_id {
                     feedback["learning"]["rule_id"] = serde_json::json!(rule_id);
+                }
+                if let Some(category) = rule_category.as_ref() {
+                    feedback["learning"]["category_id"] = serde_json::json!(category.id);
                 }
             }
             ImportPreviewDecision::Reject => {

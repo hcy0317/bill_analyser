@@ -297,6 +297,175 @@ fn build_preview_patch_from_payload(
     patch
 }
 
+fn build_preview_patch_from_payload_with_category_lookup(
+    connection: &Connection,
+    user_id: UserId,
+    preview_id: i64,
+    object: &Map<String, Value>,
+) -> Result<ImportPreviewPatch, ImportV2RouteResponse> {
+    let mut patch = build_preview_patch_from_payload(preview_id, object);
+    apply_category_id_to_preview_patch(connection, user_id, object, &mut patch)?;
+    Ok(patch)
+}
+
+fn apply_category_id_to_preview_patch(
+    connection: &Connection,
+    user_id: UserId,
+    object: &Map<String, Value>,
+    patch: &mut ImportPreviewPatch,
+) -> Result<(), ImportV2RouteResponse> {
+    let Some(value) = first_value(object, &["categoryId", "category_id"]) else {
+        return Ok(());
+    };
+
+    let Some(category_id) = value_to_i64(value).filter(|value| *value > 0) else {
+        set_preview_patch_text_change(patch, ImportPreviewPatchField::MainCategory, String::new());
+        set_preview_patch_text_change(patch, ImportPreviewPatchField::SubCategory, String::new());
+        return Ok(());
+    };
+
+    let Some(category) = load_preview_payload_category(connection, user_id, category_id)? else {
+        return Err(import_v2_error_response(400, "Invalid category"));
+    };
+
+    if let Some(preview_type) = preview_payload_category_type_name(category.type_code) {
+        set_preview_patch_text_change(
+            patch,
+            ImportPreviewPatchField::Type,
+            preview_type.to_string(),
+        );
+    }
+    set_preview_patch_text_change(
+        patch,
+        ImportPreviewPatchField::MainCategory,
+        category.main_category,
+    );
+    set_preview_patch_text_change(
+        patch,
+        ImportPreviewPatchField::SubCategory,
+        category.sub_category,
+    );
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PreviewPayloadCategory {
+    type_code: Option<i64>,
+    main_category: String,
+    sub_category: String,
+}
+
+fn load_preview_payload_category(
+    connection: &Connection,
+    user_id: UserId,
+    category_id: i64,
+) -> Result<Option<PreviewPayloadCategory>, ImportV2RouteResponse> {
+    if category_id <= 0 || !preview_payload_table_exists(connection, "categories")? {
+        return Ok(None);
+    }
+
+    let user_id = user_id_i64_value(user_id)?;
+    if preview_payload_column_exists(connection, "categories", "type")? {
+        connection
+            .query_row(
+                "
+                SELECT type, main_category, sub_category
+                FROM categories
+                WHERE id = ?1 AND user_id = ?2
+                LIMIT 1
+                ",
+                params![category_id, user_id],
+                |row| {
+                    Ok(PreviewPayloadCategory {
+                        type_code: row.get::<_, Option<i64>>(0)?,
+                        main_category: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                        sub_category: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    })
+                },
+            )
+            .optional()
+            .map_err(db_error_response)
+    } else {
+        connection
+            .query_row(
+                "
+                SELECT main_category, sub_category
+                FROM categories
+                WHERE id = ?1 AND user_id = ?2
+                LIMIT 1
+                ",
+                params![category_id, user_id],
+                |row| {
+                    Ok(PreviewPayloadCategory {
+                        type_code: None,
+                        main_category: row.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                        sub_category: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                    })
+                },
+            )
+            .optional()
+            .map_err(db_error_response)
+    }
+}
+
+fn set_preview_patch_text_change(
+    patch: &mut ImportPreviewPatch,
+    field: ImportPreviewPatchField,
+    value: String,
+) {
+    patch.changes.retain(|(existing_field, _)| *existing_field != field);
+    patch
+        .changes
+        .push((field, ImportPreviewPatchValue::Text(value)));
+}
+
+fn preview_payload_category_type_name(type_code: Option<i64>) -> Option<&'static str> {
+    match type_code {
+        Some(2) => Some("收入"),
+        Some(3) => Some("支出"),
+        Some(4) => Some("转账"),
+        Some(5) => Some("投资"),
+        _ => None,
+    }
+}
+
+fn preview_payload_table_exists(
+    connection: &Connection,
+    table_name: &str,
+) -> Result<bool, ImportV2RouteResponse> {
+    Ok(connection
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1",
+            params![table_name],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(db_error_response)?
+        .is_some())
+}
+
+fn preview_payload_column_exists(
+    connection: &Connection,
+    table_name: &str,
+    column_name: &str,
+) -> Result<bool, ImportV2RouteResponse> {
+    if table_name != "categories" {
+        return Ok(false);
+    }
+
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table_name})"))
+        .map_err(db_error_response)?;
+    let mut rows = statement.query([]).map_err(db_error_response)?;
+    while let Some(row) = rows.next().map_err(db_error_response)? {
+        let name: String = row.get(1).map_err(db_error_response)?;
+        if name == column_name {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn apply_preview_updates_from_payload(
     runtime: &mut SqliteRuntime,
     session_id: &str,
@@ -318,7 +487,12 @@ fn apply_preview_updates_from_payload(
             }
             Err(error) => return Err(db_error_response(error)),
         }
-        patches.push(build_preview_patch_from_payload(preview_id, item));
+        patches.push(build_preview_patch_from_payload_with_category_lookup(
+            runtime.connection(),
+            user_id,
+            preview_id,
+            item,
+        )?);
     }
     update_preview_bills_batch(runtime.connection_mut(), session_id, user_id, &patches)
         .map_err(db_error_response)

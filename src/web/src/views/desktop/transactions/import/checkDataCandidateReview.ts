@@ -23,7 +23,7 @@ function parseOptionalId(value: string | null | undefined): number | null {
     }
 
     const parsedValue = parseInt(value, 10);
-    return Number.isNaN(parsedValue) ? null : parsedValue;
+    return Number.isNaN(parsedValue) || parsedValue <= 0 ? null : parsedValue;
 }
 
 interface ImportCheckDecisionExpectedStateInput {
@@ -32,12 +32,11 @@ interface ImportCheckDecisionExpectedStateInput {
     type: number;
     categoryId?: string | null;
     recurringTemplateId?: string | null;
-}
-
-interface ImportCheckLearningDecisionExpectedStateInput extends ImportCheckDecisionExpectedStateInput {
     sourceAccountId?: string | null;
     destinationAccountId?: string | null;
 }
+
+type ImportCheckLearningDecisionExpectedStateInput = ImportCheckDecisionExpectedStateInput;
 
 export function buildImportCheckDecisionExpectedState(
     input: ImportCheckDecisionExpectedStateInput
@@ -47,16 +46,14 @@ export function buildImportCheckDecisionExpectedState(
         reviewStatus: input.reviewStatus,
         previewType: getImportCheckPreviewTypeText(input.type),
         categoryId: parseOptionalId(input.categoryId),
-        recurringId: parseOptionalId(input.recurringTemplateId)
+        recurringId: parseOptionalId(input.recurringTemplateId),
+        sourceAccountId: parseOptionalId(input.sourceAccountId),
+        destinationAccountId: parseOptionalId(input.destinationAccountId)
     };
 }
 
 export function buildImportCheckLearningDecisionExpectedState(
     input: ImportCheckLearningDecisionExpectedStateInput
 ): Record<string, string | number | null> {
-    return {
-        ...buildImportCheckDecisionExpectedState(input),
-        sourceAccountId: parseOptionalId(input.sourceAccountId),
-        destinationAccountId: parseOptionalId(input.destinationAccountId)
-    };
+    return buildImportCheckDecisionExpectedState(input);
 }
