@@ -628,6 +628,25 @@ describe('checkDataMatching helpers', () => {
         expect(rejected.learning?.color).toBe('error');
     });
 
+    test('renders skipped learning feedback without review actions', () => {
+        const skipped = buildImportPreviewSignalViewModel({
+            learningStatus: 'skipped',
+            learningTitle: 'transfer preview is protected from learning type/category overrides'
+        }, {
+            infoLabels: {
+                sourceLabel: '来源',
+                duplicateSourcesLabel: '重复来源',
+                recommendedCategoryLabel: '推荐分类',
+                accountRouteLabel: '账户链路'
+            }
+        });
+
+        expect(skipped.learning?.labelKey).toBe('Learning Suggestion Skipped');
+        expect(skipped.learning?.color).toBe('warning');
+        expect(skipped.learning?.actions).toStrictEqual([]);
+        expect(skipped.learning?.title).toContain('transfer preview is protected');
+    });
+
     test('formats investment reason keys with caller-provided labels', () => {
         expect(formatInvestmentSignalReason('platform:蚂蚁财富, product:黄金ETF', {
             platform: 'Platform',

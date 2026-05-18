@@ -1232,6 +1232,11 @@ fn preview_transfer_decision_restores_snapshot_and_detects_state_conflict(
                     "tags": ["parser:wechat", "channel:wallet"]
                 }
             ]
+        },
+        "learning": {
+            "rule_id": 7,
+            "review_status": "skipped",
+            "reason": "transfer preview is protected from learning type/category overrides"
         }
     });
     insert_preview_bills_batch(
@@ -1295,6 +1300,13 @@ fn preview_transfer_decision_restores_snapshot_and_detects_state_conflict(
             .and_then(serde_json::Value::as_i64),
         Some(200)
     );
+    assert_eq!(
+        accepted_preview
+            .preview_matching_feedback
+            .pointer("/learning/rule_id")
+            .and_then(serde_json::Value::as_i64),
+        Some(7)
+    );
 
     let conflict = apply_preview_transfer_decision(
         runtime.connection_mut(),
@@ -1334,6 +1346,13 @@ fn preview_transfer_decision_restores_snapshot_and_detects_state_conflict(
             .and_then(serde_json::Value::as_str),
         Some("rejected")
     );
+    assert_eq!(
+        rejected_preview
+            .preview_matching_feedback
+            .pointer("/learning/rule_id")
+            .and_then(serde_json::Value::as_i64),
+        Some(7)
+    );
 
     let cleared = apply_preview_transfer_decision(
         runtime.connection_mut(),
@@ -1348,7 +1367,11 @@ fn preview_transfer_decision_restores_snapshot_and_detects_state_conflict(
             .preview
             .expect("clear returns preview")
             .preview_matching_feedback,
-        json!({})
+        json!({"learning": {
+            "rule_id": 7,
+            "review_status": "skipped",
+            "reason": "transfer preview is protected from learning type/category overrides"
+        }})
     );
     Ok(())
 }
@@ -1476,6 +1499,15 @@ fn preview_learning_decision_applies_rejects_and_clears_with_snapshot_restore(
     seed_import_learning_rule(&runtime, 12, 42, 21)?;
     let mut draft = preview_draft("2026-05-01", 88.0, "learning candidate");
     draft.preview_source_account_id = Some(100);
+    draft.preview_matching_feedback = json!({
+        "transfer": {
+            "candidate_type": "transfer",
+            "score": 0.91,
+            "level": "high",
+            "reason": "existing transfer signal",
+            "review_status": "pending"
+        }
+    });
     insert_preview_bills_batch(
         runtime.connection_mut(),
         "session-learning-decision",
@@ -1544,6 +1576,13 @@ fn preview_learning_decision_applies_rejects_and_clears_with_snapshot_restore(
             .and_then(serde_json::Value::as_i64),
         Some(200)
     );
+    assert_eq!(
+        accepted_preview
+            .preview_matching_feedback
+            .pointer("/transfer/review_status")
+            .and_then(serde_json::Value::as_str),
+        Some("pending")
+    );
 
     let stale = apply_preview_learning_decision(
         runtime.connection_mut(),
@@ -1591,6 +1630,13 @@ fn preview_learning_decision_applies_rejects_and_clears_with_snapshot_restore(
             .and_then(serde_json::Value::as_i64),
         Some(12)
     );
+    assert_eq!(
+        rejected_preview
+            .preview_matching_feedback
+            .pointer("/transfer/review_status")
+            .and_then(serde_json::Value::as_str),
+        Some("pending")
+    );
 
     apply_preview_learning_decision(
         runtime.connection_mut(),
@@ -1614,7 +1660,17 @@ fn preview_learning_decision_applies_rejects_and_clears_with_snapshot_restore(
     assert_eq!(cleared_preview.preview_sub_category, "午餐");
     assert_eq!(cleared_preview.preview_source_account_id, Some(100));
     assert_eq!(cleared_preview.preview_destination_account_id, None);
-    assert_eq!(cleared_preview.preview_matching_feedback, json!({}));
+    assert_eq!(
+        cleared_preview
+            .preview_matching_feedback
+            .pointer("/transfer/review_status")
+            .and_then(serde_json::Value::as_str),
+        Some("pending")
+    );
+    assert!(cleared_preview
+        .preview_matching_feedback
+        .get("learning")
+        .is_none());
     Ok(())
 }
 

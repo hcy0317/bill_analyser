@@ -153,6 +153,31 @@ describe('ImportTransaction model', () => {
         expect(dedupOnly.matching?.annotation.is_manually_annotated).toBe(false);
     });
 
+    test('skipped learning feedback is visible but not pending for review actions', () => {
+        const transaction = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            learningRecommendationReason: 'transfer preview is protected from learning type/category overrides',
+            matching: {
+                ...BASE_RESPONSE.matching!,
+                learning: {
+                    rule_id: null,
+                    score: 0,
+                    level: '',
+                    review_status: 'skipped',
+                    reason: 'transfer preview is protected from learning type/category overrides',
+                    recommended_type: '',
+                    summary: '',
+                    auto_apply: false,
+                    source: 'import_learning_rules'
+                }
+            }
+        }, 6);
+
+        expect(transaction.hasLearningRecommendation()).toBe(true);
+        expect(transaction.isLearningRecommendationSkipped()).toBe(true);
+        expect(transaction.hasPendingLearningRecommendation()).toBe(false);
+    });
+
     test('missing matching payload keeps flat fields and decision reset safe', () => {
         const transaction = ImportTransaction.of({
             ...BASE_RESPONSE,

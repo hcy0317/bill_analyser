@@ -386,6 +386,7 @@ export class ImportTransaction implements ImportTransactionResponse {
         return this.hasLearningRecommendation()
             && !this.isLearningRecommendationAccepted()
             && !this.isLearningRecommendationRejected()
+            && !this.isLearningRecommendationSkipped()
             && !this.isLearningRecommendationSuppressed();
     }
 
@@ -403,6 +404,10 @@ export class ImportTransaction implements ImportTransactionResponse {
 
     public isLearningRecommendationRejected(): boolean {
         return this.getLearningRecommendationReviewStatus() === 'rejected';
+    }
+
+    public isLearningRecommendationSkipped(): boolean {
+        return this.getLearningRecommendationReviewStatus() === 'skipped';
     }
 
     public canClearLearningRecommendationDecision(): boolean {

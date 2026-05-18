@@ -2511,6 +2511,10 @@ function getLearningSignalStatus(item: ImportTransaction): ImportPreviewSignalSt
         return 'rejected';
     }
 
+    if (item.isLearningRecommendationSkipped()) {
+        return 'skipped';
+    }
+
     return null;
 }
 

@@ -38,7 +38,7 @@ export interface ImportCheckMatchingDedupTitleOptions {
     infoLabels?: Partial<ImportPreviewSignalInfoLabels>;
 }
 
-export type ImportPreviewSignalStatus = 'pending' | 'accepted' | 'rejected';
+export type ImportPreviewSignalStatus = 'pending' | 'accepted' | 'rejected' | 'skipped';
 export type ImportPreviewLearningMode = 'green' | 'blue' | '';
 
 export interface ImportPreviewSignalDecision {
@@ -709,7 +709,8 @@ function buildReviewView(
     summary?: string,
     reviewedActions: ImportPreviewSignalDecision[] = [{ decision: 'clear', labelKey: 'Clear', color: 'warning' }],
     detailLines: string[] = [],
-    pendingColor: string = 'info'
+    pendingColor: string = 'info',
+    skippedLabelKey: string = 'Suggestion Skipped'
 ): ImportPreviewSignalReviewView | null {
     if (!status) {
         return null;
@@ -743,6 +744,19 @@ function buildReviewView(
             profileText,
             summary,
             actions: reviewedActions,
+            detailLines
+        };
+    }
+
+    if (status === 'skipped') {
+        return {
+            status,
+            labelKey: skippedLabelKey,
+            title: resolvedTitle,
+            color: 'warning',
+            profileText,
+            summary,
+            actions: [],
             detailLines
         };
     }
@@ -847,7 +861,9 @@ export function buildImportPreviewSignalViewModel(
         undefined,
         state.learningSummary,
         learningReviewedActions,
-        learningDetailLines
+        learningDetailLines,
+        'info',
+        'Learning Suggestion Skipped'
     );
     if (learning && isBlueLearning) {
         learning.color = 'primary';

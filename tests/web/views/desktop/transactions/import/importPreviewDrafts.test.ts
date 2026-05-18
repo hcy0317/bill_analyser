@@ -2,6 +2,24 @@ import { describe, expect, test } from '@jest/globals';
 
 import { cloneImportPreviewDraftTransaction } from '@/views/desktop/transactions/import/importPreviewDrafts.ts';
 
+function withStructuredCloneMock<T>(mock: typeof structuredClone, run: () => T): T {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'structuredClone');
+    Object.defineProperty(globalThis, 'structuredClone', {
+        configurable: true,
+        writable: true,
+        value: mock
+    });
+    try {
+        return run();
+    } finally {
+        if (originalDescriptor) {
+            Object.defineProperty(globalThis, 'structuredClone', originalDescriptor);
+        } else {
+            Reflect.deleteProperty(globalThis, 'structuredClone');
+        }
+    }
+}
+
 describe('import preview draft cloning', () => {
     test('clones nested preview draft payloads deeply', () => {
         const transaction = {
@@ -102,5 +120,79 @@ describe('import preview draft cloning', () => {
 
         cloned.matching.transfer.review_status = 'rejected';
         expect(transaction.matching.transfer.review_status).toBe('accepted');
+    });
+
+    test('drops runtime-only values that structuredClone cannot copy', () => {
+        const transaction = {
+            matching: {
+                transfer: {
+                    review_status: 'accepted',
+                    reason: 'matched'
+                },
+                learning: {
+                    review_status: 'skipped',
+                    reason: 'transfer preview is protected from learning type/category overrides'
+                },
+                runtime: {
+                    windowRef: typeof window === 'undefined' ? undefined : window,
+                    callback: () => 'not cloneable'
+                }
+            }
+        };
+
+        expect(() => cloneImportPreviewDraftTransaction(transaction)).not.toThrow();
+
+        const cloned = cloneImportPreviewDraftTransaction(transaction);
+        expect(cloned.matching.transfer.review_status).toBe('accepted');
+        expect(cloned.matching.learning.reason).toBe(
+            'transfer preview is protected from learning type/category overrides'
+        );
+        expect('callback' in cloned.matching.runtime).toBe(false);
+        expect('windowRef' in cloned.matching.runtime).toBe(typeof window === 'undefined');
+    });
+
+    test('falls back for non-DOM data clone errors and keeps plain cyclic data', () => {
+        const cyclicMatching: {
+            self?: unknown;
+            dates: Date[];
+            keepUndefined?: undefined;
+            dropSymbol?: symbol;
+            callback?: () => string;
+        } = {
+            dates: [new Date('2026-05-18T00:00:00.000Z')],
+            keepUndefined: undefined,
+            dropSymbol: Symbol('runtime'),
+            callback: () => 'not cloneable'
+        };
+        cyclicMatching.self = cyclicMatching;
+
+        const cloned = withStructuredCloneMock(() => {
+            throw { name: 'DataCloneError' };
+        }, () => cloneImportPreviewDraftTransaction({
+            matching: cyclicMatching,
+            geoLocation: null
+        }));
+
+        const clonedMatching = cloned.matching;
+        expect(clonedMatching).not.toBe(cyclicMatching);
+        expect(clonedMatching.self).toBe(clonedMatching);
+        expect(clonedMatching.dates[0]).toEqual(new Date('2026-05-18T00:00:00.000Z'));
+        expect(clonedMatching.dates[0]).not.toBe(cyclicMatching.dates[0]);
+        expect('keepUndefined' in clonedMatching).toBe(true);
+        expect('dropSymbol' in clonedMatching).toBe(false);
+        expect('callback' in clonedMatching).toBe(false);
+        expect(cloned.geoLocation).toBeNull();
+    });
+
+    test('rethrows unexpected structuredClone failures', () => {
+        const failure = new Error('unexpected clone failure');
+
+        withStructuredCloneMock(() => {
+            throw failure;
+        }, () => {
+            expect(() => cloneImportPreviewDraftTransaction({
+                matching: { value: 'plain' }
+            })).toThrow(failure);
+        });
     });
 });
