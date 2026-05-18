@@ -190,7 +190,7 @@ async fn import_db_runtime_reads_and_clears_import_session_preview_rows(
     assert_eq!(preview_body["data"]["query"]["page"], 1);
     assert_eq!(preview_body["data"]["query"]["page_size"], 1);
     assert_eq!(preview_body["data"]["metadata"]["counts"]["total"], 2);
-    assert_eq!(preview_body["data"]["metadata"]["counts"]["selected"], 2);
+    assert_eq!(preview_body["data"]["metadata"]["counts"]["selected"], 0);
     assert!(preview_body["data"]["metadata"]["facets"]["tags"].is_array());
     assert_eq!(preview_body["data"]["preview"].as_array().unwrap().len(), 1);
     assert_eq!(
@@ -2019,6 +2019,11 @@ async fn import_db_runtime_stage2_learning_does_not_override_transfer_pair_type(
          VALUES (902, 42, 2, '其他收入', '原路退款', 30)",
         [],
     )?;
+    runtime.connection().execute(
+        "INSERT INTO categories(id, user_id, type, main_category, sub_category, priority)
+         VALUES (904, 42, 4, '一般转账', '电子支付', 5)",
+        [],
+    )?;
     let features = build_composite_match_features(
         "cmbc",
         "支付宝（中国）网络技术有限公司客户备付金",
@@ -2103,9 +2108,233 @@ async fn import_db_runtime_stage2_learning_does_not_override_transfer_pair_type(
 
     assert_eq!(transfer["dedup_type"], "transfer");
     assert_eq!(transfer["preview_type"], "转账");
+    assert_eq!(transfer["preview_main_category"], "一般转账");
+    assert_eq!(transfer["preview_sub_category"], "电子支付");
+    assert_eq!(transfer["preview_source_account_id"], 1001);
+    assert_eq!(transfer["preview_destination_account_id"], 1002);
     assert_ne!(transfer["preview_main_category"], "其他收入");
     assert_ne!(transfer["preview_sub_category"], "原路退款");
     assert_ne!(transfer["matching"]["learning"]["auto_apply"], true);
+    assert_eq!(transfer["matching"]["learning"]["review_status"], "");
+    assert_eq!(transfer["matching"]["learning"]["reason"], "");
+    assert_ne!(
+        transfer["matching"]["annotation"]["type"],
+        "transfer_account_direction"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn import_db_runtime_stage2_prefers_exact_transfer_account_aliases_over_fuzzy_names(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new().await?;
+    let mut runtime = runtime_for(fixture.db_path())?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+    seed_import_intelligence_tables(&runtime)?;
+    runtime.connection().execute(
+        "INSERT INTO categories(id, user_id, type, main_category, sub_category, priority)
+         VALUES (904, 42, 4, '一般转账', '电子支付', 5)",
+        [],
+    )?;
+    runtime.connection().execute(
+        "INSERT INTO accounts(id, user_id, name, aliases, hidden)
+         VALUES
+         (42, 42, '民生银行', '[\"网络银行\", \"民生银行\"]', 0),
+         (312, 42, '支付宝', '[\"余额宝\", \"Alipay\", \"alipay\"]', 0)",
+        [],
+    )?;
+    let session_id = "session-stage2-transfer-exact-account-alias";
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: session_id.to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+    insert_parser_templates_batch(
+        runtime.connection_mut(),
+        session_id,
+        user_id(42),
+        &[
+            ImportParserTemplateDraft {
+                parser_date: "2016-09-01 12:22:16".to_string(),
+                parser_amount: -6000.0,
+                parser_type: "支出".to_string(),
+                parser_description: "支付宝快捷支付 | 支出 | 余额宝-单次转入".to_string(),
+                parser_id: "cmbc".to_string(),
+                parser_tags: Some(json!(["parser:cmbc", "channel:bank"])),
+                parser_counterparty: "支付宝（中国）网络技术有限公司客户备付金".to_string(),
+                parser_payment_method: "网络银行".to_string(),
+                parser_original_type: "支出".to_string(),
+                parser_original_category: String::new(),
+                parser_account_id: "cmbc".to_string(),
+            },
+            ImportParserTemplateDraft {
+                parser_date: "2016-09-01 12:22:11".to_string(),
+                parser_amount: 6000.0,
+                parser_type: "收入".to_string(),
+                parser_description: "余额宝-单次转入".to_string(),
+                parser_id: "alipay".to_string(),
+                parser_tags: Some(json!(["parser:alipay", "channel:wallet"])),
+                parser_counterparty: "天弘基金管理有限公司".to_string(),
+                parser_payment_method: "中国民生银行储蓄卡(6332)".to_string(),
+                parser_original_type: "不计收支".to_string(),
+                parser_original_category: "转账红包".to_string(),
+                parser_account_id: "alipay".to_string(),
+            },
+        ],
+    )?;
+    drop(runtime);
+
+    let app = runtime_router(&fixture);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/dedup")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"session_id": session_id, "include_preview": true}).to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    let preview = body["data"]["preview"].as_array().expect("preview rows");
+    assert_eq!(preview.len(), 1);
+    let transfer = &preview[0];
+
+    assert_eq!(transfer["dedup_type"], "transfer");
+    assert_eq!(transfer["preview_type"], "转账");
+    assert_eq!(transfer["preview_main_category"], "一般转账");
+    assert_eq!(transfer["preview_sub_category"], "电子支付");
+    assert_eq!(transfer["preview_source_account_id"], 42);
+    assert_eq!(transfer["preview_destination_account_id"], 312);
+    assert_ne!(
+        transfer["matching"]["annotation"]["type"],
+        "transfer_account_direction"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn import_db_runtime_stage2_allows_transfer_domain_learning_for_transfer_pair(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new().await?;
+    let mut runtime = runtime_for(fixture.db_path())?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+    seed_import_intelligence_tables(&runtime)?;
+    runtime.connection().execute(
+        "INSERT INTO categories(id, user_id, type, main_category, sub_category, priority)
+         VALUES (904, 42, 4, '一般转账', '电子支付', 5)",
+        [],
+    )?;
+    let features = build_composite_match_features(
+        "cmbc",
+        "支付宝（中国）网络技术有限公司客户备付金",
+        "支付宝快捷支付",
+        "网络银行",
+    )
+    .expect("transfer learning features");
+    let composite_hash = composite_hash_from_features(&features);
+    runtime.connection().execute(
+        "INSERT INTO import_learning_rules(
+            id, user_id, match_type, match_value, normalized_match_value, learned_type,
+            learned_category_id, learned_source_account_id, learned_destination_account_id,
+            enabled, parser_id, composite_match_hash, match_features_json, created_at, updated_at
+         ) VALUES (7102, 42, 'composite', ?1, ?1, '转账', 904, 1001, 1002, 1, 'cmbc', ?1, ?2, '2026-05-01', '2026-05-01')",
+        [composite_hash, serde_json::to_string(&features)?],
+    )?;
+    let session_id = "session-stage2-transfer-domain-learning";
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: session_id.to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+    insert_parser_templates_batch(
+        runtime.connection_mut(),
+        session_id,
+        user_id(42),
+        &[
+            ImportParserTemplateDraft {
+                parser_date: "2016-09-01 12:22:16".to_string(),
+                parser_amount: -6000.0,
+                parser_type: "支出".to_string(),
+                parser_description: "支付宝快捷支付".to_string(),
+                parser_id: "cmbc".to_string(),
+                parser_tags: Some(json!(["parser:cmbc", "channel:bank"])),
+                parser_counterparty: "支付宝（中国）网络技术有限公司客户备付金".to_string(),
+                parser_payment_method: "网络银行".to_string(),
+                parser_original_type: "支出".to_string(),
+                parser_original_category: String::new(),
+                parser_account_id: "1001".to_string(),
+            },
+            ImportParserTemplateDraft {
+                parser_date: "2016-09-01 12:22:11".to_string(),
+                parser_amount: 6000.0,
+                parser_type: "收入".to_string(),
+                parser_description: String::new(),
+                parser_id: "alipay".to_string(),
+                parser_tags: Some(json!(["parser:alipay", "channel:wallet"])),
+                parser_counterparty: String::new(),
+                parser_payment_method: String::new(),
+                parser_original_type: "不计收支".to_string(),
+                parser_original_category: "转账红包".to_string(),
+                parser_account_id: "1002".to_string(),
+            },
+        ],
+    )?;
+    drop(runtime);
+
+    let app = runtime_router(&fixture);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/dedup")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"session_id": session_id, "include_preview": true}).to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    assert_eq!(body["data"]["match_stats"]["learning_applied"], 1);
+    let preview = body["data"]["preview"].as_array().expect("preview rows");
+    assert_eq!(preview.len(), 1);
+    let transfer = &preview[0];
+
+    assert_eq!(transfer["dedup_type"], "transfer");
+    assert_eq!(transfer["preview_type"], "转账");
+    assert_eq!(transfer["preview_main_category"], "一般转账");
+    assert_eq!(transfer["preview_sub_category"], "电子支付");
+    assert_eq!(transfer["preview_source_account_id"], 1001);
+    assert_eq!(transfer["preview_destination_account_id"], 1002);
+    assert_eq!(
+        transfer["matching"]["learning"]["review_status"],
+        "auto_applied"
+    );
+    assert_eq!(transfer["matching"]["learning"]["auto_apply"], true);
+    assert_eq!(transfer["matching"]["learning"]["rule_id"], 7102);
+    assert_ne!(
+        transfer["matching"]["annotation"]["type"],
+        "transfer_account_direction"
+    );
     Ok(())
 }
 
@@ -3473,6 +3702,7 @@ async fn import_db_runtime_preview_query_and_confirm_preserve_server_paged_selec
     let previews =
         get_preview_by_session(runtime.connection(), "session-preserve", user_id(42), false)?;
     assert_eq!(previews.len(), 2);
+    assert!(previews.iter().all(|preview| !preview.preview_selected));
 
     let invalid_sort = app
         .clone()
@@ -3491,6 +3721,30 @@ async fn import_db_runtime_preview_query_and_confirm_preserve_server_paged_selec
         read_json(invalid_sort).await["error"],
         "Unsupported preview sort direction"
     );
+
+    let select_all = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::PUT)
+                .uri("/api/bills/import/v2/preview/session-preserve/selection")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "selectionAction": "select_all"
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(select_all.status(), StatusCode::OK);
+    let select_all_body = read_json(select_all).await;
+    assert_eq!(select_all_body["success"], true);
+    assert_eq!(select_all_body["data"]["metadata"]["counts"]["selected"], 2);
 
     let confirm = app
         .oneshot(
@@ -4073,6 +4327,30 @@ async fn import_db_runtime_handles_legacy_confirm_session_batch_and_recurring_ca
     assert_eq!(candidates_body["data"]["previewId"], row.id);
     assert_eq!(candidates_body["data"]["provider_bypassed"], false);
     assert_eq!(candidates_body["data"]["candidate_count"], 0);
+
+    let select_all = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::PUT)
+                .uri("/api/bills/import/v2/preview/session-a/selection")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "selectionAction": "select_all"
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(select_all.status(), StatusCode::OK);
+    let select_all_body = read_json(select_all).await;
+    assert_eq!(select_all_body["success"], true);
+    assert_eq!(select_all_body["data"]["metadata"]["counts"]["selected"], 2);
 
     let confirm = app
         .clone()

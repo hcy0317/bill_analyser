@@ -27,28 +27,28 @@
                     <v-list>
                         <v-list-item :prepend-icon="mdiSelectAll"
                                      :title="tt('Select All Valid Items')"
-                                     :disabled="!!disabled || serverPagedMode"
+                                     :disabled="!!disabled || serverPagedSelectionBusy"
                                      @click="selectAllValid"></v-list-item>
                         <v-list-item :prepend-icon="mdiSelectAll"
                                      :title="tt('Select All Invalid Items')"
-                                     :disabled="!!disabled || serverPagedMode"
+                                     :disabled="!!disabled || serverPagedSelectionBusy"
                                      @click="selectAllInvalid"></v-list-item>
                         <v-list-item :prepend-icon="mdiMessageAlertOutline"
                                      :title="getSelectAllAnnotationText()"
-                                     :disabled="!!disabled || serverPagedMode"
+                                     :disabled="!!disabled || serverPagedSelectionBusy"
                                      @click="selectAllNeedsAnnotation"></v-list-item>
                         <v-divider class="my-2"/>
                         <v-list-item :prepend-icon="mdiSelectAll"
                                      :title="tt('Select All')"
-                                     :disabled="!!disabled || serverPagedMode"
+                                     :disabled="!!disabled || serverPagedSelectionBusy"
                                      @click="selectAll"></v-list-item>
                         <v-list-item :prepend-icon="mdiSelect"
                                      :title="tt('Select None')"
-                                     :disabled="!!disabled || serverPagedMode"
+                                     :disabled="!!disabled || serverPagedSelectionBusy"
                                      @click="selectNone"></v-list-item>
                         <v-list-item :prepend-icon="mdiSelectInverse"
                                      :title="tt('Invert Selection')"
-                                     :disabled="!!disabled || serverPagedMode"
+                                     :disabled="!!disabled || serverPagedSelectionBusy"
                                      @click="selectInvert"></v-list-item>
                         <v-divider class="my-2"/>
                         <v-list-item :prepend-icon="mdiSelectAll"
@@ -179,7 +179,7 @@
                                    :placeholder="tt('Category')"
                                    :items="getCategoriesForType(item.type)"
                                    v-model="item.categoryId"
-                                   @update:model-value="syncTransferDecisionDraftState(item)"
+                                   @update:model-value="onTransactionDataDraftChange(item)"
                                    @primary-action="quickCreatePrimaryCategory(item)"
                                    @secondary-action="quickCreateSecondaryCategory(item, $event)">
                 </two-column-select>
@@ -245,6 +245,7 @@
                                    :placeholder="getSourceAccountTitle(item)"
                                    :items="allVisibleCategorizedAccounts"
                                    v-model="item.sourceAccountId"
+                                   @update:model-value="onTransactionDataDraftChange(item)"
                                    @secondary-action="quickCreateAccount(item, 'source', $event)">
                 </two-column-select>
                 <v-icon class="icon-with-direction mx-1" size="13" :icon="mdiArrowRight" v-if="requiresDestinationAccount(item)"></v-icon>
@@ -264,6 +265,7 @@
                                    :placeholder="getDestinationAccountTitle(item)"
                                    :items="allVisibleCategorizedAccounts"
                                    v-model="item.destinationAccountId"
+                                   @update:model-value="onTransactionDataDraftChange(item)"
                                    @secondary-action="quickCreateAccount(item, 'destination', $event)"
                                    v-if="requiresDestinationAccount(item)">
                 </two-column-select>
@@ -819,6 +821,7 @@ import {
     type ImportPreviewLLMMatchingPayload,
     resolveImportPreviewCategoryPath,
     resolveImportPreviewCategoryId,
+    resolveImportPreviewDefaultTransferCategoryId,
     type ImportPreviewRecord
 } from '../importPreview.ts';
 import { cloneImportPreviewDraftTransaction } from '../importPreviewDrafts.ts';
@@ -1048,6 +1051,8 @@ const serverPagedSelectionBaselines = ref<Map<number, {
     selected: boolean;
     invalid: boolean;
 }>>(new Map());
+const serverPagedSelectionBusy = ref<boolean>(false);
+const serverPagedSelectionMetadataOverride = ref<ImportPreviewMetadata | null>(null);
 const showCustomDateRangeDialog = ref<boolean>(false);
 const showCustomDescriptionDialog = ref<boolean>(false);
 const currentDescriptionFilterValue = ref<string | null>(null);
@@ -1204,11 +1209,11 @@ function setTransactionCategoryFromId(transaction: ImportTransaction, categoryId
 
 function getDefaultCategoryIdForTransactionType(transactionType: number): string {
     if (transactionType === TransactionType.Transfer) {
-        const cashTransferCategoryId = userStore.currentUserCashTransferCategoryId;
-        const cashTransferCategory = resolveImportPreviewCategoryPath(cashTransferCategoryId, allCategoriesMap.value);
-        if (cashTransferCategory?.type === CategoryType.Transfer) {
-            return cashTransferCategory.id;
-        }
+        return resolveImportPreviewDefaultTransferCategoryId(
+            allCategoriesMap.value,
+            allCategories.value[CategoryType.Transfer],
+            userStore.currentUserCashTransferCategoryId
+        );
     }
 
     return getFirstAvailableCategoryId(getCategoriesForType(transactionType));
@@ -1284,6 +1289,12 @@ function onTransactionTypeChange(item: ImportTransaction): void {
     if (item.hasRecurringMatch()) {
         item.clearRecurringMatch();
     }
+    updateTransactionData(item);
+    syncTransferDecisionDraftState(item);
+}
+
+function onTransactionDataDraftChange(item: ImportTransaction): void {
+    updateTransactionData(item);
     syncTransferDecisionDraftState(item);
 }
 
@@ -2499,6 +2510,10 @@ function getTransferSignalStatus(item: ImportTransaction): ImportPreviewSignalSt
 }
 
 function getLearningSignalStatus(item: ImportTransaction): ImportPreviewSignalStatus | null {
+    if (!item.hasLearningRecommendation()) {
+        return null;
+    }
+
     if (item.hasPendingLearningRecommendation()) {
         return 'pending';
     }
@@ -2625,6 +2640,12 @@ type ImportPreviewSignalViewModelCacheEntry = {
 };
 
 const importPreviewSignalViewModelCache = new WeakMap<ImportTransaction, ImportPreviewSignalViewModelCacheEntry>();
+type ServerPagedSelectionAction = 'select_all'
+    | 'select_valid'
+    | 'select_invalid'
+    | 'select_needs_annotation'
+    | 'select_none'
+    | 'invert';
 
 function serializeImportPreviewSignalSourceChain(
     sources: ImportMatchingSourcePayload[] | undefined
@@ -2787,6 +2808,47 @@ function getAnnotationIssues(item: ImportTransaction): string[] {
 
 function needsAnnotation(item: ImportTransaction): boolean {
     return getAnnotationIssues(item).length > 0;
+}
+
+function hasRawPersistedMatchingAnnotationIssue(item: ImportTransaction): boolean {
+    const annotation = item.matching?.annotation as Record<string, unknown> | undefined;
+    if (!annotation) {
+        return false;
+    }
+
+    return ['status', 'type', 'review_status', 'reason'].some(key => (
+        String(annotation[key] || '').trim() !== ''
+    ));
+}
+
+function hasCurrentPersistedMatchingAnnotationIssue(item: ImportTransaction): boolean {
+    const annotation = item.matching?.annotation as Record<string, unknown> | undefined;
+    if (!annotation) {
+        return false;
+    }
+
+    const annotationType = String(annotation['type'] || '').trim();
+    if (annotationType === 'transfer_account_direction') {
+        return !item.sourceAccountId
+            || item.sourceAccountId === '0'
+            || (requiresDestinationAccount(item) && (!item.destinationAccountId || item.destinationAccountId === '0'))
+            || (requiresDestinationAccount(item)
+                && !!item.sourceAccountId
+                && !!item.destinationAccountId
+                && item.sourceAccountId !== '0'
+                && item.destinationAccountId !== '0'
+                && item.sourceAccountId === item.destinationAccountId);
+    }
+
+    return hasRawPersistedMatchingAnnotationIssue(item);
+}
+
+function hasBaselineAnnotationIssue(item: ImportTransaction): boolean {
+    return collectAnnotationIssues(item).length > 0 || hasRawPersistedMatchingAnnotationIssue(item);
+}
+
+function hasCurrentAnnotationIssue(item: ImportTransaction): boolean {
+    return collectAnnotationIssues(item).length > 0 || hasCurrentPersistedMatchingAnnotationIssue(item);
 }
 
 function getAnnotationSummary(item: ImportTransaction): string {
@@ -3450,7 +3512,7 @@ function applyBatchAccount(): void {
 const isEditing = computed<boolean>(() => !!editingTransaction.value);
 const canImport = computed<boolean>(() => selectedImportTransactionCount.value > 0 && selectedInvalidTransactionCount.value < 1);
 
-const previewMetadata = computed<ImportPreviewMetadata>(() => props.previewMetadata || {});
+const previewMetadata = computed<ImportPreviewMetadata>(() => serverPagedSelectionMetadataOverride.value || props.previewMetadata || {});
 
 function metadataFacetLabels(entries: ImportPreviewFacetEntry[] | undefined): string[] {
     if (!Array.isArray(entries) || entries.length < 1) {
@@ -3579,7 +3641,7 @@ function recordServerPagedSelectionBaselines(transactions: ImportTransaction[]):
         }
         nextBaselines.set(previewId, {
             selected: !!transaction.selected,
-            invalid: collectAnnotationIssues(transaction).length > 0
+            invalid: hasBaselineAnnotationIssue(transaction)
         });
     }
     serverPagedSelectionBaselines.value = nextBaselines;
@@ -3595,15 +3657,31 @@ function getServerPagedSelectionDelta(): { selected: number; selectedInvalid: nu
         }
         const baseline = serverPagedSelectionBaselines.value.get(previewId) || {
             selected: !!transaction.selected,
-            invalid: collectAnnotationIssues(transaction).length > 0
+            invalid: hasBaselineAnnotationIssue(transaction)
         };
         const currentSelected = !!transaction.selected;
-        const currentInvalid = collectAnnotationIssues(transaction).length > 0;
+        const currentInvalid = hasCurrentAnnotationIssue(transaction);
         selected += Number(currentSelected) - Number(baseline.selected);
         selectedInvalid += Number(currentSelected && currentInvalid)
             - Number(baseline.selected && baseline.invalid);
     }
     return { selected, selectedInvalid };
+}
+
+function getServerPagedAnnotationDelta(): number {
+    let annotationDelta = 0;
+    for (const transaction of getUniqueTrackedServerPagedTransactions()) {
+        const previewId = getPreviewId(transaction);
+        if (previewId === null) {
+            continue;
+        }
+        const baseline = serverPagedSelectionBaselines.value.get(previewId) || {
+            selected: !!transaction.selected,
+            invalid: hasBaselineAnnotationIssue(transaction)
+        };
+        annotationDelta += Number(hasCurrentAnnotationIssue(transaction)) - Number(baseline.invalid);
+    }
+    return annotationDelta;
 }
 
 function getCurrentServerPagedSortRequest(): {
@@ -3711,6 +3789,13 @@ watch(
     applyLLMSignalMemoryToTransactions(transactions || []);
     },
     { immediate: true }
+);
+
+watch(
+    () => props.previewMetadata,
+    () => {
+        serverPagedSelectionMetadataOverride.value = null;
+    }
 );
 
 watch(
@@ -4341,7 +4426,11 @@ const selectedInvalidTransactionCount = computed<number>(() => {
 });
 const annotationTransactionCount = computed<number>(() => {
     if (serverPagedMode.value) {
-        return Number(previewMetadata.value.counts?.annotations?.['needs-review'] || 0);
+        return resolveServerPagedSelectionCount({
+            total: previewMetadata.value.counts?.total ?? totalImportTransactionCount.value,
+            selected: previewMetadata.value.counts?.annotations?.['needs-review'],
+            delta: getServerPagedAnnotationDelta()
+        });
     }
 
     return importTransactionSelectionSummary.value.annotationCount;
@@ -4697,7 +4786,91 @@ function getAllOriginalTagNames(): NameValue[] {
     return allOriginalTags;
 }
 
-function selectAllValid(): void {
+function applySelectionActionToLocalTransactions(
+    action: ServerPagedSelectionAction,
+    transactions: ImportTransaction[]
+): void {
+    for (const importTransaction of transactions) {
+        switch (action) {
+            case 'select_all':
+                importTransaction.selected = true;
+                break;
+            case 'select_valid':
+                if (!hasCurrentAnnotationIssue(importTransaction)) {
+                    importTransaction.selected = true;
+                }
+                break;
+            case 'select_invalid':
+            case 'select_needs_annotation':
+                if (hasCurrentAnnotationIssue(importTransaction)) {
+                    importTransaction.selected = true;
+                }
+                break;
+            case 'select_none':
+                importTransaction.selected = false;
+                break;
+            case 'invert':
+                importTransaction.selected = !importTransaction.selected;
+                break;
+        }
+    }
+}
+
+async function applyServerPagedSelection(action: ServerPagedSelectionAction): Promise<boolean> {
+    if (!serverPagedMode.value || !props.sessionId) {
+        return false;
+    }
+
+    serverPagedSelectionBusy.value = true;
+    try {
+        const token = getCurrentToken();
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        const response = await fetch(
+            `/api/bills/import/v2/preview/${encodeURIComponent(props.sessionId)}/selection`,
+            {
+                method: 'PUT',
+                headers,
+                body: JSON.stringify({
+                    selectionAction: action,
+                    filters: buildServerPreviewQueryFilters()
+                })
+            }
+        );
+        if (!response.ok) {
+            throw new Error(await response.text());
+        }
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.error || 'Failed to update preview selection');
+        }
+
+        serverPagedSelectionMetadataOverride.value = result.data?.metadata || null;
+        applySelectionActionToLocalTransactions(action, importTransactions.value);
+        serverPagedDrafts.value = new Map();
+        serverPagedSelectionBaselines.value = new Map();
+        recordServerPagedSelectionBaselines(importTransactions.value);
+        emitServerPagedRequest(currentPage.value, countPerPage.value, {
+            cacheDrafts: false,
+            force: true
+        });
+    } catch (error) {
+        snackbar.value?.showError(getActionErrorMessage(error, 'Failed to update preview selection'));
+    } finally {
+        serverPagedSelectionBusy.value = false;
+    }
+
+    return true;
+}
+
+async function selectAllValid(): Promise<void> {
+    if (await applyServerPagedSelection('select_valid')) {
+        return;
+    }
     if (importTransactions.value.length < 1) {
         return;
     }
@@ -4709,7 +4882,10 @@ function selectAllValid(): void {
     }
 }
 
-function selectAllInvalid(): void {
+async function selectAllInvalid(): Promise<void> {
+    if (await applyServerPagedSelection('select_invalid')) {
+        return;
+    }
     if (importTransactions.value.length < 1) {
         return;
     }
@@ -4721,7 +4897,10 @@ function selectAllInvalid(): void {
     }
 }
 
-function selectAllNeedsAnnotation(): void {
+async function selectAllNeedsAnnotation(): Promise<void> {
+    if (await applyServerPagedSelection('select_needs_annotation')) {
+        return;
+    }
     if (importTransactions.value.length < 1) {
         return;
     }
@@ -4733,7 +4912,10 @@ function selectAllNeedsAnnotation(): void {
     }
 }
 
-function selectAll(): void {
+async function selectAll(): Promise<void> {
+    if (await applyServerPagedSelection('select_all')) {
+        return;
+    }
     if (importTransactions.value.length < 1) {
         return;
     }
@@ -4745,7 +4927,10 @@ function selectAll(): void {
     }
 }
 
-function selectNone(): void {
+async function selectNone(): Promise<void> {
+    if (await applyServerPagedSelection('select_none')) {
+        return;
+    }
     if (importTransactions.value.length < 1) {
         return;
     }
@@ -4757,7 +4942,10 @@ function selectNone(): void {
     }
 }
 
-function selectInvert(): void {
+async function selectInvert(): Promise<void> {
+    if (await applyServerPagedSelection('invert')) {
+        return;
+    }
     if (importTransactions.value.length < 1) {
         return;
     }
@@ -5351,6 +5539,7 @@ function onShowDateRangeError(message: string): void {
 function reset(): void {
     serverPagedDrafts.value = new Map();
     serverPagedSelectionBaselines.value = new Map();
+    serverPagedSelectionMetadataOverride.value = null;
     editingTransaction.value = null;
     editingTags.value = [];
     filters.value.minDatetime = null;

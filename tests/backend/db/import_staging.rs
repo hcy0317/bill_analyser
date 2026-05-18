@@ -17,14 +17,14 @@ use bill_analyser_db::{
     review_preview_llm_recommendation, save_import_annotation_samples,
     stage_import_parser_templates, update_import_session_status, update_parser_template_status,
     update_preview_bill, update_preview_bills_batch, update_preview_recurring_match_decision,
-    update_preview_selection, ImportAnnotationSampleDraft, ImportParserTemplateDraft,
-    ImportPreviewClassificationUpdate, ImportPreviewDecision, ImportPreviewDraft,
-    ImportPreviewExpectedState, ImportPreviewLearningApply, ImportPreviewLlmApplyRequest,
-    ImportPreviewLlmReviewRequest, ImportPreviewLlmSuggestion, ImportPreviewPageRequest,
-    ImportPreviewPatch, ImportPreviewPatchField, ImportPreviewPatchValue,
-    ImportPreviewQueryFilters, ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate,
-    ImportSessionDraft, ImportSessionStatusUpdate, SqliteConnectionConfig, SqliteDbPath,
-    SqliteRuntime,
+    update_preview_selection, update_session_preview_selection_by_query,
+    ImportAnnotationSampleDraft, ImportParserTemplateDraft, ImportPreviewClassificationUpdate,
+    ImportPreviewDecision, ImportPreviewDraft, ImportPreviewExpectedState,
+    ImportPreviewLearningApply, ImportPreviewLlmApplyRequest, ImportPreviewLlmReviewRequest,
+    ImportPreviewLlmSuggestion, ImportPreviewPageRequest, ImportPreviewPatch,
+    ImportPreviewPatchField, ImportPreviewPatchValue, ImportPreviewQueryFilters,
+    ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate, ImportSessionDraft,
+    ImportSessionStatusUpdate, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
 use bill_analyser_parsers::{post_process_raw_bills, RawBill};
 use serde_json::json;
@@ -373,7 +373,7 @@ fn preview_batch_insert_read_page_selection_and_clear_match_staging_semantics(
     );
     assert_eq!(previews[0].preview_parser_tags, vec!["wechat", "card"]);
     assert_eq!(previews[0].dedup_source_ids, vec![11, 12]);
-    assert!(previews.iter().all(|preview| preview.preview_selected));
+    assert!(previews.iter().all(|preview| !preview.preview_selected));
 
     let filter_index =
         get_preview_filter_index_by_session(runtime.connection(), "session-preview", user_id(42))?;
@@ -423,7 +423,7 @@ fn preview_batch_insert_read_page_selection_and_clear_match_staging_semantics(
     assert_eq!(page_rows[0].preview_description, "first");
 
     let updated =
-        update_preview_selection(runtime.connection_mut(), &[id_order[0]], false, user_id(42))?;
+        update_preview_selection(runtime.connection_mut(), &[id_order[1]], true, user_id(42))?;
     assert_eq!(updated, 1);
     let selected =
         get_preview_by_session(runtime.connection(), "session-preview", user_id(42), true)?;
@@ -481,6 +481,7 @@ fn preview_query_filters_sort_and_metadata_are_session_global() -> Result<(), Bo
     )?;
 
     let mut first = preview_draft("2026-05-01 09:00:00", 30.0, "alpha coffee");
+    first.preview_selected = true;
     first.preview_sub_category = "咖啡".to_string();
     first.preview_source_account_id = Some(1001);
     first.preview_parser_tags = Some(json!(["parser:alipay", "channel:wallet"]));
@@ -490,6 +491,7 @@ fn preview_query_filters_sort_and_metadata_are_session_global() -> Result<(), Bo
         "learning": {"review_status": "auto_applied"}
     });
     let mut second = preview_draft("2026-05-02 09:00:00", 10.0, "beta lunch target");
+    second.preview_selected = true;
     second.preview_sub_category = "餐饮".to_string();
     second.preview_source_account_id = Some(1002);
     second.preview_parser_tags = Some(json!(["parser:wechat", "channel:wallet"]));
@@ -499,6 +501,7 @@ fn preview_query_filters_sort_and_metadata_are_session_global() -> Result<(), Bo
         "parser": {"parser_id": "wechat"}
     });
     let mut third = preview_draft("2026-05-03 09:00:00", 20.0, "target groceries");
+    third.preview_selected = true;
     third.preview_sub_category = "购物".to_string();
     third.preview_source_account_id = Some(1003);
     third.preview_parser_tags = Some(json!(["parser:cmbc", "channel:bank"]));
@@ -625,6 +628,128 @@ fn preview_query_filters_sort_and_metadata_are_session_global() -> Result<(), Bo
     )?;
     assert_eq!(needs_review.total, 0);
     Ok(())
+}
+
+#[test]
+fn preview_selection_query_actions_are_filter_scoped_and_issue_aware() -> Result<(), Box<dyn Error>>
+{
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("preview_selection_query.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: "session-selection-query".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+
+    let mut target_valid = preview_draft("2026-05-01 09:00:00", 30.0, "target valid");
+    target_valid.preview_source_account_id = Some(1001);
+    let mut target_invalid = preview_draft("2026-05-02 09:00:00", 10.0, "target invalid");
+    target_invalid.preview_source_account_id = None;
+    let mut other_valid = preview_draft("2026-05-03 09:00:00", 20.0, "other valid");
+    other_valid.preview_source_account_id = Some(1003);
+    insert_preview_bills_batch(
+        runtime.connection_mut(),
+        "session-selection-query",
+        user_id(42),
+        &[target_valid, target_invalid, other_valid],
+    )?;
+    assert_eq!(
+        count_preview_by_session(
+            runtime.connection(),
+            "session-selection-query",
+            user_id(42),
+            true
+        )?,
+        0
+    );
+
+    let target_filter = ImportPreviewQueryFilters {
+        description: Some("target".to_string()),
+        ..Default::default()
+    };
+    update_session_preview_selection_by_query(
+        runtime.connection(),
+        "session-selection-query",
+        user_id(42),
+        &target_filter,
+        "select_valid",
+    )?;
+    assert_eq!(
+        selected_preview_descriptions(runtime.connection(), "session-selection-query")?,
+        BTreeSet::from(["target valid".to_string()])
+    );
+
+    update_session_preview_selection_by_query(
+        runtime.connection(),
+        "session-selection-query",
+        user_id(42),
+        &target_filter,
+        "select_invalid",
+    )?;
+    assert_eq!(
+        selected_preview_descriptions(runtime.connection(), "session-selection-query")?,
+        BTreeSet::from(["target invalid".to_string(), "target valid".to_string()])
+    );
+
+    update_session_preview_selection_by_query(
+        runtime.connection(),
+        "session-selection-query",
+        user_id(42),
+        &target_filter,
+        "select_none",
+    )?;
+    assert!(
+        selected_preview_descriptions(runtime.connection(), "session-selection-query")?.is_empty()
+    );
+
+    update_session_preview_selection_by_query(
+        runtime.connection(),
+        "session-selection-query",
+        user_id(42),
+        &ImportPreviewQueryFilters::default(),
+        "select_all",
+    )?;
+    update_session_preview_selection_by_query(
+        runtime.connection(),
+        "session-selection-query",
+        user_id(42),
+        &target_filter,
+        "select_none",
+    )?;
+    assert_eq!(
+        selected_preview_descriptions(runtime.connection(), "session-selection-query")?,
+        BTreeSet::from(["other valid".to_string()])
+    );
+
+    update_session_preview_selection_by_query(
+        runtime.connection(),
+        "session-selection-query",
+        user_id(42),
+        &ImportPreviewQueryFilters::default(),
+        "invert",
+    )?;
+    assert_eq!(
+        selected_preview_descriptions(runtime.connection(), "session-selection-query")?,
+        BTreeSet::from(["target invalid".to_string(), "target valid".to_string()])
+    );
+    Ok(())
+}
+
+fn selected_preview_descriptions(
+    connection: &rusqlite::Connection,
+    session_id: &str,
+) -> Result<BTreeSet<String>, Box<dyn Error>> {
+    Ok(
+        get_preview_by_session(connection, session_id, user_id(42), true)?
+            .into_iter()
+            .map(|preview| preview.preview_description)
+            .collect(),
+    )
 }
 
 #[test]
@@ -863,6 +988,15 @@ fn preview_partial_patches_preserve_unvisited_selection_state() -> Result<(), Bo
         "session-partial-selection",
         user_id(42),
         false,
+    )?;
+    update_preview_selection(
+        runtime.connection_mut(),
+        &previews
+            .iter()
+            .map(|preview| preview.id)
+            .collect::<Vec<_>>(),
+        true,
+        user_id(42),
     )?;
 
     let changed = apply_preview_patches_preserving_selection(
@@ -2477,8 +2611,8 @@ fn confirm_preview_to_bills_inserts_selected_rows_and_marks_session_completed(
         get_preview_by_session(runtime.connection(), "session-confirm", user_id(42), false)?;
     update_preview_selection(
         runtime.connection_mut(),
-        &[previews[1].id],
-        false,
+        &[previews[0].id],
+        true,
         user_id(42),
     )?;
 
@@ -2576,6 +2710,21 @@ fn confirm_preview_to_bills_counts_duplicates_and_continues() -> Result<(), Box<
             preview_draft("2026-05-02", 18.5, "new one"),
         ],
     )?;
+    let previews = get_preview_by_session(
+        runtime.connection(),
+        "session-duplicate",
+        user_id(42),
+        false,
+    )?;
+    update_preview_selection(
+        runtime.connection_mut(),
+        &previews
+            .iter()
+            .map(|preview| preview.id)
+            .collect::<Vec<_>>(),
+        true,
+        user_id(42),
+    )?;
     let existing_hash = calculate_import_bill_hash(
         "2026-05-01 00:00:00",
         "支出",
@@ -2651,6 +2800,21 @@ fn confirm_preview_to_bills_rolls_back_on_non_duplicate_insert_error() -> Result
             preview_draft("2026-05-01", 9.25, "good insert"),
             preview_draft("2026-05-02", 18.5, "bad insert"),
         ],
+    )?;
+    let previews = get_preview_by_session(
+        runtime.connection(),
+        "session-insert-error",
+        user_id(42),
+        false,
+    )?;
+    update_preview_selection(
+        runtime.connection_mut(),
+        &previews
+            .iter()
+            .map(|preview| preview.id)
+            .collect::<Vec<_>>(),
+        true,
+        user_id(42),
     )?;
 
     let result = confirm_preview_to_bills(

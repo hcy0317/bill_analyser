@@ -153,7 +153,7 @@ describe('ImportTransaction model', () => {
         expect(dedupOnly.matching?.annotation.is_manually_annotated).toBe(false);
     });
 
-    test('skipped learning feedback is visible but not pending for review actions', () => {
+    test('transfer-protected skipped learning feedback is hidden from recommendations', () => {
         const transaction = ImportTransaction.of({
             ...BASE_RESPONSE,
             learningRecommendationReason: 'transfer preview is protected from learning type/category overrides',
@@ -173,8 +173,117 @@ describe('ImportTransaction model', () => {
             }
         }, 6);
 
+        expect(transaction.hasLearningRecommendation()).toBe(false);
+        expect(transaction.isLearningRecommendationSkipped()).toBe(true);
+        expect(transaction.isTransferProtectedLearningSkip()).toBe(true);
+        expect(transaction.hasPendingLearningRecommendation()).toBe(false);
+    });
+
+    test('transfer typed rows without transfer match keep default skipped learning visibility', () => {
+        const transaction = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            type: TransactionType.Transfer,
+            dedupType: 'remaining',
+            learningRecommendationReason: 'transfer preview is protected from learning type/category overrides',
+            matching: {
+                ...BASE_RESPONSE.matching!,
+                transfer: {
+                    ...BASE_RESPONSE.matching!.transfer,
+                    candidate_type: '',
+                    review_status: ''
+                },
+                dedup: {
+                    type: 'remaining',
+                    source_ids: []
+                },
+                learning: {
+                    rule_id: null,
+                    score: 0,
+                    level: '',
+                    review_status: 'skipped',
+                    reason: 'transfer preview is protected from learning type/category overrides',
+                    recommended_type: '',
+                    summary: '',
+                    auto_apply: false,
+                    source: 'import_learning_rules'
+                }
+            }
+        }, 7);
+
         expect(transaction.hasLearningRecommendation()).toBe(true);
         expect(transaction.isLearningRecommendationSkipped()).toBe(true);
+        expect(transaction.isTransferProtectedLearningSkip()).toBe(false);
+        expect(transaction.hasPendingLearningRecommendation()).toBe(false);
+    });
+
+    test('cash transfer matching payloads are treated as transfer-protected signals', () => {
+        const transaction = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            suggestedType: undefined,
+            transferSuggestionScore: 0,
+            learningRecommendationReason: 'transfer preview is protected from learning type/category overrides',
+            matching: {
+                ...BASE_RESPONSE.matching!,
+                transfer: {
+                    ...BASE_RESPONSE.matching!.transfer,
+                    candidate_type: 'cash_transfer',
+                    review_status: 'pending'
+                },
+                dedup: {
+                    type: '',
+                    source_ids: []
+                },
+                learning: {
+                    rule_id: null,
+                    score: 0,
+                    level: '',
+                    review_status: 'skipped',
+                    reason: 'transfer preview is protected from learning type/category overrides',
+                    recommended_type: '',
+                    summary: '',
+                    auto_apply: false,
+                    source: 'import_learning_rules'
+                }
+            }
+        }, 7);
+
+        expect(transaction.suggestedType).toBe(TransactionType.Transfer);
+        expect(transaction.hasLearningRecommendation()).toBe(false);
+        expect(transaction.isTransferProtectedLearningSkip()).toBe(true);
+    });
+
+    test('non-transfer skipped learning feedback remains visible without review actions', () => {
+        const transaction = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            dedupType: 'remaining',
+            matching: {
+                ...BASE_RESPONSE.matching!,
+                transfer: {
+                    ...BASE_RESPONSE.matching!.transfer,
+                    candidate_type: '',
+                    review_status: ''
+                },
+                dedup: {
+                    type: 'remaining',
+                    source_ids: []
+                },
+                learning: {
+                    rule_id: 8,
+                    score: 0,
+                    level: '',
+                    review_status: 'skipped',
+                    reason: 'learned category type is incompatible with preview type',
+                    recommended_type: '',
+                    summary: '',
+                    auto_apply: false,
+                    source: 'import_learning_rules'
+                }
+            }
+        }, 7);
+
+        expect(transaction.hasLearningRecommendation()).toBe(true);
+        expect(transaction.isLearningRecommendationSkipped()).toBe(true);
+        expect(transaction.isTransferProtectedLearningSkip()).toBe(false);
         expect(transaction.hasPendingLearningRecommendation()).toBe(false);
     });
 

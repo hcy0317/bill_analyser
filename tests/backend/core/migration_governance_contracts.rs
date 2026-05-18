@@ -164,6 +164,7 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
         ("DELETE", "/api/bills/import/v2/session/{session_id}"),
         ("GET", "/api/bills/import/v2/preview/{session_id}"),
         ("GET", "/api/bills/import/v2/preview/{session_id}/index"),
+        ("PUT", "/api/bills/import/v2/preview/{session_id}/selection"),
         ("PUT", "/api/bills/import/v2/preview/{session_id}/update"),
         ("POST", "/api/bills/import/v2/reclassify/{session_id}"),
         (
@@ -304,6 +305,7 @@ fn bills_import_routes_are_python_deleted_and_provider_routes_are_rust_owned() {
 
     for (method, pattern) in [
         ("POST", "/api/bills/import/v2/parse"),
+        ("PUT", "/api/bills/import/v2/preview/{session_id}/selection"),
         ("PUT", "/api/bills/import/v2/preview/{session_id}/update"),
         (
             "POST",
@@ -716,6 +718,7 @@ fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
             ("DELETE", "/api/bills/import/v2/session/{session_id}"),
             ("GET", "/api/bills/import/v2/preview/{session_id}"),
             ("GET", "/api/bills/import/v2/preview/{session_id}/index"),
+            ("PUT", "/api/bills/import/v2/preview/{session_id}/selection"),
             ("PUT", "/api/bills/import/v2/preview/{session_id}/update"),
             ("POST", "/api/bills/import/v2/reclassify/{session_id}"),
             (

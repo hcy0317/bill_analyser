@@ -363,6 +363,12 @@
     },
     {
       "method": "PUT",
+      "pattern": "/api/bills/import/v2/preview/{session_id}/selection",
+      "domain": "bills-import",
+      "state": "python_deleted"
+    },
+    {
+      "method": "PUT",
       "pattern": "/api/bills/import/v2/preview/{session_id}/update",
       "domain": "bills-import",
       "state": "python_deleted"

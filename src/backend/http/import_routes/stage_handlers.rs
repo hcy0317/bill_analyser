@@ -237,6 +237,10 @@ fn apply_import_intelligence_chain(
         .cloned()
         .map(|category| (category.id, category))
         .collect::<BTreeMap<_, _>>();
+    let user_cash_transfer_category_id =
+        load_user_cash_transfer_category_id(connection, user_id_i64)?;
+    let default_transfer_category =
+        default_transfer_category(&categories, &categories_by_id, user_cash_transfer_category_id);
     let category_rules =
         load_import_intelligence_category_rules(connection, user_id_i64, &categories_by_id)?;
     let accounts = load_import_intelligence_accounts(connection, user_id_i64)?;
@@ -269,6 +273,9 @@ fn apply_import_intelligence_chain(
         ) {
             stats.learning_applied += 1;
             applied_learning_rule_ids.push(applied_rule_id);
+        }
+        if apply_transfer_default_category(draft, &categories, default_transfer_category) {
+            stats.category_matched += 1;
         }
         if let Some(candidate) = best_recurring_candidate_for_draft(draft, &recurring_templates) {
             apply_recurring_candidate(draft, candidate);
@@ -360,6 +367,37 @@ fn load_import_intelligence_categories(
         })
     })?;
     rows.collect()
+}
+
+fn load_user_cash_transfer_category_id(
+    connection: &Connection,
+    user_id: i64,
+) -> rusqlite::Result<Option<i64>> {
+    if !import_intelligence_table_exists(connection, "users")?
+        || !table_has_column(connection, "users", "cash_transfer_category_id")?
+    {
+        return Ok(None);
+    }
+
+    connection
+        .query_row(
+            "SELECT cash_transfer_category_id FROM users WHERE id = ?1 LIMIT 1",
+            params![user_id],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .optional()
+        .map(Option::flatten)
+}
+
+fn default_transfer_category<'a>(
+    categories: &'a [ImportIntelligenceCategory],
+    categories_by_id: &'a BTreeMap<i64, ImportIntelligenceCategory>,
+    user_cash_transfer_category_id: Option<i64>,
+) -> Option<&'a ImportIntelligenceCategory> {
+    user_cash_transfer_category_id
+        .and_then(|category_id| categories_by_id.get(&category_id))
+        .filter(|category| category.type_code == 4)
+        .or_else(|| categories.iter().find(|category| category.type_code == 4))
 }
 
 fn load_import_intelligence_category_rules(
@@ -761,7 +799,12 @@ fn resolve_transfer_account_from_entry(
     }
     accounts
         .iter()
-        .find(|account| account_matches_tokens(account, &tokens))
+        .find(|account| account_exactly_matches_tokens(account, &tokens))
+        .or_else(|| {
+            accounts
+                .iter()
+                .find(|account| account_matches_tokens(account, &tokens))
+        })
         .map(|account| account.id)
 }
 
@@ -836,19 +879,7 @@ fn apply_learning_rule_match(
     category_values: &[Value],
     account_values: &[Value],
 ) -> Option<i64> {
-    if is_transfer_protected_preview(draft) {
-        matching_feedback_object_mut(draft).insert(
-            "learning".to_string(),
-            json!({
-                "review_status": "skipped",
-                "auto_apply": false,
-                "reason": "transfer preview is protected from learning type/category overrides",
-                "source": "import_learning_rules",
-            }),
-        );
-        return None;
-    }
-
+    let transfer_protected = is_transfer_protected_preview(draft);
     let features = build_composite_match_features(
         &draft.preview_parser_id,
         &draft.preview_counterparty,
@@ -889,6 +920,11 @@ fn apply_learning_rule_match(
         let Some((score, mode, reason)) = candidate else {
             continue;
         };
+        if transfer_protected
+            && !learning_rule_keeps_transfer_domain(rule, categories_by_id)
+        {
+            continue;
+        }
         if best
             .as_ref()
             .is_none_or(|(_, best_score, _, _)| score > *best_score)
@@ -906,19 +942,28 @@ fn apply_learning_rule_match(
         .unwrap_or_else(|| draft.preview_type.trim());
     let learned_category = if let Some(category_id) = rule.learned_category_id {
         let Some(category) = categories_by_id.get(&category_id) else {
-            annotate_learning_rule_skip(
-                draft,
-                rule.id,
-                "learned category is missing from current category table",
-            );
+            if !transfer_protected {
+                annotate_learning_rule_skip(
+                    draft,
+                    rule.id,
+                    "learned category is missing from current category table",
+                );
+            }
             return None;
         };
-        if !category_type_matches_preview(category.type_code, candidate_preview_type) {
-            annotate_learning_rule_skip(
-                draft,
-                rule.id,
-                "learned category type is incompatible with preview type",
-            );
+        let candidate_type_for_category = if transfer_protected && category.type_code == 4 {
+            "转账"
+        } else {
+            candidate_preview_type
+        };
+        if !category_type_matches_preview(category.type_code, candidate_type_for_category) {
+            if !transfer_protected {
+                annotate_learning_rule_skip(
+                    draft,
+                    rule.id,
+                    "learned category type is incompatible with preview type",
+                );
+            }
             return None;
         }
         Some(category)
@@ -934,10 +979,14 @@ fn apply_learning_rule_match(
         normalize_preview_type_for_category(draft, category.type_code);
     }
     if let Some(account_id) = rule.learned_source_account_id {
-        draft.preview_source_account_id = Some(account_id);
+        if !transfer_protected || draft.preview_source_account_id.is_none() {
+            draft.preview_source_account_id = Some(account_id);
+        }
     }
     if let Some(account_id) = rule.learned_destination_account_id {
-        draft.preview_destination_account_id = Some(account_id);
+        if !transfer_protected || draft.preview_destination_account_id.is_none() {
+            draft.preview_destination_account_id = Some(account_id);
+        }
     }
     let mut rule_payload = Map::new();
     rule_payload.insert("learned_type".to_string(), json!(rule.learned_type));
@@ -971,6 +1020,31 @@ fn apply_learning_rule_match(
     Some(rule.id)
 }
 
+fn learning_rule_keeps_transfer_domain(
+    rule: &ImportIntelligenceLearningRule,
+    categories_by_id: &BTreeMap<i64, ImportIntelligenceCategory>,
+) -> bool {
+    if rule
+        .learned_type
+        .as_deref()
+        .and_then(normalize_transaction_type_text)
+        .is_some_and(|transaction_type| transaction_type == "转账")
+    {
+        return true;
+    }
+
+    if let Some(category_id) = rule.learned_category_id {
+        return categories_by_id
+            .get(&category_id)
+            .is_some_and(|category| category.type_code == 4);
+    }
+
+    rule.learned_type
+        .as_deref()
+        .and_then(normalize_transaction_type_text)
+        .is_none()
+}
+
 fn learning_similarity_has_semantic_anchor(score: &Value) -> bool {
     score
         .get("matched_fields")
@@ -995,13 +1069,49 @@ fn annotate_learning_rule_skip(draft: &mut ImportPreviewDraft, rule_id: i64, rea
     );
 }
 
+fn apply_transfer_default_category(
+    draft: &mut ImportPreviewDraft,
+    categories: &[ImportIntelligenceCategory],
+    default_category: Option<&ImportIntelligenceCategory>,
+) -> bool {
+    if !is_transfer_protected_preview(draft)
+        || preview_category_matches_type(draft, categories, 4)
+    {
+        return false;
+    }
+
+    let Some(category) = default_category else {
+        return false;
+    };
+    draft.preview_main_category = category.main_category.clone();
+    draft.preview_sub_category = category.sub_category.clone();
+    true
+}
+
+fn preview_category_matches_type(
+    draft: &ImportPreviewDraft,
+    categories: &[ImportIntelligenceCategory],
+    expected_type: i64,
+) -> bool {
+    let main_category = draft.preview_main_category.trim();
+    let sub_category = draft.preview_sub_category.trim();
+    if main_category.is_empty() && sub_category.is_empty() {
+        return false;
+    }
+
+    categories.iter().any(|category| {
+        category.type_code == expected_type
+            && category.main_category.trim() == main_category
+            && category.sub_category.trim() == sub_category
+    })
+}
+
 fn is_transfer_protected_preview(draft: &ImportPreviewDraft) -> bool {
-    draft.preview_type.trim() == "转账"
-        || draft
-            .dedup_type
-            .as_deref()
-            .map(|value| value.trim().to_ascii_lowercase().contains("transfer"))
-            .unwrap_or(false)
+    draft
+        .dedup_type
+        .as_deref()
+        .map(|value| value.trim().to_ascii_lowercase().contains("transfer"))
+        .unwrap_or(false)
         || draft.preview_matching_feedback.get("transfer").is_some()
 }
 
@@ -1015,6 +1125,8 @@ fn enforce_import_preview_invariants(drafts: &mut [ImportPreviewDraft]) {
         if transfer_preview_requires_account_review(draft) {
             draft.preview_selected = false;
             annotate_transfer_account_review(draft);
+        } else {
+            clear_transfer_account_review_annotation(draft);
         }
     }
 }
@@ -1045,6 +1157,19 @@ fn annotate_transfer_account_review(draft: &mut ImportPreviewDraft) {
             "reason": "transfer preview is missing source or destination account",
         }),
     );
+}
+
+fn clear_transfer_account_review_annotation(draft: &mut ImportPreviewDraft) {
+    if draft
+        .preview_matching_feedback
+        .pointer("/annotation/type")
+        .and_then(Value::as_str)
+        .is_none_or(|value| value != "transfer_account_direction")
+    {
+        return;
+    }
+
+    matching_feedback_object_mut(draft).remove("annotation");
 }
 
 fn best_recurring_candidate_for_draft(
@@ -1259,6 +1384,13 @@ fn account_matches_tokens(account: &ImportIntelligenceAccount, tokens: &[String]
             && tokens
                 .iter()
                 .any(|token| token == &alias || token.contains(&alias) || alias.contains(token))
+    })
+}
+
+fn account_exactly_matches_tokens(account: &ImportIntelligenceAccount, tokens: &[String]) -> bool {
+    account.aliases.iter().any(|alias| {
+        let alias = normalize_account_match_text(alias);
+        !alias.is_empty() && tokens.iter().any(|token| token == &alias)
     })
 }
 
@@ -1746,6 +1878,127 @@ pub async fn import_preview_index_runtime_handler(
         total: items.len(),
         items,
     }))
+}
+
+pub async fn import_preview_selection_runtime_handler(
+    State(state): State<HttpAppState>,
+    Path(session_id): Path<String>,
+    headers: HeaderMap,
+    Json(payload): Json<Value>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(runtime) => runtime,
+        Err(response) => return route_response(response),
+    };
+    if let Err(response) = init_import_runtime_schema(&runtime) {
+        return route_response(response);
+    }
+    match get_import_session(runtime.connection(), &session_id, user_id) {
+        Ok(Some(_)) => {}
+        Ok(None) => return route_response(import_session_not_found_response()),
+        Err(error) => return route_response(db_error_response(error)),
+    }
+    let object = match payload_object(&payload) {
+        Ok(object) => object,
+        Err(response) => return route_response(response),
+    };
+    let action = match preview_selection_action_from_payload(object) {
+        Ok(action) => action,
+        Err(response) => return route_response(response),
+    };
+    let filters = import_preview_query_filters_from_payload(object);
+    let updated = match update_session_preview_selection_by_query(
+        runtime.connection(),
+        &session_id,
+        user_id,
+        &filters,
+        action.as_str(),
+    ) {
+        Ok(updated) => updated,
+        Err(error) => return route_response(db_error_response(error)),
+    };
+    let metadata = match query_preview_page_by_session(
+        runtime.connection(),
+        &session_id,
+        user_id,
+        &ImportPreviewPageRequest {
+            page: 1,
+            page_size: 1,
+            sort_by: String::new(),
+            sort_direction: "asc".to_string(),
+            preview_ids: Vec::new(),
+            filters,
+        },
+    ) {
+        Ok(result) => serde_json::to_value(result.metadata).unwrap_or_else(|_| json!({})),
+        Err(error) => return route_response(db_error_response(error)),
+    };
+
+    route_response(import_v2_data_response(json!({
+        "updated": updated,
+        "selectionAction": action,
+        "metadata": metadata,
+    })))
+}
+
+fn preview_selection_action_from_payload(
+    object: &Map<String, Value>,
+) -> Result<String, ImportV2RouteResponse> {
+    let action = first_value(
+        object,
+        &["selectionAction", "selection_action", "action"],
+    )
+    .and_then(value_to_text)
+    .unwrap_or_default();
+    match action
+        .trim()
+        .replace('-', "_")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "selectall" | "select_all" | "all" => Ok("select_all".to_string()),
+        "selectvalid" | "select_valid" | "valid" => Ok("select_valid".to_string()),
+        "selectinvalid" | "select_invalid" | "invalid" => Ok("select_invalid".to_string()),
+        "selectneedsannotation" | "select_needs_annotation" | "needs_annotation" => {
+            Ok("select_needs_annotation".to_string())
+        }
+        "selectnone" | "select_none" | "none" => Ok("select_none".to_string()),
+        "selectinvert" | "select_invert" | "invert" => Ok("invert".to_string()),
+        _ => Err(import_v2_error_response(400, "Invalid selection action")),
+    }
+}
+
+fn import_preview_query_filters_from_payload(object: &Map<String, Value>) -> ImportPreviewQueryFilters {
+    let filters = first_value(object, &["filters", "queryFilters", "query_filters"])
+        .and_then(Value::as_object);
+    ImportPreviewQueryFilters {
+        min_datetime: preview_filter_text(filters, &["minDatetime", "min_datetime"]),
+        max_datetime: preview_filter_text(filters, &["maxDatetime", "max_datetime"]),
+        transaction_type: preview_filter_text(filters, &["transactionType", "transaction_type"]),
+        category: preview_filter_text(filters, &["category"]),
+        account: preview_filter_text(filters, &["account"]),
+        tag: preview_filter_text(filters, &["tag"]),
+        signal: preview_filter_text(filters, &["signal"]),
+        annotation: preview_filter_text(filters, &["annotation"]),
+        description: preview_filter_text(filters, &["description"]),
+        selected_only: false,
+    }
+}
+
+fn preview_filter_text(
+    filters: Option<&Map<String, Value>>,
+    keys: &[&str],
+) -> Option<String> {
+    filters.and_then(|object| {
+        first_value(object, keys)
+            .and_then(value_to_text)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    })
 }
 
 pub async fn import_preview_update_runtime_handler(
@@ -2567,6 +2820,183 @@ mod stage_handler_transfer_account_tests {
         assert_eq!(drafts[0].preview_source_account_id, Some(100));
         assert_eq!(drafts[0].preview_destination_account_id, Some(1));
         Ok(())
+    }
+
+    #[test]
+    fn user_cash_transfer_category_id_reads_optional_profile_setting() -> rusqlite::Result<()> {
+        let connection = Connection::open_in_memory()?;
+        connection.execute_batch(
+            "
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                cash_transfer_category_id INTEGER
+            );
+            INSERT INTO users(id, cash_transfer_category_id) VALUES (42, 904);
+            ",
+        )?;
+
+        assert_eq!(load_user_cash_transfer_category_id(&connection, 42)?, Some(904));
+        assert_eq!(load_user_cash_transfer_category_id(&connection, 77)?, None);
+        Ok(())
+    }
+
+    #[test]
+    fn transfer_default_category_prefers_user_cash_transfer_category() {
+        let categories = vec![
+            ImportIntelligenceCategory {
+                id: 901,
+                type_code: 4,
+                main_category: "一般转账".to_string(),
+                sub_category: "银行转账".to_string(),
+            },
+            ImportIntelligenceCategory {
+                id: 904,
+                type_code: 4,
+                main_category: "账户互转".to_string(),
+                sub_category: "电子支付".to_string(),
+            },
+        ];
+        let categories_by_id = categories
+            .iter()
+            .cloned()
+            .map(|category| (category.id, category))
+            .collect::<BTreeMap<_, _>>();
+
+        let selected = default_transfer_category(&categories, &categories_by_id, Some(904))
+            .expect("user transfer category");
+        assert_eq!(selected.id, 904);
+
+        let mut draft = ImportPreviewDraft {
+            preview_type: "转账".to_string(),
+            dedup_type: Some("transfer".to_string()),
+            ..ImportPreviewDraft::default()
+        };
+        assert!(apply_transfer_default_category(
+            &mut draft,
+            &categories,
+            Some(selected)
+        ));
+        assert_eq!(draft.preview_main_category, "账户互转");
+        assert_eq!(draft.preview_sub_category, "电子支付");
+    }
+
+    #[test]
+    fn transfer_protection_requires_match_signal_not_type_only() {
+        let type_only = ImportPreviewDraft {
+            preview_type: "转账".to_string(),
+            ..ImportPreviewDraft::default()
+        };
+        assert!(!is_transfer_protected_preview(&type_only));
+
+        let dedup_matched = ImportPreviewDraft {
+            preview_type: "支出".to_string(),
+            dedup_type: Some("transfer".to_string()),
+            ..ImportPreviewDraft::default()
+        };
+        assert!(is_transfer_protected_preview(&dedup_matched));
+
+        let signal_matched = ImportPreviewDraft {
+            preview_type: "收入".to_string(),
+            preview_matching_feedback: json!({
+                "transfer": {"candidate_type": "transfer"}
+            }),
+            ..ImportPreviewDraft::default()
+        };
+        assert!(is_transfer_protected_preview(&signal_matched));
+    }
+
+    #[test]
+    fn transfer_learning_domain_allows_account_only_rule() {
+        let rule = ImportIntelligenceLearningRule {
+            id: 1,
+            parser_id: String::new(),
+            composite_hash: String::new(),
+            match_features: BTreeMap::new(),
+            learned_type: None,
+            learned_category_id: None,
+            learned_source_account_id: Some(100),
+            learned_destination_account_id: Some(200),
+        };
+        assert!(learning_rule_keeps_transfer_domain(
+            &rule,
+            &BTreeMap::new()
+        ));
+    }
+
+    #[test]
+    fn transfer_learning_does_not_override_source_chain_accounts() {
+        let features = build_composite_match_features(
+            "cmbc",
+            "支付宝（中国）网络技术有限公司客户备付金",
+            "支付宝快捷支付",
+            "网络银行",
+        )
+        .expect("transfer learning features");
+        let composite_hash = composite_hash_from_features(&features);
+        let rule = ImportIntelligenceLearningRule {
+            id: 7103,
+            parser_id: "cmbc".to_string(),
+            composite_hash,
+            match_features: features,
+            learned_type: None,
+            learned_category_id: None,
+            learned_source_account_id: Some(9001),
+            learned_destination_account_id: Some(9002),
+        };
+        let mut draft = ImportPreviewDraft {
+            preview_type: "转账".to_string(),
+            preview_parser_id: "cmbc".to_string(),
+            preview_counterparty: "支付宝（中国）网络技术有限公司客户备付金".to_string(),
+            preview_description: "支付宝快捷支付".to_string(),
+            preview_payment_method: "网络银行".to_string(),
+            preview_source_account_id: Some(1001),
+            preview_destination_account_id: Some(1002),
+            dedup_type: Some("transfer".to_string()),
+            preview_matching_feedback: json!({
+                "transfer": {"candidate_type": "transfer"}
+            }),
+            ..ImportPreviewDraft::default()
+        };
+        let account_values = vec![
+            json!({"id": 1001, "name": "民生银行"}),
+            json!({"id": 1002, "name": "支付宝"}),
+            json!({"id": 9001, "name": "旧来源"}),
+            json!({"id": 9002, "name": "旧目标"}),
+        ];
+
+        assert_eq!(
+            apply_learning_rule_match(
+                &mut draft,
+                &[rule],
+                &BTreeMap::new(),
+                &[],
+                &account_values,
+            ),
+            Some(7103)
+        );
+        assert_eq!(draft.preview_source_account_id, Some(1001));
+        assert_eq!(draft.preview_destination_account_id, Some(1002));
+    }
+
+    #[test]
+    fn transfer_invariants_clear_stale_account_review_annotation() {
+        let mut drafts = vec![ImportPreviewDraft {
+            preview_type: "转账".to_string(),
+            preview_source_account_id: Some(100),
+            preview_destination_account_id: Some(200),
+            preview_matching_feedback: json!({
+                "transfer": {"candidate_type": "transfer"},
+                "annotation": {
+                    "type": "transfer_account_direction",
+                    "reason": "transfer preview is missing source or destination account"
+                }
+            }),
+            ..ImportPreviewDraft::default()
+        }];
+
+        enforce_import_preview_invariants(drafts.as_mut_slice());
+
+        assert!(drafts[0].preview_matching_feedback.get("annotation").is_none());
     }
 }
 

@@ -1,4 +1,5 @@
 import type { ImportMatchingPayload } from '@/models/import_matching.ts';
+import { CategoryType } from '@/core/category.ts';
 import { TransactionType } from '@/core/transaction.ts';
 
 export interface ImportPreviewLLMMatchingPayload {
@@ -21,6 +22,8 @@ export interface ImportPreviewCategoryLike {
     name: string;
     parentId?: string | null;
     type?: number | null;
+    hidden?: boolean;
+    subCategories?: ImportPreviewCategoryLike[];
 }
 
 export type ImportPreviewCategoryMap = Record<string, ImportPreviewCategoryLike | undefined>;
@@ -217,6 +220,31 @@ export function resolveImportPreviewCategoryId(
 
         if (mainCategory && category.name === mainCategory && (!category.parentId || category.parentId === '0')) {
             return categoryId;
+        }
+    }
+
+    return '';
+}
+
+export function resolveImportPreviewDefaultTransferCategoryId(
+    categoriesById: ImportPreviewCategoryMap,
+    transferCategories: ImportPreviewCategoryLike[] | undefined,
+    cashTransferCategoryId: number | string | null | undefined
+): string {
+    const cashTransferCategory = resolveImportPreviewCategoryPath(cashTransferCategoryId, categoriesById);
+    if (cashTransferCategory?.type === CategoryType.Transfer) {
+        return cashTransferCategory.id;
+    }
+
+    for (const primaryCategory of transferCategories || []) {
+        if (primaryCategory.hidden) {
+            continue;
+        }
+
+        for (const secondaryCategory of primaryCategory.subCategories || []) {
+            if (!secondaryCategory.hidden && secondaryCategory.id) {
+                return secondaryCategory.id;
+            }
         }
     }
 

@@ -31,6 +31,47 @@ pub fn reset_session_preview_selection(
     Ok(changed)
 }
 
+pub fn update_session_preview_selection_by_query(
+    connection: &Connection,
+    session_id: &str,
+    user_id: UserId,
+    filters: &ImportPreviewQueryFilters,
+    action: &str,
+) -> DbResult<usize> {
+    let query = build_preview_sql_query("id", session_id, user_id, filters, None, None, None)?;
+    let issue_clause = preview_annotation_issue_sql_clause();
+    let normalized_action = action.trim().to_ascii_lowercase();
+    let update_expression = match normalized_action.as_str() {
+        "select_all" => "1".to_string(),
+        "select_none" => "0".to_string(),
+        "invert" => "CASE WHEN preview_selected = 1 THEN 0 ELSE 1 END".to_string(),
+        "select_valid" => "1".to_string(),
+        "select_invalid" | "select_needs_annotation" => "1".to_string(),
+        _ => return Err(DbError::InvalidOperation("invalid selection action".to_string())),
+    };
+    let mut sql = format!(
+        "UPDATE bills_preview SET preview_selected = {update_expression} WHERE id IN ({})",
+        query.sql
+    );
+    match normalized_action.as_str() {
+        "select_valid" => {
+            sql.push_str(" AND NOT (");
+            sql.push_str(&issue_clause);
+            sql.push(')');
+        }
+        "select_invalid" | "select_needs_annotation" => {
+            sql.push_str(" AND (");
+            sql.push_str(&issue_clause);
+            sql.push(')');
+        }
+        _ => {}
+    }
+
+    connection
+        .execute(sql.as_str(), params_from_iter(query.params.iter()))
+        .map_err(DbError::from)
+}
+
 pub fn replace_preview_selection_with_patches(
     connection: &mut Connection,
     session_id: &str,

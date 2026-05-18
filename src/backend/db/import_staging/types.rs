@@ -209,7 +209,7 @@ pub fn preview_draft_from_dedup_bill(bill: &DedupBill) -> ImportPreviewDraft {
         preview_description: bill.description.clone(),
         preview_parser_id: bill.parser_id.clone(),
         preview_parser_tags: dedup_bill_parser_tags_value(bill),
-        preview_selected: !(no_income_expenditure || transfer_requires_review),
+        preview_selected: false,
         dedup_type: Some(
             bill.dedup_type
                 .clone()
@@ -345,7 +345,7 @@ impl Default for ImportPreviewDraft {
             preview_recurring_match_score: 0.0,
             preview_recurring_match_reasons: String::new(),
             preview_recurring_matched_date: String::new(),
-            preview_selected: true,
+            preview_selected: false,
             dedup_type: None,
             dedup_source_ids: Vec::new(),
             preview_matching_feedback: Value::Object(Default::default()),

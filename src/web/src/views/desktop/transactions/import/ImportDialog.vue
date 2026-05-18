@@ -436,6 +436,7 @@ import ImportTransactionCheckDataTab from './tabs/ImportTransactionCheckDataTab.
 import {
     resolveImportPreviewCategoryPath,
     resolveImportPreviewCategoryId,
+    resolveImportPreviewDefaultTransferCategoryId,
     type ImportPreviewRecord
 } from './importPreview.ts';
 import type {
@@ -460,8 +461,10 @@ import { useTransactionsStore } from '@/stores/transaction.ts';
 import { useOverviewStore } from '@/stores/overview.ts';
 import { useStatisticsStore } from '@/stores/statistics.ts';
 import { useSettingsStore } from '@/stores/setting.ts';
+import { useUserStore } from '@/stores/user.ts';
 
 import { type NumeralSystem } from '@/core/numeral.ts';
+import { CategoryType } from '@/core/category.ts';
 
 import type { LocalizedImportFileTypeSubType } from '@/core/file.ts';
 import { ImportTransaction, type ImportTransactionResponse } from '@/models/imported_transaction.ts';
@@ -583,6 +586,7 @@ const transactionsStore = useTransactionsStore();
 const overviewStore = useOverviewStore();
 const statisticsStore = useStatisticsStore();
 const settingsStore = useSettingsStore();
+const userStore = useUserStore();
 
 const confirmDialog = useTemplateRef<ConfirmDialogType>('confirmDialog');
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
@@ -1250,6 +1254,18 @@ function normalizePreviewPageSortDirection(value: string | null | undefined): 'a
     return String(value || '').toLowerCase() === 'desc' ? 'desc' : 'asc';
 }
 
+function getDefaultPreviewCategoryId(type: number): string {
+    if (type !== 4) {
+        return '';
+    }
+
+    return resolveImportPreviewDefaultTransferCategoryId(
+        transactionCategoriesStore.allTransactionCategoriesMap,
+        transactionCategoriesStore.allTransactionCategories[CategoryType.Transfer],
+        userStore.currentUserCashTransferCategoryId
+    );
+}
+
 const PREVIEW_PAGE_FILTER_PARAM_NAMES: Record<keyof ImportPreviewServerQueryFilters, string> = {
     minDatetime: 'min_datetime',
     maxDatetime: 'max_datetime',
@@ -1543,6 +1559,10 @@ function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: num
     const categoryId = resolveImportPreviewCategoryId(
         item,
         transactionCategoriesStore.allTransactionCategoriesMap
+    ) || getDefaultPreviewCategoryId(type);
+    const categoryPath = resolveImportPreviewCategoryPath(
+        categoryId,
+        transactionCategoriesStore.allTransactionCategoriesMap
     );
 
     // 账户ID
@@ -1556,7 +1576,7 @@ function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: num
     const responseItem: ImportTransactionResponse = {
         type: type,
         categoryId: categoryId,
-        originalCategoryName: subCat || mainCat || '',
+        originalCategoryName: subCat || mainCat || categoryPath?.displayCategory || '',
         time: isNaN(time) ? Date.now() / 1000 : time,
         utcOffset: defaultUtcOffset,
         sourceAccountId: sourceAccountId,

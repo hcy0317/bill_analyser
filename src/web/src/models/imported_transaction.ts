@@ -29,7 +29,11 @@ function getFirstDefinedIdString(...values: Array<number | string | null | undef
 
 function getSuggestedTypeFromMatchingCandidate(candidateType: string | undefined): number | undefined {
     const normalizedCandidateType = (candidateType || '').trim().toLowerCase();
-    if (normalizedCandidateType === '转账' || normalizedCandidateType === 'transfer' || normalizedCandidateType === '4') {
+    if (
+        normalizedCandidateType === '转账'
+        || normalizedCandidateType === '4'
+        || normalizedCandidateType.includes('transfer')
+    ) {
         return TransactionType.Transfer;
     }
 
@@ -373,6 +377,10 @@ export class ImportTransaction implements ImportTransactionResponse {
     }
 
     public hasLearningRecommendation(): boolean {
+        if (this.isTransferProtectedLearningSkip()) {
+            return false;
+        }
+
         const learningRuleId = this.matching?.learning?.rule_id;
         return this.learningRecommendationScore > 0
             || !!this.learningRecommendationSummary
@@ -408,6 +416,28 @@ export class ImportTransaction implements ImportTransactionResponse {
 
     public isLearningRecommendationSkipped(): boolean {
         return this.getLearningRecommendationReviewStatus() === 'skipped';
+    }
+
+    public isTransferProtectedLearningSkip(): boolean {
+        if (!this.isLearningRecommendationSkipped()) {
+            return false;
+        }
+
+        const reason = getFirstNonEmptyString(
+            this.matching?.learning?.reason,
+            this.learningRecommendationReason
+        ).trim().toLowerCase();
+        if (!reason.includes('transfer preview is protected')) {
+            return false;
+        }
+
+        const transferCandidateType = (this.matching?.transfer?.candidate_type || '').trim().toLowerCase();
+        const dedupType = getFirstNonEmptyString(this.matching?.dedup?.type, this.dedupType)
+            .trim()
+            .toLowerCase();
+        return transferCandidateType === '转账'
+            || transferCandidateType.includes('transfer')
+            || dedupType.includes('transfer');
     }
 
     public canClearLearningRecommendationDecision(): boolean {

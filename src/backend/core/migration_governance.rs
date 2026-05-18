@@ -880,6 +880,15 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
     },
     EndpointOwnership {
         method: "PUT",
+        pattern: "/api/bills/import/v2/preview/{session_id}/selection",
+        domain: "bills-import",
+        state: MigrationState::PythonDeleted,
+        envelope: ResponseEnvelopeFamily::ImportPreviewAction,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust import_db_runtime owns this route; the retired legacy bills import route package is deleted.",
+    },
+    EndpointOwnership {
+        method: "PUT",
         pattern: "/api/bills/import/v2/preview/{session_id}/update",
         domain: "bills-import",
         state: MigrationState::PythonDeleted,

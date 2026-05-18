@@ -79,6 +79,7 @@ export const RUST_ROUTE_OWNERSHIP: readonly RustRouteOwnership[] = [
     {"method":"DELETE","pattern":"/api/bills/import/v2/session/{session_id}","domain":"bills-import","state":"python_deleted"},
     {"method":"GET","pattern":"/api/bills/import/v2/preview/{session_id}","domain":"bills-import","state":"python_deleted"},
     {"method":"GET","pattern":"/api/bills/import/v2/preview/{session_id}/index","domain":"bills-import","state":"python_deleted"},
+    {"method":"PUT","pattern":"/api/bills/import/v2/preview/{session_id}/selection","domain":"bills-import","state":"python_deleted"},
     {"method":"PUT","pattern":"/api/bills/import/v2/preview/{session_id}/update","domain":"bills-import","state":"python_deleted"},
     {"method":"POST","pattern":"/api/bills/import/v2/reclassify/{session_id}","domain":"bills-import","state":"python_deleted"},
     {"method":"GET","pattern":"/api/bills/import/v2/preview-item/{preview_id}/recurring-candidates","domain":"bills-import","state":"python_deleted"},

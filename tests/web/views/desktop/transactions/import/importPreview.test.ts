@@ -6,6 +6,7 @@ import { describe, expect, test } from '@jest/globals';
 import { CategoryType } from '@/core/category.ts';
 import {
     resolveImportPreviewCategoryId,
+    resolveImportPreviewDefaultTransferCategoryId,
     resolveImportPreviewCategoryPath
 } from '@/views/desktop/transactions/import/importPreview.ts';
 
@@ -180,6 +181,82 @@ describe('import preview category resolution', () => {
 
         expect(resolveImportPreviewCategoryPath('missing', categoriesById)).toBeNull();
         expect(resolveImportPreviewCategoryPath('tagLikeName', categoriesById)).toBeNull();
+    });
+
+    test('resolves the default transfer category from profile setting before visible fallback', () => {
+        const transferCategories = [
+            {
+                id: 'transferParent',
+                name: '账户互转',
+                parentId: '0',
+                type: CategoryType.Transfer,
+                subCategories: [
+                    {
+                        id: 'transferSub',
+                        name: '默认互转',
+                        parentId: 'transferParent',
+                        type: CategoryType.Transfer
+                    }
+                ]
+            }
+        ];
+        const transferCategoryMap = {
+            transferParent: {
+                id: 'transferParent',
+                name: '账户互转',
+                parentId: '0',
+                type: CategoryType.Transfer
+            },
+            transferSub: {
+                id: 'transferSub',
+                name: '默认互转',
+                parentId: 'transferParent',
+                type: CategoryType.Transfer
+            },
+            userTransferSub: {
+                id: 'userTransferSub',
+                name: '用户互转',
+                parentId: 'transferParent',
+                type: CategoryType.Transfer
+            }
+        };
+
+        expect(resolveImportPreviewDefaultTransferCategoryId(
+            transferCategoryMap,
+            transferCategories,
+            'userTransferSub'
+        )).toBe('userTransferSub');
+        expect(resolveImportPreviewDefaultTransferCategoryId(
+            transferCategoryMap,
+            transferCategories,
+            'missing'
+        )).toBe('transferSub');
+        expect(resolveImportPreviewDefaultTransferCategoryId(
+            transferCategoryMap,
+            [
+                {
+                    id: 'hiddenParent',
+                    name: '隐藏互转',
+                    parentId: '0',
+                    type: CategoryType.Transfer,
+                    hidden: true,
+                    subCategories: [
+                        {
+                            id: 'hiddenSub',
+                            name: '隐藏子类',
+                            parentId: 'hiddenParent',
+                            type: CategoryType.Transfer
+                        }
+                    ]
+                }
+            ],
+            'missing'
+        )).toBe('');
+        expect(resolveImportPreviewDefaultTransferCategoryId(
+            transferCategoryMap,
+            undefined,
+            'missing'
+        )).toBe('');
     });
 });
 

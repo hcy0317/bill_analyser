@@ -43,7 +43,7 @@ pub fn init_import_staging_schema(connection: &Connection) -> DbResult<()> {
             preview_recurring_match_score REAL DEFAULT 0,
             preview_recurring_match_reasons TEXT,
             preview_recurring_matched_date TEXT,
-            preview_selected INTEGER DEFAULT 1,
+            preview_selected INTEGER DEFAULT 0,
             dedup_type TEXT,
             dedup_source_ids TEXT,
             preview_matching_feedback_json TEXT,

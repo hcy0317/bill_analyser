@@ -52,13 +52,14 @@ use bill_analyser_db::{
     save_import_annotation_samples, set_app_setting, stage_import_parser_templates,
     store_ocr_config_setting, update_import_session_status, update_llm_config, update_preview_bill,
     update_preview_bills_batch, update_preview_recurring_match_decision, update_preview_selection,
-    AppSettingDraft, ImportAnnotationSampleDraft, ImportPreviewDecision,
-    ImportPreviewDecisionResult, ImportPreviewDraft, ImportPreviewExpectedState,
-    ImportPreviewLlmDecisionResult, ImportPreviewLlmReviewRequest, ImportPreviewLlmSuggestion,
-    ImportPreviewPageRequest, ImportPreviewPatch, ImportPreviewPatchField, ImportPreviewPatchValue,
-    ImportPreviewQueryFilters, ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate,
-    ImportPreviewRow, ImportSessionDraft, ImportSessionStatusUpdate, LlmCandidateDraft,
-    LlmConfigDraft, LlmConfigUpdate, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
+    update_session_preview_selection_by_query, AppSettingDraft, ImportAnnotationSampleDraft,
+    ImportPreviewDecision, ImportPreviewDecisionResult, ImportPreviewDraft,
+    ImportPreviewExpectedState, ImportPreviewLlmDecisionResult, ImportPreviewLlmReviewRequest,
+    ImportPreviewLlmSuggestion, ImportPreviewPageRequest, ImportPreviewPatch,
+    ImportPreviewPatchField, ImportPreviewPatchValue, ImportPreviewQueryFilters,
+    ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate, ImportPreviewRow,
+    ImportSessionDraft, ImportSessionStatusUpdate, LlmCandidateDraft, LlmConfigDraft,
+    LlmConfigUpdate, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
 use bill_analyser_parsers::{
     parse_dedicated_import_bytes, post_process_raw_bills, RawBill, StandardBill,
@@ -106,6 +107,7 @@ pub const IMPORT_SKELETON_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("DELETE", "/api/bills/import/v2/session/{session_id}"),
     ("GET", "/api/bills/import/v2/preview/{session_id}"),
     ("GET", "/api/bills/import/v2/preview/{session_id}/index"),
+    ("PUT", "/api/bills/import/v2/preview/{session_id}/selection"),
     ("PUT", "/api/bills/import/v2/preview/{session_id}/update"),
     ("POST", "/api/bills/import/v2/reclassify/{session_id}"),
     (
@@ -195,6 +197,10 @@ pub fn import_runtime_router() -> Router<HttpAppState> {
         .route(
             "/api/bills/import/v2/preview/:session_id/index",
             get(import_preview_index_runtime_handler),
+        )
+        .route(
+            "/api/bills/import/v2/preview/:session_id/selection",
+            put(import_preview_selection_runtime_handler),
         )
         .route(
             "/api/bills/import/v2/preview/:session_id/update",
