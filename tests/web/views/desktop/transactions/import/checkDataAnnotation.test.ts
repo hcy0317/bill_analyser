@@ -25,12 +25,12 @@ describe('checkDataAnnotation helpers', () => {
         })).toBe(true);
     });
 
-    test('shows manually annotated rows in the needs-review filter after editing is completed', () => {
+    test('hides manually annotated rows from needs-review after issues are resolved', () => {
         expect(matches('needs-review', {
             hasAnnotationIssues: false,
             isManuallyAnnotated: true,
             isEditing: false
-        })).toBe(true);
+        })).toBe(false);
     });
 
     test('hides resolved non-manual rows from the needs-review filter after editing ends', () => {
@@ -41,7 +41,7 @@ describe('checkDataAnnotation helpers', () => {
         })).toBe(false);
     });
 
-    test('keeps non-issue rows visible only when they are not manually annotated or currently edited', () => {
+    test('keeps resolved rows visible in no-issues even after manual edits', () => {
         expect(matches('no-issues', {
             hasAnnotationIssues: false,
             isManuallyAnnotated: false,
@@ -52,7 +52,7 @@ describe('checkDataAnnotation helpers', () => {
             hasAnnotationIssues: false,
             isManuallyAnnotated: true,
             isEditing: false
-        })).toBe(false);
+        })).toBe(true);
 
         expect(matches('no-issues', {
             hasAnnotationIssues: false,

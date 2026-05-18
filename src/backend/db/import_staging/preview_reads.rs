@@ -528,10 +528,30 @@ fn category_issue_sql_clause() -> String {
         .to_string()
 }
 
+fn source_account_issue_sql_clause() -> String {
+    "preview_source_account_id IS NULL".to_string()
+}
+
+fn destination_account_issue_sql_clause() -> String {
+    format!(
+        "({} IN (4, 5) AND preview_destination_account_id IS NULL)",
+        preview_type_code_sql_expression(),
+    )
+}
+
+fn transfer_account_review_sql_clause() -> String {
+    format!(
+        "({} IN (4, 5) AND preview_source_account_id IS NOT NULL AND preview_destination_account_id IS NOT NULL AND preview_source_account_id = preview_destination_account_id)",
+        preview_type_code_sql_expression(),
+    )
+}
+
 fn account_issue_sql_clause() -> String {
     format!(
-        "(preview_source_account_id IS NULL OR ({} IN (4, 5) AND (preview_destination_account_id IS NULL OR preview_source_account_id = preview_destination_account_id)))",
-        preview_type_code_sql_expression(),
+        "({} OR {} OR {})",
+        source_account_issue_sql_clause(),
+        destination_account_issue_sql_clause(),
+        transfer_account_review_sql_clause(),
     )
 }
 
@@ -543,14 +563,39 @@ fn matching_feedback_json_sql_expression() -> &'static str {
     "CASE WHEN json_valid(COALESCE(preview_matching_feedback_json, '')) THEN preview_matching_feedback_json ELSE '{}' END"
 }
 
-fn feedback_annotation_issue_sql_clause() -> String {
+fn feedback_annotation_type_sql_expression() -> String {
     let feedback_json = matching_feedback_json_sql_expression();
     format!(
+        "LOWER(TRIM(COALESCE(CASE \
+            WHEN json_type({feedback_json}, '$.annotation') = 'text' \
+            THEN json_extract({feedback_json}, '$.annotation') \
+            ELSE CAST(json_extract({feedback_json}, '$.annotation.type') AS TEXT) \
+        END, '')))"
+    )
+}
+
+fn feedback_annotation_issue_sql_clause() -> String {
+    let feedback_json = matching_feedback_json_sql_expression();
+    let annotation_type = feedback_annotation_type_sql_expression();
+    let category_issue = category_issue_sql_clause();
+    let source_account_issue = source_account_issue_sql_clause();
+    let destination_account_issue = destination_account_issue_sql_clause();
+    let account_issue = account_issue_sql_clause();
+    let raw_annotation_issue = format!(
         "((json_type({feedback_json}, '$.annotation') = 'text' AND TRIM(COALESCE(json_extract({feedback_json}, '$.annotation'), '')) <> '') \
           OR TRIM(COALESCE(CAST(json_extract({feedback_json}, '$.annotation.status') AS TEXT), '')) <> '' \
           OR TRIM(COALESCE(CAST(json_extract({feedback_json}, '$.annotation.review_status') AS TEXT), '')) <> '' \
           OR TRIM(COALESCE(CAST(json_extract({feedback_json}, '$.annotation.level') AS TEXT), '')) <> '' \
           OR TRIM(COALESCE(CAST(json_extract({feedback_json}, '$.annotation.type') AS TEXT), '')) <> '')"
+    );
+    format!(
+        "({raw_annotation_issue} AND CASE \
+            WHEN {annotation_type} IN ('category', 'category_missing', 'missing_category', 'missing-category', 'missing_classification') THEN {category_issue} \
+            WHEN {annotation_type} IN ('account', 'missing_account', 'source_account', 'source_account_missing', 'missing_source_account', 'missing-source-account') THEN {source_account_issue} \
+            WHEN {annotation_type} IN ('destination_account', 'destination_account_missing', 'missing_destination_account', 'missing-destination-account') THEN {destination_account_issue} \
+            WHEN {annotation_type} IN ('transfer_account_direction', 'transfer_accounts', 'review_transfer_accounts', 'same_transfer_accounts') THEN {account_issue} \
+            ELSE 1 \
+        END)"
     )
 }
 
@@ -727,12 +772,26 @@ fn preview_row_has_category_issues(row: &ImportPreviewRow) -> bool {
 }
 
 fn preview_row_has_account_issues(row: &ImportPreviewRow) -> bool {
-    let requires_destination = matches!(preview_type_code(&row.preview_type), Some(4) | Some(5));
+    preview_row_has_source_account_issues(row)
+        || preview_row_has_destination_account_issues(row)
+        || preview_row_has_transfer_account_review_issues(row)
+}
+
+fn preview_row_has_source_account_issues(row: &ImportPreviewRow) -> bool {
     row.preview_source_account_id.is_none()
-        || (requires_destination && row.preview_destination_account_id.is_none())
-        || (requires_destination
-            && row.preview_source_account_id.is_some()
-            && row.preview_source_account_id == row.preview_destination_account_id)
+}
+
+fn preview_row_has_destination_account_issues(row: &ImportPreviewRow) -> bool {
+    let requires_destination = matches!(preview_type_code(&row.preview_type), Some(4) | Some(5));
+    requires_destination && row.preview_destination_account_id.is_none()
+}
+
+fn preview_row_has_transfer_account_review_issues(row: &ImportPreviewRow) -> bool {
+    let requires_destination = matches!(preview_type_code(&row.preview_type), Some(4) | Some(5));
+    requires_destination
+        && row.preview_source_account_id.is_some()
+        && row.preview_destination_account_id.is_some()
+        && row.preview_source_account_id == row.preview_destination_account_id
 }
 
 fn preview_row_has_annotation_issues(row: &ImportPreviewRow) -> bool {
@@ -814,10 +873,10 @@ fn preview_row_matches_annotation(row: &ImportPreviewRow, annotation: &str) -> b
         return true;
     }
     if annotation == "needs-review" {
-        return preview_row_has_annotation_issues(row) || annotation_count_key(&row.preview_matching_feedback).is_some();
+        return preview_row_has_annotation_issues(row) || preview_row_has_feedback_annotation_issue(row);
     }
     if annotation == "no-issues" {
-        return !preview_row_has_annotation_issues(row) && annotation_count_key(&row.preview_matching_feedback).is_none();
+        return !preview_row_has_annotation_issues(row) && !preview_row_has_feedback_annotation_issue(row);
     }
     let Some(value) = row.preview_matching_feedback.get("annotation") else {
         return false;
@@ -905,7 +964,7 @@ fn build_preview_metadata(rows: &[ImportPreviewRow]) -> ImportPreviewMetadata {
 
     for row in rows {
         let has_annotation_issues =
-            preview_row_has_annotation_issues(row) || annotation_count_key(&row.preview_matching_feedback).is_some();
+            preview_row_has_annotation_issues(row) || preview_row_has_feedback_annotation_issue(row);
         if row.preview_selected {
             selected += 1;
             if has_annotation_issues {
@@ -1274,6 +1333,87 @@ fn annotation_count_key(feedback: &Value) -> Option<String> {
             .filter(|text| !text.is_empty())
             .map(ToOwned::to_owned)
     })
+}
+
+fn annotation_type_key(feedback: &Value) -> Option<String> {
+    let value = feedback.get("annotation")?;
+    if let Some(text) = value.as_str().map(str::trim).filter(|text| !text.is_empty()) {
+        return Some(text.to_string());
+    }
+    value
+        .as_object()
+        .and_then(|object| object.get("type")?.as_str())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn annotation_type_in(annotation_type: &str, candidates: &[&str]) -> bool {
+    let normalized = normalized_text(annotation_type);
+    candidates.iter().any(|candidate| normalized == *candidate)
+}
+
+fn preview_row_has_feedback_annotation_issue(row: &ImportPreviewRow) -> bool {
+    if annotation_count_key(&row.preview_matching_feedback).is_none() {
+        return false;
+    }
+
+    let Some(annotation_type) = annotation_type_key(&row.preview_matching_feedback) else {
+        return true;
+    };
+
+    if annotation_type_in(
+        &annotation_type,
+        &[
+            "category",
+            "category_missing",
+            "missing_category",
+            "missing-category",
+            "missing_classification",
+        ],
+    ) {
+        return preview_row_has_category_issues(row);
+    }
+
+    if annotation_type_in(
+        &annotation_type,
+        &[
+            "account",
+            "missing_account",
+            "source_account",
+            "source_account_missing",
+            "missing_source_account",
+            "missing-source-account",
+        ],
+    ) {
+        return preview_row_has_source_account_issues(row);
+    }
+
+    if annotation_type_in(
+        &annotation_type,
+        &[
+            "destination_account",
+            "destination_account_missing",
+            "missing_destination_account",
+            "missing-destination-account",
+        ],
+    ) {
+        return preview_row_has_destination_account_issues(row);
+    }
+
+    if annotation_type_in(
+        &annotation_type,
+        &[
+            "transfer_account_direction",
+            "transfer_accounts",
+            "review_transfer_accounts",
+            "same_transfer_accounts",
+        ],
+    ) {
+        return preview_row_has_account_issues(row);
+    }
+
+    true
 }
 
 fn signal_count_keys(row: &ImportPreviewRow) -> Vec<String> {

@@ -19,7 +19,7 @@
 - 混合来源 multipart 上传必须按文件保持 parser id 和 parser tags，不允许使用首个文件 parser id 覆盖整批账单。
 - 多文件 parser work 可以并发执行，但 session/template staging 仍保持一次性写入。
 - stage2 processed 状态按 `session_id + user_id + parser_is_processed` 更新，避免大批量 `id IN (...)` 更新；preview 批量写入复用 prepared statement。
-- preview page 承担 Check Data 的分页、排序、筛选与轻量聚合 metadata；旧 preview index 路由仅作为兼容读取面，不再是首屏预览依赖。
+- preview page 承担 Check Data 的分页、排序、筛选与轻量聚合 metadata；缺少分类、缺少账户和转账账户复核状态按当前预览字段计算，人工补齐后不会被历史 annotation 或人工编辑标记继续计为待标注；旧 preview index 路由仅作为兼容读取面，不再是首屏预览依赖。
 - confirm、cancel、导入失败后新建 session 都会立即清理当前用户的 import staging；系统不保留未完成导入续传状态。
 - preview update/reclassify 要显式落库，不只改响应投影；reclassify 会复用 stage2 智能链路刷新分类、账户、recurring 和 learning 信号。
 - confirm 必须使用事务保证 bills、tags、accounts、learning side effects 一致。

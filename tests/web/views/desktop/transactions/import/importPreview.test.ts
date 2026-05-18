@@ -333,4 +333,16 @@ describe('import preview server-paged reset guards', () => {
         expect(tabSource).not.toContain('/index');
         expect(tabSource).not.toContain('loadServerPagedPreviewIndex');
     });
+
+    test('check-data server paging baselines use dynamic annotation issue state', () => {
+        const tabSource = readSource('src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue');
+        const functionIndex = tabSource.indexOf('function hasBaselineAnnotationIssue');
+        const nextFunctionIndex = tabSource.indexOf('function getAnnotationSummary', functionIndex);
+        const functionSource = tabSource.slice(functionIndex, nextFunctionIndex);
+
+        expect(functionIndex).toBeGreaterThanOrEqual(0);
+        expect(nextFunctionIndex).toBeGreaterThan(functionIndex);
+        expect(functionSource).toContain('return hasCurrentAnnotationIssue(item);');
+        expect(functionSource).not.toContain('hasRawPersistedMatchingAnnotationIssue');
+    });
 });

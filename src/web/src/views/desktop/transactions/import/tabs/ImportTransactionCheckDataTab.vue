@@ -2771,27 +2771,43 @@ function getImportTransactionRowKey(item: ImportTransaction): string {
     return `row:${item.index}`;
 }
 
+function hasMissingCategoryIssue(item: ImportTransaction): boolean {
+    return item.type !== TransactionType.ModifyBalance && !isTransactionCategoryAccepted(item);
+}
+
+function hasMissingSourceAccountIssue(item: ImportTransaction): boolean {
+    return !item.sourceAccountId || item.sourceAccountId === '0';
+}
+
+function hasMissingDestinationAccountIssue(item: ImportTransaction): boolean {
+    return requiresDestinationAccount(item) && (!item.destinationAccountId || item.destinationAccountId === '0');
+}
+
+function hasTransferAccountReviewIssue(item: ImportTransaction): boolean {
+    return requiresDestinationAccount(item)
+        && !!item.sourceAccountId
+        && !!item.destinationAccountId
+        && item.sourceAccountId !== '0'
+        && item.destinationAccountId !== '0'
+        && item.sourceAccountId === item.destinationAccountId;
+}
+
 function collectAnnotationIssues(item: ImportTransaction): string[] {
     const reasons: string[] = [];
 
-    if (item.type !== TransactionType.ModifyBalance && !isTransactionCategoryAccepted(item)) {
+    if (hasMissingCategoryIssue(item)) {
         reasons.push(tt('Missing Category'));
     }
 
-    if (!item.sourceAccountId || item.sourceAccountId === '0') {
+    if (hasMissingSourceAccountIssue(item)) {
         reasons.push(tt('Missing Source Account'));
     }
 
-    if (requiresDestinationAccount(item) && (!item.destinationAccountId || item.destinationAccountId === '0')) {
+    if (hasMissingDestinationAccountIssue(item)) {
         reasons.push(tt('Missing Destination Account'));
     }
 
-    if (requiresDestinationAccount(item)
-        && item.sourceAccountId
-        && item.destinationAccountId
-        && item.sourceAccountId !== '0'
-        && item.destinationAccountId !== '0'
-        && item.sourceAccountId === item.destinationAccountId) {
+    if (hasTransferAccountReviewIssue(item)) {
         reasons.push(tt('Review Transfer Accounts'));
     }
 
@@ -2810,41 +2826,114 @@ function needsAnnotation(item: ImportTransaction): boolean {
     return getAnnotationIssues(item).length > 0;
 }
 
-function hasRawPersistedMatchingAnnotationIssue(item: ImportTransaction): boolean {
-    const annotation = item.matching?.annotation as Record<string, unknown> | undefined;
-    if (!annotation) {
-        return false;
+type MatchingAnnotationPayload = Record<string, unknown> | string | null | undefined;
+
+function getMatchingAnnotationPayload(item: ImportTransaction): MatchingAnnotationPayload {
+    return item.matching?.annotation as MatchingAnnotationPayload;
+}
+
+function getAnnotationText(annotation: MatchingAnnotationPayload): string {
+    if (typeof annotation === 'string') {
+        return annotation.trim();
     }
 
-    return ['status', 'type', 'review_status', 'reason'].some(key => (
-        String(annotation[key] || '').trim() !== ''
-    ));
+    if (annotation && typeof annotation === 'object') {
+        for (const key of ['status', 'type', 'review_status', 'level', 'reason']) {
+            const value = annotation[key];
+            if (typeof value === 'string' && value.trim() !== '') {
+                return value.trim();
+            }
+        }
+    }
+
+    return '';
+}
+
+function getAnnotationType(annotation: MatchingAnnotationPayload): string {
+    if (typeof annotation === 'string') {
+        return annotation.trim().toLowerCase();
+    }
+
+    if (annotation && typeof annotation === 'object') {
+        return String(annotation['type'] || '').trim().toLowerCase();
+    }
+
+    return '';
+}
+
+function isCategoryAnnotationType(annotationType: string): boolean {
+    return [
+        'category',
+        'category_missing',
+        'missing_category',
+        'missing-category',
+        'missing_classification'
+    ].includes(annotationType);
+}
+
+function isSourceAccountAnnotationType(annotationType: string): boolean {
+    return [
+        'account',
+        'missing_account',
+        'source_account',
+        'source_account_missing',
+        'missing_source_account',
+        'missing-source-account'
+    ].includes(annotationType);
+}
+
+function isDestinationAccountAnnotationType(annotationType: string): boolean {
+    return [
+        'destination_account',
+        'destination_account_missing',
+        'missing_destination_account',
+        'missing-destination-account'
+    ].includes(annotationType);
+}
+
+function isTransferAccountAnnotationType(annotationType: string): boolean {
+    return [
+        'transfer_account_direction',
+        'transfer_accounts',
+        'review_transfer_accounts',
+        'same_transfer_accounts'
+    ].includes(annotationType);
+}
+
+function hasRawPersistedMatchingAnnotationIssue(item: ImportTransaction): boolean {
+    return getAnnotationText(getMatchingAnnotationPayload(item)) !== '';
 }
 
 function hasCurrentPersistedMatchingAnnotationIssue(item: ImportTransaction): boolean {
-    const annotation = item.matching?.annotation as Record<string, unknown> | undefined;
-    if (!annotation) {
+    const annotation = getMatchingAnnotationPayload(item);
+    if (getAnnotationText(annotation) === '') {
         return false;
     }
 
-    const annotationType = String(annotation['type'] || '').trim();
-    if (annotationType === 'transfer_account_direction') {
-        return !item.sourceAccountId
-            || item.sourceAccountId === '0'
-            || (requiresDestinationAccount(item) && (!item.destinationAccountId || item.destinationAccountId === '0'))
-            || (requiresDestinationAccount(item)
-                && !!item.sourceAccountId
-                && !!item.destinationAccountId
-                && item.sourceAccountId !== '0'
-                && item.destinationAccountId !== '0'
-                && item.sourceAccountId === item.destinationAccountId);
+    const annotationType = getAnnotationType(annotation);
+    if (isCategoryAnnotationType(annotationType)) {
+        return hasMissingCategoryIssue(item);
+    }
+
+    if (isSourceAccountAnnotationType(annotationType)) {
+        return hasMissingSourceAccountIssue(item);
+    }
+
+    if (isDestinationAccountAnnotationType(annotationType)) {
+        return hasMissingDestinationAccountIssue(item);
+    }
+
+    if (isTransferAccountAnnotationType(annotationType)) {
+        return hasMissingSourceAccountIssue(item)
+            || hasMissingDestinationAccountIssue(item)
+            || hasTransferAccountReviewIssue(item);
     }
 
     return hasRawPersistedMatchingAnnotationIssue(item);
 }
 
 function hasBaselineAnnotationIssue(item: ImportTransaction): boolean {
-    return collectAnnotationIssues(item).length > 0 || hasRawPersistedMatchingAnnotationIssue(item);
+    return hasCurrentAnnotationIssue(item);
 }
 
 function hasCurrentAnnotationIssue(item: ImportTransaction): boolean {

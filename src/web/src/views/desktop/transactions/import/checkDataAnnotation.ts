@@ -15,11 +15,11 @@ export function matchesImportCheckAnnotationFilter(
     }
 
     if (filter === 'needs-review') {
-        return state.hasAnnotationIssues || state.isManuallyAnnotated;
+        return state.hasAnnotationIssues;
     }
 
     if (filter === 'no-issues') {
-        return !state.hasAnnotationIssues && !state.isManuallyAnnotated;
+        return !state.hasAnnotationIssues;
     }
 
     return true;

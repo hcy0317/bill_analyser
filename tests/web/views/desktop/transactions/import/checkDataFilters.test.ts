@@ -149,7 +149,8 @@ describe('checkDataFilters helpers', () => {
         const rows: TestRow[] = [
             { id: 1, time: 100, type: 5, comment: 'parser-row', signalState: { parserSource: 'alipay' } },
             { id: 2, time: 200, type: 5, comment: 'learning-row', signalState: { learningStatus: 'pending', learningSummary: '支出 | 餐饮/咖啡' } },
-            { id: 3, time: 300, type: 5, comment: 'manual-row', isManuallyAnnotated: true }
+            { id: 3, time: 300, type: 5, comment: 'manual-row', isManuallyAnnotated: true },
+            { id: 4, time: 400, type: 5, comment: 'missing-row', hasAnnotationIssues: true }
         ];
 
         const learningRows = getImportCheckVisibleTransactions(
@@ -178,7 +179,20 @@ describe('checkDataFilters helpers', () => {
                 countPerPage: 10
             }
         );
-        expect(annotatedRows.map(row => row.id)).toStrictEqual([3]);
+        expect(annotatedRows.map(row => row.id)).toStrictEqual([4]);
+
+        const resolvedManualRows = getImportCheckVisibleTransactions(
+            rows,
+            row => matches(row, {
+                annotation: 'no-issues'
+            }),
+            {
+                serverPaged: true,
+                currentPage: 1,
+                countPerPage: 10
+            }
+        );
+        expect(resolvedManualRows.map(row => row.id)).toContain(3);
     });
 
     test('summarizes selected check-data rows and annotation reasons', () => {

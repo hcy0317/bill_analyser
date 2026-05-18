@@ -631,6 +631,275 @@ fn preview_query_filters_sort_and_metadata_are_session_global() -> Result<(), Bo
 }
 
 #[test]
+fn resolved_known_missing_annotations_are_not_current_missing_signals() -> Result<(), Box<dyn Error>>
+{
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("known_annotations_resolved.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: "session-known-annotations-resolved".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+
+    let annotation = |annotation_type: &str| {
+        json!({
+            "annotation": {
+                "status": "needs_review",
+                "type": annotation_type,
+                "review_status": "requires_manual_review"
+            }
+        })
+    };
+
+    let mut resolved_category = preview_draft("2026-05-01 09:00:00", 10.0, "resolved category");
+    resolved_category.preview_source_account_id = Some(1001);
+    resolved_category.preview_matching_feedback = annotation("missing_category");
+
+    let mut missing_category = resolved_category.clone();
+    missing_category.preview_description = "missing category".to_string();
+    missing_category.preview_main_category = String::new();
+    missing_category.preview_sub_category = String::new();
+
+    let mut resolved_source = preview_draft("2026-05-02 09:00:00", 20.0, "resolved source");
+    resolved_source.preview_source_account_id = Some(1002);
+    resolved_source.preview_matching_feedback = annotation("missing_source_account");
+
+    let mut missing_source = resolved_source.clone();
+    missing_source.preview_description = "missing source".to_string();
+    missing_source.preview_source_account_id = None;
+
+    let mut resolved_destination =
+        preview_draft("2026-05-03 09:00:00", 30.0, "resolved destination");
+    resolved_destination.preview_type = "转账".to_string();
+    resolved_destination.preview_main_category = "转账".to_string();
+    resolved_destination.preview_sub_category = "账户互转".to_string();
+    resolved_destination.preview_source_account_id = Some(1003);
+    resolved_destination.preview_destination_account_id = Some(1004);
+    resolved_destination.preview_matching_feedback = annotation("missing_destination_account");
+
+    let mut missing_destination = resolved_destination.clone();
+    missing_destination.preview_description = "missing destination".to_string();
+    missing_destination.preview_destination_account_id = None;
+
+    insert_preview_bills_batch(
+        runtime.connection_mut(),
+        "session-known-annotations-resolved",
+        user_id(42),
+        &[
+            resolved_category,
+            missing_category,
+            resolved_source,
+            missing_source,
+            resolved_destination,
+            missing_destination,
+        ],
+    )?;
+    let preview_ids = get_preview_by_session(
+        runtime.connection(),
+        "session-known-annotations-resolved",
+        user_id(42),
+        false,
+    )?
+    .into_iter()
+    .map(|row| row.id)
+    .collect::<Vec<_>>();
+
+    for preview_ids in [Vec::new(), preview_ids] {
+        let all = query_preview_page_by_session(
+            runtime.connection(),
+            "session-known-annotations-resolved",
+            user_id(42),
+            &ImportPreviewPageRequest {
+                page: 1,
+                page_size: 10,
+                preview_ids: preview_ids.clone(),
+                ..Default::default()
+            },
+        )?;
+        assert_eq!(
+            all.metadata.counts.annotations.get("needs-review"),
+            Some(&3)
+        );
+        assert_eq!(all.metadata.counts.annotations.get("no-issues"), Some(&3));
+
+        let needs_review = query_preview_page_by_session(
+            runtime.connection(),
+            "session-known-annotations-resolved",
+            user_id(42),
+            &ImportPreviewPageRequest {
+                page: 1,
+                page_size: 10,
+                preview_ids: preview_ids.clone(),
+                filters: ImportPreviewQueryFilters {
+                    annotation: Some("needs-review".to_string()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        )?;
+        assert_eq!(needs_review.total, 3);
+        let needs_review_descriptions = needs_review
+            .rows
+            .iter()
+            .map(|row| row.preview_description.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            needs_review_descriptions,
+            BTreeSet::from(["missing category", "missing source", "missing destination"])
+        );
+
+        let no_issues = query_preview_page_by_session(
+            runtime.connection(),
+            "session-known-annotations-resolved",
+            user_id(42),
+            &ImportPreviewPageRequest {
+                page: 1,
+                page_size: 10,
+                preview_ids,
+                filters: ImportPreviewQueryFilters {
+                    annotation: Some("no-issues".to_string()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        )?;
+        assert_eq!(no_issues.total, 3);
+        let no_issue_descriptions = no_issues
+            .rows
+            .iter()
+            .map(|row| row.preview_description.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            no_issue_descriptions,
+            BTreeSet::from([
+                "resolved category",
+                "resolved source",
+                "resolved destination"
+            ])
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn resolved_transfer_account_annotation_is_not_a_current_missing_signal(
+) -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("transfer_annotation_resolved.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: "session-transfer-annotation-resolved".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+
+    let mut resolved = preview_draft("2026-05-01 09:00:00", 30.0, "resolved transfer");
+    resolved.preview_type = "转账".to_string();
+    resolved.preview_main_category = "转账".to_string();
+    resolved.preview_sub_category = "账户互转".to_string();
+    resolved.preview_source_account_id = Some(1001);
+    resolved.preview_destination_account_id = Some(1002);
+    resolved.preview_matching_feedback = json!({
+        "annotation": {
+            "status": "needs_review",
+            "type": "transfer_account_direction",
+            "review_status": "requires_account_review"
+        }
+    });
+
+    let mut unresolved = resolved.clone();
+    unresolved.preview_description = "unresolved transfer".to_string();
+    unresolved.preview_source_account_id = Some(1003);
+    unresolved.preview_destination_account_id = Some(1003);
+
+    insert_preview_bills_batch(
+        runtime.connection_mut(),
+        "session-transfer-annotation-resolved",
+        user_id(42),
+        &[resolved, unresolved],
+    )?;
+    let preview_ids = get_preview_by_session(
+        runtime.connection(),
+        "session-transfer-annotation-resolved",
+        user_id(42),
+        false,
+    )?
+    .into_iter()
+    .map(|row| row.id)
+    .collect::<Vec<_>>();
+
+    for preview_ids in [Vec::new(), preview_ids] {
+        let all = query_preview_page_by_session(
+            runtime.connection(),
+            "session-transfer-annotation-resolved",
+            user_id(42),
+            &ImportPreviewPageRequest {
+                page: 1,
+                page_size: 10,
+                preview_ids: preview_ids.clone(),
+                ..Default::default()
+            },
+        )?;
+        assert_eq!(
+            all.metadata.counts.annotations.get("needs-review"),
+            Some(&1)
+        );
+        assert_eq!(all.metadata.counts.annotations.get("no-issues"), Some(&1));
+
+        let needs_review = query_preview_page_by_session(
+            runtime.connection(),
+            "session-transfer-annotation-resolved",
+            user_id(42),
+            &ImportPreviewPageRequest {
+                page: 1,
+                page_size: 10,
+                preview_ids: preview_ids.clone(),
+                filters: ImportPreviewQueryFilters {
+                    annotation: Some("needs-review".to_string()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        )?;
+        assert_eq!(needs_review.total, 1);
+        assert_eq!(
+            needs_review.rows[0].preview_description,
+            "unresolved transfer"
+        );
+
+        let no_issues = query_preview_page_by_session(
+            runtime.connection(),
+            "session-transfer-annotation-resolved",
+            user_id(42),
+            &ImportPreviewPageRequest {
+                page: 1,
+                page_size: 10,
+                preview_ids,
+                filters: ImportPreviewQueryFilters {
+                    annotation: Some("no-issues".to_string()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        )?;
+        assert_eq!(no_issues.total, 1);
+        assert_eq!(no_issues.rows[0].preview_description, "resolved transfer");
+    }
+
+    Ok(())
+}
+
+#[test]
 fn preview_selection_query_actions_are_filter_scoped_and_issue_aware() -> Result<(), Box<dyn Error>>
 {
     let temp_dir = tempfile::tempdir()?;
