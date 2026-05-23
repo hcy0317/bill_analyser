@@ -13,6 +13,8 @@
 - `src/backend/db/import_staging`：session、preview、template staging、decision、LLM memory 与 confirm repository。
 - `src/backend/core/import_pipeline.rs`：导入管线合同。
 
+更完整的导入管线图、数据流和修改路径见 [Rust 后端导航图](backend-map.md#import-pipeline)。该图是导入相关路径索引的详细入口；本页只保留运行态约束。
+
 ## 行为约束
 
 - parser-first 上传必须保持 provider 检测顺序稳定。

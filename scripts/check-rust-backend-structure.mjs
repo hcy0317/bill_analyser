@@ -22,8 +22,9 @@ function printUsage() {
     console.log([
         'Usage: node scripts/check-rust-backend-structure.mjs [--print-baseline]',
         '',
-        'Checks tracked Rust backend file sizes against a committed baseline.',
-        'Historical oversized files may shrink, but must not grow.',
+        'Checks tracked Rust backend file sizes against a committed calibrated baseline.',
+        'Counts non-comment Rust lines so documentation-only edits do not raise the ratchet.',
+        'Historical oversized files may shrink, but must not grow after calibration.',
         'New tracked Rust backend files must stay within warning thresholds.'
     ].join('\n'));
 }
@@ -41,6 +42,53 @@ function countLines(text) {
     return trimmedTrailingNewline.length === 0
         ? 1
         : trimmedTrailingNewline.split('\n').length;
+}
+
+function countRustCodeLines(text) {
+    if (text.length === 0) {
+        return 0;
+    }
+
+    const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    let blockDepth = 0;
+    let codeLines = 0;
+
+    for (const rawLine of normalized.split('\n')) {
+        let visible = '';
+
+        for (let index = 0; index < rawLine.length; index += 1) {
+            const pair = rawLine.slice(index, index + 2);
+
+            if (blockDepth > 0) {
+                if (pair === '/*') {
+                    blockDepth += 1;
+                    index += 1;
+                } else if (pair === '*/') {
+                    blockDepth -= 1;
+                    index += 1;
+                }
+                continue;
+            }
+
+            if (pair === '/*') {
+                blockDepth += 1;
+                index += 1;
+                continue;
+            }
+
+            if (pair === '//') {
+                break;
+            }
+
+            visible += rawLine[index];
+        }
+
+        if (visible.trim().length > 0) {
+            codeLines += 1;
+        }
+    }
+
+    return codeLines;
 }
 
 function normalizePath(filePath) {
@@ -86,7 +134,8 @@ function scanFile(repoRelativePath) {
         path: normalizePath(fullPath),
         kind: 'rust',
         area: getBackendArea(repoRelativePath),
-        lines: countLines(source)
+        lines: countRustCodeLines(source),
+        physicalLines: countLines(source)
     };
 }
 
@@ -120,9 +169,10 @@ function isOversized(record, thresholds) {
 function buildBaseline(records, thresholds) {
     return {
         version: 1,
-        description: 'Rust backend file-size baseline for legacy oversized files. Ratchet only: entries may shrink but must not grow.',
+        description: 'Rust backend non-comment line baseline for legacy oversized files. Ratchet after calibration: entries may shrink but must not grow.',
         thresholds,
         generatedBy: 'scripts/check-rust-backend-structure.mjs --print-baseline',
+        countMode: 'non-comment-rust-lines',
         files: records
             .filter(record => isOversized(record, thresholds))
             .map(record => ({

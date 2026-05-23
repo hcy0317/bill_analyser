@@ -1,3 +1,7 @@
+// 中文导读：账单解析层，负责 provider 检测、RawBill 采集和 StandardBill 标准化。
+// 维护重点：只保留来源识别、字段清洗和 parser_tags，不写入导入 staging、分类、账户或数据库。
+// 不变式：解析结果的金额、时间、类型和来源标签必须在进入导入管线前保持可复核的原始来源语义。
+
 use std::{collections::HashMap, io::Cursor, path::Path};
 
 use calamine::{open_workbook_auto_from_rs, Data, Reader};

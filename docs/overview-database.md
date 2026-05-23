@@ -2,6 +2,8 @@
 
 数据库运行态由 `src/backend/db` 提供，默认使用 SQLite WAL 模式。
 
+repository 调用路径、事务边界和 row helper 约定见 [Rust 后端导航图](backend-map.md#repository-data-flow)。本页保留数据库运行态职责摘要。
+
 ## 核心职责
 
 - SQLite path guard、连接初始化、foreign keys、WAL 和事务 helper。
@@ -20,3 +22,4 @@ HTTP route 解析当前用户与请求 DTO 后调用 domain runtime；domain run
 - 账户余额、账单、导入 confirm、预算 import、settings bundle import 等跨表行为必须保持 rollback-on-error。
 - 金额字段必须明确元/分边界。
 - 认证和业务审计为 best-effort，不应破坏主事务的关键业务结果。
+- 新增 repository 或移动 SQL helper 时，同步检查 `docs/backend-map.md` 的 source/test path index 和验证矩阵。

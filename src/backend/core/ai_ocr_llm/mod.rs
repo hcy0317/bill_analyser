@@ -1,3 +1,7 @@
+// 中文导读：核心业务合同层，负责把金额、时间、分类、导入、匹配、预算、统计等规则从 HTTP/DB 细节中隔离。
+// 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
+// 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
+
 mod llm_config;
 mod llm_prompts;
 mod llm_provider;
@@ -9,6 +13,8 @@ mod secret_redaction;
 mod types;
 mod value_helpers;
 
+// LLM/OCR facade 只暴露脱敏配置、provider allowlist、prompt 渲染、
+// response 截断和 receipt draft 合同；HTTP 层负责 rate limit 与用户上下文。
 pub use llm_config::{
     build_llm_config_get_response, build_runtime_llm_config_from_saved_config,
     copy_runtime_llm_config, normalize_llm_advanced_settings, safe_llm_config_payload,

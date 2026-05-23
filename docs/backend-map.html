@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bill Analyser Rust 后端导航图</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --ink: #1f2937;
+      --muted: #5b6472;
+      --line: #d8dee8;
+      --blue: #2563eb;
+      --green: #138a64;
+      --amber: #b45309;
+      --rose: #be123c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.65 "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    header {
+      padding: 32px clamp(20px, 5vw, 64px) 24px;
+      background: #ffffff;
+      border-bottom: 1px solid var(--line);
+    }
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px clamp(16px, 4vw, 40px) 48px;
+    }
+    h1, h2, h3 { line-height: 1.25; margin: 0 0 12px; }
+    h1 { font-size: 32px; }
+    h2 { margin-top: 28px; font-size: 22px; }
+    p { margin: 0 0 12px; color: var(--muted); }
+    code {
+      font-family: "Cascadia Mono", Consolas, monospace;
+      background: #eef2f7;
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 14px;
+      margin: 16px 0;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .panel strong { display: block; margin-bottom: 6px; }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      margin: 16px 0;
+    }
+    .step {
+      min-height: 86px;
+      padding: 14px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #fff;
+      position: relative;
+    }
+    .step::after {
+      content: "→";
+      position: absolute;
+      right: 10px;
+      top: 8px;
+      color: var(--blue);
+      font-weight: 700;
+    }
+    .step:last-child::after { content: ""; }
+    .tag {
+      display: inline-block;
+      margin: 4px 6px 4px 0;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #1d4ed8;
+      font-size: 12px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #eef2f7; }
+    ul { margin: 8px 0 0 20px; padding: 0; }
+    a { color: var(--blue); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Bill Analyser Rust 后端导航图</h1>
+    <p><strong>Canonical source: docs/backend-map.md</strong></p>
+    <p>本页是静态阅读入口，核心事实以 Markdown 源文件为准。当前运行态由 Rust Axum `REST /api/...` 与 SQLite repository 层直接承接。</p>
+  </header>
+  <main>
+    <section id="backend-layering">
+      <h2>后端分层</h2>
+      <div class="grid">
+        <article class="panel"><strong>HTTP</strong><code>src/backend/http</code><p>Axum 路由、认证上下文、请求 DTO、response envelope。</p></article>
+        <article class="panel"><strong>Core</strong><code>src/backend/core</code><p>业务合同、金额/时间/分类、导入、匹配、预算、统计、LLM/OCR。</p></article>
+        <article class="panel"><strong>DB</strong><code>src/backend/db</code><p>SQLite WAL/FK、schema、事务、user-scope repository。</p></article>
+        <article class="panel"><strong>Parsers</strong><code>src/backend/parsers</code><p>provider 检测、RawBill、StandardBill、fixture/golden 合同。</p></article>
+      </div>
+      <p><span class="tag">http 112</span><span class="tag">db 74</span><span class="tag">core 54</span><span class="tag">parsers 9</span></p>
+    </section>
+    <section id="api-request-lifecycle">
+      <h2>API 请求生命周期</h2>
+      <div class="flow">
+        <div class="step"><strong>Frontend</strong><br><code>services.ts</code></div>
+        <div class="step"><strong>Router</strong><br><code>/api/...</code></div>
+        <div class="step"><strong>Auth</strong><br>Bearer / trusted header</div>
+        <div class="step"><strong>Core</strong><br>DTO + 单位 + 合同</div>
+        <div class="step"><strong>DB</strong><br>user-scope transaction</div>
+        <div class="step"><strong>Envelope</strong><br><code>success/data</code> 或 <code>success/result</code></div>
+      </div>
+    </section>
+    <section id="import-pipeline">
+      <h2>导入管线</h2>
+      <div class="flow">
+        <div class="step">上传</div>
+        <div class="step">Parser 检测</div>
+        <div class="step">StandardBill</div>
+        <div class="step">Session/template staging</div>
+        <div class="step">Dedup/transfer/learning</div>
+        <div class="step">Preview page</div>
+        <div class="step">Confirm + cleanup</div>
+      </div>
+      <p>parser 不写 staging；preview page 负责筛选、排序、计数和批量选择；confirm 在事务内写正式账单并清理导入临时表。</p>
+    </section>
+    <section id="repository-data-flow">
+      <h2>Repository 数据流</h2>
+      <div class="flow">
+        <div class="step">HTTP handler</div>
+        <div class="step">Core/domain runtime</div>
+        <div class="step">Repository facade</div>
+        <div class="step">Transaction helper</div>
+        <div class="step">Row helpers / SQL</div>
+      </div>
+    </section>
+    <section id="development-recipes">
+      <h2>开发路径</h2>
+      <div class="grid">
+        <article class="panel"><strong>新增 API</strong><p>先找 route facade，再确认 auth、DTO、envelope、user-scope。</p></article>
+        <article class="panel"><strong>新增 parser</strong><p>说明 provider identity、RawBill/StandardBill 和 fixture 期望。</p></article>
+        <article class="panel"><strong>改导入预览</strong><p>区分 parser、dedup、selection、transfer、learning、confirm 边界。</p></article>
+        <article class="panel"><strong>改 repository</strong><p>先确认事务和 user-scope，不把 schema 改动混进普通查询。</p></article>
+      </div>
+    </section>
+    <section id="verification-matrix">
+      <h2>验证矩阵</h2>
+      <table>
+        <thead><tr><th>范围</th><th>最小验证</th><th>最终门禁</th></tr></thead>
+        <tbody>
+          <tr><td>文档/HTML</td><td><code>node scripts/check-backend-doc-map.mjs</code></td><td><code>git diff --check -- docs scripts</code></td></tr>
+          <tr><td>Parser</td><td><code>cargo test -p bill-analyser-parsers</code></td><td rowspan="4"><code>cargo fmt --all -- --check</code><br><code>cargo clippy --workspace --all-targets -- -D warnings</code><br><code>cargo test --workspace</code><br><code>cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90</code></td></tr>
+          <tr><td>Core</td><td><code>cargo test -p bill-analyser-core</code></td></tr>
+          <tr><td>DB</td><td><code>cargo test -p bill-analyser-db</code></td></tr>
+          <tr><td>HTTP</td><td><code>cargo test -p bill-analyser-http</code></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>
+

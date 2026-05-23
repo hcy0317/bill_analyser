@@ -2,6 +2,8 @@
 
 当前运行态 API 主链为 Rust Axum `REST /api/...`。所有业务路由都在 `src/backend/http/` 的 route modules 中注册，未知 `/api/...` 请求由 Rust 返回结构化 404。
 
+请求生命周期、route-to-core/db 调用边界和验证矩阵见 [Rust 后端导航图](backend-map.md#api-request-lifecycle)。本页保留 route module 摘要与合同约束。
+
 ## 主要 route modules
 
 - `auth_routes/`：login/register/token/profile/cloud/external-auth/system/user-data/2FA/step-up/OAuth2 disabled-safe 合同；handler/helper 按 public auth、profile/user-data、2FA/token、JWT/TOTP、payload、audit/response 分片。
@@ -20,3 +22,4 @@
 - 账户、标签、分类、模板、预算、账单和导入 preview 写入必须保持 user-scope。
 - 金额相关路由继续显式处理元/分边界。
 - 前端路由使用 `src/web/src/contracts/rustRouteOwnership.generated.ts` 做 contract guard。
+- 新增或调整 route 时，同步检查 `docs/backend-map.md` 的路径索引和开发路径是否仍准确。

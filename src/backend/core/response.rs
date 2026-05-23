@@ -1,12 +1,16 @@
+// 中文导读：核心业务合同层，负责把金额、时间、分类、导入、匹配、预算、统计等规则从 HTTP/DB 细节中隔离。
+// 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
+// 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::RuntimeError;
 
-/// Runtime-shell response envelope used by the Rust foundation layer.
+/// Rust response envelope for handlers that return the shared `data` shape.
 ///
-/// This is not a claim that every existing Flask endpoint already uses this
-/// exact payload shape. Later business migration slices must add endpoint-level
-/// parity variants or adapters before using Rust responses for those endpoints.
+/// Some migrated routes still expose legacy-compatible `result` or raw payload
+/// variants, so route modules choose the envelope family that matches the
+/// frontend contract instead of forcing every endpoint through this helper.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApiError {
     code: String,

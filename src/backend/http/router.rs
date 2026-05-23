@@ -1,3 +1,7 @@
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
+// 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
+
 use axum::{
     body::Body,
     extract::{DefaultBodyLimit, State},
@@ -21,6 +25,8 @@ use crate::{
 };
 
 pub fn build_router(state: HttpAppState) -> Router {
+    // 注册顺序体现 Rust-only `/api/...` 主链：业务 router 在 fallback 之前合并，
+    // 未知 API 统一由 Rust 返回结构化 404，不能重新透传旧 sidecar。
     let body_limit_bytes = state.config.body_limit_bytes;
     Router::new()
         .route("/api/health", get(health_handler))
@@ -49,6 +55,8 @@ pub async fn metadata_handler(State(state): State<HttpAppState>) -> Json<HttpShe
 }
 
 async fn not_found_handler() -> Response<Body> {
+    // fallback 是前端 route ownership contract 的兜底响应；保持机器可读 code，
+    // 便于 contract test 区分 Rust 未实现与网络/代理错误。
     (
         StatusCode::NOT_FOUND,
         Json(serde_json::json!({

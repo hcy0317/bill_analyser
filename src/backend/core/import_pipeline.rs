@@ -1,3 +1,7 @@
+// 中文导读：核心业务合同层，负责把金额、时间、分类、导入、匹配、预算、统计等规则从 HTTP/DB 细节中隔离。
+// 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
+// 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
+
 use std::collections::{BTreeMap, HashSet};
 
 use serde::{Deserialize, Serialize};
@@ -11,6 +15,8 @@ pub const IMPORT_PREVIEW_SORT_KEYS: &[&str] = &[
     "paymentMethod",
     "comment",
 ];
+// 这些字段是 Check Data 前端与 Rust preview page 的排序合同；新增字段时必须同步
+// preview query、services.ts 映射和前端 contract 测试。
 pub const IMPORT_PREVIEW_SELECTION_KEYS: &[&str] =
     &["selected", "isSelected", "is_selected", "preview_selected"];
 pub const IMPORT_V2_PIPELINE_STEPS: &[&str] = &[
@@ -24,6 +30,8 @@ pub const IMPORT_V2_PIPELINE_STEPS: &[&str] = &[
     "preview",
     "confirm",
 ];
+// 导入步骤名用于状态响应和排错，不代表 handler 可以跳过 staging/preview/confirm
+// 的数据库生命周期。
 pub const IMPORT_STAGING_TABLES: &[&str] =
     &["import_sessions", "bills_parser_template", "bills_preview"];
 pub const BILLS_PREVIEW_CONTRACT_FIELDS: &[&str] = &[
@@ -41,6 +49,8 @@ pub const BILLS_PREVIEW_CONTRACT_FIELDS: &[&str] = &[
     "preview_recurring_matched_date",
     "preview_matching_feedback_json",
 ];
+// preview row 的兼容字段清单。任何删改都要同时复核后端投影、前端模型和
+// matching feedback 的 sparse payload 兼容性。
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

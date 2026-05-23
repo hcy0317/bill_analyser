@@ -2,6 +2,8 @@
 
 当前测试基线分为 Rust 后端、前端和仓库治理三类。
 
+按后端变更类型选择验证命令时，优先查看 [Rust 后端导航图的验证矩阵](backend-map.md#verification-matrix)。
+
 ## Rust 后端
 
 - `cargo test --workspace` 覆盖 Rust workspace 的单元、集成和契约测试。
@@ -9,6 +11,7 @@
 - `cargo clippy --workspace --all-targets -- -D warnings` 是共享 runtime 改动的静态门禁。
 - `node scripts/check-rust-backend-structure.mjs` 是 Rust 后端结构体量门禁，按已追踪的 `src/backend/**/*.rs` 文件和 `scripts/rust-backend-structure-baseline.json` 做 ratchet-only 检查；生成或复核 baseline 使用 `node scripts/check-rust-backend-structure.mjs --print-baseline`。
 - `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90` 是业务代码最终覆盖率门禁。
+- `node scripts/check-backend-doc-map.mjs` 校验 `docs/backend-map.md` 与静态 HTML 入口的 canonical marker、锚点和关键路径索引。
 
 ## 前端
 

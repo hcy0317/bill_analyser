@@ -1,3 +1,7 @@
+// 中文导读：账单解析层，负责 provider 检测、RawBill 采集和 StandardBill 标准化。
+// 维护重点：只保留来源识别、字段清洗和 parser_tags，不写入导入 staging、分类、账户或数据库。
+// 不变式：解析结果的金额、时间、类型和来源标签必须在进入导入管线前保持可复核的原始来源语义。
+
 use std::borrow::Cow;
 
 use serde::de::Error as DeError;
@@ -30,6 +34,8 @@ const DESCRIPTION_FIELDS: &[&str] = &[
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// Parser registry row exposed to HTTP/UI code so users can see which provider
+/// recognized a file and which extensions are supported.
 pub struct ParserInfo {
     pub id: &'static str,
     pub name: &'static str,
@@ -40,6 +46,9 @@ pub struct ParserInfo {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// Provider-local bill row before normalization. Dedicated parsers should keep
+/// source wording here instead of guessing categories, accounts, or staging
+/// decisions that belong to the import runtime.
 pub struct RawBill {
     pub date: String,
     pub trade_time: String,
@@ -68,6 +77,9 @@ pub struct RawBill {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Import-runtime bill draft after parser normalization. Amounts serialize as
+/// yuan numbers for parser/API parity, while `Money` still preserves cents
+/// internally for later amount-boundary checks.
 pub struct StandardBill {
     pub date: String,
     #[serde(
@@ -120,6 +132,7 @@ impl StandardBill {
     }
 }
 
+/// Stable provider list used by import route discovery and parser selection.
 pub fn parser_registry() -> &'static [ParserInfo] {
     &[
         ParserInfo {
@@ -330,6 +343,9 @@ pub fn aggregate_description(raw_bill: &RawBill) -> String {
     parts.join(" | ")
 }
 
+/// Converts provider-local rows into import drafts without touching DB staging.
+/// This is the last parser-layer boundary before dedup, category, account,
+/// transfer and learning decisions take over in the import pipeline.
 pub fn post_process_raw_bills(parser_id: &str, raw_bills: &[RawBill]) -> Vec<StandardBill> {
     let mut processed = Vec::new();
 

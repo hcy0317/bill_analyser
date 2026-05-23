@@ -1,10 +1,10 @@
 # 后端模块
 
-后端是 Rust workspace，按 runtime、core、database、parser 分层。
+后端是 Rust workspace，按 HTTP runtime、core contract、database repository、parser 四层维护。详细的路径索引、请求生命周期、导入管线、repository 数据流和验证矩阵见 [Rust 后端导航图](backend-map.md)；本页只保留稳定分层摘要。
 
 ## `src/backend/http`
 
-Axum HTTP 入口，负责路由注册、认证上下文、请求解析、multipart 上传、response envelope 和 structured error。主要 route modules：
+Axum HTTP 入口，负责路由注册、认证上下文、请求解析、multipart 上传、response envelope 和 structured error。handler 解析请求并投影响应，复杂 SQL 和跨表事务下沉到 core/db。主要 route modules：
 
 - `auth_routes/` facade + auth route helper shards
 - `bill_routes/`
@@ -32,3 +32,4 @@ SQLite repository 层，负责 WAL/FK 连接配置、schema 初始化、事务 h
 - Route handler 不直接承载复杂 SQL；复杂读写下沉到 repository/runtime。
 - API 兼容优先通过 DTO/envelope/adapter 层处理，不在前端 store 中重复补丁。
 - 业务写入保持事务原子性、user-scope 和审计 best-effort。
+- 维护入口优先从 `docs/backend-map.md` 的开发路径和验证矩阵开始，避免把路径索引复制到多处后漂移。
