@@ -405,7 +405,7 @@
                                 </v-col>
                                 <v-col cols="12" md="12"
                                        v-if="type === TransactionEditPageType.Transaction && mode !== TransactionEditPageMode.Add && editId">
-                                    <v-card variant="tonal" class="pa-3 recurring-match-card">
+                                    <v-card variant="flat" class="pa-3 recurring-match-card">
                                         <div class="d-flex justify-space-between align-center flex-wrap ga-3">
                                             <div class="flex-grow-1 min-w-0">
                                                 <div class="text-caption text-medium-emphasis mb-1">{{ tt('Scheduled Match') }}</div>
@@ -1958,6 +1958,12 @@ defineExpose({
     color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)) !important;
 }
 
+.transaction-readonly-form {
+    background-color: rgba(var(--v-theme-on-surface), 0.045);
+    border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+    border-radius: 14px;
+}
+
 .transaction-readonly-form :deep(.v-field) {
     background-color: rgba(var(--v-theme-on-surface), 0.05) !important;
     border-radius: 10px;
@@ -1965,6 +1971,11 @@ defineExpose({
 
 .transaction-readonly-form :deep(.v-field__overlay) {
     opacity: 0 !important;
+}
+
+.recurring-match-card {
+    background-color: transparent !important;
+    border: 1px solid rgba(var(--v-theme-on-surface), 0.10);
 }
 
 @media (min-height: 630px) {

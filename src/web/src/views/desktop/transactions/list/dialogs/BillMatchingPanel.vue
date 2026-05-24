@@ -1,5 +1,5 @@
 <template>
-    <v-card variant="tonal" class="pa-3 bill-matching-card">
+    <v-card variant="flat" class="pa-3 bill-matching-card">
         <div class="d-flex justify-space-between align-center flex-wrap ga-3">
             <div class="flex-grow-1 min-w-0">
                 <div class="text-caption text-medium-emphasis mb-1">{{ tt('Historical Matching') }}</div>
@@ -447,6 +447,11 @@ watch(normalizedBillId, () => {
 </script>
 
 <style scoped>
+.bill-matching-card {
+    background-color: transparent !important;
+    border: 1px solid rgba(var(--v-theme-on-surface), 0.10);
+}
+
 .bill-matching-card :deep(.v-list-item__append) {
     align-self: center;
 }
