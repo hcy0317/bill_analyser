@@ -25,6 +25,10 @@ Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预
 
 导入链路由 Rust runtime 完成 parser-first 上传、JSON parse、session/template staging、dedup、账户别名匹配、分类规则、transfer/recurring/learning decision、preview page、preview update/reclassify、confirm 和 cleanup。混合来源上传按文件保留 parser id / tags；Check Data 首屏读取分页 preview page；确认、取消和失败后新建 session 都会清理当前用户的 import staging。
 
+### Matching
+
+历史正式账单的转账候选与导入既有账单转账配对保持同一核心约束：同日、5 分钟内、金额绝对值在 1 分容差内且方向相反、来源账户不同，并排除已配对或已 suppressed 的账单。账单详情的历史匹配还会对同用户、未配对且日期、类型、金额、账户、对方、说明、支付方式和分类完全一致的正式账单返回只读 `duplicate` 候选，用于提示人工创建的重复账单。
+
 ### 金额
 
 数据库核心金额通常按元存储，部分前端/API 交互使用分。账单、账户、预算、统计或导入金额字段发生变化时，必须显式复核元/分转换。

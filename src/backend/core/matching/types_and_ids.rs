@@ -6,8 +6,10 @@ pub const CANDIDATE_KIND_ORDER: &[&str] = &["reconciliation", "transfer", "learn
 pub const LEGACY_SUMMARY_KIND_ORDER: &[&str] = &["transfer", "learning", "recurring"];
 pub const TRANSFER_PAIR_TYPE: &str = "transfer";
 pub const INVESTMENT_PAIR_TYPE: &str = "investment";
+pub const DUPLICATE_CANDIDATE_KIND: &str = "duplicate";
 pub const MANUAL_PAIR_SOURCE: &str = "manual";
 pub const TRANSFER_PAIR_LOOKBACK_DAYS: i64 = 3;
+pub const HISTORICAL_TRANSFER_PAIR_TIME_TOLERANCE_SECONDS: i64 = 300;
 pub const INVESTMENT_PAIR_LOOKBACK_DAYS: i64 = 3;
 pub const TRANSFER_AMOUNT_TOLERANCE: f64 = 0.01;
 pub const MIN_RECURRING_OCCURRENCES: usize = 3;
@@ -311,6 +313,10 @@ pub fn build_formal_transfer_candidate_id(anchor_bill_id: i64, candidate_bill_id
 
 pub fn build_formal_investment_candidate_id(anchor_bill_id: i64, candidate_bill_id: i64) -> String {
     format!("bill:{anchor_bill_id}:investment:{candidate_bill_id}")
+}
+
+pub fn build_formal_duplicate_candidate_id(anchor_bill_id: i64, candidate_bill_id: i64) -> String {
+    format!("bill:{anchor_bill_id}:duplicate:{candidate_bill_id}")
 }
 
 pub fn normalize_learning_rule_revision(raw_rule_revision: &str) -> String {

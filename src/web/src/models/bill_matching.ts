@@ -1,4 +1,11 @@
-export type BillMatchingCandidateKind = 'transfer' | 'investment' | 'learning' | string;
+export type BillMatchingCandidateKind =
+    'transfer'
+    | 'investment'
+    | 'learning'
+    | 'duplicate'
+    | 'reconciliation_transfer'
+    | 'reconciliation_duplicate'
+    | string;
 export type BillMatchingViewMode = 'linked' | 'candidates' | 'empty';
 
 export interface BillMatchingPairSummary {
@@ -263,6 +270,10 @@ export function getBillMatchingCandidateBillAmountCents(candidate: BillMatchingC
     return Math.round(amount * 100);
 }
 
+export function isBillMatchingCandidateReviewActionSupported(candidate: BillMatchingCandidate): boolean {
+    return candidate.kind.trim().toLowerCase() !== 'duplicate';
+}
+
 export function buildBillMatchingViewState(
     response: BillMatchingCandidatesResponse
 ): BillMatchingViewState {
@@ -289,7 +300,7 @@ export function buildBillMatchingViewState(
             hasCandidates: true,
             candidateCount: sortedCandidates.length,
             primaryCandidate: sortedCandidates[0] || null,
-            showCandidateActions: true,
+            showCandidateActions: sortedCandidates.some(isBillMatchingCandidateReviewActionSupported),
             showDeletePairAction: false
         };
     }

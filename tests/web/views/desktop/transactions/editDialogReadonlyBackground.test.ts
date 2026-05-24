@@ -18,4 +18,18 @@ describe('desktop transaction edit dialog readonly affordance', () => {
         expect(source).toMatch(/\.transaction-readonly-form\s+\.v-field__overlay\s*\{/);
         expect(source).toMatch(/background-color:\s*rgba\(var\(--v-theme-on-surface\),\s*0\.08\)/);
     });
+
+    test('scheduled and historical matching panels share the readonly surface background', () => {
+        const editDialogSource = readSource('src/views/desktop/transactions/list/dialogs/EditDialog.vue');
+        const billMatchingPanelSource = readSource('src/views/desktop/transactions/list/dialogs/BillMatchingPanel.vue');
+        const readonlySurface = /background-color:\s*rgba\(var\(--v-theme-on-surface\),\s*0\.08\)\s*!important/;
+
+        const recurringRule = editDialogSource.match(/\.recurring-match-card\s*\{(?<body>[^}]*)\}/);
+        const historicalRule = billMatchingPanelSource.match(/\.bill-matching-card\s*\{(?<body>[^}]*)\}/);
+
+        expect(recurringRule?.groups?.['body'] ?? '').toMatch(readonlySurface);
+        expect(historicalRule?.groups?.['body'] ?? '').toMatch(readonlySurface);
+        expect(recurringRule?.groups?.['body'] ?? '').toContain('border: 1px solid rgba(var(--v-theme-on-surface), 0.10)');
+        expect(historicalRule?.groups?.['body'] ?? '').toContain('border: 1px solid rgba(var(--v-theme-on-surface), 0.10)');
+    });
 });

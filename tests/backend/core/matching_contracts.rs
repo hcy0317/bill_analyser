@@ -2,14 +2,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use bill_analyser_core::{
     bill_pair_feedback_payload_is_related, build_bill_pair_feedback_payload,
-    build_formal_investment_candidate_id, build_formal_learning_candidate_id,
-    build_formal_transfer_candidate_id, build_investment_pair_candidate,
-    build_investment_pair_candidates, build_learning_candidate_for_bill,
-    build_learning_candidates_for_bill, build_learning_rule_revision,
-    build_matching_candidate_action_payload, build_matching_session_candidates,
-    build_transfer_pair_candidate, build_transfer_pair_candidates,
-    build_user_investment_keyword_settings, classify_investment_pnl_change,
-    compute_recurring_pattern_hash, detect_recurring_frequency,
+    build_duplicate_bill_candidate, build_duplicate_bill_candidates,
+    build_formal_duplicate_candidate_id, build_formal_investment_candidate_id,
+    build_formal_learning_candidate_id, build_formal_transfer_candidate_id,
+    build_investment_pair_candidate, build_investment_pair_candidates,
+    build_learning_candidate_for_bill, build_learning_candidates_for_bill,
+    build_learning_rule_revision, build_matching_candidate_action_payload,
+    build_matching_session_candidates, build_transfer_pair_candidate,
+    build_transfer_pair_candidates, build_user_investment_keyword_settings,
+    classify_investment_pnl_change, compute_recurring_pattern_hash, detect_recurring_frequency,
     detect_recurring_patterns_with_today, estimate_next_recurring_date, extract_investment_profile,
     is_ordinary_bank_interest_income, normalize_keyword_list, normalize_learning_rule_revision,
     normalize_reconcile_history_families, normalize_transfer_pair_bill_ids,
@@ -33,6 +34,10 @@ fn candidate_ids_parse_all_s12_families() {
     assert_eq!(
         build_formal_investment_candidate_id(11, 12),
         "bill:11:investment:12"
+    );
+    assert_eq!(
+        build_formal_duplicate_candidate_id(11, 12),
+        "bill:11:duplicate:12"
     );
     assert_eq!(normalize_learning_rule_revision(" rev-1_! "), "rev1");
     assert_eq!(
@@ -66,6 +71,12 @@ fn candidate_ids_parse_all_s12_families() {
     assert_eq!(transfer.bill_id, Some(11));
     assert_eq!(transfer.candidate_bill_id, Some(12));
 
+    let duplicate =
+        parse_matching_candidate_id("bill:11:duplicate:12").expect("duplicate descriptor");
+    assert_eq!(duplicate.scope, "bill");
+    assert_eq!(duplicate.kind, "duplicate");
+    assert_eq!(duplicate.candidate_bill_id, Some(12));
+
     let learning =
         parse_matching_candidate_id("bill:11:learning:5:rev1").expect("learning descriptor");
     assert_eq!(learning.rule_id, Some(5));
@@ -84,6 +95,64 @@ fn candidate_ids_parse_all_s12_families() {
 }
 
 #[test]
+fn duplicate_candidates_match_identical_formal_bills_only() {
+    let anchor = object(json!({
+        "id": 30,
+        "date": "2026-05-01 10:00:00",
+        "type": "支出",
+        "amount": -88.5,
+        "destination_amount": 0,
+        "source_account_id": 7,
+        "destination_account_id": 0,
+        "counterparty": "咖啡店",
+        "description": "拿铁",
+        "payment_method": "微信",
+        "main_category": "餐饮",
+        "sub_category": "咖啡"
+    }));
+    let identical = json!({
+        "id": 31,
+        "date": "2026-05-01 10:00:00",
+        "type": "支出",
+        "amount": -88.5,
+        "destination_amount": 0,
+        "source_account_id": 7,
+        "destination_account_id": 0,
+        "counterparty": "咖啡店",
+        "description": "拿铁",
+        "payment_method": "微信",
+        "main_category": "餐饮",
+        "sub_category": "咖啡"
+    });
+    let different_description = json!({
+        "id": 32,
+        "date": "2026-05-01 10:00:00",
+        "type": "支出",
+        "amount": -88.5,
+        "destination_amount": 0,
+        "source_account_id": 7,
+        "destination_account_id": 0,
+        "counterparty": "咖啡店",
+        "description": "美式",
+        "payment_method": "微信",
+        "main_category": "餐饮",
+        "sub_category": "咖啡"
+    });
+
+    let duplicate =
+        build_duplicate_bill_candidate(&anchor, identical.as_object().expect("candidate object"))
+            .expect("duplicate candidate");
+    assert_eq!(duplicate["candidate_id"], "bill:30:duplicate:31");
+    assert_eq!(duplicate["kind"], "duplicate");
+    assert_eq!(duplicate["score"], 1.0);
+    assert_eq!(duplicate["bill"]["id"], 31);
+
+    let candidates = build_duplicate_bill_candidates(&anchor, &[identical, different_description]);
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0]["candidate_id"], "bill:30:duplicate:31");
+}
+
+#[test]
 fn transfer_candidates_preserve_python_pair_rules_and_stable_sort() {
     let anchor = object(json!({
         "id": 10,
@@ -95,7 +164,7 @@ fn transfer_candidates_preserve_python_pair_rules_and_stable_sort() {
         "counterparty": "A",
         "description": "转出"
     }));
-    let far = json!({
+    let different_day = json!({
         "id": 12,
         "date": "2026-05-03 10:00:00",
         "type": "收入",
@@ -107,7 +176,7 @@ fn transfer_candidates_preserve_python_pair_rules_and_stable_sort() {
     });
     let near = json!({
         "id": 11,
-        "date": "2026-05-01 10:20:00",
+        "date": "2026-05-01 10:04:00",
         "type": "收入",
         "amount": 100.0,
         "source_account_id": 2,
@@ -115,22 +184,50 @@ fn transfer_candidates_preserve_python_pair_rules_and_stable_sort() {
         "counterparty": "B",
         "description": "转入"
     });
+    let outside_import_window = json!({
+        "id": 17,
+        "date": "2026-05-01 10:06:00",
+        "type": "收入",
+        "amount": 100.0,
+        "source_account_id": 2,
+        "destination_account_id": 0,
+        "counterparty": "B",
+        "description": "转入"
+    });
+    let different_amount = json!({
+        "id": 18,
+        "date": "2026-05-01 10:04:00",
+        "type": "收入",
+        "amount": 101.0,
+        "source_account_id": 2,
+        "destination_account_id": 0,
+        "counterparty": "B",
+        "description": "转入"
+    });
     let invalid_same_account = json!({
         "id": 13,
-        "date": "2026-05-01 10:20:00",
+        "date": "2026-05-01 10:04:00",
         "type": "收入",
         "amount": 100.0,
         "source_account_id": 1
     });
 
-    let candidates = build_transfer_pair_candidates(&anchor, &[far, near, invalid_same_account]);
-    assert_eq!(candidates.len(), 2);
+    let candidates = build_transfer_pair_candidates(
+        &anchor,
+        &[
+            different_day,
+            near,
+            outside_import_window,
+            different_amount,
+            invalid_same_account,
+        ],
+    );
+    assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0]["candidate_id"], "bill:10:transfer:11");
     assert_eq!(
         candidates[0]["reason"],
         "opposite_amount|different_source_account|time_close"
     );
-    assert_eq!(candidates[1]["candidate_id"], "bill:10:transfer:12");
     assert!(candidates[0].get("time_diff_seconds").is_none());
 
     let explicit_transfer = object(json!({
@@ -167,14 +264,14 @@ fn transfer_candidates_preserve_python_pair_rules_and_stable_sort() {
 
     let tie_a = json!({
         "id": 16,
-        "date": "2026-05-01 10:30:00",
+        "date": "2026-05-01 10:03:00",
         "type": "收入",
         "amount": 100.0,
         "source_account_id": 2
     });
     let tie_b = json!({
         "id": 15,
-        "date": "2026-05-01 10:30:00",
+        "date": "2026-05-01 10:03:00",
         "type": "收入",
         "amount": 100.0,
         "source_account_id": 2

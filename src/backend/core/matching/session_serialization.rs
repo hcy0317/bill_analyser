@@ -299,6 +299,22 @@ fn pair_time_diff_seconds(
     (max_window_seconds > 0 && diff_seconds <= max_window_seconds).then_some(diff_seconds)
 }
 
+fn same_day_pair_time_diff_seconds(
+    left_bill: &Map<String, Value>,
+    right_bill: &Map<String, Value>,
+    max_window_seconds: i64,
+) -> Option<i64> {
+    let left_datetime = parse_bill_datetime(&value_to_string(left_bill.get("date")))?;
+    let right_datetime = parse_bill_datetime(&value_to_string(right_bill.get("date")))?;
+    if left_datetime.inner().date() != right_datetime.inner().date() {
+        return None;
+    }
+    let diff_seconds = (left_datetime.inner() - right_datetime.inner())
+        .num_seconds()
+        .abs();
+    (max_window_seconds > 0 && diff_seconds <= max_window_seconds).then_some(diff_seconds)
+}
+
 fn is_explicit_transfer_type(raw_type: Option<&Value>) -> bool {
     matches!(
         value_to_string(raw_type).trim().to_lowercase().as_str(),

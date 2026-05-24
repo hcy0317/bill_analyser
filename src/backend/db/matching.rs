@@ -7,12 +7,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use bill_analyser_core::{
     matching::{
         bill_pair_feedback_payload_is_related, build_bill_pair_feedback_payload,
-        build_investment_pair_candidates, build_learning_candidates_for_bill,
-        build_learning_rule_revision, build_matching_session_candidates,
-        build_transfer_pair_candidate, build_transfer_pair_candidates,
-        build_user_investment_keyword_settings, normalize_learning_rule_revision,
-        normalize_transfer_pair_bill_ids, parse_matching_candidate_id, score_investment_candidate,
-        INVESTMENT_PAIR_TYPE, MANUAL_PAIR_SOURCE, TRANSFER_AMOUNT_TOLERANCE, TRANSFER_PAIR_TYPE,
+        build_duplicate_bill_candidates, build_investment_pair_candidates,
+        build_learning_candidates_for_bill, build_learning_rule_revision,
+        build_matching_session_candidates, build_transfer_pair_candidate,
+        build_transfer_pair_candidates, build_user_investment_keyword_settings,
+        normalize_learning_rule_revision, normalize_transfer_pair_bill_ids,
+        parse_matching_candidate_id, score_investment_candidate, INVESTMENT_PAIR_TYPE,
+        MANUAL_PAIR_SOURCE, TRANSFER_AMOUNT_TOLERANCE, TRANSFER_PAIR_TYPE,
     },
     UserId,
 };

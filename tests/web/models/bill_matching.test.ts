@@ -6,6 +6,7 @@ import {
     getBillMatchingCandidateBillCategoryLabel,
     getBillMatchingCandidateBillSubtitleParts,
     getBillMatchingCandidateBillTitle,
+    isBillMatchingCandidateReviewActionSupported,
     normalizeBillMatchingCandidatesResponse,
     normalizeBillMatchingFeedbackResponse
 } from '@/models/bill_matching.ts';
@@ -233,5 +234,36 @@ describe('bill_matching model helpers', () => {
             '张三'
         ]);
         expect(getBillMatchingCandidateBillAmountCents(candidate)).toBe(8850);
+    });
+
+    test('marks formal duplicate candidates as readonly while keeping persisted reconciliation actions', () => {
+        const response = normalizeBillMatchingCandidatesResponse({
+            billId: 101,
+            linkedPair: null,
+            candidates: [
+                {
+                    candidateId: 'bill:101:duplicate:202',
+                    kind: 'duplicate',
+                    billId: 202,
+                    score: 1,
+                    level: 'high',
+                    reason: 'same_bill_fields'
+                },
+                {
+                    candidateId: 'reconcile:import:duplicate:bill:101:preview-3',
+                    kind: 'reconciliation_duplicate',
+                    score: 0.98,
+                    level: 'high',
+                    reason: 'same_date_amount_counterparty'
+                }
+            ]
+        });
+
+        expect(isBillMatchingCandidateReviewActionSupported(response.candidates[0]!)).toBe(false);
+        expect(isBillMatchingCandidateReviewActionSupported(response.candidates[1]!)).toBe(true);
+
+        const state = buildBillMatchingViewState(response);
+        expect(state.mode).toBe('candidates');
+        expect(state.showCandidateActions).toBe(true);
     });
 });

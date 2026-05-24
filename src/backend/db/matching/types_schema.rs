@@ -250,6 +250,11 @@ pub fn query_matching_bill_candidates_payload(
     candidates.extend(list_reconciliation_candidates_for_bill(
         connection, user_id, bill_id,
     )?);
+    candidates.extend(list_duplicate_candidates_for_bill(
+        connection,
+        user_id,
+        &anchor_bill,
+    )?);
     candidates.extend(list_transfer_candidates_for_bill(
         connection,
         user_id,

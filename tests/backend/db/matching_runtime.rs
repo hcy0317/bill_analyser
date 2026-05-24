@@ -36,6 +36,26 @@ fn matching_runtime_repository_covers_bill_preview_and_reconciliation_flows(
     let transfer_payload = query_matching_bill_candidates_payload(&connection, user_id, 101)?
         .expect("transfer candidates");
     assert!(candidate_ids(&transfer_payload).contains(&"bill:101:transfer:102".to_string()));
+    let strict_transfer_payload =
+        query_matching_bill_candidates_payload(&connection, user_id, 601)?
+            .expect("strict transfer candidates");
+    let strict_transfer_ids = candidate_ids(&strict_transfer_payload);
+    assert!(!strict_transfer_ids.contains(&"bill:601:transfer:602".to_string()));
+    assert!(!strict_transfer_ids.contains(&"bill:601:transfer:603".to_string()));
+    assert!(!strict_transfer_ids.contains(&"bill:601:transfer:604".to_string()));
+    let duplicate_payload = query_matching_bill_candidates_payload(&connection, user_id, 701)?
+        .expect("duplicate candidates");
+    assert!(candidate_ids(&duplicate_payload).contains(&"bill:701:duplicate:702".to_string()));
+    assert!(!candidate_ids(&duplicate_payload).contains(&"bill:701:duplicate:703".to_string()));
+    assert!(duplicate_payload["candidates"]
+        .as_array()
+        .expect("candidate rows")
+        .iter()
+        .any(|candidate| {
+            candidate["candidateId"] == "bill:701:duplicate:702"
+                && candidate["kind"] == "duplicate"
+                && candidate["bill"]["description"] == "Identical coffee"
+        }));
     let investment_payload = query_matching_bill_candidates_payload(&connection, user_id, 201)?
         .expect("investment candidates");
     assert!(candidate_ids(&investment_payload).contains(&"bill:201:investment:202".to_string()));
@@ -790,9 +810,9 @@ fn insert_core_rows(connection: &Connection) -> Result<(), Box<dyn Error>> {
             created_at, updated_at
         ) VALUES
             (101, 42, '2026-04-01T09:00:00', 'expense', -50.0, 'Cash', 'Transfer out', 'cash', 'Transfer', '', 10, 0, 0, 'now', 'now'),
-            (102, 42, '2026-04-01T09:10:00', 'income', 50.0, 'Card', 'Transfer in', 'card', 'Transfer', '', 11, 0, 0, 'now', 'now'),
+            (102, 42, '2026-04-01T09:04:00', 'income', 50.0, 'Card', 'Transfer in', 'card', 'Transfer', '', 11, 0, 0, 'now', 'now'),
             (103, 42, '2026-04-02T09:00:00', 'expense', -60.0, 'Cash', 'Reject transfer out', 'cash', 'Transfer', '', 10, 0, 0, 'now', 'now'),
-            (104, 42, '2026-04-02T09:15:00', 'income', 60.0, 'Card', 'Reject transfer in', 'card', 'Transfer', '', 11, 0, 0, 'now', 'now'),
+            (104, 42, '2026-04-02T09:04:00', 'income', 60.0, 'Card', 'Reject transfer in', 'card', 'Transfer', '', 11, 0, 0, 'now', 'now'),
             (201, 42, '2026-04-03T10:00:00', 'expense', -100.0, 'Acme Invest', 'Buy Index Fund', 'cash', 'Investment', 'Fund', 10, 0, 0, 'now', 'now'),
             (202, 42, '2026-04-03T10:30:00', 'income', 100.0, 'Acme Invest', 'Sell Index Fund', 'brokerage', 'Investment', 'Fund', 12, 0, 0, 'now', 'now'),
             (203, 42, '2026-04-04T10:00:00', 'expense', -120.0, 'Acme Invest', 'Buy Index Fund', 'cash', 'Investment', 'Fund', 10, 0, 0, 'now', 'now'),
@@ -801,6 +821,13 @@ fn insert_core_rows(connection: &Connection) -> Result<(), Box<dyn Error>> {
             (302, 42, '2026-04-06T08:00:00', 'expense', -5.5, 'Coffee Shop', 'Latte', 'card', '', '', 11, 0, 0, 'now', 'now'),
             (401, 42, '2026-04-07T08:00:00', 'expense', -20.0, 'Subscription', 'Existing subscription', 'card', 'Life', 'Service', 11, 0, 0, 'now', 'now'),
             (402, 42, '2026-04-08T09:00:00', 'expense', -30.0, 'Transfer peer', 'Existing transfer', 'card', 'Transfer', '', 11, 0, 0, 'now', 'now'),
+            (601, 42, '2026-04-09T09:00:00', 'expense', -70.0, 'Strict transfer anchor', 'Out', 'cash', 'Transfer', '', 10, 0, 0, 'now', 'now'),
+            (602, 42, '2026-04-10T09:00:00', 'income', 70.0, 'Different day', 'In', 'card', 'Transfer', '', 11, 0, 0, 'now', 'now'),
+            (603, 42, '2026-04-09T09:04:00', 'income', 71.0, 'Different amount', 'In', 'card', 'Transfer', '', 11, 0, 0, 'now', 'now'),
+            (604, 42, '2026-04-09T09:06:00', 'income', 70.0, 'Outside import window', 'In', 'card', 'Transfer', '', 11, 0, 0, 'now', 'now'),
+            (701, 42, '2026-04-11T10:00:00', 'expense', -18.8, 'Coffee Shop', 'Identical coffee', 'wechat', 'Food', 'Coffee', 10, 0, 0, 'now', 'now'),
+            (702, 42, '2026-04-11T10:00:00', 'expense', -18.8, 'Coffee Shop', 'Identical coffee', 'wechat', 'Food', 'Coffee', 10, 0, 0, 'now', 'now'),
+            (703, 42, '2026-04-11T10:00:00', 'expense', -18.8, 'Coffee Shop', 'Different coffee', 'wechat', 'Food', 'Coffee', 10, 0, 0, 'now', 'now'),
             (901, 77, '2026-04-01', 'expense', -50.0, 'Other', 'Other user', 'cash', 'Other', '', 99, 0, 0, 'now', 'now')
         ",
         [],

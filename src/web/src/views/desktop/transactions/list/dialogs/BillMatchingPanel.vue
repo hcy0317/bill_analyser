@@ -46,7 +46,8 @@
                     </div>
                 </template>
                 <template #append>
-                    <div class="d-flex flex-wrap ga-2 align-center justify-end">
+                    <div v-if="isBillMatchingCandidateReviewActionSupported(candidate)"
+                         class="d-flex flex-wrap ga-2 align-center justify-end">
                         <v-progress-circular v-if="actionCandidateId === candidate.candidateId" indeterminate size="18" />
                         <v-btn size="small" color="primary" variant="outlined"
                                :disabled="isBusy"
@@ -107,6 +108,7 @@ import {
     getBillMatchingCandidateBillAmountCents,
     getBillMatchingCandidateBillSubtitleParts,
     getBillMatchingCandidateBillTitle,
+    isBillMatchingCandidateReviewActionSupported,
     normalizeBillMatchingCandidatesResponse,
     normalizeBillMatchingFeedbackResponse,
     type BillMatchingCandidate,
@@ -222,7 +224,7 @@ function getPairTypeLabel(pairType: string): string {
 }
 
 function getCandidateKindLabel(kind: string): string {
-    if (kind === 'reconciliation_duplicate') {
+    if (kind === 'duplicate' || kind === 'reconciliation_duplicate') {
         return tt('Duplicate');
     }
     if (kind === 'reconciliation_transfer') {
@@ -242,7 +244,7 @@ function getCandidateKindLabel(kind: string): string {
 }
 
 function getCandidateChipColor(kind: string): string {
-    if (kind === 'reconciliation_duplicate') {
+    if (kind === 'duplicate' || kind === 'reconciliation_duplicate') {
         return 'secondary';
     }
     if (kind === 'reconciliation_transfer') {
@@ -470,8 +472,9 @@ watch(normalizedBillId, () => {
 
 <style scoped>
 .bill-matching-card {
-    background-color: transparent !important;
+    background-color: rgba(var(--v-theme-on-surface), 0.08) !important;
     border: 1px solid rgba(var(--v-theme-on-surface), 0.10);
+    border-radius: 8px;
 }
 
 .bill-matching-card :deep(.v-list-item__append) {

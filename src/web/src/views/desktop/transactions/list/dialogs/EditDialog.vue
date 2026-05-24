@@ -1974,8 +1974,9 @@ defineExpose({
 }
 
 .recurring-match-card {
-    background-color: transparent !important;
+    background-color: rgba(var(--v-theme-on-surface), 0.08) !important;
     border: 1px solid rgba(var(--v-theme-on-surface), 0.10);
+    border-radius: 8px;
 }
 
 @media (min-height: 630px) {

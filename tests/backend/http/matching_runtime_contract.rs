@@ -128,6 +128,27 @@ async fn matching_recurring_calendar_networth_runtime_serves_owned_routes(
         matching_candidates_body["data"]["candidates"][0]["bill"]["id"],
         21
     );
+    let duplicate_candidates_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/matching/candidates?billId=30",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(duplicate_candidates_response.status(), StatusCode::OK);
+    let duplicate_candidates_body = read_json(duplicate_candidates_response).await;
+    let duplicate_candidates = duplicate_candidates_body["data"]["candidates"]
+        .as_array()
+        .expect("duplicate candidates");
+    assert!(duplicate_candidates.iter().any(|candidate| {
+        candidate["candidateId"] == "bill:30:duplicate:31"
+            && candidate["kind"] == "duplicate"
+            && candidate["bill"]["description"] == "Identical coffee"
+    }));
+    assert!(!duplicate_candidates
+        .iter()
+        .any(|candidate| candidate["candidateId"] == "bill:30:duplicate:32"));
 
     let invalid_selector_response = app
         .clone()
@@ -988,7 +1009,10 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
                 (3, 42, '2026-03-03', 'transfer', 10.0, 'Savings', 'Move', 'card', 'Transfer', 'Internal', 10, 11, 10.0),
                 (4, 42, '2026-03-15T23:59:59', 'expense', -7.25, 'Late Store', 'End date timestamp', 'cash', 'Food', 'Snack', 10, 0, 0),
                 (20, 42, '2026-03-05T09:00:00', 'expense', -25.5, 'Wallet', 'Transfer out', 'cash', 'Transfer', '', 10, 0, 0),
-                (21, 42, '2026-03-05T09:20:00', 'income', 25.5, 'Card', 'Transfer in', 'card', 'Transfer', '', 11, 0, 0),
+                (21, 42, '2026-03-05T09:04:00', 'income', 25.5, 'Card', 'Transfer in', 'card', 'Transfer', '', 11, 0, 0),
+                (30, 42, '2026-03-06T10:00:00', 'expense', -18.8, 'Coffee Shop', 'Identical coffee', 'wechat', 'Food', 'Coffee', 10, 0, 0),
+                (31, 42, '2026-03-06T10:00:00', 'expense', -18.8, 'Coffee Shop', 'Identical coffee', 'wechat', 'Food', 'Coffee', 10, 0, 0),
+                (32, 42, '2026-03-06T10:00:00', 'expense', -18.8, 'Coffee Shop', 'Different coffee', 'wechat', 'Food', 'Coffee', 10, 0, 0),
                 (77, 77, '2026-03-01', 'expense', -999.0, 'Other', 'Other user', 'cash', 'Food', '', 10, 0, 0)",
         [],
     )?;

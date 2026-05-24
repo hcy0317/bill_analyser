@@ -57,6 +57,66 @@ fn list_transfer_candidates_for_bill(
     Ok(build_transfer_pair_candidates(anchor_bill, &bills))
 }
 
+fn list_duplicate_candidates_for_bill(
+    connection: &Connection,
+    user_id: i64,
+    anchor_bill: &Map<String, Value>,
+) -> DbResult<Vec<Value>> {
+    let bill_id = map_i64(anchor_bill, "id");
+    let amount = map_f64(anchor_bill, "amount");
+    let destination_amount = map_f64(anchor_bill, "destination_amount");
+    let mut statement = connection.prepare(
+        "
+        SELECT * FROM bills b
+        WHERE b.user_id = ?
+          AND b.id != ?
+          AND COALESCE(b.date, '') = ?
+          AND COALESCE(b.type, '') = ?
+          AND ABS(COALESCE(b.amount, 0) - ?) <= ?
+          AND ABS(COALESCE(b.destination_amount, 0) - ?) <= ?
+          AND COALESCE(b.source_account_id, 0) = ?
+          AND COALESCE(b.destination_account_id, 0) = ?
+          AND COALESCE(b.counterparty, '') = ?
+          AND COALESCE(b.description, '') = ?
+          AND COALESCE(b.payment_method, '') = ?
+          AND COALESCE(b.main_category, '') = ?
+          AND COALESCE(b.sub_category, '') = ?
+          AND NOT EXISTS (
+              SELECT 1 FROM bill_pair_links links
+              WHERE links.user_id = ? AND (links.left_bill_id = b.id OR links.right_bill_id = b.id)
+          )
+        ORDER BY b.id ASC
+        ",
+    )?;
+    let rows = statement.query_map(
+        params![
+            user_id,
+            bill_id,
+            map_string(anchor_bill, "date", ""),
+            map_string(anchor_bill, "type", ""),
+            amount,
+            TRANSFER_AMOUNT_TOLERANCE,
+            destination_amount,
+            TRANSFER_AMOUNT_TOLERANCE,
+            map_i64(anchor_bill, "source_account_id"),
+            map_i64(anchor_bill, "destination_account_id"),
+            map_string(anchor_bill, "counterparty", ""),
+            map_string(anchor_bill, "description", ""),
+            map_string(anchor_bill, "payment_method", ""),
+            map_string(anchor_bill, "main_category", ""),
+            map_string(anchor_bill, "sub_category", ""),
+            user_id
+        ],
+        bill_from_row,
+    )?;
+    let bills = rows
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(Value::Object)
+        .collect::<Vec<_>>();
+    Ok(build_duplicate_bill_candidates(anchor_bill, &bills))
+}
+
 fn list_investment_candidates_for_bill(
     connection: &Connection,
     user_id: i64,
