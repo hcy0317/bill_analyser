@@ -1958,13 +1958,19 @@ defineExpose({
     color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)) !important;
 }
 
-.transaction-readonly-form :deep(.v-field) {
-    background-color: rgba(var(--v-theme-on-surface), 0.05) !important;
-    border-radius: 10px;
+.transaction-readonly-form .v-field {
+    background-color: rgba(var(--v-theme-on-surface), 0.08) !important;
+    border-radius: 8px;
 }
 
-.transaction-readonly-form :deep(.v-field__overlay) {
-    opacity: 0 !important;
+.transaction-readonly-form .v-field__overlay {
+    opacity: 0.06 !important;
+}
+
+.transaction-readonly-form .v-field__input,
+.transaction-readonly-form .v-select__selection,
+.transaction-readonly-form textarea {
+    cursor: default;
 }
 
 .recurring-match-card {

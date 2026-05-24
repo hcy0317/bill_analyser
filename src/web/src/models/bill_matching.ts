@@ -18,6 +18,10 @@ export interface BillMatchingCandidateBillSummary {
     description: string;
     counterparty: string;
     paymentMethod: string;
+    mainCategory: string;
+    subCategory: string;
+    sourceAccountId: number;
+    destinationAccountId: number;
 }
 
 export interface BillMatchingCandidate {
@@ -89,6 +93,18 @@ function toNullableNumber(value: unknown): number | null {
     return parsedValue > 0 ? parsedValue : null;
 }
 
+function toStringOrNumber(value: unknown): string {
+    if (typeof value === 'string') {
+        return value;
+    }
+
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return String(value);
+    }
+
+    return '';
+}
+
 function toStringValue(value: unknown): string {
     return typeof value === 'string' ? value : '';
 }
@@ -136,12 +152,16 @@ export function normalizeBillMatchingCandidatesResponse(
                 billId: toNullableNumber(candidateRecord['billId']),
                 bill: billRecord ? {
                     id: toNumber(billRecord['id']),
-                    type: toStringValue(billRecord['type']),
+                    type: toStringOrNumber(billRecord['type']),
                     amount: toNumber(billRecord['amount']),
                     date: toStringValue(billRecord['date']),
                     description: toStringValue(billRecord['description']),
                     counterparty: toStringValue(billRecord['counterparty']),
-                    paymentMethod: toStringValue(billRecord['paymentMethod'])
+                    paymentMethod: toStringValue(billRecord['paymentMethod'] ?? billRecord['payment_method']),
+                    mainCategory: toStringValue(billRecord['mainCategory'] ?? billRecord['main_category']),
+                    subCategory: toStringValue(billRecord['subCategory'] ?? billRecord['sub_category']),
+                    sourceAccountId: toNumber(billRecord['sourceAccountId'] ?? billRecord['source_account_id']),
+                    destinationAccountId: toNumber(billRecord['destinationAccountId'] ?? billRecord['destination_account_id'])
                 } : null,
                 ruleId: toNullableNumber(candidateRecord['ruleId']),
                 recommendedType: toStringValue(candidateRecord['recommendedType']),
@@ -172,6 +192,75 @@ export function normalizeBillMatchingFeedbackResponse(
             } satisfies BillMatchingFeedbackEvent;
         })
     };
+}
+
+export function getBillMatchingCandidateBillCategoryLabel(
+    bill: BillMatchingCandidateBillSummary | null
+): string {
+    if (!bill) {
+        return '';
+    }
+
+    if (bill.mainCategory && bill.subCategory) {
+        return `${bill.mainCategory} / ${bill.subCategory}`;
+    }
+
+    return bill.subCategory || bill.mainCategory;
+}
+
+export function getBillMatchingCandidateBillTitle(candidate: BillMatchingCandidate): string {
+    const bill = candidate.bill;
+
+    if (!bill) {
+        return '';
+    }
+
+    if (bill.description) {
+        return bill.description;
+    }
+
+    if (bill.counterparty) {
+        return bill.counterparty;
+    }
+
+    return bill.id > 0 ? `#${bill.id}` : '';
+}
+
+export function getBillMatchingCandidateBillSubtitleParts(candidate: BillMatchingCandidate): string[] {
+    const bill = candidate.bill;
+
+    if (!bill) {
+        return [];
+    }
+
+    const parts = [
+        bill.date,
+        bill.type,
+        getBillMatchingCandidateBillCategoryLabel(bill),
+        bill.counterparty
+    ];
+    const seen: Record<string, boolean> = {};
+
+    return parts.filter(part => {
+        const value = part.trim();
+
+        if (!value || seen[value]) {
+            return false;
+        }
+
+        seen[value] = true;
+        return true;
+    });
+}
+
+export function getBillMatchingCandidateBillAmountCents(candidate: BillMatchingCandidate): number | null {
+    const amount = candidate.bill?.amount;
+
+    if (typeof amount !== 'number' || !Number.isFinite(amount)) {
+        return null;
+    }
+
+    return Math.round(amount * 100);
 }
 
 export function buildBillMatchingViewState(

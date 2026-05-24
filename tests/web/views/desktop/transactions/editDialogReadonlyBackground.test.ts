@@ -13,7 +13,9 @@ describe('desktop transaction edit dialog readonly affordance', () => {
         const readonlyFormRule = source.match(/\.transaction-readonly-form\s*\{(?<body>[^}]*)\}/);
 
         expect(readonlyFormRule?.groups?.['body'] ?? '').not.toMatch(/background|border|border-radius|padding|margin/);
-        expect(source).toMatch(/\.transaction-readonly-form\s+:deep\(\.v-field\)\s*\{/);
-        expect(source).toMatch(/\.transaction-readonly-form\s+:deep\(\.v-field__overlay\)\s*\{/);
+        expect(source).not.toMatch(/\.transaction-readonly-form\s+:deep/);
+        expect(source).toMatch(/\.transaction-readonly-form\s+\.v-field\s*\{/);
+        expect(source).toMatch(/\.transaction-readonly-form\s+\.v-field__overlay\s*\{/);
+        expect(source).toMatch(/background-color:\s*rgba\(var\(--v-theme-on-surface\),\s*0\.08\)/);
     });
 });

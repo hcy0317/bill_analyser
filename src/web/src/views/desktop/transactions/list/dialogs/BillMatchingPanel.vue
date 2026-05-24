@@ -101,8 +101,12 @@ import { computed, ref, watch } from 'vue';
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import { useI18n } from '@/locales/helpers.ts';
 import services from '@/lib/services.ts';
+import { useAccountsStore } from '@/stores/account.ts';
 import {
     buildBillMatchingViewState,
+    getBillMatchingCandidateBillAmountCents,
+    getBillMatchingCandidateBillSubtitleParts,
+    getBillMatchingCandidateBillTitle,
     normalizeBillMatchingCandidatesResponse,
     normalizeBillMatchingFeedbackResponse,
     type BillMatchingCandidate,
@@ -123,7 +127,8 @@ const emit = defineEmits<{
     updated: [];
 }>();
 
-const { tt } = useI18n();
+const { tt, formatAmountToLocalizedNumeralsWithCurrency } = useI18n();
+const accountsStore = useAccountsStore();
 
 const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null);
 const loading = ref<boolean>(false);
@@ -151,6 +156,7 @@ const reconciliationSignal = computed<string>(() => {
 const sortedCandidates = computed<BillMatchingCandidate[]>(() => {
     return [...candidatesResponse.value.candidates].sort((left, right) => right.score - left.score);
 });
+const allAccountsMap = computed(() => accountsStore.allAccountsMap);
 const isBusy = computed<boolean>(() => {
     return !!props.disabled || loading.value || !!actionCandidateId.value || !!deletingPairId.value;
 });
@@ -260,12 +266,12 @@ function formatScore(score: number): string {
 }
 
 function getCandidateTitle(candidate: BillMatchingCandidate): string {
-    if (candidate.kind.startsWith('reconciliation') && candidate.summary) {
-        return candidate.summary;
+    const billTitle = getBillMatchingCandidateBillTitle(candidate);
+
+    if (billTitle) {
+        return billTitle;
     }
-    if (candidate.bill?.description) {
-        return candidate.bill.description;
-    }
+
     if (candidate.summary) {
         return candidate.summary;
     }
@@ -277,35 +283,51 @@ function getCandidateTitle(candidate: BillMatchingCandidate): string {
 }
 
 function getCandidateSubtitle(candidate: BillMatchingCandidate): string {
-    const parts: string[] = [];
+    const billParts = getBillMatchingCandidateBillSubtitleParts(candidate);
 
-    if (candidate.bill?.counterparty) {
-        parts.push(candidate.bill.counterparty);
-    }
-    if (candidate.recommendedType) {
-        parts.push(candidate.recommendedType);
-    }
-    if (candidate.reason) {
-        parts.push(candidate.reason);
+    if (billParts.length) {
+        return billParts.join(' · ');
     }
 
-    return parts.join(' · ');
+    return [candidate.recommendedType, candidate.reason].filter(Boolean).join(' · ');
 }
 
 function getCandidateMeta(candidate: BillMatchingCandidate): string {
     const parts: string[] = [];
+    const billAmountCents = getBillMatchingCandidateBillAmountCents(candidate);
 
-    if (candidate.bill?.date) {
-        parts.push(candidate.bill.date);
+    if (billAmountCents !== null) {
+        parts.push(formatAmountToLocalizedNumeralsWithCurrency(billAmountCents, false));
     }
-    if (candidate.bill && Number.isFinite(candidate.bill.amount)) {
-        parts.push(String(candidate.bill.amount));
+
+    const accountText = getCandidateBillAccountText(candidate);
+
+    if (accountText) {
+        parts.push(accountText);
     }
+
     if (candidate.bill?.paymentMethod) {
         parts.push(candidate.bill.paymentMethod);
     }
 
     return parts.join(' · ');
+}
+
+function getCandidateBillAccountText(candidate: BillMatchingCandidate): string {
+    const bill = candidate.bill;
+
+    if (!bill) {
+        return '';
+    }
+
+    const sourceAccountName = bill.sourceAccountId > 0 ? allAccountsMap.value[String(bill.sourceAccountId)]?.name || '' : '';
+    const destinationAccountName = bill.destinationAccountId > 0 ? allAccountsMap.value[String(bill.destinationAccountId)]?.name || '' : '';
+
+    if (sourceAccountName && destinationAccountName && sourceAccountName !== destinationAccountName) {
+        return `${sourceAccountName} -> ${destinationAccountName}`;
+    }
+
+    return sourceAccountName || destinationAccountName;
 }
 
 function getFeedbackActionColor(action: string): string {

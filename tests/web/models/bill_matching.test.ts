@@ -2,6 +2,10 @@ import { describe, expect, test } from '@jest/globals';
 
 import {
     buildBillMatchingViewState,
+    getBillMatchingCandidateBillAmountCents,
+    getBillMatchingCandidateBillCategoryLabel,
+    getBillMatchingCandidateBillSubtitleParts,
+    getBillMatchingCandidateBillTitle,
     normalizeBillMatchingCandidatesResponse,
     normalizeBillMatchingFeedbackResponse
 } from '@/models/bill_matching.ts';
@@ -68,7 +72,11 @@ describe('bill_matching model helpers', () => {
         });
         expect(response.candidates[0]!.bill).toMatchObject({
             id: 202,
-            description: '蚂蚁财富 手工投资配对 卖出'
+            description: '蚂蚁财富 手工投资配对 卖出',
+            mainCategory: '',
+            subCategory: '',
+            sourceAccountId: 0,
+            destinationAccountId: 0
         });
         expect(response.candidates[1]).toMatchObject({
             candidateId: 'bill:101:learning:9:2',
@@ -186,5 +194,44 @@ describe('bill_matching model helpers', () => {
         expect(state.hasCandidates).toBe(false);
         expect(state.candidateCount).toBe(0);
         expect(state.primaryCandidate).toBeNull();
+    });
+
+    test('builds bill-format candidate display values before raw matching fields', () => {
+        const response = normalizeBillMatchingCandidatesResponse({
+            billId: 101,
+            linkedPair: null,
+            candidates: [{
+                candidateId: 'bill:101:reconciliation_duplicate:202',
+                kind: 'reconciliation_duplicate',
+                score: 0.98,
+                level: 'high',
+                reason: 'same_amount',
+                summary: '原始信息：支付宝收款',
+                bill: {
+                    id: 202,
+                    type: '收入',
+                    amount: 88.5,
+                    date: '2026-05-20',
+                    description: '支付宝收款',
+                    counterparty: '张三',
+                    paymentMethod: '支付宝',
+                    mainCategory: '经营',
+                    subCategory: '销售',
+                    sourceAccountId: 12,
+                    destinationAccountId: 0
+                }
+            }]
+        });
+        const candidate = response.candidates[0]!;
+
+        expect(getBillMatchingCandidateBillTitle(candidate)).toBe('支付宝收款');
+        expect(getBillMatchingCandidateBillCategoryLabel(candidate.bill)).toBe('经营 / 销售');
+        expect(getBillMatchingCandidateBillSubtitleParts(candidate)).toEqual([
+            '2026-05-20',
+            '收入',
+            '经营 / 销售',
+            '张三'
+        ]);
+        expect(getBillMatchingCandidateBillAmountCents(candidate)).toBe(8850);
     });
 });

@@ -117,6 +117,7 @@ import type {
 import {
     TransactionAmountsRequest
 } from '@/models/transaction.ts';
+import { buildTransactionListQuery } from '@/lib/services/transaction.ts';
 import type {
     TransactionCategoryCreateRequest,
     TransactionCategoryCreateBatchRequest,
@@ -1005,9 +1006,7 @@ export default {
         return axios.post<ApiResponse<SyncBalancesResponse>>('accounts/sync-balances');
     },
     getTransactions: (req: TransactionListByMaxTimeRequest): ApiResponsePromise<TransactionInfoPageWrapperResponse> => {
-        const amountFilter = encodeURIComponent(req.amountFilter);
-        const keyword = encodeURIComponent(req.keyword);
-        return axios.get<ApiResponse<TransactionInfoPageWrapperResponse>>(`bills/?max_time=${req.maxTime}&min_time=${req.minTime}&type=${req.type}&categoryIds=${req.categoryIds}&accountIds=${req.accountIds}&tagIds=${req.tagIds}&tagFilterType=${req.tagFilterType}&amountFilter=${amountFilter}&keyword=${keyword}&page_size=${req.count}&page=${req.page}&with_count=${req.withCount}`);
+        return axios.get<ApiResponse<TransactionInfoPageWrapperResponse>>(`bills/?${buildTransactionListQuery(req)}`);
     },
     getAllTransactionsByMonth: (req: TransactionListInMonthByPageRequest): ApiResponsePromise<TransactionInfoPageWrapperResponse2> => {
         const amountFilter = encodeURIComponent(req.amountFilter);
