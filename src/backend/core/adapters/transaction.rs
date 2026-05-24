@@ -311,11 +311,11 @@ pub fn backend_transaction_type_name(transaction_type: TransactionType) -> &'sta
 pub fn frontend_transaction_type_from_backend(
     raw_value: &str,
 ) -> Result<TransactionType, RuntimeError> {
-    match raw_value {
-        "收入" => Ok(TransactionType::Income),
-        "支出" => Ok(TransactionType::Expense),
-        "转账" => Ok(TransactionType::Transfer),
-        "投资" => Ok(TransactionType::Investment),
+    match raw_value.trim().to_ascii_lowercase().as_str() {
+        "收入" | "income" | "2" => Ok(TransactionType::Income),
+        "支出" | "expense" | "3" => Ok(TransactionType::Expense),
+        "转账" | "transfer" | "4" => Ok(TransactionType::Transfer),
+        "投资" | "investment" | "5" => Ok(TransactionType::Investment),
         _ => Err(RuntimeError::new(
             ErrorCode::InvalidInput,
             "invalid backend transaction type",

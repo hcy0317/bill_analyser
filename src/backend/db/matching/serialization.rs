@@ -519,6 +519,21 @@ fn investment_suppression_exists_on_tx(
     )
 }
 
+fn duplicate_suppression_exists_on_tx(
+    tx: &Transaction<'_>,
+    user_id: i64,
+    left_bill_id: i64,
+    right_bill_id: i64,
+) -> DbResult<bool> {
+    suppression_exists_on_tx(
+        tx,
+        "bill_duplicate_pair_suppressions",
+        user_id,
+        left_bill_id,
+        right_bill_id,
+    )
+}
+
 fn suppression_exists_on_tx(
     tx: &Transaction<'_>,
     table: &str,
@@ -547,6 +562,9 @@ fn pair_is_eligible(
 ) -> DbResult<bool> {
     if pair_type == TRANSFER_PAIR_TYPE {
         return Ok(build_transfer_pair_candidate(left, right).is_some());
+    }
+    if pair_type == DUPLICATE_CANDIDATE_KIND {
+        return Ok(build_duplicate_bill_candidate(left, right).is_some());
     }
     let keyword_config = user_investment_keyword_config_tx(tx, user_id)?;
     Ok(

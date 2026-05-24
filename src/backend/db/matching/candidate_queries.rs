@@ -63,6 +63,12 @@ fn list_duplicate_candidates_for_bill(
     anchor_bill: &Map<String, Value>,
 ) -> DbResult<Vec<Value>> {
     let bill_id = map_i64(anchor_bill, "id");
+    let suppressed = suppressed_pair_candidate_ids(
+        connection,
+        user_id,
+        bill_id,
+        "bill_duplicate_pair_suppressions",
+    )?;
     let amount = map_f64(anchor_bill, "amount");
     let destination_amount = map_f64(anchor_bill, "destination_amount");
     let mut statement = connection.prepare(
@@ -112,6 +118,7 @@ fn list_duplicate_candidates_for_bill(
     let bills = rows
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
+        .filter(|bill| !suppressed.contains(&map_i64(bill, "id")))
         .map(Value::Object)
         .collect::<Vec<_>>();
     Ok(build_duplicate_bill_candidates(anchor_bill, &bills))

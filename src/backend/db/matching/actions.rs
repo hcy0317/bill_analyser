@@ -13,10 +13,10 @@ fn reject_bill_pair_candidate(
     let (left_bill_id, right_bill_id) =
         normalize_transfer_pair_bill_ids(bill_id, candidate_bill_id)
             .map_err(|message| MatchingRuntimeError::BadRequest(message.to_string()))?;
-    let table = if pair_type == INVESTMENT_PAIR_TYPE {
-        "bill_investment_pair_suppressions"
-    } else {
-        "bill_transfer_pair_suppressions"
+    let table = match pair_type {
+        INVESTMENT_PAIR_TYPE => "bill_investment_pair_suppressions",
+        DUPLICATE_CANDIDATE_KIND => "bill_duplicate_pair_suppressions",
+        _ => "bill_transfer_pair_suppressions",
     };
     let now = utc_now();
     run_transaction(connection, |tx| {
@@ -61,6 +61,321 @@ fn reject_bill_pair_candidate(
         Ok(())
     })
     .map_err(map_write_error)
+}
+
+fn accept_bill_pair_candidate(
+    connection: &mut Connection,
+    user_id: UserId,
+    candidate_id: &str,
+    bill_id: i64,
+    candidate_bill_id: i64,
+    pair_type: &str,
+) -> MatchingResult<Value> {
+    if pair_type == DUPLICATE_CANDIDATE_KIND {
+        return accept_duplicate_bill_candidate(
+            connection,
+            user_id,
+            candidate_id,
+            bill_id,
+            candidate_bill_id,
+        );
+    }
+    if pair_type == TRANSFER_PAIR_TYPE {
+        return accept_transfer_bill_candidate(
+            connection,
+            user_id,
+            candidate_id,
+            bill_id,
+            candidate_bill_id,
+        );
+    }
+    let pair = create_manual_matching_pair(
+        connection,
+        user_id,
+        bill_id,
+        candidate_bill_id,
+        pair_type,
+        Some(candidate_id),
+    )?;
+    Ok(json!({"candidate_id": candidate_id, "action": "accept", "pair": pair["pair"]}))
+}
+
+fn accept_duplicate_bill_candidate(
+    connection: &mut Connection,
+    user_id: UserId,
+    candidate_id: &str,
+    bill_id: i64,
+    candidate_bill_id: i64,
+) -> MatchingResult<Value> {
+    accept_bill_merge_candidate(
+        connection,
+        user_id,
+        candidate_id,
+        bill_id,
+        candidate_bill_id,
+        DUPLICATE_CANDIDATE_KIND,
+        MergeEffect::Duplicate,
+    )
+}
+
+fn accept_transfer_bill_candidate(
+    connection: &mut Connection,
+    user_id: UserId,
+    candidate_id: &str,
+    bill_id: i64,
+    candidate_bill_id: i64,
+) -> MatchingResult<Value> {
+    accept_bill_merge_candidate(
+        connection,
+        user_id,
+        candidate_id,
+        bill_id,
+        candidate_bill_id,
+        TRANSFER_PAIR_TYPE,
+        MergeEffect::Transfer,
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MergeEffect {
+    Duplicate,
+    Transfer,
+}
+
+fn accept_bill_merge_candidate(
+    connection: &mut Connection,
+    user_id: UserId,
+    candidate_id: &str,
+    bill_id: i64,
+    candidate_bill_id: i64,
+    pair_type: &str,
+    effect: MergeEffect,
+) -> MatchingResult<Value> {
+    let user_id_value = UserScope::new(user_id).bind_value()?;
+    let (left_bill_id, right_bill_id) =
+        normalize_transfer_pair_bill_ids(bill_id, candidate_bill_id)
+            .map_err(|message| MatchingRuntimeError::BadRequest(message.to_string()))?;
+    let now = utc_now();
+    run_transaction(connection, |tx| {
+        let bills = get_bills_by_ids_on_tx(tx, user_id_value, &[left_bill_id, right_bill_id])?;
+        if bills.len() != 2 {
+            return Err(DbError::InvalidOperation("Bill not found".to_string()));
+        }
+        if get_pair_for_bill_on_tx(tx, user_id_value, left_bill_id, None)?.is_some()
+            || get_pair_for_bill_on_tx(tx, user_id_value, right_bill_id, None)?.is_some()
+        {
+            return Err(DbError::InvalidOperation(
+                "Bills already belong to an existing transfer pair".to_string(),
+            ));
+        }
+        validate_pair_not_suppressed(tx, user_id_value, left_bill_id, right_bill_id, pair_type)?;
+        let anchor = bills
+            .iter()
+            .find(|bill| map_i64(bill, "id") == bill_id)
+            .ok_or_else(|| DbError::InvalidOperation("Bill not found".to_string()))?;
+        let candidate = bills
+            .iter()
+            .find(|bill| map_i64(bill, "id") == candidate_bill_id)
+            .ok_or_else(|| DbError::InvalidOperation("Bill not found".to_string()))?;
+        if !pair_is_eligible(tx, user_id_value, anchor, candidate, pair_type)? {
+            return Err(DbError::InvalidOperation(format!(
+                "Bills are not eligible for {pair_type} pairing"
+            )));
+        }
+
+        merge_bill_tags_on_tx(tx, bill_id, candidate_bill_id, &now)?;
+        let updated_bill = match effect {
+            MergeEffect::Duplicate => {
+                if !crate::bills::delete_bill_on_tx(tx, user_id_value, candidate_bill_id, &now)? {
+                    return Err(DbError::InvalidOperation("Bill not found".to_string()));
+                }
+                get_bill_map_on_tx(tx, user_id_value, bill_id)?
+                    .ok_or_else(|| DbError::InvalidOperation("Bill not found".to_string()))?
+            }
+            MergeEffect::Transfer => {
+                let updates = transfer_merge_updates(anchor, candidate);
+                if !crate::bills::update_bill_fields_on_tx(
+                    tx,
+                    user_id_value,
+                    bill_id,
+                    &updates,
+                    &now,
+                )? {
+                    return Err(DbError::InvalidOperation("Bill not found".to_string()));
+                }
+                let updated_bill = get_bill_map_on_tx(tx, user_id_value, bill_id)?
+                    .ok_or_else(|| DbError::InvalidOperation("Bill not found".to_string()))?;
+                if !crate::bills::delete_bill_on_tx(tx, user_id_value, candidate_bill_id, &now)? {
+                    return Err(DbError::InvalidOperation("Bill not found".to_string()));
+                }
+                updated_bill
+            }
+        };
+        let pair = virtual_pair_payload(pair_type, left_bill_id, right_bill_id);
+        let mut feedback =
+            build_bill_pair_feedback_payload(pair_type, bill_id, candidate_bill_id, Some(&pair));
+        feedback["effect"] = json!(match effect {
+            MergeEffect::Duplicate => "duplicate_merge",
+            MergeEffect::Transfer => "transfer_merge",
+        });
+        feedback["kept_bill_id"] = json!(bill_id);
+        feedback["merged_bill_id"] = json!(candidate_bill_id);
+        record_feedback_on_tx(tx, user_id_value, candidate_id, "accept", &feedback, &now)?;
+        Ok(json!({
+            "candidate_id": candidate_id,
+            "action": "accept",
+            "effect": match effect {
+                MergeEffect::Duplicate => "duplicate_merge",
+                MergeEffect::Transfer => "transfer_merge",
+            },
+            "pair": serialize_bill_pair(&pair),
+            "bill": updated_bill,
+            "keptBillId": bill_id,
+            "mergedBillId": candidate_bill_id,
+        }))
+    })
+    .map_err(map_write_error)
+}
+
+fn validate_pair_not_suppressed(
+    tx: &Transaction<'_>,
+    user_id: i64,
+    left_bill_id: i64,
+    right_bill_id: i64,
+    pair_type: &str,
+) -> DbResult<()> {
+    if pair_type == TRANSFER_PAIR_TYPE
+        && transfer_suppression_exists_on_tx(tx, user_id, left_bill_id, right_bill_id)?
+    {
+        return Err(DbError::InvalidOperation(
+            "Bills already rejected for transfer pairing".to_string(),
+        ));
+    }
+    if pair_type == INVESTMENT_PAIR_TYPE
+        && (transfer_suppression_exists_on_tx(tx, user_id, left_bill_id, right_bill_id)?
+            || investment_suppression_exists_on_tx(tx, user_id, left_bill_id, right_bill_id)?)
+    {
+        return Err(DbError::InvalidOperation(
+            "Bills already rejected for investment pairing".to_string(),
+        ));
+    }
+    if pair_type == DUPLICATE_CANDIDATE_KIND
+        && duplicate_suppression_exists_on_tx(tx, user_id, left_bill_id, right_bill_id)?
+    {
+        return Err(DbError::InvalidOperation(
+            "Bills already rejected for duplicate pairing".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn transfer_merge_updates(
+    anchor: &Map<String, Value>,
+    candidate: &Map<String, Value>,
+) -> Map<String, Value> {
+    let anchor_amount = map_f64(anchor, "amount");
+    let (outgoing, incoming) = if anchor_amount < 0.0 {
+        (anchor, candidate)
+    } else {
+        (candidate, anchor)
+    };
+    let outgoing_amount = map_f64(outgoing, "amount").abs();
+    let incoming_amount = map_f64(incoming, "amount").abs();
+    let mut updates = Map::new();
+    updates.insert("date".to_string(), json!(map_string(outgoing, "date", "")));
+    updates.insert("type".to_string(), json!("转账"));
+    updates.insert("amount".to_string(), json!(-outgoing_amount));
+    updates.insert(
+        "destination_amount".to_string(),
+        json!(incoming_amount.max(outgoing_amount)),
+    );
+    updates.insert(
+        "counterparty".to_string(),
+        json!(first_non_empty_pair_text(
+            &map_string(outgoing, "counterparty", ""),
+            &map_string(incoming, "counterparty", "")
+        )),
+    );
+    updates.insert(
+        "description".to_string(),
+        json!(merge_pair_text(
+            &map_string(outgoing, "description", ""),
+            &map_string(incoming, "description", "")
+        )),
+    );
+    updates.insert(
+        "payment_method".to_string(),
+        json!(map_string(outgoing, "payment_method", "")),
+    );
+    updates.insert(
+        "main_category".to_string(),
+        json!(map_string(outgoing, "main_category", "")),
+    );
+    updates.insert(
+        "sub_category".to_string(),
+        json!(map_string(outgoing, "sub_category", "")),
+    );
+    updates.insert(
+        "source_account_id".to_string(),
+        json!(map_i64(outgoing, "source_account_id")),
+    );
+    updates.insert(
+        "destination_account_id".to_string(),
+        json!(map_i64(incoming, "source_account_id")),
+    );
+    updates
+}
+
+fn merge_bill_tags_on_tx(
+    tx: &Transaction<'_>,
+    keep_bill_id: i64,
+    merged_bill_id: i64,
+    now: &str,
+) -> DbResult<()> {
+    if !table_exists_tx(tx, "bill_tags")? {
+        return Ok(());
+    }
+    tx.execute(
+        "
+        INSERT OR IGNORE INTO bill_tags(bill_id, tag_id, created_at)
+        SELECT ?1, tag_id, ?3 FROM bill_tags WHERE bill_id = ?2
+        ",
+        params![keep_bill_id, merged_bill_id, now],
+    )?;
+    Ok(())
+}
+
+fn virtual_pair_payload(pair_type: &str, left_bill_id: i64, right_bill_id: i64) -> Map<String, Value> {
+    json!({
+        "id": 0,
+        "pair_type": pair_type,
+        "source": MANUAL_PAIR_SOURCE,
+        "left_bill_id": left_bill_id,
+        "right_bill_id": right_bill_id,
+    })
+    .as_object()
+    .expect("virtual pair object")
+    .clone()
+}
+
+fn first_non_empty_pair_text(left: &str, right: &str) -> String {
+    if !left.trim().is_empty() {
+        left.to_string()
+    } else {
+        right.to_string()
+    }
+}
+
+fn merge_pair_text(left: &str, right: &str) -> String {
+    let left = left.trim();
+    let right = right.trim();
+    if left.is_empty() {
+        return right.to_string();
+    }
+    if right.is_empty() || left == right {
+        return left.to_string();
+    }
+    format!("{left} | {right}")
 }
 
 fn accept_bill_learning_candidate(

@@ -29,20 +29,31 @@
                     </v-chip>
                 </template>
                 <template #title>
-                    <div class="d-flex align-center flex-wrap ga-2">
-                        <span>{{ getCandidateTitle(candidate) }}</span>
-                        <v-chip size="x-small" variant="outlined">
-                            {{ tt('Match Score') }} {{ formatScore(candidate.score) }}
-                        </v-chip>
-                        <v-chip size="x-small" variant="outlined" v-if="candidate.level">
-                            {{ candidate.level }}
-                        </v-chip>
+                    <div class="d-flex flex-column ga-1 min-w-0">
+                        <div class="d-flex align-center flex-wrap ga-2">
+                            <span v-for="part in getCandidateTopLineParts(candidate)"
+                                  :key="`top-${candidate.candidateId}-${part}`">
+                                {{ part }}
+                            </span>
+                            <v-chip size="x-small" variant="outlined">
+                                {{ tt('Match Score') }} {{ formatScore(candidate.score) }}
+                            </v-chip>
+                            <v-chip size="x-small" variant="outlined" v-if="candidate.level">
+                                {{ candidate.level }}
+                            </v-chip>
+                        </div>
+                        <div class="d-flex align-center flex-wrap ga-2 text-caption text-medium-emphasis"
+                             v-if="getCandidateSecondLineParts(candidate).length">
+                            <span v-for="part in getCandidateSecondLineParts(candidate)"
+                                  :key="`second-${candidate.candidateId}-${part}`">
+                                {{ part }}
+                            </span>
+                        </div>
                     </div>
                 </template>
                 <template #subtitle>
-                    <div class="mt-1">{{ getCandidateSubtitle(candidate) }}</div>
-                    <div class="text-caption text-medium-emphasis mt-1" v-if="getCandidateMeta(candidate)">
-                        {{ getCandidateMeta(candidate) }}
+                    <div class="text-caption text-medium-emphasis mt-1" v-if="getCandidateRemark(candidate)">
+                        {{ getCandidateRemark(candidate) }}
                     </div>
                 </template>
                 <template #append>
@@ -219,6 +230,9 @@ function getPairTypeLabel(pairType: string): string {
     if (pairType === 'investment') {
         return tt('Investment');
     }
+    if (pairType === 'duplicate') {
+        return tt('Duplicate');
+    }
 
     return pairType;
 }
@@ -267,34 +281,17 @@ function formatScore(score: number): string {
     return Number(score || 0).toFixed(2);
 }
 
-function getCandidateTitle(candidate: BillMatchingCandidate): string {
-    const billTitle = getBillMatchingCandidateBillTitle(candidate);
-
-    if (billTitle) {
-        return billTitle;
-    }
-
-    if (candidate.summary) {
-        return candidate.summary;
-    }
-    if (candidate.reason) {
-        return candidate.reason;
-    }
-
-    return `#${candidate.billId || candidate.ruleId || candidate.candidateId}`;
-}
-
-function getCandidateSubtitle(candidate: BillMatchingCandidate): string {
+function getCandidateTopLineParts(candidate: BillMatchingCandidate): string[] {
     const billParts = getBillMatchingCandidateBillSubtitleParts(candidate);
 
     if (billParts.length) {
-        return billParts.join(' · ');
+        return billParts;
     }
 
-    return [candidate.recommendedType, candidate.reason].filter(Boolean).join(' · ');
+    return [getCandidateKindLabel(candidate.kind), candidate.recommendedType].filter(Boolean);
 }
 
-function getCandidateMeta(candidate: BillMatchingCandidate): string {
+function getCandidateSecondLineParts(candidate: BillMatchingCandidate): string[] {
     const parts: string[] = [];
     const billAmountCents = getBillMatchingCandidateBillAmountCents(candidate);
 
@@ -308,11 +305,21 @@ function getCandidateMeta(candidate: BillMatchingCandidate): string {
         parts.push(accountText);
     }
 
-    if (candidate.bill?.paymentMethod) {
-        parts.push(candidate.bill.paymentMethod);
+    if (!parts.length && candidate.summary) {
+        parts.push(candidate.summary);
     }
 
-    return parts.join(' · ');
+    return parts;
+}
+
+function getCandidateRemark(candidate: BillMatchingCandidate): string {
+    const billTitle = getBillMatchingCandidateBillTitle(candidate);
+
+    if (billTitle) {
+        return billTitle;
+    }
+
+    return [candidate.summary, candidate.reason].filter(Boolean).join(' · ');
 }
 
 function getCandidateBillAccountText(candidate: BillMatchingCandidate): string {
@@ -346,7 +353,8 @@ function getFeedbackActionColor(action: string): string {
 function getFeedbackPairType(event: BillMatchingFeedbackEvent): string {
     const pair = event.payload['pair'];
     if (pair && typeof pair === 'object' && !Array.isArray(pair)) {
-        const pairType = (pair as Record<string, unknown>)['pairType'];
+        const pairRecord = pair as Record<string, unknown>;
+        const pairType = pairRecord['pairType'] ?? pairRecord['pair_type'];
         if (typeof pairType === 'string' && pairType) {
             return pairType;
         }

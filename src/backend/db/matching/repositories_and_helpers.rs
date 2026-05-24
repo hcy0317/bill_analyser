@@ -341,6 +341,7 @@ fn normalize_pair_type(pair_type: &str) -> MatchingResult<&'static str> {
     match pair_type.trim().to_ascii_lowercase().as_str() {
         TRANSFER_PAIR_TYPE => Ok(TRANSFER_PAIR_TYPE),
         INVESTMENT_PAIR_TYPE => Ok(INVESTMENT_PAIR_TYPE),
+        DUPLICATE_CANDIDATE_KIND => Ok(DUPLICATE_CANDIDATE_KIND),
         _ => Err(MatchingRuntimeError::BadRequest(
             "Invalid pairType".to_string(),
         )),

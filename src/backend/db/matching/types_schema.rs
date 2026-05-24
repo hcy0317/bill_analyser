@@ -115,6 +115,15 @@ pub fn init_matching_runtime_schema(connection: &Connection) -> DbResult<()> {
             CHECK(left_bill_id < right_bill_id),
             UNIQUE(user_id, left_bill_id, right_bill_id)
         );
+        CREATE TABLE IF NOT EXISTS bill_duplicate_pair_suppressions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            left_bill_id INTEGER NOT NULL,
+            right_bill_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            CHECK(left_bill_id < right_bill_id),
+            UNIQUE(user_id, left_bill_id, right_bill_id)
+        );
         CREATE TABLE IF NOT EXISTS bill_learning_rule_suppressions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL DEFAULT 1,
@@ -420,6 +429,13 @@ pub fn create_manual_matching_pair(
                 "Bills already rejected for investment pairing".to_string(),
             ));
         }
+        if pair_type == DUPLICATE_CANDIDATE_KIND
+            && duplicate_suppression_exists_on_tx(tx, user_id, left_bill_id, right_bill_id)?
+        {
+            return Err(DbError::InvalidOperation(
+                "Bills already rejected for duplicate pairing".to_string(),
+            ));
+        }
         let left = bills
             .iter()
             .find(|bill| map_i64(bill, "id") == left_bill_id)
@@ -511,18 +527,17 @@ pub fn apply_matching_candidate_action(
         descriptor.kind.as_str(),
         action.as_str(),
     ) {
-        ("bill", TRANSFER_PAIR_TYPE, "accept") | ("bill", INVESTMENT_PAIR_TYPE, "accept") => {
-            let pair = create_manual_matching_pair(
+        ("bill", TRANSFER_PAIR_TYPE | INVESTMENT_PAIR_TYPE | DUPLICATE_CANDIDATE_KIND, "accept") => {
+            accept_bill_pair_candidate(
                 connection,
                 user_id,
+                candidate_id,
                 descriptor.bill_id.unwrap_or_default(),
                 descriptor.candidate_bill_id.unwrap_or_default(),
                 &descriptor.kind,
-                Some(candidate_id),
-            )?;
-            Ok(json!({"candidate_id": candidate_id, "action": "accept", "pair": pair["pair"]}))
+            )
         }
-        ("bill", TRANSFER_PAIR_TYPE, "reject") | ("bill", INVESTMENT_PAIR_TYPE, "reject") => {
+        ("bill", TRANSFER_PAIR_TYPE | INVESTMENT_PAIR_TYPE | DUPLICATE_CANDIDATE_KIND, "reject") => {
             reject_bill_pair_candidate(
                 connection,
                 user_id_value,

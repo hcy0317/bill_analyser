@@ -144,6 +144,14 @@ fn adapter_helpers_mirror_existing_python_contract_edges() {
         frontend_transaction_type_from_backend("投资").unwrap(),
         TransactionType::Investment
     );
+    assert_eq!(
+        frontend_transaction_type_from_backend("transfer").unwrap(),
+        TransactionType::Transfer
+    );
+    assert_eq!(
+        frontend_transaction_type_from_backend("3").unwrap(),
+        TransactionType::Expense
+    );
     assert_eq!(serde_json::to_value(TransactionType::Expense).unwrap(), 3);
 
     let positive = Money::from_cents(1234);

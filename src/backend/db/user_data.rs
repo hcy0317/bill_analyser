@@ -237,6 +237,7 @@ fn delete_bill_side_effects(tx: &Transaction<'_>, user_id: i64, bill_ids: &[i64]
     delete_pair_table_by_pair_columns(tx, user_id, &bill_ids, "bill_pair_links")?;
     delete_pair_table_by_pair_columns(tx, user_id, &bill_ids, "bill_transfer_pair_suppressions")?;
     delete_pair_table_by_pair_columns(tx, user_id, &bill_ids, "bill_investment_pair_suppressions")?;
+    delete_pair_table_by_pair_columns(tx, user_id, &bill_ids, "bill_duplicate_pair_suppressions")?;
     if table_exists(tx, "bill_learning_rule_suppressions")? {
         let placeholders = placeholders(bill_ids.len());
         let mut sql_params = vec![SqlValue::Integer(user_id)];

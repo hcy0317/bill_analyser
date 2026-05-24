@@ -270,7 +270,10 @@ interface MatchingCandidateActionResponse {
     previewId?: number;
     sessionId?: string;
     recurringId?: number;
+    keptBillId?: number;
+    mergedBillId?: number;
     reviewStatus?: string;
+    effect?: string;
     suppressed?: boolean;
     previewItem?: Record<string, unknown>;
     preview?: Array<Record<string, unknown>>;

@@ -243,8 +243,7 @@ export function getBillMatchingCandidateBillSubtitleParts(candidate: BillMatchin
     const parts = [
         bill.date,
         bill.type,
-        getBillMatchingCandidateBillCategoryLabel(bill),
-        bill.counterparty
+        getBillMatchingCandidateBillCategoryLabel(bill)
     ];
     const seen: Record<string, boolean> = {};
 
@@ -271,7 +270,14 @@ export function getBillMatchingCandidateBillAmountCents(candidate: BillMatchingC
 }
 
 export function isBillMatchingCandidateReviewActionSupported(candidate: BillMatchingCandidate): boolean {
-    return candidate.kind.trim().toLowerCase() !== 'duplicate';
+    return [
+        'transfer',
+        'investment',
+        'learning',
+        'duplicate',
+        'reconciliation_transfer',
+        'reconciliation_duplicate'
+    ].includes(candidate.kind.trim().toLowerCase());
 }
 
 export function buildBillMatchingViewState(

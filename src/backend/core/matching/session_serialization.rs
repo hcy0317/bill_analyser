@@ -229,6 +229,7 @@ fn serialize_bill_snapshot(snapshot: &Map<String, Value>) -> Value {
         "date": value_to_string(snapshot.get("date")),
         "type": value_to_string(snapshot.get("type")),
         "amount": value_to_f64(snapshot.get("amount")),
+        "destinationAmount": value_to_f64(snapshot.get("destination_amount")),
         "counterparty": value_to_string(snapshot.get("counterparty")),
         "description": value_to_string(snapshot.get("description")),
         "paymentMethod": value_to_string(snapshot.get("payment_method")),

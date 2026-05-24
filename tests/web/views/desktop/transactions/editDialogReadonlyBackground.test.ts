@@ -32,4 +32,19 @@ describe('desktop transaction edit dialog readonly affordance', () => {
         expect(recurringRule?.groups?.['body'] ?? '').toContain('border: 1px solid rgba(var(--v-theme-on-surface), 0.10)');
         expect(historicalRule?.groups?.['body'] ?? '').toContain('border: 1px solid rgba(var(--v-theme-on-surface), 0.10)');
     });
+
+    test('historical matching candidates keep facts above remarks and actions visible', () => {
+        const source = readSource('src/views/desktop/transactions/list/dialogs/BillMatchingPanel.vue');
+        const titleSlot = source.match(/<template #title>(?<body>[\s\S]*?)<\/template>/)?.groups?.['body'] ?? '';
+        const subtitleSlot = source.match(/<template #subtitle>(?<body>[\s\S]*?)<\/template>/)?.groups?.['body'] ?? '';
+        const appendSlot = source.match(/<template #append>(?<body>[\s\S]*?)<\/template>/)?.groups?.['body'] ?? '';
+
+        expect(titleSlot).toContain('getCandidateTopLineParts(candidate)');
+        expect(titleSlot).toContain('getCandidateSecondLineParts(candidate)');
+        expect(subtitleSlot).toContain('getCandidateRemark(candidate)');
+        expect(titleSlot).not.toContain('getCandidateRemark(candidate)');
+        expect(appendSlot).toContain('isBillMatchingCandidateReviewActionSupported(candidate)');
+        expect(appendSlot).toContain("handleCandidateAction('accept', candidate)");
+        expect(appendSlot).toContain("handleCandidateAction('reject', candidate)");
+    });
 });

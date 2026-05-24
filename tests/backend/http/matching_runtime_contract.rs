@@ -150,6 +150,62 @@ async fn matching_recurring_calendar_networth_runtime_serves_owned_routes(
         .iter()
         .any(|candidate| candidate["candidateId"] == "bill:30:duplicate:32"));
 
+    let reverse_duplicate_reject_response = app
+        .clone()
+        .oneshot(authed_json_request(
+            Method::POST,
+            "/api/matching/candidates/bill%3A808%3Aduplicate%3A442/reject",
+            serde_json::json!({}),
+        ))
+        .await?;
+    let reverse_duplicate_reject_status = reverse_duplicate_reject_response.status();
+    let reverse_duplicate_reject_body = read_json(reverse_duplicate_reject_response).await;
+    assert_eq!(
+        reverse_duplicate_reject_status,
+        StatusCode::OK,
+        "{reverse_duplicate_reject_body}"
+    );
+    assert_eq!(reverse_duplicate_reject_body["data"]["action"], "reject");
+    let suppressed_reverse_duplicate_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/matching/candidates?billId=808",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(
+        suppressed_reverse_duplicate_response.status(),
+        StatusCode::OK
+    );
+    let suppressed_reverse_duplicate_body = read_json(suppressed_reverse_duplicate_response).await;
+    assert!(!suppressed_reverse_duplicate_body["data"]["candidates"]
+        .as_array()
+        .expect("suppressed reverse duplicate candidates")
+        .iter()
+        .any(|candidate| candidate["candidateId"] == "bill:808:duplicate:442"));
+
+    let reverse_duplicate_accept_response = app
+        .clone()
+        .oneshot(authed_json_request(
+            Method::POST,
+            "/api/matching/candidates/bill%3A809%3Aduplicate%3A443/accept",
+            serde_json::json!({}),
+        ))
+        .await?;
+    let reverse_duplicate_accept_status = reverse_duplicate_accept_response.status();
+    let reverse_duplicate_accept_body = read_json(reverse_duplicate_accept_response).await;
+    assert_eq!(
+        reverse_duplicate_accept_status,
+        StatusCode::OK,
+        "{reverse_duplicate_accept_body}"
+    );
+    assert_eq!(
+        reverse_duplicate_accept_body["data"]["pair"]["pairType"],
+        "duplicate"
+    );
+    assert_eq!(reverse_duplicate_accept_body["data"]["mergedBillId"], 443);
+
     let invalid_selector_response = app
         .clone()
         .oneshot(authed_request(
@@ -196,6 +252,17 @@ async fn matching_recurring_calendar_networth_runtime_serves_owned_routes(
     assert_eq!(accept_matching_body["data"]["pair"]["pairType"], "transfer");
     assert_eq!(accept_matching_body["data"]["pair"]["leftBillId"], 20);
     assert_eq!(accept_matching_body["data"]["pair"]["rightBillId"], 21);
+    assert_eq!(accept_matching_body["data"]["mergedBillId"], 21);
+    assert_eq!(accept_matching_body["data"]["bill"]["type"], "转账");
+    assert_eq!(accept_matching_body["data"]["bill"]["sourceAccountId"], 10);
+    assert_eq!(
+        accept_matching_body["data"]["bill"]["destinationAccountId"],
+        11
+    );
+    assert_eq!(
+        accept_matching_body["data"]["bill"]["destinationAmount"],
+        25.5
+    );
 
     let feedback_response = app
         .clone()
@@ -224,11 +291,38 @@ async fn matching_recurring_calendar_networth_runtime_serves_owned_routes(
     assert_eq!(reconcile_response.status(), StatusCode::OK);
     let reconcile_body = read_json(reconcile_response).await;
     assert_eq!(reconcile_body["data"]["summary"]["billCount"], 1);
-    assert_eq!(reconcile_body["data"]["summary"]["linkedPairCount"], 1);
+    assert_eq!(reconcile_body["data"]["summary"]["linkedPairCount"], 0);
+    assert!(reconcile_body["data"]["results"][0]["linkedPair"].is_null());
+
+    let pairs_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/matching/pairs",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(pairs_response.status(), StatusCode::OK);
+    let pairs_body = read_json(pairs_response).await;
     assert_eq!(
-        reconcile_body["data"]["results"][0]["linkedPair"]["pairType"],
-        "transfer"
+        pairs_body["data"]["pairs"]
+            .as_array()
+            .expect("pairs after merge")
+            .len(),
+        0
     );
+
+    let manual_pair_response = app
+        .clone()
+        .oneshot(authed_json_request(
+            Method::POST,
+            "/api/matching/manual-pair",
+            serde_json::json!({"billId": 22, "candidateBillId": 23, "pairType": "transfer"}),
+        ))
+        .await?;
+    assert_eq!(manual_pair_response.status(), StatusCode::OK);
+    let manual_pair_body = read_json(manual_pair_response).await;
+    assert_eq!(manual_pair_body["data"]["pair"]["pairType"], "transfer");
 
     let pairs_response = app
         .clone()
@@ -243,8 +337,8 @@ async fn matching_recurring_calendar_networth_runtime_serves_owned_routes(
     let pair_id = pairs_body["data"]["pairs"][0]["id"]
         .as_i64()
         .expect("pair id");
-    assert_eq!(pairs_body["data"]["pairs"][0]["leftBill"]["id"], 20);
-    assert_eq!(pairs_body["data"]["pairs"][0]["rightBill"]["id"], 21);
+    assert_eq!(pairs_body["data"]["pairs"][0]["leftBill"]["id"], 22);
+    assert_eq!(pairs_body["data"]["pairs"][0]["rightBill"]["id"], 23);
 
     let delete_pair_response = app
         .clone()
@@ -257,18 +351,6 @@ async fn matching_recurring_calendar_networth_runtime_serves_owned_routes(
     assert_eq!(delete_pair_response.status(), StatusCode::OK);
     let delete_pair_body = read_json(delete_pair_response).await;
     assert_eq!(delete_pair_body["data"]["pair"]["id"], pair_id);
-
-    let manual_pair_response = app
-        .clone()
-        .oneshot(authed_json_request(
-            Method::POST,
-            "/api/matching/manual-pair",
-            serde_json::json!({"billId": 20, "candidateBillId": 21, "pairType": "transfer"}),
-        ))
-        .await?;
-    assert_eq!(manual_pair_response.status(), StatusCode::OK);
-    let manual_pair_body = read_json(manual_pair_response).await;
-    assert_eq!(manual_pair_body["data"]["pair"]["pairType"], "transfer");
 
     let reconciliation_candidates_response = app
         .clone()
@@ -931,10 +1013,14 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             payment_method TEXT DEFAULT '',
             main_category TEXT,
             sub_category TEXT,
+            batch_id TEXT,
+            hash TEXT,
             source_account_id INTEGER DEFAULT 0,
             destination_account_id INTEGER DEFAULT 0,
             destination_amount REAL DEFAULT 0,
+            created_from_template INTEGER,
             created_from_recurring INTEGER,
+            import_history_id INTEGER,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
@@ -1010,9 +1096,15 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
                 (4, 42, '2026-03-15T23:59:59', 'expense', -7.25, 'Late Store', 'End date timestamp', 'cash', 'Food', 'Snack', 10, 0, 0),
                 (20, 42, '2026-03-05T09:00:00', 'expense', -25.5, 'Wallet', 'Transfer out', 'cash', 'Transfer', '', 10, 0, 0),
                 (21, 42, '2026-03-05T09:04:00', 'income', 25.5, 'Card', 'Transfer in', 'card', 'Transfer', '', 11, 0, 0),
+                (22, 42, '2026-03-05T10:00:00', 'expense', -26.5, 'Wallet', 'Manual pair transfer out', 'cash', 'Transfer', '', 10, 0, 0),
+                (23, 42, '2026-03-05T10:04:00', 'income', 26.5, 'Card', 'Manual pair transfer in', 'card', 'Transfer', '', 11, 0, 0),
                 (30, 42, '2026-03-06T10:00:00', 'expense', -18.8, 'Coffee Shop', 'Identical coffee', 'wechat', 'Food', 'Coffee', 10, 0, 0),
                 (31, 42, '2026-03-06T10:00:00', 'expense', -18.8, 'Coffee Shop', 'Identical coffee', 'wechat', 'Food', 'Coffee', 10, 0, 0),
                 (32, 42, '2026-03-06T10:00:00', 'expense', -18.8, 'Coffee Shop', 'Different coffee', 'wechat', 'Food', 'Coffee', 10, 0, 0),
+                (442, 42, '2026-03-07T10:00:00', 'expense', -28.8, 'Tea Shop', 'Identical tea', 'wechat', 'Food', 'Tea', 10, 0, 0),
+                (443, 42, '2026-03-08T10:00:00', 'expense', -38.8, 'Dessert Shop', 'Identical cake', 'wechat', 'Food', 'Dessert', 10, 0, 0),
+                (808, 42, '2026-03-07T10:00:00', 'expense', -28.8, 'Tea Shop', 'Identical tea', 'wechat', 'Food', 'Tea', 10, 0, 0),
+                (809, 42, '2026-03-08T10:00:00', 'expense', -38.8, 'Dessert Shop', 'Identical cake', 'wechat', 'Food', 'Dessert', 10, 0, 0),
                 (77, 77, '2026-03-01', 'expense', -999.0, 'Other', 'Other user', 'cash', 'Food', '', 10, 0, 0)",
         [],
     )?;

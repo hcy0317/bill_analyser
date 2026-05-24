@@ -413,6 +413,12 @@ fn delete_bill_side_effects(
         &bill_ids,
         "bill_investment_pair_suppressions",
     )?;
+    delete_pair_table_by_pair_columns(
+        transaction,
+        user_id,
+        &bill_ids,
+        "bill_duplicate_pair_suppressions",
+    )?;
     if table_exists(transaction, "bill_learning_rule_suppressions")? {
         let placeholders = placeholders(bill_ids.len());
         let mut sql_params = vec![SqlValue::Integer(user_id)];

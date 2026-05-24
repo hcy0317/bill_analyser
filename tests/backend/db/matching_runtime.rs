@@ -56,6 +56,32 @@ fn matching_runtime_repository_covers_bill_preview_and_reconciliation_flows(
                 && candidate["kind"] == "duplicate"
                 && candidate["bill"]["description"] == "Identical coffee"
         }));
+    let rejected_duplicate = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "bill:701:duplicate:702",
+        "reject",
+        &PreviewMatchingActionRequest::default(),
+    )?;
+    assert_eq!(rejected_duplicate["action"], "reject");
+    let suppressed_duplicate = query_matching_bill_candidates_payload(&connection, user_id, 701)?
+        .expect("suppressed duplicate");
+    assert!(!candidate_ids(&suppressed_duplicate).contains(&"bill:701:duplicate:702".to_string()));
+    let accepted_duplicate = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "bill:704:duplicate:705",
+        "accept",
+        &PreviewMatchingActionRequest::default(),
+    )?;
+    assert_eq!(accepted_duplicate["pair"]["pairType"], "duplicate");
+    assert_eq!(accepted_duplicate["mergedBillId"], 705);
+    assert_eq!(bill_count(&connection, 704)?, 1);
+    assert_eq!(bill_count(&connection, 705)?, 0);
+    let duplicate_after_accept = query_matching_bill_candidates_payload(&connection, user_id, 704)?
+        .expect("duplicate merge payload");
+    assert!(duplicate_after_accept["linkedPair"].is_null());
+    assert!(!candidate_ids(&duplicate_after_accept).contains(&"bill:704:duplicate:705".to_string()));
     let investment_payload = query_matching_bill_candidates_payload(&connection, user_id, 201)?
         .expect("investment candidates");
     assert!(candidate_ids(&investment_payload).contains(&"bill:201:investment:202".to_string()));
@@ -92,9 +118,48 @@ fn matching_runtime_repository_covers_bill_preview_and_reconciliation_flows(
         &PreviewMatchingActionRequest::default(),
     )?;
     assert_eq!(accepted_transfer["pair"]["pairType"], "transfer");
-    let linked_payload = query_matching_bill_candidates_payload(&connection, user_id, 101)?
-        .expect("linked pair payload");
-    assert_eq!(linked_payload["linkedPair"]["otherBillId"], 102);
+    assert_eq!(accepted_transfer["mergedBillId"], 102);
+    assert_eq!(accepted_transfer["bill"]["type"], "转账");
+    assert_eq!(accepted_transfer["bill"]["amount"], -50.0);
+    assert_eq!(accepted_transfer["bill"]["source_account_id"], 10);
+    assert_eq!(accepted_transfer["bill"]["destination_account_id"], 11);
+    assert_eq!(accepted_transfer["bill"]["destination_amount"], 50.0);
+    assert_eq!(bill_count(&connection, 101)?, 1);
+    assert_eq!(bill_count(&connection, 102)?, 0);
+    let transfer_after_accept = query_matching_bill_candidates_payload(&connection, user_id, 101)?
+        .expect("merged transfer payload");
+    assert!(transfer_after_accept["linkedPair"].is_null());
+    assert!(!candidate_ids(&transfer_after_accept).contains(&"bill:101:transfer:102".to_string()));
+
+    let accepted_incoming_anchor_transfer = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "bill:707:transfer:706",
+        "accept",
+        &PreviewMatchingActionRequest::default(),
+    )?;
+    assert_eq!(
+        accepted_incoming_anchor_transfer["pair"]["pairType"],
+        "transfer"
+    );
+    assert_eq!(accepted_incoming_anchor_transfer["bill"]["id"], 707);
+    assert_eq!(accepted_incoming_anchor_transfer["bill"]["type"], "转账");
+    assert_eq!(accepted_incoming_anchor_transfer["bill"]["amount"], -88.0);
+    assert_eq!(
+        accepted_incoming_anchor_transfer["bill"]["source_account_id"],
+        10
+    );
+    assert_eq!(
+        accepted_incoming_anchor_transfer["bill"]["destination_account_id"],
+        11
+    );
+    assert_eq!(
+        accepted_incoming_anchor_transfer["bill"]["destination_amount"],
+        88.0
+    );
+    assert_eq!(accepted_incoming_anchor_transfer["mergedBillId"], 706);
+    assert_eq!(bill_count(&connection, 706)?, 0);
+    assert_eq!(bill_count(&connection, 707)?, 1);
 
     let rejected_transfer = apply_matching_candidate_action(
         &mut connection,
@@ -715,9 +780,14 @@ fn create_business_schema(connection: &Connection) -> Result<(), Box<dyn Error>>
             payment_method TEXT DEFAULT '',
             main_category TEXT,
             sub_category TEXT,
+            batch_id TEXT,
+            hash TEXT,
             source_account_id INTEGER DEFAULT 0,
             destination_account_id INTEGER DEFAULT 0,
             destination_amount REAL DEFAULT 0,
+            created_from_template INTEGER,
+            created_from_recurring INTEGER,
+            import_history_id INTEGER,
             created_at TEXT,
             updated_at TEXT
         );
@@ -828,6 +898,10 @@ fn insert_core_rows(connection: &Connection) -> Result<(), Box<dyn Error>> {
             (701, 42, '2026-04-11T10:00:00', 'expense', -18.8, 'Coffee Shop', 'Identical coffee', 'wechat', 'Food', 'Coffee', 10, 0, 0, 'now', 'now'),
             (702, 42, '2026-04-11T10:00:00', 'expense', -18.8, 'Coffee Shop', 'Identical coffee', 'wechat', 'Food', 'Coffee', 10, 0, 0, 'now', 'now'),
             (703, 42, '2026-04-11T10:00:00', 'expense', -18.8, 'Coffee Shop', 'Different coffee', 'wechat', 'Food', 'Coffee', 10, 0, 0, 'now', 'now'),
+            (704, 42, '2026-04-12T10:00:00', 'expense', -28.8, 'Tea Shop', 'Identical tea', 'wechat', 'Food', 'Tea', 10, 0, 0, 'now', 'now'),
+            (705, 42, '2026-04-12T10:00:00', 'expense', -28.8, 'Tea Shop', 'Identical tea', 'wechat', 'Food', 'Tea', 10, 0, 0, 'now', 'now'),
+            (706, 42, '2026-04-13T10:00:00', 'expense', -88.0, 'Wallet', 'Reverse anchor transfer out', 'cash', 'Transfer', '', 10, 0, 0, 'now', 'now'),
+            (707, 42, '2026-04-13T10:03:00', 'income', 88.0, 'Card', 'Reverse anchor transfer in', 'card', 'Transfer', '', 11, 0, 0, 'now', 'now'),
             (901, 77, '2026-04-01', 'expense', -50.0, 'Other', 'Other user', 'cash', 'Other', '', 99, 0, 0, 'now', 'now')
         ",
         [],
@@ -1122,6 +1196,14 @@ fn candidate_ids(payload: &Value) -> Vec<String> {
                 .map(str::to_string)
         })
         .collect()
+}
+
+fn bill_count(connection: &Connection, bill_id: i64) -> Result<i64, Box<dyn Error>> {
+    Ok(connection.query_row(
+        "SELECT COUNT(*) FROM bills WHERE id = ?1",
+        [bill_id],
+        |row| row.get(0),
+    )?)
 }
 
 fn reconciliation_id() -> String {

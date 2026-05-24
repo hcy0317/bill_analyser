@@ -230,13 +230,12 @@ describe('bill_matching model helpers', () => {
         expect(getBillMatchingCandidateBillSubtitleParts(candidate)).toEqual([
             '2026-05-20',
             '收入',
-            '经营 / 销售',
-            '张三'
+            '经营 / 销售'
         ]);
         expect(getBillMatchingCandidateBillAmountCents(candidate)).toBe(8850);
     });
 
-    test('marks formal duplicate candidates as readonly while keeping persisted reconciliation actions', () => {
+    test('keeps historical duplicate candidates actionable with persisted reconciliation actions', () => {
         const response = normalizeBillMatchingCandidatesResponse({
             billId: 101,
             linkedPair: null,
@@ -259,7 +258,7 @@ describe('bill_matching model helpers', () => {
             ]
         });
 
-        expect(isBillMatchingCandidateReviewActionSupported(response.candidates[0]!)).toBe(false);
+        expect(isBillMatchingCandidateReviewActionSupported(response.candidates[0]!)).toBe(true);
         expect(isBillMatchingCandidateReviewActionSupported(response.candidates[1]!)).toBe(true);
 
         const state = buildBillMatchingViewState(response);

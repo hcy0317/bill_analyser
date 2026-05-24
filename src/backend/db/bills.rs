@@ -300,19 +300,64 @@ pub fn batch_update_bills(
 pub fn delete_bill(connection: &mut Connection, user_id: UserId, bill_id: i64) -> DbResult<bool> {
     let user_id = UserScope::new(user_id).bind_value()?;
     run_transaction(connection, |tx| {
-        let Some(snapshot) = get_bill_account_snapshot_on_tx(tx, user_id, bill_id)? else {
-            return Ok(false);
-        };
         let now = now_text();
-        delete_pairing_side_effects(tx, user_id, &[bill_id])?;
-        delete_bill_tags(tx, &[bill_id])?;
-        let deleted = tx.execute(
-            "DELETE FROM bills WHERE id = ?1 AND user_id = ?2",
-            params![bill_id, user_id],
-        )?;
-        sync_account_balances(tx, user_id, &sync_account_ids_for_bill(snapshot), &now)?;
-        Ok(deleted > 0)
+        delete_bill_on_tx(tx, user_id, bill_id, &now)
     })
+}
+
+pub(crate) fn update_bill_fields_on_tx(
+    tx: &Transaction<'_>,
+    user_id: i64,
+    bill_id: i64,
+    fields: &BillRecord,
+    now: &str,
+) -> DbResult<bool> {
+    let Some(old_snapshot) = get_bill_account_snapshot_on_tx(tx, user_id, bill_id)? else {
+        return Ok(false);
+    };
+    if fields.is_empty() {
+        return Ok(true);
+    }
+    let update_payload = prepare_update_payload(tx, user_id, bill_id, fields, now, false)?;
+    let (set_clause, mut values) = update_payload_to_sql(update_payload)?;
+    values.push(SqlValue::Integer(bill_id));
+    values.push(SqlValue::Integer(user_id));
+    let updated = tx.execute(
+        &format!("UPDATE bills SET {set_clause} WHERE id = ? AND user_id = ?"),
+        params_from_iter(values),
+    )?;
+    if updated == 0 {
+        return Ok(false);
+    }
+    delete_pairing_side_effects(tx, user_id, &[bill_id])?;
+    let new_snapshot = get_bill_account_snapshot_on_tx(tx, user_id, bill_id)?
+        .ok_or_else(|| DbError::InvalidOperation("updated bill not found".to_string()))?;
+    sync_account_balances(
+        tx,
+        user_id,
+        &sync_account_ids_for_update(old_snapshot, new_snapshot),
+        now,
+    )?;
+    Ok(true)
+}
+
+pub(crate) fn delete_bill_on_tx(
+    tx: &Transaction<'_>,
+    user_id: i64,
+    bill_id: i64,
+    now: &str,
+) -> DbResult<bool> {
+    let Some(snapshot) = get_bill_account_snapshot_on_tx(tx, user_id, bill_id)? else {
+        return Ok(false);
+    };
+    delete_pairing_side_effects(tx, user_id, &[bill_id])?;
+    delete_bill_tags(tx, &[bill_id])?;
+    let deleted = tx.execute(
+        "DELETE FROM bills WHERE id = ?1 AND user_id = ?2",
+        params![bill_id, user_id],
+    )?;
+    sync_account_balances(tx, user_id, &sync_account_ids_for_bill(snapshot), now)?;
+    Ok(deleted > 0)
 }
 
 pub fn batch_delete_bills(
@@ -908,6 +953,7 @@ fn delete_pairing_side_effects(
     delete_pair_table_by_pair_columns(tx, user_id, &bill_ids, "bill_pair_links")?;
     delete_pair_table_by_pair_columns(tx, user_id, &bill_ids, "bill_transfer_pair_suppressions")?;
     delete_pair_table_by_pair_columns(tx, user_id, &bill_ids, "bill_investment_pair_suppressions")?;
+    delete_pair_table_by_pair_columns(tx, user_id, &bill_ids, "bill_duplicate_pair_suppressions")?;
     if table_exists(tx, "bill_learning_rule_suppressions")? {
         let placeholders = placeholders(bill_ids.len());
         let mut params = vec![SqlValue::Integer(user_id)];

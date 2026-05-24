@@ -365,7 +365,10 @@ pub fn build_matching_candidate_action_payload(
     insert_i64_if_present(object, "previewId", result.get("preview_id"));
     insert_string_if_present(object, "sessionId", result.get("session_id"));
     insert_i64_if_present(object, "recurringId", result.get("recurring_id"));
+    insert_i64_if_present(object, "keptBillId", result.get("keptBillId"));
+    insert_i64_if_present(object, "mergedBillId", result.get("mergedBillId"));
     insert_string_if_present(object, "reviewStatus", result.get("review_status"));
+    insert_string_if_present(object, "effect", result.get("effect"));
     if let Some(value) = result.get("suppressed") {
         object.insert(
             "suppressed".to_string(),
