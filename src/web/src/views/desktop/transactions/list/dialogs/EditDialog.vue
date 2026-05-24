@@ -1958,12 +1958,6 @@ defineExpose({
     color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)) !important;
 }
 
-.transaction-readonly-form {
-    background-color: rgba(var(--v-theme-on-surface), 0.045);
-    border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-    border-radius: 14px;
-}
-
 .transaction-readonly-form :deep(.v-field) {
     background-color: rgba(var(--v-theme-on-surface), 0.05) !important;
     border-radius: 10px;

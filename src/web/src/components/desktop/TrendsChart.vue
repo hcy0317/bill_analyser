@@ -27,7 +27,7 @@ import {
     DateRangeScene
 } from '@/core/datetime.ts';
 import type { ColorStyleValue } from '@/core/color.ts';
-import { ThemeType } from '@/core/theme.ts';
+import { isDarkApplicationTheme } from '@/core/theme.ts';
 import {
     ChartDataAggregationType,
     TrendChartType,
@@ -115,7 +115,7 @@ const userStore = useUserStore();
 const selectedLegends = ref<Record<string, boolean>>({});
 
 const textDirection = computed<TextDirection>(() => getCurrentLanguageTextDirection());
-const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
+const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
 
 const itemsMap = computed<Record<string, Record<string, unknown>>>(() => {
     const map: Record<string, Record<string, unknown>> = {};

@@ -129,7 +129,7 @@ import { useI18n } from '@/locales/helpers.ts';
 
 import { useRootStore } from '@/stores/index.ts';
 
-import { ThemeType } from '@/core/theme.ts';
+import { isDarkApplicationTheme } from '@/core/theme.ts';
 import { APPLICATION_LOGO_PATH } from '@/consts/asset.ts';
 
 import { getClientDisplayVersion } from '@/lib/version.ts';
@@ -165,7 +165,7 @@ const confirmPassword = ref<string>('');
 const updating = ref<boolean>(false);
 const passwordChanged = ref<boolean>(false);
 
-const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
+const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
 
 const inputProblemMessage = computed<string | null>(() => {
     if (!email.value) {

@@ -20,12 +20,20 @@ import { useUserStore } from '@/stores/user.ts';
 import { useExchangeRatesStore } from '@/stores/exchangeRates.ts';
 
 import { APPLICATION_LOGO_PATH } from '@/consts/asset.ts';
-import { ThemeType } from '@/core/theme.ts';
+import {
+    type ApplicationThemeName,
+    SYSTEM_THEME_PREFERENCE,
+    ThemeType,
+    getFramework7DarkModePreference,
+    getMobileThemeConfig,
+    normalizeThemePreference,
+    resolveThemePreference
+} from '@/core/theme.ts';
 import { isProduction } from '@/lib/version.ts';
 import { getTheme, isEnableSwipeBack, isEnableAnimate } from '@/lib/settings.ts';
 import { initMapProvider } from '@/lib/map/index.ts';
 import { isUserLogined, isUserUnlocked } from '@/lib/userstate.ts';
-import { setExpenseAndIncomeAmountColor } from '@/lib/ui/common.ts';
+import { getSystemTheme, setExpenseAndIncomeAmountColor } from '@/lib/ui/common.ts';
 import { isModalShowing, setAppFontSize } from '@/lib/ui/mobile.ts';
 import logger from '@/lib/logger.ts';
 
@@ -37,24 +45,34 @@ const environmentsStore = useEnvironmentsStore();
 const userStore = useUserStore();
 const exchangeRatesStore = useExchangeRatesStore();
 
+function getResolvedMobileTheme(darkMode?: boolean): ApplicationThemeName {
+    const themePreference = normalizeThemePreference(getTheme());
+
+    if (themePreference === SYSTEM_THEME_PREFERENCE && darkMode !== undefined) {
+        return darkMode ? ThemeType.Dark : ThemeType.Light;
+    }
+
+    return resolveThemePreference(themePreference, getSystemTheme());
+}
+
+function applyMobileThemeVariables(themeName: ApplicationThemeName): void {
+    const mobileTheme = getMobileThemeConfig(themeName);
+
+    for (const [name, value] of Object.entries(mobileTheme.cssVariables)) {
+        document.documentElement.style.setProperty(name, value);
+    }
+}
+
+applyMobileThemeVariables(getResolvedMobileTheme());
+
 const f7params = ref<Framework7Parameters>({
     name: 'bill analyser',
     theme: 'ios',
     colors: {
-        primary: '#c67e48'
+        primary: getMobileThemeConfig(getResolvedMobileTheme()).primary
     },
     routes: routes,
-    darkMode: (() => {
-        let darkMode: boolean | string = 'auto';
-
-        if (getTheme() === ThemeType.Light) {
-            darkMode = false;
-        } else if (getTheme() === ThemeType.Dark) {
-            darkMode = true;
-        }
-
-        return darkMode;
-    })(),
+    darkMode: getFramework7DarkModePreference(getTheme()),
     touch: {
         disableContextMenu: true,
         tapHold: true
@@ -121,23 +139,18 @@ function isiOSHomeScreenMode(): boolean {
 }
 
 function setThemeColorMeta(darkMode: boolean | undefined): void {
+    const mobileTheme = getMobileThemeConfig(getResolvedMobileTheme(darkMode));
+    applyMobileThemeVariables(getResolvedMobileTheme(darkMode));
+
     if (hasPushPopupBackdrop.value) {
-        document.querySelector('meta[name=theme-color]')?.setAttribute('content', '#000');
+        document.querySelector('meta[name=theme-color]')?.setAttribute('content', mobileTheme.metaThemeColor.pushBackdrop);
         return;
     }
 
-    if (darkMode) {
-        if (hasBackdrop.value) {
-            document.querySelector('meta[name=theme-color]')?.setAttribute('content', '#0b0b0b');
-        } else {
-            document.querySelector('meta[name=theme-color]')?.setAttribute('content', '#121212');
-        }
+    if (hasBackdrop.value) {
+        document.querySelector('meta[name=theme-color]')?.setAttribute('content', mobileTheme.metaThemeColor.backdrop);
     } else {
-        if (hasBackdrop.value) {
-            document.querySelector('meta[name=theme-color]')?.setAttribute('content', '#949495');
-        } else {
-            document.querySelector('meta[name=theme-color]')?.setAttribute('content', '#f6f6f8');
-        }
+        document.querySelector('meta[name=theme-color]')?.setAttribute('content', mobileTheme.metaThemeColor.default);
     }
 }
 

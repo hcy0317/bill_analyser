@@ -100,7 +100,7 @@ import { useI18n } from '@/locales/helpers.ts';
 
 import { useRootStore } from '@/stores/index.ts';
 
-import { ThemeType } from '@/core/theme.ts';
+import { isDarkApplicationTheme } from '@/core/theme.ts';
 import { APPLICATION_LOGO_PATH } from '@/consts/asset.ts';
 
 import { getClientDisplayVersion } from '@/lib/version.ts';
@@ -124,7 +124,7 @@ const snackbar = useTemplateRef<SnackBarType>('snackbar');
 const email = ref<string>('');
 const requesting = ref<boolean>(false);
 
-const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
+const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
 
 function requestResetPassword(): void {
     if (!email.value) {

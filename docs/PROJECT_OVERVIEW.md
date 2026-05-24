@@ -41,6 +41,10 @@ Rust auth runtime 校验 Bearer access token，2FA、step-up、user-data clear�
 
 LLM 临时配置保存在 Rust 进程内 user-scoped map，saved config 落库并脱敏；provider 生成保留 allowlist/SSRF 防护、响应体上限、候选截断和 rate limit。OCR recognition 默认 disabled，配置后通过 provider 返回结构化交易草稿。
 
+### 前端主题
+
+前端主题由 `src/web/src/core/theme.ts` 的统一注册表管理。桌面 Vuetify、移动端 Framework7、应用设置页与系统主题自动解析都从同一注册表读取主题名称、明暗属性、色板、移动端 CSS 变量和 meta theme-color；当前保留 `auto` / `light` / `dark` 兼容值，并为 Halloween、forest、wireframe、black、dracula、business、night、dim 等经典预设提供浅色/深色配对。桌面表格条纹、表头和主题切换按钮使用主题 token 与配对关系，避免深色主题下出现硬编码浅色条纹。金额收入/支出颜色仍由独立 amount-color 体系管理，不并入主题状态色。
+
 ## 文档入口
 
 - [后端导航图](backend-map.md) — Rust 后端分层、请求生命周期、导入管线、repository 数据流和验证矩阵

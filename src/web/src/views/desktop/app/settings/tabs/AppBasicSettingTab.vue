@@ -307,7 +307,7 @@ import { useAccountsStore } from '@/stores/account.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 
 import type { LocalizedSwitchOption } from '@/core/base.ts';
-import { ThemeType } from '@/core/theme.ts';
+import { normalizeThemePreference, resolveThemePreference } from '@/core/theme.ts';
 import { CategoryType } from '@/core/category.ts';
 
 import { getSystemTheme } from '@/lib/ui/common.ts';
@@ -357,16 +357,11 @@ const showAccountsIncludedInTotalDialog = ref<boolean>(false);
 const enableDisableOptions = computed<LocalizedSwitchOption[]>(() => getAllEnableDisableOptions());
 
 const currentTheme = computed<string>({
-    get: () => settingsStore.appSettings.theme,
+    get: () => normalizeThemePreference(settingsStore.appSettings.theme),
     set: (value: string) => {
         if (value !== settingsStore.appSettings.theme) {
             settingsStore.setTheme(value);
-
-            if (value === ThemeType.Light || value === ThemeType.Dark) {
-                theme.change(value);
-            } else {
-                theme.change(getSystemTheme());
-            }
+            theme.change(resolveThemePreference(value, getSystemTheme()));
         }
     }
 });

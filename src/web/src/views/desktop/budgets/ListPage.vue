@@ -702,7 +702,7 @@ import { DateRange, DateRangeScene } from '@/core/datetime.ts';
 import { FiscalYearStart } from '@/core/fiscalyear.ts';
 import { TransactionCategory } from '@/models/transaction_category.ts';
 import { AmountFilterType } from '@/core/numeral.ts';
-import { ThemeType } from '@/core/theme.ts';
+import { isDarkApplicationTheme } from '@/core/theme.ts';
 import {
     getCurrentUnixTime,
     getTodayFirstUnixTime,
@@ -814,7 +814,7 @@ const userStore = useUserStore();
 const defaultCurrency = computed(() => String(settingsStore.appSettings['currency'] || 'CNY'));
 
 // 暗色模式检测
-const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
+const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
 
 // 是否始终显示导航栏（桌面端）
 const alwaysShowNav = computed(() => display.mdAndUp.value);

@@ -21,7 +21,7 @@ import {
 } from '@/models/transaction.ts';
 
 import { values } from '@/core/base.ts';
-import { ThemeType } from '@/core/theme.ts';
+import { isDarkApplicationTheme } from '@/core/theme.ts';
 
 import { isNumber } from '@/lib/common.ts';
 import { getExpenseAndIncomeAmountColor } from '@/lib/ui/common.ts';
@@ -115,7 +115,7 @@ const overviewDataItemTypeSankeyChartNodeItemDepthMap: Record<TransactionCategor
     [TransactionCategoricalOverviewAnalysisDataItemType.ExpenseByPrimaryCategory]: SankeyChartDepth.PrimaryExpenseCategory
 };
 
-const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
+const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
 
 const sankeyData = computed<SankeyChartData>(() => {
     const nodes: SankeyChartNodeItem[] = [];

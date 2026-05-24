@@ -180,7 +180,7 @@ import { useLoginPageBase } from '@/views/base/LoginPageBase.ts';
 
 import { useRootStore } from '@/stores/index.ts';
 
-import { ThemeType } from '@/core/theme.ts';
+import { isDarkApplicationTheme } from '@/core/theme.ts';
 import { APPLICATION_LOGO_PATH } from '@/consts/asset.ts';
 import { KnownErrorCode } from '@/consts/api.ts';
 
@@ -234,7 +234,7 @@ const snackbar = useTemplateRef<SnackBarType>('snackbar');
 const show2faInput = ref<boolean>(false);
 const showMobileQrCode = ref<boolean>(false);
 
-const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
+const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
 
 function login(): void {
     if (!username.value) {

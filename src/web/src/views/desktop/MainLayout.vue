@@ -133,8 +133,8 @@
                         </div>
                         <v-spacer />
                         <v-btn color="primary" variant="text" class="me-2"
-                               :icon="true" @click="(currentTheme === 'light' ? currentTheme = 'dark' : (currentTheme === 'dark' ? currentTheme = 'auto' : currentTheme = 'light'))">
-                            <v-icon :icon="(currentTheme === 'light' ? mdiWeatherSunny : (currentTheme === 'dark' ? mdiWeatherNight : mdiThemeLightDark))" size="24" />
+                               :icon="true" @click="currentTheme = getNextQuickThemePreference(currentTheme)">
+                            <v-icon :icon="currentThemeIcon" size="24" />
                         </v-btn>
                         <v-avatar class="cursor-pointer" variant="tonal"
                                   :color="currentUserAvatar ? 'rgba(0,0,0,0)' : 'primary'">
@@ -225,7 +225,13 @@ import { useUserStore } from '@/stores/user.ts';
 import { useDesktopPageStore } from '@/stores/desktopPage.ts';
 
 import { APPLICATION_LOGO_PATH } from '@/consts/asset.ts';
-import { ThemeType } from '@/core/theme.ts';
+import {
+    SYSTEM_THEME_PREFERENCE,
+    getNextQuickThemePreference,
+    isDarkApplicationTheme,
+    normalizeThemePreference,
+    resolveThemePreference
+} from '@/core/theme.ts';
 import { isUserScheduledTransactionEnabled } from '@/lib/server_settings.ts';
 import { getSystemTheme, setExpenseAndIncomeAmountColor } from '@/lib/ui/common.ts';
 
@@ -279,20 +285,22 @@ const showMobileQrCode = ref<boolean>(false);
 const mdAndDown = computed<boolean>(() => display.mdAndDown.value);
 const currentNickName = computed<string>(() => userStore.currentUserNickname || tt('User'));
 const currentUserAvatar = computed<string | null>(() => userStore.getUserAvatarUrl(userStore.currentUserBasicInfo, true));
+const currentThemeIcon = computed<string>(() => {
+    if (currentTheme.value === SYSTEM_THEME_PREFERENCE) {
+        return mdiThemeLightDark;
+    }
+
+    return isDarkApplicationTheme(currentTheme.value) ? mdiWeatherNight : mdiWeatherSunny;
+});
 
 const currentTheme = computed<string>({
     get: () => {
-        return settingsStore.appSettings.theme;
+        return normalizeThemePreference(settingsStore.appSettings.theme);
     },
     set: (value: string) => {
         if (value !== settingsStore.appSettings.theme) {
             settingsStore.setTheme(value);
-
-            if (value === ThemeType.Light || value === ThemeType.Dark) {
-                theme.change(value);
-            } else {
-                theme.change(getSystemTheme());
-            }
+            theme.change(resolveThemePreference(value, getSystemTheme()));
         }
     }
 });

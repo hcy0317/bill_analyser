@@ -35,7 +35,7 @@ import { useTheme } from 'vuetify';
 
 import { useI18n } from '@/locales/helpers.ts';
 
-import { ThemeType } from '@/core/theme.ts';
+import { isDarkApplicationTheme } from '@/core/theme.ts';
 import type { Year0BasedMonth } from '@/core/datetime.ts';
 
 import { getYear0BasedMonthObjectFromUnixTime, getThisMonthFirstUnixTime } from '@/lib/datetime.ts';
@@ -60,7 +60,7 @@ const { tt } = useI18n();
 
 const monthValue = ref<Year0BasedMonth>(getYear0BasedMonthObjectFromUnixTime(getThisMonthFirstUnixTime()));
 
-const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
+const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
 const showState = computed<boolean>({
     get: () => props.show || false,
     set: (value) => emit('update:show', value)

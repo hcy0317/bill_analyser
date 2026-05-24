@@ -37,14 +37,14 @@ import {
     useFiscalYearStartSelectionBase
 } from '@/components/base/FiscalYearStartSelectionBase.ts';
 
-import { ThemeType } from '@/core/theme.ts';
+import { isDarkApplicationTheme } from '@/core/theme.ts';
 
 const props = defineProps<CommonFiscalYearStartSelectionProps>();
 const emit = defineEmits<CommonFiscalYearStartSelectionEmits>();
 
 const theme = useTheme();
 
-const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
+const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
 
 const {
     disabledDates,

@@ -107,7 +107,7 @@ import { useI18n } from '@/locales/helpers.ts';
 
 import { useRootStore } from '@/stores/index.ts';
 
-import { ThemeType } from '@/core/theme.ts';
+import { isDarkApplicationTheme } from '@/core/theme.ts';
 import { APPLICATION_LOGO_PATH } from '@/consts/asset.ts';
 
 import { isUserVerifyEmailEnabled } from '@/lib/server_settings.ts';
@@ -145,7 +145,7 @@ const resending = ref<boolean>(false);
 const verified = ref<boolean>(false);
 const errorMessage = ref<string>('');
 
-const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
+const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
 
 function init(): void {
     verified.value = false;

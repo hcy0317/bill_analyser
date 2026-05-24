@@ -222,7 +222,7 @@ import { useRootStore } from '@/stores/index.ts';
 
 import type { PartialRecord, TypeAndDisplayName } from '@/core/base.ts';
 import { type LocalizedPresetCategory, CategoryType } from '@/core/category.ts';
-import { ThemeType } from '@/core/theme.ts';
+import { isDarkApplicationTheme } from '@/core/theme.ts';
 import { APPLICATION_LOGO_PATH } from '@/consts/asset.ts';
 
 import { categorizedArrayToPlainArray } from '@/lib/common.ts';
@@ -263,7 +263,7 @@ const navigateToHomePage = ref<boolean>(false);
 
 const allWeekDays = computed<TypeAndDisplayName[]>(() => getAllWeekDays());
 const allPresetCategories = computed<PartialRecord<CategoryType, LocalizedPresetCategory[]>>(() => getAllTransactionDefaultCategories(0, currentLocale.value));
-const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
+const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
 
 const allSteps = computed<StepBarItem[]>(() => {
     const allSteps = [

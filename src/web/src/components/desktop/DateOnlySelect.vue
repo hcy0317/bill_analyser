@@ -31,7 +31,7 @@ import { useTheme } from 'vuetify';
 
 import DateTimePicker from '@/components/common/DateTimePicker.vue';
 
-import { ThemeType } from '@/core/theme.ts';
+import { isDarkApplicationTheme } from '@/core/theme.ts';
 
 const props = defineProps<{
     modelValue: number;  // 毫秒时间戳
@@ -48,7 +48,7 @@ const emit = defineEmits<{
 
 const theme = useTheme();
 
-const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
+const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
 
 const dateValue = computed<Date>({
     get: () => {

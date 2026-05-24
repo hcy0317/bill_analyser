@@ -103,7 +103,7 @@ import { useTheme } from 'vuetify';
 import { useI18n } from '@/locales/helpers.ts';
 import { type TimePickerValue, useDateTimeSelectionBase } from '@/components/base/DateTimeSelectionBase.ts';
 
-import { ThemeType } from '@/core/theme.ts';
+import { isDarkApplicationTheme } from '@/core/theme.ts';
 import { NumeralSystem } from '@/core/numeral.ts';
 import {
     type DateTime,
@@ -162,7 +162,7 @@ const hourInput = useTemplateRef<VAutocomplete>('hourInput');
 const minuteInput = useTemplateRef<VAutocomplete>('minuteInput');
 const secondInput = useTemplateRef<VAutocomplete>('secondInput');
 
-const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
+const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
 const numeralSystem = computed<NumeralSystem>(() => getCurrentNumeralSystemType());
 const menuProps = computed<Record<string, unknown>>(() => {
     return {

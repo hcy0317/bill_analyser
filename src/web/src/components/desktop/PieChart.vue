@@ -15,7 +15,7 @@ import { type CommonPieChartDataItem, type CommonPieChartProps, usePieChartBase 
 
 import { itemAndIndex } from '@/core/base.ts';
 import type { ColorStyleValue } from '@/core/color.ts';
-import { ThemeType } from '@/core/theme.ts';
+import { isDarkApplicationTheme } from '@/core/theme.ts';
 
 import { getObjectOwnFieldCount } from '@/lib/common.ts';
 
@@ -39,7 +39,7 @@ const { selectedIndex, validItems } = usePieChartBase(props);
 
 const selectedLegends = ref<Record<string, boolean>>({});
 
-const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
+const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
 
 const itemsMap = computed<Record<string, Record<string, unknown>>>(() => {
     const map: Record<string, Record<string, unknown>> = {};

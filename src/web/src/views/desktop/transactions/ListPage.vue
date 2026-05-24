@@ -734,7 +734,7 @@ import {
     DateRange
 } from '@/core/datetime.ts';
 import { type NumeralSystem, AmountFilterType } from '@/core/numeral.ts';
-import { ThemeType } from '@/core/theme.ts';
+import { isDarkApplicationTheme } from '@/core/theme.ts';
 import { TransactionType, TransactionTagFilterType } from '@/core/transaction.ts';
 import { TemplateType }  from '@/core/template.ts';
 import type { TransactionCategory } from '@/models/transaction_category.ts';
@@ -938,7 +938,7 @@ const showFilterAccountDialog = ref<boolean>(false);
 const showFilterCategoryDialog = ref<boolean>(false);
 const showFilterTagDialog = ref<boolean>(false);
 
-const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
+const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
 const numeralSystem = computed<NumeralSystem>(() => getCurrentNumeralSystemType());
 
 const allPageCounts = computed<NameNumeralValue[]>(() => {

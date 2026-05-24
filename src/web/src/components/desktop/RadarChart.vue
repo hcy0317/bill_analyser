@@ -9,7 +9,7 @@ import { useTheme } from 'vuetify';
 import { useI18n } from '@/locales/helpers.ts';
 
 import type { ColorValue } from '@/core/color.ts';
-import { ThemeType } from '@/core/theme.ts';
+import { isDarkApplicationTheme } from '@/core/theme.ts';
 import { DEFAULT_CHART_COLORS } from '@/consts/color.ts';
 
 import { isNumber } from '@/lib/common.ts';
@@ -47,7 +47,7 @@ const theme = useTheme();
 
 const { formatAmountToLocalizedNumeralsWithCurrency, formatPercentToLocalizedNumerals } = useI18n();
 
-const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
+const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
 
 const radarData = computed<RadarChartData>(() => {
     let totalValidValue = 0;

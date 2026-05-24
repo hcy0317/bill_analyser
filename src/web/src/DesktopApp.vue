@@ -29,7 +29,7 @@ import { useUserStore } from '@/stores/user.ts';
 import { useExchangeRatesStore } from '@/stores/exchangeRates.ts';
 
 import { APPLICATION_LOGO_PATH } from '@/consts/asset.ts';
-import { ThemeType } from '@/core/theme.ts';
+import { SYSTEM_THEME_PREFERENCE, ThemeType, resolveThemePreference } from '@/core/theme.ts';
 import { isProduction } from '@/lib/version.ts';
 import { initMapProvider } from '@/lib/map/index.ts';
 import { isUserLogined, isUserUnlocked } from '@/lib/userstate.ts';
@@ -82,16 +82,10 @@ watch(currentNotificationContent, (newValue) => {
     showNotification.value = !!newValue;
 });
 
-if (settingsStore.appSettings.theme === ThemeType.Light) {
-    theme.change(ThemeType.Light);
-} else if (settingsStore.appSettings.theme === ThemeType.Dark) {
-    theme.change(ThemeType.Dark);
-} else {
-    theme.change(getSystemTheme());
-}
+theme.change(resolveThemePreference(settingsStore.appSettings.theme, getSystemTheme()));
 
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function (e) {
-    if (settingsStore.appSettings.theme === 'auto') {
+    if (settingsStore.appSettings.theme === SYSTEM_THEME_PREFERENCE) {
         if (e.matches) {
             theme.change(ThemeType.Dark);
         } else {

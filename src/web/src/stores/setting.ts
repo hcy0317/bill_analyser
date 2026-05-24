@@ -14,6 +14,7 @@ import {
     UserApplicationCloudSettingType,
     ALL_ALLOWED_CLOUD_SYNC_APP_SETTING_KEY_TYPES
 } from '@/core/setting.ts';
+import { normalizeThemePreference } from '@/core/theme.ts';
 
 import {
     isObject,
@@ -130,8 +131,10 @@ export const useSettingsStore = defineStore('settings', () => {
 
     // 基础设置
     function setTheme(value: string): void {
-        updateApplicationSettingsValue('theme', value);
-        appSettings.value.theme = value;
+        const normalizedTheme = normalizeThemePreference(value);
+
+        updateApplicationSettingsValue('theme', normalizedTheme);
+        appSettings.value.theme = normalizedTheme;
     }
 
     function setFontSize(value: number): void {

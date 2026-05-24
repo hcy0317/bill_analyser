@@ -106,7 +106,7 @@ import { useUnlockPageBase } from '@/views/base/UnlockPageBase.ts';
 import { useSettingsStore } from '@/stores/setting.ts';
 import { useUserStore } from '@/stores/user.ts';
 
-import { ThemeType } from '@/core/theme.ts';
+import { isDarkApplicationTheme } from '@/core/theme.ts';
 import { APPLICATION_LOGO_PATH } from '@/consts/asset.ts';
 
 import {
@@ -138,7 +138,7 @@ const snackbar = useTemplateRef<SnackBarType>('snackbar');
 
 const verifyingByWebAuthn = ref<boolean>(false);
 
-const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
+const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
 
 function unlockByWebAuthn(): void {
     const webAuthnCredentialId = getWebAuthnCredentialId();

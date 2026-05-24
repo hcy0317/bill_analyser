@@ -198,11 +198,11 @@ html[dir="rtl"] .bidirectional-switch {
 
 .v-table {
     th {
-        background: rgb(var(--v-table-header-background)) !important;
+        background: rgb(var(--v-table-header-color)) !important;
     }
 
     tr.even-row {
-        background: #fcfcfc;
+        background: rgb(var(--v-theme-table-row-striped)) !important;
     }
 
     tbody.has-bottom-border > tr:last-child > td {
@@ -218,23 +218,7 @@ html[dir="rtl"] .bidirectional-switch {
 
 .v-table.table-striped {
     tr:nth-child(even) {
-        background: #fcfcfc;
-    }
-}
-
-.v-theme--dark {
-    .v-table {
-        tr.even-row {
-            background: #161616;
-        }
-    }
-}
-
-.v-theme--dark {
-    .v-table.table-striped {
-        tr:nth-child(even) {
-            background: #161616;
-        }
+        background: rgb(var(--v-theme-table-row-striped)) !important;
     }
 }
 

@@ -19,7 +19,7 @@ import { useUserStore } from '@/stores/user.ts';
 import { type NameValue, itemAndIndex } from '@/core/base.ts';
 import { TextDirection } from '@/core/text.ts';
 import type { ColorStyleValue } from '@/core/color.ts';
-import { ThemeType } from '@/core/theme.ts';
+import { isDarkApplicationTheme } from '@/core/theme.ts';
 import { AccountBalanceTrendChartType } from '@/core/statistics.ts';
 import { DEFAULT_CHART_COLORS } from '@/consts/color.ts';
 
@@ -58,7 +58,7 @@ const { allDataItems, allDisplayDateRanges } = useAccountBalanceTrendsChartBase(
 const userStore = useUserStore();
 
 const textDirection = computed<TextDirection>(() => getCurrentLanguageTextDirection());
-const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
+const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
 
 const allSeries = computed<AccountBalanceTrendsChartDataItem[]>(() => {
     console.log(`[AccountBalanceTrendsChart] allSeries计算开始 - type=${props.type}, dataItems数量=${allDataItems.value?.length || 0}`);

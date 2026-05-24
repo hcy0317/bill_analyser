@@ -12,6 +12,7 @@ import { useStatisticsStore } from '@/stores/statistics.ts';
 import { type NameValue, type TypeAndDisplayName, keysIfValueEquals, values } from '@/core/base.ts';
 import type { LocalizedTimezoneInfo } from '@/core/timezone.ts';
 import { CategoryType } from '@/core/category.ts';
+import { getThemePreferenceOptions } from '@/core/theme.ts';
 import type { Account } from '@/models/account.ts';
 
 import { isObjectEmpty } from '@/lib/common.ts';
@@ -30,11 +31,7 @@ export function useAppSettingPageBase() {
     const loadingTransactionCategories = ref<boolean>(false);
 
     const allThemes = computed<NameValue[]>(() => {
-        return [
-            { name: tt('System Default'), value: 'auto' },
-            { name: tt('Light'), value: 'light' },
-            { name: tt('Dark'), value: 'dark' }
-        ];
+        return getThemePreferenceOptions(tt);
     });
 
     const allTimezones = computed<LocalizedTimezoneInfo[]>(() => getAllTimezones(true));
