@@ -27,7 +27,7 @@ describe('AIImageRecognitionSheet OCR contract wiring', () => {
         expect(source).toContain("const errorCode = typed && typeof typed.errorCode === 'string' ? typed.errorCode : 'unknown';");
         expect(source).toContain("if (errorCode === 'cancelled')");
         expect(source).toContain("if (errorCode === 'provider_unconfigured')");
-        expect(source).toContain("showToast('Receipt recognition is not configured');");
+        expect(source).toContain("showToast('OCR recognition requires configuration in Rule Center');");
         expect(source).toContain("if (errorCode === 'timeout')");
         expect(source).toContain("showToast('Recognition timed out, please try again');");
         expect(source).toContain("if (errorCode === 'parse_error')");
@@ -81,7 +81,7 @@ describe('AIImageRecognitionSheet OCR contract wiring', () => {
 
 describe('AIImageRecognitionSheet i18n keys exist in en + zh_Hans', () => {
     const REQUIRED_KEYS = [
-        'Receipt recognition is not configured',
+        'OCR recognition requires configuration in Rule Center',
         'Recognition timed out, please try again',
         'Could not parse this image, please try a clearer one',
         'Too many requests, please wait a moment',

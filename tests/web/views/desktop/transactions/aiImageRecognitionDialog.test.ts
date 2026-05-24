@@ -28,7 +28,7 @@ describe('AIImageRecognitionDialog OCR contract wiring', () => {
         // 5 typed branches + unknown fallback, each with i18n key string literal.
         expect(source).toContain("if (errorCode === 'cancelled')");
         expect(source).toContain("if (errorCode === 'provider_unconfigured')");
-        expect(source).toContain("snackbar.value?.showError('Receipt recognition is not configured');");
+        expect(source).toContain("snackbar.value?.showError('OCR recognition requires configuration in Rule Center');");
         expect(source).toContain("if (errorCode === 'timeout')");
         expect(source).toContain("snackbar.value?.showError('Recognition timed out, please try again');");
         expect(source).toContain("if (errorCode === 'parse_error')");

@@ -47,4 +47,14 @@ describe('desktop transaction edit dialog readonly affordance', () => {
         expect(appendSlot).toContain("handleCandidateAction('accept', candidate)");
         expect(appendSlot).toContain("handleCandidateAction('reject', candidate)");
     });
+
+    test('historical matching empty state is compact and remains visible while editing', () => {
+        const editDialogSource = readSource('src/views/desktop/transactions/list/dialogs/EditDialog.vue');
+        const billMatchingPanelSource = readSource('src/views/desktop/transactions/list/dialogs/BillMatchingPanel.vue');
+
+        expect(editDialogSource).toContain('mode !== TransactionEditPageMode.Add && editId');
+        expect(editDialogSource).toContain(':disabled="loading || submitting || mode !== TransactionEditPageMode.View"');
+        expect(billMatchingPanelSource).toContain("return tt('None');");
+        expect(billMatchingPanelSource).not.toContain("{{ tt('No Historical Matching Candidates') }}");
+    });
 });

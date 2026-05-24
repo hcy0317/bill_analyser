@@ -1347,7 +1347,7 @@ function showReceiptRecognitionError(error: RecognizeReceiptImageError | unknown
     const errorCode = typed && typeof typed.errorCode === 'string' ? typed.errorCode : 'unknown';
 
     if (errorCode === 'provider_unconfigured') {
-        showToast('Receipt recognition is not configured');
+        showToast('OCR recognition requires configuration in Rule Center');
         return;
     }
     if (errorCode === 'timeout') {

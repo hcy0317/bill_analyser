@@ -42,6 +42,18 @@ export const APPLICATION_THEME_ORDER = [
     ThemeType.DimDark
 ] as const;
 
+export const APPLICATION_THEME_FAMILY_OPTION_ORDER = [
+    ThemeType.Light,
+    ThemeType.HalloweenLight,
+    ThemeType.ForestLight,
+    ThemeType.WireframeLight,
+    ThemeType.BlackLight,
+    ThemeType.DraculaLight,
+    ThemeType.BusinessLight,
+    ThemeType.NightLight,
+    ThemeType.DimLight
+] as const;
+
 export type ApplicationThemeName = (typeof APPLICATION_THEME_ORDER)[number];
 export type ThemePreference = typeof SYSTEM_THEME_PREFERENCE | ApplicationThemeName;
 export type ApplicationThemeMode = 'light' | 'dark';
@@ -217,7 +229,7 @@ const darkVuetifyTheme: ApplicationVuetifyThemeDefinition = {
         'skin-bordered-background': '#4b3b2d',
         'skin-bordered-surface': '#4b3b2d',
         'expansion-panel-text-custom-bg': '#503f33',
-        'table-row-striped': '#201b17',
+        'table-row-striped': '#242322',
         'table-row-hover': '#2c241e'
     },
     variables: {
@@ -714,6 +726,17 @@ export function normalizeThemePreference(value: string | undefined | null): Them
     return SYSTEM_THEME_PREFERENCE;
 }
 
+export function getThemeFamilyOptionValue(preference: string | undefined | null): ThemePreference {
+    const normalizedPreference = normalizeThemePreference(preference);
+
+    if (normalizedPreference === SYSTEM_THEME_PREFERENCE) {
+        return SYSTEM_THEME_PREFERENCE;
+    }
+
+    const definition = APPLICATION_THEMES[normalizedPreference];
+    return themePairByFamily[definition.family].light;
+}
+
 export function resolveThemePreference(preference: string | undefined | null, systemTheme: string = ThemeType.Light): ApplicationThemeName {
     const normalizedPreference = normalizeThemePreference(preference);
 
@@ -755,13 +778,12 @@ export function getMobileThemeConfig(themeName: string | undefined | null): Appl
 export function getThemePreferenceOptions(translate: (key: string) => string): ThemePreferenceOption[] {
     return [
         { name: translate('System Default'), value: SYSTEM_THEME_PREFERENCE },
-        ...APPLICATION_THEME_ORDER.map(themeName => {
+        ...APPLICATION_THEME_FAMILY_OPTION_ORDER.map(themeName => {
             const definition = APPLICATION_THEMES[themeName];
             const familyName = translate(definition.displayKey);
-            const modeName = translate(definition.mode === 'dark' ? 'Dark' : 'Light');
 
             return {
-                name: definition.family === 'classic' ? familyName : `${familyName} / ${modeName}`,
+                name: definition.family === 'classic' ? translate('Default') : familyName,
                 value: themeName
             };
         })

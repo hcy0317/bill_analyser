@@ -71,6 +71,12 @@ export interface LearningRulesResponse {
     offset: number;
 }
 
+export interface LearningFeatureChip {
+    key: string;
+    labelKey: string;
+    value: string;
+}
+
 // ── Generate (挖掘) ──────────────────────────
 
 export interface GenerateSuggestionsResponse {
@@ -203,44 +209,110 @@ export function normalizeGenerateResponse(payload: unknown): GenerateSuggestions
     };
 }
 
+const learningFeatureAliases: Record<string, string> = {
+    c: 'counterparty',
+    counterparty: 'counterparty',
+    d: 'description',
+    description: 'description',
+    p: 'parser_id',
+    parser: 'parser_id',
+    parser_id: 'parser_id',
+    m: 'payment_method',
+    payment: 'payment_method',
+    payment_method: 'payment_method',
+};
+
+const learningFeatureLabels: Record<string, string> = {
+    counterparty: 'Counterparty',
+    description: 'Description',
+    parser_id: 'Parser',
+    payment_method: 'Payment Method',
+};
+
+const learningFeatureDisplayOrder = [
+    'counterparty',
+    'description',
+    'parser_id',
+    'payment_method',
+];
+
+function normalizeLearningFeatureKey(key: string): string {
+    return learningFeatureAliases[key.trim()] || key.trim();
+}
+
+function parseDelimitedFeatureString(source: string): Record<string, string> {
+    const features: Record<string, string> = {};
+    const keyMatches = Array.from(source.matchAll(/(?:^|\|)\s*([A-Za-z_]+)\s*=/g));
+
+    for (let index = 0; index < keyMatches.length; index += 1) {
+        const match = keyMatches[index]!;
+        const rawKey = match[1] || '';
+        const valueStart = (match.index ?? 0) + match[0].length;
+        const nextMatch = keyMatches[index + 1];
+        const valueEnd = nextMatch?.index ?? source.length;
+        const value = source.slice(valueStart, valueEnd).replace(/\|\s*$/, '').trim();
+
+        if (value) {
+            features[normalizeLearningFeatureKey(rawKey)] = value;
+        }
+    }
+
+    return features;
+}
+
+function parseLearningFeatures(source: string): Record<string, string> {
+    const trimmed = source.trim();
+    if (!trimmed) {
+        return {};
+    }
+
+    try {
+        const rawFeatures: Record<string, unknown> = JSON.parse(trimmed);
+        return Object.entries(rawFeatures).reduce<Record<string, string>>((features, [key, value]) => {
+            if (typeof value === 'string' && value.trim()) {
+                features[normalizeLearningFeatureKey(key)] = value.trim();
+            }
+            return features;
+        }, {});
+    } catch {
+        return parseDelimitedFeatureString(trimmed);
+    }
+}
+
+function getLearningFeatureChips(featuresJson: string): LearningFeatureChip[] {
+    const features = parseLearningFeatures(featuresJson || '');
+
+    return learningFeatureDisplayOrder
+        .filter(key => typeof features[key] === 'string' && features[key]!.trim().length > 0)
+        .map(key => ({
+            key,
+            labelKey: learningFeatureLabels[key] || key,
+            value: features[key]!.trim(),
+        }));
+}
+
+export function getSuggestionFeatureChips(suggestion: LearningSuggestion): LearningFeatureChip[] {
+    return getLearningFeatureChips(suggestion.matchFeaturesJson);
+}
+
+export function getRuleFeatureChips(rule: LearningRule): LearningFeatureChip[] {
+    return getLearningFeatureChips(rule.matchFeaturesJson);
+}
+
 /**
  * Parse match_features_json into a readable summary string.
  */
 export function getSuggestionFeatureSummary(suggestion: LearningSuggestion): string {
-    const labels: Record<string, string> = {
-        parser_id: 'parser',
-        counterparty: 'counterparty',
-        description: 'description',
-        payment_method: 'payment',
-    };
-    try {
-        const features: Record<string, string> = JSON.parse(suggestion.matchFeaturesJson || '{}');
-        return Object.entries(features)
-            .filter(([, v]) => typeof v === 'string' && v.trim().length > 0)
-            .map(([k, v]) => `${labels[k] || k}: ${v}`)
-            .join(' · ');
-    } catch {
-        return '';
-    }
+    return getSuggestionFeatureChips(suggestion)
+        .map(chip => `${chip.labelKey}: ${chip.value}`)
+        .join(' · ');
 }
 
 /**
  * Parse match_features_json for a rule.
  */
 export function getRuleFeatureSummary(rule: LearningRule): string {
-    const labels: Record<string, string> = {
-        parser_id: 'parser',
-        counterparty: 'counterparty',
-        description: 'description',
-        payment_method: 'payment',
-    };
-    try {
-        const features: Record<string, string> = JSON.parse(rule.matchFeaturesJson || '{}');
-        return Object.entries(features)
-            .filter(([, v]) => typeof v === 'string' && v.trim().length > 0)
-            .map(([k, v]) => `${labels[k] || k}: ${v}`)
-            .join(' · ');
-    } catch {
-        return '';
-    }
+    return getRuleFeatureChips(rule)
+        .map(chip => `${chip.labelKey}: ${chip.value}`)
+        .join(' · ');
 }

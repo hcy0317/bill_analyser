@@ -90,9 +90,9 @@
                                             </td>
                                             <td>
                                                 <div class="d-flex flex-wrap ga-1">
-                                                    <v-chip v-for="(feat, idx) in getFeatureSummary(item).split(' · ').filter(Boolean)"
-                                                            :key="idx" size="x-small" variant="tonal" color="secondary">
-                                                        {{ feat }}
+                                                    <v-chip v-for="feat in getSuggestionFeatureChips(item)"
+                                                            :key="`${item.id}-${feat.key}`" size="x-small" variant="tonal" color="secondary">
+                                                        {{ tt(feat.labelKey) }}: {{ feat.value }}
                                                     </v-chip>
                                                 </div>
                                             </td>
@@ -322,15 +322,15 @@
                                             </td>
                                             <td class="text-center">
                                                 <div class="learning-rules-feature-cell d-flex flex-wrap ga-1 align-center justify-center">
-                                                    <v-chip v-if="rule.matchValue"
+                                                    <v-chip v-if="rule.matchValue && getRuleFeatureChips(rule).length === 0"
                                                             size="x-small"
                                                             variant="outlined"
                                                             color="primary">
                                                         {{ rule.matchValue }}
                                                     </v-chip>
-                                                    <v-chip v-for="(feat, idx) in getRuleFeatSummary(rule).split(' · ').filter(Boolean)"
-                                                            :key="idx" size="x-small" variant="tonal" color="secondary">
-                                                        {{ feat }}
+                                                    <v-chip v-for="feat in getRuleFeatureChips(rule)"
+                                                            :key="`${rule.id}-${feat.key}`" size="x-small" variant="tonal" color="secondary">
+                                                        {{ tt(feat.labelKey) }}: {{ feat.value }}
                                                     </v-chip>
                                                 </div>
                                             </td>
@@ -754,8 +754,8 @@ import SnackBar from '@/components/desktop/SnackBar.vue';
 import SettingsJsonImportExportButton from '@/components/desktop/SettingsJsonImportExportButton.vue';
 import { useI18n } from '@/locales/helpers.ts';
 import { useLearningStore } from '@/stores/learning.ts';
-import type { LearningSuggestion, LearningRule } from '@/models/learning_center.ts';
-import { getSuggestionFeatureSummary, getRuleFeatureSummary } from '@/models/learning_center.ts';
+import type { LearningRule } from '@/models/learning_center.ts';
+import { getSuggestionFeatureChips, getRuleFeatureChips, getRuleFeatureSummary } from '@/models/learning_center.ts';
 import services from '@/lib/services.ts';
 import {
     buildAdvancedSettingsPayload,
@@ -923,7 +923,7 @@ const filteredRules = computed(() => rules.value.filter((rule) => {
         return false;
     }
 
-    const featureText = `${rule.matchValue} ${getRuleFeatSummary(rule)}`;
+    const featureText = `${rule.matchValue} ${getRuleFeatureSummary(rule)}`;
     if (!containsText(featureText, ruleFeatureFilter.value)) {
         return false;
     }
@@ -1021,14 +1021,6 @@ function getRequestErrorMessage(error: unknown, fallback: string): string {
     }
 
     return fallback;
-}
-
-function getFeatureSummary(item: LearningSuggestion): string {
-    return getSuggestionFeatureSummary(item);
-}
-
-function getRuleFeatSummary(rule: LearningRule): string {
-    return getRuleFeatureSummary(rule);
 }
 
 function statusColor(status: string): string {

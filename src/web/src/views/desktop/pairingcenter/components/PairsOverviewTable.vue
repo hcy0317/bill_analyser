@@ -78,6 +78,8 @@ function pairTypeColor(pairType: string): string {
     switch (pairType) {
         case 'transfer': return 'blue';
         case 'investment': return 'green';
+        case 'duplicate': return 'purple';
+        case 'reconciliation_duplicate': return 'purple';
         case 'learning': return 'orange';
         default: return 'grey';
     }
@@ -87,6 +89,8 @@ function pairTypeLabel(pairType: string): string {
     switch (pairType) {
         case 'transfer': return tt('Transfer');
         case 'investment': return tt('Investment');
+        case 'duplicate': return tt('Duplicate');
+        case 'reconciliation_duplicate': return tt('Duplicate');
         case 'learning': return tt('Learning');
         default: return pairType;
     }

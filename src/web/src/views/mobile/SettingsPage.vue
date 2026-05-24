@@ -105,7 +105,7 @@ import { useSettingsStore } from '@/stores/setting.ts';
 import { useUserStore } from '@/stores/user.ts';
 import { useExchangeRatesStore } from '@/stores/exchangeRates.ts';
 
-import { normalizeThemePreference } from '@/core/theme.ts';
+import { getThemeFamilyOptionValue } from '@/core/theme.ts';
 
 import { findNameByValue } from '@/lib/common.ts';
 import { getClientDisplayVersion, getDesktopVersionPath } from '@/lib/version.ts';
@@ -134,7 +134,7 @@ const showTimezonePopup = ref<boolean>(false);
 const currentNickName = computed<string>(() => userStore.currentUserNickname || tt('User'));
 
 const currentTheme = computed<string>({
-    get: () => normalizeThemePreference(settingsStore.appSettings.theme),
+    get: () => getThemeFamilyOptionValue(settingsStore.appSettings.theme),
     set: value => {
         if (value !== settingsStore.appSettings.theme) {
             settingsStore.setTheme(value);

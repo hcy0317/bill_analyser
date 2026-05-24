@@ -1,4 +1,4 @@
-export type RuleCenterDomain = 'transfer' | 'investment' | 'learning' | 'llm';
+export type RuleCenterDomain = 'transfer' | 'duplicate' | 'investment' | 'learning' | 'llm';
 export type RuleCenterTab = 'overview' | 'rules' | 'config' | 'ocr-config';
 export type LegacyRuleTab = 'rules' | 'learning' | 'recurring';
 
@@ -9,7 +9,7 @@ export interface RuleCenterSelection {
     shouldRewriteQuery: boolean;
 }
 
-export const RULE_CENTER_DOMAINS: RuleCenterDomain[] = ['transfer', 'investment', 'learning', 'llm'];
+export const RULE_CENTER_DOMAINS: RuleCenterDomain[] = ['transfer', 'duplicate', 'learning', 'llm'];
 
 export function isRuleCenterDomain(value: unknown): value is RuleCenterDomain {
     return typeof value === 'string'
@@ -32,7 +32,7 @@ export function normalizeRuleCenterTab(domain: RuleCenterDomain, tab?: string): 
         return 'rules';
     }
 
-    if (domain === 'investment') {
+    if (domain === 'duplicate') {
         return 'overview';
     }
 
@@ -58,7 +58,7 @@ export function normalizeRuleCenterSelection(input: {
     const view = firstString(input.view);
     const pairType = firstString(input.pairType);
 
-    if (domain === 'investment' && tab === 'rules') {
+    if (domain === 'investment') {
         return {
             domain: 'transfer',
             tab: 'rules',
@@ -78,7 +78,16 @@ export function normalizeRuleCenterSelection(input: {
 
     if (pairType === 'investment') {
         return {
-            domain: 'investment',
+            domain: 'transfer',
+            tab: 'rules',
+            legacyRuleTab: 'rules',
+            shouldRewriteQuery: true,
+        };
+    }
+
+    if (pairType === 'duplicate') {
+        return {
+            domain: 'duplicate',
             tab: 'overview',
             legacyRuleTab: 'rules',
             shouldRewriteQuery: true,

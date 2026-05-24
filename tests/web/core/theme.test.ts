@@ -6,6 +6,7 @@ import {
     SYSTEM_THEME_PREFERENCE,
     ThemeType,
     getFramework7DarkModePreference,
+    getThemeFamilyOptionValue,
     getNextQuickThemePreference,
     getPairedApplicationThemeName,
     getThemePreferenceOptions,
@@ -107,12 +108,20 @@ describe('application theme registry', () => {
 
         expect(options.map(option => option.value)).toEqual([
             SYSTEM_THEME_PREFERENCE,
-            ...APPLICATION_THEME_ORDER
+            ThemeType.Light,
+            ThemeType.HalloweenLight,
+            ThemeType.ForestLight,
+            ThemeType.WireframeLight,
+            ThemeType.BlackLight,
+            ThemeType.DraculaLight,
+            ThemeType.BusinessLight,
+            ThemeType.NightLight,
+            ThemeType.DimLight
         ]);
         expect(options[0]).toEqual({ name: 't:System Default', value: SYSTEM_THEME_PREFERENCE });
-        expect(options).toContainEqual({ name: 't:Halloween / t:Light', value: ThemeType.HalloweenLight });
-        expect(options).toContainEqual({ name: 't:Halloween / t:Dark', value: ThemeType.HalloweenDark });
-        expect(options.at(-1)).toEqual({ name: 't:Dim / t:Dark', value: ThemeType.DimDark });
+        expect(options).toContainEqual({ name: 't:Halloween', value: ThemeType.HalloweenLight });
+        expect(options).not.toContainEqual({ name: 't:Halloween / t:Dark', value: ThemeType.HalloweenDark });
+        expect(options.at(-1)).toEqual({ name: 't:Dim', value: ThemeType.DimLight });
     });
 
     test('theme preference resolver keeps auto compatible and falls back safely', () => {
@@ -157,6 +166,13 @@ describe('application theme registry', () => {
         expect(getNextQuickThemePreference('halloween')).toBe(ThemeType.HalloweenLight);
     });
 
+    test('theme family option value maps explicit light and dark variants to one setting item', () => {
+        expect(getThemeFamilyOptionValue(ThemeType.Dark)).toBe(ThemeType.Light);
+        expect(getThemeFamilyOptionValue(ThemeType.HalloweenDark)).toBe(ThemeType.HalloweenLight);
+        expect(getThemeFamilyOptionValue(ThemeType.ForestLight)).toBe(ThemeType.ForestLight);
+        expect(getThemeFamilyOptionValue(SYSTEM_THEME_PREFERENCE)).toBe(SYSTEM_THEME_PREFERENCE);
+    });
+
     test('vuetify theme adapter emits complete token sets', () => {
         const vuetifyThemes = getVuetifyThemes();
 
@@ -183,5 +199,6 @@ describe('application theme registry', () => {
         expect(vuetifyThemes.light.colors['background']).toBe('#faf8f4');
         expect(vuetifyThemes.dark.colors['primary']).toBe('#c67e48');
         expect(vuetifyThemes.dark.colors['background']).toBe('#060504');
+        expect(vuetifyThemes.dark.colors['table-row-striped']).toBe('#242322');
     });
 });

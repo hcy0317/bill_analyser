@@ -28,7 +28,7 @@
                       class="transaction-picture transaction-picture-add"
                       :class="{ 'enabled': !submitting, 'cursor-pointer': !submitting }"
                       color="rgba(0,0,0,0)" @click="showOpenPictureDialog">
-                <v-tooltip activator="parent" v-if="!submitting">{{ tt('Add Picture') }}</v-tooltip>
+                <v-tooltip activator="parent" v-if="!submitting">{{ tt('Upload Receipt Image') }}</v-tooltip>
                 <v-icon class="transaction-picture-add-icon" size="56" :icon="mdiImagePlusOutline" v-if="!uploadingPicture && !recognizingPicture"/>
                 <v-progress-circular color="grey-500" indeterminate size="48" v-if="uploadingPicture || recognizingPicture"></v-progress-circular>
             </v-avatar>

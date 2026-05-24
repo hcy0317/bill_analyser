@@ -53,4 +53,11 @@ describe('mobile transaction EditPage picture OCR source contract', () => {
         expect(picturesPanelSource).toMatch(/submitting \|\| uploadingPicture \|\| recognizingPicture \|\| removingPictureId/);
         expect(picturesPanelSource).toMatch(/uploadingPicture \|\| recognizingPicture/);
     });
+
+    test('mobile picture panel uses OCR recognition copy and setup-oriented unconfigured message', () => {
+        const picturesPanelSource = readSource(PICTURES_PANEL_PATH);
+
+        expect(picturesPanelSource).toContain(":header=\"tt('OCR Recognition')\"");
+        expect(source).toContain("showToast('OCR recognition requires configuration in Rule Center');");
+    });
 });

@@ -75,10 +75,6 @@
             </v-list-item>
         </v-list>
 
-        <div class="text-body-2 text-medium-emphasis mt-3" v-else-if="!loading && !viewState.hasLinkedPair">
-            {{ tt('No Historical Matching Candidates') }}
-        </div>
-
         <template v-if="feedbackResponse.events.length">
             <v-divider class="my-3" />
             <div class="text-caption text-medium-emphasis mb-2">{{ tt('Matching Feedback') }}</div>
@@ -186,7 +182,7 @@ const headlineText = computed<string>(() => {
         return `${tt('Matching Candidates')} ${viewState.value.candidateCount}`;
     }
 
-    return tt('No Historical Matching Candidates');
+    return tt('None');
 });
 const sublineText = computed<string>(() => {
     if (viewState.value.mode === 'linked' && linkedPair.value) {

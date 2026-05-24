@@ -8,8 +8,8 @@ import {
 
 describe('rule center navigation mapping', () => {
     test('keeps canonical domain and tab query params', () => {
-        expect(normalizeRuleCenterSelection({ domain: 'investment', tab: 'overview' })).toEqual({
-            domain: 'investment',
+        expect(normalizeRuleCenterSelection({ domain: 'duplicate', tab: 'overview' })).toEqual({
+            domain: 'duplicate',
             tab: 'overview',
             legacyRuleTab: 'rules',
             shouldRewriteQuery: false,
@@ -33,6 +33,18 @@ describe('rule center navigation mapping', () => {
         expect(normalizeRuleCenterSelection({ pairType: 'transfer' })).toMatchObject({
             domain: 'transfer',
             tab: 'overview',
+            shouldRewriteQuery: true,
+        });
+
+        expect(normalizeRuleCenterSelection({ pairType: 'duplicate' })).toMatchObject({
+            domain: 'duplicate',
+            tab: 'overview',
+            shouldRewriteQuery: true,
+        });
+
+        expect(normalizeRuleCenterSelection({ pairType: 'investment' })).toMatchObject({
+            domain: 'transfer',
+            tab: 'rules',
             shouldRewriteQuery: true,
         });
 
@@ -176,5 +188,19 @@ describe('rule center UX source guards', () => {
         expect(refreshIndex).toBeGreaterThan(titleIndex);
         expect(spacerIndex).toBeGreaterThan(refreshIndex);
         expect(chipIndex).toBeGreaterThan(spacerIndex);
+    });
+
+    test('pairing overview shows duplicate pairs instead of investment pairs', () => {
+        const source = readSource('src/views/desktop/pairingcenter/ListPage.vue');
+        const tableSource = readSource('src/views/desktop/pairingcenter/components/PairsOverviewTable.vue');
+
+        expect(source).toContain("value: 'duplicate-overview'");
+        expect(source).toContain("label: tt('Duplicate Pairing')");
+        expect(source).toContain("activeDomain === 'transfer' ? 'No Transfer Pairs' : 'No Duplicate Pairs'");
+        expect(source).toContain("pair.pairType === 'duplicate' || pair.pairType === 'reconciliation_duplicate'");
+        expect(source).not.toContain("label: tt('Investment Pairing')");
+        expect(source).not.toContain("'investment-overview'");
+        expect(tableSource).toContain("case 'duplicate': return 'purple';");
+        expect(tableSource).toContain("case 'reconciliation_duplicate': return 'purple';");
     });
 });

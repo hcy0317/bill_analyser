@@ -159,7 +159,7 @@ function confirm(): void {
 
         if (errorCode === 'provider_unconfigured') {
             // Keep sheet open so user understands config is missing; do not emit update:show=false.
-            showToast('Receipt recognition is not configured');
+            showToast('OCR recognition requires configuration in Rule Center');
             return;
         }
 

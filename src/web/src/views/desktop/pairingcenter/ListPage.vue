@@ -104,7 +104,7 @@
                                     <pairs-overview-table v-if="!loading"
                                                           :pairs="filteredPairs"
                                                           :deleting-pair-id="deleting"
-                                                          :empty-headline="tt(activeDomain === 'transfer' ? 'No Transfer Pairs' : 'No Investment Pairs')"
+                                                          :empty-headline="tt(activeDomain === 'transfer' ? 'No Transfer Pairs' : 'No Duplicate Pairs')"
                                                           @delete="confirmDeletePair" />
                                 </template>
 
@@ -222,7 +222,7 @@ import {
 type PrimaryNavValue = 'pairing-overview' | 'rule-config' | 'learning' | 'llm';
 type SecondaryNavValue =
     | 'transfer-overview'
-    | 'investment-overview'
+    | 'duplicate-overview'
     | 'category-recognition'
     | 'recurring-recognition'
     | 'learning-overview'
@@ -325,8 +325,8 @@ const activePrimary = computed<PrimaryNavValue>(() => {
 });
 
 const activeSecondary = computed<SecondaryNavValue>(() => {
-    if (activeDomain.value === 'investment' && activeTab.value === 'overview') {
-        return 'investment-overview';
+    if (activeDomain.value === 'duplicate' && activeTab.value === 'overview') {
+        return 'duplicate-overview';
     }
 
     if (activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeLegacyRuleTab.value === 'recurring') {
@@ -373,10 +373,10 @@ function secondaryTabsForPrimary(primary: PrimaryNavValue): SecondaryTabOption[]
                 },
             },
             {
-                value: 'investment-overview',
-                label: tt('Investment Pairing'),
+                value: 'duplicate-overview',
+                label: tt('Duplicate Pairing'),
                 selection: {
-                    domain: 'investment',
+                    domain: 'duplicate',
                     tab: 'overview',
                     legacyRuleTab: 'rules',
                 },
@@ -468,7 +468,7 @@ const currentTabOption = computed<SecondaryTabOption>(() => {
 });
 
 const isPairingOverview = computed(() =>
-    (activeDomain.value === 'transfer' || activeDomain.value === 'investment') && activeTab.value === 'overview'
+    (activeDomain.value === 'transfer' || activeDomain.value === 'duplicate') && activeTab.value === 'overview'
 );
 const isCategoryRecognition = computed(() =>
     activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeLegacyRuleTab.value === 'rules'
@@ -483,7 +483,13 @@ const showRuleHeaderActions = computed(() =>
     isCategoryRecognition.value || isRecurringRecognition.value
 );
 const currentPageTitle = computed(() => currentTabOption.value.label);
-const filteredPairs = computed(() => matchingStore.pairs.filter(pair => pair.pairType === activeDomain.value));
+const filteredPairs = computed(() => matchingStore.pairs.filter(pair => {
+    if (activeDomain.value === 'duplicate') {
+        return pair.pairType === 'duplicate' || pair.pairType === 'reconciliation_duplicate';
+    }
+
+    return pair.pairType === activeDomain.value;
+}));
 const showPairsLoading = computed(() => isPairingOverview.value && loading.value);
 const showPairsError = computed(() => isPairingOverview.value && !!error.value);
 const canRefreshActiveView = computed(() => (

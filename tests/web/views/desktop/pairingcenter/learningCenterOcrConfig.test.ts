@@ -31,3 +31,15 @@ describe('LearningCenterPanel OCR config placement', () => {
         expect(source).toContain('password-required-for-export');
     });
 });
+
+describe('LearningCenterPanel feature display', () => {
+    test('learning suggestions and rules render typed feature chips instead of splitting raw summaries', () => {
+        const source = readSource(PANEL_PATH);
+
+        expect(source).toContain('getSuggestionFeatureChips(item)');
+        expect(source).toContain('getRuleFeatureChips(rule)');
+        expect(source).toContain('tt(feat.labelKey)');
+        expect(source).not.toContain("getFeatureSummary(item).split(' · ').filter(Boolean)");
+        expect(source).not.toContain("getRuleFeatSummary(rule).split(' · ').filter(Boolean)");
+    });
+});

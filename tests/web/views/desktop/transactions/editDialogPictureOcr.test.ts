@@ -46,8 +46,16 @@ describe('EditDialog picture OCR wiring', () => {
         const source = readSource(EDIT_DIALOG_PATH);
 
         expect(source).toContain("if (errorCode === 'provider_unconfigured')");
-        expect(source).toContain("snackbar.value?.showError('Receipt recognition is not configured');");
+        expect(source).toContain("snackbar.value?.showError('OCR recognition requires configuration in Rule Center');");
         expect(source).toContain("snackbar.value?.showError('Unable to recognize image');");
+    });
+
+    test('transaction picture entry is presented as OCR recognition in add flow', () => {
+        const editDialogSource = readSource(EDIT_DIALOG_PATH);
+        const panelSource = readSource(PICTURES_PANEL_PATH);
+
+        expect(editDialogSource).toContain("<span>{{ tt('OCR Recognition') }}</span>");
+        expect(panelSource).toContain("tt('Upload Receipt Image')");
     });
 
     test('extracted picture panel keeps the parent upload and view/remove contract', () => {

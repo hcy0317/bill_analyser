@@ -188,7 +188,7 @@ function recognize(): void {
         cancelRecognizingUuid.value = undefined;
 
         if (errorCode === 'provider_unconfigured') {
-            snackbar.value?.showError('Receipt recognition is not configured');
+            snackbar.value?.showError('OCR recognition requires configuration in Rule Center');
             return;
         }
 

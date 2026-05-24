@@ -80,7 +80,7 @@
                             <span>{{ tt('Location on Map') }}</span>
                         </v-tab>
                         <v-tab value="pictures" :disabled="mode !== TransactionEditPageMode.Add && mode !== TransactionEditPageMode.Edit && (!transaction.pictures || !transaction.pictures.length)" v-if="type === TransactionEditPageType.Transaction && isTransactionPicturesEnabled()">
-                            <span>{{ tt('Pictures') }}</span>
+                            <span>{{ tt('OCR Recognition') }}</span>
                         </v-tab>
                     </v-tabs>
                 </div>
@@ -437,12 +437,12 @@
                                     </v-card>
                                 </v-col>
                                 <v-col cols="12" md="12"
-                                       v-if="type === TransactionEditPageType.Transaction && mode === TransactionEditPageMode.View && editId">
+                                       v-if="type === TransactionEditPageType.Transaction && mode !== TransactionEditPageMode.Add && editId">
                                     <bill-matching-panel :bill-id="editId"
-                                                         :disabled="loading || submitting"
+                                                         :disabled="loading || submitting || mode !== TransactionEditPageMode.View"
                                                          @notify="onBillMatchingNotify"
-                                                                            @error="onBillMatchingError"
-                                                                            @updated="onBillMatchingUpdated" />
+                                                                             @error="onBillMatchingError"
+                                                                             @updated="onBillMatchingUpdated" />
                                 </v-col>
                                 <v-col cols="12" md="12">
                                     <v-autocomplete
@@ -1707,7 +1707,7 @@ function showReceiptRecognitionError(error: RecognizeReceiptImageError | unknown
     const errorCode = typed && typeof typed.errorCode === 'string' ? typed.errorCode : 'unknown';
 
     if (errorCode === 'provider_unconfigured') {
-        snackbar.value?.showError('Receipt recognition is not configured');
+        snackbar.value?.showError('OCR recognition requires configuration in Rule Center');
         return;
     }
 

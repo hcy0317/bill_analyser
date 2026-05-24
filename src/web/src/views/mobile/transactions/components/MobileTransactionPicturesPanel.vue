@@ -1,7 +1,7 @@
 <template>
     <f7-list-item
         link="#" no-chevron
-        :header="tt('Pictures')"
+        :header="tt('OCR Recognition')"
         v-if="show"
     >
         <template #footer>

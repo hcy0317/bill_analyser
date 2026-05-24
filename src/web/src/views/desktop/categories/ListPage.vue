@@ -40,23 +40,12 @@
                                                    :ripple="false" :icon="true" @click="showNav = !showNav">
                                                 <v-icon :icon="mdiMenu" size="24" />
                                             </v-btn>
-                                            <span>{{ tt('Transaction Categories') }}</span>
-                                            <v-btn class="ms-3" color="default" variant="outlined"
-                                                   :prepend-icon="mdiShapePlusOutline"
-                                                   :disabled="loading || updating">
-                                                {{ tt('Add') }}
-                                                <v-menu activator="parent">
-                                                    <v-list>
-                                                        <v-list-item :title="tt('Add Primary Category')"
-                                                                     :prepend-icon="mdiShapePlusOutline"
-                                                                     @click="addPrimaryCategory"></v-list-item>
-                                                        <v-list-item :title="tt('Add Secondary Category')"
-                                                                     :prepend-icon="mdiShapePlusOutline"
-                                                                     :disabled="!canAddSecondaryCategory"
-                                                                     @click="addSecondaryCategory"></v-list-item>
-                                                    </v-list>
-                                                </v-menu>
-                                            </v-btn>
+                                             <span>{{ tt('Transaction Categories') }}</span>
+                                             <v-btn class="ms-3" color="default" variant="outlined"
+                                                    :disabled="loading || updating"
+                                                    @click="addCategoryByCurrentSelection">
+                                                 {{ tt('Add') }}
+                                             </v-btn>
                                             <settings-json-import-export-button
                                                 section-key="transactionCategories"
                                                 filename-prefix="transaction-categories"
@@ -250,8 +239,7 @@ import {
     mdiEyeOutline,
     mdiDeleteOutline,
     mdiDrag,
-    mdiDotsVertical,
-    mdiShapePlusOutline
+    mdiDotsVertical
 } from '@mdi/js';
 
 type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
@@ -417,6 +405,15 @@ function addSecondaryCategory(): void {
         color: currentPrimaryCategory.value.color,
         icon: currentPrimaryCategory.value.icon
     });
+}
+
+function addCategoryByCurrentSelection(): void {
+    if (canAddSecondaryCategory.value) {
+        addSecondaryCategory();
+        return;
+    }
+
+    addPrimaryCategory();
 }
 
 function edit(category: TransactionCategory): void {
