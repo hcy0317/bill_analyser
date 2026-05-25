@@ -413,6 +413,9 @@ pub fn resolve_import_preview_learning_signal_status(
     if matches!(review_status.as_str(), "accepted" | "rejected") {
         return Some(review_status);
     }
+    if matches!(review_status.as_str(), "auto_applied" | "auto-applied") {
+        return Some("accepted".to_string());
+    }
 
     let learning_rule_id = learning_matching
         .and_then(|matching| matching.get("rule_id"))

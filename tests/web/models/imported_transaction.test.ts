@@ -573,6 +573,42 @@ describe('ImportTransaction model', () => {
                 }
             }
         }, 11);
+        const autoApplied = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            matching: {
+                ...BASE_RESPONSE.matching!,
+                learning: {
+                    ...BASE_RESPONSE.matching!.learning,
+                    rule_id: 15,
+                    score: 1,
+                    level: 'exact',
+                    reason: 'composite exact match',
+                    recommended_type: '收入',
+                    summary: '收入 | 投资收益/理财收益 | 支付宝',
+                    review_status: 'auto_applied',
+                    auto_apply: true,
+                    suppressed: false
+                }
+            }
+        }, 12);
+        const legacyAutoApplied = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            matching: {
+                ...BASE_RESPONSE.matching!,
+                learning: {
+                    ...BASE_RESPONSE.matching!.learning,
+                    rule_id: 16,
+                    score: 1,
+                    level: 'exact',
+                    reason: 'composite exact match',
+                    recommended_type: '收入',
+                    summary: '收入 | 投资收益/理财收益 | 支付宝',
+                    review_status: 'auto-applied',
+                    auto_apply: true,
+                    suppressed: false
+                }
+            }
+        }, 13);
 
         expect(pending.hasLearningRecommendation()).toBe(true);
         expect(pending.hasPendingLearningRecommendation()).toBe(true);
@@ -591,6 +627,18 @@ describe('ImportTransaction model', () => {
         expect(rejected.isLearningRecommendationRejected()).toBe(true);
         expect(rejected.isLearningRecommendationSuppressed()).toBe(true);
         expect(rejected.canClearLearningRecommendationDecision()).toBe(true);
+
+        expect(autoApplied.hasLearningRecommendation()).toBe(true);
+        expect(autoApplied.hasPendingLearningRecommendation()).toBe(false);
+        expect(autoApplied.getLearningRecommendationReviewStatus()).toBe('auto_applied');
+        expect(autoApplied.isLearningRecommendationAccepted()).toBe(true);
+        expect(autoApplied.canClearLearningRecommendationDecision()).toBe(true);
+
+        expect(legacyAutoApplied.hasLearningRecommendation()).toBe(true);
+        expect(legacyAutoApplied.hasPendingLearningRecommendation()).toBe(false);
+        expect(legacyAutoApplied.getLearningRecommendationReviewStatus()).toBe('auto-applied');
+        expect(legacyAutoApplied.isLearningRecommendationAccepted()).toBe(true);
+        expect(legacyAutoApplied.canClearLearningRecommendationDecision()).toBe(true);
     });
 
     test('investment review helpers expose pending, accepted, and rejected states', () => {

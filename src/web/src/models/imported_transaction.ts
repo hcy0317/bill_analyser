@@ -409,7 +409,10 @@ export class ImportTransaction implements ImportTransactionResponse {
     }
 
     public isLearningRecommendationAccepted(): boolean {
-        return this.getLearningRecommendationReviewStatus() === 'accepted';
+        const reviewStatus = this.getLearningRecommendationReviewStatus();
+        return reviewStatus === 'accepted'
+            || reviewStatus === 'auto_applied'
+            || reviewStatus === 'auto-applied';
     }
 
     public isLearningRecommendationRejected(): boolean {

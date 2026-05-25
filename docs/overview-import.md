@@ -22,7 +22,7 @@
 - 多文件 parser work 可以并发执行，但 session/template staging 仍保持一次性写入。
 - stage2 processed 状态按 `session_id + user_id + parser_is_processed` 更新，避免大批量 `id IN (...)` 更新；preview 批量写入复用 prepared statement。
 - preview page 承担 Check Data 的分页、排序、筛选与轻量聚合 metadata；缺少分类、缺少账户和转账账户复核状态按当前预览字段计算，人工补齐后不会被历史 annotation 或人工编辑标记继续计为待标注；旧 preview index 路由仅作为兼容读取面，不再是首屏预览依赖。
-- preview 的 transfer、learning 和 LLM 建议只有 pending 状态展示接受/拒绝动作；接受会记录 applied/previous 快照，清除已接受建议时仅在当前字段仍等于 applied 快照时恢复 previous，人工改动后的清除不会覆盖人工值；拒绝 pending 建议会在当前字段仍等于建议 applied 快照时回退到 stage2 已落库的分类规则和账户基线，基线不存在或字段已被人工改动时只记录拒绝状态并保留当前字段。
+- preview 的 transfer、learning 和 LLM 建议只有 pending 状态展示接受/拒绝动作；learning `auto_applied` / `auto-applied` 按已应用状态投影，只允许撤销自动应用，不再显示接受/拒绝动作；接受会记录 applied/previous 快照，清除已接受建议时仅在当前字段仍等于 applied 快照时恢复 previous，人工改动后的清除不会覆盖人工值；拒绝 pending 建议会在当前字段仍等于建议 applied 快照时回退到 stage2 已落库的分类规则和账户基线，基线不存在或字段已被人工改动时只记录拒绝状态并保留当前字段。
 - 前端人工编辑类型、分类、账户等字段时只清除 transfer/learning/LLM 这些 actionable 建议提示，并通过 family-scoped update payload 持久化；parser、dedup、recurring 和当前预览字段不随提示清除被删除。投资识别不再作为独立 preview 信号或 candidate family，结果只体现在分类规则链路命中的 `preview_type/category` 上。
 - confirm、cancel、导入失败后新建 session 都会立即清理当前用户的 import staging；系统不保留未完成导入续传状态。
 - preview update/reclassify 要显式落库，不只改响应投影；reclassify 会复用 stage2 智能链路刷新分类、账户、recurring 和 learning 信号。

@@ -306,6 +306,42 @@ fn preview_filter_index_item_reads_signals_from_matching_feedback_payload() {
 }
 
 #[test]
+fn preview_filter_index_item_treats_auto_applied_learning_as_accepted() {
+    for review_status in ["auto_applied", "auto-applied"] {
+        let preview = json!({
+            "id": 78,
+            "preview_type": "收入",
+            "preview_amount": 0.22,
+            "preview_main_category": "投资收入",
+            "preview_sub_category": "理财收益",
+            "preview_matching_feedback": {
+                "learning": {
+                    "rule_id": 9,
+                    "score": 1.0,
+                    "reason": "composite exact",
+                    "summary": "收入 | 投资收入/理财收益 | 支付宝",
+                    "mode": "exact",
+                    "review_status": review_status,
+                    "auto_apply": true
+                }
+            }
+        });
+        let preview = preview.as_object().unwrap();
+
+        let item = build_import_preview_filter_index_item(
+            preview,
+            &BTreeMap::<i64, CategoryLookup>::new(),
+            &BTreeMap::<i64, AccountLookup>::new(),
+        );
+
+        assert_eq!(item.learning_status.as_deref(), Some("accepted"));
+        assert_eq!(item.learning_title, "composite exact");
+        assert_eq!(item.learning_summary, "收入 | 投资收入/理财收益 | 支付宝");
+        assert_eq!(item.learning_mode, "exact");
+    }
+}
+
+#[test]
 fn route_envelopes_and_expected_state_match_v2_error_surface() {
     assert_eq!(
         map_import_preview_type_to_frontend_value(Some(&json!("income"))),
