@@ -2,6 +2,7 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn init_import_staging_schema(connection: &Connection) -> DbResult<()> {
     connection.execute_batch(
         "
@@ -143,7 +144,10 @@ pub fn init_import_staging_schema(connection: &Connection) -> DbResult<()> {
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn create_import_session(connection: &Connection, draft: &ImportSessionDraft) -> DbResult<i64> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "create_import_session", "business operation entered");
     let now = now_text();
     let user_id = user_id_i64(draft.user_id)?;
     clear_user_import_staging_data(connection, user_id)?;
@@ -160,7 +164,10 @@ pub fn create_import_session(connection: &Connection, draft: &ImportSessionDraft
     Ok(connection.last_insert_rowid())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn clear_user_import_staging_data(connection: &Connection, user_id: i64) -> DbResult<usize> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "clear_user_import_staging_data", "business operation entered");
     let annotation_count = connection.execute(
         "DELETE FROM import_annotation_samples WHERE user_id = ?1",
         [user_id],
@@ -173,10 +180,13 @@ pub fn clear_user_import_staging_data(connection: &Connection, user_id: i64) -> 
     Ok(annotation_count + preview_count + parser_count + session_count)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn update_import_session_status(
     connection: &Connection,
     update: &ImportSessionStatusUpdate,
 ) -> DbResult<bool> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "update_import_session_status", "business operation entered");
     let changed = connection.execute(
         "
         UPDATE import_sessions
@@ -200,6 +210,7 @@ pub fn update_import_session_status(
     Ok(changed > 0)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_import_session(
     connection: &Connection,
     session_id: &str,

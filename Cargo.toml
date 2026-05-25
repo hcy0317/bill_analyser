@@ -36,6 +36,8 @@ thiserror = "2.0"
 tokio = { version = "1.42", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "time"] }
 tokio-util = { version = "0.7", features = ["io"] }
 tower = { version = "0.5", features = ["util"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 unicode-normalization = "0.1"
 url = "2.5"
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -45,6 +47,7 @@ zip = { version = "7.2.0", default-features = false, features = ["deflate-flate2
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
 
 [workspace.lints.clippy]
 all = "warn"

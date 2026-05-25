@@ -146,6 +146,7 @@ pub const TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ),
 ];
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn taxonomy_runtime_router() -> Router<HttpAppState> {
     Router::new()
         .route("/api/rules/overview", get(rules_overview_handler))

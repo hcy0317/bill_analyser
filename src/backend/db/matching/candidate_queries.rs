@@ -2,6 +2,7 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn list_transfer_candidates_for_bill(
     connection: &Connection,
     user_id: i64,
@@ -57,6 +58,7 @@ fn list_transfer_candidates_for_bill(
     Ok(build_transfer_pair_candidates(anchor_bill, &bills))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn list_duplicate_candidates_for_bill(
     connection: &Connection,
     user_id: i64,
@@ -124,6 +126,7 @@ fn list_duplicate_candidates_for_bill(
     Ok(build_duplicate_bill_candidates(anchor_bill, &bills))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn list_investment_candidates_for_bill(
     connection: &Connection,
     user_id: i64,
@@ -195,6 +198,7 @@ fn list_investment_candidates_for_bill(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn list_learning_candidates_for_bill(
     connection: &Connection,
     user_id: i64,
@@ -223,6 +227,7 @@ fn list_learning_candidates_for_bill(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_learning_rules_candidate_columns_available(connection: &Connection) -> DbResult<bool> {
     for column in ["id", "user_id", "enabled"] {
         if !column_exists(connection, "import_learning_rules", column)? {
@@ -233,6 +238,7 @@ fn import_learning_rules_candidate_columns_available(connection: &Connection) ->
     Ok(true)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn list_reconciliation_candidates_for_bill(
     connection: &Connection,
     user_id: i64,
@@ -275,6 +281,7 @@ fn list_reconciliation_candidates_for_bill(
         .collect())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn list_reconciliation_candidates(
     connection: &Connection,
     user_id: i64,
@@ -340,6 +347,7 @@ fn list_reconciliation_candidates(
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_bill_reconciliation_projection(
     connection: &Connection,
     user_id: i64,

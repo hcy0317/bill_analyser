@@ -4,6 +4,7 @@
 
 use super::*;
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn cleanup_backups_response(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -112,6 +113,7 @@ pub(super) fn cleanup_backups_response(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn parse_keep_count(payload: &Value) -> Result<usize, String> {
     let Some(value) = payload.get("keep_count") else {
         return Ok(10);
@@ -133,6 +135,7 @@ pub(super) fn parse_keep_count(payload: &Value) -> Result<usize, String> {
     usize::try_from(parsed).map_err(|_| "keep_count must be an integer".to_string())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn apply_cleanup_plan(
     connection: &rusqlite::Connection,
     backup_dir: &Path,

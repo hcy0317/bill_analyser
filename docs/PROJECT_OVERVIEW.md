@@ -9,6 +9,7 @@ Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预
 - 静态阅读入口：`docs/backend-map.html`
 - 前端工程：`src/web`
 - 当前 API 主链：`REST /api/...`
+- 运行态日志：Rust HTTP 服务使用 `tracing`，默认过滤等级为 `info`；开发环境可通过 `RUST_LOG` 打开各 crate 或模块的 `debug` span。业务日志字段只记录功能域、操作和不敏感内部 ID/计数，不记录请求体、文件名、交易描述、prompt、token 或密钥。
 
 ## 后端分层
 

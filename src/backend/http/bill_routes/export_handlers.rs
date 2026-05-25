@@ -2,11 +2,14 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn export_bills_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BillsExportQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "bills", operation = "export_bills_handler", "business operation entered");
     let export_format = match BillExportFormat::normalize(query.format.as_deref()) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -58,6 +61,7 @@ impl BillExportFormat {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn export_filename(extension: &str) -> String {
     format!(
         "bills_export_{}.{}",
@@ -66,6 +70,7 @@ fn export_filename(extension: &str) -> String {
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn export_file_response(content_type: &'static str, filename: String, body: Vec<u8>) -> Response {
     Response::builder()
         .status(StatusCode::OK)
@@ -78,6 +83,7 @@ fn export_file_response(content_type: &'static str, filename: String, body: Vec<
         .unwrap_or_else(|_| db_error_response())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn render_bills_csv_export(bills: &[BillRecord]) -> Result<Vec<u8>, csv::Error> {
     let mut writer = csv::WriterBuilder::new()
         .terminator(csv::Terminator::CRLF)
@@ -95,6 +101,7 @@ fn render_bills_csv_export(bills: &[BillRecord]) -> Result<Vec<u8>, csv::Error> 
     Ok(body)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn render_bills_xlsx_export(bills: &[BillRecord]) -> Vec<u8> {
     let sheet_xml = render_bills_xlsx_sheet(bills);
     let entries = [
@@ -119,6 +126,7 @@ fn render_bills_xlsx_export(bills: &[BillRecord]) -> Vec<u8> {
     render_stored_zip(&entries)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn render_bills_xlsx_sheet(bills: &[BillRecord]) -> String {
     let mut sheet = String::from(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>"#,
@@ -141,6 +149,7 @@ fn render_bills_xlsx_sheet(bills: &[BillRecord]) -> String {
     sheet
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn render_xlsx_row<I>(sheet: &mut String, row_number: usize, cells: I)
 where
     I: IntoIterator<Item = String>,
@@ -184,6 +193,7 @@ fn xml_escape(value: &str) -> String {
     escaped
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn export_bill_value(bill: &BillRecord, key: &str) -> String {
     match bill.get(key) {
         Some(Value::String(text)) => serialize_optional_export_cell(key, Some(text)),
@@ -194,6 +204,7 @@ fn export_bill_value(bill: &BillRecord, key: &str) -> String {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn render_stored_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
     let mut body = Vec::new();
     let mut central_directory = Vec::new();

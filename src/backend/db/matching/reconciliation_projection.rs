@@ -169,6 +169,7 @@ fn set_reconciliation_candidate_status_on_tx(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn prepare_reconciliation_base_snapshot_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -196,6 +197,7 @@ fn prepare_reconciliation_base_snapshot_on_tx(
     Ok((base_bill, metadata))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_bill_projection_snapshot_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -216,6 +218,7 @@ fn get_bill_projection_snapshot_on_tx(
     Ok(bill)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_bill_tag_ids_on_tx(tx: &Transaction<'_>, user_id: i64, bill_id: i64) -> DbResult<Vec<i64>> {
     if !table_exists_tx(tx, "bill_tags")? || !table_exists_tx(tx, "tags")? {
         return Ok(Vec::new());
@@ -313,6 +316,7 @@ fn assert_reconciliation_projection_current_on_tx(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn find_reconciliation_preview_id_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -418,6 +422,7 @@ fn same_preview_still_applied_on_tx(
     Ok(false)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_group_candidates_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -465,6 +470,7 @@ fn snapshot_tag_ids(snapshot: &Map<String, Value>) -> Vec<i64> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_tag_ids(raw_value: Option<&Value>) -> Vec<i64> {
     let Some(raw_value) = raw_value else {
         return Vec::new();
@@ -496,6 +502,7 @@ fn normalize_tag_ids(raw_value: Option<&Value>) -> Vec<i64> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_tag_ids_from_iter(values: impl IntoIterator<Item = i64>) -> Vec<i64> {
     let mut tag_ids = Vec::new();
     for value in values {

@@ -19,12 +19,14 @@ pub struct RecurringSuggestionSaveSummary {
     pub skipped: i64,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn init_recurring_runtime_schema(connection: &Connection) -> DbResult<()> {
     ensure_recurring_suggestions_schema(connection)?;
     ensure_recurring_bills_schema(connection)?;
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn count_recurring_suggestions(
     connection: &Connection,
     user_id: UserId,
@@ -46,6 +48,7 @@ pub fn count_recurring_suggestions(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn list_recurring_suggestions(
     connection: &Connection,
     user_id: UserId,
@@ -53,6 +56,12 @@ pub fn list_recurring_suggestions(
     limit: usize,
     offset: usize,
 ) -> DbResult<Vec<Value>> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "list_recurring_suggestions",
+        "business operation entered"
+    );
     ensure_recurring_suggestions_schema(connection)?;
     let user_id = UserScope::new(user_id).bind_value()?;
     let mut values = vec![SqlValue::Integer(user_id)];
@@ -82,11 +91,18 @@ pub fn list_recurring_suggestions(
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn detect_and_save_recurring_suggestions(
     connection: &Connection,
     user_id: UserId,
     patterns: &[RecurringPattern],
 ) -> DbResult<RecurringSuggestionSaveSummary> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "detect_and_save_recurring_suggestions",
+        "business operation entered"
+    );
     ensure_recurring_suggestions_schema(connection)?;
     let user_id = UserScope::new(user_id).bind_value()?;
     let now = utc_now_iso();
@@ -185,11 +201,18 @@ pub fn detect_and_save_recurring_suggestions(
     Ok(summary)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn accept_recurring_suggestion(
     connection: &mut Connection,
     user_id: UserId,
     suggestion_id: i64,
 ) -> DbResult<Option<Value>> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "accept_recurring_suggestion",
+        "business operation entered"
+    );
     init_recurring_runtime_schema(connection)?;
     let user_id = UserScope::new(user_id).bind_value()?;
     let now = utc_now_iso();
@@ -263,11 +286,18 @@ pub fn accept_recurring_suggestion(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn reject_recurring_suggestion(
     connection: &mut Connection,
     user_id: UserId,
     suggestion_id: i64,
 ) -> DbResult<bool> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "reject_recurring_suggestion",
+        "business operation entered"
+    );
     ensure_recurring_suggestions_schema(connection)?;
     let user_id = UserScope::new(user_id).bind_value()?;
     let now = utc_now_iso();
@@ -284,6 +314,7 @@ pub fn reject_recurring_suggestion(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_bills_linked_to_recurring(
     connection: &Connection,
     user_id: UserId,
@@ -306,11 +337,18 @@ pub fn get_bills_linked_to_recurring(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn list_recent_bills_for_recurring_detection(
     connection: &Connection,
     user_id: UserId,
     limit: usize,
 ) -> DbResult<Vec<Value>> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "list_recent_bills_for_recurring_detection",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     if !table_exists(connection, "bills")? {
         return Ok(Vec::new());
@@ -453,6 +491,7 @@ fn recurring_suggestion_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Va
     Ok(Value::Object(item))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn ensure_recurring_suggestions_schema(connection: &Connection) -> DbResult<()> {
     connection.execute_batch(
         "
@@ -488,6 +527,7 @@ fn ensure_recurring_suggestions_schema(connection: &Connection) -> DbResult<()> 
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn ensure_recurring_bills_schema(connection: &Connection) -> DbResult<()> {
     connection.execute_batch(
         "

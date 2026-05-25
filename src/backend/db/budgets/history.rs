@@ -3,11 +3,14 @@
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_budget_execution_history(
     connection: &Connection,
     user_id: UserId,
     filters: &BudgetExecutionFilters,
 ) -> DbResult<Vec<Value>> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "query_budget_execution_history", "business operation entered");
     let user_id_value = UserScope::new(user_id).bind_value()?;
     let categories = load_category_context_values(connection, user_id_value)?;
     let category_context = build_budget_category_context(&categories);
@@ -56,11 +59,14 @@ pub fn query_budget_execution_history(
     Ok(history_items.into_iter().map(Value::Object).collect())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_budget_forecast(
     connection: &Connection,
     user_id: UserId,
     filters: &BudgetForecastFilters,
 ) -> DbResult<Vec<Value>> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "query_budget_forecast", "business operation entered");
     let user_id = UserScope::new(user_id).bind_value()?;
     if !table_exists(connection, "bills")? {
         return Ok(Vec::new());
@@ -260,6 +266,7 @@ fn extract_exact_budget_history_items(
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_budget_execution_history_on_demand(
     connection: &Connection,
     user_id: UserId,
@@ -322,6 +329,7 @@ fn budget_detail_overlaps_period(
     .map_err(DbError::InvalidOperation)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn merge_budget_execution_history_items(
     mut history_items: Vec<BudgetRecord>,
     on_demand_items: Vec<BudgetRecord>,
@@ -338,6 +346,7 @@ fn merge_budget_execution_history_items(
     history_items
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn sort_budget_execution_history_items(items: &mut [BudgetRecord]) {
     items.sort_by_key(|item| std::cmp::Reverse(budget_history_sort_key(item)));
 }

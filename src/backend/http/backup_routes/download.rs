@@ -4,6 +4,7 @@
 
 use super::*;
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn prepare_download_backup_response(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -94,6 +95,7 @@ pub(super) fn prepare_download_backup_response(
     Ok((file, safe_filename))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn stream_backup_download_response(file: File, safe_filename: &str) -> Response {
     let stream = ReaderStream::new(tokio::fs::File::from_std(file));
     let mut response = Response::new(Body::from_stream(stream));

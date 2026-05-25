@@ -85,6 +85,7 @@ pub const BILL_CRUD_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/bills/pictures/unused"),
 ];
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn bill_runtime_router() -> Router<HttpAppState> {
     Router::new()
         .route("/api/bills/export", get(export_bills_handler))

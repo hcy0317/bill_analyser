@@ -24,6 +24,7 @@ use crate::{
     taxonomy_routes::taxonomy_runtime_router,
 };
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_router(state: HttpAppState) -> Router {
     // 注册顺序体现 Rust-only `/api/...` 主链：业务 router 在 fallback 之前合并，
     // 未知 API 统一由 Rust 返回结构化 404，不能重新透传旧 sidecar。
@@ -44,17 +45,38 @@ pub fn build_router(state: HttpAppState) -> Router {
         .with_state(state)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn health_handler(State(state): State<HttpAppState>) -> Json<HttpShellHealth> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "runtime",
+        operation = "health_handler",
+        "business operation entered"
+    );
     Json(http_shell_health(&state.config))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn metadata_handler(State(state): State<HttpAppState>) -> Json<HttpShellIdentity> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "runtime",
+        operation = "metadata_handler",
+        "business operation entered"
+    );
     Json(HttpShellIdentity::for_import_route_mode(
         state.config.import_route_mode,
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn not_found_handler() -> Response<Body> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "runtime",
+        operation = "not_found_handler",
+        "business operation entered"
+    );
     // fallback 是前端 route ownership contract 的兜底响应；保持机器可读 code，
     // 便于 contract test 区分 Rust 未实现与网络/代理错误。
     (

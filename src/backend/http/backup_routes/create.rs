@@ -4,6 +4,7 @@
 
 use super::*;
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn list_backup_files_response(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -43,6 +44,7 @@ pub(super) fn list_backup_files_response(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn create_backup_response(
     state: &HttpAppState,
     headers: &HeaderMap,

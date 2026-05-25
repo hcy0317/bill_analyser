@@ -176,6 +176,7 @@ pub const IMPORT_SKELETON_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("PUT", "/api/ml/receipt-recognition/config"),
 ];
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn import_runtime_router() -> Router<HttpAppState> {
     Router::new()
         .route(

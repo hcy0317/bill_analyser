@@ -12,6 +12,7 @@ fn hex_prefix(bytes: &[u8], length: usize) -> String {
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_list(value: Option<&Value>) -> Vec<Value> {
     match value {
         None | Some(Value::Null) => Vec::new(),
@@ -34,12 +35,14 @@ fn recurring_sample_bill_ids(item: &Map<String, Value>) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn insert_i64_if_present(object: &mut Map<String, Value>, key: &str, value: Option<&Value>) {
     if let Some(value) = value.and_then(|value| value_to_i64(Some(value))) {
         object.insert(key.to_string(), json!(value));
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn insert_string_if_present(object: &mut Map<String, Value>, key: &str, value: Option<&Value>) {
     let text = value_to_string(value);
     if !text.is_empty() {
@@ -56,6 +59,7 @@ fn optional_lower_query(query: &Map<String, Value>, key: &str) -> Option<String>
     optional_string_query(query, key).map(|value| value.to_lowercase())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn dedupe_keywords<I>(keywords: I) -> Vec<String>
 where
     I: IntoIterator<Item = String>,
@@ -74,6 +78,7 @@ where
     result
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn sort_by_len_desc(values: &[String]) -> Vec<String> {
     let mut sorted = values.to_vec();
     sorted.sort_by(|left, right| {
@@ -93,6 +98,7 @@ fn value_array_strings(value: Option<&Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn calculate_learning_feature_similarity(field: &str, bill_value: &str, rule_value: &str) -> f64 {
     if bill_value.is_empty() || rule_value.is_empty() {
         return 0.0;
@@ -185,6 +191,7 @@ fn sequence_matcher_matching_chars(
     before + best_size + after
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn find_longest_contiguous_match(
     left: &[char],
     left_start: usize,
@@ -215,6 +222,7 @@ fn find_longest_contiguous_match(
     (best_left, best_right, best_size)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn find_object_by_id(values: &[Value], target_id: i64) -> Option<&Map<String, Value>> {
     values
         .iter()

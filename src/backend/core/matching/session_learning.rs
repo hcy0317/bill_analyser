@@ -2,10 +2,13 @@
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
 // 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_transfer_pair_candidate(
     anchor_bill: &Map<String, Value>,
     candidate_bill: &Map<String, Value>,
 ) -> Option<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "build_transfer_pair_candidate", "business operation entered");
     if is_explicit_transfer_type(anchor_bill.get("type"))
         || is_explicit_transfer_type(candidate_bill.get("type"))
     {
@@ -63,10 +66,13 @@ pub fn build_transfer_pair_candidate(
     }))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_transfer_pair_candidates(
     anchor_bill: &Map<String, Value>,
     candidate_bills: &[Value],
 ) -> Vec<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "build_transfer_pair_candidates", "business operation entered");
     let mut candidates: Vec<Value> = candidate_bills
         .iter()
         .filter_map(Value::as_object)
@@ -97,10 +103,13 @@ pub fn build_transfer_pair_candidates(
     candidates
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_duplicate_bill_candidate(
     anchor_bill: &Map<String, Value>,
     candidate_bill: &Map<String, Value>,
 ) -> Option<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "build_duplicate_bill_candidate", "business operation entered");
     let anchor_id = value_to_i64(anchor_bill.get("id")).filter(|value| *value > 0)?;
     let candidate_id = value_to_i64(candidate_bill.get("id")).filter(|value| *value > 0)?;
     if anchor_id == candidate_id || !duplicate_bill_fields_match(anchor_bill, candidate_bill) {
@@ -121,10 +130,13 @@ pub fn build_duplicate_bill_candidate(
     }))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_duplicate_bill_candidates(
     anchor_bill: &Map<String, Value>,
     candidate_bills: &[Value],
 ) -> Vec<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "build_duplicate_bill_candidates", "business operation entered");
     let mut candidates: Vec<Value> = candidate_bills
         .iter()
         .filter_map(Value::as_object)
@@ -178,11 +190,14 @@ fn duplicate_bill_fields_match(
     true
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_investment_pair_candidate(
     anchor_bill: &Map<String, Value>,
     candidate_bill: &Map<String, Value>,
     keyword_config: Option<&Value>,
 ) -> Option<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "build_investment_pair_candidate", "business operation entered");
     score_investment_candidate(anchor_bill, true, keyword_config)?;
     score_investment_candidate(candidate_bill, true, keyword_config)?;
 
@@ -233,11 +248,14 @@ pub fn build_investment_pair_candidate(
     }))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_investment_pair_candidates(
     anchor_bill: &Map<String, Value>,
     candidate_bills: &[Value],
     keyword_config: Option<&Value>,
 ) -> Vec<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "build_investment_pair_candidates", "business operation entered");
     let mut candidates: Vec<Value> = candidate_bills
         .iter()
         .filter_map(Value::as_object)
@@ -270,7 +288,10 @@ pub fn build_investment_pair_candidates(
     candidates
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_matching_session_candidates(session_id: &str, previews: &[Value]) -> Value {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "build_matching_session_candidates", "business operation entered");
     let mut candidates = Vec::new();
     let mut counts_by_kind: BTreeMap<&str, i64> =
         CANDIDATE_KIND_ORDER.iter().map(|kind| (*kind, 0)).collect();
@@ -324,6 +345,7 @@ pub fn build_matching_session_candidates(session_id: &str, previews: &[Value]) -
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_reconciliation_candidates_query(query: &Map<String, Value>) -> Result<Value, String> {
     let candidate_type = optional_lower_query(query, "candidateType");
     if let Some(candidate_type) = candidate_type.as_deref() {
@@ -353,10 +375,13 @@ pub fn parse_reconciliation_candidates_query(query: &Map<String, Value>) -> Resu
     }))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_matching_candidate_action_payload(
     candidate_id: &str,
     result: &Map<String, Value>,
 ) -> Value {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "build_matching_candidate_action_payload", "business operation entered");
     let mut payload = json!({
         "candidateId": value_to_string(result.get("candidate_id")).if_empty(candidate_id),
         "action": value_to_string(result.get("action")),
@@ -395,6 +420,7 @@ pub fn build_matching_candidate_action_payload(
     payload
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_learning_candidate_for_bill(
     bill: &Map<String, Value>,
     rule: &Map<String, Value>,
@@ -402,6 +428,8 @@ pub fn build_learning_candidate_for_bill(
     categories: &[Value],
     accounts: &[Value],
 ) -> Option<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "build_learning_candidate_for_bill", "business operation entered");
     let bill_id = value_to_i64(bill.get("id")).filter(|value| *value > 0)?;
     let rule_id = value_to_i64(rule.get("id")).filter(|value| *value > 0)?;
     if value_to_string(rule.get("match_type")) != "composite"
@@ -454,6 +482,7 @@ pub fn build_learning_candidate_for_bill(
     }))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_learning_candidates_for_bill(
     bill: &Map<String, Value>,
     rules: &[Value],
@@ -461,6 +490,8 @@ pub fn build_learning_candidates_for_bill(
     categories: &[Value],
     accounts: &[Value],
 ) -> Vec<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "build_learning_candidates_for_bill", "business operation entered");
     let mut candidates: Vec<Value> = rules
         .iter()
         .filter_map(Value::as_object)
@@ -490,6 +521,7 @@ pub fn build_learning_candidates_for_bill(
     candidates
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn deserialize_learning_match_features(
     rule: &Map<String, Value>,
 ) -> Option<BTreeMap<String, String>> {
@@ -515,6 +547,7 @@ pub fn deserialize_learning_match_features(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn score_learning_rule_similarity(
     bill_features: &BTreeMap<String, String>,
     rule_features: &BTreeMap<String, String>,
@@ -575,11 +608,14 @@ pub fn score_learning_rule_similarity(
     }))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_learning_rule_result_summary(
     rule: &Map<String, Value>,
     categories: &[Value],
     accounts: &[Value],
 ) -> String {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "build_learning_rule_result_summary", "business operation entered");
     let mut parts = Vec::new();
     let learned_type = value_to_string(rule.get("learned_type")).trim().to_string();
     if !learned_type.is_empty() {

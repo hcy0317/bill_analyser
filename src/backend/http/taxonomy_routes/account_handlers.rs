@@ -2,14 +2,20 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn encryption_status_handler() -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "encryption_status_handler", "business operation entered");
     let encrypt_raw = std::env::var("BILL_DB_ENCRYPT").ok();
     let key_raw = std::env::var("BILL_DB_KEY").ok();
     let status = normalize_sqlcipher_status(encrypt_raw.as_deref(), key_raw.as_deref(), false);
     json_response(StatusCode::OK, encryption_status_response(&status))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn list_accounts_handler(State(state): State<HttpAppState>, headers: HeaderMap) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "list_accounts_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -26,11 +32,14 @@ async fn list_accounts_handler(State(state): State<HttpAppState>, headers: Heade
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn get_account_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(account_id): Path<i64>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "get_account_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -51,11 +60,14 @@ async fn get_account_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn create_account_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "create_account_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -88,12 +100,15 @@ async fn create_account_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn update_account_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(account_id): Path<i64>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "update_account_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -141,11 +156,14 @@ async fn update_account_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn delete_account_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(account_id): Path<i64>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "delete_account_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -177,11 +195,14 @@ async fn delete_account_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn update_account_display_orders_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "update_account_display_orders_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -222,10 +243,13 @@ async fn update_account_display_orders_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn sync_account_balances_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "sync_account_balances_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -244,12 +268,15 @@ async fn sync_account_balances_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn move_account_transactions_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(account_id): Path<i64>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "move_account_transactions_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -364,12 +391,15 @@ async fn move_account_transactions_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn clear_account_transactions_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(account_id): Path<i64>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "clear_account_transactions_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,

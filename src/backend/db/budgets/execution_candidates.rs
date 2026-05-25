@@ -3,6 +3,7 @@
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn query_budget_execution_candidates(
     connection: &Connection,
     user_id: i64,
@@ -77,6 +78,7 @@ fn budget_overlaps_request_period(budget: &BudgetRecord, filters: &BudgetExecuti
     budget_start <= request_end && budget_end.is_none_or(|end| end >= request_start)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn dedupe_budget_execution_candidates(budgets: Vec<BudgetRecord>) -> Vec<BudgetRecord> {
     let mut selected: BTreeMap<(String, String, String, String, i64), BudgetRecord> =
         BTreeMap::new();
@@ -119,6 +121,7 @@ fn dedupe_budget_execution_candidates(budgets: Vec<BudgetRecord>) -> Vec<BudgetR
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_budget_spent_amount(
     connection: &Connection,
     user_id: i64,
@@ -185,6 +188,7 @@ fn get_budget_spent_amount(
     Ok(spent.abs())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn resolve_budget_execution_window(
     budget: &BudgetRecord,
     filters: &BudgetExecutionFilters,
@@ -209,6 +213,7 @@ fn resolve_budget_execution_window(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_budget_execution_item(
     budget: &BudgetRecord,
     spent: f64,
@@ -257,6 +262,7 @@ fn build_budget_execution_item(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_category_filter(
     connection: &Connection,
     user_id: i64,

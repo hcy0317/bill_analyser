@@ -3,6 +3,7 @@
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_settings_templates(
     transaction: &Transaction<'_>,
     templates: &[Value],
@@ -39,6 +40,7 @@ fn import_settings_templates(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_existing_template_names(
     transaction: &Transaction<'_>,
     user_id: i64,
@@ -59,6 +61,7 @@ fn load_existing_template_names(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(level = "debug", skip_all)]
 fn upsert_settings_template(
     transaction: &Transaction<'_>,
     item: &Value,
@@ -206,6 +209,7 @@ fn template_update_values(payload: &Value, template_type: i64) -> Vec<SqlValue> 
     values
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_settings_category_rules(
     transaction: &Transaction<'_>,
     rules: &[Value],
@@ -279,6 +283,7 @@ fn import_settings_category_rules(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_existing_category_rules(
     transaction: &Transaction<'_>,
     user_id: i64,
@@ -301,6 +306,7 @@ fn load_existing_category_rules(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn resolve_settings_category_id(
     item: &Value,
     category_ref_map: &BTreeMap<String, i64>,
@@ -328,6 +334,7 @@ fn resolve_settings_category_id(
         .copied()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_settings_llm_configs(
     transaction: &Transaction<'_>,
     configs: &[Value],
@@ -542,6 +549,7 @@ fn import_settings_llm_configs(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_existing_llm_configs(
     transaction: &Transaction<'_>,
     user_id: i64,
@@ -569,6 +577,7 @@ fn load_existing_llm_configs(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn ensure_settings_llm_credential_column(transaction: &Transaction<'_>) -> DbResult<()> {
     if !table_has_column(transaction, "llm_configs", "credential_config")? {
         transaction.execute(
@@ -622,6 +631,7 @@ fn settings_credential_config_is_masked(value: &Value) -> bool {
             .is_some_and(is_masked_secret)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_settings_ocr_config(
     transaction: &Transaction<'_>,
     configs: &[Value],

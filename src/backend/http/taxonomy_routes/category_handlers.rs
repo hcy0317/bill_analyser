@@ -2,10 +2,13 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn list_categories_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "list_categories_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -22,10 +25,13 @@ async fn list_categories_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn flat_categories_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "flat_categories_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -42,7 +48,10 @@ async fn flat_categories_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn all_categories_handler(State(state): State<HttpAppState>, headers: HeaderMap) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "all_categories_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -59,11 +68,14 @@ async fn all_categories_handler(State(state): State<HttpAppState>, headers: Head
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn update_all_categories_handler(
     headers: HeaderMap,
     State(state): State<HttpAppState>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "update_all_categories_handler", "business operation entered");
     if let Err(response) = user_id_from_headers(&headers, &state.config) {
         return *response;
     }
@@ -85,11 +97,14 @@ async fn update_all_categories_handler(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn create_category_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "create_category_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -177,11 +192,14 @@ async fn create_category_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn get_category_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(category_id): Path<String>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "get_category_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -227,12 +245,15 @@ async fn get_category_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn update_category_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(category_id): Path<String>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "update_category_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -262,11 +283,14 @@ async fn update_category_handler(
     update_real_category_handler(&mut repository, user_id, category_id, &body)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn delete_category_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(category_id): Path<String>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "delete_category_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -294,11 +318,14 @@ async fn delete_category_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn move_categories_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "move_categories_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -339,11 +366,14 @@ async fn move_categories_handler(
     success_result(StatusCode::OK, Value::Bool(true))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn batch_create_categories_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "batch_create_categories_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -428,10 +458,13 @@ async fn batch_create_categories_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn export_categories_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "export_categories_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -457,11 +490,14 @@ async fn export_categories_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn category_statistics_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<CategoryStatisticsQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "category_statistics_handler", "business operation entered");
     let _ignored_legacy_filters = (query.period.as_deref(), query.category_type.as_deref());
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
@@ -486,11 +522,14 @@ async fn category_statistics_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn recategorize_all_bills_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "recategorize_all_bills_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,

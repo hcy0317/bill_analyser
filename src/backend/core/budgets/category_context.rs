@@ -3,6 +3,7 @@
 // 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
 
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_budget_category_type(raw: Option<i32>) -> Option<TransactionType> {
     match raw {
         Some(LEGACY_EXPENSE_CATEGORY_TYPE) => Some(TransactionType::Expense),
@@ -11,7 +12,10 @@ pub fn normalize_budget_category_type(raw: Option<i32>) -> Option<TransactionTyp
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_budget_category_context(categories: &[Value]) -> BudgetCategoryContext {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "build_budget_category_context", "business operation entered");
     let mut context = BudgetCategoryContext::default();
     for category in categories {
         let Value::Object(object) = category else {
@@ -84,6 +88,7 @@ pub fn build_budget_category_context(categories: &[Value]) -> BudgetCategoryCont
     context
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn resolve_budget_category_type(
     context: &BudgetCategoryContext,
     category: &str,
@@ -170,6 +175,7 @@ fn budget_category_info_to_json(info: BudgetCategoryInfo) -> Value {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn merge_budget_primary_with_fallback(
     mut primary: BudgetCategoryInfo,
     fallback: Option<&BudgetCategoryInfo>,
@@ -186,6 +192,7 @@ fn merge_budget_primary_with_fallback(
     primary
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn resolve_budget_category_info(
     context: &BudgetCategoryContext,
     category: &str,
@@ -236,6 +243,7 @@ pub fn resolve_budget_category_info(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_budget_type_name(budget_type: i32) -> &'static str {
     if budget_type == BUDGET_TYPE_EXPENSE {
         "支出"
@@ -244,6 +252,7 @@ pub fn get_budget_type_name(budget_type: i32) -> &'static str {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn budget_type_matches_category(
     context: &BudgetCategoryContext,
     category: &str,

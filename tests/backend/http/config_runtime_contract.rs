@@ -9,7 +9,7 @@ use bill_analyser_http::{
         DEFAULT_BACKUP_DIR, DEFAULT_BODY_LIMIT_BYTES, DEFAULT_DATA_DIR, DEFAULT_TIMEOUT_MS,
         DEFAULT_UPLOADS_DIR,
     },
-    HttpShellConfig, HttpShellConfigError, ImportRouteMode,
+    runtime_log_filter_from_directives, HttpShellConfig, HttpShellConfigError, ImportRouteMode,
 };
 
 #[test]
@@ -55,6 +55,17 @@ fn http_shell_config_ignores_legacy_upstream_and_uses_rust_runtime_defaults() {
     assert_eq!(config.public_base_url, None);
     assert!(config.import_route_mode.intercepts_import_routes());
     assert_eq!(config.import_route_mode.as_str(), "import_db_runtime");
+}
+
+#[test]
+fn runtime_logging_defaults_to_info_and_keeps_debug_opt_in() {
+    let default_filter = runtime_log_filter_from_directives(Some(""));
+    assert_eq!(default_filter.to_string(), "info");
+
+    let debug_filter = runtime_log_filter_from_directives(Some("bill_analyser_http=debug"));
+    assert!(debug_filter
+        .to_string()
+        .contains("bill_analyser_http=debug"));
 }
 
 #[test]

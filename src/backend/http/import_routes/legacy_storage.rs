@@ -36,6 +36,7 @@ fn init_legacy_bills_runtime_schema(runtime: &SqliteRuntime) -> Result<(), Impor
         .map_err(db_error_response)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn insert_legacy_confirmed_bills(
     connection: &mut Connection,
     user_id: UserId,
@@ -227,6 +228,7 @@ fn split_preview_line(line: &str, delimiter: char) -> Vec<String> {
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn detect_delimiter_for_line(line: &str, hint: Option<&str>) -> Option<char> {
     if let Some(delimiter) = delimiter_from_hint(hint) {
         return Some(delimiter);
@@ -256,6 +258,7 @@ fn delimiter_to_response(delimiter: Option<char>) -> String {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_urlencoded_form(body: &[u8]) -> HashMap<String, String> {
     let text = String::from_utf8_lossy(body);
     text.split('&')
@@ -330,6 +333,7 @@ fn save_unmatched_import_file(
     Ok(format!("{user_component}/{session_component}/{file_name}"))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn validate_import_temp_path(
     raw_path: &str,
     user_id: UserId,
@@ -394,6 +398,7 @@ fn temp_import_root() -> PathBuf {
     std::env::temp_dir().join("bill-analyser-rust-import")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_temp_user_component(user_id: UserId) -> String {
     format!("user-{}", user_id.get())
 }

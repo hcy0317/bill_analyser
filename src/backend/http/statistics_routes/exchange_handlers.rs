@@ -34,11 +34,18 @@ use super::{
         db_error_response, json_response, open_runtime, success_result, user_id_from_headers,
     },
 };
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn exchange_rates_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<ExchangeRatesQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "exchange_rates_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -92,6 +99,7 @@ pub(super) async fn exchange_rates_handler(
     success_result(StatusCode::OK, json!(result))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_exchange_rates_result(
     base_currency: &str,
     requested_provider: &str,
@@ -110,11 +118,18 @@ fn build_exchange_rates_result(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn update_user_custom_exchange_rate_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(body): Json<UserCustomExchangeRateRequest>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "update_user_custom_exchange_rate_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -178,11 +193,18 @@ pub(super) async fn update_user_custom_exchange_rate_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn delete_user_custom_exchange_rate_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(currency): Path<String>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "delete_user_custom_exchange_rate_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -242,6 +264,7 @@ fn is_missing_json_value(value: Option<&Value>) -> bool {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_exchange_rate_value(value: Option<&Value>) -> Result<f64, &'static str> {
     json_number(value.ok_or("currency and rate are required")?).ok_or("rate must be numeric")
 }

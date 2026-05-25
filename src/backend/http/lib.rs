@@ -15,6 +15,7 @@ pub mod bill_routes;
 pub mod budget_routes;
 pub mod config;
 pub mod import_routes;
+pub mod logging;
 pub mod matching_routes;
 pub mod router;
 pub mod runtime;
@@ -33,6 +34,9 @@ pub use bill_routes::{bill_runtime_router, BILL_CRUD_ROUTE_PATTERNS};
 pub use budget_routes::{budget_runtime_router, BUDGET_CRUD_ROUTE_PATTERNS};
 pub use config::{HttpShellConfig, HttpShellConfigError, ImportRouteMode};
 pub use import_routes::IMPORT_SKELETON_ROUTE_PATTERNS;
+#[cfg(not(coverage))]
+pub use logging::init_runtime_tracing;
+pub use logging::runtime_log_filter_from_directives;
 pub use matching_routes::{
     matching_recurring_calendar_networth_runtime_router,
     MATCHING_RECURRING_CALENDAR_NETWORTH_ROUTE_PATTERNS,

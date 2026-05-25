@@ -2,7 +2,10 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn create_auth_log(connection: &Connection, draft: &AuthLogDraft) -> DbResult<i64> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "create_auth_log", "business operation entered");
     let user_id = draft.user_id.map(user_id_sql).transpose()?;
     connection.execute(
         r#"

@@ -172,6 +172,7 @@ fn annotations_total(connection: &Connection, user_id: i64) -> Result<i64, Impor
         .map_err(db_error_response)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_learning_corpus_annotations(
     connection: &Connection,
     user_id: i64,
@@ -305,6 +306,7 @@ fn collect_learning_suggestion_candidates(
     (candidates, conflicted_hashes)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn resolve_suggestion_match(
     annotation: &LearningSuggestionCandidateInput,
 ) -> Option<(String, BTreeMap<String, String>)> {
@@ -376,6 +378,7 @@ fn learning_suggestion_id_by_key(
         .map_err(db_error_response)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn count_learning_suggestions(
     connection: &Connection,
     user_id: UserId,
@@ -401,6 +404,7 @@ fn count_learning_suggestions(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_learning_suggestions(
     connection: &Connection,
     user_id: UserId,
@@ -499,6 +503,7 @@ fn learning_suggestion_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Learning
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_learning_suggestion(
     connection: &Connection,
     suggestion_id: i64,
@@ -518,6 +523,7 @@ fn get_learning_suggestion(
         .map_err(db_error_response)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn accept_learning_suggestion(
     connection: &mut Connection,
     suggestion_id: i64,
@@ -626,6 +632,7 @@ fn accept_learning_suggestion(
     })))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn reject_learning_suggestion(
     connection: &mut Connection,
     suggestion_id: i64,

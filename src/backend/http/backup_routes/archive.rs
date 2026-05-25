@@ -4,6 +4,7 @@
 
 use super::*;
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn create_backup_file(
     data_dir: &Path,
     backup_dir: &Path,
@@ -43,11 +44,13 @@ impl BackupSource {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub(super) fn data_dir(&self) -> &Path {
         &self.data_dir
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn prepare_backup_source(
     data_dir: &Path,
     backup_dir: &Path,
@@ -89,6 +92,7 @@ pub(super) fn prepare_backup_source(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn sqlite_sidecar_relative_paths(sqlite_relative: &Path) -> Vec<PathBuf> {
     let raw = sqlite_relative.to_string_lossy();
     [format!("{raw}-wal"), format!("{raw}-shm")]
@@ -97,6 +101,7 @@ pub(super) fn sqlite_sidecar_relative_paths(sqlite_relative: &Path) -> Vec<PathB
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn snapshot_sqlite_database(source: &Path, target: &Path) -> FileRouteResult<()> {
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent)?;
@@ -112,6 +117,7 @@ pub(super) fn snapshot_sqlite_database(source: &Path, target: &Path) -> FileRout
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn unique_backup_zip_path(backup_dir: &Path) -> PathBuf {
     let counter = BACKUP_FILENAME_COUNTER.fetch_add(1, Ordering::Relaxed);
     backup_dir.join(format!(
@@ -121,6 +127,7 @@ pub(super) fn unique_backup_zip_path(backup_dir: &Path) -> PathBuf {
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn create_backup_zip(data_dir: &Path, backup_path: &Path) -> FileRouteResult<()> {
     let data_parent = data_dir
         .parent()
@@ -172,6 +179,7 @@ pub(super) fn create_backup_zip(data_dir: &Path, backup_path: &Path) -> FileRout
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn relative_zip_name(base_dir: &Path, file_path: &Path) -> FileRouteResult<String> {
     let relative = file_path
         .strip_prefix(base_dir)
@@ -193,6 +201,7 @@ pub(super) fn relative_zip_name(base_dir: &Path, file_path: &Path) -> FileRouteR
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn encrypt_backup_file(file_path: &Path, secret: &str) -> FileRouteResult<PathBuf> {
     let key = derive_backup_fernet_key(secret)
         .ok_or_else(|| BackupFileRuntimeError::bad_request("备份加密密钥未配置"))?;
@@ -246,6 +255,7 @@ pub(super) fn encrypt_backup_file(file_path: &Path, secret: &str) -> FileRouteRe
     Ok(encrypted_path)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn build_runtime_backup_info(
     file_path: &Path,
     encryption_key: Option<&str>,
@@ -283,10 +293,12 @@ pub(super) fn build_runtime_backup_info(
     }))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn public_backup_reference(file_path: &Path) -> String {
     format!("backup/{}", public_backup_filename(file_path))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn archive_summary_for_backup_file(
     file_path: &Path,
     encryption_key: Option<&str>,
@@ -306,6 +318,7 @@ pub(super) fn archive_summary_for_backup_file(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn decrypted_backup_bytes(file_path: &Path, secret: &str) -> FileRouteResult<Vec<u8>> {
     let key = derive_backup_fernet_key(secret)
         .ok_or_else(|| BackupFileRuntimeError::bad_request("备份加密密钥未配置"))?;
@@ -318,6 +331,7 @@ pub(super) fn decrypted_backup_bytes(file_path: &Path, secret: &str) -> FileRout
         .map_err(|_| BackupFileRuntimeError::bad_request("备份解密失败"))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn inspect_zip_reader<R: Read + Seek>(
     reader: R,
 ) -> bill_analyser_core::BackupArchiveSummary {
@@ -335,6 +349,7 @@ pub(super) fn inspect_zip_reader<R: Read + Seek>(
     backup_archive_summary_from_entries(names)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn build_backup_metadata(
     file_path: &Path,
     checksum: &str,
@@ -355,6 +370,7 @@ pub(super) fn build_backup_metadata(
     Ok(metadata)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn read_backup_metadata(file_path: &Path) -> Value {
     fs::read_to_string(backup_metadata_path(file_path))
         .ok()
@@ -362,10 +378,12 @@ pub(super) fn read_backup_metadata(file_path: &Path) -> Value {
         .unwrap_or_else(|| Value::Object(Map::new()))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn backup_metadata_path(file_path: &Path) -> PathBuf {
     PathBuf::from(format!("{}.meta.json", file_path.to_string_lossy()))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn calculate_file_checksum(file_path: &Path) -> FileRouteResult<String> {
     let mut file = File::open(file_path).map_err(|error| {
         io_context_error(
@@ -385,10 +403,12 @@ pub(super) fn calculate_file_checksum(file_path: &Path) -> FileRouteResult<Strin
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn io_context_error(error: io::Error, context: impl ToString) -> BackupFileRuntimeError {
     BackupFileRuntimeError::internal(format!("{}: {error}", context.to_string()))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn upsert_backup_record_from_info(
     connection: &rusqlite::Connection,
     backup_info: &BackupFileInfoContract,
@@ -412,6 +432,7 @@ pub(super) fn upsert_backup_record_from_info(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn backup_info_with_record(
     info: BackupFileInfoContract,
     record: Option<&BackupRecordRow>,
@@ -425,6 +446,7 @@ pub(super) fn backup_info_with_record(
     value
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn list_local_backup_files(backup_dir: &Path) -> FileRouteResult<Vec<PathBuf>> {
     fs::create_dir_all(backup_dir)?;
     let mut files = BTreeMap::new();
@@ -444,6 +466,7 @@ pub(super) fn list_local_backup_files(backup_dir: &Path) -> FileRouteResult<Vec<
     Ok(files.into_values().collect())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn remove_stale_plaintext_backup_temps(backup_dir: &Path) -> FileRouteResult<()> {
     if !backup_dir.exists() {
         return Ok(());
@@ -462,6 +485,7 @@ pub(super) fn remove_stale_plaintext_backup_temps(backup_dir: &Path) -> FileRout
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn remove_metadata_file(file_path: &Path) -> FileRouteResult<()> {
     let metadata_path = backup_metadata_path(file_path);
     if metadata_path.exists() {
@@ -470,6 +494,7 @@ pub(super) fn remove_metadata_file(file_path: &Path) -> FileRouteResult<()> {
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn resolve_backup_path(backup_dir: &Path, filename: &str) -> FileRouteResult<PathBuf> {
     let resolution = resolve_backup_filename(filename).map_err(|error| {
         BackupFileRuntimeError::new(status_or_internal(error.status_code), error.message)
@@ -507,6 +532,7 @@ pub(super) fn resolve_backup_path(backup_dir: &Path, filename: &str) -> FileRout
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn backup_dir(config: &HttpShellConfig) -> RouteResult<PathBuf> {
     let backup_dir = PathBuf::from(&config.backup_dir);
     fs::create_dir_all(&backup_dir)
@@ -514,14 +540,17 @@ pub(super) fn backup_dir(config: &HttpShellConfig) -> RouteResult<PathBuf> {
     Ok(backup_dir)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn data_dir(config: &HttpShellConfig) -> PathBuf {
     PathBuf::from(&config.data_dir)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn backup_filename(path: &Path) -> String {
     public_backup_filename(path)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn public_backup_filename(path: &Path) -> String {
     let filename = physical_backup_filename(path);
     if filename.ends_with(RUST_ENCRYPTED_BACKUP_STORAGE_SUFFIX) {
@@ -534,6 +563,7 @@ pub(super) fn public_backup_filename(path: &Path) -> String {
     filename
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn physical_backup_filename(path: &Path) -> String {
     path.file_name()
         .and_then(|value| value.to_str())
@@ -541,12 +571,14 @@ pub(super) fn physical_backup_filename(path: &Path) -> String {
         .to_string()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn is_encrypted_backup_storage_path(path: &Path) -> bool {
     let filename = physical_backup_filename(path);
     filename.ends_with(PUBLIC_ENCRYPTED_BACKUP_SUFFIX)
         || filename.ends_with(RUST_ENCRYPTED_BACKUP_STORAGE_SUFFIX)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn encrypted_storage_path_for_zip(file_path: &Path) -> PathBuf {
     let raw = file_path.to_string_lossy();
     PathBuf::from(format!(
@@ -556,6 +588,7 @@ pub(super) fn encrypted_storage_path_for_zip(file_path: &Path) -> PathBuf {
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn encrypted_storage_filename_for_public(filename: &str) -> String {
     format!(
         "{}{}",
@@ -564,6 +597,7 @@ pub(super) fn encrypted_storage_filename_for_public(filename: &str) -> String {
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn file_modified_at(path: &Path) -> FileRouteResult<i64> {
     Ok(path
         .metadata()?
@@ -574,11 +608,13 @@ pub(super) fn file_modified_at(path: &Path) -> FileRouteResult<i64> {
         .as_secs() as i64)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn system_time_iso(value: SystemTime) -> String {
     let datetime: chrono::DateTime<Local> = value.into();
     datetime.format("%Y-%m-%dT%H:%M:%S%.f").to_string()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn now_iso() -> String {
     Utc::now()
         .naive_utc()

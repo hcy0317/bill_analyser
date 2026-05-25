@@ -2,6 +2,7 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn insert_register_preset_categories(
     connection: &Connection,
     user_id: i64,
@@ -57,11 +58,14 @@ fn insert_register_preset_categories(
     Ok(true)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(crate) fn ensure_default_category_seed(
     connection: &Connection,
     user_id: i64,
     created_at: &str,
 ) -> DbResult<RegisterDefaultSeedSummary> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "ensure_default_category_seed", "business operation entered");
     let mut summary = RegisterDefaultSeedSummary {
         categories_created: 0,
         categories_skipped: 0,
@@ -154,6 +158,7 @@ struct CategoryInsertDraft<'a> {
     created_at: &'a str,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn insert_category_ignore(
     connection: &Connection,
     draft: &CategoryInsertDraft<'_>,
@@ -179,6 +184,7 @@ fn insert_category_ignore(
     Ok(changed > 0)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn find_category_id(
     connection: &Connection,
     user_id: i64,

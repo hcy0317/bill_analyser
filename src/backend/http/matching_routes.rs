@@ -65,6 +65,7 @@ pub const MATCHING_RECURRING_CALENDAR_NETWORTH_ROUTE_PATTERNS: &[(&str, &str)] =
     ("POST", "/api/recurring/suggestions/{suggestion_id}/reject"),
 ];
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn matching_recurring_calendar_networth_runtime_router() -> Router<HttpAppState> {
     Router::new()
         .route("/api/calendar/events", get(calendar_events_handler))
@@ -165,11 +166,18 @@ struct ReconciliationCandidatesQuery {
     limit: Option<String>,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn calendar_events_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<CalendarEventsQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "calendar_events_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -192,10 +200,17 @@ async fn calendar_events_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn networth_snapshot_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "networth_snapshot_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -210,11 +225,18 @@ async fn networth_snapshot_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn list_suggestions_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<RecurringSuggestionsQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "list_suggestions_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -254,10 +276,17 @@ async fn list_suggestions_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn detect_suggestions_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "detect_suggestions_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -290,11 +319,18 @@ async fn detect_suggestions_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn accept_suggestion_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(suggestion_id): Path<i64>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "accept_suggestion_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -310,11 +346,18 @@ async fn accept_suggestion_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn reject_suggestion_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(suggestion_id): Path<i64>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "reject_suggestion_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -330,11 +373,18 @@ async fn reject_suggestion_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn matching_session_candidates_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(session_id): Path<String>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "matching_session_candidates_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -350,19 +400,33 @@ async fn matching_session_candidates_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn matching_bill_candidates_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(bill_id): Path<i64>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "matching_bill_candidates_handler",
+        "business operation entered"
+    );
     matching_bill_candidates_response(&state, &headers, bill_id)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn matching_candidates_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<MatchingCandidatesQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "matching_candidates_handler",
+        "business operation entered"
+    );
     let session_id = query
         .session_id
         .as_deref()
@@ -389,11 +453,18 @@ async fn matching_candidates_handler(
     matching_bill_candidates_response(&state, &headers, bill_id)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn matching_bill_feedback_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(bill_id): Path<i64>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "matching_bill_feedback_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -409,11 +480,18 @@ async fn matching_bill_feedback_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn reconciliation_candidates_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<ReconciliationCandidatesQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "reconciliation_candidates_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -434,7 +512,14 @@ async fn reconciliation_candidates_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn matching_pairs_handler(State(state): State<HttpAppState>, headers: HeaderMap) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "matching_pairs_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -449,11 +534,18 @@ async fn matching_pairs_handler(State(state): State<HttpAppState>, headers: Head
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn create_manual_pair_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     payload: Option<Json<Value>>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "create_manual_pair_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -482,11 +574,18 @@ async fn create_manual_pair_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn delete_manual_pair_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(pair_id): Path<i64>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "delete_manual_pair_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -501,37 +600,65 @@ async fn delete_manual_pair_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn accept_matching_candidate_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(candidate_id): Path<String>,
     payload: Option<Json<Value>>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "accept_matching_candidate_handler",
+        "business operation entered"
+    );
     matching_candidate_action_response(&state, &headers, candidate_id, "accept", payload)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn reject_matching_candidate_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(candidate_id): Path<String>,
     payload: Option<Json<Value>>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "reject_matching_candidate_handler",
+        "business operation entered"
+    );
     matching_candidate_action_response(&state, &headers, candidate_id, "reject", payload)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn clear_matching_candidate_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(candidate_id): Path<String>,
     payload: Option<Json<Value>>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "clear_matching_candidate_handler",
+        "business operation entered"
+    );
     matching_candidate_action_response(&state, &headers, candidate_id, "clear", payload)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn investment_settings_gone_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "investment_settings_gone_handler",
+        "business operation entered"
+    );
     match user_id_from_headers(&headers, &state.config) {
         Ok(_) => error_response(
             StatusCode::GONE,
@@ -541,11 +668,18 @@ async fn investment_settings_gone_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn reconcile_history_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     payload: Option<Json<Value>>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "reconcile_history_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -668,6 +802,7 @@ fn required_date(value: Option<&str>, name: &str) -> RouteResult<NaiveDate> {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_limit(value: Option<&str>) -> RouteResult<usize> {
     let limit = match value.map(str::trim).filter(|value| !value.is_empty()) {
         Some(value) => value.parse::<usize>().map_err(|error| {
@@ -681,6 +816,7 @@ fn parse_limit(value: Option<&str>) -> RouteResult<usize> {
     Ok(limit.min(1000))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_offset(value: Option<&str>) -> RouteResult<usize> {
     match value.map(str::trim).filter(|value| !value.is_empty()) {
         Some(value) => value.parse::<usize>().map_err(|error| {
@@ -1019,6 +1155,7 @@ fn reconciliation_query_to_map(query: ReconciliationCandidatesQuery) -> Map<Stri
     map
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn insert_query_string(map: &mut Map<String, Value>, key: &str, value: Option<String>) {
     if let Some(value) = value {
         map.insert(key.to_string(), json!(value));
@@ -1039,6 +1176,7 @@ fn reconciliation_filters_from_value(value: &Value) -> ReconciliationCandidateFi
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_reconcile_history_bill_ids(object: &Map<String, Value>) -> Result<Vec<i64>, &'static str> {
     let Some(raw_bill_ids) = object.get("billIds") else {
         return Err("billIds is required");
@@ -1151,6 +1289,7 @@ fn value_to_f64(value: &Value) -> Option<f64> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_preview_type_text(value: &str) -> String {
     match value.trim().to_ascii_lowercase().as_str() {
         "expense" => "支出".to_string(),

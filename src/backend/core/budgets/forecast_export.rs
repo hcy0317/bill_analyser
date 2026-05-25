@@ -3,6 +3,7 @@
 // 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
 
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn calculate_forecast_amount(amounts: &[f64], strategy: &str) -> Option<f64> {
     if amounts.is_empty() {
         return None;
@@ -16,6 +17,7 @@ pub fn calculate_forecast_amount(amounts: &[f64], strategy: &str) -> Option<f64>
     average(values).map(round2)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn calculate_forecast_backtest_mape(amounts: &[f64], strategy: &str) -> Option<f64> {
     let mut errors = Vec::new();
     for index in 1..amounts.len() {
@@ -29,6 +31,7 @@ pub fn calculate_forecast_backtest_mape(amounts: &[f64], strategy: &str) -> Opti
     average(&errors).map(round2)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn resolve_forecast_confidence(backtest_mape: Option<f64>) -> &'static str {
     match backtest_mape {
         Some(value) if value <= 10.0 => "high",
@@ -37,6 +40,7 @@ pub fn resolve_forecast_confidence(backtest_mape: Option<f64>) -> &'static str {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn resolve_forecast_trend(amounts: &[f64]) -> &'static str {
     if amounts.len() < 2 {
         return "stable";
@@ -55,6 +59,7 @@ pub fn resolve_forecast_trend(amounts: &[f64]) -> &'static str {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn resolve_forecast_budget_amount(primary_amount: f64, sub_total: f64) -> f64 {
     if primary_amount > 0.0 {
         round2(primary_amount)
@@ -63,6 +68,7 @@ pub fn resolve_forecast_budget_amount(primary_amount: f64, sub_total: f64) -> f6
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_budget_forecast_item(
     category: &str,
     category_info: Value,
@@ -72,6 +78,8 @@ pub fn build_budget_forecast_item(
     sub_budget_total: f64,
     strategy: &str,
 ) -> Value {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "build_budget_forecast_item", "business operation entered");
     build_budget_forecast_item_from_input(BudgetForecastItemInput {
         category,
         category_info,
@@ -85,7 +93,10 @@ pub fn build_budget_forecast_item(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_budget_forecast_item_from_input(input: BudgetForecastItemInput<'_>) -> Value {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "build_budget_forecast_item_from_input", "business operation entered");
     let normalized_strategy = if input.strategy.trim().is_empty() {
         "historical_average"
     } else {
@@ -133,7 +144,10 @@ pub fn build_budget_forecast_item_from_input(input: BudgetForecastItemInput<'_>)
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_budget_export_item(row: &Value) -> Value {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "build_budget_export_item", "business operation entered");
     json!({
         "name": field_or_null(row, "name"),
         "category": field_or_null(row, "category"),
@@ -147,6 +161,7 @@ pub fn build_budget_export_item(row: &Value) -> Value {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_budget_export_response(rows: &[Value]) -> Value {
     json!({
         "success": true,

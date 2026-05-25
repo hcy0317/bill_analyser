@@ -28,11 +28,13 @@ pub struct ImportLearningTrainingSample {
     pub route_label: String,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_learning_text(raw_value: Option<&Value>) -> String {
     let text = value_to_string(raw_value).trim().to_lowercase();
     collapse_whitespace(&text)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_import_learning_text(raw_value: Option<&Value>) -> String {
     let text = value_to_string(raw_value).trim().to_lowercase();
     if text.is_empty() {
@@ -52,17 +54,25 @@ pub fn normalize_import_learning_text(raw_value: Option<&Value>) -> String {
     collapse_whitespace(&normalized)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_import_learning_suggestion_id(raw_value: Option<&Value>) -> Option<i64> {
     let normalized = optional_positive_i64(raw_value);
     normalized.filter(|value| *value > 0)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_composite_match_features(
     parser_id: &str,
     counterparty: &str,
     description: &str,
     payment_method: &str,
 ) -> Option<BTreeMap<String, String>> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "build_composite_match_features",
+        "business operation entered"
+    );
     let mut features = BTreeMap::new();
     for (key, raw_value) in [
         ("parser_id", parser_id),
@@ -83,16 +93,24 @@ pub fn build_composite_match_features(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_composite_match_hash(
     parser_id: &str,
     counterparty: &str,
     description: &str,
     payment_method: &str,
 ) -> Option<String> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "build_composite_match_hash",
+        "business operation entered"
+    );
     build_composite_match_features(parser_id, counterparty, description, payment_method)
         .map(|features| composite_hash_from_features(&features))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn composite_hash_from_features(features: &BTreeMap<String, String>) -> String {
     features
         .iter()
@@ -110,6 +128,7 @@ pub fn composite_hash_from_features(features: &BTreeMap<String, String>) -> Stri
         .join("|")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_composite_match_value(raw_value: Option<&Value>) -> Option<BTreeMap<String, String>> {
     let mut features = BTreeMap::new();
     for part in value_to_string(raw_value).split('|') {
@@ -138,6 +157,7 @@ pub fn parse_composite_match_value(raw_value: Option<&Value>) -> Option<BTreeMap
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn amount_bucket(raw_amount: Option<&Value>) -> &'static str {
     let amount = value_to_f64(raw_amount).abs();
     if amount == 0.0 {
@@ -153,19 +173,34 @@ pub fn amount_bucket(raw_amount: Option<&Value>) -> &'static str {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_semantic_label(row: &Map<String, Value>) -> String {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "build_semantic_label",
+        "business operation entered"
+    );
     let learned_type = normalize_learning_text(row.get("annotated_type"));
     let category_id = optional_nonnegative_i64(row.get("annotated_category_id")).unwrap_or(0);
     format!("type={learned_type}|category={category_id}")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_route_label(row: &Map<String, Value>) -> String {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "build_route_label",
+        "business operation entered"
+    );
     let source_id = optional_nonnegative_i64(row.get("annotated_source_account_id")).unwrap_or(0);
     let destination_id =
         optional_nonnegative_i64(row.get("annotated_destination_account_id")).unwrap_or(0);
     format!("source={source_id}|destination={destination_id}")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_semantic_label(label: &str) -> SemanticLabelParts {
     let mut result = SemanticLabelParts::default();
     for part in label.split('|') {
@@ -185,6 +220,7 @@ pub fn parse_semantic_label(label: &str) -> SemanticLabelParts {
     result
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_route_label(label: &str) -> RouteLabelParts {
     let mut result = RouteLabelParts::default();
     for part in label.split('|') {
@@ -215,7 +251,14 @@ pub struct RouteLabelParts {
     pub destination_account_id: Option<i64>,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_feature_payload(row: &Map<String, Value>) -> BTreeMap<String, String> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "build_feature_payload",
+        "business operation entered"
+    );
     let snapshot = snapshot_payload(row.get("source_snapshot_json"));
     let preview_type = normalize_learning_text(snapshot.get("preview_type"));
     let preview_type = if preview_type.is_empty() {
@@ -248,6 +291,7 @@ pub fn build_feature_payload(row: &Map<String, Value>) -> BTreeMap<String, Strin
     ])
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn prepare_training_samples(rows: &[Value]) -> Vec<ImportLearningTrainingSample> {
     rows.iter()
         .filter_map(Value::as_object)
@@ -279,6 +323,7 @@ pub fn prepare_training_samples(rows: &[Value]) -> Vec<ImportLearningTrainingSam
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn iter_feature_tokens(features: &BTreeMap<String, String>) -> Vec<String> {
     let mut tokens = Vec::new();
     if let Some(parser_id) = features
@@ -311,9 +356,16 @@ pub fn iter_feature_tokens(features: &BTreeMap<String, String>) -> Vec<String> {
     tokens
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_label_confirmation_counts(
     samples: &[ImportLearningTrainingSample],
 ) -> BTreeMap<String, i64> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "build_label_confirmation_counts",
+        "business operation entered"
+    );
     let mut counts = BTreeMap::new();
     for sample in samples {
         let key = format!("{}||{}", sample.semantic_label, sample.route_label);
@@ -322,9 +374,16 @@ pub fn build_label_confirmation_counts(
     counts
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_semantic_label_counts(
     samples: &[ImportLearningTrainingSample],
 ) -> BTreeMap<String, i64> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "build_semantic_label_counts",
+        "business operation entered"
+    );
     let mut counts = BTreeMap::new();
     for sample in samples {
         *counts.entry(sample.semantic_label.clone()).or_insert(0) += 1;
@@ -353,11 +412,18 @@ pub struct LearningPolicyDecision {
     pub rejection_reasons: Vec<String>,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn evaluate_learning_policy(
     prediction: &ImportLearningPrediction,
     confirmation_count: i64,
     conflict_reasons: &[String],
 ) -> LearningPolicyDecision {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "evaluate_learning_policy",
+        "business operation entered"
+    );
     let confidence = prediction
         .semantic_confidence
         .min(prediction.route_confidence);
@@ -432,9 +498,16 @@ pub struct ImportLearningDatasetSnapshotPayload {
     pub joint_label_confirmation_counts: BTreeMap<String, i64>,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_dataset_snapshot_payload(
     samples: &[ImportLearningTrainingSample],
 ) -> ImportLearningDatasetSnapshotPayload {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "build_dataset_snapshot_payload",
+        "business operation entered"
+    );
     ImportLearningDatasetSnapshotPayload {
         feature_schema_version: FEATURE_SCHEMA_VERSION.to_string(),
         policy_version: POLICY_VERSION.to_string(),
@@ -444,7 +517,14 @@ pub fn build_dataset_snapshot_payload(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn import_learning_model_version(dataset_snapshot_id: i64) -> String {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "import_learning_model_version",
+        "business operation entered"
+    );
     format!("v{dataset_snapshot_id}")
 }
 
@@ -458,11 +538,18 @@ pub struct ImportLearningModelRegistryPayload {
     pub joint_label_confirmation_counts: BTreeMap<String, i64>,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_model_registry_payload(
     model_parameters: Value,
     training_metrics: Value,
     confirmation_counts: BTreeMap<String, i64>,
 ) -> ImportLearningModelRegistryPayload {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "build_model_registry_payload",
+        "business operation entered"
+    );
     ImportLearningModelRegistryPayload {
         feature_schema_version: FEATURE_SCHEMA_VERSION.to_string(),
         policy_version: POLICY_VERSION.to_string(),
@@ -500,12 +587,19 @@ pub struct LlmPreviewApplyPlan {
     pub resolved_destination_account_id: Option<i64>,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_llm_preview_apply_plan(
     current: LlmPreviewSnapshot,
     suggestion: &LlmPreviewSuggestion,
     resolved_source_account_id: Option<i64>,
     resolved_destination_account_id: Option<i64>,
 ) -> LlmPreviewApplyPlan {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "build_llm_preview_apply_plan",
+        "business operation entered"
+    );
     let normalized_current = LlmPreviewSnapshot {
         preview_main_category: current.preview_main_category.trim().to_string(),
         preview_sub_category: current.preview_sub_category.trim().to_string(),
@@ -554,6 +648,7 @@ pub fn build_llm_preview_apply_plan(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_llm_preview_review_decision(decision: &str) -> Option<&'static str> {
     match decision.trim().to_lowercase().as_str() {
         "accept" => Some("accept"),
@@ -562,6 +657,7 @@ pub fn normalize_llm_preview_review_decision(decision: &str) -> Option<&'static 
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn should_restore_llm_previous_preview(
     decision: &str,
     previous_preview_snapshot: Option<&LlmPreviewSnapshot>,
@@ -608,6 +704,7 @@ pub struct LearningRouteResponse {
     pub body: Value,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn learning_error_response(status_code: u16, error: &str) -> LearningRouteResponse {
     LearningRouteResponse {
         status_code,
@@ -615,6 +712,7 @@ pub fn learning_error_response(status_code: u16, error: &str) -> LearningRouteRe
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn learning_data_response<T>(data: T) -> LearningRouteResponse
 where
     T: Serialize,
@@ -625,6 +723,7 @@ where
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn learning_center_page_response(
     items: Vec<Value>,
     total: i64,
@@ -639,6 +738,7 @@ pub fn learning_center_page_response(
     }))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn legacy_learning_rules_page_response(
     result: Vec<Value>,
     total_count: i64,
@@ -674,6 +774,7 @@ pub fn legacy_learning_rules_page_response(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_preview_ids(value: Option<&Value>) -> Result<Option<Vec<i64>>, &'static str> {
     let Some(value) = value else {
         return Ok(None);
@@ -699,6 +800,7 @@ pub fn parse_preview_ids(value: Option<&Value>) -> Result<Option<Vec<i64>>, &'st
     Ok(Some(result))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_learning_suggestion_ids(value: Option<&Value>) -> Result<Vec<i64>, String> {
     let Some(Value::Array(values)) = value else {
         return Err("suggestionIds must be a non-empty array".to_string());
@@ -722,6 +824,7 @@ pub fn parse_learning_suggestion_ids(value: Option<&Value>) -> Result<Vec<i64>, 
     Ok(result)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn learning_batch_accept_response(
     accepted: Vec<Value>,
     failed: Vec<Value>,
@@ -736,6 +839,7 @@ pub fn learning_batch_accept_response(
     }))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn llm_memory_events_success(
     events: Vec<LlmMemoryEventContract>,
     total: i64,
@@ -746,6 +850,7 @@ pub fn llm_memory_events_success(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn llm_error_response(status_code: u16, message: &str, code: &str) -> LearningRouteResponse {
     LearningRouteResponse {
         status_code,

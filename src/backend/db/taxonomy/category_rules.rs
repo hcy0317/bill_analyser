@@ -59,16 +59,24 @@ pub struct CategoryRulesRepository<'conn> {
 }
 
 impl<'conn> CategoryRulesRepository<'conn> {
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn new(connection: &'conn mut Connection) -> Self {
         Self { connection }
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn list_rules(
         &mut self,
         user_id: i64,
         category_id: Option<i64>,
         enabled_only: bool,
     ) -> DbResult<Vec<CategoryRuleRecord>> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "list_rules",
+            "business operation entered"
+        );
         let mut sql = String::from(
             "SELECT
                 cr.id, cr.user_id, cr.category_id, cr.name, cr.priority,
@@ -95,6 +103,7 @@ impl<'conn> CategoryRulesRepository<'conn> {
         rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn get_rule(&mut self, rule_id: i64, user_id: i64) -> DbResult<Option<CategoryRuleRecord>> {
         self.connection
             .query_row(
@@ -113,7 +122,14 @@ impl<'conn> CategoryRulesRepository<'conn> {
             .map_err(DbError::from)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn create_rule(&mut self, payload: &Value, user_id: i64) -> DbResult<Option<i64>> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "create_rule",
+            "business operation entered"
+        );
         let object = payload.as_object().ok_or_else(|| {
             DbError::InvalidOperation("category rule payload must be an object".to_string())
         })?;
@@ -168,7 +184,14 @@ impl<'conn> CategoryRulesRepository<'conn> {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn update_rule(&mut self, rule_id: i64, payload: &Value, user_id: i64) -> DbResult<bool> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "update_rule",
+            "business operation entered"
+        );
         let object = payload.as_object().ok_or_else(|| {
             DbError::InvalidOperation("category rule update payload must be an object".to_string())
         })?;
@@ -236,7 +259,14 @@ impl<'conn> CategoryRulesRepository<'conn> {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn delete_rule(&mut self, rule_id: i64, user_id: i64) -> DbResult<bool> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "delete_rule",
+            "business operation entered"
+        );
         let changed = self.connection.execute(
             "DELETE FROM category_rules WHERE id = ? AND user_id = ?",
             params![rule_id, user_id],
@@ -244,6 +274,7 @@ impl<'conn> CategoryRulesRepository<'conn> {
         Ok(changed > 0)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn reorder_rules(&mut self, rule_ids: &[i64], user_id: i64) -> DbResult<bool> {
         let now = utc_now_iso();
         run_transaction(self.connection, |transaction| {
@@ -264,11 +295,19 @@ impl<'conn> CategoryRulesRepository<'conn> {
         Ok(true)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn ensure_default_seed(&mut self, user_id: i64) -> DbResult<RegisterDefaultSeedSummary> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "ensure_default_seed",
+            "business operation entered"
+        );
         let now = utc_now_iso();
         ensure_default_category_seed(self.connection, user_id, &now)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn migrate_keywords_to_rules(
         &mut self,
         user_id: i64,

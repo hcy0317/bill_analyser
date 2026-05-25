@@ -4,6 +4,7 @@
 
 use super::*;
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn list_backup_jobs_response(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -17,6 +18,7 @@ pub(super) fn list_backup_jobs_response(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn save_backup_job_response(
     state: &HttpAppState,
     headers: &HeaderMap,

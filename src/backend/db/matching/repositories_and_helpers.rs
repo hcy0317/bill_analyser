@@ -2,6 +2,7 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_learning_rule(
     connection: &Connection,
     user_id: i64,
@@ -20,6 +21,7 @@ fn get_learning_rule(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_learning_rule_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -37,6 +39,7 @@ fn get_learning_rule_on_tx(
     .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn validate_learning_revision(
     rule: &Map<String, Value>,
     expected_revision: Option<&str>,
@@ -74,6 +77,7 @@ fn learning_suppression_revision_map(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_learning_rules(connection: &Connection, user_id: i64) -> DbResult<Vec<Value>> {
     let order_by = if column_exists(connection, "import_learning_rules", "confidence")? {
         "ORDER BY COALESCE(confidence, 0) DESC, id DESC"
@@ -96,6 +100,7 @@ fn load_learning_rules(connection: &Connection, user_id: i64) -> DbResult<Vec<Va
         .collect())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_categories(connection: &Connection, user_id: i64) -> DbResult<Vec<Value>> {
     if !table_exists(connection, "categories")? {
         return Ok(Vec::new());
@@ -109,6 +114,7 @@ fn load_categories(connection: &Connection, user_id: i64) -> DbResult<Vec<Value>
         .collect())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_accounts(connection: &Connection, user_id: i64) -> DbResult<Vec<Value>> {
     if !table_exists(connection, "accounts")? {
         return Ok(Vec::new());
@@ -167,6 +173,7 @@ fn user_investment_keyword_config_tx(tx: &Transaction<'_>, user_id: i64) -> DbRe
     Ok(build_user_investment_keyword_settings(user.as_ref()))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_category_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -330,6 +337,7 @@ fn json_value_to_sql(value: &Value) -> SqlValue {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_json_object(raw: &str) -> Map<String, Value> {
     serde_json::from_str::<Value>(raw)
         .ok()
@@ -337,6 +345,7 @@ fn parse_json_object(raw: &str) -> Map<String, Value> {
         .unwrap_or_default()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_pair_type(pair_type: &str) -> MatchingResult<&'static str> {
     match pair_type.trim().to_ascii_lowercase().as_str() {
         TRANSFER_PAIR_TYPE => Ok(TRANSFER_PAIR_TYPE),
@@ -359,6 +368,7 @@ fn decision_from_action(action: &str) -> MatchingResult<ImportPreviewDecision> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn map_write_error(error: DbError) -> MatchingRuntimeError {
     match error {
         DbError::InvalidOperation(message)
@@ -371,6 +381,7 @@ fn map_write_error(error: DbError) -> MatchingRuntimeError {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn map_reconciliation_error(error: DbError) -> MatchingRuntimeError {
     match error {
         DbError::InvalidOperation(message) if message.contains("not found") => {
@@ -425,6 +436,7 @@ fn column_exists_tx(tx: &Transaction<'_>, table: &str, column: &str) -> DbResult
         .any(|name| name == column))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn map_string(map: &Map<String, Value>, key: &str, fallback: &str) -> String {
     map.get(key)
         .map(|value| value_string(Some(value)))
@@ -432,14 +444,17 @@ fn map_string(map: &Map<String, Value>, key: &str, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.to_string())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn map_i64(map: &Map<String, Value>, key: &str) -> i64 {
     map_optional_i64(map, key).unwrap_or(0)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn map_optional_i64(map: &Map<String, Value>, key: &str) -> Option<i64> {
     value_i64(map.get(key)).filter(|value| *value > 0)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn map_f64(map: &Map<String, Value>, key: &str) -> f64 {
     value_f64(map.get(key))
 }
@@ -478,6 +493,7 @@ fn utc_now() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn merge_description_values(values: impl IntoIterator<Item = String>) -> String {
     let mut merged = Vec::new();
     for value in values {

@@ -2,12 +2,15 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn recurring_candidates_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(bill_id): Path<i64>,
     Query(query): Query<RecurringCandidatesQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "bills", operation = "recurring_candidates_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -32,12 +35,15 @@ async fn recurring_candidates_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn bind_recurring_match_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(bill_id): Path<i64>,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "bills", operation = "bind_recurring_match_handler", "business operation entered");
     let Some(recurring_id) = payload.get("recurringId").and_then(value_to_positive_i64) else {
         return bad_request("Missing recurringId");
     };
@@ -63,11 +69,14 @@ async fn bind_recurring_match_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn unbind_recurring_match_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(bill_id): Path<i64>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "bills", operation = "unbind_recurring_match_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,

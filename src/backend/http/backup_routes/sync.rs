@@ -4,6 +4,7 @@
 
 use super::*;
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn prepare_sync_backup_response(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -183,6 +184,7 @@ pub(super) fn prepare_sync_backup_response(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn finish_sync_backup_response(
     state: &HttpAppState,
     headers: &HeaderMap,

@@ -2,11 +2,14 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_parse_runtime_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_parse_runtime_handler", "business operation entered");
     let content_type = content_type_from_headers(&headers);
     let content_type_lower = content_type.to_ascii_lowercase();
     if content_type_lower.contains("multipart/form-data") {
@@ -26,19 +29,25 @@ pub async fn import_parse_runtime_handler(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_parse_generic_runtime_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_parse_generic_runtime_handler", "business operation entered");
     import_parse_json_runtime_response(&state, &headers, &payload, true)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn legacy_import_preview_runtime_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "legacy_import_preview_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -73,10 +82,13 @@ pub async fn legacy_import_preview_runtime_handler(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn legacy_import_parsers_runtime_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "legacy_import_parsers_runtime_handler", "business operation entered");
     if let Err(response) = user_id_from_headers(&headers, &state.config) {
         return route_response(response);
     }
@@ -89,11 +101,14 @@ pub async fn legacy_import_parsers_runtime_handler(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn legacy_parse_import_runtime_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "legacy_parse_import_runtime_handler", "business operation entered");
     let content_type = content_type_from_headers(&headers);
     if !content_type
         .to_ascii_lowercase()
@@ -139,11 +154,14 @@ pub async fn legacy_parse_import_runtime_handler(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn legacy_import_upload_runtime_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "legacy_import_upload_runtime_handler", "business operation entered");
     let content_type = content_type_from_headers(&headers);
     if !content_type
         .to_ascii_lowercase()
@@ -193,11 +211,14 @@ pub async fn legacy_import_upload_runtime_handler(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn legacy_import_reclassify_runtime_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "legacy_import_reclassify_runtime_handler", "business operation entered");
     if let Err(response) = user_id_from_headers(&headers, &state.config) {
         return route_response(response);
     }
@@ -219,11 +240,14 @@ pub async fn legacy_import_reclassify_runtime_handler(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_configs_list_runtime_handler(
     State(state): State<HttpAppState>,
     Query(query): Query<ImportConfigQuery>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_configs_list_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -257,11 +281,14 @@ pub async fn import_configs_list_runtime_handler(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_configs_save_runtime_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_configs_save_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -335,11 +362,14 @@ pub async fn import_configs_save_runtime_handler(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_configs_match_runtime_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_configs_match_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -375,11 +405,14 @@ pub async fn import_configs_match_runtime_handler(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_configs_suggest_runtime_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_configs_suggest_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -416,11 +449,14 @@ pub async fn import_configs_suggest_runtime_handler(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_configs_delete_runtime_handler(
     State(state): State<HttpAppState>,
     Path(config_id): Path<i64>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_configs_delete_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -450,11 +486,14 @@ pub async fn import_configs_delete_runtime_handler(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn legacy_import_confirm_runtime_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "legacy_import_confirm_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -519,11 +558,14 @@ pub async fn legacy_import_confirm_runtime_handler(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn legacy_import_batch_runtime_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "legacy_import_batch_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),

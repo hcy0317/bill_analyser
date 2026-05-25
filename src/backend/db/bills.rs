@@ -134,6 +134,7 @@ const BILL_SELECT_COLUMNS: &[&str] = &[
     "import_history_id",
 ];
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn calculate_bill_hash_from_fields(
     date: &str,
     bill_type: &str,
@@ -152,6 +153,7 @@ pub fn calculate_bill_hash_from_fields(
     format!("{:x}", md5::compute(source.as_bytes()))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn calculate_bill_hash_from_record(record: &BillRecord) -> DbResult<String> {
     Ok(calculate_bill_hash_from_fields(
         &record_text(record, "date"),
@@ -162,11 +164,18 @@ pub fn calculate_bill_hash_from_record(record: &BillRecord) -> DbResult<String> 
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn create_bill(
     connection: &mut Connection,
     user_id: UserId,
     draft: &BillCreateDraft,
 ) -> DbResult<i64> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "bills",
+        operation = "create_bill",
+        "business operation entered"
+    );
     let user_scope = UserScope::new(user_id);
     let user_id = user_scope.bind_value()?;
     run_transaction(connection, |tx| {
@@ -177,11 +186,18 @@ pub fn create_bill(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn batch_create_bills(
     connection: &mut Connection,
     user_id: UserId,
     drafts: &[BillCreateDraft],
 ) -> DbResult<Vec<i64>> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "bills",
+        operation = "batch_create_bills",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     if drafts.is_empty() {
         return Ok(Vec::new());
@@ -200,12 +216,19 @@ pub fn batch_create_bills(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn update_bill(
     connection: &mut Connection,
     user_id: UserId,
     bill_id: i64,
     draft: &BillUpdateDraft,
 ) -> DbResult<bool> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "bills",
+        operation = "update_bill",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     run_transaction(connection, |tx| {
         let Some(old_snapshot) = get_bill_account_snapshot_on_tx(tx, user_id, bill_id)? else {
@@ -245,12 +268,19 @@ pub fn update_bill(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn batch_update_bills(
     connection: &mut Connection,
     user_id: UserId,
     bill_ids: &[i64],
     fields: &BillRecord,
 ) -> DbResult<BatchUpdateBillsResult> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "bills",
+        operation = "batch_update_bills",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     let bill_ids = normalize_bill_ids(bill_ids);
     if bill_ids.is_empty() || fields.is_empty() {
@@ -297,7 +327,14 @@ pub fn batch_update_bills(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn delete_bill(connection: &mut Connection, user_id: UserId, bill_id: i64) -> DbResult<bool> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "bills",
+        operation = "delete_bill",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     run_transaction(connection, |tx| {
         let now = now_text();
@@ -305,6 +342,7 @@ pub fn delete_bill(connection: &mut Connection, user_id: UserId, bill_id: i64) -
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(crate) fn update_bill_fields_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -312,6 +350,12 @@ pub(crate) fn update_bill_fields_on_tx(
     fields: &BillRecord,
     now: &str,
 ) -> DbResult<bool> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "bills",
+        operation = "update_bill_fields_on_tx",
+        "business operation entered"
+    );
     let Some(old_snapshot) = get_bill_account_snapshot_on_tx(tx, user_id, bill_id)? else {
         return Ok(false);
     };
@@ -341,12 +385,19 @@ pub(crate) fn update_bill_fields_on_tx(
     Ok(true)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(crate) fn delete_bill_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
     bill_id: i64,
     now: &str,
 ) -> DbResult<bool> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "bills",
+        operation = "delete_bill_on_tx",
+        "business operation entered"
+    );
     let Some(snapshot) = get_bill_account_snapshot_on_tx(tx, user_id, bill_id)? else {
         return Ok(false);
     };
@@ -360,11 +411,18 @@ pub(crate) fn delete_bill_on_tx(
     Ok(deleted > 0)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn batch_delete_bills(
     connection: &mut Connection,
     user_id: UserId,
     bill_ids: &[i64],
 ) -> DbResult<usize> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "bills",
+        operation = "batch_delete_bills",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     let bill_ids = normalize_bill_ids(bill_ids);
     if bill_ids.is_empty() {
@@ -399,6 +457,7 @@ pub fn batch_delete_bills(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_bill_by_id(
     connection: &Connection,
     user_id: UserId,
@@ -408,6 +467,7 @@ pub fn get_bill_by_id(
     get_bill_by_id_on_connection(connection, user_id, bill_id)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_bill_update_snapshot(
     connection: &Connection,
     user_id: UserId,
@@ -417,6 +477,7 @@ pub fn get_bill_update_snapshot(
     get_bill_update_snapshot_on_connection(connection, user_id, bill_id)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_bill_tags(
     connection: &Connection,
     user_id: UserId,
@@ -426,6 +487,7 @@ pub fn get_bill_tags(
     get_bill_tags_on_connection(connection, user_id, bill_id)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_bills(
     connection: &Connection,
     user_id: UserId,
@@ -433,6 +495,12 @@ pub fn query_bills(
     page_size: usize,
     filters: &BillFilters,
 ) -> DbResult<BillPage> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "bills",
+        operation = "query_bills",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     let page = page.max(1);
     let page_size = page_size.clamp(1, 500);
@@ -467,6 +535,7 @@ pub fn query_bills(
     Ok(BillPage { bills, total })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_bill_recurring_candidates(
     connection: &Connection,
     user_id: UserId,
@@ -506,12 +575,19 @@ pub fn get_bill_recurring_candidates(
     }))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn bind_bill_to_recurring(
     connection: &mut Connection,
     user_id: UserId,
     bill_id: i64,
     recurring_id: i64,
 ) -> DbResult<Option<BillRecurringBindResult>> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "bills",
+        operation = "bind_bill_to_recurring",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     run_transaction(connection, |tx| {
         let Some(bill) = get_bill_by_id_on_tx(tx, user_id, bill_id)? else {
@@ -554,11 +630,18 @@ pub fn bind_bill_to_recurring(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn unbind_bill_from_recurring(
     connection: &mut Connection,
     user_id: UserId,
     bill_id: i64,
 ) -> DbResult<Option<bool>> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "bills",
+        operation = "unbind_bill_from_recurring",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     run_transaction(connection, |tx| {
         let Some(bill) = get_bill_by_id_on_tx(tx, user_id, bill_id)? else {
@@ -577,11 +660,18 @@ pub fn unbind_bill_from_recurring(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn list_bills(
     connection: &Connection,
     user_id: UserId,
     filters: &BillFilters,
 ) -> DbResult<Vec<BillRecord>> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "bills",
+        operation = "list_bills",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     let (conditions, filter_params) = build_bill_filter_conditions(filters)?;
     let mut list_params = vec![SqlValue::Integer(user_id)];
@@ -600,6 +690,7 @@ pub fn list_bills(
     Ok(bills)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_first_account_id(connection: &Connection, user_id: UserId) -> DbResult<Option<i64>> {
     let user_id = UserScope::new(user_id).bind_value()?;
     connection
@@ -612,10 +703,17 @@ pub fn get_first_account_id(connection: &Connection, user_id: UserId) -> DbResul
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn sync_all_account_balances(
     connection: &mut Connection,
     user_id: UserId,
 ) -> DbResult<SyncAllAccountBalancesResult> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "bills",
+        operation = "sync_all_account_balances",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     run_transaction(connection, |tx| {
         let accounts = load_account_balance_sync_targets(tx, user_id)?;
@@ -659,6 +757,7 @@ pub fn sync_all_account_balances(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn insert_bill_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -691,6 +790,7 @@ fn insert_bill_on_tx(
     Ok((bill_id, snapshot))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn prepare_create_payload(user_id: i64, fields: &BillRecord, now: &str) -> DbResult<BillRecord> {
     let mut payload = fields.clone();
     normalize_create_aliases(&mut payload);
@@ -716,6 +816,7 @@ fn prepare_create_payload(user_id: i64, fields: &BillRecord, now: &str) -> DbRes
     Ok(payload)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn prepare_update_payload(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -745,6 +846,7 @@ fn prepare_update_payload(
     Ok(payload)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn update_payload_to_sql(payload: BillRecord) -> DbResult<(String, Vec<SqlValue>)> {
     if payload.is_empty() {
         return Err(DbError::InvalidOperation("empty bill update".to_string()));
@@ -762,6 +864,7 @@ fn update_payload_to_sql(payload: BillRecord) -> DbResult<(String, Vec<SqlValue>
     Ok((assignments.join(", "), values))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_bill_by_id_on_connection(
     connection: &Connection,
     user_id: i64,
@@ -777,6 +880,7 @@ fn get_bill_by_id_on_connection(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_bill_by_id_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -791,6 +895,7 @@ fn get_bill_by_id_on_tx(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_bill_account_snapshot_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -810,6 +915,7 @@ fn get_bill_account_snapshot_on_tx(
     .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_bill_account_snapshots_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -841,6 +947,7 @@ fn get_bill_account_snapshots_on_tx(
     Ok(snapshots)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_bill_update_snapshot_on_connection(
     connection: &Connection,
     user_id: i64,
@@ -870,6 +977,7 @@ fn bill_update_snapshot_from_row(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_bill_tags_on_connection(
     connection: &Connection,
     user_id: i64,
@@ -923,6 +1031,7 @@ fn replace_bill_tags(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn delete_bill_tags(tx: &Transaction<'_>, bill_ids: &[i64]) -> DbResult<()> {
     let bill_ids = normalize_bill_ids(bill_ids);
     if bill_ids.is_empty() || !table_exists(tx, "bill_tags")? {
@@ -941,6 +1050,7 @@ fn delete_bill_tags(tx: &Transaction<'_>, bill_ids: &[i64]) -> DbResult<()> {
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn delete_pairing_side_effects(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -968,6 +1078,7 @@ fn delete_pairing_side_effects(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn delete_pair_table_by_pair_columns(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -990,6 +1101,7 @@ fn delete_pair_table_by_pair_columns(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn sync_account_balances(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -1019,6 +1131,7 @@ fn sync_account_balances(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_account_balance_sync_targets(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -1046,6 +1159,7 @@ fn load_account_balance_sync_targets(
     Ok(accounts)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn calculate_account_balance_yuan_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -1064,6 +1178,7 @@ fn calculate_account_balance_yuan_on_tx(
     money_to_yuan_f64(balance)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_account_balance_bills(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -1099,6 +1214,7 @@ fn load_account_balance_bills(
     Ok(bills)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn calculate_same_account_investment_pnl_correction(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -1162,6 +1278,7 @@ fn calculate_same_account_investment_pnl_correction(
     money_from_yuan(correction)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_bill_filter_conditions(filters: &BillFilters) -> DbResult<(Vec<String>, Vec<SqlValue>)> {
     let mut conditions = Vec::new();
     let mut params = Vec::new();
@@ -1260,6 +1377,7 @@ fn build_bill_filter_conditions(filters: &BillFilters) -> DbResult<(Vec<String>,
     Ok((conditions, params))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_amount_filter(
     conditions: &mut Vec<String>,
     params: &mut Vec<SqlValue>,
@@ -1379,6 +1497,7 @@ fn tag_value_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     Ok(Value::Object(tag))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn list_enabled_recurring_templates(
     connection: &Connection,
     user_id: i64,
@@ -1403,6 +1522,7 @@ fn list_enabled_recurring_templates(
     Ok(recurring)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_recurring_template_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -1470,6 +1590,7 @@ fn sql_value_ref_to_json(value: ValueRef<'_>) -> Value {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_recurring_candidates_for_bill_data(
     bill: &BillRecord,
     recurring_rows: &[BillRecord],
@@ -1633,6 +1754,7 @@ fn serialize_recurring_template_row(row: &BillRecord) -> Map<String, Value> {
     value
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn recalculate_recurring_next_date_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -1669,6 +1791,7 @@ fn recalculate_recurring_next_date_on_tx(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_date_value(value: &str) -> Option<NaiveDate> {
     let text = value.trim();
     if text.is_empty() {
@@ -1677,6 +1800,7 @@ fn parse_date_value(value: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(text.get(..10)?, "%Y-%m-%d").ok()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_schedule_frequency_values(value: &str) -> Vec<u32> {
     let mut values = value
         .split(',')
@@ -1741,6 +1865,7 @@ fn is_recurring_due_on_date(recurring: &BillRecord, target_date: NaiveDate) -> b
         || start_date.is_some_and(|date| date == target_date)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn find_recurring_occurrence_near_date(
     recurring: &BillRecord,
     target_date: NaiveDate,
@@ -1762,6 +1887,7 @@ fn find_recurring_occurrence_near_date(
     nearest_date
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_next_recurring_occurrence_after(
     recurring: &BillRecord,
     after_date: NaiveDate,
@@ -1772,6 +1898,7 @@ fn get_next_recurring_occurrence_after(
         .find(|candidate| is_recurring_due_on_date(recurring, *candidate))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_first_recurring_occurrence(
     recurring: &BillRecord,
     max_search_days: i64,
@@ -1798,6 +1925,7 @@ fn collect_account_ids(snapshots: impl IntoIterator<Item = BillAccountSyncSnapsh
     ids.into_iter().collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_bill_ids(values: &[i64]) -> Vec<i64> {
     values
         .iter()
@@ -1808,6 +1936,7 @@ fn normalize_bill_ids(values: &[i64]) -> Vec<i64> {
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_create_aliases(payload: &mut BillRecord) {
     if !payload.contains_key("payment_method") {
         if let Some(value) = payload.remove("channel").filter(is_non_empty_json_value) {
@@ -1821,6 +1950,7 @@ fn normalize_create_aliases(payload: &mut BillRecord) {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn update_requires_hash_recalculation(payload: &BillRecord) -> bool {
     ["date", "type", "amount", "counterparty", "description"]
         .iter()
@@ -1911,6 +2041,7 @@ fn non_empty_str(value: &str) -> Option<&str> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_template_transaction_type(value: Option<&Value>) -> i64 {
     let text = match value {
         Some(Value::String(value)) => value.trim().to_ascii_lowercase(),

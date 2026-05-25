@@ -2,7 +2,10 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn authorize_oauth2_callback_handler(State(state): State<HttpAppState>) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "authorize_oauth2_callback_handler", "business operation entered");
     if !state.config.auth_enable_oauth2 {
         return auth_rest_error_response(AuthRestError::new(
             403,
@@ -18,12 +21,15 @@ async fn authorize_oauth2_callback_handler(State(state): State<HttpAppState>) ->
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn verify_email_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "verify_email_handler", "business operation entered");
     let peer_addr = connect_info.map(|ConnectInfo(addr)| addr);
     let body = request_body_object(&body);
     let token = body
@@ -149,12 +155,15 @@ async fn verify_email_handler(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn resend_public_verification_email_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "resend_public_verification_email_handler", "business operation entered");
     let body = request_body_object(&body);
     let email = body
         .get("email")
@@ -222,12 +231,15 @@ async fn resend_public_verification_email_handler(
     success_result(StatusCode::OK, Value::Bool(true))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn forgot_password_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "forgot_password_handler", "business operation entered");
     let body = request_body_object(&body);
     let email = body
         .get("email")
@@ -293,12 +305,15 @@ async fn forgot_password_handler(
     success_result(StatusCode::OK, Value::Bool(true))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn reset_password_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "reset_password_handler", "business operation entered");
     let body = request_body_object(&body);
     let email = body
         .get("email")
@@ -404,12 +419,15 @@ async fn reset_password_handler(
     success_result(StatusCode::OK, Value::Bool(true))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn unlink_profile_external_auth_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "unlink_profile_external_auth_handler", "business operation entered");
     let auth = match authenticated_user(&headers, &state) {
         Ok(value) => value,
         Err(response) => return *response,

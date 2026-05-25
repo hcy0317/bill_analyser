@@ -185,6 +185,7 @@ fn synchronize_primary_budget_for_group(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn delete_budget_record_on_tx(tx: &Transaction<'_>, budget: &BudgetRecord) -> DbResult<()> {
     let budget_id = record_i64(budget, "id").unwrap_or_default();
     let user_id = record_i64(budget, "user_id").unwrap_or_default();
@@ -198,6 +199,7 @@ fn delete_budget_record_on_tx(tx: &Transaction<'_>, budget: &BudgetRecord) -> Db
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn update_parent_budget_floor(
     tx: &Transaction<'_>,
     budget: &BudgetRecord,
@@ -240,6 +242,7 @@ fn update_parent_budget_floor(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_primary_category_budget(
     tx: &Transaction<'_>,
     group_key: &BudgetGroupKey,
@@ -269,6 +272,7 @@ fn get_primary_category_budget(
     .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_period_parent_budget(
     tx: &Transaction<'_>,
     group_key: &BudgetPeriodGroupKey,
@@ -306,6 +310,7 @@ fn get_period_parent_budget(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_sub_category_budgets_total(
     tx: &Transaction<'_>,
     group_key: &BudgetGroupKey,
@@ -332,6 +337,7 @@ fn get_sub_category_budgets_total(
     .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_period_child_budgets_total(
     tx: &Transaction<'_>,
     group_key: &BudgetPeriodGroupKey,
@@ -404,6 +410,7 @@ fn sum_yearly_budget_period_children(
     Ok(total)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_budget_period_child_amounts_by_start(
     tx: &Transaction<'_>,
     group_key: &BudgetPeriodGroupKey,
@@ -466,6 +473,7 @@ fn collect_budget_sync_group_keys<'a>(
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_budget_group_key(budget: &BudgetRecord, user_id: i64) -> Option<BudgetGroupKey> {
     let category = record_text(budget, "category");
     let period_type = record_text(budget, "period_type");
@@ -481,6 +489,7 @@ fn build_budget_group_key(budget: &BudgetRecord, user_id: i64) -> Option<BudgetG
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_budget_period_group_key(
     budget: &BudgetRecord,
     period_type: &str,

@@ -2,7 +2,10 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn list_tags_handler(State(state): State<HttpAppState>, headers: HeaderMap) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "list_tags_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -19,11 +22,14 @@ async fn list_tags_handler(State(state): State<HttpAppState>, headers: HeaderMap
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn get_tag_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(tag_id): Path<i64>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "get_tag_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -43,11 +49,14 @@ async fn get_tag_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn create_tag_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "create_tag_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -84,12 +93,15 @@ async fn create_tag_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn update_tag_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(tag_id): Path<i64>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "update_tag_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -122,11 +134,14 @@ async fn update_tag_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn delete_tag_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(tag_id): Path<i64>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "delete_tag_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -144,11 +159,14 @@ async fn delete_tag_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn update_tag_display_orders_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "update_tag_display_orders_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -197,11 +215,14 @@ async fn update_tag_display_orders_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn batch_create_tags_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "batch_create_tags_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -275,11 +296,14 @@ async fn batch_create_tags_handler(
     success_result(StatusCode::CREATED, Value::Array(created_tags))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn list_templates_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BTreeMap<String, String>>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "list_templates_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -297,12 +321,15 @@ async fn list_templates_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn get_template_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BTreeMap<String, String>>,
     Path(template_id): Path<i64>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "get_template_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -321,12 +348,15 @@ async fn get_template_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn create_template_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BTreeMap<String, String>>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "create_template_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -357,6 +387,7 @@ async fn create_template_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn update_template_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -364,6 +395,8 @@ async fn update_template_handler(
     Path(template_id): Path<i64>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "update_template_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -391,12 +424,15 @@ async fn update_template_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn delete_template_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BTreeMap<String, String>>,
     Path(template_id): Path<i64>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "delete_template_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -415,12 +451,15 @@ async fn delete_template_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn update_template_display_orders_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BTreeMap<String, String>>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "update_template_display_orders_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,

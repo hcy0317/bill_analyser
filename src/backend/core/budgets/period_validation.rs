@@ -3,10 +3,12 @@
 // 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
 
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn is_valid_budget_period_type(period_type: &str) -> bool {
     VALID_BUDGET_PERIOD_TYPES.contains(&period_type)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn validate_budget_period_args(
     input: &BudgetPeriodScopeInput,
     months_history: Option<i64>,
@@ -37,6 +39,7 @@ pub fn validate_budget_period_args(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn validate_budget_date_range(
     start_date: Option<&str>,
     end_date: Option<&str>,
@@ -56,6 +59,7 @@ pub fn validate_budget_date_range(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn resolve_budget_period_range(
     input: &BudgetPeriodScopeInput,
     today: NaiveDate,
@@ -112,10 +116,13 @@ pub fn resolve_budget_period_range(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_budget_period_scope(
     input: &BudgetPeriodScopeInput,
     today: NaiveDate,
 ) -> Result<BudgetPeriodScope, String> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "build_budget_period_scope", "business operation entered");
     let period_type = input
         .period_type
         .as_deref()
@@ -134,6 +141,7 @@ pub fn build_budget_period_scope(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_budget_csv_int_list(
     raw: Option<&str>,
     field_name: &str,
@@ -164,6 +172,7 @@ pub fn parse_budget_csv_int_list(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_budget_json_int_list(
     raw: Option<&Value>,
     field_name: &str,
@@ -191,6 +200,7 @@ pub fn parse_budget_json_int_list(
     Ok(values)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn validate_import_budget_item(item: &Value, index: usize) -> Result<(), String> {
     let Value::Object(object) = item else {
         return Err(format!("第{index}条预算格式无效"));
@@ -216,6 +226,7 @@ pub fn validate_import_budget_item(item: &Value, index: usize) -> Result<(), Str
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn calculate_budget_period_progress(
     start_date: &str,
     end_date: &str,

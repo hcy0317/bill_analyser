@@ -56,6 +56,7 @@ pub struct HttpShellConfig {
 }
 
 impl HttpShellConfig {
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn new(
         _legacy_upstream: impl Into<String>,
         timeout: Duration,
@@ -69,6 +70,7 @@ impl HttpShellConfig {
         )
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn new_with_import_route_mode(
         _legacy_upstream: impl Into<String>,
         timeout: Duration,
@@ -108,11 +110,13 @@ impl HttpShellConfig {
         })
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn with_sqlite_db_path(mut self, sqlite_db_path: impl Into<String>) -> Self {
         self.sqlite_db_path = Some(sqlite_db_path.into());
         self
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn with_uploads_dir(mut self, uploads_dir: impl Into<String>) -> Self {
         let uploads_dir = uploads_dir.into().trim().to_string();
         self.uploads_dir = if uploads_dir.is_empty() {
@@ -123,6 +127,7 @@ impl HttpShellConfig {
         self
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn with_data_dir(mut self, data_dir: impl Into<String>) -> Self {
         let data_dir = data_dir.into().trim().to_string();
         self.data_dir = if data_dir.is_empty() {
@@ -133,6 +138,7 @@ impl HttpShellConfig {
         self
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn with_backup_dir(mut self, backup_dir: impl Into<String>) -> Self {
         let backup_dir = backup_dir.into().trim().to_string();
         self.backup_dir = if backup_dir.is_empty() {
@@ -143,6 +149,7 @@ impl HttpShellConfig {
         self
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn with_backup_encryption_key(mut self, backup_encryption_key: impl Into<String>) -> Self {
         let backup_encryption_key = backup_encryption_key.into().trim().to_string();
         self.backup_encryption_key =
@@ -150,71 +157,85 @@ impl HttpShellConfig {
         self
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn with_trusted_user_header_secret(mut self, secret: impl Into<String>) -> Self {
         self.trusted_user_header_secret = Some(secret.into());
         self
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn with_auth_jwt_secret(mut self, secret: impl Into<String>) -> Self {
         self.auth_jwt_secret = Some(secret.into());
         self
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn with_auth_jwt_algorithm(mut self, algorithm: impl Into<String>) -> Self {
         self.auth_jwt_algorithm = algorithm.into();
         self
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn with_auth_jwt_expiration_days(mut self, days: i64) -> Self {
         self.auth_jwt_expiration_days = days;
         self
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn with_auth_refresh_token_expiration_days(mut self, days: i64) -> Self {
         self.auth_refresh_token_expiration_days = days;
         self
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn with_auth_max_login_attempts(mut self, attempts: i64) -> Self {
         self.auth_max_login_attempts = attempts;
         self
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn with_auth_lockout_duration_minutes(mut self, minutes: i64) -> Self {
         self.auth_lockout_duration_minutes = minutes;
         self
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn with_auth_enable_user_registration(mut self, enabled: bool) -> Self {
         self.auth_enable_user_registration = enabled;
         self
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn with_auth_require_email_verification(mut self, required: bool) -> Self {
         self.auth_require_email_verification = required;
         self
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn with_auth_enable_user_forget_password(mut self, enabled: bool) -> Self {
         self.auth_enable_user_forget_password = enabled;
         self
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn with_auth_enable_oauth2(mut self, enabled: bool) -> Self {
         self.auth_enable_oauth2 = enabled;
         self
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn with_auth_oauth2_provider(mut self, provider: impl Into<String>) -> Self {
         self.auth_oauth2_provider = provider.into().trim().to_string();
         self
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn with_auth_password_policy(mut self, policy: PasswordPolicy) -> Self {
         self.auth_password_policy = policy;
         self
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn with_public_base_url(mut self, public_base_url: impl Into<String>) -> Self {
         let public_base_url = public_base_url.into();
         let public_base_url = public_base_url.trim().trim_end_matches('/').to_string();
@@ -226,10 +247,12 @@ impl HttpShellConfig {
         self
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn from_env() -> Result<Self, HttpShellConfigError> {
         Self::from_env_with(|name| env::var(name).ok())
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn from_env_with(
         mut lookup: impl FnMut(&'static str) -> Option<String>,
     ) -> Result<Self, HttpShellConfigError> {
@@ -445,6 +468,7 @@ impl ImportRouteMode {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_upstream(upstream: String) -> Result<String, HttpShellConfigError> {
     let trimmed = upstream.trim().trim_end_matches('/');
     if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
@@ -453,6 +477,7 @@ fn normalize_upstream(upstream: String) -> Result<String, HttpShellConfigError> 
     Ok(trimmed.to_string())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_env_u64_value(
     name: &'static str,
     value: Option<String>,
@@ -466,6 +491,7 @@ fn parse_env_u64_value(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_env_usize_value(
     name: &'static str,
     value: Option<String>,
@@ -479,6 +505,7 @@ fn parse_env_usize_value(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_env_usize_range_value(
     name: &'static str,
     value: Option<String>,
@@ -493,6 +520,7 @@ fn parse_env_usize_range_value(
     Ok(parsed)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_env_i64_range_value(
     name: &'static str,
     value: Option<String>,
@@ -514,6 +542,7 @@ fn parse_env_i64_range_value(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_env_bool_value(
     name: &'static str,
     value: Option<String>,
@@ -529,6 +558,7 @@ fn parse_env_bool_value(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_import_route_mode(value: Option<&str>) -> Result<ImportRouteMode, HttpShellConfigError> {
     let normalized = value.unwrap_or("").trim().to_ascii_lowercase();
     match normalized.as_str() {

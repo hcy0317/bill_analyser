@@ -26,6 +26,7 @@ pub struct AuthRestError {
 }
 
 impl AuthRestError {
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn new(status: u16, error: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             status,
@@ -34,19 +35,23 @@ impl AuthRestError {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn unauthorized(message: impl Into<String>) -> Self {
         Self::new(401, "Unauthorized", message)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn invalid_request(message: impl Into<String>) -> Self {
         Self::new(400, "Invalid request", message)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn invalid_token(status: u16, message: impl Into<String>) -> Self {
         Self::new(status, "Invalid token", message)
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_bearer_authorization_header(auth_header: &str) -> Result<String, AuthRestError> {
     if auth_header.is_empty() {
         return Err(AuthRestError::unauthorized("Missing authorization header"));
@@ -62,10 +67,12 @@ pub fn parse_bearer_authorization_header(auth_header: &str) -> Result<String, Au
     Ok(parts[1].to_string())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn extract_bearer_token_or_empty(auth_header: &str) -> String {
     parse_bearer_authorization_header(auth_header).unwrap_or_default()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn json_object_or_empty(value: Option<&Value>) -> Map<String, Value> {
     value
         .and_then(Value::as_object)
@@ -80,6 +87,7 @@ pub struct RefreshTokenClaims {
     pub username: String,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn validate_refresh_token_claims(value: &Value) -> Result<RefreshTokenClaims, AuthRestError> {
     if value.get("type").and_then(Value::as_str) != Some("refresh") {
         return Err(AuthRestError::invalid_token(400, "Not a refresh token"));
@@ -118,6 +126,7 @@ impl TokenKind {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn user_agent(self, request_user_agent: &str) -> String {
         match self {
             Self::Api => API_TOKEN_USER_AGENT.to_string(),
@@ -143,6 +152,7 @@ impl FromStr for TokenKind {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn infer_token_type_from_user_agent(user_agent: &str) -> i32 {
     let normalized = user_agent.to_ascii_lowercase();
     if normalized.contains("mcp token") {
@@ -154,6 +164,7 @@ pub fn infer_token_type_from_user_agent(user_agent: &str) -> i32 {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_user_agent_device_name(user_agent: &str) -> String {
     if user_agent.is_empty() {
         return "未知设备".to_string();
@@ -218,6 +229,7 @@ impl Default for PasswordPolicy {
 }
 
 impl PasswordPolicy {
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn validate(self, password: &str) -> Result<(), String> {
         if password.chars().count() < self.min_length {
             return Err(format!(
@@ -250,6 +262,7 @@ impl PasswordPolicy {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_recovery_code(recovery_code: &str) -> String {
     recovery_code
         .split_whitespace()
@@ -257,6 +270,7 @@ pub fn normalize_recovery_code(recovery_code: &str) -> String {
         .to_ascii_uppercase()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn recovery_code_hash_input(recovery_code: &str) -> Option<String> {
     let normalized = normalize_recovery_code(recovery_code);
     if normalized.is_empty() {

@@ -61,6 +61,7 @@ fn primary_is_synchronized_shadow(primary: &Value, secondary: &[Value]) -> bool 
             <= SYNCHRONIZED_PRIMARY_TOLERANCE
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_budget_i64(cleaned: &str, prefix: &str) -> Result<i64, String> {
     cleaned
         .parse::<i64>()
@@ -126,6 +127,7 @@ fn non_empty_str(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_budget_date_prefix(value: &str) -> Result<NaiveDate, String> {
     let date_text = value
         .trim()

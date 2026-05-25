@@ -77,15 +77,23 @@ pub struct TemplatesRepository<'conn> {
 }
 
 impl<'conn> TemplatesRepository<'conn> {
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn new(connection: &'conn mut Connection) -> Self {
         Self { connection }
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn list_templates(
         &mut self,
         user_id: i64,
         template_type: Option<i64>,
     ) -> DbResult<Vec<TemplateRecord>> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "list_templates",
+            "business operation entered"
+        );
         let mut templates = Vec::new();
         if template_type.is_none() || template_type == Some(1) {
             let rows = self.list_bill_template_rows(user_id)?;
@@ -106,6 +114,7 @@ impl<'conn> TemplatesRepository<'conn> {
         Ok(templates)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn get_template_by_id(
         &mut self,
         template_id: i64,
@@ -125,14 +134,28 @@ impl<'conn> TemplatesRepository<'conn> {
         Ok(None)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn list_enabled_recurring_templates(
         &mut self,
         user_id: i64,
     ) -> DbResult<Vec<TemplateRecord>> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "list_enabled_recurring_templates",
+            "business operation entered"
+        );
         self.list_recurring_template_rows(user_id, true)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn create_template(&mut self, payload: &Value, user_id: i64) -> DbResult<i64> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "create_template",
+            "business operation entered"
+        );
         let template_type = int_or_default(payload.get("templateType"), 1)?;
         let display_order = self.next_display_order(template_type, user_id)?;
         let now = utc_now_iso();
@@ -216,6 +239,7 @@ impl<'conn> TemplatesRepository<'conn> {
         Ok(self.connection.last_insert_rowid())
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn update_template(
         &mut self,
         template_id: i64,
@@ -223,6 +247,12 @@ impl<'conn> TemplatesRepository<'conn> {
         user_id: i64,
         template_type: Option<i64>,
     ) -> DbResult<bool> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "update_template",
+            "business operation entered"
+        );
         let object = payload.as_object().ok_or_else(|| {
             DbError::InvalidOperation("template update payload must be an object".to_string())
         })?;
@@ -309,12 +339,19 @@ impl<'conn> TemplatesRepository<'conn> {
         Ok(changed > 0)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn delete_template(
         &mut self,
         template_id: i64,
         user_id: i64,
         template_type: Option<i64>,
     ) -> DbResult<bool> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "delete_template",
+            "business operation entered"
+        );
         let changed = self.connection.execute(
             &format!(
                 "DELETE FROM {} WHERE id = ? AND user_id = ?",
@@ -325,12 +362,19 @@ impl<'conn> TemplatesRepository<'conn> {
         Ok(changed > 0)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn update_display_orders(
         &mut self,
         orders: &[TemplateDisplayOrder],
         template_type: i64,
         user_id: i64,
     ) -> DbResult<bool> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "update_display_orders",
+            "business operation entered"
+        );
         if orders.is_empty() {
             return Ok(true);
         }
@@ -351,6 +395,7 @@ impl<'conn> TemplatesRepository<'conn> {
         Ok(true)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     fn list_bill_template_rows(&mut self, user_id: i64) -> DbResult<Vec<TemplateRecord>> {
         let mut statement = self.connection.prepare(
             "SELECT id, user_id, name, description, type, category, amount,
@@ -365,6 +410,7 @@ impl<'conn> TemplatesRepository<'conn> {
         rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     fn list_recurring_template_rows(
         &mut self,
         user_id: i64,
@@ -394,6 +440,7 @@ impl<'conn> TemplatesRepository<'conn> {
         rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     fn get_bill_template_row(
         &mut self,
         template_id: i64,
@@ -414,6 +461,7 @@ impl<'conn> TemplatesRepository<'conn> {
             .map_err(DbError::from)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     fn get_recurring_template_row(
         &mut self,
         template_id: i64,
@@ -446,6 +494,7 @@ impl<'conn> TemplatesRepository<'conn> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn open_templates_connection(db_path: &str) -> DbResult<Connection> {
     if db_path == ":memory:" || db_path == "file::memory:?cache=shared" {
         return Err(DbError::InvalidOperation(
@@ -460,6 +509,7 @@ pub fn open_templates_connection(db_path: &str) -> DbResult<Connection> {
     Ok(connection)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_template_display_orders(raw_value: &Value) -> DbResult<Vec<TemplateDisplayOrder>> {
     let values = raw_value
         .as_array()
@@ -692,6 +742,7 @@ fn deserialize_tag_ids(value: Option<&Value>) -> Vec<Value> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_template_transaction_type(value: Option<&Value>) -> i64 {
     let Some(value) = value else {
         return 3;

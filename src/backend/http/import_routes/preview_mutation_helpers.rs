@@ -71,6 +71,7 @@ fn preview_selection_too_large_response() -> ImportV2RouteResponse {
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn generate_import_session_id() -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -119,6 +120,7 @@ fn preview_id_from_payload(object: &Map<String, Value>) -> Result<i64, ImportV2R
         .ok_or_else(|| import_v2_error_response(400, "Missing bill id"))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_preview_patch_from_payload(
     preview_id: i64,
     object: &Map<String, Value>,
@@ -317,6 +319,7 @@ fn build_preview_patch_from_payload(
     patch
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn clear_actionable_suggestion_family(object: &Map<String, Value>, family: &str) -> bool {
     let Some(value) = first_value(
         object,
@@ -346,6 +349,7 @@ fn clear_actionable_suggestion_family(object: &Map<String, Value>, family: &str)
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_preview_patch_from_payload_with_category_lookup(
     connection: &Connection,
     user_id: UserId,
@@ -357,6 +361,7 @@ fn build_preview_patch_from_payload_with_category_lookup(
     Ok(patch)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_category_id_to_preview_patch(
     connection: &Connection,
     user_id: UserId,
@@ -404,6 +409,7 @@ struct PreviewPayloadCategory {
     sub_category: String,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_preview_payload_category(
     connection: &Connection,
     user_id: UserId,
@@ -515,6 +521,7 @@ fn preview_payload_column_exists(
     Ok(false)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_preview_updates_from_payload(
     runtime: &mut SqliteRuntime,
     session_id: &str,
@@ -968,6 +975,7 @@ fn value_to_preview_type_text(value: &Value) -> Option<String> {
     normalize_transaction_type_text(&text)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_transaction_type_text(value: &str) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {

@@ -35,6 +35,7 @@ pub struct AppSettingRow {
     pub updated_at: String,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn init_app_settings_schema(connection: &Connection) -> DbResult<()> {
     connection.execute_batch(
         "
@@ -54,6 +55,7 @@ pub fn init_app_settings_schema(connection: &Connection) -> DbResult<()> {
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_app_setting(connection: &Connection, key: &str) -> DbResult<Option<String>> {
     let normalized_key = normalize_setting_key(key)?;
     let value = connection
@@ -67,6 +69,7 @@ pub fn get_app_setting(connection: &Connection, key: &str) -> DbResult<Option<St
     Ok(value)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_app_setting_row(connection: &Connection, key: &str) -> DbResult<Option<AppSettingRow>> {
     let normalized_key = normalize_setting_key(key)?;
     connection
@@ -80,6 +83,7 @@ pub fn get_app_setting_row(connection: &Connection, key: &str) -> DbResult<Optio
         .map_err(Into::into)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn set_app_setting(connection: &Connection, draft: &AppSettingDraft) -> DbResult<bool> {
     let key = normalize_setting_key(&draft.key)?;
     let value_type = normalize_setting_value_type(&draft.value_type);
@@ -109,6 +113,7 @@ pub fn set_app_setting(connection: &Connection, draft: &AppSettingDraft) -> DbRe
     Ok(true)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn load_ocr_config_setting(connection: &Connection) -> DbResult<OcrConfigContract> {
     let stored = get_app_setting(connection, OCR_CONFIG_SETTING_KEY)?;
     let parsed = stored
@@ -117,6 +122,7 @@ pub fn load_ocr_config_setting(connection: &Connection) -> DbResult<OcrConfigCon
     Ok(normalize_ocr_config(parsed.as_ref()))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_ocr_config_for_storage(value: Option<&Value>) -> DbResult<OcrConfigContract> {
     let object = value.and_then(Value::as_object);
     let provider = object
@@ -127,10 +133,17 @@ pub fn normalize_ocr_config_for_storage(value: Option<&Value>) -> DbResult<OcrCo
     Ok(normalize_ocr_config(value))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn store_ocr_config_setting(
     connection: &Connection,
     value: Option<&Value>,
 ) -> DbResult<OcrConfigContract> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "runtime",
+        operation = "store_ocr_config_setting",
+        "business operation entered"
+    );
     let config = normalize_ocr_config_for_storage(value)?;
     let stored_value = json!({
         "provider": config.provider,
@@ -167,6 +180,7 @@ fn app_setting_row_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AppSett
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_setting_key(key: &str) -> DbResult<String> {
     let trimmed = key.trim();
     if trimmed.is_empty() {
@@ -177,6 +191,7 @@ fn normalize_setting_key(key: &str) -> DbResult<String> {
     Ok(trimmed.to_string())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_setting_value_type(value_type: &str) -> String {
     let trimmed = value_type.trim();
     if trimmed.is_empty() {
@@ -186,6 +201,7 @@ fn normalize_setting_value_type(value_type: &str) -> String {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn validate_ocr_provider(provider: &str) -> DbResult<()> {
     let normalized = provider.trim().to_lowercase();
     let provider_name = if normalized.is_empty() || matches!(normalized.as_str(), "none" | "off") {

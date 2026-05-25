@@ -28,11 +28,18 @@ use super::{
         success_result, user_id_from_headers,
     },
 };
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn analyzer_overview_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<AnalyzerStatisticsQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "analyzer_overview_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -48,11 +55,18 @@ pub(super) async fn analyzer_overview_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn analyzer_trends_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<AnalyzerStatisticsQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "analyzer_trends_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -73,11 +87,18 @@ pub(super) async fn analyzer_trends_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn analyzer_comparison_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<AnalyzerStatisticsQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "analyzer_comparison_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -104,11 +125,18 @@ pub(super) async fn analyzer_comparison_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn analyzer_category_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<AnalyzerStatisticsQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "analyzer_category_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -129,11 +157,18 @@ pub(super) async fn analyzer_category_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn analyzer_trend_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<AnalyzerStatisticsQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "analyzer_trend_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -154,11 +189,18 @@ pub(super) async fn analyzer_trend_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn insights_anomalies_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<InsightsAnomaliesQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "insights_anomalies_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,

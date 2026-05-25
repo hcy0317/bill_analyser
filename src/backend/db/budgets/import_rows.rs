@@ -3,6 +3,7 @@
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_budget_row_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,

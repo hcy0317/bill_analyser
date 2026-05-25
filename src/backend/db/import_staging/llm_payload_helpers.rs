@@ -2,6 +2,7 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_llm_feedback_payload(
     suggestion: &ImportPreviewLlmSuggestion,
     review_status: &str,
@@ -115,6 +116,7 @@ fn snapshot_account_id(snapshot: &Value, field: &str) -> Option<i64> {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_rule_id(rule_id: Option<i64>) -> Option<i64> {
     rule_id.filter(|value| *value > 0)
 }

@@ -2,10 +2,13 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn export_settings_bundle_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "export_settings_bundle_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -21,11 +24,14 @@ async fn export_settings_bundle_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn export_settings_bundle_section_get_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(section_key): Path<String>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "export_settings_bundle_section_get_handler", "business operation entered");
     if !is_valid_settings_bundle_section(&section_key) {
         return settings_bundle_section_not_found(&section_key);
     }
@@ -35,12 +41,15 @@ async fn export_settings_bundle_section_get_handler(
     export_settings_bundle_section(&state, &headers, &section_key)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn export_settings_bundle_section_post_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(section_key): Path<String>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "export_settings_bundle_section_post_handler", "business operation entered");
     if !is_valid_settings_bundle_section(&section_key) {
         return settings_bundle_section_not_found(&section_key);
     }
@@ -90,6 +99,7 @@ async fn export_settings_bundle_section_post_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn export_settings_bundle_section(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -113,11 +123,14 @@ fn export_settings_bundle_section(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn preview_import_settings_bundle_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "preview_import_settings_bundle_handler", "business operation entered");
     import_settings_bundle_response(
         &state,
         &headers,
@@ -128,11 +141,14 @@ async fn preview_import_settings_bundle_handler(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn import_settings_bundle_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "import_settings_bundle_handler", "business operation entered");
     import_settings_bundle_response(
         &state,
         &headers,
@@ -143,12 +159,15 @@ async fn import_settings_bundle_handler(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn preview_import_settings_bundle_section_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(section_key): Path<String>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "preview_import_settings_bundle_section_handler", "business operation entered");
     if !is_valid_settings_bundle_section(&section_key) {
         return settings_bundle_section_not_found(&section_key);
     }
@@ -162,12 +181,15 @@ async fn preview_import_settings_bundle_section_handler(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn import_settings_bundle_section_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(section_key): Path<String>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "import_settings_bundle_section_handler", "business operation entered");
     if !is_valid_settings_bundle_section(&section_key) {
         return settings_bundle_section_not_found(&section_key);
     }
@@ -181,6 +203,7 @@ async fn import_settings_bundle_section_handler(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_settings_bundle_section_response(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -204,6 +227,7 @@ fn import_settings_bundle_section_response(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_settings_bundle_response(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -226,6 +250,7 @@ fn import_settings_bundle_response(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_settings_bundle_value_response(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -255,6 +280,7 @@ fn import_settings_bundle_value_response(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_settings_bundle_body(body: Bytes) -> RouteResult<Value> {
     let value = if body.is_empty() {
         return Err(Box::new(bad_request("Invalid JSON bundle")));
@@ -290,11 +316,14 @@ fn settings_bundle_section_from_request(data: &Value, section_key: &str) -> Valu
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn import_categories_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "import_categories_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,

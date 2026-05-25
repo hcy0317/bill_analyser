@@ -33,6 +33,7 @@ impl CompiledRuleDto {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn compile_rule_expression(expr: &str, regex_enabled: bool) -> CompiledRuleDto {
     if expr.is_empty() {
         return CompiledRuleDto::empty();
@@ -61,11 +62,13 @@ pub fn compile_rule_expression(expr: &str, regex_enabled: bool) -> CompiledRuleD
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn match_rule_expression(text: &str, expr: &str, regex_enabled: bool) -> bool {
     let compiled = compile_rule_expression(expr, regex_enabled);
     match_compiled_rule(text, &compiled)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn escape_rule_expression_term(term: &str) -> String {
     let mut output = String::new();
     for value in term.chars() {
@@ -77,6 +80,7 @@ pub fn escape_rule_expression_term(term: &str) -> String {
     output
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn match_compiled_rule(text: &str, compiled: &CompiledRuleDto) -> bool {
     if compiled.is_empty || text.is_empty() {
         return false;
@@ -159,6 +163,7 @@ fn match_rule_pattern(text_lower: &str, pattern: &str) -> bool {
     text_lower.contains(pattern)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn compile_legacy_rule(rule: &str) -> CompiledRuleDto {
     if rule.is_empty() {
         return CompiledRuleDto::empty();
@@ -242,6 +247,7 @@ impl RuleExpressionParser {
         Ok(node)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     fn parse_or_expression(
         &self,
         mut index: usize,
@@ -273,6 +279,7 @@ impl RuleExpressionParser {
         Ok((collapse_children("any", children), index))
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     fn parse_and_expression(
         &self,
         mut index: usize,
@@ -354,6 +361,7 @@ impl RuleExpressionParser {
         Ok((collapse_children("all", children), index))
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     fn parse_factor(
         &self,
         mut index: usize,
@@ -406,6 +414,7 @@ impl RuleExpressionParser {
         Ok((Some(self.parse_clause(&block)?), index))
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     fn parse_clause(&self, block: &str) -> Result<RuleExpressionNodeDto, String> {
         let Some(eq_idx) = block.find("={") else {
             let pattern = if self.regex_enabled {
@@ -518,6 +527,7 @@ fn collapse_children(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_not_connector(child: RuleExpressionNodeDto) -> RuleExpressionNodeDto {
     if child.kind == "clause" && child.operator == "NOT" {
         return child;

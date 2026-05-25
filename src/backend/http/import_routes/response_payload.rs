@@ -20,6 +20,7 @@ fn payload_object(payload: &Value) -> Result<&Map<String, Value>, ImportV2RouteR
         .ok_or_else(|| import_v2_error_response(400, "Invalid request"))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_stage_elapsed_ms(started_at: Instant) -> u128 {
     started_at.elapsed().as_millis()
 }
@@ -27,7 +28,7 @@ fn import_stage_elapsed_ms(started_at: Instant) -> u128 {
 #[derive(Debug)]
 struct ImportParseRuntimeInput {
     session_id: String,
-    parser_id: String,
+    _parser_id: String,
     standard_bills: Vec<ImportParsedStandardBill>,
     file_count: i64,
     files: Vec<Value>,
@@ -55,7 +56,7 @@ struct ImportMultipartFileParseResult {
     original_name: String,
     body: Vec<u8>,
     parsed: Option<ImportMultipartParsedFile>,
-    elapsed_ms: u128,
+    _elapsed_ms: u128,
 }
 
 #[derive(Debug)]
@@ -66,6 +67,7 @@ struct ImportMultipartParsedFile {
     bills: Vec<StandardBill>,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_parse_json_runtime_response(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -129,7 +131,7 @@ fn import_parse_json_runtime_response(
         user_id,
         ImportParseRuntimeInput {
             session_id,
-            parser_id,
+            _parser_id: parser_id,
             standard_bills,
             file_count,
             files,
@@ -140,27 +142,33 @@ fn import_parse_json_runtime_response(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn import_parse_multipart_runtime_response(
     state: &HttpAppState,
     headers: &HeaderMap,
     content_type: &str,
     body: &[u8],
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_parse_multipart_runtime_response", "business operation entered");
     let request_started_at = Instant::now();
     let user_id = match user_id_from_headers(headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
     };
-    let multipart_started_at = Instant::now();
+    let _multipart_started_at = Instant::now();
     let form = match parse_multipart_form_data(content_type, body) {
         Ok(form) => form,
         Err(response) => return route_response(response),
     };
-    eprintln!(
-        "[bill analyser import] stage1 multipart parsed user_id={} body_bytes={} elapsed_ms={}",
-        user_id.get(),
-        body.len(),
-        import_stage_elapsed_ms(multipart_started_at)
+    #[cfg(not(coverage))]
+    tracing::debug!(
+        domain = "import_parser",
+        operation = "import_parse_multipart_runtime_response",
+        user_id = user_id.get(),
+        body_bytes = body.len(),
+        elapsed_ms = import_stage_elapsed_ms(_multipart_started_at),
+        "stage1 multipart parsed"
     );
     let session_id = form
         .text_value(&["session_id", "sessionId"])
@@ -188,15 +196,21 @@ async fn import_parse_multipart_runtime_response(
         };
 
     for result in parse_results {
+        let _file_index = result.index;
         let original_name = result.original_name;
         if let Some(parsed) = result.parsed {
             first_detected_parser_id.get_or_insert_with(|| parsed.parser_id.clone());
-            eprintln!(
-                "[bill analyser import] stage1 dedicated parser matched user_id={} session_id={session_id} filename={original_name} parser_id={} parsed_count={parsed_count} elapsed_ms={}",
-                user_id.get(),
-                parsed.parser_id,
-                result.elapsed_ms,
-                parsed_count = parsed.parsed_count
+            #[cfg(not(coverage))]
+            tracing::debug!(
+                domain = "import_parser",
+                operation = "import_parse_multipart_runtime_response",
+                user_id = user_id.get(),
+                session_id = %session_id,
+                file_index = _file_index,
+                parser_id = %parsed.parser_id,
+                parsed_count = parsed.parsed_count,
+                elapsed_ms = result._elapsed_ms,
+                "stage1 dedicated parser matched"
             );
             files.push(json!({
                 "filename": original_name,
@@ -214,7 +228,7 @@ async fn import_parse_multipart_runtime_response(
                     }),
             );
         } else {
-            let unmatched_started_at = Instant::now();
+            let _unmatched_started_at = Instant::now();
             let unmatched_parser_id = if requested_parser == "auto" {
                 "rust-import"
             } else {
@@ -229,10 +243,15 @@ async fn import_parse_multipart_runtime_response(
                 Ok(path) => path,
                 Err(response) => return route_response(response),
             };
-            eprintln!(
-                "[bill analyser import] stage1 unmatched file persisted user_id={} session_id={session_id} filename={original_name} temp_path={temp_path} elapsed_ms={}",
-                user_id.get(),
-                import_stage_elapsed_ms(unmatched_started_at)
+            #[cfg(not(coverage))]
+            tracing::debug!(
+                domain = "import_parser",
+                operation = "import_parse_multipart_runtime_response",
+                user_id = user_id.get(),
+                session_id = %session_id,
+                file_index = _file_index,
+                elapsed_ms = import_stage_elapsed_ms(_unmatched_started_at),
+                "stage1 unmatched file persisted"
             );
             unmatched_files.push(json!({
                 "original_name": original_name,
@@ -262,7 +281,7 @@ async fn import_parse_multipart_runtime_response(
         user_id,
         ImportParseRuntimeInput {
             session_id,
-            parser_id,
+            _parser_id: parser_id,
             standard_bills,
             file_count: usize_to_i64(file_count),
             files,
@@ -273,6 +292,7 @@ async fn import_parse_multipart_runtime_response(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn parse_multipart_import_files_parallel(
     file_parts: Vec<&MultipartPart>,
     requested_parser: &str,
@@ -305,6 +325,7 @@ async fn parse_multipart_import_files_parallel(
     Ok(results)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_multipart_import_file(
     input: ImportMultipartFileParseInput,
 ) -> ImportMultipartFileParseResult {
@@ -323,15 +344,16 @@ fn parse_multipart_import_file(
         original_name: input.original_name,
         body: input.body,
         parsed,
-        elapsed_ms: import_stage_elapsed_ms(started_at),
+        _elapsed_ms: import_stage_elapsed_ms(started_at),
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn persist_import_parse_runtime_response(
     state: &HttpAppState,
     user_id: UserId,
     input: ImportParseRuntimeInput,
-    request_started_at: Instant,
+    _request_started_at: Instant,
 ) -> Response {
     let mut runtime = match open_runtime(state) {
         Ok(runtime) => runtime,
@@ -347,7 +369,7 @@ fn persist_import_parse_runtime_response(
             parser_template_draft_from_standard_bill(&parsed_bill.bill, &parsed_bill.parser_id)
         })
         .collect::<Vec<_>>();
-    let staging_started_at = Instant::now();
+    let _staging_started_at = Instant::now();
     let staging_result = match stage_import_parser_templates(
         runtime.connection_mut(),
         &ImportSessionDraft {
@@ -361,15 +383,18 @@ fn persist_import_parse_runtime_response(
         Ok(result) => result,
         Err(error) => return route_response(db_error_response(error)),
     };
-    eprintln!(
-        "[bill analyser import] stage1 staging inserted user_id={} session_id={} parser_id={} drafts={} inserted_count={} staging_elapsed_ms={} total_elapsed_ms={}",
-        user_id.get(),
-        input.session_id,
-        input.parser_id,
-        drafts.len(),
-        staging_result.inserted_count,
-        import_stage_elapsed_ms(staging_started_at),
-        import_stage_elapsed_ms(request_started_at)
+    #[cfg(not(coverage))]
+    tracing::debug!(
+        domain = "import_parser",
+        operation = "persist_import_parse_runtime_response",
+        user_id = user_id.get(),
+        session_id = %input.session_id,
+        parser_id = %input._parser_id,
+        drafts = drafts.len(),
+        inserted_count = staging_result.inserted_count,
+        staging_elapsed_ms = import_stage_elapsed_ms(_staging_started_at),
+        total_elapsed_ms = import_stage_elapsed_ms(_request_started_at),
+        "stage1 staging inserted"
     );
     if !staging_result.session_found {
         return route_response(import_session_not_found_response());
@@ -548,4 +573,3 @@ fn copy_alias_if_missing(object: &mut Map<String, Value>, target: &str, aliases:
         object.insert(target.to_string(), value);
     }
 }
-

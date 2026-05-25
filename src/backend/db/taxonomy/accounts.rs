@@ -41,11 +41,19 @@ pub struct AccountsRepository<'conn> {
 }
 
 impl<'conn> AccountsRepository<'conn> {
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn new(connection: &'conn mut Connection) -> Self {
         Self { connection }
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn list_accounts(&mut self, user_id: i64) -> DbResult<Vec<AccountRecord>> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "list_accounts",
+            "business operation entered"
+        );
         let mut statement = self.connection.prepare(
             "SELECT id, user_id, name, type, category, currency, icon, color,
                     balance, initial_balance, hidden, display_order, comment, aliases,
@@ -58,6 +66,7 @@ impl<'conn> AccountsRepository<'conn> {
         rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn get_account(
         &mut self,
         account_id: i64,
@@ -77,6 +86,7 @@ impl<'conn> AccountsRepository<'conn> {
             .map_err(DbError::from)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn get_sub_accounts(
         &mut self,
         parent_id: i64,
@@ -93,7 +103,14 @@ impl<'conn> AccountsRepository<'conn> {
         rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn create_account(&mut self, payload: &Value, user_id: i64) -> DbResult<i64> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "create_account",
+            "business operation entered"
+        );
         let now = utc_now_iso();
         let parent_id = parent_id_value(payload);
         let aliases_value = aliases_sql_value(payload.get("aliases"))?;
@@ -141,12 +158,19 @@ impl<'conn> AccountsRepository<'conn> {
         Ok(account_id)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn update_account(
         &mut self,
         account_id: i64,
         payload: &Value,
         user_id: i64,
     ) -> DbResult<bool> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "update_account",
+            "business operation entered"
+        );
         let object = payload.as_object().ok_or_else(|| {
             DbError::InvalidOperation("account update payload must be an object".to_string())
         })?;
@@ -210,7 +234,14 @@ impl<'conn> AccountsRepository<'conn> {
         Ok(changed > 0)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn delete_account(&mut self, account_id: i64, user_id: i64) -> DbResult<bool> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "delete_account",
+            "business operation entered"
+        );
         let changed = self.connection.execute(
             "DELETE FROM accounts WHERE id = ? AND user_id = ?",
             params![account_id, user_id],
@@ -218,11 +249,18 @@ impl<'conn> AccountsRepository<'conn> {
         Ok(changed > 0)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn update_display_orders(
         &mut self,
         orders: &[AccountDisplayOrder],
         user_id: i64,
     ) -> DbResult<bool> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "update_display_orders",
+            "business operation entered"
+        );
         if orders.is_empty() {
             return Ok(true);
         }
@@ -240,6 +278,7 @@ impl<'conn> AccountsRepository<'conn> {
         Ok(true)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn move_all_transactions(
         &mut self,
         from_account_id: i64,
@@ -299,11 +338,18 @@ impl<'conn> AccountsRepository<'conn> {
         })
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn delete_all_transactions_by_account(
         &mut self,
         account_id: i64,
         user_id: i64,
     ) -> DbResult<AccountTransactionsClearResult> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "delete_all_transactions_by_account",
+            "business operation entered"
+        );
         run_transaction(self.connection, |transaction| {
             if !account_exists_in_transaction(transaction, account_id, user_id)? {
                 return Ok(account_clear_failure("Account not found"));
@@ -374,6 +420,7 @@ fn account_exists_in_transaction(
     )?)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn list_account_bill_ids(
     transaction: &Transaction<'_>,
     user_id: i64,
@@ -391,6 +438,7 @@ fn list_account_bill_ids(
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn delete_bill_side_effects(
     transaction: &Transaction<'_>,
     user_id: i64,
@@ -434,6 +482,7 @@ fn delete_bill_side_effects(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn delete_pair_table_by_pair_columns(
     transaction: &Transaction<'_>,
     user_id: i64,
@@ -458,6 +507,7 @@ fn delete_pair_table_by_pair_columns(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn delete_bill_tags(transaction: &Transaction<'_>, bill_ids: &[i64]) -> DbResult<()> {
     let bill_ids = normalize_ids(bill_ids);
     if bill_ids.is_empty() || !table_exists(transaction, "bill_tags")? {
@@ -488,6 +538,7 @@ fn placeholders(count: usize) -> String {
     vec!["?"; count].join(",")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_ids(values: &[i64]) -> Vec<i64> {
     values
         .iter()
@@ -502,6 +553,7 @@ fn row_count_to_i64(value: usize) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn open_accounts_connection(db_path: &str) -> DbResult<Connection> {
     if db_path == ":memory:" || db_path == "file::memory:?cache=shared" {
         return Err(DbError::InvalidOperation(
@@ -519,6 +571,7 @@ pub fn open_accounts_connection(db_path: &str) -> DbResult<Connection> {
     Ok(connection)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_account_display_orders(raw_value: &Value) -> DbResult<Vec<AccountDisplayOrder>> {
     let values = raw_value
         .as_array()

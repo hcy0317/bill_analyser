@@ -2,18 +2,28 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn login_options_handler() -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "login_options_handler", "business operation entered");
     auth_options_handler().await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn register_options_handler() -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "register_options_handler", "business operation entered");
     auth_options_handler().await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn auth_options_handler() -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "auth_options_handler", "business operation entered");
     StatusCode::NO_CONTENT.into_response()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn auth_cors_middleware(request: Request<Body>, next: Next) -> Response {
     let method = request.method().clone();
     let origin = request.headers().get(header::ORIGIN).cloned();
@@ -29,12 +39,15 @@ async fn auth_cors_middleware(request: Request<Body>, next: Next) -> Response {
     response
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn register_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "register_handler", "business operation entered");
     let body = request_body_object(&body);
     let username = body
         .get("username")
@@ -210,12 +223,15 @@ async fn register_handler(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn generate_api_token_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "generate_api_token_handler", "business operation entered");
     generate_personal_token(
         TokenKind::Api,
         state,
@@ -226,12 +242,15 @@ async fn generate_api_token_handler(
     .await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn generate_mcp_token_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "generate_mcp_token_handler", "business operation entered");
     generate_personal_token(
         TokenKind::Mcp,
         state,
@@ -242,12 +261,15 @@ async fn generate_mcp_token_handler(
     .await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn login_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "login_handler", "business operation entered");
     let body = request_body_object(&body);
     let login_name = body
         .get("loginName")
@@ -445,12 +467,15 @@ async fn login_handler(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn refresh_token_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "refresh_token_handler", "business operation entered");
     let body = request_body_object(&body);
     let refresh_token = body
         .get("refreshToken")

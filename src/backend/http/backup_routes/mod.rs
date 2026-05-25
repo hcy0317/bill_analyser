@@ -132,6 +132,7 @@ pub const BACKUP_OPS_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/backup/sync"),
 ];
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn backup_ops_runtime_router() -> Router<HttpAppState> {
     Router::new()
         .route("/api/backup/", get(list_backup_files_handler))
@@ -196,6 +197,7 @@ use handlers::{
     save_backup_job_handler, sync_backup_handler, verify_backup_restore_handler,
 };
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn blocking_route<F>(operation: F) -> Response
 where
     F: FnOnce() -> RouteResult<Response> + Send + 'static,

@@ -2,6 +2,7 @@
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
 // 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_recurring_date(value: &Value) -> Option<NaiveDate> {
     match value {
         Value::String(text) => NaiveDate::parse_from_str(text.trim().get(..10)?, "%Y-%m-%d").ok(),
@@ -9,6 +10,7 @@ pub fn parse_recurring_date(value: &Value) -> Option<NaiveDate> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn compute_recurring_pattern_hash(
     transaction_type: &str,
     amount_cents: i64,
@@ -26,7 +28,10 @@ pub fn compute_recurring_pattern_hash(
     hex_prefix(&digest, 16)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn detect_recurring_frequency(intervals: &[f64]) -> FrequencyDetection {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "detect_recurring_frequency", "business operation entered");
     if intervals.is_empty() {
         return FrequencyDetection {
             frequency: "unknown".to_string(),
@@ -84,6 +89,7 @@ pub fn detect_recurring_frequency(intervals: &[f64]) -> FrequencyDetection {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn estimate_next_recurring_date(
     last_date: NaiveDate,
     frequency: &str,
@@ -108,11 +114,14 @@ pub fn estimate_next_recurring_date(
     last_date + Duration::days(days)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn detect_recurring_patterns(
     bills: &[Value],
     min_occurrences: usize,
     existing_recurring_ids: &BTreeSet<i64>,
 ) -> Vec<RecurringPattern> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "detect_recurring_patterns", "business operation entered");
     detect_recurring_patterns_with_today(
         bills,
         min_occurrences,
@@ -121,12 +130,15 @@ pub fn detect_recurring_patterns(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn detect_recurring_patterns_with_today(
     bills: &[Value],
     min_occurrences: usize,
     existing_recurring_ids: &BTreeSet<i64>,
     today: NaiveDate,
 ) -> Vec<RecurringPattern> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "detect_recurring_patterns_with_today", "business operation entered");
     let mut group_order = Vec::new();
     let mut groups: BTreeMap<String, Vec<RecurringGroupEntry>> = BTreeMap::new();
     for bill in bills {
@@ -264,6 +276,7 @@ pub fn detect_recurring_patterns_with_today(
     patterns
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn serialize_recurring_suggestion(item: &Map<String, Value>) -> Value {
     json!({
         "id": value_to_i64(item.get("id")).unwrap_or(0),
@@ -289,6 +302,7 @@ pub fn serialize_recurring_suggestion(item: &Map<String, Value>) -> Value {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn serialize_recurring_suggestions(items: &[Value]) -> Vec<Value> {
     items
         .iter()

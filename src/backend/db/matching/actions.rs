@@ -2,6 +2,7 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn reject_bill_pair_candidate(
     connection: &mut Connection,
     user_id: i64,
@@ -63,6 +64,7 @@ fn reject_bill_pair_candidate(
     .map_err(map_write_error)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn accept_bill_pair_candidate(
     connection: &mut Connection,
     user_id: UserId,
@@ -100,6 +102,7 @@ fn accept_bill_pair_candidate(
     Ok(json!({"candidate_id": candidate_id, "action": "accept", "pair": pair["pair"]}))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn accept_duplicate_bill_candidate(
     connection: &mut Connection,
     user_id: UserId,
@@ -118,6 +121,7 @@ fn accept_duplicate_bill_candidate(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn accept_transfer_bill_candidate(
     connection: &mut Connection,
     user_id: UserId,
@@ -142,6 +146,7 @@ enum MergeEffect {
     Transfer,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn accept_bill_merge_candidate(
     connection: &mut Connection,
     user_id: UserId,
@@ -237,6 +242,7 @@ fn accept_bill_merge_candidate(
     .map_err(map_write_error)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn validate_pair_not_suppressed(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -326,6 +332,7 @@ fn transfer_merge_updates(
     updates
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn merge_bill_tags_on_tx(
     tx: &Transaction<'_>,
     keep_bill_id: i64,
@@ -366,6 +373,7 @@ fn first_non_empty_pair_text(left: &str, right: &str) -> String {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn merge_pair_text(left: &str, right: &str) -> String {
     let left = left.trim();
     let right = right.trim();
@@ -378,6 +386,7 @@ fn merge_pair_text(left: &str, right: &str) -> String {
     format!("{left} | {right}")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn accept_bill_learning_candidate(
     connection: &mut Connection,
     user_id: UserId,
@@ -486,6 +495,7 @@ fn accept_bill_learning_candidate(
     .map_err(map_write_error)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn reject_bill_learning_candidate(
     connection: &mut Connection,
     user_id: UserId,

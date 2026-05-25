@@ -44,11 +44,18 @@ pub struct UserCustomExchangeRateUpsert {
     pub update_time: i64,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_category_statistics_payload(
     connection: &Connection,
     user_id: UserId,
     filters: &StatisticsBillFilters,
 ) -> DbResult<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "query_category_statistics_payload",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     let bills = load_statistics_bills(connection, user_id, filters)?;
     let categories = load_statistics_categories(connection, user_id)?;
@@ -57,12 +64,19 @@ pub fn query_category_statistics_payload(
     Ok(json!(items))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_category_trends_payload(
     connection: &Connection,
     user_id: UserId,
     filters: &StatisticsBillFilters,
     range: &StatisticsYearMonthRange,
 ) -> DbResult<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "query_category_trends_payload",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     let bills = load_statistics_bills(connection, user_id, filters)?;
     let categories = load_statistics_categories(connection, user_id)?;
@@ -71,12 +85,19 @@ pub fn query_category_trends_payload(
     Ok(json!(buckets))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_asset_trends_payload(
     connection: &Connection,
     user_id: UserId,
     start_date: NaiveDate,
     end_date: NaiveDate,
 ) -> DbResult<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "query_asset_trends_payload",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     let filters = StatisticsBillFilters {
         start_date: Some(start_date.to_string()),
@@ -94,27 +115,42 @@ pub fn query_asset_trends_payload(
     }))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_category_pie_payload(
     connection: &Connection,
     user_id: UserId,
     filters: &StatisticsBillFilters,
 ) -> DbResult<Vec<NameValueStatisticItem>> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "query_category_pie_payload",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     let bills = load_statistics_bills(connection, user_id, filters)?;
     Ok(build_category_pie_data(&bills))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_top_merchants_payload(
     connection: &Connection,
     user_id: UserId,
     filters: &StatisticsBillFilters,
     limit: usize,
 ) -> DbResult<Vec<TopMerchantStatisticItem>> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "query_top_merchants_payload",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     let bills = load_statistics_bills(connection, user_id, filters)?;
     Ok(build_top_merchants_data(&bills, limit))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_transaction_amount_period(
     connection: &Connection,
     user_id: UserId,
@@ -123,6 +159,12 @@ pub fn query_transaction_amount_period(
     start_date: String,
     end_date: String,
 ) -> DbResult<TransactionAmountPeriodResult> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "query_transaction_amount_period",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     let filters = StatisticsBillFilters {
         start_date: Some(start_date),
@@ -135,11 +177,18 @@ pub fn query_transaction_amount_period(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_statistics_analyzer_report_payload(
     connection: &Connection,
     user_id: UserId,
     period: &str,
 ) -> DbResult<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "query_statistics_analyzer_report_payload",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     let today = Local::now().date_naive();
     let range = statistics_analyzer_period_range(period, today);
@@ -158,12 +207,19 @@ pub fn query_statistics_analyzer_report_payload(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_statistics_analyzer_trends_payload(
     connection: &Connection,
     user_id: UserId,
     period: &str,
     category: Option<&str>,
 ) -> DbResult<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "query_statistics_analyzer_trends_payload",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     let today = Local::now().date_naive();
     let mut buckets = Vec::<StatisticsAnalyzerTrendBucket>::new();
@@ -189,12 +245,19 @@ pub fn query_statistics_analyzer_trends_payload(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_statistics_analyzer_comparison_payload(
     connection: &Connection,
     user_id: UserId,
     period: &str,
     compare_type: &str,
 ) -> DbResult<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "query_statistics_analyzer_comparison_payload",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     let today = Local::now().date_naive();
     let range = statistics_analyzer_period_range(period, today);
@@ -211,12 +274,19 @@ pub fn query_statistics_analyzer_comparison_payload(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_statistics_analyzer_category_payload(
     connection: &Connection,
     user_id: UserId,
     period: &str,
     main_category: Option<&str>,
 ) -> DbResult<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "query_statistics_analyzer_category_payload",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     let today = Local::now().date_naive();
     let range = statistics_analyzer_period_range(period, today);
@@ -236,18 +306,32 @@ pub fn query_statistics_analyzer_category_payload(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_net_worth_payload(connection: &Connection, user_id: UserId) -> DbResult<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "query_net_worth_payload",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     let accounts = load_statistics_accounts(connection, user_id)?;
     Ok(json!(build_net_worth_snapshot(&accounts)))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_calendar_events_payload(
     connection: &Connection,
     user_id: UserId,
     start_date: NaiveDate,
     end_date: NaiveDate,
 ) -> DbResult<CalendarEventsData> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "query_calendar_events_payload",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     let filters = StatisticsBillFilters {
         start_date: Some(start_date.to_string()),
@@ -264,12 +348,19 @@ pub fn query_calendar_events_payload(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_insight_anomaly_summary_payload(
     connection: &Connection,
     user_id: UserId,
     analyzed_months: u32,
     today: NaiveDate,
 ) -> DbResult<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "query_insight_anomaly_summary_payload",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     let end_date = today.to_string();
     let start_date = (today - Duration::days(i64::from(analyzed_months) * 30)).to_string();
@@ -287,6 +378,7 @@ pub fn query_insight_anomaly_summary_payload(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_statistics_user_default_currency(
     connection: &Connection,
     user_id: UserId,
@@ -314,11 +406,18 @@ pub fn get_statistics_user_default_currency(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn list_user_custom_exchange_rates(
     connection: &Connection,
     user_id: UserId,
     base_currency: &str,
 ) -> DbResult<Vec<UserCustomExchangeRateInput>> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "list_user_custom_exchange_rates",
+        "business operation entered"
+    );
     if !table_exists(connection, "user_exchange_rates")? {
         return Ok(Vec::new());
     }
@@ -359,6 +458,7 @@ pub fn list_user_custom_exchange_rates(
     Ok(result)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn upsert_user_custom_exchange_rate(
     connection: &Connection,
     user_id: UserId,
@@ -366,6 +466,12 @@ pub fn upsert_user_custom_exchange_rate(
     currency: &str,
     rate: f64,
 ) -> DbResult<UserCustomExchangeRateUpsert> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "upsert_user_custom_exchange_rate",
+        "business operation entered"
+    );
     if !table_exists(connection, "user_exchange_rates")? {
         return Err(DbError::InvalidOperation(
             "user_exchange_rates table is not initialized".to_string(),
@@ -392,12 +498,19 @@ pub fn upsert_user_custom_exchange_rate(
     Ok(UserCustomExchangeRateUpsert { update_time })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn delete_user_custom_exchange_rate(
     connection: &Connection,
     user_id: UserId,
     base_currency: &str,
     currency: &str,
 ) -> DbResult<bool> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "delete_user_custom_exchange_rate",
+        "business operation entered"
+    );
     if !table_exists(connection, "user_exchange_rates")? {
         return Ok(false);
     }
@@ -416,10 +529,17 @@ pub fn delete_user_custom_exchange_rate(
     Ok(changed > 0)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn find_statistics_all_date_range(
     connection: &Connection,
     user_id: UserId,
 ) -> DbResult<Option<StatisticsAllDateRange>> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "find_statistics_all_date_range",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     let value = connection
         .query_row(
@@ -478,6 +598,7 @@ fn add_months(date: NaiveDate, months: u32) -> Option<NaiveDate> {
     first_day(year, month)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_statistics_bills(
     connection: &Connection,
     user_id: i64,
@@ -572,6 +693,7 @@ fn load_statistics_bills(
     collect_rows(rows)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_statistics_categories(
     connection: &Connection,
     user_id: i64,
@@ -597,6 +719,7 @@ fn load_statistics_categories(
     collect_rows(rows)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_statistics_accounts(
     connection: &Connection,
     user_id: i64,
@@ -644,6 +767,7 @@ fn load_statistics_accounts(
     collect_rows(rows)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_calendar_recurring_rules(
     connection: &Connection,
     user_id: i64,
@@ -693,6 +817,7 @@ fn load_calendar_recurring_rules(
     collect_rows(rows)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_account_balance_deltas_before(
     connection: &Connection,
     user_id: i64,

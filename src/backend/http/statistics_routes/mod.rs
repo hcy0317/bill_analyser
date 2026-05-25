@@ -47,6 +47,7 @@ pub const STATISTICS_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("DELETE", "/api/statistics/exchange-rates/custom/{currency}"),
 ];
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn statistics_runtime_router() -> Router<HttpAppState> {
     Router::new()
         .route(

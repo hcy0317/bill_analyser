@@ -8,6 +8,7 @@ struct RegisterAccountsResult {
     default_account_id: Option<i64>,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn create_register_default_accounts(
     connection: &Connection,
     user_id: i64,

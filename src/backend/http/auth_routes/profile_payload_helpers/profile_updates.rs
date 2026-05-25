@@ -26,6 +26,7 @@ fn validated_profile_updates(
     Ok(updates)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn validate_profile_email_update(
     connection: &rusqlite::Connection,
     user_id: UserId,
@@ -63,6 +64,7 @@ fn validate_profile_email_update(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn validate_profile_reference_ids(
     connection: &rusqlite::Connection,
     user_id: UserId,
@@ -90,6 +92,7 @@ fn validate_profile_reference_ids(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn validate_profile_account_id(
     connection: &rusqlite::Connection,
     user_id: UserId,
@@ -111,6 +114,7 @@ fn validate_profile_account_id(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn validate_profile_category_id(
     connection: &rusqlite::Connection,
     user_id: UserId,

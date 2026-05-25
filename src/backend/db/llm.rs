@@ -51,6 +51,7 @@ pub struct LlmCandidateDraft {
     pub llm_response_raw: String,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn init_llm_runtime_schema(connection: &Connection) -> DbResult<()> {
     connection.execute_batch(
         "
@@ -107,7 +108,14 @@ pub fn init_llm_runtime_schema(connection: &Connection) -> DbResult<()> {
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn list_llm_configs(connection: &Connection, user_id: i64) -> DbResult<Vec<Value>> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "ai",
+        operation = "list_llm_configs",
+        "business operation entered"
+    );
     let mut statement = connection.prepare(
         "SELECT * FROM llm_configs WHERE user_id = ?1 ORDER BY is_active DESC, updated_at DESC",
     )?;
@@ -115,6 +123,7 @@ pub fn list_llm_configs(connection: &Connection, user_id: i64) -> DbResult<Vec<V
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_active_llm_config(connection: &Connection, user_id: i64) -> DbResult<Option<Value>> {
     connection
         .query_row(
@@ -126,11 +135,18 @@ pub fn get_active_llm_config(connection: &Connection, user_id: i64) -> DbResult<
         .map_err(Into::into)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn create_llm_config(
     connection: &Connection,
     user_id: i64,
     draft: &LlmConfigDraft,
 ) -> DbResult<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "ai",
+        operation = "create_llm_config",
+        "business operation entered"
+    );
     let now = now_text();
     if draft.is_active {
         connection.execute(
@@ -163,12 +179,19 @@ pub fn create_llm_config(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn update_llm_config(
     connection: &Connection,
     config_id: i64,
     user_id: i64,
     update: &LlmConfigUpdate,
 ) -> DbResult<Option<Value>> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "ai",
+        operation = "update_llm_config",
+        "business operation entered"
+    );
     if get_llm_config_by_id(connection, config_id, user_id)?.is_none() {
         return Ok(None);
     }
@@ -232,7 +255,14 @@ pub fn update_llm_config(
     get_llm_config_by_id(connection, config_id, user_id)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn delete_llm_config(connection: &Connection, config_id: i64, user_id: i64) -> DbResult<bool> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "ai",
+        operation = "delete_llm_config",
+        "business operation entered"
+    );
     let deleted = connection.execute(
         "DELETE FROM llm_configs WHERE id = ?1 AND user_id = ?2",
         params![config_id, user_id],
@@ -240,6 +270,7 @@ pub fn delete_llm_config(connection: &Connection, config_id: i64, user_id: i64) 
     Ok(deleted > 0)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn activate_llm_config(
     connection: &Connection,
     config_id: i64,
@@ -260,6 +291,7 @@ pub fn activate_llm_config(
     Ok(true)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn effective_llm_config_from_saved(connection: &Connection, user_id: i64) -> DbResult<Value> {
     get_active_llm_config(connection, user_id).map(|active| {
         active
@@ -269,6 +301,7 @@ pub fn effective_llm_config_from_saved(connection: &Connection, user_id: i64) ->
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn list_llm_candidates(
     connection: &Connection,
     user_id: i64,
@@ -277,6 +310,12 @@ pub fn list_llm_candidates(
     limit: i64,
     offset: i64,
 ) -> DbResult<Vec<Value>> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "ai",
+        operation = "list_llm_candidates",
+        "business operation entered"
+    );
     let mut sql = String::from("SELECT * FROM llm_candidates WHERE user_id = ?");
     let mut values = vec![SqlValue::Integer(user_id)];
     if let Some(status) = status {
@@ -296,6 +335,7 @@ pub fn list_llm_candidates(
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn count_llm_candidates(
     connection: &Connection,
     user_id: i64,
@@ -317,6 +357,7 @@ pub fn count_llm_candidates(
         .map_err(Into::into)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_llm_candidate_by_id(
     connection: &Connection,
     candidate_id: i64,
@@ -332,7 +373,14 @@ pub fn get_llm_candidate_by_id(
         .map_err(Into::into)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn create_llm_candidate(connection: &Connection, draft: &LlmCandidateDraft) -> DbResult<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "ai",
+        operation = "create_llm_candidate",
+        "business operation entered"
+    );
     let source_bill_ids = Value::Array(
         draft
             .source_bill_ids
@@ -369,12 +417,19 @@ pub fn create_llm_candidate(connection: &Connection, draft: &LlmCandidateDraft) 
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn update_llm_candidate_status(
     connection: &Connection,
     candidate_id: i64,
     status: &str,
     user_id: i64,
 ) -> DbResult<bool> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "ai",
+        operation = "update_llm_candidate_status",
+        "business operation entered"
+    );
     let updated = connection.execute(
         "UPDATE llm_candidates SET status = ?1, reviewed_at = ?2 WHERE id = ?3 AND user_id = ?4",
         params![status, now_text(), candidate_id, user_id],
@@ -382,11 +437,18 @@ pub fn update_llm_candidate_status(
     Ok(updated > 0)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn accept_llm_candidate(
     connection: &Connection,
     candidate_id: i64,
     user_id: i64,
 ) -> DbResult<Option<Value>> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "ai",
+        operation = "accept_llm_candidate",
+        "business operation entered"
+    );
     let Some(candidate) = get_llm_candidate_by_id(connection, candidate_id, user_id)? else {
         return Ok(None);
     };
@@ -403,17 +465,25 @@ pub fn accept_llm_candidate(
     Ok(Some(Value::Object(result)))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn reject_llm_candidate(
     connection: &Connection,
     candidate_id: i64,
     user_id: i64,
 ) -> DbResult<Option<bool>> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "ai",
+        operation = "reject_llm_candidate",
+        "business operation entered"
+    );
     if get_llm_candidate_by_id(connection, candidate_id, user_id)?.is_none() {
         return Ok(None);
     }
     update_llm_candidate_status(connection, candidate_id, "rejected", user_id).map(Some)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn default_llm_runtime_config() -> Value {
     json!({
         "enabled": false,
@@ -423,6 +493,7 @@ pub fn default_llm_runtime_config() -> Value {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_llm_config_by_id(
     connection: &Connection,
     config_id: i64,
@@ -529,6 +600,7 @@ fn should_materialize_rule_candidate(candidate: &Value) -> bool {
             .is_some_and(|expression| !expression.trim().is_empty())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn create_rule_for_llm_candidate(
     connection: &Connection,
     candidate: &Value,

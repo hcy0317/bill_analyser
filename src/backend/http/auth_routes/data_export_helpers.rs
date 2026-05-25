@@ -26,6 +26,7 @@ impl UserDataExportType {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_user_data_export_type(file_type: &str) -> Result<UserDataExportType, AuthRestError> {
     match file_type.trim().to_ascii_lowercase().as_str() {
         "csv" => Ok(UserDataExportType::Csv),
@@ -38,6 +39,7 @@ fn normalize_user_data_export_type(file_type: &str) -> Result<UserDataExportType
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_user_data_export_filters(
     query: &HashMap<String, String>,
     categories: &[UserDataExportCategory],
@@ -117,6 +119,7 @@ fn user_data_export_category_filters(
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn render_user_data_export(
     bundle: &UserDataExportBundle,
     delimiter: u8,
@@ -179,6 +182,7 @@ fn render_user_data_export(
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn export_value(value: Option<&Value>, key: &str) -> String {
     match value {
         Some(Value::String(text)) => serialize_optional_export_cell(key, Some(text)),
@@ -189,6 +193,7 @@ fn export_value(value: Option<&Value>, key: &str) -> String {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn export_account_name(
     value: Option<&Value>,
     key: &str,

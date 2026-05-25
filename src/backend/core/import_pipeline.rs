@@ -77,6 +77,7 @@ pub struct ImportPreviewPageQuery {
     pub preview_ids: Vec<i64>,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_import_preview_page_query(
     page: Option<i64>,
     page_size: Option<i64>,
@@ -93,15 +94,18 @@ pub fn normalize_import_preview_page_query(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_page(page: Option<i64>) -> usize {
     usize::try_from(page.unwrap_or(1).max(1)).unwrap_or(1)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_page_size(page_size: Option<i64>) -> usize {
     let page_size = page_size.unwrap_or(50).clamp(1, 200);
     usize::try_from(page_size).unwrap_or(50)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_import_preview_page_sort_direction(
     sort_direction: Option<&str>,
 ) -> ImportPreviewSortDirection {
@@ -116,6 +120,7 @@ pub fn normalize_import_preview_page_sort_direction(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_import_preview_page_sort_key(sort_by: Option<&str>) -> &'static str {
     let normalized = sort_by.unwrap_or("").trim();
     IMPORT_PREVIEW_SORT_KEYS
@@ -125,6 +130,7 @@ pub fn normalize_import_preview_page_sort_key(sort_by: Option<&str>) -> &'static
         .unwrap_or("")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_preview_ids(preview_ids: &[i64]) -> Vec<i64> {
     let mut seen = HashSet::new();
     preview_ids
@@ -135,6 +141,7 @@ pub fn normalize_preview_ids(preview_ids: &[i64]) -> Vec<i64> {
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn sort_import_preview_page_items(
     items: &[Value],
     sort_by: Option<&str>,
@@ -187,6 +194,7 @@ pub fn sort_import_preview_page_items(
     sorted
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn coerce_preview_selected_value(value: Option<&Value>, default: bool) -> bool {
     match value {
         None | Some(Value::Null) => default,
@@ -206,6 +214,7 @@ pub fn coerce_preview_selected_value(value: Option<&Value>, default: bool) -> bo
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn preview_update_is_selected(update_item: &Map<String, Value>, default: bool) -> bool {
     IMPORT_PREVIEW_SELECTION_KEYS
         .iter()
@@ -263,11 +272,18 @@ pub struct ImportPreviewFilterIndexItem {
     pub recurring_matched_date: String,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_import_preview_filter_index_item(
     preview_item: &Map<String, Value>,
     categories_by_id: &BTreeMap<i64, CategoryLookup>,
     accounts_by_id: &BTreeMap<i64, AccountLookup>,
 ) -> ImportPreviewFilterIndexItem {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "build_import_preview_filter_index_item",
+        "business operation entered"
+    );
     let category_id_value = preview_item.get("category_id");
     let category_id = normalize_id_text(category_id_value);
     let category_row =
@@ -361,6 +377,7 @@ pub fn build_import_preview_filter_index_item(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn resolve_import_preview_transfer_signal_status(
     preview_item: &Map<String, Value>,
 ) -> Option<String> {
@@ -401,6 +418,7 @@ pub fn resolve_import_preview_transfer_signal_status(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn resolve_import_preview_learning_signal_status(
     preview_item: &Map<String, Value>,
 ) -> Option<String> {
@@ -445,12 +463,20 @@ pub fn resolve_import_preview_learning_signal_status(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn attach_import_preview_matching_payload(preview_item: &mut Map<String, Value>) {
     let matching = build_import_preview_matching_payload(preview_item);
     preview_item.insert("matching".to_string(), matching);
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_import_preview_matching_payload(preview_item: &Map<String, Value>) -> Value {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "build_import_preview_matching_payload",
+        "business operation entered"
+    );
     let mut payload =
         serde_json::to_value(ImportPreviewMatchingPayload::default()).unwrap_or_else(|_| json!({}));
     let Some(payload_object) = payload.as_object_mut() else {
@@ -492,6 +518,7 @@ fn preview_matching_payload(preview_item: &Map<String, Value>) -> Option<&Map<St
         .or_else(|| object_field_from_map(preview_item, "preview_matching_feedback"))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn merge_object_fields(target: &mut Map<String, Value>, source: &Map<String, Value>) {
     for (key, value) in source {
         target.insert(key.clone(), value.clone());
@@ -658,6 +685,7 @@ fn first_non_empty_string_field<'a>(
     }))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_first_non_empty_string(values: impl IntoIterator<Item = String>) -> String {
     values
         .into_iter()
@@ -683,6 +711,7 @@ fn matching_section_string_field(
         .map(|section| string_field_from_map(section, key))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn map_import_preview_type_to_frontend_value(preview_type: Option<&Value>) -> i64 {
     match value_to_trimmed_string(preview_type).as_str() {
         "收入" | "income" => 2,
@@ -868,6 +897,7 @@ pub struct ExpectedPreviewState {
     pub destination_account_id: Option<Value>,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn expected_preview_state_from_value(value: Option<&Value>) -> Option<ExpectedPreviewState> {
     value.and_then(|value| serde_json::from_value(value.clone()).ok())
 }
@@ -906,6 +936,7 @@ pub struct ImportV2RouteResponse {
     pub body: Value,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn import_v2_error_response(status_code: u16, error: &str) -> ImportV2RouteResponse {
     ImportV2RouteResponse {
         status_code,
@@ -913,6 +944,7 @@ pub fn import_v2_error_response(status_code: u16, error: &str) -> ImportV2RouteR
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn import_v2_message_response(
     status_code: u16,
     success: bool,
@@ -924,6 +956,7 @@ pub fn import_v2_message_response(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn import_v2_data_response<T>(data: T) -> ImportV2RouteResponse
 where
     T: Serialize,
@@ -934,58 +967,108 @@ where
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn import_stage_parse_success(data: ImportStageParseData) -> ImportV2RouteResponse {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "import_stage_parse_success",
+        "business operation entered"
+    );
     import_v2_data_response(data)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn import_stage_dedup_success(data: ImportStageDedupData) -> ImportV2RouteResponse {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "import_stage_dedup_success",
+        "business operation entered"
+    );
     import_v2_data_response(data)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn import_stage_confirm_success(data: ImportStageConfirmData) -> ImportV2RouteResponse {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "import_stage_confirm_success",
+        "business operation entered"
+    );
     import_v2_data_response(data)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn import_preview_page_success(data: ImportPreviewPageData) -> ImportV2RouteResponse {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "import_preview_page_success",
+        "business operation entered"
+    );
     import_v2_data_response(data)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn import_preview_index_success(data: ImportPreviewIndexData) -> ImportV2RouteResponse {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "import_preview_index_success",
+        "business operation entered"
+    );
     import_v2_data_response(data)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn import_session_success(session: ImportSessionSummary) -> ImportV2RouteResponse {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "import_session_success",
+        "business operation entered"
+    );
     import_v2_data_response(session)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn import_session_not_found_response() -> ImportV2RouteResponse {
     import_v2_error_response(404, "Session not found or expired")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn import_session_cancel_missing_response() -> ImportV2RouteResponse {
     import_v2_message_response(200, false, "Session not found")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn import_session_cancel_success_response() -> ImportV2RouteResponse {
     import_v2_message_response(200, true, "Session cleared")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn import_v2_missing_session_id_response() -> ImportV2RouteResponse {
     import_v2_error_response(400, "Missing session_id")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn import_v2_invalid_request_response() -> ImportV2RouteResponse {
     import_v2_error_response(400, "Invalid request")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn expected_preview_state_is_valid(value: Option<&Value>) -> bool {
     matches!(value, Some(Value::Object(_)))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn preview_state_conflict_response() -> ImportV2RouteResponse {
     import_v2_error_response(409, "Preview state changed, please refresh")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_id_text(value: Option<&Value>) -> String {
     match value {
         None | Some(Value::Null) => String::new(),
@@ -1067,6 +1150,7 @@ fn string_field_from_map(map: &Map<String, Value>, key: &str) -> String {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn list_field_from_map(map: &Map<String, Value>, key: &str) -> Vec<Value> {
     match map.get(key) {
         Some(Value::Array(values)) => values.clone(),
@@ -1088,6 +1172,7 @@ fn object_field(value: Option<&Value>) -> Option<&Map<String, Value>> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_dedup_source_ids(value: Option<&Value>) -> Vec<Value> {
     match value {
         Some(Value::String(text)) => text

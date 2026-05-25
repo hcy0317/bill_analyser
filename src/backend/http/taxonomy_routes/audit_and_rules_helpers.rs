@@ -2,6 +2,7 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn verify_sensitive_export_password(
     connection: &Connection,
     user_id: i64,
@@ -28,6 +29,7 @@ struct AccountAuditLogDraft {
     user_agent: String,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn verify_sensitive_account_operation_password(
     connection: &Connection,
     user_id: i64,
@@ -68,6 +70,7 @@ fn verify_sensitive_account_operation_password(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn create_account_audit_log_best_effort(connection: &Connection, draft: AccountAuditLogDraft) {
     let now = Utc::now()
         .naive_utc()
@@ -168,6 +171,7 @@ fn recurring_string_or_null(row: &Map<String, Value>, template_type: i64, key: &
     row.get(key).cloned().unwrap_or(Value::Null)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_template_transaction_type(value: Option<&Value>) -> i64 {
     let text = string_or_default(value, "").to_ascii_lowercase();
     match text.as_str() {
@@ -178,6 +182,7 @@ fn normalize_template_transaction_type(value: Option<&Value>) -> i64 {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_llm_advanced_settings(raw_value: &str) -> Value {
     let loaded = serde_json::from_str::<Value>(raw_value).unwrap_or_else(|_| json!({}));
     let object = loaded.as_object();
@@ -227,6 +232,7 @@ fn normalize_llm_advanced_settings(raw_value: &str) -> Value {
     Value::Object(normalized)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_ocr_config(raw_value: &Value) -> Value {
     let normalized = bill_analyser_core::normalize_ocr_config(Some(raw_value));
     json!({
@@ -259,6 +265,7 @@ fn value_as_i64_or(value: Option<&Value>, default: i64) -> i64 {
     value.and_then(value_as_i64).unwrap_or(default)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn count_rules_overview_learning_rules(
     connection: &Connection,
     user_id: i64,
@@ -270,6 +277,7 @@ fn count_rules_overview_learning_rules(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn list_rules_overview_learning_rules(
     connection: &Connection,
     user_id: i64,
@@ -299,6 +307,7 @@ fn list_rules_overview_learning_rules(
     rows.collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn list_rules_overview_recurring_rules(
     connection: &Connection,
     user_id: i64,
@@ -349,6 +358,7 @@ fn legacy_category_rules_setting_key(user_id: i64) -> String {
     format!("{LEGACY_CATEGORY_RULES_CONFIG_KEY_PREFIX}{user_id}")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn list_legacy_category_engine_rules(
     connection: &Connection,
     user_id: i64,
@@ -419,6 +429,7 @@ fn list_legacy_category_engine_rules(
     Ok(rules)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_legacy_category_rule_type(raw_type: i64) -> Option<i64> {
     match raw_type {
         1 => Some(3),

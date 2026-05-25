@@ -2,11 +2,14 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn list_category_rules_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<CategoryRulesQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "list_category_rules_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -27,11 +30,14 @@ async fn list_category_rules_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn create_category_rule_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "create_category_rule_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -68,10 +74,13 @@ async fn create_category_rule_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn get_legacy_category_rules_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "get_legacy_category_rules_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -99,11 +108,14 @@ async fn get_legacy_category_rules_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn update_legacy_category_rules_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "update_legacy_category_rules_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -140,12 +152,15 @@ async fn update_legacy_category_rules_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn update_category_rule_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(rule_id): Path<i64>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "update_category_rule_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -179,11 +194,14 @@ async fn update_category_rule_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn delete_category_rule_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(rule_id): Path<i64>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "delete_category_rule_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -201,11 +219,14 @@ async fn delete_category_rule_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn reorder_category_rules_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "reorder_category_rules_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -240,10 +261,13 @@ async fn reorder_category_rules_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn ensure_category_rule_defaults_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "ensure_category_rule_defaults_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -276,10 +300,13 @@ async fn ensure_category_rule_defaults_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn migrate_category_keywords_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "migrate_category_keywords_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -305,12 +332,15 @@ async fn migrate_category_keywords_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn test_category_rule_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(rule_id): Path<i64>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "test_category_rule_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -348,7 +378,10 @@ async fn test_category_rule_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn rules_overview_handler(State(state): State<HttpAppState>, headers: HeaderMap) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "rules_overview_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,

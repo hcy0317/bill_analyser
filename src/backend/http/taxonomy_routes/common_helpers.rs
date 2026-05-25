@@ -85,6 +85,7 @@ fn required_json_body(body: Bytes, missing_message: &'static str) -> RouteResult
     Ok(value)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_json_body(body: Bytes) -> RouteResult<Value> {
     if body.is_empty() {
         return Ok(Value::Null);
@@ -195,6 +196,7 @@ fn status_or_internal(status: u16) -> StatusCode {
     StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_aliases(value: Option<&Value>) -> Vec<String> {
     match value {
         None | Some(Value::Null) => Vec::new(),
@@ -209,6 +211,7 @@ fn parse_aliases(value: Option<&Value>) -> Vec<String> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_alias_string(text: &str) -> Vec<String> {
     let text = text.trim();
     if text.is_empty() {
@@ -255,6 +258,7 @@ fn template_type_from_query_body(
     default
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_template_type_text(value: &str) -> Option<i64> {
     let value = value.trim();
     if value.is_empty() {
@@ -397,6 +401,7 @@ fn string_or_default(value: Option<&Value>, default: &str) -> String {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_python_int(value: &Value) -> Option<i64> {
     match value {
         Value::Number(number) => number.as_i64(),

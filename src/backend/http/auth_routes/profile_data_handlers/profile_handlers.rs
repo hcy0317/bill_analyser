@@ -2,7 +2,10 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn get_profile_handler(State(state): State<HttpAppState>, headers: HeaderMap) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "get_profile_handler", "business operation entered");
     let auth = match authenticated_user(&headers, &state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -20,12 +23,15 @@ async fn get_profile_handler(State(state): State<HttpAppState>, headers: HeaderM
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn update_profile_handler(
     State(state): State<HttpAppState>,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "update_profile_handler", "business operation entered");
     let auth = match authenticated_user(&headers, &state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -111,11 +117,14 @@ async fn update_profile_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn update_profile_avatar_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "update_profile_avatar_handler", "business operation entered");
     let auth = match authenticated_user(&headers, &state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -127,10 +136,13 @@ async fn update_profile_avatar_handler(
     update_profile_avatar_value(&state, auth.user_id, avatar).await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn remove_profile_avatar_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "remove_profile_avatar_handler", "business operation entered");
     let auth = match authenticated_user(&headers, &state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -138,6 +150,7 @@ async fn remove_profile_avatar_handler(
     update_profile_avatar_value(&state, auth.user_id, String::new()).await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn update_profile_avatar_value(
     state: &HttpAppState,
     user_id: UserId,
@@ -167,11 +180,14 @@ async fn update_profile_avatar_value(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn resend_profile_verification_email_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "resend_profile_verification_email_handler", "business operation entered");
     let auth = match authenticated_user(&headers, &state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -243,10 +259,13 @@ async fn resend_profile_verification_email_handler(
     success_result(StatusCode::OK, Value::Bool(true))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn get_profile_cloud_settings_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "get_profile_cloud_settings_handler", "business operation entered");
     let auth = match authenticated_user(&headers, &state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -264,11 +283,14 @@ async fn get_profile_cloud_settings_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn update_profile_cloud_settings_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "update_profile_cloud_settings_handler", "business operation entered");
     let auth = match authenticated_user(&headers, &state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -313,10 +335,13 @@ async fn update_profile_cloud_settings_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn delete_profile_cloud_settings_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "delete_profile_cloud_settings_handler", "business operation entered");
     let auth = match authenticated_user(&headers, &state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -331,10 +356,13 @@ async fn delete_profile_cloud_settings_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn list_profile_external_auths_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "list_profile_external_auths_handler", "business operation entered");
     let auth = match authenticated_user(&headers, &state) {
         Ok(value) => value,
         Err(response) => return *response,

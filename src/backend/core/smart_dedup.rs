@@ -306,6 +306,7 @@ impl Default for DedupBill {
 }
 
 impl DedupBill {
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn source_type(&self) -> String {
         let parser_id = normalized_source(&self.parser_id);
         if !parser_id.is_empty() {
@@ -325,6 +326,7 @@ impl DedupBill {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn source_identifier(&self) -> String {
         let parser_id = normalized_source(&self.parser_id);
         if parser_id.is_empty() {
@@ -334,6 +336,7 @@ impl DedupBill {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn dedup_source_ids(&self) -> Vec<String> {
         let mut ids = Vec::new();
         append_optional_id(&mut ids, &self.template_id);
@@ -424,6 +427,7 @@ pub struct ImportReconciliationCandidate {
 pub struct SmartDeduplicationEngine;
 
 impl SmartDeduplicationEngine {
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn process(&self, bills: Vec<DedupBill>) -> DeduplicationResult {
         let original_count = bills.len();
         let mut bills = bills;
@@ -455,10 +459,17 @@ impl SmartDeduplicationEngine {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn find_database_duplicates(
     imported_bills: &mut [DedupBill],
     existing_bills: &[DedupBill],
 ) -> Vec<DatabaseDuplicateMatch> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "find_database_duplicates",
+        "business operation entered"
+    );
     let mut matches = Vec::new();
 
     for (imported_index, imported_bill) in imported_bills.iter_mut().enumerate() {
@@ -520,10 +531,17 @@ pub fn find_database_duplicates(
     matches
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn find_cross_batch_transfer_pairs(
     imported_bills: &mut [DedupBill],
     existing_bills: &[DedupBill],
 ) -> Vec<CrossBatchTransferMatch> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "find_cross_batch_transfer_pairs",
+        "business operation entered"
+    );
     let mut matches = Vec::new();
     let mut matched_existing_ids = HashSet::new();
 
@@ -581,10 +599,17 @@ pub fn find_cross_batch_transfer_pairs(
     matches
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn find_import_reconciliation_candidates(
     imported_bills: &[DedupBill],
     existing_bills: &[DedupBill],
 ) -> Vec<ImportReconciliationCandidate> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "matching",
+        operation = "find_import_reconciliation_candidates",
+        "business operation entered"
+    );
     let mut candidates = Vec::new();
     let mut matched_pairs = HashSet::new();
 
@@ -662,6 +687,7 @@ pub fn find_import_reconciliation_candidates(
     candidates
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn find_exact_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup> {
     let mut groups = Vec::new();
     let mut by_key: HashMap<String, Vec<usize>> = HashMap::new();
@@ -697,6 +723,7 @@ fn find_exact_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup> {
     groups
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn find_platform_bank_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup> {
     let mut groups = Vec::new();
     let source_types: Vec<String> = bills.iter().map(DedupBill::source_type).collect();
@@ -779,6 +806,7 @@ fn find_platform_bank_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup>
     groups
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn find_transfer_pairs(bills: &mut [DedupBill]) -> Vec<TransferPair> {
     let mut pairs = Vec::new();
     if !has_multiple_active_sources(bills, DedupBill::source_identifier) {
@@ -890,6 +918,7 @@ fn find_transfer_pairs(bills: &mut [DedupBill]) -> Vec<TransferPair> {
     pairs
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn find_similar_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup> {
     let mut groups = Vec::new();
     if !has_multiple_active_sources(bills, DedupBill::source_type) {
@@ -994,6 +1023,7 @@ fn find_similar_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup> {
     groups
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn find_split_bills(bills: &mut [DedupBill]) -> Vec<SplitGroup> {
     let mut groups = Vec::new();
     if !has_multiple_active_sources(bills, |bill| normalized_source(&bill.source_account_id)) {
@@ -1139,6 +1169,7 @@ fn amount_cents_for_bills(bills: &[DedupBill]) -> Vec<i128> {
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_time_amount_buckets<I, F>(
     indices: I,
     timestamps: &[Option<i64>],
@@ -1184,6 +1215,7 @@ fn amount_tolerance_values(amount_cents: i128) -> impl Iterator<Item = i128> {
     (amount_cents - AMOUNT_TOLERANCE_CENTS)..=(amount_cents + AMOUNT_TOLERANCE_CENTS)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_split_source_groups<I>(
     indices: I,
     timestamps: &[Option<i64>],
@@ -1218,6 +1250,7 @@ where
     groups
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_split_group_ranges(
     groups: &HashMap<SplitSourceKey, Vec<usize>>,
     amount_cents: &[i128],
@@ -1279,6 +1312,7 @@ fn split_group_range_can_match(
         .unwrap_or(false)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn find_split_candidates_for_total(
     groups: &HashMap<SplitSourceKey, Vec<usize>>,
     group_ranges: &HashMap<SplitSourceKey, SplitAmountRange>,
@@ -1379,12 +1413,14 @@ fn clean_runtime_markers(mut bill: DedupBill) -> DedupBill {
     bill
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn merge_template_id(target: &mut DedupBill, template_id: &Option<String>) {
     if let Some(template_id) = template_id {
         append_id(&mut target.merged_template_ids, template_id);
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn merge_template_ids_from_bill(target: &mut DedupBill, secondary: &DedupBill) {
     append_optional_id(&mut target.merged_template_ids, &secondary.template_id);
     append_ids(
@@ -1393,6 +1429,7 @@ fn merge_template_ids_from_bill(target: &mut DedupBill, secondary: &DedupBill) {
     );
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn merge_bill_fields(target: &mut DedupBill, secondary: &DedupBill, merge_parser_tags: bool) {
     target.counterparty = merge_field_values(&target.counterparty, &secondary.counterparty);
     target.payment_method = merge_field_values(&target.payment_method, &secondary.payment_method);
@@ -1409,6 +1446,7 @@ fn merge_bill_fields(target: &mut DedupBill, secondary: &DedupBill, merge_parser
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn merge_field_values(left: &str, right: &str) -> String {
     let left = left.trim();
     let right = right.trim();
@@ -1450,6 +1488,7 @@ fn merge_field_values(left: &str, right: &str) -> String {
     parts.join(" | ")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn merge_parser_tags_from_bill(target: &mut DedupBill, secondary: &DedupBill) {
     let mut tags = normalized_parser_tags(target);
     for tag in normalized_parser_tags(secondary) {
@@ -1477,6 +1516,7 @@ fn normalized_parser_tags(bill: &DedupBill) -> Vec<String> {
     tags
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_transfer_source_snapshot(bill: &DedupBill, role: &str) -> TransferSourceSnapshot {
     TransferSourceSnapshot {
         role: role.to_string(),
@@ -1662,6 +1702,7 @@ fn normalized_similarity(left: &str, right: &str) -> f64 {
     (2.0 * lcs as f64) / (left_chars.len() + right_chars.len()) as f64
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_reconciliation_import_key(bill: &DedupBill) -> String {
     if let Some(preview_id) = &bill.preview_id {
         if !preview_id.trim().is_empty() {
@@ -1691,6 +1732,7 @@ fn build_reconciliation_import_key(bill: &DedupBill) -> String {
     format!("hash:{}", stable_hash_hex(&key))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_reconciliation_candidate_id(
     candidate_type: ReconciliationCandidateType,
     existing_bill_id: &str,
@@ -1704,6 +1746,7 @@ fn build_reconciliation_candidate_id(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn resolve_reconciliation_candidate_type(
     imported_bill: &DedupBill,
     existing_bill: &DedupBill,
@@ -1928,6 +1971,7 @@ fn value_to_string(value: &Value) -> Option<String> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_string_vec_text(text: &str) -> Vec<String> {
     let text = text.trim();
     if text.is_empty() {

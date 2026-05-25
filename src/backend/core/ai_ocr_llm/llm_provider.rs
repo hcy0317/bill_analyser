@@ -11,6 +11,7 @@ use super::value_helpers::first_non_empty_field;
 
 const LLM_BASE_URL_ALLOWLIST_ENV: &str = "BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST";
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn llm_available_providers() -> Vec<String> {
     LLM_AVAILABLE_PROVIDERS
         .iter()
@@ -18,6 +19,7 @@ pub fn llm_available_providers() -> Vec<String> {
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_llm_provider_name(provider: &str) -> String {
     match provider.trim().to_lowercase().as_str() {
         "" => "openai".to_string(),
@@ -28,10 +30,17 @@ pub fn normalize_llm_provider_name(provider: &str) -> String {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_llm_provider_config(
     provider: &str,
     provider_config: Option<&Value>,
 ) -> Result<LlmProviderConfigContract, String> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "ai",
+        operation = "build_llm_provider_config",
+        "business operation entered"
+    );
     let normalized_provider = normalize_llm_provider_name(provider);
     if !is_llm_provider_creatable(&normalized_provider) {
         return Err(format!(
@@ -109,6 +118,7 @@ fn default_llm_base_url(provider: &str) -> Option<&'static str> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn validate_llm_base_url(provider: &str, base_url: &str, explicit: bool) -> Result<(), String> {
     let parsed = parse_llm_base_url(base_url)?;
     if !explicit {
@@ -138,6 +148,7 @@ fn validate_llm_base_url(provider: &str, base_url: &str, explicit: bool) -> Resu
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_llm_base_url(base_url: &str) -> Result<Url, String> {
     let trimmed = base_url.trim();
     if trimmed.is_empty() {
@@ -231,6 +242,7 @@ fn llm_url_origin(parsed: &Url) -> String {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn validate_azure_base_url(base_url: &str) -> Result<(), String> {
     let trimmed = base_url.trim();
     if trimmed.contains('\\') || trimmed.chars().any(char::is_control) {

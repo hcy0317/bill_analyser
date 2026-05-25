@@ -134,6 +134,7 @@ fn llm_limit_from_object(
     Ok(limit)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn ensure_import_session_exists(
     runtime: &SqliteRuntime,
     session_id: &str,
@@ -240,6 +241,7 @@ fn llm_provider_context_from_config(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn execute_llm_provider_request(
     state: &HttpAppState,
     context: &LlmProviderRequestContext,
@@ -336,6 +338,7 @@ fn llm_relogin_required_response() -> ImportV2RouteResponse {
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn refresh_llm_provider_context(
     state: &HttpAppState,
     client: &reqwest::Client,
@@ -358,6 +361,7 @@ async fn refresh_llm_provider_context(
     Ok(updated)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn persist_refreshed_llm_credentials(
     state: &HttpAppState,
     context: &LlmProviderRequestContext,
@@ -381,6 +385,7 @@ fn persist_refreshed_llm_credentials(
     );
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn read_limited_llm_provider_body(
     mut response: reqwest::Response,
 ) -> Result<String, ImportV2RouteResponse> {

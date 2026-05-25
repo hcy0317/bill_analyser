@@ -23,6 +23,7 @@ pub struct StatisticsContractError {
 }
 
 impl StatisticsContractError {
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn new(error: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             error: error.into(),
@@ -295,6 +296,7 @@ pub struct StatisticsAnalyzerTrendBucket {
     pub net: f64,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_statistics_timestamp_range(
     start_raw: Option<&str>,
     end_raw: Option<&str>,
@@ -314,6 +316,7 @@ pub fn parse_statistics_timestamp_range(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn validate_statistics_time_range(
     start_time: i64,
     end_time: i64,
@@ -327,6 +330,7 @@ pub fn validate_statistics_time_range(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn validate_asset_trends_span(
     start_time: i64,
     end_time: i64,
@@ -341,6 +345,7 @@ pub fn validate_asset_trends_span(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_statistics_year_month_range(
     start_raw: Option<&str>,
     end_raw: Option<&str>,
@@ -375,11 +380,18 @@ pub fn parse_statistics_year_month_range(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_category_statistics_items(
     bills: &[StatisticsBillInput],
     categories: &[StatisticsCategoryInput],
     accounts: &[StatisticsAccountInput],
 ) -> Vec<CategoryStatisticItem> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_category_statistics_items",
+        "business operation entered"
+    );
     let category_name_to_id = build_category_name_to_id(categories);
     let account_name_to_id = build_account_name_to_id(accounts);
     let valid_account_ids = accounts
@@ -411,6 +423,7 @@ pub fn build_category_statistics_items(
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_category_statistics_response(
     start_time: i64,
     end_time: i64,
@@ -426,12 +439,19 @@ pub fn build_category_statistics_response(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_category_trend_statistics(
     bills: &[StatisticsBillInput],
     categories: &[StatisticsCategoryInput],
     accounts: &[StatisticsAccountInput],
     range: &StatisticsYearMonthRange,
 ) -> Vec<CategoryTrendBucket> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_category_trend_statistics",
+        "business operation entered"
+    );
     let category_name_to_id = build_category_name_to_id(categories);
     let account_name_to_id = build_account_name_to_id(accounts);
     let valid_account_ids = accounts
@@ -484,6 +504,7 @@ pub fn build_category_trend_statistics(
     .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_asset_trends(
     bills: &[StatisticsBillInput],
     accounts: &[StatisticsAccountInput],
@@ -491,6 +512,12 @@ pub fn build_asset_trends(
     start_date: NaiveDate,
     end_date: NaiveDate,
 ) -> Vec<AssetTrendDay> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_asset_trends",
+        "business operation entered"
+    );
     let mut current_balances: BTreeMap<i64, i64> = BTreeMap::new();
     for account in accounts {
         let initial = yuan_to_cents_lossy(&account.initial_balance_yuan);
@@ -541,6 +568,7 @@ pub fn build_asset_trends(
     result
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn non_empty_asset_trend_account_ids(days: &[AssetTrendDay]) -> BTreeSet<String> {
     let mut ids = BTreeSet::new();
     for day in days {
@@ -556,10 +584,17 @@ pub fn non_empty_asset_trend_account_ids(days: &[AssetTrendDay]) -> BTreeSet<Str
     ids
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_asset_trend_legend(
     accounts: &[StatisticsAccountInput],
     days: &[AssetTrendDay],
 ) -> Vec<AssetTrendLegendItem> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_asset_trend_legend",
+        "business operation entered"
+    );
     let non_empty_ids = non_empty_asset_trend_account_ids(days);
     accounts
         .iter()
@@ -571,7 +606,14 @@ pub fn build_asset_trend_legend(
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_net_worth_snapshot(accounts: &[StatisticsAccountInput]) -> NetWorthSnapshot {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_net_worth_snapshot",
+        "business operation entered"
+    );
     let mut assets = Vec::new();
     let mut liabilities = Vec::new();
     let mut total_assets_cents = 0_i64;
@@ -612,16 +654,24 @@ pub fn build_net_worth_snapshot(accounts: &[StatisticsAccountInput]) -> NetWorth
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_net_worth_snapshot_response(snapshot: &NetWorthSnapshot) -> Value {
     json!({"success": true, "data": snapshot})
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_insight_anomaly_summary(
     bills: &[StatisticsBillInput],
     analyzed_months: u32,
     start_date: &str,
     end_date: &str,
 ) -> Value {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_insight_anomaly_summary",
+        "business operation entered"
+    );
     let mut anomalies = Vec::<Value>::new();
     let mut category_amounts: BTreeMap<String, Vec<i64>> = BTreeMap::new();
 
@@ -701,12 +751,19 @@ pub fn build_insight_anomaly_summary(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_calendar_events_data(
     bills: &[StatisticsBillInput],
     recurring_rules: &[RecurringRuleInput],
     start_date: NaiveDate,
     end_date: NaiveDate,
 ) -> CalendarEventsData {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_calendar_events_data",
+        "business operation entered"
+    );
     let mut daily: BTreeMap<String, CalendarEventDay> = BTreeMap::new();
     for bill in bills {
         let Some(date) = parse_bill_date_prefix(&bill.date) else {
@@ -749,11 +806,19 @@ pub fn build_calendar_events_data(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_calendar_events_response(data: &CalendarEventsData) -> Value {
     json!({"success": true, "data": data})
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_category_pie_data(bills: &[StatisticsBillInput]) -> Vec<NameValueStatisticItem> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_category_pie_data",
+        "business operation entered"
+    );
     let mut totals: BTreeMap<String, i64> = BTreeMap::new();
     for bill in bills {
         let category = bill.main_category.clone();
@@ -777,10 +842,17 @@ pub fn build_category_pie_data(bills: &[StatisticsBillInput]) -> Vec<NameValueSt
     result
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_top_merchants_data(
     bills: &[StatisticsBillInput],
     limit: usize,
 ) -> Vec<TopMerchantStatisticItem> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_top_merchants_data",
+        "business operation entered"
+    );
     let mut totals: BTreeMap<String, (i64, usize)> = BTreeMap::new();
     for bill in bills {
         let merchant = if bill.counterparty.trim().is_empty() {
@@ -812,6 +884,7 @@ pub fn build_top_merchants_data(
     result
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_transaction_amount_period_query(period_query: &str) -> Option<(String, i64, i64)> {
     let parts = period_query.split('_').collect::<Vec<_>>();
     if parts.len() != 3 {
@@ -822,11 +895,18 @@ pub fn parse_transaction_amount_period_query(period_query: &str) -> Option<(Stri
     Some((parts[0].to_string(), start_time, end_time))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_transaction_amount_period_result(
     start_time: i64,
     end_time: i64,
     bills: &[StatisticsBillInput],
 ) -> TransactionAmountPeriodResult {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_transaction_amount_period_result",
+        "business operation entered"
+    );
     let total_income = bills
         .iter()
         .filter(|bill| is_income_type(&bill.bill_type))
@@ -849,13 +929,21 @@ pub fn build_transaction_amount_period_result(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_transaction_amounts_response(
     period_results: &BTreeMap<String, TransactionAmountPeriodResult>,
 ) -> Value {
     json!({"success": true, "result": period_results})
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_statistics_trend_points(analyzer_result: &Value) -> Vec<StatisticsTrendPoint> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_statistics_trend_points",
+        "business operation entered"
+    );
     analyzer_result
         .get("trends")
         .and_then(Value::as_array)
@@ -874,10 +962,12 @@ pub fn build_statistics_trend_points(analyzer_result: &Value) -> Vec<StatisticsT
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_statistics_trend_response(analyzer_result: &Value) -> Value {
     json!({"success": true, "data": build_statistics_trend_points(analyzer_result)})
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn statistics_analyzer_period_range(
     period: &str,
     today: NaiveDate,
@@ -903,12 +993,19 @@ pub fn statistics_analyzer_period_range(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_statistics_analyzer_report(
     period: &str,
     range: &StatisticsAnalyzerPeriodRange,
     bills: &[StatisticsBillInput],
     generated_at: &str,
 ) -> Value {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_statistics_analyzer_report",
+        "business operation entered"
+    );
     if bills.is_empty() {
         return empty_statistics_analyzer_report(generated_at);
     }
@@ -928,11 +1025,18 @@ pub fn build_statistics_analyzer_report(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_statistics_analyzer_trends_result(
     period: &str,
     category: Option<&str>,
     buckets: &[StatisticsAnalyzerTrendBucket],
 ) -> Value {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_statistics_analyzer_trends_result",
+        "business operation entered"
+    );
     json!({
         "trends": buckets,
         "period": period,
@@ -940,10 +1044,17 @@ pub fn build_statistics_analyzer_trends_result(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_statistics_analyzer_trend_bucket(
     period: &str,
     bills: &[StatisticsBillInput],
 ) -> StatisticsAnalyzerTrendBucket {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_statistics_analyzer_trend_bucket",
+        "business operation entered"
+    );
     let income_cents = bills
         .iter()
         .filter(|bill| is_income_type(&bill.bill_type))
@@ -964,11 +1075,18 @@ pub fn build_statistics_analyzer_trend_bucket(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_statistics_analyzer_comparison_result(
     period: &str,
     compare_type: &str,
     bills: &[StatisticsBillInput],
 ) -> Value {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_statistics_analyzer_comparison_result",
+        "business operation entered"
+    );
     let comparison = if compare_type == "category" {
         let mut categories: BTreeMap<String, (i64, i64, usize)> = BTreeMap::new();
         for bill in bills {
@@ -1015,11 +1133,18 @@ pub fn build_statistics_analyzer_comparison_result(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_statistics_analyzer_category_result(
     period: &str,
     main_category: Option<&str>,
     bills: &[StatisticsBillInput],
 ) -> Value {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_statistics_analyzer_category_result",
+        "business operation entered"
+    );
     let mut sub_categories: BTreeMap<String, (i64, usize)> = BTreeMap::new();
     let mut total_cents = 0_i64;
     for bill in bills.iter().filter(|bill| is_expense_type(&bill.bill_type)) {
@@ -1070,6 +1195,7 @@ pub fn build_statistics_analyzer_category_result(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn exchange_rate_provider_options() -> BTreeMap<String, ExchangeRateProviderOption> {
     BTreeMap::from([
         (
@@ -1116,6 +1242,7 @@ pub fn exchange_rate_provider_options() -> BTreeMap<String, ExchangeRateProvider
     ])
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_requested_exchange_rate_provider(raw: Option<&str>) -> String {
     let provider = raw.unwrap_or("auto").trim().to_lowercase();
     if provider.is_empty() {
@@ -1125,7 +1252,14 @@ pub fn normalize_requested_exchange_rate_provider(raw: Option<&str>) -> String {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_provider_candidate_order(requested_provider: &str) -> Vec<String> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_provider_candidate_order",
+        "business operation entered"
+    );
     if requested_provider == "auto" {
         return DEFAULT_EXCHANGE_RATE_PROVIDER_ORDER
             .iter()
@@ -1146,11 +1280,18 @@ pub fn build_provider_candidate_order(requested_provider: &str) -> Vec<String> {
     order
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_user_custom_exchange_rates_result(
     base_currency: &str,
     custom_rates: &[UserCustomExchangeRateInput],
     now_timestamp: i64,
 ) -> ExchangeRatesResult {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_user_custom_exchange_rates_result",
+        "business operation entered"
+    );
     let mut exchange_rates = vec![ExchangeRateItem {
         currency: base_currency.to_string(),
         rate: "1.0".to_string(),
@@ -1181,6 +1322,7 @@ pub fn build_user_custom_exchange_rates_result(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_provider_exchange_rates_result(
     base_currency: &str,
     requested_provider: &str,
@@ -1188,6 +1330,12 @@ pub fn build_provider_exchange_rates_result(
     rates: &BTreeMap<String, f64>,
     update_time: i64,
 ) -> ExchangeRatesResult {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_provider_exchange_rates_result",
+        "business operation entered"
+    );
     let option = exchange_rate_provider_options()
         .get(provider_key)
         .cloned()
@@ -1219,10 +1367,17 @@ pub fn build_provider_exchange_rates_result(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_builtin_fallback_exchange_rates(
     base_currency: &str,
     update_time: i64,
 ) -> ExchangeRatesResult {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_builtin_fallback_exchange_rates",
+        "business operation entered"
+    );
     let cny_rates = builtin_cny_based_rates();
     let mut exchange_rates = Vec::new();
     if base_currency == "CNY" {
@@ -1270,6 +1425,7 @@ pub fn build_builtin_fallback_exchange_rates(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn convert_cny_quote_map_to_rates(
     quote_map: &BTreeMap<String, f64>,
     base_currency: &str,
@@ -1311,6 +1467,7 @@ pub fn convert_cny_quote_map_to_rates(
     result
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn convert_provider_base_currency(
     rates: &BTreeMap<String, f64>,
     original_base: &str,
@@ -1350,6 +1507,7 @@ pub fn convert_provider_base_currency(
     result
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_chinese_currency_name(value: &str) -> String {
     let text = value
         .trim()
@@ -1365,6 +1523,7 @@ pub fn normalize_chinese_currency_name(value: &str) -> String {
         .to_string()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn extract_numeric_values(values: &[&str]) -> Vec<f64> {
     values
         .iter()
@@ -1387,7 +1546,14 @@ pub fn extract_numeric_values(values: &[&str]) -> Vec<f64> {
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_overview_result_from_report(report: &Value) -> Value {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_overview_result_from_report",
+        "business operation entered"
+    );
     let summary = report.get("summary").unwrap_or(&Value::Null);
     let total_income = round_money(
         summary
@@ -1417,7 +1583,14 @@ pub fn build_overview_result_from_report(report: &Value) -> Value {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_statistics_report_chart_plan(report: &Value) -> Vec<String> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "build_statistics_report_chart_plan",
+        "business operation entered"
+    );
     let mut chart_ids = Vec::new();
     if value_is_non_empty_array(report.get("trend")) {
         chart_ids.push("trend".to_string());
@@ -1621,6 +1794,7 @@ fn add_months(date: NaiveDate, months: u32) -> NaiveDate {
     first_day(year, month)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_i64_text(text: &str, error: &str) -> Result<i64, StatisticsContractError> {
     text.parse::<i64>()
         .map_err(|exc| StatisticsContractError::new(error, format!("{error}: {exc}")))
@@ -1630,6 +1804,7 @@ fn clean_year_month_text(text: &str) -> String {
     text.trim().replace('-', "")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_year_month_clean(text: &str) -> Result<(i32, u32), StatisticsContractError> {
     if text.len() < 6 {
         return Err(StatisticsContractError::new(
@@ -1687,6 +1862,7 @@ fn iter_year_months(
     result
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_category_name_to_id(categories: &[StatisticsCategoryInput]) -> BTreeMap<String, String> {
     categories
         .iter()
@@ -1699,6 +1875,7 @@ fn build_category_name_to_id(categories: &[StatisticsCategoryInput]) -> BTreeMap
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_account_name_to_id(accounts: &[StatisticsAccountInput]) -> BTreeMap<String, String> {
     accounts
         .iter()
@@ -1714,6 +1891,7 @@ fn category_key(main_category: &str, sub_category: &str) -> String {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn resolve_statistics_account_id(
     bill: &StatisticsBillInput,
     valid_account_ids: &BTreeSet<String>,
@@ -1745,6 +1923,7 @@ fn signed_statistics_amount_cents(bill: &StatisticsBillInput) -> i64 {
     amount
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_asset_trend_bill(current_balances: &mut BTreeMap<i64, i64>, bill: &StatisticsBillInput) {
     let amount = yuan_to_cents_lossy(&bill.amount_yuan).abs();
     if is_income_type(&bill.bill_type) {
@@ -1780,10 +1959,12 @@ fn apply_asset_trend_bill(current_balances: &mut BTreeMap<i64, i64>, bill: &Stat
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_bill_date_prefix(value: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(value.get(0..10)?, "%Y-%m-%d").ok()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_effective_date_timestamp(value: Option<&str>) -> Option<i64> {
     let text = value?.trim();
     if text.is_empty() {
@@ -1866,6 +2047,7 @@ fn first_non_empty(first: &str, second: &str) -> String {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_duplicate_charge_anomalies(bills: &[StatisticsBillInput]) -> Vec<Value> {
     let mut expense_bills = bills
         .iter()
@@ -1923,6 +2105,7 @@ fn build_duplicate_charge_anomalies(bills: &[StatisticsBillInput]) -> Vec<Value>
     anomalies
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_category_spike_anomalies(bills: &[StatisticsBillInput]) -> Vec<Value> {
     let mut monthly: BTreeMap<String, BTreeMap<String, i64>> = BTreeMap::new();
     for bill in bills.iter().filter(|bill| is_expense_type(&bill.bill_type)) {
@@ -1993,6 +2176,7 @@ fn empty_calendar_day(date: String) -> CalendarEventDay {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_calendar_recurring_projections(
     recurring_rules: &[RecurringRuleInput],
     start_date: NaiveDate,

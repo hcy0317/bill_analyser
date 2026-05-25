@@ -14,6 +14,7 @@ use super::value_helpers::string_field_or;
 
 const LLM_PROMPT_TEXT_LIMIT: usize = 12_000;
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_llm_advanced_settings(settings: Option<&Value>) -> Map<String, Value> {
     let loaded = decode_settings_object(settings);
     let mut normalized = Map::new();
@@ -54,6 +55,7 @@ pub fn normalize_llm_advanced_settings(settings: Option<&Value>) -> Map<String, 
     normalized
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn safe_llm_config_payload(config: &Value) -> Value {
     let mut safe_config = config.as_object().cloned().unwrap_or_default();
     safe_config.insert(
@@ -71,7 +73,14 @@ pub fn safe_llm_config_payload(config: &Value) -> Value {
     Value::Object(safe_config)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_runtime_llm_config_from_saved_config(config: &Value) -> Value {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "ai",
+        operation = "build_runtime_llm_config_from_saved_config",
+        "business operation entered"
+    );
     let object = config.as_object();
     let auth_profile =
         normalize_provider_auth_config(object.and_then(|item| item.get("credential_config")));
@@ -94,6 +103,7 @@ pub fn build_runtime_llm_config_from_saved_config(config: &Value) -> Value {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn copy_runtime_llm_config(config: &Value) -> Value {
     let object = config.as_object();
     let provider_config = object
@@ -123,6 +133,7 @@ pub fn copy_runtime_llm_config(config: &Value) -> Value {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_llm_config_get_response(config: &Value) -> AiRouteResponse {
     let copied = copy_runtime_llm_config(config);
     let copied_object = copied.as_object();
@@ -176,6 +187,7 @@ fn is_falsy_settings_value(value: &Value) -> bool {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_float_setting(value: Option<&Value>, minimum: f64, maximum: f64) -> Option<f64> {
     let parsed = match value {
         Some(Value::Number(number)) => number.as_f64(),
@@ -185,6 +197,7 @@ fn normalize_float_setting(value: Option<&Value>, minimum: f64, maximum: f64) ->
     (minimum..=maximum).contains(&parsed).then_some(parsed)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_int_setting(value: Option<&Value>, minimum: i64, maximum: i64) -> Option<i64> {
     let parsed = match value {
         Some(Value::Number(number)) => number.as_i64(),
@@ -194,6 +207,7 @@ fn normalize_int_setting(value: Option<&Value>, minimum: i64, maximum: i64) -> O
     (minimum..=maximum).contains(&parsed).then_some(parsed)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_prompt_text(value: &str) -> String {
     value.trim().chars().take(LLM_PROMPT_TEXT_LIMIT).collect()
 }

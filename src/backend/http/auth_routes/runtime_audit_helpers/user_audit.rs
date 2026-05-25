@@ -2,6 +2,7 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn create_two_factor_recovery_audit_log_best_effort(
     connection: &rusqlite::Connection,
     user_id: UserId,
@@ -43,6 +44,7 @@ struct UserDataAuditLogDraft<'a> {
     now: &'a str,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn create_user_audit_log_best_effort(
     connection: &rusqlite::Connection,
     draft: UserAuditLogDraft<'_>,
@@ -75,6 +77,7 @@ fn create_user_audit_log_best_effort(
     );
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn create_user_data_audit_log_best_effort(
     connection: &rusqlite::Connection,
     draft: UserDataAuditLogDraft<'_>,

@@ -2,6 +2,7 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn validate_application_cloud_setting(
     setting: &Value,
 ) -> Result<ApplicationCloudSettingDraft, AuthRestError> {
@@ -122,6 +123,7 @@ fn application_cloud_setting_type(setting_key: &str) -> Option<&'static str> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn register_preset_categories_from_body(body: &Map<String, Value>) -> Vec<RegisterPresetCategory> {
     let Some(categories) = body.get("categories").and_then(Value::as_array) else {
         return Vec::new();
@@ -189,6 +191,7 @@ fn register_preset_categories_from_body(body: &Map<String, Value>) -> Vec<Regist
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_expires_in_seconds(body: &Map<String, Value>) -> RouteResult<i64> {
     let Some(value) = body.get("expiresInSeconds") else {
         return Ok(0);

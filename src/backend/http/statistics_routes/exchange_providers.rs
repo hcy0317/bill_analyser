@@ -13,6 +13,7 @@ use serde_json::Value;
 #[cfg(test)]
 static TEST_PROVIDER_BASE_URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn target_exchange_currencies(base_currency: &str) -> Vec<String> {
     TARGET_EXCHANGE_CURRENCIES
         .iter()
@@ -22,6 +23,7 @@ pub(super) fn target_exchange_currencies(base_currency: &str) -> Vec<String> {
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn fetch_exchange_rates_from_providers(
     base_currency: &str,
     target_currencies: &[String],
@@ -46,6 +48,7 @@ pub(super) async fn fetch_exchange_rates_from_providers(
     None
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn fetch_exchange_rates_from_provider(
     client: &reqwest::Client,
     provider_key: &str,
@@ -61,6 +64,7 @@ async fn fetch_exchange_rates_from_provider(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn fetch_boc_china_rates(
     client: &reqwest::Client,
     base_currency: &str,
@@ -79,6 +83,7 @@ async fn fetch_boc_china_rates(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn fetch_cmb_china_rates(
     client: &reqwest::Client,
     base_currency: &str,
@@ -115,6 +120,7 @@ async fn fetch_cmb_china_rates(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn fetch_ecb_rates(
     client: &reqwest::Client,
     base_currency: &str,
@@ -138,6 +144,7 @@ async fn fetch_ecb_rates(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn fetch_rba_rates(
     client: &reqwest::Client,
     base_currency: &str,
@@ -161,6 +168,7 @@ async fn fetch_rba_rates(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn fetch_text(client: &reqwest::Client, url: &str) -> Option<String> {
     client
         .get(url)
@@ -183,6 +191,7 @@ fn provider_url(default_url: &str, _test_path: &str) -> String {
     default_url.to_string()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_boc_quote_map(html: &str) -> BTreeMap<String, f64> {
     let mut quote_map = BTreeMap::new();
     for cells in html_table_rows(html) {
@@ -203,6 +212,7 @@ fn parse_boc_quote_map(html: &str) -> BTreeMap<String, f64> {
     quote_map
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_cmb_quote_map_from_api(payload: &Value) -> BTreeMap<String, f64> {
     let mut quote_map = BTreeMap::new();
     let Some(rows) = payload.get("body").and_then(Value::as_array) else {
@@ -225,6 +235,7 @@ fn parse_cmb_quote_map_from_api(payload: &Value) -> BTreeMap<String, f64> {
     quote_map
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_cmb_quote_map_from_html(html: &str) -> BTreeMap<String, f64> {
     let mut quote_map = BTreeMap::new();
     for cells in html_table_rows(html) {
@@ -258,6 +269,7 @@ fn parse_cmb_quote_map_from_html(html: &str) -> BTreeMap<String, f64> {
     quote_map
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_ecb_base_rates(xml: &str) -> BTreeMap<String, f64> {
     let mut rates = BTreeMap::from([("EUR".to_string(), 1.0)]);
     for fragment in xml.split("<Cube").skip(1) {
@@ -273,6 +285,7 @@ fn parse_ecb_base_rates(xml: &str) -> BTreeMap<String, f64> {
     rates
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_rba_base_rates(xml: &str) -> BTreeMap<String, f64> {
     let mut rates = BTreeMap::from([("AUD".to_string(), 1.0)]);
     for item in xml.split("<item").skip(1) {
@@ -396,6 +409,7 @@ fn between(value: &str, start_marker: &str, end_marker: &str) -> Option<String> 
     Some(rest[..end].trim().to_string())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn json_number(value: &Value) -> Option<f64> {
     match value {
         Value::Number(number) => number.as_f64(),

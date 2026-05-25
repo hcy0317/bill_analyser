@@ -35,11 +35,19 @@ pub struct TagsRepository<'conn> {
 }
 
 impl<'conn> TagsRepository<'conn> {
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn new(connection: &'conn mut Connection) -> Self {
         Self { connection }
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn list_tags(&mut self, user_id: i64) -> DbResult<Vec<TagRecord>> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "list_tags",
+            "business operation entered"
+        );
         let mut statement = self.connection.prepare(
             "SELECT id, user_id, name, color, icon, display_order, hidden, created_at, updated_at
              FROM tags
@@ -50,6 +58,7 @@ impl<'conn> TagsRepository<'conn> {
         rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn get_tag(&mut self, tag_id: i64, user_id: i64) -> DbResult<Option<TagRecord>> {
         self.connection
             .query_row(
@@ -63,7 +72,14 @@ impl<'conn> TagsRepository<'conn> {
             .map_err(DbError::from)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn create_tag(&mut self, payload: &Value, user_id: i64) -> DbResult<i64> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "create_tag",
+            "business operation entered"
+        );
         let name = optional_text(payload, "name")
             .filter(|value| !value.is_empty())
             .ok_or_else(|| DbError::InvalidOperation("name is required".to_string()))?;
@@ -80,7 +96,14 @@ impl<'conn> TagsRepository<'conn> {
         Ok(self.connection.last_insert_rowid())
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn update_tag(&mut self, tag_id: i64, payload: &Value, user_id: i64) -> DbResult<bool> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "update_tag",
+            "business operation entered"
+        );
         let object = payload.as_object().ok_or_else(|| {
             DbError::InvalidOperation("tag update payload must be an object".to_string())
         })?;
@@ -137,7 +160,14 @@ impl<'conn> TagsRepository<'conn> {
         Ok(changed > 0)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn delete_tag(&mut self, tag_id: i64, user_id: i64) -> DbResult<bool> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "delete_tag",
+            "business operation entered"
+        );
         let changed = self.connection.execute(
             "DELETE FROM tags WHERE id = ? AND user_id = ?",
             params![tag_id, user_id],
@@ -145,11 +175,18 @@ impl<'conn> TagsRepository<'conn> {
         Ok(changed > 0)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn update_display_orders(
         &mut self,
         orders: &[TagDisplayOrder],
         user_id: i64,
     ) -> DbResult<bool> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "update_display_orders",
+            "business operation entered"
+        );
         if orders.is_empty() {
             return Ok(true);
         }
@@ -168,6 +205,7 @@ impl<'conn> TagsRepository<'conn> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn open_tags_connection(db_path: &str) -> DbResult<Connection> {
     if db_path == ":memory:" || db_path == "file::memory:?cache=shared" {
         return Err(DbError::InvalidOperation(
@@ -182,6 +220,7 @@ pub fn open_tags_connection(db_path: &str) -> DbResult<Connection> {
     Ok(connection)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_display_orders(raw_value: &Value) -> DbResult<Vec<TagDisplayOrder>> {
     let values = raw_value
         .as_array()

@@ -84,6 +84,7 @@ pub struct BackupRecordRow {
     pub updated_at: String,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn init_backup_ops_schema(connection: &Connection) -> DbResult<()> {
     connection.execute_batch(
         r#"
@@ -159,7 +160,14 @@ pub fn init_backup_ops_schema(connection: &Connection) -> DbResult<()> {
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn list_backup_records(connection: &Connection) -> DbResult<Vec<BackupRecordRow>> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "list_backup_records",
+        "business operation entered"
+    );
     let mut statement = connection.prepare(
         r#"
         SELECT id, backup_name, storage_type, file_path, checksum, encrypted,
@@ -191,7 +199,14 @@ pub fn list_backup_records(connection: &Connection) -> DbResult<Vec<BackupRecord
     Ok(records)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn upsert_backup_record(connection: &Connection, draft: BackupRecordDraft) -> DbResult<i64> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "upsert_backup_record",
+        "business operation entered"
+    );
     let now = utc_now_iso();
     let backup_name = draft.backup_name;
     connection.execute(
@@ -227,12 +242,19 @@ pub fn upsert_backup_record(connection: &Connection, draft: BackupRecordDraft) -
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn update_backup_record_by_filename(
     connection: &Connection,
     filename: &str,
     status: Option<&str>,
     metadata_update: Value,
 ) -> DbResult<bool> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "update_backup_record_by_filename",
+        "business operation entered"
+    );
     if filename.trim().is_empty() {
         return Ok(false);
     }
@@ -265,7 +287,14 @@ pub fn update_backup_record_by_filename(
     Ok(affected > 0)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn list_backup_jobs(connection: &Connection, user_id: UserId) -> DbResult<Vec<BackupJobRow>> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "list_backup_jobs",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     let mut statement = connection.prepare(
         r#"
@@ -298,11 +327,18 @@ pub fn list_backup_jobs(connection: &Connection, user_id: UserId) -> DbResult<Ve
     Ok(jobs)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn create_or_update_backup_job(
     connection: &Connection,
     user_id: UserId,
     draft: BackupJobDraft,
 ) -> DbResult<i64> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "create_or_update_backup_job",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     let now = utc_now_iso();
     let retention_count = i64::try_from(draft.retention_count).unwrap_or(i64::MAX);
@@ -377,6 +413,7 @@ pub fn create_or_update_backup_job(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn dedupe_backup_jobs_by_user_and_type(connection: &Connection) -> DbResult<()> {
     connection.execute(
         r#"
@@ -392,6 +429,7 @@ fn dedupe_backup_jobs_by_user_and_type(connection: &Connection) -> DbResult<()> 
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn find_backup_job_id_by_type(
     connection: &Connection,
     user_id: i64,
@@ -441,12 +479,14 @@ fn backup_record_metadata_by_name(connection: &Connection, backup_name: &str) ->
     Ok(parse_metadata_json(metadata_json.as_deref()))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_metadata_json(raw_value: Option<&str>) -> Value {
     raw_value
         .and_then(|value| serde_json::from_str::<Value>(value).ok())
         .unwrap_or_else(|| Value::Object(Default::default()))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn merge_metadata(existing: Value, update: Value) -> Value {
     let mut existing = existing.as_object().cloned().unwrap_or_default();
     if let Some(update) = update.as_object() {
@@ -457,7 +497,14 @@ fn merge_metadata(existing: Value, update: Value) -> Value {
     Value::Object(existing)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn create_backup_audit_log_best_effort(connection: &Connection, draft: BackupAuditLogDraft) {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "create_backup_audit_log_best_effort",
+        "business operation entered"
+    );
     let details = if draft.details.is_null() {
         None
     } else {

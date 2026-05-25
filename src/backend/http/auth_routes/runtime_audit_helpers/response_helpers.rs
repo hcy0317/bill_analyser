@@ -16,6 +16,7 @@ fn utc_now_text() -> String {
         .to_string()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn login_lockout_until_text(minutes: i64) -> String {
     (Utc::now().naive_utc() + ChronoDuration::minutes(minutes))
         .format("%Y-%m-%dT%H:%M:%S%.f")
@@ -75,6 +76,7 @@ fn json_response(status: StatusCode, body: Value) -> Response {
     (status, Json(body)).into_response()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_auth_cors_headers(origin: Option<&HeaderValue>, headers: &mut HeaderMap) {
     let Some(origin) = origin else {
         return;
@@ -97,6 +99,7 @@ fn apply_auth_cors_headers(origin: Option<&HeaderValue>, headers: &mut HeaderMap
     headers.append(header::VARY, HeaderValue::from_static("Origin"));
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_auth_preflight_headers(requested_headers: Option<&HeaderValue>, headers: &mut HeaderMap) {
     headers.insert(
         header::ACCESS_CONTROL_ALLOW_METHODS,

@@ -7,6 +7,7 @@ fn authenticated_user(headers: &HeaderMap, state: &HttpAppState) -> RouteResult<
         .map_err(|error| Box::new(auth_error_response(error)))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn verify_sensitive_operation_password_with_policy(
     connection: &rusqlite::Connection,
     user: &AuthLoginUserRow,
@@ -28,6 +29,7 @@ enum OperationPasswordPolicy {
     RequireConfigured,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn verify_operation_password(
     connection: &rusqlite::Connection,
     password: &str,
@@ -72,6 +74,7 @@ enum SensitiveTwoFactorAuthError {
     Db,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn resolve_sensitive_two_factor_auth(
     connection: &rusqlite::Connection,
     body: &Map<String, Value>,
@@ -87,6 +90,7 @@ fn resolve_sensitive_two_factor_auth(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn resolve_destructive_user_data_auth(
     connection: &rusqlite::Connection,
     body: &Map<String, Value>,
@@ -102,6 +106,7 @@ fn resolve_destructive_user_data_auth(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn resolve_sensitive_two_factor_auth_with_policy(
     connection: &rusqlite::Connection,
     body: &Map<String, Value>,

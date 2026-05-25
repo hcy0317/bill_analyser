@@ -4,7 +4,14 @@
 
 use serde_json::Value;
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_llm_classification_prompt(transactions: &[Value]) -> String {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "ai",
+        operation = "build_llm_classification_prompt",
+        "business operation entered"
+    );
     let transactions_block = transactions
         .iter()
         .enumerate()
@@ -28,7 +35,14 @@ pub fn build_llm_classification_prompt(transactions: &[Value]) -> String {
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_llm_rule_induction_prompt(category_name: &str, transactions: &[Value]) -> String {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "ai",
+        operation = "build_llm_rule_induction_prompt",
+        "business operation entered"
+    );
     let samples_block = transactions
         .iter()
         .enumerate()
@@ -49,12 +63,19 @@ pub fn build_llm_rule_induction_prompt(category_name: &str, transactions: &[Valu
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_llm_import_preview_recommendation_prompt(
     transactions: &[Value],
     existing_categories: &[String],
     existing_accounts: &[String],
     memory_context: &[Value],
 ) -> String {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "ai",
+        operation = "build_llm_import_preview_recommendation_prompt",
+        "business operation entered"
+    );
     let transactions_block = transactions
         .iter()
         .enumerate()
@@ -130,10 +151,17 @@ pub fn build_llm_import_preview_recommendation_prompt(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_llm_rule_expression_synthesis_prompt(
     knowledge_summary_pack: &Value,
     max_candidates: usize,
 ) -> String {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "ai",
+        operation = "build_llm_rule_expression_synthesis_prompt",
+        "business operation entered"
+    );
     let summary_json =
         serde_json::to_string_pretty(knowledge_summary_pack).unwrap_or_else(|_| "{}".to_string());
     format!(
@@ -141,6 +169,7 @@ pub fn build_llm_rule_expression_synthesis_prompt(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn render_llm_prompt_template(
     template: &str,
     default_prompt: &str,
@@ -164,6 +193,7 @@ pub fn render_llm_prompt_template(
         .replace("{category_name}", category_name)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_llm_json_array_response(content: &str) -> Result<Vec<Value>, String> {
     let stripped = strip_json_code_fence(content.trim());
     let candidate = if let (Some(start), Some(end)) = (stripped.find('['), stripped.rfind(']')) {

@@ -19,6 +19,7 @@ pub const BUDGET_CRUD_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/budgets/export"),
 ];
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn budget_runtime_router() -> Router<HttpAppState> {
     Router::new()
         .route("/api/budgets/execution", get(get_budget_execution_handler))

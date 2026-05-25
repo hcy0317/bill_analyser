@@ -14,11 +14,18 @@ use super::types::{
 const AUTO_FILL_THRESHOLD: f64 = 0.80;
 const CANDIDATE_THRESHOLD: f64 = 0.55;
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_receipt_transaction_draft(
     parsed: &PaymentScreenshotParseContract,
     provider_result: &OcrProviderTextResult,
     context: &ReceiptDraftContext,
 ) -> ReceiptTransactionDraft {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "ai",
+        operation = "build_receipt_transaction_draft",
+        "business operation entered"
+    );
     let mut draft = ReceiptTransactionDraft::default();
     let text = receipt_evidence_text(provider_result);
     let primary_evidence = primary_evidence_lines(provider_result, parsed);
@@ -99,6 +106,7 @@ pub fn build_receipt_transaction_draft(
     draft
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn insert_field(draft: &mut ReceiptTransactionDraft, key: &str, field: ReceiptDraftField) {
     let confidence = field.confidence.clamp(0.0, 1.0);
     let field = ReceiptDraftField {
@@ -227,6 +235,7 @@ fn infer_transaction_type(
     None
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_category_mapping(
     draft: &mut ReceiptTransactionDraft,
     text: &str,
@@ -299,6 +308,7 @@ fn apply_category_mapping(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_account_mapping(
     draft: &mut ReceiptTransactionDraft,
     text: &str,
@@ -333,6 +343,7 @@ fn apply_account_mapping(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_tag_mapping(draft: &mut ReceiptTransactionDraft, text: &str, tags: &[ReceiptDraftTag]) {
     let matched = tags
         .iter()
@@ -454,6 +465,7 @@ fn matching_keywords(text: &str, needles: &[&str]) -> Vec<String> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_match_text(value: &str) -> String {
     value.trim().to_lowercase()
 }

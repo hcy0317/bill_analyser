@@ -3,11 +3,14 @@
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_budget_execution_details(
     connection: &Connection,
     user_id: UserId,
     filters: &BudgetExecutionFilters,
 ) -> DbResult<Vec<Value>> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "query_budget_execution_details", "business operation entered");
     let user_id = UserScope::new(user_id).bind_value()?;
     let categories = load_category_context_values(connection, user_id)?;
     let category_context = build_budget_category_context(&categories);
@@ -43,11 +46,14 @@ pub fn query_budget_execution_details(
     Ok(results)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn create_budget_execution_snapshots(
     connection: &mut Connection,
     user_id: UserId,
     filters: &BudgetExecutionFilters,
 ) -> DbResult<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "create_budget_execution_snapshots", "business operation entered");
     let user_id_value = UserScope::new(user_id).bind_value()?;
     let snapshots = query_budget_execution_details(connection, user_id, filters)?;
     let calculated_at = now_text();

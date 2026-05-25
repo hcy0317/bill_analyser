@@ -30,11 +30,18 @@ use super::{
         user_id_from_headers,
     },
 };
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn category_statistics_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<CategoryStatisticsQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "category_statistics_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -71,11 +78,18 @@ pub(super) async fn category_statistics_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn category_trends_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<CategoryTrendsQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "category_trends_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -114,11 +128,18 @@ pub(super) async fn category_trends_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn asset_trends_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<CategoryStatisticsQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "asset_trends_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -154,11 +175,18 @@ pub(super) async fn asset_trends_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn category_pie_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BasicStatisticsQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "category_pie_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -180,11 +208,18 @@ pub(super) async fn category_pie_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn top_merchants_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BasicStatisticsQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "top_merchants_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -208,11 +243,18 @@ pub(super) async fn top_merchants_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn transaction_amounts_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BasicStatisticsQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "statistics",
+        operation = "transaction_amounts_handler",
+        "business operation entered"
+    );
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,

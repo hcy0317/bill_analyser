@@ -2,11 +2,14 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn upload_transaction_picture_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     mut multipart: axum::extract::Multipart,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "bills", operation = "upload_transaction_picture_handler", "business operation entered");
     if let Err(response) = user_id_from_headers(&headers, &state.config) {
         return *response;
     }
@@ -77,11 +80,14 @@ async fn upload_transaction_picture_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn remove_unused_transaction_picture_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "bills", operation = "remove_unused_transaction_picture_handler", "business operation entered");
     if let Err(response) = user_id_from_headers(&headers, &state.config) {
         return *response;
     }

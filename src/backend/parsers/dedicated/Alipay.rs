@@ -6,7 +6,14 @@ use crate::{post_process_raw_bills, RawBill, StandardBill};
 
 use super::common::{csv_records_from_text, decode_text, file_suffix, get, RowMap};
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "parse",
+        "business operation entered"
+    );
     let suffix = file_suffix(filename);
     match suffix.as_str() {
         "csv" | "txt" => parse_csv(bytes),
@@ -14,7 +21,14 @@ pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_csv(bytes: &[u8]) -> Vec<StandardBill> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "parse_csv",
+        "business operation entered"
+    );
     let text = decode_text(bytes);
     let probe = text.lines().take(15).collect::<Vec<_>>().join("\n");
     if ![
@@ -39,6 +53,7 @@ fn parse_csv(bytes: &[u8]) -> Vec<StandardBill> {
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn raw_alipay(row: &RowMap) -> Option<RawBill> {
     let date = get(row, &["交易时间", "交易创建时间"]);
     if date.is_empty() || date.contains('共') {

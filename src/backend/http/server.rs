@@ -12,10 +12,12 @@ use crate::{build_router, HttpAppState};
 
 pub const DEFAULT_HTTP_BIND: &str = "127.0.0.1:5000";
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn bind_addr_from_env() -> Result<SocketAddr, HttpServerConfigError> {
     bind_addr_from_env_with(|name| env::var(name).ok())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn bind_addr_from_env_with(
     mut lookup: impl FnMut(&'static str) -> Option<String>,
 ) -> Result<SocketAddr, HttpServerConfigError> {
@@ -25,6 +27,7 @@ pub fn bind_addr_from_env_with(
         .map_err(|_| HttpServerConfigError::InvalidBindAddress)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn run_http_server(
     listener: TcpListener,
     state: HttpAppState,

@@ -2,12 +2,15 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn import_settings_bundle(
     connection: &mut Connection,
     bundle: &Value,
     user_id: i64,
     dry_run: bool,
 ) -> DbResult<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "taxonomy", operation = "import_settings_bundle", "business operation entered");
     let sections = normalize_settings_bundle_sections(bundle)?;
     let transaction = connection.transaction()?;
     let mut result_sections = ImportSections::new();
@@ -98,6 +101,7 @@ fn section_items<'payload>(sections: &'payload Value, section: &str) -> &'payloa
         .unwrap_or(&[])
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_settings_accounts(
     transaction: &Transaction<'_>,
     accounts: &[Value],
@@ -182,6 +186,7 @@ fn add_account_refs(ref_map: &mut BTreeMap<String, i64>, item: &Value, account_i
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_existing_accounts(
     transaction: &Transaction<'_>,
     user_id: i64,
@@ -204,6 +209,7 @@ fn load_existing_accounts(
     Ok(existing)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn upsert_settings_account(
     transaction: &Transaction<'_>,
     item: &Value,
@@ -290,6 +296,7 @@ fn account_update_sql_values(normalized: &Value) -> DbResult<Vec<SqlValue>> {
     ])
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_settings_categories(
     transaction: &Transaction<'_>,
     categories: &[Value],
@@ -338,6 +345,7 @@ fn import_settings_categories(
     Ok(ref_map)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_existing_categories(
     transaction: &Transaction<'_>,
     user_id: i64,
@@ -364,6 +372,7 @@ fn load_existing_categories(
     Ok(existing)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn upsert_settings_category(
     transaction: &Transaction<'_>,
     item: &Value,
@@ -438,6 +447,7 @@ fn category_update_sql_values(normalized: &Value) -> Vec<SqlValue> {
     ]
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_settings_tags(
     transaction: &Transaction<'_>,
     tags: &[Value],
@@ -482,6 +492,7 @@ fn import_settings_tags(
     Ok(ref_map)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_existing_tags(transaction: &Transaction<'_>, user_id: i64) -> DbResult<ExistingTags> {
     let mut statement =
         transaction.prepare("SELECT id, name FROM tags WHERE user_id = ?1 ORDER BY id")?;
@@ -500,6 +511,7 @@ fn load_existing_tags(transaction: &Transaction<'_>, user_id: i64) -> DbResult<E
     Ok(existing)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn upsert_settings_tag(
     transaction: &Transaction<'_>,
     item: &Value,

@@ -19,6 +19,7 @@ const OCR_ERROR_CANCELLED: &str = "cancelled";
 const OCR_ERROR_RATE_LIMITED: &str = "rate_limited";
 const OCR_ERROR_PROVIDER_RELOGIN_REQUIRED: &str = "provider_relogin_required";
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_ocr_config(value: Option<&Value>) -> OcrConfigContract {
     let object = value.and_then(Value::as_object);
     let provider = object
@@ -66,6 +67,7 @@ pub fn normalize_ocr_config(value: Option<&Value>) -> OcrConfigContract {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_ocr_provider_name(provider: &str) -> String {
     let normalized = provider.trim().to_lowercase();
     if normalized.is_empty() || matches!(normalized.as_str(), "none" | "off") {
@@ -80,6 +82,7 @@ pub fn normalize_ocr_provider_name(provider: &str) -> String {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_ocr_lang(lang: &str) -> String {
     let normalized = lang.trim();
     if normalized.is_empty()
@@ -93,6 +96,7 @@ pub fn normalize_ocr_lang(lang: &str) -> String {
     normalized.to_string()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn ocr_available_providers_with_disabled() -> Vec<String> {
     std::iter::once(OCR_DISABLED_PROVIDER_NAME)
         .chain(OCR_AVAILABLE_PROVIDERS)
@@ -100,7 +104,14 @@ pub fn ocr_available_providers_with_disabled() -> Vec<String> {
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_ocr_config_response_payload(config: &OcrConfigContract) -> Value {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "ai",
+        operation = "build_ocr_config_response_payload",
+        "business operation entered"
+    );
     json!({
         "provider": config.provider,
         "lang": config.lang,
@@ -113,6 +124,7 @@ pub fn build_ocr_config_response_payload(config: &OcrConfigContract) -> Value {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_ocr_config_success_response(config: &OcrConfigContract) -> AiRouteResponse {
     AiRouteResponse {
         status_code: 200,
@@ -123,6 +135,7 @@ pub fn build_ocr_config_success_response(config: &OcrConfigContract) -> AiRouteR
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_unknown_ocr_provider_response() -> AiRouteResponse {
     AiRouteResponse {
         status_code: 400,
@@ -134,6 +147,7 @@ pub fn build_unknown_ocr_provider_response() -> AiRouteResponse {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_ocr_error_response(code: &str, message: Option<&str>) -> AiRouteResponse {
     let message_text = message.unwrap_or_default().trim();
     let fallback = if code == OCR_ERROR_PROVIDER_UNCONFIGURED {
@@ -158,6 +172,7 @@ pub fn build_ocr_error_response(code: &str, message: Option<&str>) -> AiRouteRes
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_ocr_recognition_success_response(
     provider_name: &str,
     provider_result: &OcrProviderTextResult,
@@ -171,12 +186,19 @@ pub fn build_ocr_recognition_success_response(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_ocr_recognition_success_response_with_context(
     provider_name: &str,
     provider_result: &OcrProviderTextResult,
     request_id: &str,
     draft_context: &ReceiptDraftContext,
 ) -> AiRouteResponse {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "ai",
+        operation = "build_ocr_recognition_success_response_with_context",
+        "business operation entered"
+    );
     let parsed = parse_payment_screenshot_text(&provider_result.text);
     let draft = build_receipt_transaction_draft(&parsed, provider_result, draft_context);
     let confidence = provider_result
@@ -205,6 +227,7 @@ pub fn build_ocr_recognition_success_response_with_context(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn ocr_error_http_status(code: &str) -> u16 {
     match code {
         OCR_ERROR_PROVIDER_UNCONFIGURED => 501,

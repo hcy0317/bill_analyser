@@ -124,6 +124,7 @@ pub const AUTH_TOKEN_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/2fa/recovery/verify"),
 ];
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn auth_token_runtime_router() -> Router<HttpAppState> {
     Router::new()
         .route(

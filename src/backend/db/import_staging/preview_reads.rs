@@ -5,6 +5,7 @@
 const PREVIEW_FILTER_NONE_VALUE: &str = "__none__";
 const PREVIEW_FILTER_INVALID_VALUE: &str = "__invalid__";
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn insert_preview_bill(
     connection: &Connection,
     session_id: &str,
@@ -15,6 +16,7 @@ pub fn insert_preview_bill(
     Ok(connection.last_insert_rowid())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn insert_preview_bills_batch(
     connection: &mut Connection,
     session_id: &str,
@@ -36,6 +38,7 @@ pub fn insert_preview_bills_batch(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_preview_by_session(
     connection: &Connection,
     session_id: &str,
@@ -54,6 +57,7 @@ pub fn get_preview_by_session(
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn count_preview_by_session(
     connection: &Connection,
     session_id: &str,
@@ -76,6 +80,7 @@ pub fn count_preview_by_session(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_preview_page_by_session(
     connection: &Connection,
     session_id: &str,
@@ -115,12 +120,15 @@ pub fn get_preview_page_by_session(
     Ok((rows.collect::<Result<Vec<_>, _>>()?, total))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_preview_page_by_session(
     connection: &Connection,
     session_id: &str,
     user_id: UserId,
     request: &ImportPreviewPageRequest,
 ) -> DbResult<ImportPreviewPageResult> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "query_preview_page_by_session", "business operation entered");
     if !request.preview_ids.is_empty() {
         let mut rows = get_preview_by_ids(connection, session_id, &request.preview_ids, user_id)?;
         if !request.sort_by.is_empty() {
@@ -166,6 +174,7 @@ pub fn query_preview_page_by_session(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn count_preview_rows_by_query(
     connection: &Connection,
     session_id: &str,
@@ -181,6 +190,7 @@ fn count_preview_rows_by_query(
     Ok(usize::try_from(count.max(0)).unwrap_or(usize::MAX))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_preview_rows_by_query(
     connection: &Connection,
     session_id: &str,
@@ -212,6 +222,7 @@ struct PreviewSqlBuildOptions<'a> {
     offset: Option<usize>,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_preview_sql_query(
     select: &str,
     session_id: &str,
@@ -233,6 +244,7 @@ fn build_preview_sql_query(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_preview_sql_query_from(options: PreviewSqlBuildOptions<'_>) -> DbResult<PreviewSqlQuery> {
     let mut clauses = vec!["session_id = ?".to_string(), "user_id = ?".to_string()];
     let mut params = vec![
@@ -616,6 +628,7 @@ fn preview_type_code_sql_expression() -> &'static str {
     "CASE LOWER(TRIM(preview_type)) WHEN '收入' THEN 2 WHEN 'income' THEN 2 WHEN '2' THEN 2 WHEN '支出' THEN 3 WHEN 'expense' THEN 3 WHEN '3' THEN 3 WHEN '转账' THEN 4 WHEN 'transfer' THEN 4 WHEN '4' THEN 4 WHEN '投资' THEN 5 WHEN 'investment' THEN 5 WHEN '5' THEN 5 ELSE NULL END"
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_preview_filters(
     rows: Vec<ImportPreviewRow>,
     filters: &ImportPreviewQueryFilters,
@@ -897,6 +910,7 @@ fn preview_row_matches_annotation(row: &ImportPreviewRow, annotation: &str) -> b
         })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn sort_preview_rows(rows: &mut [ImportPreviewRow], sort_by: &str, sort_direction: &str) {
     rows.sort_by_key(|row| row.id);
     let descending = sort_direction.eq_ignore_ascii_case("desc");
@@ -957,6 +971,7 @@ fn compare_f64(left: f64, right: f64, descending: bool) -> std::cmp::Ordering {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_preview_metadata(rows: &[ImportPreviewRow]) -> ImportPreviewMetadata {
     let mut categories = std::collections::BTreeMap::<String, (Option<String>, usize)>::new();
     let mut accounts = std::collections::BTreeMap::<String, (Option<String>, usize)>::new();
@@ -1022,6 +1037,7 @@ fn build_preview_metadata(rows: &[ImportPreviewRow]) -> ImportPreviewMetadata {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_preview_metadata_by_query(
     connection: &Connection,
     session_id: &str,
@@ -1047,6 +1063,7 @@ fn build_preview_metadata_by_query(
     Ok(metadata)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn query_category_facets(
     connection: &Connection,
     session_id: &str,
@@ -1068,6 +1085,7 @@ fn query_category_facets(
     query_facet_entries(connection, &query)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn query_account_facets(
     connection: &Connection,
     session_id: &str,
@@ -1098,6 +1116,7 @@ fn query_account_facets(
     Ok(facet_entries(accounts))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn query_tag_facets(
     connection: &Connection,
     session_id: &str,
@@ -1121,6 +1140,7 @@ fn query_tag_facets(
     query_facet_entries(connection, &query)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn query_annotation_counts(
     connection: &Connection,
     session_id: &str,
@@ -1150,6 +1170,7 @@ fn query_annotation_counts(
     Ok(counts)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn query_signal_counts(
     connection: &Connection,
     session_id: &str,
@@ -1193,6 +1214,7 @@ fn query_signal_counts(
     Ok(signals)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn query_facet_entries(
     connection: &Connection,
     query: &PreviewSqlQuery,
@@ -1219,6 +1241,7 @@ fn query_facet_entries(
     Ok(entries)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn merge_signal_counts(
     connection: &Connection,
     query: &PreviewSqlQuery,
@@ -1251,6 +1274,7 @@ fn sql_value_to_text(value: SqlValue) -> String {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_session_selected_counts(
     connection: &Connection,
     session_id: &str,
@@ -1263,6 +1287,7 @@ fn apply_session_selected_counts(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn count_session_selected_state(
     connection: &Connection,
     session_id: &str,
@@ -1438,6 +1463,7 @@ fn signal_count_keys(row: &ImportPreviewRow) -> Vec<String> {
     keys
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_preview_filter_index_by_session(
     connection: &Connection,
     session_id: &str,
@@ -1479,6 +1505,7 @@ pub fn get_preview_filter_index_by_session(
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_preview_bill_by_id(
     connection: &Connection,
     preview_id: i64,
@@ -1494,6 +1521,7 @@ pub fn get_preview_bill_by_id(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_preview_by_ids(
     connection: &Connection,
     session_id: &str,

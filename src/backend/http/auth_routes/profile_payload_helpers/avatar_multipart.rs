@@ -70,6 +70,7 @@ fn avatar_data_url_from_payload(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn detect_avatar_mime_type(payload: &[u8]) -> Option<&'static str> {
     if payload.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
         return Some("image/png");
@@ -149,6 +150,7 @@ fn multipart_part_content_type(header_text: &str) -> Option<String> {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() || needle.len() > haystack.len() {
         return None;

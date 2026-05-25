@@ -9,6 +9,7 @@ use super::secret_redaction::redact_secrets_in_value;
 
 const DEFAULT_EXPIRY_SKEW_SECONDS: i64 = 60;
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_provider_auth_config(value: Option<&Value>) -> Value {
     let Some(value) = value else {
         return json!({});
@@ -152,12 +153,14 @@ pub fn normalize_provider_auth_config(value: Option<&Value>) -> Value {
     Value::Object(normalized)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn redact_provider_auth_config(value: &Value) -> Value {
     let mut redacted = normalize_provider_auth_config(Some(value));
     redact_secrets_in_value(&mut redacted);
     redacted
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn provider_auth_access_token(value: &Value) -> Option<String> {
     value
         .get("access_token")
@@ -167,6 +170,7 @@ pub fn provider_auth_access_token(value: &Value) -> Option<String> {
         .map(ToString::to_string)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn provider_auth_refresh_token(value: &Value) -> Option<String> {
     value
         .get("refresh_token")
@@ -176,10 +180,12 @@ pub fn provider_auth_refresh_token(value: &Value) -> Option<String> {
         .map(ToString::to_string)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn provider_auth_has_refresh_credential(value: &Value) -> bool {
     provider_auth_refresh_token(value).is_some()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn provider_auth_is_expired(value: &Value, now: DateTime<Utc>) -> bool {
     let Some(expires_at) = value
         .get("expires_at")
@@ -248,6 +254,7 @@ fn credential_json_value(value: &Value) -> Option<Value> {
     None
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_jsonish_value(value: &Value) -> Option<Value> {
     match value {
         Value::String(text) => serde_json::from_str::<Value>(text)
@@ -268,6 +275,7 @@ fn is_empty_jsonish(value: &Value) -> bool {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_credential_mode(value: &str) -> String {
     match value.trim().to_ascii_lowercase().replace('-', "_").as_str() {
         "" => "api_key".to_string(),

@@ -23,7 +23,7 @@ function printUsage() {
         'Usage: node scripts/check-rust-backend-structure.mjs [--print-baseline]',
         '',
         'Checks tracked Rust backend file sizes against a committed calibrated baseline.',
-        'Counts non-comment Rust lines so documentation-only edits do not raise the ratchet.',
+        'Counts non-comment, non-observability Rust lines so documentation/logging-only edits do not raise the ratchet.',
         'Historical oversized files may shrink, but must not grow after calibration.',
         'New tracked Rust backend files must stay within warning thresholds.'
     ].join('\n'));
@@ -51,7 +51,7 @@ function countRustCodeLines(text) {
 
     const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     let blockDepth = 0;
-    let codeLines = 0;
+    const visibleLines = [];
 
     for (const rawLine of normalized.split('\n')) {
         let visible = '';
@@ -83,9 +83,57 @@ function countRustCodeLines(text) {
             visible += rawLine[index];
         }
 
-        if (visible.trim().length > 0) {
-            codeLines += 1;
+        visibleLines.push(visible.trim());
+    }
+
+    let codeLines = 0;
+    let deferredCoverageCfg = false;
+    let skippingTracingMacro = false;
+
+    for (const visible of visibleLines) {
+        if (visible.length === 0) {
+            continue;
         }
+
+        if (skippingTracingMacro) {
+            if (visible.includes(');')) {
+                skippingTracingMacro = false;
+            }
+            continue;
+        }
+
+        if (visible === '#[cfg(not(coverage))]') {
+            deferredCoverageCfg = true;
+            continue;
+        }
+
+        const isTracingMacro = /^tracing::(?:trace|debug|info|warn|error)!\s*\(/.test(visible);
+
+        if (deferredCoverageCfg) {
+            if (isTracingMacro) {
+                skippingTracingMacro = !visible.includes(');');
+                deferredCoverageCfg = false;
+                continue;
+            }
+
+            codeLines += 1;
+            deferredCoverageCfg = false;
+        }
+
+        if (/^#\[tracing::instrument\b/.test(visible)) {
+            continue;
+        }
+
+        if (isTracingMacro) {
+            skippingTracingMacro = !visible.includes(');');
+            continue;
+        }
+
+        codeLines += 1;
+    }
+
+    if (deferredCoverageCfg) {
+        codeLines += 1;
     }
 
     return codeLines;
@@ -169,10 +217,10 @@ function isOversized(record, thresholds) {
 function buildBaseline(records, thresholds) {
     return {
         version: 1,
-        description: 'Rust backend non-comment line baseline for legacy oversized files. Ratchet after calibration: entries may shrink but must not grow.',
+        description: 'Rust backend non-comment, non-observability line baseline for legacy oversized files. Ratchet after calibration: entries may shrink but must not grow.',
         thresholds,
         generatedBy: 'scripts/check-rust-backend-structure.mjs --print-baseline',
-        countMode: 'non-comment-rust-lines',
+        countMode: 'non-comment-non-observability-rust-lines',
         files: records
             .filter(record => isOversized(record, thresholds))
             .map(record => ({

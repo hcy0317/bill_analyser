@@ -9,7 +9,14 @@ use super::common::{
     positive_amount_text, row_contains_all, rows_to_maps, workbook_rows, RowMap,
 };
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "parse",
+        "business operation entered"
+    );
     let suffix = file_suffix(filename);
     match suffix.as_str() {
         "xlsx" | "xls" => parse_sheet_or_html(bytes),
@@ -17,7 +24,14 @@ pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_sheet_or_html(bytes: &[u8]) -> Vec<StandardBill> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "parse_sheet_or_html",
+        "business operation entered"
+    );
     let rows = workbook_rows(bytes).unwrap_or_else(|| html_rows(bytes));
     let content = rows.iter().flatten().cloned().collect::<Vec<_>>().join(" ");
     if !content.contains("建设银行")
@@ -30,6 +44,7 @@ fn parse_sheet_or_html(bytes: &[u8]) -> Vec<StandardBill> {
     post_process_raw_bills("ccb", &maps.iter().filter_map(raw_ccb).collect::<Vec<_>>())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn raw_ccb(row: &RowMap) -> Option<RawBill> {
     let trade_time = build_trade_time(row);
     if trade_time.is_empty() {

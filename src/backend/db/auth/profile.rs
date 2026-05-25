@@ -2,6 +2,7 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn auth_email_exists_for_other_user(
     connection: &Connection,
     user_id: UserId,
@@ -19,6 +20,7 @@ pub fn auth_email_exists_for_other_user(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn auth_account_belongs_to_user(
     connection: &Connection,
     user_id: UserId,
@@ -27,6 +29,7 @@ pub fn auth_account_belongs_to_user(
     scoped_id_exists(connection, "accounts", user_id, account_id)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn auth_category_belongs_to_user(
     connection: &Connection,
     user_id: UserId,
@@ -35,6 +38,7 @@ pub fn auth_category_belongs_to_user(
     scoped_id_exists(connection, "categories", user_id, category_id)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn count_auth_events_since(
     connection: &Connection,
     user_id: UserId,
@@ -55,6 +59,7 @@ pub fn count_auth_events_since(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn create_auth_log_under_event_limit(
     connection: &Connection,
     user_id: UserId,
@@ -63,6 +68,8 @@ pub fn create_auth_log_under_event_limit(
     limit: i64,
     draft: &AuthLogDraft,
 ) -> DbResult<bool> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "create_auth_log_under_event_limit", "business operation entered");
     if draft.user_id != Some(user_id) {
         return Err(DbError::InvalidOperation(
             "auth log user does not match event limit user".to_string(),
@@ -103,12 +110,15 @@ pub fn create_auth_log_under_event_limit(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn update_auth_user_profile(
     connection: &Connection,
     user_id: UserId,
     updates: &[AuthUserProfileUpdate],
     updated_at: &str,
 ) -> DbResult<bool> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "update_auth_user_profile", "business operation entered");
     if updates.is_empty() {
         return Ok(false);
     }
@@ -142,6 +152,7 @@ pub fn update_auth_user_profile(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn update_auth_user_profile_with_auth_log(
     connection: &Connection,
     user_id: UserId,
@@ -149,6 +160,8 @@ pub fn update_auth_user_profile_with_auth_log(
     updated_at: &str,
     auth_log: &AuthLogDraft,
 ) -> DbResult<bool> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "update_auth_user_profile_with_auth_log", "business operation entered");
     if updates.is_empty() {
         return Ok(false);
     }
@@ -186,6 +199,7 @@ pub fn update_auth_user_profile_with_auth_log(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn update_application_cloud_settings(
     connection: &Connection,
     user_id: UserId,
@@ -193,6 +207,8 @@ pub fn update_application_cloud_settings(
     full_update: bool,
     updated_at: &str,
 ) -> DbResult<bool> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "update_application_cloud_settings", "business operation entered");
     let user_id = user_id_sql(user_id)?;
     connection.execute_batch("BEGIN IMMEDIATE")?;
 

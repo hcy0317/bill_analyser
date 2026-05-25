@@ -2,12 +2,15 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn update_preview_selection(
     connection: &mut Connection,
     preview_ids: &[i64],
     selected: bool,
     user_id: UserId,
 ) -> DbResult<usize> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "update_preview_selection", "business operation entered");
     if preview_ids.is_empty() {
         return Ok(0);
     }
@@ -23,6 +26,7 @@ pub fn update_preview_selection(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn reset_session_preview_selection(
     connection: &Connection,
     session_id: &str,
@@ -35,6 +39,7 @@ pub fn reset_session_preview_selection(
     Ok(changed)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn update_session_preview_selection_by_query(
     connection: &Connection,
     session_id: &str,
@@ -42,6 +47,8 @@ pub fn update_session_preview_selection_by_query(
     filters: &ImportPreviewQueryFilters,
     action: &str,
 ) -> DbResult<usize> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "update_session_preview_selection_by_query", "business operation entered");
     let query = build_preview_sql_query("id", session_id, user_id, filters, None, None, None)?;
     let issue_clause = preview_annotation_issue_sql_clause();
     let normalized_action = action.trim().to_ascii_lowercase();
@@ -76,6 +83,7 @@ pub fn update_session_preview_selection_by_query(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn replace_preview_selection_with_patches(
     connection: &mut Connection,
     session_id: &str,
@@ -97,6 +105,7 @@ pub fn replace_preview_selection_with_patches(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn apply_preview_patches_preserving_selection(
     connection: &mut Connection,
     session_id: &str,
@@ -114,6 +123,7 @@ pub fn apply_preview_patches_preserving_selection(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn save_import_annotation_samples(
     connection: &mut Connection,
     session_id: &str,
@@ -167,6 +177,7 @@ pub fn save_import_annotation_samples(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_import_annotation_samples(
     connection: &Connection,
     session_id: &str,
@@ -186,11 +197,14 @@ pub fn get_import_annotation_samples(
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn clear_session_data(
     connection: &mut Connection,
     session_id: &str,
     user_id: UserId,
 ) -> DbResult<ClearSessionDataResult> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "clear_session_data", "business operation entered");
     run_transaction(connection, |tx| {
         let user_id = user_id_i64(user_id)?;
         let parser_count = tx.execute(
@@ -218,6 +232,7 @@ pub fn clear_session_data(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn confirm_preview_to_bills(
     connection: &mut Connection,
     session_id: &str,
@@ -318,6 +333,7 @@ pub fn confirm_preview_to_bills(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn confirm_preview_requires_review(preview: &ImportPreviewRow, bill_type: &str) -> bool {
     if bill_type == "转账"
         && (preview.preview_source_account_id.is_none()

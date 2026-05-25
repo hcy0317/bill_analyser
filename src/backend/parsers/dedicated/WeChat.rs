@@ -9,7 +9,14 @@ use super::common::{
     RowMap,
 };
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "parse",
+        "business operation entered"
+    );
     let suffix = file_suffix(filename);
     match suffix.as_str() {
         "csv" | "txt" => parse_csv(filename, bytes),
@@ -18,7 +25,14 @@ pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_csv(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "parse_csv",
+        "business operation entered"
+    );
     let text = decode_text(bytes);
     let filename_hint =
         filename.to_ascii_lowercase().contains("wechat") || filename.contains("微信");
@@ -48,6 +62,7 @@ fn row_text_like_header(line: &str) -> bool {
         && (line.contains("商品") || line.contains("交易对方") || line.contains("支付方式"))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn raw_wechat(row: &RowMap) -> Option<RawBill> {
     let date = get(row, &["交易时间"]);
     if date.is_empty() || date.contains("总计") {
@@ -69,7 +84,14 @@ fn raw_wechat(row: &RowMap) -> Option<RawBill> {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_sheet_or_html(bytes: &[u8]) -> Vec<StandardBill> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "parse_sheet_or_html",
+        "business operation entered"
+    );
     let rows = workbook_rows(bytes).unwrap_or_else(|| html_rows(bytes));
     if !rows
         .iter()

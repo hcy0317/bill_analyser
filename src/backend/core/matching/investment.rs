@@ -2,6 +2,7 @@
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
 // 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_reconcile_history_families(raw_families: Option<&Value>) -> Vec<String> {
     let allowed = ["transfer", "investment", "learning"];
     let families = match raw_families {
@@ -22,6 +23,7 @@ pub fn normalize_reconcile_history_families(raw_families: Option<&Value>) -> Vec
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_keyword_list(raw_value: Option<&Value>, fallback: &[&str]) -> Vec<String> {
     let values: Vec<String> = match raw_value {
         None | Some(Value::Null) => fallback.iter().map(|value| (*value).to_string()).collect(),
@@ -48,12 +50,16 @@ pub fn normalize_keyword_list(raw_value: Option<&Value>, fallback: &[&str]) -> V
     dedupe_keywords(values)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn serialize_keyword_list(raw_value: Option<&Value>) -> String {
     serde_json::to_string(&normalize_keyword_list(raw_value, &[]))
         .unwrap_or_else(|_| "[]".to_string())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_user_investment_keyword_settings(user: Option<&Map<String, Value>>) -> Value {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "build_user_investment_keyword_settings", "business operation entered");
     let user = user.cloned().unwrap_or_default();
     json!({
         "platform_keywords": normalize_keyword_list(user.get("investment_platform_keywords"), DEFAULT_INVESTMENT_PLATFORM_KEYWORDS),
@@ -62,6 +68,7 @@ pub fn build_user_investment_keyword_settings(user: Option<&Map<String, Value>>)
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn extract_investment_profile(text: &str, keyword_config: Option<&Value>) -> InvestmentProfile {
     let raw_text = text.trim();
     if raw_text.is_empty() {
@@ -159,6 +166,7 @@ pub fn extract_investment_profile(text: &str, keyword_config: Option<&Value>) ->
     InvestmentProfile { platform, product }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn is_ordinary_bank_interest_income(
     bill: &Map<String, Value>,
     keyword_config: Option<&Value>,
@@ -215,6 +223,7 @@ pub fn is_ordinary_bank_interest_income(
         .any(|keyword| evidence_lower.contains(&keyword.to_lowercase()))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn score_investment_candidate(
     bill: &Map<String, Value>,
     allow_existing_investment: bool,
@@ -398,6 +407,7 @@ pub fn score_investment_candidate(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn classify_investment_pnl_change(
     bill: &Map<String, Value>,
     keyword_config: Option<&Value>,

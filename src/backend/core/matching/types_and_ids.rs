@@ -307,18 +307,28 @@ pub struct RecurringPattern {
     pub suggested_next_date: String,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_formal_transfer_candidate_id(anchor_bill_id: i64, candidate_bill_id: i64) -> String {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "build_formal_transfer_candidate_id", "business operation entered");
     format!("bill:{anchor_bill_id}:transfer:{candidate_bill_id}")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_formal_investment_candidate_id(anchor_bill_id: i64, candidate_bill_id: i64) -> String {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "build_formal_investment_candidate_id", "business operation entered");
     format!("bill:{anchor_bill_id}:investment:{candidate_bill_id}")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_formal_duplicate_candidate_id(anchor_bill_id: i64, candidate_bill_id: i64) -> String {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "build_formal_duplicate_candidate_id", "business operation entered");
     format!("bill:{anchor_bill_id}:duplicate:{candidate_bill_id}")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_learning_rule_revision(raw_rule_revision: &str) -> String {
     let revision: String = raw_rule_revision
         .trim()
@@ -332,7 +342,10 @@ pub fn normalize_learning_rule_revision(raw_rule_revision: &str) -> String {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_learning_rule_revision(rule: &Map<String, Value>) -> String {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "build_learning_rule_revision", "business operation entered");
     let nullable_id = |key: &str| -> String {
         match rule.get(key) {
             None | Some(Value::Null) => String::new(),
@@ -377,17 +390,21 @@ pub fn build_learning_rule_revision(rule: &Map<String, Value>) -> String {
     hex_prefix(&digest, 16)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_formal_learning_candidate_id(
     anchor_bill_id: i64,
     rule_id: i64,
     rule_revision: &str,
 ) -> String {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "build_formal_learning_candidate_id", "business operation entered");
     format!(
         "bill:{anchor_bill_id}:learning:{rule_id}:{}",
         normalize_learning_rule_revision(rule_revision)
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_matching_candidate_id(candidate_id: &str) -> Option<MatchingCandidateDescriptor> {
     let normalized = candidate_id.trim();
     if normalized.is_empty() {
@@ -463,6 +480,7 @@ pub fn parse_matching_candidate_id(candidate_id: &str) -> Option<MatchingCandida
     None
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_transfer_pair_bill_ids(
     bill_id: i64,
     candidate_bill_id: i64,
@@ -476,12 +494,15 @@ pub fn normalize_transfer_pair_bill_ids(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_bill_pair_feedback_payload(
     kind: &str,
     bill_id: i64,
     candidate_bill_id: i64,
     pair: Option<&Map<String, Value>>,
 ) -> Value {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "build_bill_pair_feedback_payload", "business operation entered");
     let mut payload = json!({
         "scope": "bill",
         "kind": kind.trim(),
@@ -500,6 +521,7 @@ pub fn build_bill_pair_feedback_payload(
     payload
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn bill_pair_feedback_payload_is_related(payload: &Value, bill_id: i64) -> bool {
     let Some(object) = payload.as_object() else {
         return false;
@@ -520,6 +542,7 @@ pub fn bill_pair_feedback_payload_is_related(payload: &Value, bill_id: i64) -> b
     related_ids.contains(&bill_id)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_manual_pair_request(data: &Value) -> Result<ManualPairRequest, &'static str> {
     let Some(object) = data.as_object() else {
         return Err("Invalid request");

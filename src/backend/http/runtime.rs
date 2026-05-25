@@ -18,10 +18,12 @@ pub struct HttpShellIdentity {
 }
 
 impl HttpShellIdentity {
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn current() -> Self {
         Self::for_import_route_mode(ImportRouteMode::ImportDbRuntime)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn for_import_route_mode(import_route_mode: ImportRouteMode) -> Self {
         let (runtime_boundary, business_migration) = match import_route_mode {
             ImportRouteMode::ImportDbRuntime => (
@@ -47,6 +49,7 @@ pub struct HttpShellHealth {
     pub details: BTreeMap<String, String>,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
     let mut details = BTreeMap::new();
     details.insert(

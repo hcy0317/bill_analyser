@@ -2,6 +2,7 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn update_virtual_category_handler(
     repository: &mut CategoriesRepository<'_>,
     user_id: i64,
@@ -210,6 +211,7 @@ fn update_virtual_category_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn update_real_category_handler(
     repository: &mut CategoriesRepository<'_>,
     user_id: i64,
@@ -333,6 +335,7 @@ enum CategoryPayloadMode {
     ImportDefaults,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn resolve_parent_category(
     repository: &mut CategoriesRepository<'_>,
     parent_id: &str,
@@ -504,6 +507,7 @@ fn category_update_payload_from_frontend(payload: &Value) -> Map<String, Value> 
     result
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_category_payload(
     payload: &Value,
     main_category: &str,

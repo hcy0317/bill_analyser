@@ -4,6 +4,7 @@
 
 use super::*;
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn authenticated_backup_runtime(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -24,12 +25,14 @@ pub(super) fn authenticated_backup_runtime(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn open_backup_ops_runtime(state: &HttpAppState) -> RouteResult<SqliteRuntime> {
     let runtime = open_runtime(state)?;
     init_backup_ops_schema(runtime.connection()).map_err(|_| Box::new(db_error_response()))?;
     Ok(runtime)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn ensure_sensitive_backup_auth(
     auth_runtime: &AuthenticatedBackupRuntime,
     state: &HttpAppState,
@@ -49,6 +52,7 @@ pub(super) fn ensure_sensitive_backup_auth(
         .map_err(|message| Box::new(error_response(StatusCode::UNAUTHORIZED, message)))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn backup_step_up_token(headers: &HeaderMap, payload: Option<&Value>) -> Option<String> {
     header_text(headers, STEP_UP_TOKEN_HEADER).or_else(|| {
         payload
@@ -64,6 +68,7 @@ pub(super) fn backup_step_up_token(headers: &HeaderMap, payload: Option<&Value>)
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn validate_backup_step_up_token(
     token: &str,
     state: &HttpAppState,
@@ -124,6 +129,7 @@ pub(super) fn validate_backup_step_up_token(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn decode_backup_jwt_part(encoded: &str) -> Result<Value, &'static str> {
     let decoded = general_purpose::URL_SAFE_NO_PAD
         .decode(encoded)
@@ -132,10 +138,12 @@ pub(super) fn decode_backup_jwt_part(encoded: &str) -> Result<Value, &'static st
     serde_json::from_slice(&decoded).map_err(|_| "Invalid step-up token")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn normalize_jwt_algorithm(algorithm: &str) -> String {
     algorithm.trim().to_ascii_uppercase()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn jwt_hmac_algorithm(algorithm: &str) -> Result<hmac::Algorithm, &'static str> {
     match normalize_jwt_algorithm(algorithm).as_str() {
         "HS256" => Ok(hmac::HMAC_SHA256),

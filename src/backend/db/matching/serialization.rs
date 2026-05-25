@@ -2,6 +2,7 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_reconciliation_projection_signal(
     candidate_type: &str,
     base_bill: &Map<String, Value>,
@@ -116,6 +117,7 @@ fn infer_bill_flow_role(snapshot: &Map<String, Value>) -> String {
     "primary".to_string()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn dedupe_text_items(items: Vec<String>) -> Vec<String> {
     let mut deduped = Vec::new();
     for item in items {
@@ -131,6 +133,7 @@ fn manual_source_label() -> &'static str {
     "\u{4eba}\u{5de5}"
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_source_label() -> &'static str {
     "\u{5bfc}\u{5165}"
 }
@@ -158,6 +161,7 @@ fn append_merge_event_on_tx(
     Ok(tx.last_insert_rowid())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_reconciliation_candidate_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -352,6 +356,7 @@ fn serialize_bill_snapshot(snapshot: &Map<String, Value>) -> Value {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_bill_map(
     connection: &Connection,
     user_id: i64,
@@ -367,6 +372,7 @@ fn get_bill_map(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_bill_map_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -381,6 +387,7 @@ fn get_bill_map_on_tx(
     .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_bills_by_ids_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -396,6 +403,7 @@ fn get_bills_by_ids_on_tx(
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_bill_pair_link_for_bill(
     connection: &Connection,
     user_id: i64,
@@ -419,6 +427,7 @@ fn get_bill_pair_link_for_bill(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_pair_for_bill_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -441,6 +450,7 @@ fn get_pair_for_bill_on_tx(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_pair_by_id_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,

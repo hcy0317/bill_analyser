@@ -55,6 +55,7 @@ fn enrich_budget_listing(
     Ok(enriched)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_category_context_values(connection: &Connection, user_id: i64) -> DbResult<Vec<Value>> {
     if !table_exists(connection, "categories")? {
         return Ok(Vec::new());
@@ -83,6 +84,7 @@ fn load_category_context_values(connection: &Connection, user_id: i64) -> DbResu
     Ok(categories)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn insert_budget_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -113,6 +115,7 @@ fn insert_budget_on_tx(
     Ok(tx.last_insert_rowid())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_create_payload(fields: &BudgetRecord, now: &str) -> DbResult<BudgetRecord> {
     let mut payload = fields.clone();
     payload
@@ -144,6 +147,7 @@ fn normalize_create_payload(fields: &BudgetRecord, now: &str) -> DbResult<Budget
     Ok(payload)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_update_payload(
     existing: &BudgetRecord,
     fields: &BudgetRecord,
@@ -185,6 +189,7 @@ fn should_copy_existing_sub_category(payload: &BudgetRecord) -> bool {
     .any(|key| payload.contains_key(*key))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn update_payload_to_sql(payload: &mut BudgetRecord) -> DbResult<(Vec<String>, Vec<SqlValue>)> {
     let mut keys = payload
         .keys()
@@ -206,6 +211,7 @@ fn update_payload_to_sql(payload: &mut BudgetRecord) -> DbResult<(Vec<String>, V
     Ok((assignments, values))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_budget_by_id_on_connection(
     connection: &Connection,
     user_id: i64,
@@ -221,6 +227,7 @@ fn get_budget_by_id_on_connection(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_budget_by_id_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -235,6 +242,7 @@ fn get_budget_by_id_on_tx(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_budgets_for_sync_group_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,

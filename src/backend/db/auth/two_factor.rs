@@ -2,11 +2,13 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn hash_two_factor_recovery_code(recovery_code: &str) -> Option<String> {
     recovery_code_hash_input(recovery_code)
         .map(|value| format!("{:x}", Sha256::digest(value.as_bytes())))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn replace_two_factor_recovery_codes(
     connection: &Connection,
     user_id: UserId,
@@ -35,6 +37,7 @@ pub fn replace_two_factor_recovery_codes(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn enable_two_factor_with_recovery_codes_and_session(
     connection: &Connection,
     user_id: UserId,
@@ -101,6 +104,7 @@ pub fn enable_two_factor_with_recovery_codes_and_session(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn disable_two_factor_and_clear_recovery_codes(
     connection: &Connection,
     user_id: UserId,
@@ -145,6 +149,7 @@ pub fn disable_two_factor_and_clear_recovery_codes(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn consume_two_factor_recovery_code(
     connection: &Connection,
     user_id: UserId,
@@ -166,10 +171,13 @@ pub fn consume_two_factor_recovery_code(
     Ok(changed > 0)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn clear_two_factor_recovery_codes(
     connection: &Connection,
     user_id: UserId,
 ) -> DbResult<usize> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "clear_two_factor_recovery_codes", "business operation entered");
     let user_id = user_id_sql(user_id)?;
     Ok(connection.execute(
         "DELETE FROM user_two_factor_recovery_codes WHERE user_id = ?1",
@@ -177,6 +185,7 @@ pub fn clear_two_factor_recovery_codes(
     )?)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn count_active_two_factor_recovery_codes(
     connection: &Connection,
     user_id: UserId,

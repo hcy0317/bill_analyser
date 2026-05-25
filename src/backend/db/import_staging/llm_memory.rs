@@ -2,10 +2,13 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn create_llm_memory_event(
     connection: &Connection,
     draft: &LlmMemoryEventDraft,
 ) -> DbResult<i64> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "create_llm_memory_event", "business operation entered");
     connection.execute(
         "
         INSERT INTO llm_memory_events (
@@ -44,6 +47,7 @@ pub fn create_llm_memory_event(
     Ok(connection.last_insert_rowid())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_llm_memory_events(
     connection: &Connection,
     user_id: UserId,
@@ -78,6 +82,7 @@ pub fn get_llm_memory_events(
     Ok(events)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn apply_preview_llm_recommendation(
     connection: &mut Connection,
     request: ImportPreviewLlmApplyRequest<'_>,
@@ -224,6 +229,7 @@ pub fn apply_preview_llm_recommendation(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn review_preview_llm_recommendation(
     connection: &mut Connection,
     request: ImportPreviewLlmReviewRequest<'_>,

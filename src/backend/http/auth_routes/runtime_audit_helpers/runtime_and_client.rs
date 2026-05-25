@@ -46,6 +46,7 @@ fn client_ip(headers: &HeaderMap, peer_addr: Option<SocketAddr>) -> String {
     forwarded_header_ip(headers).unwrap_or_else(|| FALLBACK_CLIENT_IP.to_string())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn login_client_ip(headers: &HeaderMap, peer_addr: Option<SocketAddr>) -> String {
     forwarded_header_ip(headers)
         .or_else(|| peer_addr.map(|addr| addr.ip().to_string()))

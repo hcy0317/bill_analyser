@@ -2,10 +2,13 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn request_two_factor_enable_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "request_two_factor_enable_handler", "business operation entered");
     let auth = match authenticated_user(&headers, &state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -45,12 +48,15 @@ async fn request_two_factor_enable_handler(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn confirm_two_factor_enable_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "confirm_two_factor_enable_handler", "business operation entered");
     let auth = match authenticated_user(&headers, &state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -167,12 +173,15 @@ async fn confirm_two_factor_enable_handler(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn disable_two_factor_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "disable_two_factor_handler", "business operation entered");
     let auth = match authenticated_user(&headers, &state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -230,12 +239,15 @@ async fn disable_two_factor_handler(
     success_result(StatusCode::OK, Value::Bool(true))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn regenerate_two_factor_recovery_codes_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "regenerate_two_factor_recovery_codes_handler", "business operation entered");
     let auth = match authenticated_user(&headers, &state) {
         Ok(value) => value,
         Err(response) => return *response,

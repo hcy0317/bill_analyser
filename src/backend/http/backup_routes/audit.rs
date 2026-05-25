@@ -4,6 +4,7 @@
 
 use super::*;
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn sync_config_validation_audit_details(config: &Value) -> Value {
     json!({
         "provider": audit_safe_json_field(config, "provider"),
@@ -13,6 +14,7 @@ pub(super) fn sync_config_validation_audit_details(config: &Value) -> Value {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn sync_config_audit_details(contract: &SyncConfigContract) -> Value {
     json!({
         "provider": contract.provider.clone(),
@@ -25,6 +27,7 @@ pub(super) fn sync_config_audit_details(contract: &SyncConfigContract) -> Value 
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn validation_audit_details(payload: &Value) -> Value {
     json!({
         "job_type": audit_safe_json_field(payload, "job_type"),
@@ -34,6 +37,7 @@ pub(super) fn validation_audit_details(payload: &Value) -> Value {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn write_backup_sync_audit(
     connection: &rusqlite::Connection,
     user_id: UserId,
@@ -55,6 +59,7 @@ pub(super) fn write_backup_sync_audit(
     );
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn write_backup_job_audit(
     connection: &rusqlite::Connection,
     user_id: UserId,
@@ -77,6 +82,7 @@ pub(super) fn write_backup_job_audit(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn write_backup_audit_event(
     connection: &rusqlite::Connection,
     user_id: UserId,
@@ -102,6 +108,7 @@ pub(super) fn write_backup_audit_event(
     );
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn with_audit_actor(mut details: Value, user_id: UserId) -> Value {
     let Value::Object(object) = &mut details else {
         return json!({ "user_id": user_id.get(), "details": details });
@@ -110,6 +117,7 @@ pub(super) fn with_audit_actor(mut details: Value, user_id: UserId) -> Value {
     details
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn client_ip(headers: &HeaderMap) -> Option<String> {
     let forwarded_for = header_text(headers, "x-forwarded-for");
     if let Some(value) = forwarded_for {
@@ -121,6 +129,7 @@ pub(super) fn client_ip(headers: &HeaderMap) -> Option<String> {
     header_text(headers, "x-real-ip")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
     headers
         .get(name)
@@ -130,10 +139,12 @@ pub(super) fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn audit_safe_json_field(payload: &Value, key: &str) -> String {
     payload.get(key).map(audit_safe_value).unwrap_or_default()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn audit_safe_endpoint_json_field(payload: &Value, key: &str) -> String {
     payload
         .get(key)
@@ -141,6 +152,7 @@ pub(super) fn audit_safe_endpoint_json_field(payload: &Value, key: &str) -> Stri
         .unwrap_or_default()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn audit_safe_endpoint_value(value: &Value) -> String {
     value
         .as_str()
@@ -148,6 +160,7 @@ pub(super) fn audit_safe_endpoint_value(value: &Value) -> String {
         .unwrap_or_else(|| "<invalid-url>".to_string())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn audit_safe_endpoint_text(raw: &str) -> String {
     let raw = raw.trim();
     if raw.is_empty() {
@@ -165,12 +178,14 @@ pub(super) fn audit_safe_endpoint_text(raw: &str) -> String {
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn audit_safe_sync_config(config: &Value) -> Value {
     let mut config = config.clone();
     audit_sanitize_endpoint_keys(&mut config);
     config
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn audit_sanitize_endpoint_keys(value: &mut Value) {
     match value {
         Value::Object(map) => {
@@ -191,6 +206,7 @@ pub(super) fn audit_sanitize_endpoint_keys(value: &mut Value) {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn audit_safe_value(value: &Value) -> String {
     let raw = value.as_str().map(str::to_string).unwrap_or_else(|| {
         if value.is_null() {
@@ -202,6 +218,7 @@ pub(super) fn audit_safe_value(value: &Value) -> String {
     raw.trim().chars().take(128).collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn value_to_string(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.clone()),
@@ -211,6 +228,7 @@ pub(super) fn value_to_string(value: &Value) -> Option<String> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn json_string_field(value: &Value, key: &str) -> String {
     value
         .get(key)

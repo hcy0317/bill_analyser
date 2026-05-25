@@ -58,11 +58,18 @@ const AUTO_PARSERS: &[DedicatedParser] = &[
     },
 ];
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_dedicated_import_bytes(
     filename: &str,
     bytes: &[u8],
     requested_parser: &str,
 ) -> Option<DedicatedParseResult> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "parse_dedicated_import_bytes",
+        "business operation entered"
+    );
     let requested = requested_parser.trim().to_ascii_lowercase();
     if matches!(
         requested.as_str(),
@@ -83,6 +90,7 @@ pub fn parse_dedicated_import_bytes(
         .and_then(|parser| parse_with_parser(parser, filename, bytes))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_with_parser(
     parser: &DedicatedParser,
     filename: &str,

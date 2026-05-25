@@ -146,6 +146,7 @@ fn ocr_rate_limit_try_acquire(user_id: i64) -> bool {
     true
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn run_ocr_provider(
     config: &OcrConfigContract,
     image_bytes: Vec<u8>,
@@ -166,6 +167,7 @@ async fn run_ocr_provider(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn run_tesseract_ocr(
     lang: String,
     image_bytes: Vec<u8>,
@@ -289,6 +291,7 @@ fn ocr_io_error_response(error: io::Error) -> AiRouteResponse {
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn run_local_json_ocr(
     image_bytes: Vec<u8>,
     mime: String,
@@ -429,6 +432,7 @@ fn ocr_local_json_io_error_response(error: io::Error) -> AiRouteResponse {
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_local_json_ocr_output(
     stdout: &str,
     mime: &str,
@@ -446,6 +450,7 @@ fn parse_local_json_ocr_output(
     local_json_ocr_result_from_value(parsed, mime)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_local_json_ocr_json_lines(text: &str) -> serde_json::Result<Value> {
     let mut items = Vec::new();
     for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
@@ -594,6 +599,7 @@ fn text_from_map_or(object: &Map<String, Value>, key: &str, default: &str) -> St
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn update_runtime_llm_config_payload(base_config: &Value, object: &Map<String, Value>) -> Value {
     let mut config = copy_runtime_llm_config(base_config)
         .as_object()
@@ -688,6 +694,7 @@ fn llm_config_update_from_map(object: &Map<String, Value>) -> LlmConfigUpdate {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn refresh_provider_auth_profile(
     client: &reqwest::Client,
     credential_config: &Value,
@@ -762,6 +769,7 @@ async fn refresh_provider_auth_profile(
         .ok_or(ProviderAuthRefreshError)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn merge_refreshed_provider_auth_profile(current: &Value, response: &Value) -> Option<Value> {
     let mut merged = current.as_object().cloned().unwrap_or_default();
     let refreshed = normalize_provider_auth_config(Some(response));
@@ -792,6 +800,7 @@ fn merge_refreshed_provider_auth_profile(current: &Value, response: &Value) -> O
     Some(normalized)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn validate_provider_token_endpoint(
     token_endpoint: &str,
     provider_base_url: &str,
@@ -811,6 +820,7 @@ fn validate_provider_token_endpoint(
     Err("token endpoint is not allowed".to_string())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_provider_runtime_url(value: &str) -> Result<Url, String> {
     let trimmed = value.trim();
     if trimmed.is_empty() || trimmed.contains('\\') || trimmed.chars().any(char::is_control) {
@@ -874,6 +884,7 @@ fn header_value_text(value: &Value) -> Option<String> {
     .filter(|value| !value.is_empty())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn run_network_llm_ocr(
     config: &OcrConfigContract,
     image_bytes: Vec<u8>,
@@ -991,6 +1002,7 @@ fn llm_not_found_response(message: &str) -> ImportV2RouteResponse {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_multipart_form_data(
     content_type: &str,
     body: &[u8],
@@ -1079,6 +1091,7 @@ fn split_once_bytes<'a>(body: &'a [u8], marker: &[u8]) -> Option<(&'a [u8], &'a 
     Some((&body[..offset], &body[offset + marker.len()..]))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn find_bytes(body: &[u8], marker: &[u8]) -> Option<usize> {
     if marker.is_empty() || marker.len() > body.len() {
         return None;

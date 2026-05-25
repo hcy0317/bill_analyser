@@ -6,6 +6,7 @@ use rusqlite::Connection;
 
 use crate::DbResult;
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn run_transaction<T>(
     connection: &mut Connection,
     operation: impl FnOnce(&rusqlite::Transaction<'_>) -> DbResult<T>,

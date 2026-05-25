@@ -3,6 +3,7 @@
 // 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
 
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_budget_query_end_date(end_date: Option<&str>) -> Option<String> {
     let end_date = non_empty_str(end_date)?;
     if end_date.len() <= 10 {
@@ -12,6 +13,7 @@ pub fn normalize_budget_query_end_date(end_date: Option<&str>) -> Option<String>
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn expand_forecast_history_window(
     period_type: &str,
     start_date: &str,
@@ -46,7 +48,10 @@ pub fn expand_forecast_history_window(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_forecast_period_key(period_type: &str, date: NaiveDate) -> String {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "build_forecast_period_key", "business operation entered");
     match period_type {
         "daily" => format_date(date),
         "weekly" => date.format("%Y-%W").to_string(),
@@ -56,6 +61,7 @@ pub fn build_forecast_period_key(period_type: &str, date: NaiveDate) -> String {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn resolve_parent_budget_period(
     child_period_type: &str,
     child_start_date: &str,
@@ -80,10 +86,12 @@ pub fn resolve_parent_budget_period(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn rollup_parent_amount(existing_parent_amount: f64, child_total: f64) -> f64 {
     existing_parent_amount.max(child_total)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn rollup_yearly_child_total(
     quarterly_amounts: &BTreeMap<u32, f64>,
     monthly_totals_by_quarter: &BTreeMap<u32, f64>,
@@ -100,7 +108,10 @@ pub fn rollup_yearly_child_total(
     total
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_budget_history_filter_summary(input: &BudgetHistoryFilterSummaryInput) -> String {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "build_budget_history_filter_summary", "business operation entered");
     let mut fields = BTreeMap::new();
     fields.insert(
         "account_ids",
@@ -132,6 +143,7 @@ pub fn build_budget_history_filter_summary(input: &BudgetHistoryFilterSummaryInp
     format!("{{{rendered}}}")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn iter_budget_history_period_ranges(
     period_type: &str,
     start_date: &str,
@@ -192,6 +204,7 @@ pub fn iter_budget_history_period_ranges(
     Ok(ranges)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn budget_overlaps_period(
     budget_start: &str,
     budget_end: Option<&str>,
@@ -209,7 +222,10 @@ pub fn budget_overlaps_period(
     Ok(budget_start <= period_end && budget_end.is_none_or(|end| end >= period_start))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_budget_history_item_from_detail(detail: &Value, period: &BudgetPeriodRange) -> Value {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "build_budget_history_item_from_detail", "business operation entered");
     build_budget_history_item_from_detail_with_context(
         detail,
         period,
@@ -219,6 +235,7 @@ pub fn build_budget_history_item_from_detail(detail: &Value, period: &BudgetPeri
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_budget_history_item_from_detail_with_context(
     detail: &Value,
     period: &BudgetPeriodRange,
@@ -226,6 +243,8 @@ pub fn build_budget_history_item_from_detail_with_context(
     period_type: &str,
     filter_summary: &str,
 ) -> Value {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "build_budget_history_item_from_detail_with_context", "business operation entered");
     let id = value_to_i64(detail.get("id")).unwrap_or_default();
     let budget_amount = budget_item_amount(detail, "budget_amount");
     let spent_amount = budget_item_amount(detail, "spent_amount");

@@ -9,7 +9,14 @@ use super::common::{
     positive_amount_text, rows_to_maps, workbook_rows, RowMap,
 };
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "parse",
+        "business operation entered"
+    );
     let suffix = file_suffix(filename);
     match suffix.as_str() {
         "csv" | "txt" => parse_csv(bytes),
@@ -18,7 +25,14 @@ pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_csv(bytes: &[u8]) -> Vec<StandardBill> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "parse_csv",
+        "business operation entered"
+    );
     let text = decode_text(bytes);
     let probe = text.lines().take(15).collect::<Vec<_>>().join("\n");
     if !probe.contains("农业银行")
@@ -35,7 +49,14 @@ fn parse_csv(bytes: &[u8]) -> Vec<StandardBill> {
     post_process_raw_bills("abc", &rows.iter().filter_map(raw_abc).collect::<Vec<_>>())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_sheet(bytes: &[u8]) -> Vec<StandardBill> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "parse_sheet",
+        "business operation entered"
+    );
     let Some(rows) = workbook_rows(bytes) else {
         return Vec::new();
     };
@@ -54,6 +75,7 @@ fn parse_sheet(bytes: &[u8]) -> Vec<StandardBill> {
     post_process_raw_bills("abc", &maps.iter().filter_map(raw_abc).collect::<Vec<_>>())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn raw_abc(row: &RowMap) -> Option<RawBill> {
     let mut date = get(row, &["交易日期", "交易⽇期", "记账日期"]);
     let time = get(row, &["交易时间"]);

@@ -3,11 +3,14 @@
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn list_budgets_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BudgetListQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "list_budgets_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -29,11 +32,14 @@ async fn list_budgets_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn get_budget_execution_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BudgetExecutionQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "get_budget_execution_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -64,11 +70,14 @@ async fn get_budget_execution_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn get_budget_forecast_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BudgetForecastQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "get_budget_forecast_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -130,11 +139,14 @@ async fn get_budget_forecast_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn get_budget_history_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<BudgetExecutionQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "get_budget_history_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -170,11 +182,14 @@ async fn get_budget_history_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn create_budget_history_snapshot_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "create_budget_history_snapshot_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -201,11 +216,14 @@ async fn create_budget_history_snapshot_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn get_budget_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(budget_id): Path<i64>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "get_budget_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -221,11 +239,14 @@ async fn get_budget_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn create_budget_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "create_budget_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -255,12 +276,15 @@ async fn create_budget_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn update_budget_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(budget_id): Path<i64>,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "update_budget_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -293,11 +317,14 @@ async fn update_budget_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn delete_budget_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(budget_id): Path<i64>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "delete_budget_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -316,7 +343,10 @@ async fn delete_budget_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn export_budgets_handler(State(state): State<HttpAppState>, headers: HeaderMap) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "export_budgets_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -331,11 +361,14 @@ async fn export_budgets_handler(State(state): State<HttpAppState>, headers: Head
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn import_budgets_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "import_budgets_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,

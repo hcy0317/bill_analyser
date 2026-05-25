@@ -2,6 +2,7 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn apply_preview_transfer_decision(
     connection: &mut Connection,
     preview_id: i64,
@@ -201,6 +202,7 @@ pub fn apply_preview_transfer_decision(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn update_preview_recurring_match_decision(
     connection: &mut Connection,
     preview_id: i64,
@@ -208,6 +210,8 @@ pub fn update_preview_recurring_match_decision(
     update: &ImportPreviewRecurringMatchUpdate,
     expected_state: Option<&ImportPreviewExpectedState>,
 ) -> DbResult<ImportPreviewDecisionResult> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "update_preview_recurring_match_decision", "business operation entered");
     run_transaction(connection, |tx| {
         let Some(preview) = get_preview_bill_by_id(tx, preview_id, user_id)? else {
             return Ok(preview_decision_not_found());
@@ -293,6 +297,7 @@ pub fn update_preview_recurring_match_decision(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn apply_preview_learning_decision(
     connection: &mut Connection,
     preview_id: i64,

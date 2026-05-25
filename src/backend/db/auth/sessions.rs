@@ -2,10 +2,13 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn delete_application_cloud_settings(
     connection: &Connection,
     user_id: UserId,
 ) -> DbResult<bool> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "delete_application_cloud_settings", "business operation entered");
     let user_id = user_id_sql(user_id)?;
     connection.execute(
         "DELETE FROM user_application_cloud_settings WHERE user_id = ?1",
@@ -14,10 +17,13 @@ pub fn delete_application_cloud_settings(
     Ok(true)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn list_user_sessions(
     connection: &Connection,
     user_id: UserId,
 ) -> DbResult<Vec<TokenSessionRow>> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "list_user_sessions", "business operation entered");
     let user_id = user_id_sql(user_id)?;
     let mut statement = connection.prepare(
         r#"
@@ -41,10 +47,13 @@ pub fn list_user_sessions(
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn create_token_session(
     connection: &Connection,
     draft: &CreateTokenSessionDraft,
 ) -> DbResult<i64> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "create_token_session", "business operation entered");
     let user_id = user_id_sql(draft.user_id)?;
     connection.execute(
         r#"
@@ -67,6 +76,7 @@ pub fn create_token_session(
     Ok(connection.last_insert_rowid())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn rotate_refresh_token_session(
     connection: &Connection,
     consumed_session_id: i64,

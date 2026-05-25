@@ -2,6 +2,7 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn cleanup_expired_sessions(connection: &Connection, now: &str) -> DbResult<usize> {
     Ok(connection.execute(
         r#"
@@ -13,6 +14,7 @@ pub fn cleanup_expired_sessions(connection: &Connection, now: &str) -> DbResult<
     )?)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_auth_token_user(
     connection: &Connection,
     user_id: UserId,
@@ -43,6 +45,7 @@ pub fn get_auth_token_user(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_login_user_by_login_name(
     connection: &Connection,
     login_name: &str,
@@ -75,6 +78,7 @@ pub fn get_login_user_by_login_name(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_login_user_by_email(
     connection: &Connection,
     email: &str,
@@ -107,6 +111,7 @@ pub fn get_login_user_by_email(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_login_user_by_id(
     connection: &Connection,
     user_id: UserId,
@@ -138,6 +143,7 @@ pub fn get_login_user_by_id(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_active_refresh_session(
     connection: &Connection,
     refresh_token_hash: &str,
@@ -166,6 +172,7 @@ pub fn get_active_refresh_session(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_active_logout_session_by_token_hash(
     connection: &Connection,
     token_hash: &str,
@@ -192,6 +199,7 @@ pub fn get_active_logout_session_by_token_hash(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_auth_user_profile(
     connection: &Connection,
     user_id: UserId,
@@ -221,6 +229,7 @@ pub fn get_auth_user_profile(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_auth_user_two_factor_enabled(
     connection: &Connection,
     user_id: UserId,

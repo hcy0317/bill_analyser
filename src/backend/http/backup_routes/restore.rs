@@ -4,6 +4,7 @@
 
 use super::*;
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn verify_backup_restore_response(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -118,6 +119,7 @@ pub(super) fn verify_backup_restore_response(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn restore_backup_response(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -206,6 +208,7 @@ pub(super) fn restore_backup_response(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn restore_data_dir_from_backup(
     file_path: &Path,
     backup_dir: &Path,
@@ -224,6 +227,7 @@ pub(super) fn restore_data_dir_from_backup(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn restore_data_dir_from_archive<R: Read + Seek>(
     reader: R,
     backup_dir: &Path,
@@ -323,6 +327,7 @@ pub(super) fn restore_data_dir_from_archive<R: Read + Seek>(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn validate_data_dir_for_restore(data_dir: &Path) -> FileRouteResult<()> {
     if data_dir.file_name().and_then(|value| value.to_str()) != Some("data") {
         return Err(BackupFileRuntimeError::internal(
@@ -337,10 +342,12 @@ pub(super) fn validate_data_dir_for_restore(data_dir: &Path) -> FileRouteResult<
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn copy_dir_all(from: &Path, to: &Path) -> FileRouteResult<()> {
     copy_dir_all_filtered(from, to, &|_| false)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn copy_dir_all_filtered(
     from: &Path,
     to: &Path,
@@ -372,6 +379,7 @@ pub(super) fn copy_dir_all_filtered(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn unique_directory_path(parent: &Path, prefix: &str) -> PathBuf {
     let counter = BACKUP_FILENAME_COUNTER.fetch_add(1, Ordering::Relaxed);
     parent.join(format!(
@@ -382,6 +390,7 @@ pub(super) fn unique_directory_path(parent: &Path, prefix: &str) -> PathBuf {
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn directory_contains_file(directory: &Path) -> bool {
     directory.exists()
         && WalkDir::new(directory)

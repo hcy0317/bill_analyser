@@ -39,11 +39,19 @@ pub struct CategoriesRepository<'conn> {
 }
 
 impl<'conn> CategoriesRepository<'conn> {
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn new(connection: &'conn mut Connection) -> Self {
         Self { connection }
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn list_categories(&mut self, user_id: i64) -> DbResult<Vec<CategoryRecord>> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "list_categories",
+            "business operation entered"
+        );
         let mut statement = self.connection.prepare(
             "SELECT id, user_id, type, main_category, sub_category, description,
                     priority, keywords, hidden, icon, color, created_at
@@ -67,6 +75,7 @@ impl<'conn> CategoriesRepository<'conn> {
         rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn get_category_by_id(
         &mut self,
         category_id: i64,
@@ -85,6 +94,7 @@ impl<'conn> CategoriesRepository<'conn> {
             .map_err(DbError::from)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn get_category_by_name(
         &mut self,
         main_category: &str,
@@ -104,7 +114,14 @@ impl<'conn> CategoriesRepository<'conn> {
             .map_err(DbError::from)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn create_category(&mut self, payload: &Value, user_id: i64) -> DbResult<Option<i64>> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "create_category",
+            "business operation entered"
+        );
         let now = utc_now_iso();
         let values = category_insert_values(payload, user_id, now)?;
 
@@ -116,11 +133,18 @@ impl<'conn> CategoriesRepository<'conn> {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn ensure_categories(
         &mut self,
         payload: &Value,
         user_id: i64,
     ) -> DbResult<CategoryEnsureSummary> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "ensure_categories",
+            "business operation entered"
+        );
         let categories = payload.as_array().ok_or_else(|| {
             DbError::InvalidOperation("category ensure payload must be an array".to_string())
         })?;
@@ -144,12 +168,19 @@ impl<'conn> CategoriesRepository<'conn> {
         })
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn update_category(
         &mut self,
         category_id: i64,
         payload: &Value,
         user_id: i64,
     ) -> DbResult<bool> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "update_category",
+            "business operation entered"
+        );
         let object = payload.as_object().ok_or_else(|| {
             DbError::InvalidOperation("category update payload must be an object".to_string())
         })?;
@@ -204,7 +235,14 @@ impl<'conn> CategoriesRepository<'conn> {
         Ok(changed > 0)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn delete_category(&mut self, category_id: i64, user_id: i64) -> DbResult<bool> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "delete_category",
+            "business operation entered"
+        );
         let category = self.get_category_by_id(category_id, user_id)?;
         let Some(category) = category else {
             return Ok(false);
@@ -227,11 +265,18 @@ impl<'conn> CategoriesRepository<'conn> {
         Ok(changed > 0)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn delete_categories_by_main_category(
         &mut self,
         main_category: &str,
         user_id: i64,
     ) -> DbResult<bool> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "delete_categories_by_main_category",
+            "business operation entered"
+        );
         let changed = self.connection.execute(
             "DELETE FROM categories WHERE main_category = ? AND user_id = ?",
             params![main_category, user_id],
@@ -239,12 +284,19 @@ impl<'conn> CategoriesRepository<'conn> {
         Ok(changed > 0)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn update_main_category_name(
         &mut self,
         old_name: &str,
         new_name: &str,
         user_id: i64,
     ) -> DbResult<bool> {
+        #[cfg(not(coverage))]
+        tracing::info!(
+            domain = "taxonomy",
+            operation = "update_main_category_name",
+            "business operation entered"
+        );
         let result = run_transaction(self.connection, |transaction| {
             let changed = transaction.execute(
                 "UPDATE categories SET main_category = ? WHERE main_category = ? AND user_id = ?",
@@ -259,6 +311,7 @@ impl<'conn> CategoriesRepository<'conn> {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn category_statistics(
         &mut self,
         start_date: Option<&str>,
@@ -296,6 +349,7 @@ impl<'conn> CategoriesRepository<'conn> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn open_categories_connection(db_path: &str) -> DbResult<Connection> {
     if db_path == ":memory:" || db_path == "file::memory:?cache=shared" {
         return Err(DbError::InvalidOperation(

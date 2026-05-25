@@ -2,6 +2,7 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn increment_failed_login(
     connection: &Connection,
     user_id: UserId,
@@ -76,7 +77,10 @@ pub fn increment_failed_login(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn clear_expired_login_lock(connection: &Connection, user_id: UserId) -> DbResult<bool> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "clear_expired_login_lock", "business operation entered");
     let user_id = user_id_sql(user_id)?;
     let changed = connection.execute(
         "UPDATE users SET locked_until = NULL, failed_login_attempts = 0 WHERE id = ?1",
@@ -85,12 +89,15 @@ pub fn clear_expired_login_lock(connection: &Connection, user_id: UserId) -> DbR
     Ok(changed > 0)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn update_user_last_login(
     connection: &Connection,
     user_id: UserId,
     last_login_at: &str,
     ip_address: &str,
 ) -> DbResult<bool> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "update_user_last_login", "business operation entered");
     let user_id = user_id_sql(user_id)?;
     let changed = connection.execute(
         r#"
@@ -103,6 +110,7 @@ pub fn update_user_last_login(
     Ok(changed > 0)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn set_user_email_verified(
     connection: &Connection,
     user_id: UserId,
@@ -117,12 +125,15 @@ pub fn set_user_email_verified(
     Ok(changed > 0)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn update_user_password_hash(
     connection: &Connection,
     user_id: UserId,
     password_hash: &str,
     updated_at: &str,
 ) -> DbResult<bool> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "update_user_password_hash", "business operation entered");
     let user_id = user_id_sql(user_id)?;
     let changed = connection.execute(
         "UPDATE users SET password_hash = ?1, updated_at = ?2 WHERE id = ?3",
@@ -131,6 +142,7 @@ pub fn update_user_password_hash(
     Ok(changed > 0)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn count_recent_token_password_failures(
     connection: &Connection,
     user_id: UserId,
@@ -153,6 +165,7 @@ pub fn count_recent_token_password_failures(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn invalidate_session_by_id(
     connection: &Connection,
     session_id: i64,
@@ -166,6 +179,7 @@ pub fn invalidate_session_by_id(
     Ok(changed > 0)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn invalidate_session_by_token_hash(
     connection: &Connection,
     token_hash: &str,
@@ -177,6 +191,7 @@ pub fn invalidate_session_by_token_hash(
     Ok(changed > 0)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn invalidate_other_user_sessions(
     connection: &Connection,
     user_id: UserId,

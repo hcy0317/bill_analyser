@@ -2,6 +2,7 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn update_sub_accounts(
     repository: &mut AccountsRepository<'_>,
     account_id: i64,
@@ -50,6 +51,7 @@ fn update_sub_accounts(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_account_with_sub_accounts(
     repository: &mut AccountsRepository<'_>,
     account_id: i64,

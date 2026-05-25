@@ -158,6 +158,7 @@ fn init_global_learning_runtime_schema(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn ensure_table_column(
     connection: &Connection,
     table_name: &str,
@@ -431,6 +432,7 @@ fn composite_match_features_for_preview(
     Some((features, hash))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn count_import_learning_rules(
     connection: &Connection,
     user_id: UserId,
@@ -447,6 +449,7 @@ fn count_import_learning_rules(
         .map_err(db_error_response)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_import_learning_rules(
     connection: &Connection,
     user_id: UserId,
@@ -479,6 +482,7 @@ fn load_import_learning_rules(
         .map_err(db_error_response)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn get_import_learning_rule(
     connection: &Connection,
     rule_id: i64,
@@ -495,6 +499,7 @@ fn get_import_learning_rule(
         .map_err(db_error_response)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn update_import_learning_rule(
     connection: &Connection,
     rule_id: i64,
@@ -574,6 +579,7 @@ fn update_import_learning_rule(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn delete_import_learning_rule(
     connection: &Connection,
     rule_id: i64,

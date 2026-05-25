@@ -33,6 +33,7 @@ pub struct OpsContractError {
 }
 
 impl OpsContractError {
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn new(error: impl Into<String>, message: impl Into<String>, status_code: u16) -> Self {
         Self {
             error: error.into(),
@@ -211,6 +212,7 @@ pub struct ReportExportContract {
     pub mimetype: String,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn secure_backup_filename(filename: &str) -> String {
     let normalized = filename.nfkd().collect::<String>();
     let mut cleaned = String::new();
@@ -230,6 +232,7 @@ pub fn secure_backup_filename(filename: &str) -> String {
         .to_string()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn resolve_backup_filename(
     filename: &str,
 ) -> Result<BackupFilenameResolution, OpsContractError> {
@@ -275,11 +278,13 @@ pub fn resolve_backup_filename(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn is_allowed_backup_filename(filename: &str) -> bool {
     filename.starts_with(BACKUP_PREFIX)
         && (filename.ends_with(BACKUP_ZIP_SUFFIX) || filename.ends_with(BACKUP_ENCRYPTED_SUFFIX))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn is_safe_backup_archive_member(member_name: &str) -> bool {
     let normalized = member_name.replace('\\', "/").trim().to_string();
     if normalized.is_empty() || normalized.starts_with('/') {
@@ -294,6 +299,7 @@ pub fn is_safe_backup_archive_member(member_name: &str) -> bool {
     !normalized.split('/').any(|part| part == "..")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn backup_archive_summary_from_entries<I, S>(entries: I) -> BackupArchiveSummary
 where
     I: IntoIterator<Item = S>,
@@ -337,6 +343,7 @@ where
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn invalid_backup_archive_summary(error: &str) -> BackupArchiveSummary {
     BackupArchiveSummary {
         valid_zip: false,
@@ -348,7 +355,14 @@ pub fn invalid_backup_archive_summary(error: &str) -> BackupArchiveSummary {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_backup_file_info(input: BackupFileInfoInput) -> BackupFileInfoContract {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "build_backup_file_info",
+        "business operation entered"
+    );
     let encrypted = input.filename.ends_with(BACKUP_ENCRYPTED_SUFFIX);
     let metadata_checksum_matched = input
         .metadata_checksum
@@ -372,6 +386,7 @@ pub fn build_backup_file_info(input: BackupFileInfoInput) -> BackupFileInfoContr
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn backup_restore_verify_response(backup_info: &BackupFileInfoContract) -> Value {
     let restore_ready = backup_info.valid_zip && backup_info.ready_to_restore;
     json!({
@@ -380,6 +395,7 @@ pub fn backup_restore_verify_response(backup_info: &BackupFileInfoContract) -> V
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn plan_backup_cleanup(
     records: &[BackupRecordContract],
     stray_files: &[BackupFileCandidate],
@@ -457,6 +473,7 @@ pub fn plan_backup_cleanup(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_backup_job_payload(
     payload: &Value,
 ) -> Result<BackupJobContract, OpsContractError> {
@@ -541,10 +558,12 @@ pub fn normalize_backup_job_payload(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn backup_encryption_secret_configured(secret: Option<&str>) -> bool {
     secret.is_some_and(|value| !value.trim().is_empty())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn derive_backup_fernet_key(secret: &str) -> Option<String> {
     let secret = secret.trim();
     if secret.is_empty() {
@@ -554,6 +573,7 @@ pub fn derive_backup_fernet_key(secret: &str) -> Option<String> {
     Some(base64_urlsafe_padded(&digest))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_sqlcipher_status(
     encrypt_raw: Option<&str>,
     key_raw: Option<&str>,
@@ -569,6 +589,7 @@ pub fn normalize_sqlcipher_status(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn encryption_status_response(status: &SqlcipherStatusContract) -> Value {
     json!({
         "success": true,
@@ -576,6 +597,7 @@ pub fn encryption_status_response(status: &SqlcipherStatusContract) -> Value {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_comma_separated_ints(raw_value: &str) -> Vec<i64> {
     raw_value
         .split(',')
@@ -583,6 +605,7 @@ pub fn parse_comma_separated_ints(raw_value: &str) -> Vec<i64> {
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_export_timestamp_millis(raw_value: &str) -> Option<String> {
     let cleaned = raw_value.trim();
     if cleaned.is_empty() || cleaned == "0" {
@@ -595,6 +618,7 @@ pub fn parse_export_timestamp_millis(raw_value: &str) -> Option<String> {
         .map(|value| value.format("%Y-%m-%d %H:%M:%S").to_string())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn resolve_sensitive_auth_mode(
     has_current_password: bool,
     has_step_up_token: bool,
@@ -612,12 +636,19 @@ pub fn resolve_sensitive_auth_mode(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_user_data_audit_contract(
     kind: UserDataClearKind,
     user_id: i64,
     auth_mode: SensitiveAuthMode,
     result: &Value,
 ) -> UserDataAuditContract {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "build_user_data_audit_contract",
+        "business operation entered"
+    );
     let success = result
         .get("success")
         .and_then(Value::as_bool)
@@ -660,6 +691,7 @@ pub fn build_user_data_audit_contract(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_user_data_statistics(value: &Value) -> UserDataStatisticsContract {
     UserDataStatisticsContract {
         bill_count: field_i64_with_aliases(value, &["billCount", "bill_count", "bills"]),
@@ -679,6 +711,7 @@ pub fn normalize_user_data_statistics(value: &Value) -> UserDataStatisticsContra
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn user_data_statistics_response(statistics: &UserDataStatisticsContract) -> Value {
     json!({
         "success": true,
@@ -686,6 +719,7 @@ pub fn user_data_statistics_response(statistics: &UserDataStatisticsContract) ->
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_sync_provider(provider: &str) -> Option<String> {
     let normalized = provider.trim().to_lowercase();
     if SUPPORTED_SYNC_PROVIDERS.contains(&normalized.as_str()) {
@@ -695,6 +729,7 @@ pub fn normalize_sync_provider(provider: &str) -> Option<String> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_backup_sync_prefix(prefix: Option<&str>) -> Result<String, OpsContractError> {
     let raw_prefix = prefix.map(str::trim).unwrap_or_default();
     if raw_prefix.is_empty() {
@@ -734,10 +769,17 @@ pub fn normalize_backup_sync_prefix(prefix: Option<&str>) -> Result<String, OpsC
     Ok(format!("{normalized}/"))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_cloud_backup_object_key(
     prefix: Option<&str>,
     filename: &str,
 ) -> Result<String, OpsContractError> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "build_cloud_backup_object_key",
+        "business operation entered"
+    );
     let safe_filename = resolve_cloud_backup_object_filename(filename)?;
     Ok(format!(
         "{}{}",
@@ -746,6 +788,7 @@ pub fn build_cloud_backup_object_key(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn resolve_cloud_backup_object_filename(filename: &str) -> Result<String, OpsContractError> {
     let trimmed = filename.trim();
     let resolution = resolve_backup_filename(trimmed)?;
@@ -759,10 +802,17 @@ fn resolve_cloud_backup_object_filename(filename: &str) -> Result<String, OpsCon
     Ok(resolution.sanitized)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_sync_config_contract(
     config: &Value,
     filename: &str,
 ) -> Result<SyncConfigContract, OpsContractError> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "build_sync_config_contract",
+        "business operation entered"
+    );
     let object = config.as_object();
     let provider = string_field(object, "provider").trim().to_lowercase();
     let normalized_provider = normalize_sync_provider(&provider);
@@ -782,6 +832,7 @@ pub fn build_sync_config_contract(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_report_export_format(
     format_type: &str,
 ) -> Result<ReportExportContract, OpsContractError> {
@@ -811,6 +862,7 @@ pub fn normalize_report_export_format(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn secure_report_filename(filename: &str) -> String {
     let fallback = "report";
     let trimmed = filename.trim();

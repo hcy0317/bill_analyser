@@ -7,6 +7,7 @@ use unicode_normalization::UnicodeNormalization;
 
 use super::types::PaymentScreenshotParseContract;
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_payment_screenshot_text(text: &str) -> PaymentScreenshotParseContract {
     let normalized_text = normalize_text(text);
     if normalized_text.is_empty() {
@@ -40,6 +41,7 @@ pub fn parse_payment_screenshot_text(text: &str) -> PaymentScreenshotParseContra
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_text(text: &str) -> String {
     text.nfkc()
         .collect::<String>()
@@ -48,6 +50,7 @@ fn normalize_text(text: &str) -> String {
         .to_string()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_lines(text: &str) -> Vec<String> {
     text.lines()
         .map(collapse_whitespace)
@@ -63,6 +66,7 @@ fn collapse_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn detect_payment_platform(text: &str) -> Option<&'static str> {
     let lowered = text.to_lowercase();
     if text.contains("微信支付") || text.contains("财付通") || lowered.contains("wechat pay")
@@ -79,6 +83,7 @@ fn detect_payment_platform(text: &str) -> Option<&'static str> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_amount(text: &str) -> Option<f64> {
     for marker in [
         "付款金额",
@@ -116,6 +121,7 @@ fn parse_amount(text: &str) -> Option<f64> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_number_after_prefix(text: &str, start: usize) -> Option<f64> {
     let mut number_start = None;
     for (offset, ch) in text[start..].char_indices() {
@@ -130,6 +136,7 @@ fn parse_number_after_prefix(text: &str, start: usize) -> Option<f64> {
     number_start.and_then(|index| parse_number_at(text, index))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_currency_adjacent_amount(text: &str) -> Option<f64> {
     for marker in ["CNY", "cny", "RMB", "rmb"] {
         for (index, _) in text.match_indices(marker) {
@@ -152,6 +159,7 @@ fn parse_currency_adjacent_amount(text: &str) -> Option<f64> {
     None
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_number_before_index(text: &str, end: usize) -> Option<f64> {
     let mut trimmed_end = end;
     while let Some((index, ch)) = text[..trimmed_end].char_indices().next_back() {
@@ -185,6 +193,7 @@ fn parse_number_before_index(text: &str, end: usize) -> Option<f64> {
     has_digit.then(|| parse_number_at(text, start)).flatten()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_number_at(text: &str, start: usize) -> Option<f64> {
     let mut raw = String::new();
     let mut has_digit = false;
@@ -211,6 +220,7 @@ fn parse_number_at(text: &str, start: usize) -> Option<f64> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_trade_time(text: &str) -> Option<String> {
     let search_text = normalize_datetime_text(text);
     let tokens = search_text.split_whitespace().collect::<Vec<_>>();
@@ -226,6 +236,7 @@ fn parse_trade_time(text: &str) -> Option<String> {
     None
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_datetime_text(text: &str) -> String {
     text.nfkc()
         .collect::<String>()
@@ -238,6 +249,7 @@ fn normalize_datetime_text(text: &str) -> String {
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_date_token(token: &str) -> Option<(i32, u32, u32)> {
     let cleaned = trim_to_ascii_date_token(token);
     let parts = cleaned.split('-').collect::<Vec<_>>();
@@ -258,6 +270,7 @@ fn parse_date_token(token: &str) -> Option<(i32, u32, u32)> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_time_token(token: &str) -> Option<(u32, u32, u32, bool)> {
     let cleaned = trim_to_ascii_time_token(token);
     let parts = cleaned.split(':').collect::<Vec<_>>();
@@ -295,10 +308,12 @@ fn trim_to_ascii_time_token(token: &str) -> String {
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn validate_date(parts: (i32, u32, u32)) -> Option<(i32, u32, u32)> {
     NaiveDate::from_ymd_opt(parts.0, parts.1, parts.2).map(|_| parts)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn validate_time(parts: (u32, u32, u32, bool)) -> Option<(u32, u32, u32, bool)> {
     NaiveTime::from_hms_opt(parts.0, parts.1, parts.2).map(|_| parts)
 }
@@ -319,6 +334,7 @@ fn format_date_time(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_description(lines: &[String]) -> Option<String> {
     parse_labeled_description(lines).or_else(|| {
         lines
@@ -328,6 +344,7 @@ fn parse_description(lines: &[String]) -> Option<String> {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_labeled_description(lines: &[String]) -> Option<String> {
     for (index, line) in lines.iter().enumerate() {
         for label in description_labels() {

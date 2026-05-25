@@ -29,6 +29,7 @@ pub struct UserDataClearAllResult {
     pub counts: BTreeMap<String, i64>,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_user_data_statistics(
     connection: &Connection,
     user_id: UserId,
@@ -43,6 +44,7 @@ pub fn get_user_data_statistics(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn count_user_rows(connection: &Connection, table_name: &str, user_id: i64) -> DbResult<i64> {
     let sql = format!("SELECT COUNT(*) FROM {table_name} WHERE user_id = ?1");
     connection
@@ -50,10 +52,17 @@ fn count_user_rows(connection: &Connection, table_name: &str, user_id: i64) -> D
         .map_err(Into::into)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn list_user_data_categories(
     connection: &Connection,
     user_id: UserId,
 ) -> DbResult<Vec<UserDataExportCategory>> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "list_user_data_categories",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     let mut statement = connection.prepare(
         "SELECT id, main_category, sub_category
@@ -71,6 +80,7 @@ pub fn list_user_data_categories(
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn load_user_data_export(
     connection: &Connection,
     user_id: UserId,
@@ -90,7 +100,14 @@ pub fn load_user_data_export(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn clear_user_transactions(connection: &mut Connection, user_id: UserId) -> DbResult<i64> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "clear_user_transactions",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     run_transaction(connection, |tx| {
         let bill_ids = list_user_bill_ids(tx, user_id)?;
@@ -112,10 +129,17 @@ pub fn clear_user_transactions(connection: &mut Connection, user_id: UserId) -> 
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn clear_user_data(
     connection: &mut Connection,
     user_id: UserId,
 ) -> DbResult<UserDataClearAllResult> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "clear_user_data",
+        "business operation entered"
+    );
     let user_id = UserScope::new(user_id).bind_value()?;
     run_transaction(connection, |tx| {
         let counts = clear_all_counts(tx, user_id)?;
@@ -148,6 +172,7 @@ pub fn clear_user_data(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_account_names(connection: &Connection, user_id: UserId) -> DbResult<BTreeMap<i64, String>> {
     let user_id = UserScope::new(user_id).bind_value()?;
     let mut statement =
@@ -163,6 +188,7 @@ fn load_account_names(connection: &Connection, user_id: UserId) -> DbResult<BTre
     Ok(account_names)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_tag_names_for_bills(
     connection: &Connection,
     user_id: UserId,
@@ -194,6 +220,7 @@ fn load_tag_names_for_bills(
     Ok(tags)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn clear_all_counts(tx: &Transaction<'_>, user_id: i64) -> DbResult<BTreeMap<String, i64>> {
     let mut counts = BTreeMap::new();
     for (key, table_name) in [
@@ -220,6 +247,7 @@ fn clear_all_counts(tx: &Transaction<'_>, user_id: i64) -> DbResult<BTreeMap<Str
     Ok(counts)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn list_user_bill_ids(tx: &Transaction<'_>, user_id: i64) -> DbResult<Vec<i64>> {
     if !table_exists(tx, "bills")? {
         return Ok(Vec::new());
@@ -229,6 +257,7 @@ fn list_user_bill_ids(tx: &Transaction<'_>, user_id: i64) -> DbResult<Vec<i64>> 
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn delete_bill_side_effects(tx: &Transaction<'_>, user_id: i64, bill_ids: &[i64]) -> DbResult<()> {
     let bill_ids = normalize_ids(bill_ids);
     if bill_ids.is_empty() {
@@ -252,6 +281,7 @@ fn delete_bill_side_effects(tx: &Transaction<'_>, user_id: i64, bill_ids: &[i64]
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn delete_pair_table_by_pair_columns(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -274,6 +304,7 @@ fn delete_pair_table_by_pair_columns(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn delete_bill_tags(tx: &Transaction<'_>, bill_ids: &[i64]) -> DbResult<()> {
     let bill_ids = normalize_ids(bill_ids);
     if bill_ids.is_empty() || !table_exists(tx, "bill_tags")? {
@@ -292,6 +323,7 @@ fn delete_bill_tags(tx: &Transaction<'_>, bill_ids: &[i64]) -> DbResult<()> {
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn delete_if_table_exists(tx: &Transaction<'_>, table_name: &str, user_id: i64) -> DbResult<()> {
     if table_exists(tx, table_name)? {
         tx.execute(
@@ -314,6 +346,7 @@ fn placeholders(count: usize) -> String {
     vec!["?"; count].join(",")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_ids(values: &[i64]) -> Vec<i64> {
     values
         .iter()

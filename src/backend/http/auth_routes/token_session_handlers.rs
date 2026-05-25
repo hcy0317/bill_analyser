@@ -2,7 +2,10 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn list_tokens_handler(State(state): State<HttpAppState>, headers: HeaderMap) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "list_tokens_handler", "business operation entered");
     let auth = match authenticated_user(&headers, &state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -29,6 +32,7 @@ async fn list_tokens_handler(State(state): State<HttpAppState>, headers: HeaderM
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn generate_personal_token(
     token_kind: TokenKind,
     state: HttpAppState,
@@ -193,10 +197,13 @@ async fn generate_personal_token(
     success_result(StatusCode::OK, Value::Object(result))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn revoke_other_tokens_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "revoke_other_tokens_handler", "business operation entered");
     let auth = match authenticated_user(&headers, &state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -225,11 +232,14 @@ async fn revoke_other_tokens_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn revoke_token_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Path(token_id): Path<String>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "revoke_token_handler", "business operation entered");
     let auth = match authenticated_user(&headers, &state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -256,11 +266,14 @@ async fn revoke_token_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn logout_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     connect_info: Option<ConnectInfo<SocketAddr>>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "logout_handler", "business operation entered");
     let token = match parse_logout_bearer_token(&headers) {
         Ok(value) => value,
         Err(error) => return auth_rest_error_response(error),
@@ -312,6 +325,7 @@ async fn logout_handler(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_logout_bearer_token(headers: &HeaderMap) -> Result<String, AuthRestError> {
     let auth_header = header_value(headers, header::AUTHORIZATION.as_str());
     if auth_header.is_empty() {
@@ -327,10 +341,17 @@ fn parse_logout_bearer_token(headers: &HeaderMap) -> Result<String, AuthRestErro
     Ok(token.to_string())
 }
 
-fn emit_logout_session_not_found_warning(token_hash: &str) {
-    eprintln!("{}", logout_session_not_found_warning_payload(token_hash));
+fn emit_logout_session_not_found_warning(_token_hash: &str) {
+    #[cfg(not(coverage))]
+    tracing::warn!(
+        domain = "auth",
+        operation = "logout_handler",
+        "logout session not found"
+    );
 }
 
+#[cfg(test)]
+#[tracing::instrument(level = "debug", skip_all)]
 fn logout_session_not_found_warning_payload(token_hash: &str) -> Value {
     json!({
         "level": "warn",
@@ -339,4 +360,3 @@ fn logout_session_not_found_warning_payload(token_hash: &str) -> Value {
         "token_hash_prefix": token_hash.chars().take(16).collect::<String>(),
     })
 }
-

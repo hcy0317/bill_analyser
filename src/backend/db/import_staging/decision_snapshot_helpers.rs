@@ -2,6 +2,7 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_transfer_snapshot(value: &Value) -> Option<Value> {
     value
         .as_object()
@@ -9,6 +10,7 @@ fn normalize_transfer_snapshot(value: &Value) -> Option<Value> {
         .filter(|value| value.as_object().is_some_and(|object| !object.is_empty()))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_transfer_previous_snapshot(preview: &ImportPreviewRow) -> Value {
     serde_json::json!({
         "preview_type": preview.preview_type,
@@ -110,6 +112,7 @@ struct ImportPreviewTransferAccountResolution {
     destination_account_id: Option<i64>,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn resolve_transfer_accounts_for_preview(
     tx: &rusqlite::Transaction<'_>,
     user_id: UserId,
@@ -138,6 +141,7 @@ fn resolve_transfer_accounts_for_preview(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_transfer_resolution_accounts(
     tx: &rusqlite::Transaction<'_>,
     user_id: UserId,
@@ -183,6 +187,7 @@ fn load_transfer_resolution_accounts(
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn resolve_transfer_accounts_from_chain(
     source_chain: &[Value],
     accounts: &[ImportPreviewTransferAccount],
@@ -235,6 +240,7 @@ fn transfer_chain_entry_for_roles<'a>(
         .or_else(|| fallback_index.and_then(|index| source_chain.get(index)))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn resolve_transfer_account_from_entry(
     entry: &Value,
     accounts: &[ImportPreviewTransferAccount],
@@ -330,6 +336,7 @@ fn transfer_account_matches_tokens(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_transfer_account_aliases(raw_aliases: Option<&str>) -> Vec<String> {
     let raw_aliases = raw_aliases.unwrap_or("").trim();
     if raw_aliases.is_empty() {
@@ -365,10 +372,12 @@ fn transfer_account_value_text(value: Option<&Value>) -> Option<String> {
     value.as_f64().map(|number| number.to_string())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_transfer_account_text(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_learning_snapshot(value: &Value) -> Option<Value> {
     value.as_object().map(|_| {
         serde_json::json!({
@@ -381,6 +390,7 @@ fn normalize_learning_snapshot(value: &Value) -> Option<Value> {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_learning_previous_snapshot(preview: &ImportPreviewRow) -> Value {
     serde_json::json!({
         "preview_type": preview.preview_type,
@@ -454,6 +464,7 @@ fn category_rule_account_baseline_snapshot(
     })))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_stage2_baseline_snapshot(value: &Value) -> Option<Value> {
     let object = value.as_object()?;
     let has_baseline_field = [
@@ -592,6 +603,7 @@ fn canonicalize_learning_snapshot_category(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_category_to_learning_snapshot(
     snapshot: &mut Value,
     category: &ImportPreviewCanonicalCategory,
@@ -693,6 +705,7 @@ fn first_import_preview_category_for_type(
     .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_preview_category_by_id(
     tx: &rusqlite::Transaction<'_>,
     user_id: UserId,
@@ -738,6 +751,7 @@ fn import_preview_category_by_id(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_preview_category_by_path(
     tx: &rusqlite::Transaction<'_>,
     user_id: UserId,
@@ -808,6 +822,7 @@ fn import_preview_category_by_path(
     .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_preview_category_from_row(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<ImportPreviewCanonicalCategory> {
@@ -819,6 +834,7 @@ fn import_preview_category_from_row(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_staging_table_exists_tx(
     tx: &rusqlite::Transaction<'_>,
     table_name: &str,
@@ -832,6 +848,7 @@ fn import_staging_table_exists_tx(
     .is_some())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_staging_column_exists_tx(
     tx: &rusqlite::Transaction<'_>,
     table_name: &str,
@@ -927,6 +944,7 @@ fn preview_llm_not_found() -> ImportPreviewLlmDecisionResult {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_llm_previous_snapshot(preview: &ImportPreviewRow) -> Value {
     serde_json::json!({
         "preview_main_category": preview.preview_main_category,
@@ -936,6 +954,7 @@ fn build_llm_previous_snapshot(preview: &ImportPreviewRow) -> Value {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_llm_snapshot(value: &Value) -> Option<Value> {
     value.as_object().map(|_| {
         serde_json::json!({

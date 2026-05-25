@@ -2,6 +2,7 @@
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
 // 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_candidate_context(matching: &Map<String, Value>) -> Value {
     let dedup = matching.get("dedup").and_then(Value::as_object);
     let parser = matching.get("parser").and_then(Value::as_object);
@@ -21,6 +22,7 @@ fn build_candidate_context(matching: &Map<String, Value>) -> Value {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_historical_candidate_bill_snapshot(
     candidate_bill: &Map<String, Value>,
     source_account_id: i64,
@@ -83,6 +85,7 @@ fn should_include_candidate(kind: &str, details: &Map<String, Value>) -> bool {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_session_candidate(
     session_id: &str,
     preview: &Map<String, Value>,
@@ -149,6 +152,7 @@ fn build_session_candidate(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_candidate_details(kind: &str, details: &Map<String, Value>) -> Value {
     match kind {
         "reconciliation" => json!({
@@ -190,6 +194,7 @@ fn build_candidate_details(kind: &str, details: &Map<String, Value>) -> Value {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_candidate_preview(preview: &Map<String, Value>) -> Value {
     json!({
         "preview_date": preview.get("preview_date").cloned().unwrap_or(json!("")),
@@ -240,6 +245,7 @@ fn serialize_bill_snapshot(snapshot: &Map<String, Value>) -> Value {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_positive_request_int(
     object: &Map<String, Value>,
     field_name: &str,
@@ -269,6 +275,7 @@ fn parse_positive_request_int(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_optional_positive_query_int(
     query: &Map<String, Value>,
     field_name: &str,
@@ -323,6 +330,7 @@ fn is_explicit_transfer_type(raw_type: Option<&Value>) -> bool {
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_positive_i64(text: &str) -> Option<i64> {
     text.parse::<i64>().ok().filter(|value| *value > 0)
 }

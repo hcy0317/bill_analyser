@@ -9,7 +9,14 @@ use super::common::{
     parse_amount, positive_amount_text, rows_to_maps, workbook_rows, RowMap,
 };
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "parse",
+        "business operation entered"
+    );
     let suffix = file_suffix(filename);
     match suffix.as_str() {
         "csv" | "txt" => parse_csv(bytes),
@@ -18,7 +25,14 @@ pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_csv(bytes: &[u8]) -> Vec<StandardBill> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "parse_csv",
+        "business operation entered"
+    );
     let text = decode_text(bytes);
     let probe = text.lines().take(10).collect::<Vec<_>>().join("\n");
     if ["民生银行", "农业银行", "建设银行"]
@@ -45,7 +59,14 @@ fn row_text_like_header(line: &str) -> bool {
         || contains_all_text(line, &["交易日期", "收入/支出金额", "对方户名"])
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_sheet_or_html(bytes: &[u8]) -> Vec<StandardBill> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "parse_sheet_or_html",
+        "business operation entered"
+    );
     let rows = workbook_rows(bytes).unwrap_or_else(|| html_rows(bytes));
     let content = rows.iter().flatten().cloned().collect::<Vec<_>>().join(" ");
     if !content.contains("中国工商银行")
@@ -63,6 +84,7 @@ fn parse_sheet_or_html(bytes: &[u8]) -> Vec<StandardBill> {
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn raw_icbc(row: &RowMap) -> Option<RawBill> {
     let date = get(row, &["交易日期", "记账日期"]);
     if date.is_empty() {

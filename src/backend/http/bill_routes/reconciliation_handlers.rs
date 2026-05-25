@@ -2,11 +2,14 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn reconciliation_statements_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Query(query): Query<ReconciliationStatementsQuery>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "bills", operation = "reconciliation_statements_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -100,6 +103,7 @@ fn reconciliation_statement_payload(
         .map_err(runtime_error)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_reconciliation_account(
     connection: &Connection,
     user_id: UserId,
@@ -127,6 +131,7 @@ fn load_reconciliation_account(
     .transpose()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_reconciliation_category_records(
     connection: &Connection,
     user_id: UserId,
@@ -151,6 +156,7 @@ fn load_reconciliation_category_records(
     Ok(categories)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn query_reconciliation_bill_records(
     connection: &Connection,
     user_id: UserId,
@@ -173,6 +179,7 @@ fn query_reconciliation_bill_records(
     Ok(bills)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_reconciliation_opening_snapshots(
     connection: &Connection,
     user_id: UserId,

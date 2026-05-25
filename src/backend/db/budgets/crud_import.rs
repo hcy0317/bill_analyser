@@ -3,16 +3,20 @@
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_budgets_for_listing(
     connection: &Connection,
     user_id: UserId,
     filters: &BudgetFilters,
 ) -> DbResult<Vec<BudgetRecord>> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "query_budgets_for_listing", "business operation entered");
     let user_id = UserScope::new(user_id).bind_value()?;
     let mut budgets = query_budgets_raw(connection, user_id, filters)?;
     enrich_budget_listing(connection, user_id, filters.budget_type, &mut budgets)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_budget_by_id(
     connection: &Connection,
     user_id: UserId,
@@ -22,11 +26,14 @@ pub fn get_budget_by_id(
     get_budget_by_id_on_connection(connection, user_id, budget_id)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn create_budget(
     connection: &mut Connection,
     user_id: UserId,
     draft: &BudgetCreateDraft,
 ) -> DbResult<i64> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "create_budget", "business operation entered");
     let user_id = UserScope::new(user_id).bind_value()?;
     run_transaction(connection, |tx| {
         let now = now_text();
@@ -44,12 +51,15 @@ pub fn create_budget(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn update_budget(
     connection: &mut Connection,
     user_id: UserId,
     budget_id: i64,
     draft: &BudgetUpdateDraft,
 ) -> DbResult<bool> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "update_budget", "business operation entered");
     let user_id = UserScope::new(user_id).bind_value()?;
     run_transaction(connection, |tx| {
         let Some(existing_budget) = get_budget_by_id_on_tx(tx, user_id, budget_id)? else {
@@ -86,11 +96,14 @@ pub fn update_budget(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn delete_budget(
     connection: &mut Connection,
     user_id: UserId,
     budget_id: i64,
 ) -> DbResult<bool> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "delete_budget", "business operation entered");
     let user_id = UserScope::new(user_id).bind_value()?;
     run_transaction(connection, |tx| {
         let Some(budget) = get_budget_by_id_on_tx(tx, user_id, budget_id)? else {
@@ -136,7 +149,10 @@ pub fn delete_budget(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn export_budgets(connection: &Connection, user_id: UserId) -> DbResult<Vec<Value>> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "export_budgets", "business operation entered");
     let user_id = UserScope::new(user_id).bind_value()?;
     let budgets = query_budgets_raw(connection, user_id, &BudgetFilters::default())?;
     Ok(budgets
@@ -157,11 +173,14 @@ pub fn export_budgets(connection: &Connection, user_id: UserId) -> DbResult<Vec<
         .collect())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn import_budgets(
     connection: &mut Connection,
     user_id: UserId,
     budgets: &[BudgetRecord],
 ) -> DbResult<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "import_budgets", "business operation entered");
     let user_id = UserScope::new(user_id).bind_value()?;
     run_transaction(connection, |tx| {
         let now = now_text();

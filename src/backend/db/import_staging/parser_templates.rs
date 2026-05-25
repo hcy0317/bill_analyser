@@ -2,6 +2,7 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn insert_parser_template(
     connection: &Connection,
     session_id: &str,
@@ -12,6 +13,7 @@ pub fn insert_parser_template(
     Ok(connection.last_insert_rowid())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn insert_parser_templates_batch(
     connection: &mut Connection,
     session_id: &str,
@@ -39,12 +41,15 @@ pub fn insert_parser_templates_batch(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn stage_import_parser_templates(
     connection: &mut Connection,
     session: &ImportSessionDraft,
     drafts: &[ImportParserTemplateDraft],
     require_existing_session: bool,
 ) -> DbResult<ImportParseStagingResult> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "stage_import_parser_templates", "business operation entered");
     run_transaction(connection, |tx| {
         let existing_session = get_import_session(tx, &session.session_id, session.user_id)?;
         if require_existing_session && existing_session.is_none() {
@@ -95,6 +100,7 @@ pub fn stage_import_parser_templates(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_parser_templates_by_session(
     connection: &Connection,
     session_id: &str,
@@ -118,6 +124,7 @@ pub fn get_parser_templates_by_session(
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_unprocessed_templates_for_dedup(
     connection: &Connection,
     session_id: &str,
@@ -126,6 +133,7 @@ pub fn get_unprocessed_templates_for_dedup(
     get_parser_templates_by_session(connection, session_id, user_id, Some(false))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn update_parser_template_status(
     connection: &mut Connection,
     template_ids: &[i64],
@@ -133,6 +141,8 @@ pub fn update_parser_template_status(
     account_id: Option<&str>,
     user_id: UserId,
 ) -> DbResult<usize> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "update_parser_template_status", "business operation entered");
     let normalized_ids: Vec<i64> = template_ids
         .iter()
         .copied()
@@ -172,6 +182,7 @@ pub fn update_parser_template_status(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn mark_unprocessed_parser_templates_processed_for_session(
     connection: &mut Connection,
     session_id: &str,

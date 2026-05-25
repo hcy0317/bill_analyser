@@ -43,6 +43,7 @@ fn log_auth_event(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn ensure_sensitive_auth_failure_limit(
     connection: &rusqlite::Connection,
     user_id: UserId,
@@ -91,6 +92,7 @@ fn record_sensitive_auth_failure(
     .map_err(|_| Box::new(db_error_response()))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn persist_login_success(
     connection: &rusqlite::Connection,
     session_draft: &CreateTokenSessionDraft,
@@ -139,6 +141,7 @@ fn persist_login_success(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn persist_two_factor_login_success(
     connection: &rusqlite::Connection,
     session_draft: &CreateTokenSessionDraft,
@@ -181,6 +184,7 @@ fn persist_two_factor_login_success(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn persist_two_factor_recovery_login_success(
     connection: &rusqlite::Connection,
     draft: TwoFactorRecoveryLoginDraft<'_>,

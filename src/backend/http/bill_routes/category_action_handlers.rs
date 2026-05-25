@@ -27,11 +27,14 @@ pub(crate) struct CategoryRecategorizeResult {
     pub updated: usize,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn quick_add_category_keyword_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "bills", operation = "quick_add_category_keyword_handler", "business operation entered");
     let payload = match required_json_object_from_body(&body, "Request body is required") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -68,11 +71,14 @@ async fn quick_add_category_keyword_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn refresh_bill_categories_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "bills", operation = "refresh_bill_categories_handler", "business operation entered");
     let payload = optional_json_object_from_body(&body);
     let bill_ids = extract_bill_ids(&payload).filter(|ids| !ids.is_empty());
     let user_id = match user_id_from_headers(&headers, &state.config) {
@@ -101,6 +107,7 @@ async fn refresh_bill_categories_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn quick_add_category_keyword(
     connection: &mut Connection,
     user_id: UserId,
@@ -144,6 +151,7 @@ fn quick_add_category_keyword(
     Ok(updated > 0)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn refresh_category_for_bills(
     connection: &mut Connection,
     user_id: UserId,
@@ -183,6 +191,7 @@ fn refresh_category_for_bills(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(crate) fn recategorize_bills_with_category_rules(
     connection: &mut Connection,
     user_id: UserId,
@@ -213,6 +222,7 @@ pub(crate) fn recategorize_bills_with_category_rules(
     Ok(CategoryRecategorizeResult { total, updated })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_category_runtime_rules(
     connection: &Connection,
     user_id: UserId,
@@ -256,6 +266,7 @@ fn load_category_runtime_rules(
     Ok(rules)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_category_refresh_bills(
     connection: &Connection,
     user_id: UserId,
@@ -287,6 +298,7 @@ fn load_category_refresh_bills(
     Ok(bills)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_all_category_refresh_bills(
     connection: &Connection,
     user_id: UserId,
@@ -438,6 +450,7 @@ fn bill_is_transfer_refresh_candidate(bill: &BillRecord) -> bool {
     matches!(bill_type.as_str(), "转账" | "transfer" | "4")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_category_rule_type(value: Option<i32>) -> Option<i32> {
     match value {
         Some(1) => Some(3),

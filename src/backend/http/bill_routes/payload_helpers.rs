@@ -2,6 +2,7 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn create_draft_from_payload(
     connection: &Connection,
     user_id: UserId,
@@ -47,6 +48,7 @@ fn create_draft_from_payload(
     Ok(BillCreateDraft { fields, tag_ids })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn update_draft_from_payload(
     connection: &Connection,
     user_id: UserId,
@@ -164,6 +166,7 @@ fn strip_route_only_keys(fields: &mut Map<String, Value>) {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn ensure_create_defaults(fields: &mut Map<String, Value>) {
     fields
         .entry("payment_method".to_string())
@@ -223,6 +226,7 @@ fn extract_bill_ids(payload: &Value) -> Option<Vec<i64>> {
         })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_csv_i64(value: Option<&String>) -> Vec<i64> {
     value
         .map(|text| {
@@ -233,6 +237,7 @@ fn parse_csv_i64(value: Option<&String>) -> Vec<i64> {
         .unwrap_or_default()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_positive_i64(value: &str) -> Option<i64> {
     value.trim().parse::<i64>().ok().filter(|value| *value > 0)
 }

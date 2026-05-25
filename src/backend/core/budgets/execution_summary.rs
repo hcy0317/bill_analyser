@@ -3,6 +3,7 @@
 // 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
 
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn calculate_avg_backtest_mape(items: &[Value]) -> Option<f64> {
     let mut values = Vec::new();
     for item in items {
@@ -13,15 +14,20 @@ pub fn calculate_avg_backtest_mape(items: &[Value]) -> Option<f64> {
     average(&values).map(round2)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn select_budget_detail_items(items: &[Value]) -> Vec<Value> {
     select_budget_items(items, true)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn select_budget_summary_items(items: &[Value]) -> Vec<Value> {
     select_budget_items(items, false)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_budget_execution_summary(items: &[Value]) -> Value {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "budget", operation = "build_budget_execution_summary", "business operation entered");
     let selected = select_budget_summary_items(items);
     let total_budget = selected
         .iter()

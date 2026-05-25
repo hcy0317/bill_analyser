@@ -4,6 +4,7 @@
 
 use super::*;
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn delete_backup_response(
     state: &HttpAppState,
     headers: &HeaderMap,

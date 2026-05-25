@@ -4,25 +4,46 @@
 
 use super::*;
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn list_backup_files_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "list_backup_files_handler",
+        "business operation entered"
+    );
     blocking_route(move || list_backup_files_response(&state, &headers)).await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn create_backup_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "create_backup_handler",
+        "business operation entered"
+    );
     blocking_route(move || create_backup_response(&state, &headers)).await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn sync_backup_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "sync_backup_handler",
+        "business operation entered"
+    );
     let prepare_state = state.clone();
     let prepare_headers = headers.clone();
     let prepared = match tokio::task::spawn_blocking(move || {
@@ -63,60 +84,109 @@ pub(super) async fn sync_backup_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn verify_backup_restore_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "verify_backup_restore_handler",
+        "business operation entered"
+    );
     blocking_route(move || verify_backup_restore_response(&state, &headers, body)).await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn download_backup_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     AxumPath(filename): AxumPath<String>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "download_backup_handler",
+        "business operation entered"
+    );
     match prepare_download_backup_response(&state, &headers, &filename) {
         Ok((file, safe_filename)) => stream_backup_download_response(file, &safe_filename),
         Err(response) => *response,
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn delete_backup_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     AxumPath(filename): AxumPath<String>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "delete_backup_handler",
+        "business operation entered"
+    );
     blocking_route(move || delete_backup_response(&state, &headers, &filename)).await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn restore_backup_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     AxumPath(filename): AxumPath<String>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "restore_backup_handler",
+        "business operation entered"
+    );
     blocking_route(move || restore_backup_response(&state, &headers, &filename)).await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn cleanup_backups_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "cleanup_backups_handler",
+        "business operation entered"
+    );
     blocking_route(move || cleanup_backups_response(&state, &headers, body)).await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn list_backup_jobs_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "list_backup_jobs_handler",
+        "business operation entered"
+    );
     blocking_route(move || list_backup_jobs_response(&state, &headers)).await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn save_backup_job_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "backup_user_data",
+        operation = "save_backup_job_handler",
+        "business operation entered"
+    );
     blocking_route(move || save_backup_job_response(&state, &headers, body)).await
 }

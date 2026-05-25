@@ -2,11 +2,14 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_dedup_runtime_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_dedup_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -34,31 +37,37 @@ pub async fn import_dedup_runtime_handler(
         Err(error) => return route_response(db_error_response(error)),
     }
 
-    let stage_started_at = Instant::now();
-    let template_query_started_at = Instant::now();
+    let _stage_started_at = Instant::now();
+    let _template_query_started_at = Instant::now();
     let templates =
         match get_unprocessed_templates_for_dedup(runtime.connection(), &session_id, user_id) {
             Ok(templates) => templates,
             Err(error) => return route_response(db_error_response(error)),
         };
-    eprintln!(
-        "[bill analyser import] stage2 templates loaded user_id={} session_id={} templates={} elapsed_ms={}",
-        user_id.get(),
-        session_id,
-        templates.len(),
-        import_stage_elapsed_ms(template_query_started_at)
+    #[cfg(not(coverage))]
+    tracing::debug!(
+        domain = "import_parser",
+        operation = "import_dedup_runtime_handler",
+        user_id = user_id.get(),
+        session_id = %session_id,
+        templates = templates.len(),
+        elapsed_ms = import_stage_elapsed_ms(_template_query_started_at),
+        "stage2 templates loaded"
     );
-    let dedup_started_at = Instant::now();
+    let _dedup_started_at = Instant::now();
     let dedup_input = dedup_bills_from_parser_templates(&templates);
     let dedup_result = SmartDeduplicationEngine.process(dedup_input);
-    eprintln!(
-        "[bill analyser import] stage2 smart dedup complete user_id={} session_id={} original={} kept={} removed={} dedup_elapsed_ms={}",
-        user_id.get(),
-        session_id,
-        dedup_result.original_count,
-        dedup_result.kept_bills.len(),
-        dedup_result.removed_count,
-        import_stage_elapsed_ms(dedup_started_at)
+    #[cfg(not(coverage))]
+    tracing::debug!(
+        domain = "import_parser",
+        operation = "import_dedup_runtime_handler",
+        user_id = user_id.get(),
+        session_id = %session_id,
+        original = dedup_result.original_count,
+        kept = dedup_result.kept_bills.len(),
+        removed = dedup_result.removed_count,
+        elapsed_ms = import_stage_elapsed_ms(_dedup_started_at),
+        "stage2 smart dedup complete"
     );
     let mut preview_drafts = preview_drafts_from_dedup_bills(&dedup_result.kept_bills);
     let intelligence_stats = match apply_import_intelligence_chain(
@@ -70,7 +79,7 @@ pub async fn import_dedup_runtime_handler(
         Err(error) => return route_response(db_error_response(error)),
     };
     enforce_import_preview_invariants(preview_drafts.as_mut_slice());
-    let preview_insert_started_at = Instant::now();
+    let _preview_insert_started_at = Instant::now();
     let inserted_preview = match insert_preview_bills_batch(
         runtime.connection_mut(),
         &session_id,
@@ -80,15 +89,18 @@ pub async fn import_dedup_runtime_handler(
         Ok(inserted) => inserted,
         Err(error) => return route_response(db_error_response(error)),
     };
-    eprintln!(
-        "[bill analyser import] stage2 preview inserted user_id={} session_id={} preview_rows={} insert_elapsed_ms={}",
-        user_id.get(),
-        session_id,
-        inserted_preview,
-        import_stage_elapsed_ms(preview_insert_started_at)
+    #[cfg(not(coverage))]
+    tracing::debug!(
+        domain = "import_parser",
+        operation = "import_dedup_runtime_handler",
+        user_id = user_id.get(),
+        session_id = %session_id,
+        preview_rows = inserted_preview,
+        elapsed_ms = import_stage_elapsed_ms(_preview_insert_started_at),
+        "stage2 preview inserted"
     );
-    let status_update_started_at = Instant::now();
-    let updated_templates = match mark_unprocessed_parser_templates_processed_for_session(
+    let _status_update_started_at = Instant::now();
+    let _updated_templates = match mark_unprocessed_parser_templates_processed_for_session(
         runtime.connection_mut(),
         &session_id,
         user_id,
@@ -109,14 +121,17 @@ pub async fn import_dedup_runtime_handler(
     ) {
         return route_response(db_error_response(error));
     }
-    eprintln!(
-        "[bill analyser import] stage2 status updated user_id={} session_id={} template_rows={} updated_template_rows={} total_elapsed_ms={} status_elapsed_ms={}",
-        user_id.get(),
-        session_id,
-        templates.len(),
-        updated_templates,
-        import_stage_elapsed_ms(stage_started_at),
-        import_stage_elapsed_ms(status_update_started_at)
+    #[cfg(not(coverage))]
+    tracing::debug!(
+        domain = "import_parser",
+        operation = "import_dedup_runtime_handler",
+        user_id = user_id.get(),
+        session_id = %session_id,
+        template_rows = templates.len(),
+        updated_template_rows = _updated_templates,
+        total_elapsed_ms = import_stage_elapsed_ms(_stage_started_at),
+        status_elapsed_ms = import_stage_elapsed_ms(_status_update_started_at),
+        "stage2 status updated"
     );
     let preview = if include_preview {
         match get_preview_by_session(runtime.connection(), &session_id, user_id, false) {
@@ -264,6 +279,7 @@ const BUILTIN_CATEGORY_RULE_FALLBACKS: &[ImportPreviewBuiltinCategoryFallback] =
     },
 ];
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_import_intelligence_chain(
     connection: &mut Connection,
     user_id: UserId,
@@ -361,6 +377,7 @@ fn user_id_i64_for_sql(user_id: UserId) -> rusqlite::Result<i64> {
     i64::try_from(user_id.get()).map_err(|_| rusqlite::Error::InvalidQuery)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_intelligence_table_exists(
     connection: &Connection,
     table_name: &str,
@@ -390,6 +407,7 @@ fn sql_column_or_default(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_import_intelligence_categories(
     connection: &Connection,
     user_id: i64,
@@ -422,6 +440,7 @@ fn load_import_intelligence_categories(
     rows.collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_user_cash_transfer_category_id(
     connection: &Connection,
     user_id: i64,
@@ -453,6 +472,7 @@ fn default_transfer_category<'a>(
         .or_else(|| categories.iter().find(|category| category.type_code == 4))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_import_intelligence_category_rules(
     connection: &Connection,
     user_id: i64,
@@ -507,6 +527,7 @@ fn load_import_intelligence_category_rules(
     rows.collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_import_intelligence_accounts(
     connection: &Connection,
     user_id: i64,
@@ -544,6 +565,7 @@ fn load_import_intelligence_accounts(
     rows.collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_import_intelligence_learning_rules(
     connection: &Connection,
     user_id: i64,
@@ -585,6 +607,7 @@ fn load_import_intelligence_learning_rules(
     rows.collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_import_intelligence_recurring_templates(
     connection: &Connection,
     user_id: i64,
@@ -634,6 +657,7 @@ fn load_import_intelligence_recurring_templates(
     rows.collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn ensure_base_matching_feedback(draft: &mut ImportPreviewDraft) {
     let parser_id = draft.preview_parser_id.clone();
     let parser_tags = draft.preview_parser_tags.clone().unwrap_or_else(|| json!([]));
@@ -673,6 +697,7 @@ fn matching_feedback_object_mut(draft: &mut ImportPreviewDraft) -> &mut Map<Stri
         .expect("matching feedback object")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_category_rule_match(
     draft: &mut ImportPreviewDraft,
     rules: &[ImportIntelligenceRule],
@@ -705,6 +730,7 @@ fn apply_category_rule_match(
     false
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_builtin_category_rule_fallback(
     draft: &mut ImportPreviewDraft,
     categories: &[ImportIntelligenceCategory],
@@ -761,6 +787,7 @@ fn apply_builtin_category_rule_fallback(
     false
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_category_fallback_text(value: &str) -> String {
     value
         .trim()
@@ -768,6 +795,7 @@ fn normalize_category_fallback_text(value: &str) -> String {
         .replace(char::is_whitespace, "")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn find_import_intelligence_category<'a>(
     categories: &'a [ImportIntelligenceCategory],
     category_type: i64,
@@ -781,6 +809,7 @@ fn find_import_intelligence_category<'a>(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_account_alias_match(
     draft: &mut ImportPreviewDraft,
     accounts: &[ImportIntelligenceAccount],
@@ -806,6 +835,7 @@ fn apply_account_alias_match(
     true
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn persist_stage2_actionable_baseline(draft: &mut ImportPreviewDraft) {
     let snapshot = import_preview_stage2_snapshot(draft);
 
@@ -815,6 +845,7 @@ fn persist_stage2_actionable_baseline(draft: &mut ImportPreviewDraft) {
     );
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_preview_stage2_snapshot(draft: &ImportPreviewDraft) -> Value {
     json!({
         "preview_type": draft.preview_type,
@@ -825,6 +856,7 @@ fn import_preview_stage2_snapshot(draft: &ImportPreviewDraft) -> Value {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_preview_transfer_applied_snapshot(draft: &ImportPreviewDraft) -> Value {
     json!({
         "preview_type": draft.preview_type,
@@ -841,6 +873,7 @@ fn import_preview_transfer_applied_snapshot(draft: &ImportPreviewDraft) -> Value
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_transfer_pair_account_match(
     draft: &mut ImportPreviewDraft,
     accounts: &[ImportIntelligenceAccount],
@@ -935,6 +968,7 @@ fn transfer_chain_entry_for_roles<'a>(
         .or_else(|| fallback_index.and_then(|index| source_chain.get(index)))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn resolve_transfer_account_from_entry(
     entry: &Value,
     accounts: &[ImportIntelligenceAccount],
@@ -1036,6 +1070,7 @@ fn transfer_entry_text(value: Option<&Value>) -> Option<String> {
     value.as_f64().map(|number| number.to_string())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_learning_rule_match(
     draft: &mut ImportPreviewDraft,
     rules: &[ImportIntelligenceLearningRule],
@@ -1235,6 +1270,7 @@ fn annotate_learning_rule_skip(draft: &mut ImportPreviewDraft, rule_id: i64, rea
     );
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_transfer_default_category(
     draft: &mut ImportPreviewDraft,
     categories: &[ImportIntelligenceCategory],
@@ -1298,6 +1334,7 @@ fn enforce_import_preview_invariants(drafts: &mut [ImportPreviewDraft]) {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn persist_transfer_pending_applied_snapshot(draft: &mut ImportPreviewDraft) {
     let applied_snapshot = import_preview_transfer_applied_snapshot(draft);
     let feedback = matching_feedback_object_mut(draft);
@@ -1346,6 +1383,7 @@ fn annotate_transfer_account_review(draft: &mut ImportPreviewDraft) {
     );
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn clear_transfer_account_review_annotation(draft: &mut ImportPreviewDraft) {
     if draft
         .preview_matching_feedback
@@ -1413,6 +1451,7 @@ fn recurring_template_match(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_recurring_candidate(draft: &mut ImportPreviewDraft, candidate: ImportRecurringCandidateMatch) {
     draft.preview_recurring_id = Some(candidate.id);
     draft.preview_recurring_name = candidate.name.clone();
@@ -1455,6 +1494,7 @@ fn increment_applied_learning_rules(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_account_aliases(raw_aliases: Option<&str>) -> Vec<String> {
     let raw_aliases = raw_aliases.unwrap_or("").trim();
     if raw_aliases.is_empty() {
@@ -1476,6 +1516,7 @@ fn parse_account_aliases(raw_aliases: Option<&str>) -> Vec<String> {
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_learning_features(raw_features: &str) -> BTreeMap<String, String> {
     serde_json::from_str::<BTreeMap<String, String>>(raw_features.trim())
         .unwrap_or_default()
@@ -1485,6 +1526,7 @@ fn parse_learning_features(raw_features: &str) -> BTreeMap<String, String> {
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_preview_rule_text(draft: &ImportPreviewDraft) -> String {
     let mut parts = vec![
         draft.preview_counterparty.clone(),
@@ -1515,6 +1557,7 @@ fn category_type_matches_preview(category_type: i64, preview_type: &str) -> bool
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_preview_type_for_category(draft: &mut ImportPreviewDraft, category_type: i64) {
     let normalized = match category_type {
         2 => Some("收入"),
@@ -1538,6 +1581,7 @@ fn preview_type_code(preview_type: &str) -> Option<i64> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_preview_account_tokens(draft: &ImportPreviewDraft) -> Vec<String> {
     let mut tokens = vec![
         draft.preview_parser_id.clone(),
@@ -1581,6 +1625,7 @@ fn account_exactly_matches_tokens(account: &ImportIntelligenceAccount, tokens: &
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_account_match_text(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
@@ -1632,6 +1677,7 @@ fn recurring_matched_date(
     None
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_import_preview_date(value: &str) -> Option<NaiveDate> {
     let trimmed = value.trim();
     if trimmed.len() >= 10 {
@@ -1641,6 +1687,7 @@ fn parse_import_preview_date(value: &str) -> Option<NaiveDate> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_preview_draft_from_row(row: &ImportPreviewRow) -> ImportPreviewDraft {
     ImportPreviewDraft {
         preview_date: row.preview_date.clone(),
@@ -1669,6 +1716,7 @@ fn import_preview_draft_from_row(row: &ImportPreviewRow) -> ImportPreviewDraft {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_preview_patch_from_draft(preview_id: i64, draft: &ImportPreviewDraft) -> ImportPreviewPatch {
     ImportPreviewPatch::new(preview_id).with_changes([
         (
@@ -1730,11 +1778,14 @@ fn optional_i64_patch_value(value: Option<i64>) -> ImportPreviewPatchValue {
     value.map_or(ImportPreviewPatchValue::Null, ImportPreviewPatchValue::Integer)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_confirm_runtime_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_confirm_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -1847,11 +1898,14 @@ pub async fn import_confirm_runtime_handler(
     }))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_session_runtime_handler(
     State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_session_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -1877,11 +1931,14 @@ pub async fn import_session_runtime_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_session_cancel_runtime_handler(
     State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_session_cancel_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -1903,12 +1960,15 @@ pub async fn import_session_cancel_runtime_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_preview_page_runtime_handler(
     State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
     Query(query): Query<PreviewPageQuery>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_preview_page_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2020,6 +2080,7 @@ fn invalid_import_preview_query_response(query: &PreviewPageQuery) -> Option<Imp
     None
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_preview_page_query_ids(value: Option<&str>) -> Vec<i64> {
     value
         .unwrap_or("")
@@ -2028,11 +2089,14 @@ fn parse_preview_page_query_ids(value: Option<&str>) -> Vec<i64> {
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_preview_index_runtime_handler(
     State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_preview_index_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2067,12 +2131,15 @@ pub async fn import_preview_index_runtime_handler(
     }))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_preview_selection_runtime_handler(
     State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_preview_selection_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2159,6 +2226,7 @@ fn preview_selection_action_from_payload(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_preview_query_filters_from_payload(object: &Map<String, Value>) -> ImportPreviewQueryFilters {
     let filters = first_value(object, &["filters", "queryFilters", "query_filters"])
         .and_then(Value::as_object);
@@ -2188,12 +2256,15 @@ fn preview_filter_text(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_preview_update_runtime_handler(
     State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_preview_update_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2256,12 +2327,15 @@ pub async fn import_preview_update_runtime_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_reclassify_runtime_handler(
     State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_reclassify_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2362,11 +2436,14 @@ pub async fn import_reclassify_runtime_handler(
     })))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn preview_recurring_candidates_runtime_handler(
     State(state): State<HttpAppState>,
     Path(preview_id): Path<i64>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "preview_recurring_candidates_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2433,12 +2510,15 @@ pub async fn preview_recurring_candidates_runtime_handler(
     })))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn preview_recurring_match_put_runtime_handler(
     State(state): State<HttpAppState>,
     Path(preview_id): Path<i64>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "preview_recurring_match_put_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2486,12 +2566,15 @@ pub async fn preview_recurring_match_put_runtime_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn preview_recurring_match_delete_runtime_handler(
     State(state): State<HttpAppState>,
     Path(preview_id): Path<i64>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "preview_recurring_match_delete_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2531,12 +2614,15 @@ pub async fn preview_recurring_match_delete_runtime_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn preview_transfer_decision_runtime_handler(
     State(state): State<HttpAppState>,
     Path(preview_id): Path<i64>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "preview_transfer_decision_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2580,23 +2666,30 @@ pub async fn preview_transfer_decision_runtime_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_learning_suggestions_get_runtime_handler(
     State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_learning_suggestions_get_runtime_handler", "business operation entered");
     import_learning_suggestions_response(state, session_id, headers, None).await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_learning_suggestions_post_runtime_handler(
     State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_learning_suggestions_post_runtime_handler", "business operation entered");
     import_learning_suggestions_response(state, session_id, headers, Some(payload)).await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn import_learning_suggestions_response(
     state: HttpAppState,
     session_id: String,
@@ -2649,6 +2742,7 @@ async fn import_learning_suggestions_response(
     })))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_import_learning_suggestions_from_preview(
     preview: &[ImportPreviewRow],
     preview_ids: &[i64],
@@ -2689,12 +2783,15 @@ fn build_import_learning_suggestions_from_preview(
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_learning_promote_runtime_handler(
     State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_learning_promote_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2757,11 +2854,14 @@ pub async fn import_learning_promote_runtime_handler(
     })))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_learning_rules_list_runtime_handler(
     State(state): State<HttpAppState>,
     Query(query): Query<ImportLearningRulesQuery>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_learning_rules_list_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2809,12 +2909,15 @@ pub async fn import_learning_rules_list_runtime_handler(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_learning_rule_update_runtime_handler(
     State(state): State<HttpAppState>,
     Path(rule_id): Path<i64>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_learning_rule_update_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2845,11 +2948,14 @@ pub async fn import_learning_rule_update_runtime_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_learning_rule_delete_runtime_handler(
     State(state): State<HttpAppState>,
     Path(rule_id): Path<i64>,
     headers: HeaderMap,
 ) -> Response {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "import_parser", operation = "import_learning_rule_delete_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -3251,4 +3357,3 @@ mod stage_handler_transfer_account_tests {
         assert!(drafts[0].preview_matching_feedback.get("annotation").is_none());
     }
 }
-

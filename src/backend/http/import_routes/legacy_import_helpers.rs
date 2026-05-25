@@ -2,6 +2,7 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_preview_request_from_body(
     headers: &HeaderMap,
     body: &[u8],
@@ -37,6 +38,7 @@ fn import_preview_request_from_body(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_legacy_import_file(
     form: &MultipartForm,
     filename: &str,
@@ -340,10 +342,12 @@ fn init_import_config_runtime_schema(runtime: &SqliteRuntime) -> Result<(), Impo
     init_app_settings_schema(runtime.connection()).map_err(db_error_response)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_config_setting_key(user_id: UserId) -> String {
     format!("import_configs_user_{}", user_id.get())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_import_configs(
     connection: &Connection,
     user_id: UserId,
@@ -367,6 +371,7 @@ fn load_import_configs(
     Ok(configs)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn store_import_configs(
     connection: &Connection,
     user_id: UserId,
@@ -386,6 +391,7 @@ fn store_import_configs(
     .map_err(db_error_response)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_import_config_from_payload(object: &Map<String, Value>, config_id: i64) -> Value {
     let now = now_text();
     let field_mappings = first_value(object, &["fieldMappings", "field_mappings"])
@@ -500,6 +506,7 @@ fn best_import_config_match(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_import_config_suggestion(
     file_format: &str,
     headers: &[String],
@@ -536,6 +543,7 @@ fn build_import_config_suggestion(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_config_column_type_for_header(header: &str) -> Option<i64> {
     let header = normalize_config_text(header);
     if header.contains("交易时间")

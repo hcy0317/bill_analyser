@@ -56,6 +56,7 @@ fn selected_preview_rows_for_llm(
     Ok(rows)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn validate_llm_preview_selection_limits(
     payload: &Value,
     limit: usize,
@@ -66,6 +67,7 @@ fn validate_llm_preview_selection_limits(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_preview_rows_by_ids(
     connection: &Connection,
     session_id: &str,
@@ -99,6 +101,7 @@ fn preview_row_prompt_value(row: &ImportPreviewRow) -> Value {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_llm_memory_prompt_context(
     connection: &Connection,
     user_id: UserId,
@@ -129,6 +132,7 @@ fn load_llm_memory_prompt_context(
         .collect())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_existing_category_paths(
     connection: &Connection,
     user_id: i64,
@@ -144,6 +148,7 @@ fn load_existing_category_paths(
         .collect())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_existing_category_values(
     connection: &Connection,
     user_id: i64,
@@ -173,6 +178,7 @@ fn load_existing_category_values(
         .map_err(db_error_response)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_existing_account_names(
     connection: &Connection,
     user_id: i64,
@@ -182,6 +188,7 @@ fn load_existing_account_names(
         .collect::<Vec<_>>())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_account_id_map(
     connection: &Connection,
     user_id: i64,

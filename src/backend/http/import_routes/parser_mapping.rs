@@ -2,6 +2,7 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn resolve_import_file_parser_id(requested_parser: &str, filename: &str, content: &str) -> String {
     let requested_parser = requested_parser.trim().to_ascii_lowercase();
     if !requested_parser.is_empty() && requested_parser != "auto" {
@@ -31,6 +32,7 @@ fn resolve_import_file_parser_id(requested_parser: &str, filename: &str, content
     "rust-import".to_string()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_standard_bills_from_csv_text(
     text: &str,
     parser_id: &str,
@@ -73,6 +75,7 @@ fn parse_standard_bills_from_csv_text(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn detect_csv_table_start(text: &str, require_known_headers: bool) -> Option<(usize, char)> {
     for (index, line) in text.lines().enumerate() {
         let Some(delimiter) = detect_delimiter_for_line(line, None) else {
@@ -106,6 +109,7 @@ fn looks_like_import_headers<'a>(headers: impl Iterator<Item = &'a str>) -> bool
     has_date && has_amount
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn apply_csv_header_to_raw_bill(raw_bill: &mut RawBill, header: &str, value: &str) {
     let header = normalized_header_key(header);
     let value = value.trim();
@@ -353,6 +357,7 @@ fn now_text() -> String {
         .to_string()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_config_text(value: &str) -> String {
     value
         .trim()
@@ -440,6 +445,7 @@ fn header_signature_from_headers(headers: &[String]) -> String {
         .join("|")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_learning_match_value(value: &str) -> String {
     value
         .split_whitespace()

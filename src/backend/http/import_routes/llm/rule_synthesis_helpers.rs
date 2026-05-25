@@ -54,6 +54,7 @@ fn rule_induction_groups(
         .collect())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_persisted_bill_prompt_values(
     connection: &Connection,
     user_id: i64,
@@ -101,6 +102,7 @@ fn load_persisted_bill_prompt_values(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn query_bill_prompt_values(
     connection: &Connection,
     sql: &str,
@@ -127,6 +129,7 @@ fn query_bill_prompt_values(
     Ok(items)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn build_rule_synthesis_knowledge_pack(
     connection: &Connection,
     user_id: UserId,
@@ -336,6 +339,7 @@ impl RuleSynthesisCategoryBundle {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn ensure_rule_synthesis_bundle<'a>(
     bundles: &'a mut BTreeMap<String, RuleSynthesisCategoryBundle>,
     category_name: &str,
@@ -380,6 +384,7 @@ fn json_object_from_text_field(value: &Value, key: &str) -> Value {
         .unwrap_or_else(|| json!({}))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_rule_synthesis_active_model(
     connection: &Connection,
     user_id: i64,
@@ -418,6 +423,7 @@ fn load_rule_synthesis_active_model(
         .map_err(db_error_response)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_learning_concept_stats(
     connection: &Connection,
     user_id: i64,

@@ -32,6 +32,7 @@ fn log_login_failure(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn login_lock_is_active(locked_until: &str) -> bool {
     let value = locked_until.trim();
     if value.is_empty() {
@@ -55,6 +56,7 @@ struct IssuedSessionTokens {
     refresh_expires_at: String,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn validate_refresh_jwt(
     token: &str,
     state: &HttpAppState,
@@ -116,6 +118,7 @@ fn validate_refresh_jwt(
         .map_err(|error| Box::new(auth_rest_error_response(error)))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn validate_action_jwt(
     token: &str,
     state: &HttpAppState,
@@ -127,10 +130,12 @@ fn validate_action_jwt(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn validate_pending_two_factor_jwt(token: &str, state: &HttpAppState) -> RouteResult<Value> {
     validate_action_jwt_with_invalid(token, state, "pending_2fa", invalid_pending_two_factor_box)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn validate_action_jwt_with_invalid<F>(
     token: &str,
     state: &HttpAppState,
@@ -229,6 +234,7 @@ where
     UserId::new(raw_user_id).map_err(|_| invalid_response())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn issue_session_tokens(
     user_id: UserId,
     username: &str,
@@ -269,6 +275,7 @@ fn issue_session_tokens(
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn issue_action_token(
     user: &AuthLoginUserRow,
     token_type: &str,
@@ -289,6 +296,7 @@ fn issue_action_token(
     sign_jwt(&payload, state)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn issue_access_token(
     user_id: bill_analyser_core::UserId,
     username: &str,
@@ -362,6 +370,7 @@ fn decode_jwt_part(encoded: &str) -> RouteResult<Value> {
     serde_json::from_slice(&decoded).map_err(|_| invalid_refresh_token_box())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn verify_hmac_signature(
     secret: &str,
     algorithm: hmac::Algorithm,
@@ -400,6 +409,7 @@ fn invalid_refresh_token_response() -> Response {
     auth_rest_error_response(AuthRestError::invalid_token(401, "Invalid refresh token"))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn refresh_token_expired_response() -> Response {
     auth_rest_error_response(AuthRestError::new(
         401,
@@ -408,6 +418,7 @@ fn refresh_token_expired_response() -> Response {
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn refresh_session_is_expired(expires_at: &str) -> bool {
     let normalized = expires_at.trim();
     if normalized.is_empty() {

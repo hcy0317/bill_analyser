@@ -30,6 +30,7 @@ pub(super) fn decode_text(bytes: &[u8]) -> String {
     text.trim_start_matches('\u{feff}').to_string()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn csv_records_from_text(
     text: &str,
     header_matcher: impl Fn(&str) -> bool,
@@ -76,6 +77,7 @@ fn detect_delimiter(line: &str) -> char {
     .unwrap_or(',')
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn workbook_rows(bytes: &[u8]) -> Option<Vec<Vec<String>>> {
     let cursor = Cursor::new(bytes.to_vec());
     let mut workbook = open_workbook_auto_from_rs(cursor).ok()?;
@@ -119,6 +121,7 @@ fn cell_to_string(cell: &Data) -> String {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn html_rows(bytes: &[u8]) -> Vec<Vec<String>> {
     let text = decode_text(bytes);
     let row_re = Regex::new(r"(?is)<tr[^>]*>(.*?)</tr>").expect("valid row regex");
@@ -151,6 +154,7 @@ fn strip_html_tags(value: &str) -> String {
         .replace("&#13;", " ")
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn rows_to_maps(
     rows: &[Vec<String>],
     header_matcher: impl Fn(&[String]) -> bool,

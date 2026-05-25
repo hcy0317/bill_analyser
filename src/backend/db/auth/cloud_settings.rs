@@ -2,10 +2,13 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn list_application_cloud_settings(
     connection: &Connection,
     user_id: UserId,
 ) -> DbResult<Vec<ApplicationCloudSettingRow>> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "list_application_cloud_settings", "business operation entered");
     let user_id_sql = user_id_sql(user_id)?;
     let mut statement = connection.prepare(
         r#"
@@ -25,10 +28,13 @@ pub fn list_application_cloud_settings(
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn list_user_external_auths(
     connection: &Connection,
     user_id: UserId,
 ) -> DbResult<Vec<ExternalAuthRow>> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "list_user_external_auths", "business operation entered");
     let user_id_sql = user_id_sql(user_id)?;
     let mut statement = connection.prepare(
         r#"
@@ -43,6 +49,7 @@ pub fn list_user_external_auths(
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn get_user_external_auth(
     connection: &Connection,
     user_id: UserId,
@@ -64,11 +71,14 @@ pub fn get_user_external_auth(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn delete_user_external_auth(
     connection: &Connection,
     user_id: UserId,
     external_auth_type: &str,
 ) -> DbResult<bool> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "delete_user_external_auth", "business operation entered");
     let user_id_sql = user_id_sql(user_id)?;
     let changed = connection.execute(
         "DELETE FROM user_external_auths WHERE user_id = ?1 AND external_auth_type = ?2",

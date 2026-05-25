@@ -2,6 +2,7 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn auth_username_exists(connection: &Connection, username: &str) -> DbResult<bool> {
     exists_by_text(
         connection,
@@ -10,6 +11,7 @@ pub fn auth_username_exists(connection: &Connection, username: &str) -> DbResult
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn auth_email_exists(connection: &Connection, email: &str) -> DbResult<bool> {
     exists_by_text(
         connection,
@@ -18,12 +20,15 @@ pub fn auth_email_exists(connection: &Connection, email: &str) -> DbResult<bool>
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn create_registered_user_with_defaults(
     connection: &Connection,
     draft: &RegisterUserDraft,
     preset_categories: &[RegisterPresetCategory],
     auth_log: &AuthLogDraft,
 ) -> DbResult<RegisterUserResult> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "auth", operation = "create_registered_user_with_defaults", "business operation entered");
     connection.execute_batch("BEGIN IMMEDIATE")?;
     let result = (|| {
         let user_id = insert_registered_user(connection, draft)?;
@@ -91,6 +96,7 @@ fn exists_by_text(connection: &Connection, sql: &str, value: &str) -> DbResult<b
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn insert_registered_user(connection: &Connection, draft: &RegisterUserDraft) -> DbResult<i64> {
     connection.execute(
         r#"

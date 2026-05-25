@@ -28,6 +28,7 @@ const INSERT_PARSER_TEMPLATE_SQL: &str = "
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, '0', ?14)
         ";
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn insert_preview_bill_on_connection(
     connection: &Connection,
     session_id: &str,
@@ -44,6 +45,7 @@ fn insert_preview_bill_on_connection(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn insert_preview_bill_with_statement(
     statement: &mut rusqlite::Statement<'_>,
     session_id: &str,
@@ -97,6 +99,7 @@ fn insert_preview_bill_with_statement(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn insert_parser_template_on_connection(
     connection: &Connection,
     session_id: &str,
@@ -113,6 +116,7 @@ fn insert_parser_template_on_connection(
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn insert_parser_template_with_statement(
     statement: &mut rusqlite::Statement<'_>,
     session_id: &str,
@@ -204,6 +208,7 @@ fn execute_preview_patch(
         .map_err(DbError::from)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn import_session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImportSessionRow> {
     Ok(ImportSessionRow {
         id: row.get("id")?,

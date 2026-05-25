@@ -20,6 +20,7 @@ pub enum MatchingRuntimeError {
 }
 
 impl MatchingRuntimeError {
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn status_code(&self) -> u16 {
         match self {
             Self::BadRequest(_) => 400,
@@ -29,6 +30,7 @@ impl MatchingRuntimeError {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn message(&self) -> &str {
         match self {
             Self::BadRequest(message)
@@ -74,6 +76,7 @@ pub struct PreviewMatchingActionRequest {
     pub learning_apply: Option<ImportPreviewLearningApply>,
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn init_matching_runtime_schema(connection: &Connection) -> DbResult<()> {
     connection.execute_batch(
         "
@@ -218,11 +221,14 @@ pub fn init_matching_runtime_schema(connection: &Connection) -> DbResult<()> {
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_matching_session_candidates_payload(
     connection: &Connection,
     user_id: UserId,
     session_id: &str,
 ) -> MatchingResult<Option<Value>> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "query_matching_session_candidates_payload", "business operation entered");
     let Some(_) = get_import_session(connection, session_id, user_id)? else {
         return Ok(None);
     };
@@ -235,11 +241,14 @@ pub fn query_matching_session_candidates_payload(
     )))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_matching_bill_candidates_payload(
     connection: &Connection,
     user_id: UserId,
     bill_id: i64,
 ) -> MatchingResult<Option<Value>> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "query_matching_bill_candidates_payload", "business operation entered");
     init_matching_runtime_schema(connection)?;
     let user_id = UserScope::new(user_id).bind_value()?;
     let Some(anchor_bill) = get_bill_map(connection, user_id, bill_id)? else {
@@ -288,10 +297,13 @@ pub fn query_matching_bill_candidates_payload(
     })))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_matching_pairs_payload(
     connection: &Connection,
     user_id: UserId,
 ) -> MatchingResult<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "query_matching_pairs_payload", "business operation entered");
     init_matching_runtime_schema(connection)?;
     let user_id_value = UserScope::new(user_id).bind_value()?;
     let mut statement = connection.prepare(
@@ -334,11 +346,14 @@ pub fn query_matching_pairs_payload(
     Ok(json!({ "pairs": pairs }))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn query_matching_bill_feedback_payload(
     connection: &Connection,
     user_id: UserId,
     bill_id: i64,
 ) -> MatchingResult<Option<Value>> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "query_matching_bill_feedback_payload", "business operation entered");
     init_matching_runtime_schema(connection)?;
     let user_id = UserScope::new(user_id).bind_value()?;
     if get_bill_map(connection, user_id, bill_id)?.is_none() {
@@ -374,11 +389,14 @@ pub fn query_matching_bill_feedback_payload(
     Ok(Some(json!({ "billId": bill_id, "events": events })))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn list_reconciliation_candidates_payload(
     connection: &Connection,
     user_id: UserId,
     filters: &ReconciliationCandidateFilters,
 ) -> MatchingResult<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "list_reconciliation_candidates_payload", "business operation entered");
     init_matching_runtime_schema(connection)?;
     let user_id = UserScope::new(user_id).bind_value()?;
     let rows = list_reconciliation_candidates(connection, user_id, filters)?;
@@ -387,6 +405,7 @@ pub fn list_reconciliation_candidates_payload(
     }))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn create_manual_matching_pair(
     connection: &mut Connection,
     user_id: UserId,
@@ -395,6 +414,8 @@ pub fn create_manual_matching_pair(
     pair_type: &str,
     feedback_candidate_id: Option<&str>,
 ) -> MatchingResult<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "create_manual_matching_pair", "business operation entered");
     init_matching_runtime_schema(connection)?;
     let user_id = UserScope::new(user_id).bind_value()?;
     let pair_type = normalize_pair_type(pair_type)?;
@@ -484,11 +505,14 @@ pub fn create_manual_matching_pair(
     .map_err(map_write_error)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn delete_manual_matching_pair(
     connection: &mut Connection,
     user_id: UserId,
     pair_id: i64,
 ) -> MatchingResult<Value> {
+    #[cfg(not(coverage))]
+    tracing::info!(domain = "matching", operation = "delete_manual_matching_pair", "business operation entered");
     init_matching_runtime_schema(connection)?;
     let user_id = UserScope::new(user_id).bind_value()?;
     run_transaction(connection, |tx| {
@@ -510,6 +534,7 @@ pub fn delete_manual_matching_pair(
     .map_err(map_write_error)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn apply_matching_candidate_action(
     connection: &mut Connection,
     user_id: UserId,

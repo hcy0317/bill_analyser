@@ -104,6 +104,7 @@ pub struct StandardBill {
 }
 
 impl StandardBill {
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn from_json_value(data: &Value) -> Self {
         let parser_id = string_field(data, "source_account_id");
         let payment_method = string_field(data, "payment_method");
@@ -133,7 +134,14 @@ impl StandardBill {
 }
 
 /// Stable provider list used by import route discovery and parser selection.
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parser_registry() -> &'static [ParserInfo] {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "parser_registry",
+        "business operation entered"
+    );
     &[
         ParserInfo {
             id: "wechat",
@@ -186,6 +194,7 @@ pub fn parser_registry() -> &'static [ParserInfo] {
     ]
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn parser_source_label(parser_id: &str) -> Cow<'static, str> {
     let normalized_parser_id = parser_id.trim().to_lowercase();
     match normalized_parser_id.as_str() {
@@ -201,6 +210,7 @@ pub fn parser_source_label(parser_id: &str) -> Cow<'static, str> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_parser_tags(raw_tags: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<String> {
     let mut normalized = Vec::new();
     for raw_tag in raw_tags {
@@ -212,6 +222,7 @@ pub fn normalize_parser_tags(raw_tags: impl IntoIterator<Item = impl AsRef<str>>
     normalized
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_parser_tags_value(raw_tags: Option<&Value>) -> Vec<String> {
     match raw_tags {
         None | Some(Value::Null) => Vec::new(),
@@ -221,6 +232,7 @@ pub fn normalize_parser_tags_value(raw_tags: Option<&Value>) -> Vec<String> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_parser_tags_text(raw_tags: &str) -> Vec<String> {
     let text = raw_tags.trim();
     if text.is_empty() {
@@ -234,6 +246,7 @@ pub fn normalize_parser_tags_text(raw_tags: &str) -> Vec<String> {
     normalize_parser_tags(text.split(','))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn build_parser_tags(parser_id: &str, payment_method: &str, channel: &str) -> Vec<String> {
     let mut tags = Vec::new();
     let normalized_parser_id = parser_id.trim().to_lowercase();
@@ -248,6 +261,7 @@ pub fn build_parser_tags(parser_id: &str, payment_method: &str, channel: &str) -
     normalize_parser_tags(tags)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn resolve_parser_tags(
     raw_tags: Option<&Value>,
     parser_id: &str,
@@ -262,6 +276,7 @@ pub fn resolve_parser_tags(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn serialize_parser_tags(
     raw_tags: Option<&Value>,
     parser_id: &str,
@@ -277,6 +292,7 @@ pub fn serialize_parser_tags(
     .unwrap_or_else(|_| "[]".to_string())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_transaction_type(raw_type: &str) -> String {
     let text = raw_type.trim();
     for (keyword, normalized) in [
@@ -304,11 +320,13 @@ pub fn normalize_transaction_type(raw_type: &str) -> String {
     "支出".to_string()
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_amount_text(raw_amount: &str) -> Money {
     let cleaned = clean_amount_text(raw_amount);
     Money::from_yuan_str(&cleaned).unwrap_or(Money::ZERO)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn aggregate_description(raw_bill: &RawBill) -> String {
     let values = [
         raw_bill.description.as_str(),
@@ -346,7 +364,14 @@ pub fn aggregate_description(raw_bill: &RawBill) -> String {
 /// Converts provider-local rows into import drafts without touching DB staging.
 /// This is the last parser-layer boundary before dedup, category, account,
 /// transfer and learning decisions take over in the import pipeline.
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn post_process_raw_bills(parser_id: &str, raw_bills: &[RawBill]) -> Vec<StandardBill> {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "post_process_raw_bills",
+        "business operation entered"
+    );
     let mut processed = Vec::new();
 
     for raw_bill in raw_bills {

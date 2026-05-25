@@ -50,6 +50,7 @@ fn random_base32_secret() -> RouteResult<String> {
     Ok(output)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn generate_two_factor_recovery_codes() -> RouteResult<Vec<String>> {
     let rng = SystemRandom::new();
     let mut codes = Vec::with_capacity(8);
@@ -222,6 +223,7 @@ fn percent_encode_otpauth_component(value: &str) -> String {
     encoded
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 fn verify_totp_passcode(secret: &str, passcode: &str, timestamp: i64) -> bool {
     let passcode = passcode.trim();
     if passcode.is_empty() {
