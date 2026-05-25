@@ -31,10 +31,17 @@ fn parse_optional_json_object(raw_json: Option<&str>) -> Option<Value> {
         .filter(Value::is_object)
 }
 
-fn clear_transfer_matching_feedback(raw_json: Option<&str>) -> String {
+fn clear_actionable_matching_feedback(
+    raw_json: Option<&str>,
+    clear_transfer: bool,
+    clear_learning: bool,
+    clear_llm: bool,
+) -> String {
     match parse_json_object(raw_json) {
         Value::Object(mut object) => {
-            object.remove("transfer");
+            clear_actionable_matching_family(&mut object, "transfer", clear_transfer);
+            clear_actionable_matching_family(&mut object, "learning", clear_learning);
+            clear_actionable_matching_family(&mut object, "llm", clear_llm);
             if object.is_empty() {
                 String::new()
             } else {
@@ -42,6 +49,39 @@ fn clear_transfer_matching_feedback(raw_json: Option<&str>) -> String {
             }
         }
         _ => String::new(),
+    }
+}
+
+fn clear_actionable_matching_family(
+    object: &mut serde_json::Map<String, Value>,
+    family: &str,
+    should_clear: bool,
+) {
+    if should_clear
+        && object
+            .get(family)
+            .is_some_and(is_actionable_matching_feedback)
+    {
+        object.remove(family);
+    }
+}
+
+fn is_actionable_matching_feedback(value: &Value) -> bool {
+    let suppressed = value
+        .get("suppressed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let review_status = value
+        .get("review_status")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+
+    match review_status.as_str() {
+        "" => !suppressed,
+        "pending" | "auto_applied" | "auto-applied" => true,
+        _ => false,
     }
 }
 
@@ -268,10 +308,43 @@ mod row_value_helper_tests {
         remove_json_object_key(&mut value, "transfer");
         assert_eq!(value, serde_json::json!({"other": true}));
         assert_eq!(
-            clear_transfer_matching_feedback(Some(r#"{"transfer":{},"other":true}"#)),
+            clear_actionable_matching_feedback(
+                Some(r#"{"transfer":{},"other":true}"#),
+                true,
+                false,
+                false
+            ),
             serde_json::json!({"other": true}).to_string()
         );
-        assert_eq!(clear_transfer_matching_feedback(Some(r#"{"transfer":{}}"#)), "");
+        assert_eq!(
+            clear_actionable_matching_feedback(Some(r#"{"transfer":{}}"#), true, false, false),
+            ""
+        );
+        assert_eq!(
+            clear_actionable_matching_feedback(
+                Some(
+                    r#"{"transfer":{"review_status":"accepted"},"learning":{"review_status":"auto_applied"},"llm":{"review_status":"rejected"},"other":true}"#
+                ),
+                true,
+                true,
+                true
+            ),
+            serde_json::json!({
+                "transfer": {"review_status": "accepted"},
+                "llm": {"review_status": "rejected"},
+                "other": true
+            })
+            .to_string()
+        );
+        assert_eq!(
+            clear_actionable_matching_feedback(
+                Some(r#"{"transfer":{"suppressed":true},"learning":{"review_status":"pending"}}"#),
+                true,
+                true,
+                false
+            ),
+            serde_json::json!({"transfer": {"suppressed": true}}).to_string()
+        );
         assert_eq!(serialize_preview_matching_feedback(&serde_json::json!({})), "");
         assert_eq!(serialize_preview_matching_feedback(&serde_json::json!("bad")), "");
     }

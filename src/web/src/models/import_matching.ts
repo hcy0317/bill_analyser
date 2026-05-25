@@ -89,6 +89,14 @@ export interface ImportMatchingReconciliationPayload {
     source_chain?: ImportMatchingSourcePayload[];
 }
 
+export interface ImportMatchingStage2BaselinePayload {
+    preview_type?: string;
+    preview_main_category?: string;
+    preview_sub_category?: string;
+    preview_source_account_id?: number | null;
+    preview_destination_account_id?: number | null;
+}
+
 export interface ImportMatchingPayload {
     transfer: ImportMatchingTransferPayload;
     investment: ImportMatchingInvestmentPayload;
@@ -98,4 +106,5 @@ export interface ImportMatchingPayload {
     parser: ImportMatchingParserPayload;
     annotation: ImportMatchingAnnotationPayload;
     reconciliation?: ImportMatchingReconciliationPayload;
+    stage2_baseline?: ImportMatchingStage2BaselinePayload;
 }

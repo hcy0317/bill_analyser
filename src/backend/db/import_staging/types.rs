@@ -572,6 +572,8 @@ pub struct ImportPreviewPatch {
     pub preview_id: i64,
     pub changes: Vec<(ImportPreviewPatchField, ImportPreviewPatchValue)>,
     pub clear_transfer_decision: bool,
+    pub clear_learning_decision: bool,
+    pub clear_llm_decision: bool,
 }
 
 impl ImportPreviewPatch {
@@ -580,6 +582,8 @@ impl ImportPreviewPatch {
             preview_id,
             changes: Vec::new(),
             clear_transfer_decision: false,
+            clear_learning_decision: false,
+            clear_llm_decision: false,
         }
     }
 
@@ -602,6 +606,16 @@ impl ImportPreviewPatch {
 
     pub fn with_transfer_decision_cleared(mut self) -> Self {
         self.clear_transfer_decision = true;
+        self
+    }
+
+    pub fn with_learning_decision_cleared(mut self) -> Self {
+        self.clear_learning_decision = true;
+        self
+    }
+
+    pub fn with_llm_decision_cleared(mut self) -> Self {
+        self.clear_llm_decision = true;
         self
     }
 }

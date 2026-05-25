@@ -131,47 +131,6 @@
             </div>
         </div>
 
-        <div class="signal-group investment-signal-group" v-if="viewModel.investment">
-            <div class="investment-signal-stack">
-                <v-menu
-                    v-if="hasSignalDetails(viewModel.investment.detailLines)"
-                    open-on-hover
-                    location="bottom start"
-                    :close-on-content-click="false">
-                    <template #activator="{ props: menuProps }">
-                        <v-chip
-                            v-bind="menuProps"
-                            class="investment-signal-chip"
-                            :color="viewModel.investment.color"
-                            variant="tonal"
-                            size="x-small"
-                            :prepend-icon="getInvestmentIcon(viewModel.investment.status)">
-                            {{ tt(viewModel.investment.labelKey) }}
-                        </v-chip>
-                    </template>
-                    <v-card class="signal-detail-card" variant="outlined">
-                        <v-card-text class="pa-2">
-                            <div
-                                v-for="line in viewModel.investment.detailLines"
-                                :key="`investment-${line}`"
-                                class="text-caption">
-                                {{ line }}
-                            </div>
-                        </v-card-text>
-                    </v-card>
-                </v-menu>
-                <v-chip
-                    v-else
-                    class="investment-signal-chip"
-                    :color="viewModel.investment.color"
-                    variant="tonal"
-                    size="x-small"
-                    :prepend-icon="getInvestmentIcon(viewModel.investment.status)">
-                    {{ tt(viewModel.investment.labelKey) }}
-                </v-chip>
-            </div>
-        </div>
-
         <div class="signal-group" v-if="viewModel.learning">
             <div class="signal-stack signal-stack--learning">
                 <v-menu
@@ -348,7 +307,6 @@ import {
 } from '../checkDataMatching.ts';
 import {
     mdiAlertOutline,
-    mdiChartLine,
     mdiCheck,
     mdiLightbulbOutline,
     mdiSchoolOutline,
@@ -398,14 +356,6 @@ function getStatusIcon(status: ImportPreviewSignalStatus): string {
     return mdiLightbulbOutline;
 }
 
-function getInvestmentIcon(status: ImportPreviewSignalStatus): string {
-    if (status === 'pending') {
-        return mdiChartLine;
-    }
-
-    return getStatusIcon(status);
-}
-
 function getLearningIcon(status: ImportPreviewSignalStatus): string {
     if (status === 'pending') {
         return mdiSchoolOutline;
@@ -424,18 +374,6 @@ function emitLLMReview(decision: 'accept' | 'reject' | 'clear'): void {
 </script>
 
 <style scoped>
-.investment-signal-stack {
-    display: inline-flex;
-    max-width: 100%;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 4px;
-}
-
-.investment-signal-chip {
-    align-self: flex-start;
-}
-
 .signal-stack {
     display: inline-flex;
     flex-direction: column;

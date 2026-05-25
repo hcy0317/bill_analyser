@@ -3,7 +3,6 @@ import { describe, expect, test } from '@jest/globals';
 import {
     buildImportPreviewSignalViewModel,
     buildImportPreviewTypeColumnViewModel,
-    formatInvestmentSignalReason,
     getImportCheckMatchingContextSummary,
     getImportCheckMatchingDedupLabel,
     getImportCheckMatchingDedupTitle,
@@ -12,7 +11,6 @@ import {
     hasImportCheckMatchingContext,
     matchesImportPreviewSignalFilter,
     resolveImportCheckMatchingTransferParserSources,
-    resolveImportPreviewInvestmentDecisionState,
     shouldShowImportCheckMatchingDedupSourceCount
 } from '@/views/desktop/transactions/import/checkDataMatching.ts';
 
@@ -647,47 +645,6 @@ describe('checkDataMatching helpers', () => {
         expect(skipped.learning?.title).toContain('transfer preview is protected');
     });
 
-    test('formats investment reason keys with caller-provided labels', () => {
-        expect(formatInvestmentSignalReason('platform:蚂蚁财富, product:黄金ETF', {
-            platform: 'Platform',
-            product: 'Product'
-        })).toBe('Platform: 蚂蚁财富, Product: 黄金ETF');
-    });
-
-    test('preserves plain investment reason fragments and key-only labels', () => {
-        expect(formatInvestmentSignalReason(' , manual_flag, platform:  ', {
-            platform: 'Platform'
-        })).toBe('manual_flag, Platform');
-    });
-
-    test('resolves investment decision state from minimal action payloads', () => {
-        expect(resolveImportPreviewInvestmentDecisionState('accept', {
-            reviewStatus: 'accepted',
-            suppressed: false
-        })).toStrictEqual({
-            reviewStatus: 'accepted',
-            suppressed: false
-        });
-        expect(resolveImportPreviewInvestmentDecisionState('reject', {
-            reviewStatus: 'rejected',
-            suppressed: true
-        })).toStrictEqual({
-            reviewStatus: 'rejected',
-            suppressed: true
-        });
-        expect(resolveImportPreviewInvestmentDecisionState('clear', {
-            reviewStatus: 'pending',
-            suppressed: false
-        })).toStrictEqual({
-            reviewStatus: 'pending',
-            suppressed: false
-        });
-        expect(resolveImportPreviewInvestmentDecisionState('reject')).toStrictEqual({
-            reviewStatus: 'rejected',
-            suppressed: true
-        });
-    });
-
     test('keeps manual annotation out of visible signals when it is the only context', () => {
         const summary = getImportCheckMatchingContextSummary({
             isManuallyAnnotated: true
@@ -835,7 +792,7 @@ describe('checkDataMatching helpers', () => {
         expect(sourceArrayViewModel.dedup?.detailLines).toStrictEqual(['Similar Duplicate']);
     });
 
-    test('uses default parser-source and investment-reason fallbacks when optional options are omitted', () => {
+    test('uses default parser-source fallbacks when optional options are omitted', () => {
         expect(resolveImportCheckMatchingTransferParserSources({
             parserId: 'cmbc',
             parserTags: [undefined as unknown as string, 'note:skip', 'parser:wechat'],
@@ -843,9 +800,5 @@ describe('checkDataMatching helpers', () => {
             dedupSourceIds: ['11'],
             isManuallyAnnotated: false
         })).toStrictEqual(['cmbc', 'wechat']);
-
-        expect(formatInvestmentSignalReason('platform:蚂蚁财富, custom:Alpha, type:')).toBe(
-            'Platform: 蚂蚁财富, custom: Alpha, Type'
-        );
     });
 });

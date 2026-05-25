@@ -268,6 +268,7 @@ fn apply_import_intelligence_chain(
         if apply_account_alias_match(draft, &accounts) {
             stats.account_matched += 1;
         }
+        persist_stage2_actionable_baseline(draft);
         if let Some(applied_rule_id) = apply_learning_rule_match(
             draft,
             &learning_rules,
@@ -681,6 +682,41 @@ fn apply_account_alias_match(
     true
 }
 
+fn persist_stage2_actionable_baseline(draft: &mut ImportPreviewDraft) {
+    let snapshot = import_preview_stage2_snapshot(draft);
+
+    matching_feedback_object_mut(draft).insert(
+        "stage2_baseline".to_string(),
+        snapshot,
+    );
+}
+
+fn import_preview_stage2_snapshot(draft: &ImportPreviewDraft) -> Value {
+    json!({
+        "preview_type": draft.preview_type,
+        "preview_main_category": draft.preview_main_category,
+        "preview_sub_category": draft.preview_sub_category,
+        "preview_source_account_id": draft.preview_source_account_id,
+        "preview_destination_account_id": draft.preview_destination_account_id,
+    })
+}
+
+fn import_preview_transfer_applied_snapshot(draft: &ImportPreviewDraft) -> Value {
+    json!({
+        "preview_type": draft.preview_type,
+        "preview_main_category": draft.preview_main_category,
+        "preview_sub_category": draft.preview_sub_category,
+        "preview_source_account_id": draft.preview_source_account_id,
+        "preview_destination_account_id": draft.preview_destination_account_id,
+        "preview_recurring_id": draft.preview_recurring_id,
+        "preview_recurring_name": draft.preview_recurring_name,
+        "preview_recurring_candidate_count": draft.preview_recurring_candidate_count,
+        "preview_recurring_match_score": draft.preview_recurring_match_score,
+        "preview_recurring_match_reasons": draft.preview_recurring_match_reasons,
+        "preview_recurring_matched_date": draft.preview_recurring_matched_date,
+    })
+}
+
 fn apply_transfer_pair_account_match(
     draft: &mut ImportPreviewDraft,
     accounts: &[ImportIntelligenceAccount],
@@ -1008,6 +1044,7 @@ fn apply_learning_rule_match(
     );
     let summary =
         build_learning_rule_result_summary(&rule_payload, category_values, account_values);
+    let applied_preview = import_preview_stage2_snapshot(draft);
     matching_feedback_object_mut(draft).insert(
         "learning".to_string(),
         json!({
@@ -1019,6 +1056,7 @@ fn apply_learning_rule_match(
             "review_status": "auto_applied",
             "auto_apply": true,
             "source": "import_learning_rules",
+            "applied_preview": applied_preview,
         }),
     );
     Some(rule.id)
@@ -1132,7 +1170,28 @@ fn enforce_import_preview_invariants(drafts: &mut [ImportPreviewDraft]) {
         } else {
             clear_transfer_account_review_annotation(draft);
         }
+        persist_transfer_pending_applied_snapshot(draft);
     }
+}
+
+fn persist_transfer_pending_applied_snapshot(draft: &mut ImportPreviewDraft) {
+    let applied_snapshot = import_preview_transfer_applied_snapshot(draft);
+    let feedback = matching_feedback_object_mut(draft);
+    let Some(transfer) = feedback.get_mut("transfer").and_then(Value::as_object_mut) else {
+        return;
+    };
+    let review_status = transfer
+        .get("review_status")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if matches!(review_status.as_str(), "accepted" | "rejected") {
+        return;
+    }
+    transfer
+        .entry("applied_preview".to_string())
+        .or_insert(applied_snapshot);
 }
 
 fn transfer_preview_requires_account_review(draft: &ImportPreviewDraft) -> bool {

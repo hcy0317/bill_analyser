@@ -47,40 +47,6 @@ export interface ImportPreviewSignalDecision {
     color: string;
 }
 
-export interface ImportPreviewInvestmentDecisionResponse {
-    reviewStatus?: string;
-    suppressed?: boolean;
-}
-
-export interface ImportPreviewInvestmentDecisionState {
-    reviewStatus: ImportPreviewSignalStatus;
-    suppressed: boolean;
-}
-
-export function resolveImportPreviewInvestmentDecisionState(
-    decision: ImportPreviewSignalDecision['decision'],
-    response: ImportPreviewInvestmentDecisionResponse = {}
-): ImportPreviewInvestmentDecisionState {
-    const normalizedReviewStatus = (response.reviewStatus || '').trim().toLowerCase();
-    const fallbackReviewStatus: ImportPreviewSignalStatus = decision === 'accept'
-        ? 'accepted'
-        : decision === 'reject'
-            ? 'rejected'
-            : 'pending';
-    const reviewStatus: ImportPreviewSignalStatus = normalizedReviewStatus === 'accepted'
-        || normalizedReviewStatus === 'rejected'
-        || normalizedReviewStatus === 'pending'
-        ? normalizedReviewStatus
-        : fallbackReviewStatus;
-
-    return {
-        reviewStatus,
-        suppressed: typeof response.suppressed === 'boolean'
-            ? response.suppressed
-            : decision === 'reject'
-    };
-}
-
 export interface ImportPreviewSignalParserView {
     parserId: string;
     label: string;
@@ -167,7 +133,6 @@ export interface ImportPreviewSignalState extends ImportCheckMatchingContextStat
 
 export interface ImportPreviewSignalViewModelOptions extends ImportCheckMatchingDedupTitleOptions {
     parserColors?: Record<string, string>;
-    investmentReasonLabels?: Record<string, string>;
 }
 
 export interface ImportPreviewSignalInfoLabels {
@@ -189,14 +154,6 @@ const MATCHING_DEDUP_LABEL_KEYS: Record<string, string> = {
     split: 'Split-Merge Duplicate',
     split_merge: 'Split-Merge Duplicate',
     transfer_cross_batch: 'Cross-Batch Transfer'
-};
-
-const DEFAULT_INVESTMENT_REASON_LABELS: Record<string, string> = {
-    platform: 'Platform',
-    product: 'Product',
-    exclude: 'Exclude',
-    negative: 'Negative',
-    type: 'Type'
 };
 
 const DEFAULT_SOURCE_ROLE_LABELS: Record<string, string> = {
@@ -671,31 +628,6 @@ export function buildImportPreviewTypeColumnViewModel(type: number): ImportPrevi
         type,
         signalKeys: []
     };
-}
-
-export function formatInvestmentSignalReason(
-    reason: string | undefined,
-    reasonLabels: Record<string, string> = DEFAULT_INVESTMENT_REASON_LABELS
-): string {
-    return (reason || '').split(',').map(part => {
-        const trimmedPart = part.trim();
-        if (!trimmedPart) {
-            return '';
-        }
-
-        const separatorIndex = trimmedPart.indexOf(':');
-        if (separatorIndex <= 0) {
-            return trimmedPart;
-        }
-
-        const rawKey = trimmedPart.slice(0, separatorIndex).trim();
-        const value = trimmedPart.slice(separatorIndex + 1).trim();
-        if (!value) {
-            return reasonLabels[rawKey] || rawKey;
-        }
-
-        return `${reasonLabels[rawKey] || rawKey}: ${value}`;
-    }).filter(part => !!part).join(', ');
 }
 
 function buildReviewView(

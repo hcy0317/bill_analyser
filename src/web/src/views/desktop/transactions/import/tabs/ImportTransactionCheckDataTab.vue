@@ -1290,12 +1290,12 @@ function onTransactionTypeChange(item: ImportTransaction): void {
         item.clearRecurringMatch();
     }
     updateTransactionData(item);
-    syncTransferDecisionDraftState(item);
+    syncActionableSuggestionDraftState(item);
 }
 
 function onTransactionDataDraftChange(item: ImportTransaction): void {
     updateTransactionData(item);
-    syncTransferDecisionDraftState(item);
+    syncActionableSuggestionDraftState(item);
 }
 
 function getRecurringDecisionMessageKey(cleared: boolean): string {
@@ -1594,6 +1594,7 @@ function getLearningDecisionBaseline(item: ImportTransaction): ImportCheckLearni
 function syncLearningDecisionBaseline(item: ImportTransaction): void {
     const previewState = getPreviewState(item);
     previewState._learningDecisionBaseline = buildLearningDecisionBaseline(item);
+    previewState._shouldClearLearningDecision = false;
 }
 
 function hasLearningDecisionTextDraftChanges(item: ImportTransaction): boolean {
@@ -1630,6 +1631,19 @@ function clearLearningRecommendationState(item: ImportTransaction): void {
 
     updateTransactionData(item);
     syncLearningDecisionBaseline(item);
+}
+
+function clearLLMRecommendationState(item: ImportTransaction): void {
+    const llmPayload = ensureLLMMatchingPayload(item);
+    llmPayload.suggested_main_category = '';
+    llmPayload.suggested_sub_category = '';
+    llmPayload.suggested_source_account = '';
+    llmPayload.suggested_destination_account = '';
+    llmPayload.confidence = 0;
+    llmPayload.reason = '';
+    llmPayload.review_status = '';
+    llmPayload.suppressed = false;
+    updateTransactionData(item);
 }
 
 function syncLearningCandidateFromSessionCandidate(item: ImportTransaction, candidate: MatchingSessionCandidateItem): void {
@@ -1784,13 +1798,11 @@ function syncTransactionFromLLMPreviewPayload(
     }
 
     mergeLLMMatchingFromPayload(item, payload.matching?.llm);
-    if (Array.isArray(payload.applied_fields) && payload.applied_fields.length > 0) {
-        item.resetTransferSuggestionDecisionState();
-    }
 
     updateTransactionData(item);
     syncTransferDecisionBaseline(item);
     syncLearningDecisionBaseline(item);
+    getPreviewState(item)._shouldClearLlmDecision = false;
 }
 
 function applyLLMSignalMemoryToTransactions(transactions: ImportTransaction[] = []): void {
@@ -1874,6 +1886,23 @@ function restoreTransferSuggestionDecisionState(item: ImportTransaction, baselin
     item.matching.transfer.suppressed = baseline.suppressed;
 }
 
+function clearTransferSuggestionState(item: ImportTransaction): void {
+    item.suggestedType = undefined;
+    item.transferSuggestionScore = 0;
+    item.transferSuggestionReason = '';
+    if (item.matching?.transfer) {
+        item.matching.transfer.review_status = '';
+        item.matching.transfer.reviewed_type = '';
+        item.matching.transfer.suppressed = false;
+        item.matching.transfer.candidate_type = '';
+        item.matching.transfer.score = 0;
+        item.matching.transfer.level = '';
+        item.matching.transfer.reason = '';
+        item.matching.transfer.source_chain = [];
+    }
+    updateTransactionData(item);
+}
+
 function syncTransferDecisionDraftState(item: ImportTransaction): void {
     const previewState = getPreviewState(item);
     const baseline = previewState._previewDecisionBaseline;
@@ -1888,14 +1917,54 @@ function syncTransferDecisionDraftState(item: ImportTransaction): void {
         return;
     }
 
-    const shouldClearTransferDecision = baseline.reviewStatus === 'accepted'
-        || baseline.reviewStatus === 'rejected'
-        || baseline.suppressed;
+    const shouldClearTransferDecision = baseline.reviewStatus === 'pending';
     previewState._shouldClearTransferDecision = shouldClearTransferDecision;
 
     if (shouldClearTransferDecision) {
-        item.resetTransferSuggestionDecisionState();
+        clearTransferSuggestionState(item);
     }
+}
+
+function syncLearningDecisionDraftState(item: ImportTransaction): void {
+    const previewState = getPreviewState(item);
+    if (previewState._shouldClearLearningDecision) {
+        return;
+    }
+
+    if (!item.hasPendingLearningRecommendation()) {
+        previewState._shouldClearLearningDecision = false;
+        return;
+    }
+
+    if (!hasLearningDecisionTextDraftChanges(item) && !shouldBlockLearningDecisionOnSync(item)) {
+        previewState._shouldClearLearningDecision = false;
+        return;
+    }
+
+    previewState._shouldClearLearningDecision = true;
+    clearLearningRecommendationState(item);
+    previewState._shouldClearLearningDecision = true;
+}
+
+function syncLLMDecisionDraftState(item: ImportTransaction): void {
+    const previewState = getPreviewState(item);
+    if (previewState._shouldClearLlmDecision) {
+        return;
+    }
+
+    if (getLLMSignalStatus(item) !== 'pending') {
+        previewState._shouldClearLlmDecision = false;
+        return;
+    }
+
+    previewState._shouldClearLlmDecision = true;
+    clearLLMRecommendationState(item);
+}
+
+function syncActionableSuggestionDraftState(item: ImportTransaction): void {
+    syncTransferDecisionDraftState(item);
+    syncLearningDecisionDraftState(item);
+    syncLLMDecisionDraftState(item);
 }
 
 function commitEditingTransactionDraft(): void {
@@ -1905,13 +1974,21 @@ function commitEditingTransactionDraft(): void {
 
     editingTransaction.value.tagIds = editingTags.value;
     updateTransactionData(editingTransaction.value);
-    syncTransferDecisionDraftState(editingTransaction.value);
+    syncActionableSuggestionDraftState(editingTransaction.value);
     editingTags.value = [];
     editingTransaction.value = null;
 }
 
 function shouldClearTransferDecisionOnSync(item: ImportTransaction): boolean {
     return !!getPreviewState(item)._shouldClearTransferDecision;
+}
+
+function shouldClearLearningDecisionOnSync(item: ImportTransaction): boolean {
+    return !!getPreviewState(item)._shouldClearLearningDecision;
+}
+
+function shouldClearLlmDecisionOnSync(item: ImportTransaction): boolean {
+    return !!getPreviewState(item)._shouldClearLlmDecision;
 }
 
 function getPreviewId(item: ImportTransaction): number | null {
@@ -2142,6 +2219,7 @@ function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData
     updateTransactionData(item);
     syncTransferDecisionBaseline(item);
     syncLearningDecisionBaseline(item);
+    getPreviewState(item)._shouldClearLlmDecision = false;
 }
 
 function getTransferDecisionMessageKey(decision: 'accept' | 'reject' | 'clear'): string {
@@ -2588,13 +2666,6 @@ const importPreviewSignalSharedContext = computed<{
             'Split-Merge Duplicate': tt('Split-Merge Duplicate'),
             'Cross-Batch Transfer': tt('Cross-Batch Transfer')
         },
-        investmentReasonLabels: {
-            platform: tt('Investment Reason Platform'),
-            product: tt('Investment Reason Product'),
-            exclude: tt('Investment Reason Exclude'),
-            negative: tt('Investment Reason Negative'),
-            type: tt('Investment Reason Type')
-        },
         sourceRoleLabels: {
             outgoing: tt('Outgoing'),
             incoming: tt('Incoming'),
@@ -2619,11 +2690,6 @@ const importPreviewSignalSharedContext = computed<{
             options.dedupLabels['Similar Duplicate'],
             options.dedupLabels['Split-Merge Duplicate'],
             options.dedupLabels['Cross-Batch Transfer'],
-            options.investmentReasonLabels.platform,
-            options.investmentReasonLabels.product,
-            options.investmentReasonLabels.exclude,
-            options.investmentReasonLabels.negative,
-            options.investmentReasonLabels.type,
             options.sourceRoleLabels.outgoing,
             options.sourceRoleLabels.incoming,
             options.infoLabels.sourceLabel,
@@ -2971,7 +3037,7 @@ async function reclassifySelected(): Promise<void> {
     if (editingTransaction.value) {
         editingTransaction.value.tagIds = editingTags.value;
         updateTransactionData(editingTransaction.value);
-        syncTransferDecisionDraftState(editingTransaction.value);
+        syncActionableSuggestionDraftState(editingTransaction.value);
     }
 
     // 检查 session_id 是否存在
@@ -3051,6 +3117,14 @@ function buildPreviewUpdates(options: { selectedOnly: boolean }): Record<string,
 
     return transactions.map(transaction => {
         const categoryPath = getAcceptedCategoryPathForTransaction(transaction);
+        const clearTransferDecision = shouldClearTransferDecisionOnSync(transaction);
+        const clearLearningDecision = shouldClearLearningDecisionOnSync(transaction);
+        const clearLlmDecision = shouldClearLlmDecisionOnSync(transaction);
+        const clearActionableSuggestions = [
+            clearTransferDecision ? 'transfer' : '',
+            clearLearningDecision ? 'learning' : '',
+            clearLlmDecision ? 'llm' : ''
+        ].filter(Boolean);
         return {
             id: (transaction as { _previewId?: number })._previewId,
             preview_type: typeReverseMap[transaction.type] || '支出',
@@ -3067,7 +3141,10 @@ function buildPreviewUpdates(options: { selectedOnly: boolean }): Record<string,
             category_id: categoryPath ? parseInt(categoryPath.id, 10) : null,
             preview_main_category: categoryPath?.mainCategory || '',
             preview_sub_category: categoryPath?.subCategory || '',
-            clear_transfer_decision: shouldClearTransferDecisionOnSync(transaction),
+            clear_transfer_decision: clearTransferDecision,
+            clear_learning_decision: clearLearningDecision,
+            clear_llm_decision: clearLlmDecision,
+            clear_actionable_suggestions: clearActionableSuggestions,
             selected: transaction.selected
         };
     }).filter(item => !!item.id);
@@ -3287,7 +3364,7 @@ function applyCreatedCategoryToTransaction(importTransaction: ImportTransaction,
     importTransaction.originalCategoryName = category.name;
     importTransaction.isManuallyAnnotated = true;
     updateTransactionData(importTransaction);
-    syncTransferDecisionDraftState(importTransaction);
+    syncActionableSuggestionDraftState(importTransaction);
 }
 
 function applyCreatedAccountToTransaction(
@@ -3311,6 +3388,7 @@ function applyCreatedAccountToTransaction(
 
     importTransaction.isManuallyAnnotated = true;
     updateTransactionData(importTransaction);
+    syncActionableSuggestionDraftState(importTransaction);
 }
 
 async function quickCreatePrimaryCategory(importTransaction: ImportTransaction): Promise<void> {
@@ -3550,7 +3628,7 @@ function applyBatchCategory(): void {
 
         importTransaction.isManuallyAnnotated = true;
         updateTransactionData(importTransaction);
-        syncTransferDecisionDraftState(importTransaction);
+        syncActionableSuggestionDraftState(importTransaction);
         updatedCount++;
     }
 
@@ -5069,7 +5147,7 @@ function editTransaction(transaction: ImportTransaction): void {
         editingTransaction.value.tagIds = editingTags.value;
         editingTransaction.value.isManuallyAnnotated = true;
         updateTransactionData(editingTransaction.value);
-        syncTransferDecisionDraftState(editingTransaction.value);
+        syncActionableSuggestionDraftState(editingTransaction.value);
     }
 
     if (editingTransaction.value === transaction) {
@@ -5216,7 +5294,7 @@ function showBatchReplaceDialog(type: BatchReplaceDialogDataType, allSourceTagIt
                     importTransaction.isManuallyAnnotated = true;
                     updateTransactionData(importTransaction);
                     if (type === 'expenseCategory' || type === 'incomeCategory' || type === 'transferCategory') {
-                        syncTransferDecisionDraftState(importTransaction);
+                        syncActionableSuggestionDraftState(importTransaction);
                     }
                 }
             }
@@ -5384,7 +5462,7 @@ function showReplaceInvalidItemDialog(type: BatchReplaceDialogDataType, invalidI
                     importTransaction.isManuallyAnnotated = true;
                     updateTransactionData(importTransaction);
                     if (type === 'expenseCategory' || type === 'incomeCategory' || type === 'transferCategory') {
-                        syncTransferDecisionDraftState(importTransaction);
+                        syncActionableSuggestionDraftState(importTransaction);
                     }
                 }
             }
@@ -5464,7 +5542,7 @@ function showReplaceAllTypesDialog(): void {
                     updatedCount++;
                     importTransaction.isManuallyAnnotated = true;
                     updateTransactionData(importTransaction);
-                    syncTransferDecisionDraftState(importTransaction);
+                    syncActionableSuggestionDraftState(importTransaction);
                 }
             }
         }
@@ -5537,7 +5615,7 @@ function showBatchCreateInvalidItemDialog(type: BatchCreateDialogDataType, inval
                     importTransaction.isManuallyAnnotated = true;
                     updateTransactionData(importTransaction);
                     if (type === 'expenseCategory' || type === 'incomeCategory' || type === 'transferCategory') {
-                        syncTransferDecisionDraftState(importTransaction);
+                        syncActionableSuggestionDraftState(importTransaction);
                     }
                 }
             }
@@ -5587,7 +5665,7 @@ function convertTransactionType(fromType: TransactionType, toType: TransactionTy
 
         importTransaction.isManuallyAnnotated = true;
         updateTransactionData(importTransaction);
-        syncTransferDecisionDraftState(importTransaction);
+        syncActionableSuggestionDraftState(importTransaction);
     }
 }
 
@@ -5604,7 +5682,7 @@ function clearSelectedRecurringMatches(): void {
 
         importTransaction.clearRecurringMatch(false);
         updateTransactionData(importTransaction);
-        syncTransferDecisionDraftState(importTransaction);
+        syncActionableSuggestionDraftState(importTransaction);
         updatedCount++;
     }
 

@@ -165,7 +165,7 @@ fn execute_preview_patch(
         params.push(value.clone().into_sql_value());
     }
 
-    if patch.clear_transfer_decision {
+    if patch.clear_transfer_decision || patch.clear_learning_decision || patch.clear_llm_decision {
         if let Some(raw_feedback) = connection
             .query_row(
                 "
@@ -179,9 +179,12 @@ fn execute_preview_patch(
             .optional()?
         {
             assignments.push("preview_matching_feedback_json = ?".to_string());
-            params.push(SqlValue::Text(clear_transfer_matching_feedback(Some(
-                raw_feedback.as_deref().unwrap_or(""),
-            ))));
+            params.push(SqlValue::Text(clear_actionable_matching_feedback(
+                Some(raw_feedback.as_deref().unwrap_or("")),
+                patch.clear_transfer_decision,
+                patch.clear_learning_decision,
+                patch.clear_llm_decision,
+            )));
         }
     }
 

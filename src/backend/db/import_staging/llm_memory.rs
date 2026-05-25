@@ -166,9 +166,6 @@ pub fn apply_preview_llm_recommendation(
 
         let mut feedback = preview.preview_matching_feedback.clone();
         ensure_json_object(&mut feedback);
-        if !applied_fields.is_empty() {
-            remove_json_object_key(&mut feedback, "transfer");
-        }
         feedback["llm"] = build_llm_feedback_payload(
             suggestion,
             "pending",
@@ -264,28 +261,49 @@ pub fn review_preview_llm_recommendation(
         let applied_snapshot = llm_feedback
             .get("applied_preview")
             .and_then(normalize_llm_snapshot);
-        let should_restore = decision == ImportPreviewDecision::Reject
+        let current_review_status = llm_feedback
+            .get("review_status")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        let should_restore_accepted = decision == ImportPreviewDecision::Reject
+            && current_review_status == "accepted"
             && previous_snapshot.as_ref().is_some()
             && applied_snapshot
                 .as_ref()
                 .is_none_or(|snapshot| llm_preview_matches_snapshot(&preview, snapshot));
+        let should_restore_pending = decision == ImportPreviewDecision::Reject
+            && current_review_status != "accepted"
+            && applied_snapshot
+                .as_ref()
+                .is_some_and(|snapshot| llm_preview_matches_snapshot(&preview, snapshot));
         let current_snapshot = build_llm_previous_snapshot(&preview);
-        let refreshed_snapshot = if should_restore {
-            previous_snapshot
-                .clone()
-                .unwrap_or_else(|| current_snapshot.clone())
+        let restored_snapshot = if should_restore_accepted {
+            Some(
+                previous_snapshot
+                    .clone()
+                    .unwrap_or_else(|| current_snapshot.clone()),
+            )
+        } else if should_restore_pending {
+            category_rule_account_baseline_snapshot(tx, user_id, &preview)?
         } else {
-            applied_snapshot
-                .clone()
-                .unwrap_or_else(|| current_snapshot.clone())
+            None
         };
+        let previous_feedback_snapshot = previous_snapshot
+            .clone()
+            .unwrap_or_else(|| current_snapshot.clone());
+        let applied_feedback_snapshot = applied_snapshot
+            .clone()
+            .unwrap_or_else(|| current_snapshot.clone());
+        let restored = restored_snapshot.is_some();
         let resolved_suggestion = suggestion
             .cloned()
             .unwrap_or_else(|| llm_suggestion_from_feedback(&llm_feedback));
 
         let mut patch = ImportPreviewPatch::new(preview_id);
-        if should_restore {
-            patch = patch.with_changes(llm_snapshot_restore_changes(&refreshed_snapshot));
+        if let Some(snapshot) = restored_snapshot.as_ref() {
+            patch = patch.with_changes(llm_snapshot_restore_changes(snapshot));
         }
         let review_status = if decision == ImportPreviewDecision::Accept {
             "accepted"
@@ -296,8 +314,8 @@ pub fn review_preview_llm_recommendation(
             &resolved_suggestion,
             review_status,
             decision == ImportPreviewDecision::Reject,
-            &previous_snapshot.unwrap_or_else(|| current_snapshot.clone()),
-            &applied_snapshot.unwrap_or_else(|| current_snapshot.clone()),
+            &previous_feedback_snapshot,
+            &applied_feedback_snapshot,
         );
         patch = patch.with_change(
             ImportPreviewPatchField::MatchingFeedback,
@@ -307,6 +325,9 @@ pub fn review_preview_llm_recommendation(
             return Ok(preview_llm_not_found());
         }
 
+        let event_snapshot_after = restored_snapshot
+            .clone()
+            .unwrap_or_else(|| current_snapshot.clone());
         let event_id = create_llm_memory_event(
             tx,
             &LlmMemoryEventDraft {
@@ -335,10 +356,10 @@ pub fn review_preview_llm_recommendation(
                 user_correction_category: user_correction_category.and_then(optional_non_empty),
                 user_correction_account: user_correction_account.and_then(optional_non_empty),
                 snapshot_before: Some(current_snapshot),
-                snapshot_after: Some(refreshed_snapshot),
+                snapshot_after: Some(event_snapshot_after),
                 metadata: Some(serde_json::json!({
                     "reason": resolved_suggestion.reason,
-                    "rollback": should_restore,
+                    "rollback": restored,
                 })),
             },
         )?;
@@ -346,7 +367,7 @@ pub fn review_preview_llm_recommendation(
             preview: get_preview_bill_by_id(tx, preview_id, user_id)?,
             event_id: Some(event_id),
             applied_fields: Vec::new(),
-            restored: should_restore,
+            restored,
         })
     })
 }

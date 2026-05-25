@@ -2197,10 +2197,13 @@ fn preview_llm_recommendation_applies_reviews_and_records_memory_events(
     assert_eq!(applied_preview.preview_main_category, "餐饮");
     assert_eq!(applied_preview.preview_sub_category, "早餐");
     assert_eq!(applied_preview.preview_source_account_id, Some(300));
-    assert!(applied_preview
-        .preview_matching_feedback
-        .get("transfer")
-        .is_none());
+    assert_eq!(
+        applied_preview
+            .preview_matching_feedback
+            .pointer("/transfer/review_status")
+            .and_then(serde_json::Value::as_str),
+        Some("accepted")
+    );
     assert_eq!(
         applied_preview
             .preview_matching_feedback
@@ -2261,6 +2264,13 @@ fn preview_llm_recommendation_applies_reviews_and_records_memory_events(
             .pointer("/llm/review_status")
             .and_then(serde_json::Value::as_str),
         Some("rejected")
+    );
+    assert_eq!(
+        rejected_preview
+            .preview_matching_feedback
+            .pointer("/transfer/review_status")
+            .and_then(serde_json::Value::as_str),
+        Some("accepted")
     );
 
     let events = get_llm_memory_events(

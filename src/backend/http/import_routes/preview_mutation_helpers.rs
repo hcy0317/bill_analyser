@@ -290,15 +290,60 @@ fn build_preview_patch_from_payload(
     }
 
     let mut patch = ImportPreviewPatch::new(preview_id).with_changes(changes);
-    if first_value(
+    let clear_transfer = first_value(
         object,
         &["clear_transfer_decision", "clearTransferDecision"],
     )
     .is_some_and(|value| coerce_preview_selected_value(Some(value), false))
-    {
+        || clear_actionable_suggestion_family(object, "transfer");
+    let clear_learning = first_value(
+        object,
+        &["clear_learning_decision", "clearLearningDecision"],
+    )
+    .is_some_and(|value| coerce_preview_selected_value(Some(value), false))
+        || clear_actionable_suggestion_family(object, "learning");
+    let clear_llm = first_value(object, &["clear_llm_decision", "clearLlmDecision"])
+        .is_some_and(|value| coerce_preview_selected_value(Some(value), false))
+        || clear_actionable_suggestion_family(object, "llm");
+    if clear_transfer {
         patch = patch.with_transfer_decision_cleared();
     }
+    if clear_learning {
+        patch = patch.with_learning_decision_cleared();
+    }
+    if clear_llm {
+        patch = patch.with_llm_decision_cleared();
+    }
     patch
+}
+
+fn clear_actionable_suggestion_family(object: &Map<String, Value>, family: &str) -> bool {
+    let Some(value) = first_value(
+        object,
+        &[
+            "clear_actionable_suggestions",
+            "clearActionableSuggestions",
+        ],
+    ) else {
+        return false;
+    };
+    if value
+        .as_bool()
+        .is_some_and(|enabled| enabled)
+    {
+        return true;
+    }
+    if let Some(items) = value.as_array() {
+        return items.iter().any(|item| {
+            item.as_str()
+                .is_some_and(|text| text.trim().eq_ignore_ascii_case(family))
+        });
+    }
+    value.as_object().is_some_and(|families| {
+        families
+            .get(family)
+            .is_some_and(|value| coerce_preview_selected_value(Some(value), false))
+    })
 }
 
 fn build_preview_patch_from_payload_with_category_lookup(

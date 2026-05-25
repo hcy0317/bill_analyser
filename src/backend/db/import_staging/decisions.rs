@@ -28,14 +28,24 @@ pub fn apply_preview_transfer_decision(
         let previous_snapshot = transfer_feedback
             .get("previous_preview")
             .and_then(normalize_transfer_snapshot);
+        let applied_snapshot = transfer_feedback
+            .get("applied_preview")
+            .and_then(normalize_transfer_snapshot);
         let current_review_status = transfer_feedback
             .get("review_status")
             .and_then(Value::as_str)
             .unwrap_or("")
             .trim()
             .to_ascii_lowercase();
-        let should_restore =
-            current_review_status == "accepted" && previous_snapshot.as_ref().is_some();
+        let should_restore_accepted = current_review_status == "accepted"
+            && previous_snapshot.as_ref().is_some()
+            && applied_snapshot
+                .as_ref()
+                .is_none_or(|snapshot| transfer_preview_matches_snapshot(&preview, snapshot));
+        let should_restore_pending = current_review_status != "accepted"
+            && applied_snapshot
+                .as_ref()
+                .is_some_and(|snapshot| transfer_preview_matches_snapshot(&preview, snapshot));
 
         let mut patch = ImportPreviewPatch::new(preview_id);
         match decision {
@@ -65,11 +75,11 @@ pub fn apply_preview_transfer_decision(
                     )
                     .with_change(
                         ImportPreviewPatchField::MainCategory,
-                        ImportPreviewPatchValue::Text(transfer_main_category),
+                        ImportPreviewPatchValue::Text(transfer_main_category.clone()),
                     )
                     .with_change(
                         ImportPreviewPatchField::SubCategory,
-                        ImportPreviewPatchValue::Text(transfer_sub_category),
+                        ImportPreviewPatchValue::Text(transfer_sub_category.clone()),
                     )
                     .with_change(
                         ImportPreviewPatchField::RecurringId,
@@ -109,7 +119,7 @@ pub fn apply_preview_transfer_decision(
                 }
                 let mut transfer_review = serde_json::json!({
                     "review_status": "accepted",
-                    "reviewed_type": transfer_type,
+                    "reviewed_type": transfer_type.clone(),
                     "suppressed": false,
                     "previous_preview": snapshot,
                 });
@@ -129,12 +139,35 @@ pub fn apply_preview_transfer_decision(
                 {
                     transfer_review["account_resolution"] = serde_json::json!("source_chain");
                 }
+                transfer_review["applied_preview"] = serde_json::json!({
+                    "preview_type": transfer_type,
+                    "preview_main_category": transfer_main_category,
+                    "preview_sub_category": transfer_sub_category,
+                    "preview_source_account_id": account_resolution
+                        .source_account_id
+                        .or(preview.preview_source_account_id),
+                    "preview_destination_account_id": account_resolution
+                        .destination_account_id
+                        .or(preview.preview_destination_account_id),
+                    "preview_recurring_id": Value::Null,
+                    "preview_recurring_name": "",
+                    "preview_recurring_candidate_count": 0,
+                    "preview_recurring_match_score": 0.0,
+                    "preview_recurring_match_reasons": "",
+                    "preview_recurring_matched_date": "",
+                });
                 feedback["transfer"] = transfer_review;
             }
             ImportPreviewDecision::Reject => {
-                if should_restore {
+                if should_restore_accepted {
                     if let Some(snapshot) = previous_snapshot.as_ref() {
                         patch = patch.with_changes(transfer_snapshot_restore_changes(snapshot));
+                    }
+                } else if should_restore_pending {
+                    if let Some(baseline) =
+                        category_rule_account_baseline_snapshot(tx, user_id, &preview)?
+                    {
+                        patch = patch.with_changes(learning_snapshot_restore_changes(&baseline));
                     }
                 }
                 feedback["transfer"] = serde_json::json!({
@@ -144,7 +177,7 @@ pub fn apply_preview_transfer_decision(
                 });
             }
             ImportPreviewDecision::Clear => {
-                if should_restore {
+                if should_restore_accepted {
                     if let Some(snapshot) = previous_snapshot.as_ref() {
                         patch = patch.with_changes(transfer_snapshot_restore_changes(snapshot));
                     }
@@ -300,6 +333,10 @@ pub fn apply_preview_learning_decision(
             && applied_snapshot
                 .as_ref()
                 .is_none_or(|snapshot| learning_preview_matches_snapshot(&preview, snapshot));
+        let should_restore_pending = current_review_status != "accepted"
+            && applied_snapshot
+                .as_ref()
+                .is_some_and(|snapshot| learning_preview_matches_snapshot(&preview, snapshot));
 
         let mut patch = ImportPreviewPatch::new(preview_id);
         match decision {
@@ -335,6 +372,12 @@ pub fn apply_preview_learning_decision(
                 if should_restore {
                     if let Some(snapshot) = previous_snapshot.as_ref() {
                         patch = patch.with_changes(learning_snapshot_restore_changes(snapshot));
+                    }
+                } else if should_restore_pending {
+                    if let Some(baseline) =
+                        category_rule_account_baseline_snapshot(tx, user_id, &preview)?
+                    {
+                        patch = patch.with_changes(learning_snapshot_restore_changes(&baseline));
                     }
                 }
                 feedback["learning"] = serde_json::json!({

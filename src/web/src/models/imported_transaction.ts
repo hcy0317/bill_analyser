@@ -81,6 +81,7 @@ type SparseImportMatchingPayload = {
     parser?: LegacyImportMatchingParserPayload;
     annotation?: Partial<ImportMatchingPayload['annotation']>;
     reconciliation?: ImportMatchingPayload['reconciliation'];
+    stage2_baseline?: ImportMatchingPayload['stage2_baseline'];
 };
 
 function normalizeImportMatchingPayload(matching?: SparseImportMatchingPayload): ImportMatchingPayload | undefined {
@@ -157,6 +158,7 @@ function normalizeImportMatchingPayload(matching?: SparseImportMatchingPayload):
             is_manually_annotated: !!matching.annotation?.is_manually_annotated,
         },
         reconciliation: matching.reconciliation || {},
+        stage2_baseline: matching.stage2_baseline,
     };
 }
 

@@ -465,6 +465,7 @@ pub fn build_import_preview_matching_payload(preview_item: &Map<String, Value>) 
             "parser",
             "annotation",
             "reconciliation",
+            "stage2_baseline",
         ] {
             if let Some(feedback_section) = object_field_from_map(feedback, section) {
                 merge_object_fields(

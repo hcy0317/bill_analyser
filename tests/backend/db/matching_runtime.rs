@@ -2,13 +2,15 @@ use std::error::Error;
 
 use bill_analyser_core::UserId;
 use bill_analyser_db::{
-    apply_matching_candidate_action, create_import_session, create_manual_matching_pair,
-    delete_manual_matching_pair, init_import_staging_schema, init_matching_runtime_schema,
-    insert_preview_bills_batch, list_reconciliation_candidates_payload,
-    query_matching_bill_candidates_payload, query_matching_bill_feedback_payload,
-    query_matching_pairs_payload, query_matching_session_candidates_payload, ImportPreviewDraft,
-    ImportPreviewExpectedState, ImportPreviewLearningApply, ImportPreviewRecurringCandidate,
-    ImportSessionDraft, PreviewMatchingActionRequest, ReconciliationCandidateFilters,
+    apply_matching_candidate_action, apply_preview_llm_recommendation, create_import_session,
+    create_manual_matching_pair, delete_manual_matching_pair, get_preview_bill_by_id,
+    init_import_staging_schema, init_matching_runtime_schema, insert_preview_bills_batch,
+    list_reconciliation_candidates_payload, query_matching_bill_candidates_payload,
+    query_matching_bill_feedback_payload, query_matching_pairs_payload,
+    query_matching_session_candidates_payload, ImportPreviewDraft, ImportPreviewExpectedState,
+    ImportPreviewLearningApply, ImportPreviewLlmApplyRequest, ImportPreviewLlmSuggestion,
+    ImportPreviewRecurringCandidate, ImportSessionDraft, PreviewMatchingActionRequest,
+    ReconciliationCandidateFilters,
 };
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
@@ -505,6 +507,558 @@ fn matching_runtime_repository_covers_bill_preview_and_reconciliation_flows(
     .expect_err("invalid candidate");
     assert_eq!(bad_candidate.status_code(), 400);
     assert_eq!(bad_candidate.message(), "Invalid candidateId");
+
+    Ok(())
+}
+
+#[test]
+fn preview_actionable_decisions_restore_rule_account_baseline_without_overwriting_manual_drift(
+) -> Result<(), Box<dyn Error>> {
+    let mut connection = Connection::open_in_memory()?;
+    seed_matching_fixture(&mut connection)?;
+    let user_id = user_id();
+
+    connection.execute("UPDATE categories SET type = 3 WHERE id = 6", [])?;
+    connection.execute(
+        "
+        UPDATE bills_preview
+        SET preview_type = '转账',
+            preview_main_category = '内部转账',
+            preview_sub_category = '账户互转',
+            preview_source_account_id = 10,
+            preview_destination_account_id = 11,
+            preview_matching_feedback_json = ?1
+        WHERE id = 1
+        ",
+        params![json!({
+            "category_rule": {
+                "category_id": 6,
+                "review_status": "auto_applied"
+            },
+            "account": {
+                "source_account_id": 10,
+                "review_status": "auto_applied"
+            },
+            "stage2_baseline": {
+                "preview_type": "支出",
+                "preview_main_category": "Food",
+                "preview_sub_category": "Coffee",
+                "preview_source_account_id": 10,
+                "preview_destination_account_id": null
+            },
+            "transfer": {
+                "candidate_type": "transfer",
+                "score": 0.96,
+                "level": "high",
+                "reason": "opposite_amount",
+                "review_status": "pending",
+                "applied_preview": {
+                    "preview_type": "转账",
+                    "preview_main_category": "内部转账",
+                    "preview_sub_category": "账户互转",
+                    "preview_source_account_id": 10,
+                    "preview_destination_account_id": 11,
+                    "preview_recurring_id": null,
+                    "preview_recurring_name": "",
+                    "preview_recurring_candidate_count": 0,
+                    "preview_recurring_match_score": 0.0,
+                    "preview_recurring_match_reasons": "",
+                    "preview_recurring_matched_date": ""
+                }
+            }
+        })
+        .to_string()],
+    )?;
+    connection.execute(
+        "UPDATE categories SET main_category = 'Renamed', sub_category = 'Changed', type = 2 WHERE id = 6",
+        [],
+    )?;
+
+    let rejected_transfer = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "preview:1:transfer",
+        "reject",
+        &PreviewMatchingActionRequest {
+            response_mode_preview_item: true,
+            ..Default::default()
+        },
+    )?;
+    let rejected_item = &rejected_transfer["preview_item"];
+    assert_eq!(rejected_item["preview_type"], "支出");
+    assert_eq!(rejected_item["preview_main_category"], "Food");
+    assert_eq!(rejected_item["preview_sub_category"], "Coffee");
+    assert_eq!(rejected_item["preview_source_account_id"], 10);
+    assert!(rejected_item["preview_destination_account_id"].is_null());
+    assert_eq!(
+        rejected_item["matching"]["transfer"]["review_status"],
+        "rejected"
+    );
+
+    connection.execute(
+        "
+        UPDATE bills_preview
+        SET preview_type = '支出',
+            preview_main_category = 'Food',
+            preview_sub_category = 'Coffee',
+            preview_source_account_id = 10,
+            preview_destination_account_id = NULL,
+            preview_matching_feedback_json = ?1
+        WHERE id = 1
+        ",
+        params![json!({
+            "transfer": {
+                "candidate_type": "transfer",
+                "score": 0.96,
+                "level": "high",
+                "reason": "opposite_amount",
+                "review_status": "pending",
+                "applied_preview": {
+                    "preview_type": "转账",
+                    "preview_main_category": "内部转账",
+                    "preview_sub_category": "账户互转",
+                    "preview_source_account_id": 10,
+                    "preview_destination_account_id": 11,
+                    "preview_recurring_id": null,
+                    "preview_recurring_name": "",
+                    "preview_recurring_candidate_count": 0,
+                    "preview_recurring_match_score": 0.0,
+                    "preview_recurring_match_reasons": "",
+                    "preview_recurring_matched_date": ""
+                }
+            }
+        })
+        .to_string()],
+    )?;
+    let _accepted_transfer = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "preview:1:transfer",
+        "accept",
+        &PreviewMatchingActionRequest {
+            response_mode_preview_item: true,
+            reviewed_type: Some("转账".to_string()),
+            ..Default::default()
+        },
+    )?;
+    connection.execute(
+        "
+        UPDATE bills_preview
+        SET preview_type = '支出',
+            preview_main_category = 'Manual',
+            preview_sub_category = 'Edited',
+            preview_source_account_id = 11,
+            preview_destination_account_id = NULL
+        WHERE id = 1
+        ",
+        [],
+    )?;
+    let cleared_transfer = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "preview:1:transfer",
+        "clear",
+        &PreviewMatchingActionRequest {
+            response_mode_preview_item: true,
+            ..Default::default()
+        },
+    )?;
+    let cleared_item = &cleared_transfer["preview_item"];
+    assert_eq!(cleared_item["preview_main_category"], "Manual");
+    assert_eq!(cleared_item["preview_sub_category"], "Edited");
+    assert_eq!(cleared_item["preview_source_account_id"], 11);
+    assert!(cleared_item["matching"].get("transfer").is_none());
+
+    Ok(())
+}
+
+#[test]
+fn preview_actionable_decisions_fall_back_to_legacy_rule_account_baseline(
+) -> Result<(), Box<dyn Error>> {
+    let mut connection = Connection::open_in_memory()?;
+    seed_matching_fixture(&mut connection)?;
+    let user_id = user_id();
+
+    connection.execute("UPDATE categories SET type = 3 WHERE id = 6", [])?;
+    connection.execute(
+        "
+        UPDATE bills_preview
+        SET preview_type = '转账',
+            preview_main_category = '内部转账',
+            preview_sub_category = '账户互转',
+            preview_source_account_id = 10,
+            preview_destination_account_id = 11,
+            preview_matching_feedback_json = ?1
+        WHERE id = 1
+        ",
+        params![json!({
+            "category_rule": {
+                "category_id": "6",
+                "review_status": "auto_applied"
+            },
+            "account": {
+                "source_account_id": "10",
+                "destination_account_id": "11",
+                "review_status": "auto_applied"
+            },
+            "stage2_baseline": {
+                "legacy": true
+            },
+            "transfer": {
+                "candidate_type": "transfer",
+                "score": 0.96,
+                "level": "high",
+                "reason": "opposite_amount",
+                "review_status": "pending",
+                "applied_preview": {
+                    "preview_type": "转账",
+                    "preview_main_category": "内部转账",
+                    "preview_sub_category": "账户互转",
+                    "preview_source_account_id": 10,
+                    "preview_destination_account_id": 11,
+                    "preview_recurring_id": null,
+                    "preview_recurring_name": "",
+                    "preview_recurring_candidate_count": 0,
+                    "preview_recurring_match_score": 0.0,
+                    "preview_recurring_match_reasons": "",
+                    "preview_recurring_matched_date": ""
+                }
+            }
+        })
+        .to_string()],
+    )?;
+
+    let rejected_transfer = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "preview:1:transfer",
+        "reject",
+        &PreviewMatchingActionRequest {
+            response_mode_preview_item: true,
+            ..Default::default()
+        },
+    )?;
+    let rejected_item = &rejected_transfer["preview_item"];
+    assert_eq!(rejected_item["preview_type"], "支出");
+    assert_eq!(rejected_item["preview_main_category"], "Food");
+    assert_eq!(rejected_item["preview_sub_category"], "Coffee");
+    assert_eq!(rejected_item["preview_source_account_id"], 10);
+    assert_eq!(rejected_item["preview_destination_account_id"], 11);
+    assert_eq!(
+        rejected_item["matching"]["transfer"]["review_status"],
+        "rejected"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn preview_pending_rejects_do_not_overwrite_manual_drift() -> Result<(), Box<dyn Error>> {
+    let mut connection = Connection::open_in_memory()?;
+    seed_matching_fixture(&mut connection)?;
+    let user_id = user_id();
+
+    connection.execute(
+        "
+        UPDATE bills_preview
+        SET preview_type = '转账',
+            preview_main_category = '内部转账',
+            preview_sub_category = '账户互转',
+            preview_source_account_id = 10,
+            preview_destination_account_id = 11,
+            preview_matching_feedback_json = ?1
+        WHERE id = 1
+        ",
+        params![json!({
+            "stage2_baseline": {
+                "preview_type": "支出",
+                "preview_main_category": "Food",
+                "preview_sub_category": "Coffee",
+                "preview_source_account_id": 10,
+                "preview_destination_account_id": null
+            },
+            "transfer": {
+                "candidate_type": "transfer",
+                "review_status": "pending",
+                "applied_preview": {
+                    "preview_type": "转账",
+                    "preview_main_category": "内部转账",
+                    "preview_sub_category": "账户互转",
+                    "preview_source_account_id": 10,
+                    "preview_destination_account_id": 11,
+                    "preview_recurring_id": null,
+                    "preview_recurring_name": "",
+                    "preview_recurring_candidate_count": 0,
+                    "preview_recurring_match_score": 0.0,
+                    "preview_recurring_match_reasons": "",
+                    "preview_recurring_matched_date": ""
+                }
+            }
+        })
+        .to_string()],
+    )?;
+    connection.execute(
+        "
+        UPDATE bills_preview
+        SET preview_type = '支出',
+            preview_main_category = 'Manual',
+            preview_sub_category = 'Edited',
+            preview_source_account_id = 11,
+            preview_destination_account_id = NULL
+        WHERE id = 1
+        ",
+        [],
+    )?;
+
+    let rejected_transfer = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "preview:1:transfer",
+        "reject",
+        &PreviewMatchingActionRequest {
+            response_mode_preview_item: true,
+            ..Default::default()
+        },
+    )?;
+    let rejected_transfer_item = &rejected_transfer["preview_item"];
+    assert_eq!(rejected_transfer_item["preview_main_category"], "Manual");
+    assert_eq!(rejected_transfer_item["preview_sub_category"], "Edited");
+    assert_eq!(rejected_transfer_item["preview_source_account_id"], 11);
+    assert_eq!(
+        rejected_transfer_item["matching"]["transfer"]["review_status"],
+        "rejected"
+    );
+
+    connection.execute(
+        "
+        UPDATE bills_preview
+        SET preview_type = '支出',
+            preview_main_category = 'Travel',
+            preview_sub_category = 'Metro',
+            preview_source_account_id = 11,
+            preview_destination_account_id = NULL,
+            preview_matching_feedback_json = ?1
+        WHERE id = 2
+        ",
+        params![json!({
+            "stage2_baseline": {
+                "preview_type": "支出",
+                "preview_main_category": "Food",
+                "preview_sub_category": "Coffee",
+                "preview_source_account_id": 10,
+                "preview_destination_account_id": null
+            },
+            "learning": {
+                "rule_id": 8,
+                "review_status": "auto_applied",
+                "applied_preview": {
+                    "preview_type": "支出",
+                    "preview_main_category": "Travel",
+                    "preview_sub_category": "Metro",
+                    "preview_source_account_id": 11,
+                    "preview_destination_account_id": null
+                }
+            },
+            "llm": {
+                "suggested_main_category": "Travel",
+                "suggested_sub_category": "Metro",
+                "suggested_source_account": "Card",
+                "suggested_destination_account": "",
+                "confidence": 0.86,
+                "reason": "merchant pattern",
+                "review_status": "pending",
+                "previous_preview": {
+                    "preview_main_category": "Food",
+                    "preview_sub_category": "Coffee",
+                    "preview_source_account_id": 10,
+                    "preview_destination_account_id": null
+                },
+                "applied_preview": {
+                    "preview_main_category": "Travel",
+                    "preview_sub_category": "Metro",
+                    "preview_source_account_id": 11,
+                    "preview_destination_account_id": null
+                }
+            }
+        })
+        .to_string()],
+    )?;
+    connection.execute(
+        "
+        UPDATE bills_preview
+        SET preview_main_category = 'Manual',
+            preview_sub_category = 'Edited',
+            preview_source_account_id = 10
+        WHERE id = 2
+        ",
+        [],
+    )?;
+
+    let rejected_learning = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "preview:2:learning",
+        "reject",
+        &PreviewMatchingActionRequest {
+            response_mode_preview_item: true,
+            ..Default::default()
+        },
+    )?;
+    let rejected_learning_item = &rejected_learning["preview_item"];
+    assert_eq!(rejected_learning_item["preview_main_category"], "Manual");
+    assert_eq!(rejected_learning_item["preview_sub_category"], "Edited");
+    assert_eq!(rejected_learning_item["preview_source_account_id"], 10);
+    assert_eq!(
+        rejected_learning_item["matching"]["learning"]["review_status"],
+        "rejected"
+    );
+
+    let suggestion = ImportPreviewLlmSuggestion {
+        suggested_main_category: "Travel".to_string(),
+        suggested_sub_category: "Metro".to_string(),
+        suggested_source_account: "Card".to_string(),
+        suggested_destination_account: String::new(),
+        resolved_source_account_id: Some(11),
+        resolved_destination_account_id: None,
+        confidence: 0.86,
+        reason: "merchant pattern".to_string(),
+    };
+    let llm_rejected = bill_analyser_db::review_preview_llm_recommendation(
+        &mut connection,
+        bill_analyser_db::ImportPreviewLlmReviewRequest {
+            session_id: "session-matching",
+            preview_id: 2,
+            user_id,
+            decision: bill_analyser_db::ImportPreviewDecision::Reject,
+            suggestion: Some(&suggestion),
+            user_correction_category: None,
+            user_correction_account: None,
+        },
+    )?;
+    assert!(!llm_rejected.restored);
+    let llm_rejected_item = llm_rejected.preview.expect("llm reject preview");
+    assert_eq!(llm_rejected_item.preview_main_category, "Manual");
+    assert_eq!(llm_rejected_item.preview_sub_category, "Edited");
+    assert_eq!(llm_rejected_item.preview_source_account_id, Some(10));
+    assert_eq!(
+        llm_rejected_item.preview_matching_feedback["llm"]["review_status"],
+        "rejected"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn preview_llm_recommendation_keeps_transfer_and_rejects_to_rule_account_baseline(
+) -> Result<(), Box<dyn Error>> {
+    let mut connection = Connection::open_in_memory()?;
+    seed_matching_fixture(&mut connection)?;
+    let user_id = user_id();
+
+    connection.execute("UPDATE categories SET type = 3 WHERE id = 6", [])?;
+    connection.execute(
+        "
+        UPDATE bills_preview
+        SET preview_main_category = '',
+            preview_sub_category = '',
+            preview_source_account_id = NULL,
+            preview_destination_account_id = NULL,
+            preview_matching_feedback_json = ?1
+        WHERE id = 2
+        ",
+        params![json!({
+            "category_rule": {
+                "category_id": 6,
+                "review_status": "auto_applied"
+            },
+            "account": {
+                "source_account_id": 10,
+                "review_status": "auto_applied"
+            },
+            "stage2_baseline": {
+                "preview_type": "支出",
+                "preview_main_category": "Food",
+                "preview_sub_category": "Coffee",
+                "preview_source_account_id": 10,
+                "preview_destination_account_id": null
+            },
+            "transfer": {
+                "candidate_type": "transfer",
+                "review_status": "pending"
+            }
+        })
+        .to_string()],
+    )?;
+    connection.execute(
+        "UPDATE categories SET main_category = 'Renamed', sub_category = 'Changed', type = 2 WHERE id = 6",
+        [],
+    )?;
+
+    let suggestion = ImportPreviewLlmSuggestion {
+        suggested_main_category: "Travel".to_string(),
+        suggested_sub_category: "Metro".to_string(),
+        suggested_source_account: "Card".to_string(),
+        suggested_destination_account: String::new(),
+        resolved_source_account_id: Some(11),
+        resolved_destination_account_id: None,
+        confidence: 0.86,
+        reason: "merchant pattern".to_string(),
+    };
+    let applied = apply_preview_llm_recommendation(
+        &mut connection,
+        ImportPreviewLlmApplyRequest {
+            session_id: "session-matching",
+            preview_id: 2,
+            user_id,
+            suggestion: &suggestion,
+            prompt_text: Some("fixture prompt"),
+            llm_provider: Some("fixture"),
+            llm_model: Some("fixture-model"),
+        },
+    )?;
+    assert_eq!(applied.applied_fields.len(), 3);
+    let after_apply = get_preview_bill_by_id(&connection, 2, user_id)?.expect("preview row");
+    assert_eq!(
+        after_apply.preview_matching_feedback["transfer"]["review_status"],
+        "pending"
+    );
+
+    let rejected = apply_matching_candidate_action(
+        &mut connection,
+        user_id,
+        "preview:2:learning",
+        "reject",
+        &PreviewMatchingActionRequest {
+            response_mode_preview_item: true,
+            ..Default::default()
+        },
+    )?;
+    assert_eq!(
+        rejected["preview_item"]["matching"]["learning"]["review_status"],
+        "rejected"
+    );
+
+    let llm_rejected = bill_analyser_db::review_preview_llm_recommendation(
+        &mut connection,
+        bill_analyser_db::ImportPreviewLlmReviewRequest {
+            session_id: "session-matching",
+            preview_id: 2,
+            user_id,
+            decision: bill_analyser_db::ImportPreviewDecision::Reject,
+            suggestion: Some(&suggestion),
+            user_correction_category: None,
+            user_correction_account: None,
+        },
+    )?;
+    let restored = llm_rejected.preview.expect("preview after llm reject");
+    assert_eq!(restored.preview_main_category, "Food");
+    assert_eq!(restored.preview_sub_category, "Coffee");
+    assert_eq!(restored.preview_source_account_id, Some(10));
+    assert_eq!(restored.preview_destination_account_id, None);
+    assert_eq!(
+        restored.preview_matching_feedback["llm"]["review_status"],
+        "rejected"
+    );
 
     Ok(())
 }

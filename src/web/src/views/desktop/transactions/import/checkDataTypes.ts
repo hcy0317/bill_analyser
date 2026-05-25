@@ -75,5 +75,7 @@ export type ImportTransactionWithPreviewState = ImportTransaction & {
     _previewId?: number;
     _previewDecisionBaseline?: TransferDecisionPreviewBaseline;
     _shouldClearTransferDecision?: boolean;
+    _shouldClearLearningDecision?: boolean;
+    _shouldClearLlmDecision?: boolean;
     _learningDecisionBaseline?: ImportCheckLearningDecisionBaseline;
 };

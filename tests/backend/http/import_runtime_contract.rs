@@ -20,6 +20,7 @@ use bill_analyser_http::{
 };
 use chrono::{Duration as ChronoDuration, Local};
 use ring::hmac;
+use rusqlite::params;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
@@ -1878,6 +1879,18 @@ async fn import_db_runtime_stage2_restores_import_intelligence_chain() -> Result
     assert_eq!(coffee["preview_source_account_id"], 1001);
     assert_eq!(coffee["matching"]["parser"]["id"], "alipay");
     assert_eq!(coffee["matching"]["parser"]["parser_id"], "alipay");
+    assert_eq!(
+        coffee["matching"]["stage2_baseline"]["preview_main_category"],
+        "餐饮"
+    );
+    assert_eq!(
+        coffee["matching"]["stage2_baseline"]["preview_sub_category"],
+        "咖啡"
+    );
+    assert_eq!(
+        coffee["matching"]["stage2_baseline"]["preview_source_account_id"],
+        1001
+    );
     assert!(coffee["matching"]["transfer"].is_object());
     assert_eq!(coffee["matching"]["recurring"]["id"], 3001);
     let coffee_id = coffee["id"].as_i64().expect("coffee preview id");
@@ -2968,6 +2981,190 @@ async fn import_db_runtime_applies_reclassify_preview_updates() -> Result<(), Bo
         r#"["amount","date"]"#
     );
     assert_eq!(updated["preview_selected"], false);
+    Ok(())
+}
+
+#[tokio::test]
+async fn import_db_runtime_clears_actionable_matching_families_only() -> Result<(), Box<dyn Error>>
+{
+    let fixture = RuntimeFixture::new().await?;
+    seed_import_session(fixture.db_path(), "session-a")?;
+    let row = preview_rows(fixture.db_path(), "session-a")?
+        .into_iter()
+        .next()
+        .expect("seeded preview row");
+    {
+        let runtime = runtime_for(fixture.db_path())?;
+        runtime.connection().execute(
+            "UPDATE bills_preview SET preview_matching_feedback_json = ?1 WHERE id = ?2",
+            params![
+                json!({
+                    "parser": {"parser_id": "wechat"},
+                    "dedup": {"type": "remaining"},
+                    "transfer": {"review_status": "pending"},
+                    "learning": {"review_status": "pending"},
+                    "llm": {"review_status": "pending"}
+                })
+                .to_string(),
+                row.id
+            ],
+        )?;
+    }
+    let app = runtime_router(&fixture);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::PUT)
+                .uri("/api/bills/import/v2/preview/session-a/update")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "id": row.id,
+                        "clearActionableSuggestions": ["learning", "llm"],
+                        "responseMode": "preview-item"
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    let matching = &body["data"]["previewItem"]["matching"];
+    let persisted_feedback = &body["data"]["previewItem"]["preview_matching_feedback"];
+    assert_eq!(matching["parser"]["parser_id"], "wechat");
+    assert_eq!(matching["dedup"]["type"], "remaining");
+    assert_eq!(matching["transfer"]["review_status"], "pending");
+    assert!(persisted_feedback.get("learning").is_none());
+    assert!(persisted_feedback.get("llm").is_none());
+    assert_eq!(matching["learning"]["review_status"], "");
+    assert_eq!(matching["llm"]["review_status"], "");
+
+    let app = runtime_router(&fixture);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::PUT)
+                .uri("/api/bills/import/v2/preview/session-a/update")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "id": row.id,
+                        "clearActionableSuggestions": {
+                            "transfer": true,
+                            "learning": false
+                        },
+                        "responseMode": "preview-item"
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    let matching = &body["data"]["previewItem"]["matching"];
+    assert!(body["data"]["previewItem"]["preview_matching_feedback"]
+        .get("transfer")
+        .is_none());
+    assert_eq!(matching["parser"]["parser_id"], "wechat");
+    assert_eq!(matching["dedup"]["type"], "remaining");
+    assert_eq!(matching["transfer"]["review_status"], "");
+
+    {
+        let runtime = runtime_for(fixture.db_path())?;
+        runtime.connection().execute(
+            "UPDATE bills_preview SET preview_matching_feedback_json = ?1 WHERE id = ?2",
+            params![
+                json!({
+                    "parser": {"parser_id": "wechat"},
+                    "dedup": {"type": "remaining"},
+                    "transfer": {"review_status": "pending"},
+                    "learning": {"review_status": "pending"},
+                    "llm": {"review_status": "pending"}
+                })
+                .to_string(),
+                row.id
+            ],
+        )?;
+    }
+    let app = runtime_router(&fixture);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::PUT)
+                .uri("/api/bills/import/v2/preview/session-a/update")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "id": row.id,
+                        "clearActionableSuggestions": true,
+                        "responseMode": "preview-item"
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    let persisted_feedback = &body["data"]["previewItem"]["preview_matching_feedback"];
+    assert!(persisted_feedback.get("transfer").is_none());
+    assert!(persisted_feedback.get("learning").is_none());
+    assert!(persisted_feedback.get("llm").is_none());
+
+    {
+        let runtime = runtime_for(fixture.db_path())?;
+        runtime.connection().execute(
+            "UPDATE bills_preview SET preview_matching_feedback_json = ?1 WHERE id = ?2",
+            params![
+                json!({
+                    "transfer": {"review_status": "accepted"},
+                    "learning": {"review_status": "rejected", "suppressed": true},
+                    "llm": {"review_status": "auto_applied"}
+                })
+                .to_string(),
+                row.id
+            ],
+        )?;
+    }
+    let app = runtime_router(&fixture);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::PUT)
+                .uri("/api/bills/import/v2/preview/session-a/update")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "id": row.id,
+                        "clearActionableSuggestions": true,
+                        "responseMode": "preview-item"
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    let persisted_feedback = &body["data"]["previewItem"]["preview_matching_feedback"];
+    assert_eq!(persisted_feedback["transfer"]["review_status"], "accepted");
+    assert_eq!(persisted_feedback["learning"]["review_status"], "rejected");
+    assert!(persisted_feedback.get("llm").is_none());
+
     Ok(())
 }
 

@@ -391,6 +391,100 @@ fn build_learning_previous_snapshot(preview: &ImportPreviewRow) -> Value {
     })
 }
 
+fn category_rule_account_baseline_snapshot(
+    tx: &rusqlite::Transaction<'_>,
+    user_id: UserId,
+    preview: &ImportPreviewRow,
+) -> DbResult<Option<Value>> {
+    let feedback = &preview.preview_matching_feedback;
+    if let Some(snapshot) = feedback
+        .get("stage2_baseline")
+        .and_then(normalize_stage2_baseline_snapshot)
+    {
+        return Ok(Some(snapshot));
+    }
+
+    let category = feedback
+        .get("category_rule")
+        .filter(|value| value.is_object())
+        .and_then(|value| value.get("category_id"))
+        .and_then(value_to_positive_i64)
+        .map(|category_id| import_preview_category_by_id(tx, user_id, category_id))
+        .transpose()?
+        .flatten();
+
+    let account = feedback.get("account").filter(|value| value.is_object());
+    let source_account_id = account
+        .and_then(|value| value.get("source_account_id"))
+        .and_then(value_to_positive_i64);
+    let destination_account_id = account
+        .and_then(|value| value.get("destination_account_id"))
+        .and_then(value_to_positive_i64);
+    if category.is_none() && source_account_id.is_none() && destination_account_id.is_none() {
+        return Ok(None);
+    }
+
+    let (preview_type, main_category, sub_category) = category
+        .as_ref()
+        .map(|category| {
+            (
+                preview_type_name_for_category_type(category.type_code)
+                    .unwrap_or(preview.preview_type.as_str())
+                    .to_string(),
+                category.main_category.clone(),
+                category.sub_category.clone(),
+            )
+        })
+        .unwrap_or_else(|| {
+            (
+                preview.preview_type.clone(),
+                preview.preview_main_category.clone(),
+                preview.preview_sub_category.clone(),
+            )
+        });
+    let source_account_id = source_account_id.or(preview.preview_source_account_id);
+    let destination_account_id = destination_account_id.or(preview.preview_destination_account_id);
+
+    Ok(Some(serde_json::json!({
+        "preview_type": preview_type,
+        "preview_main_category": main_category,
+        "preview_sub_category": sub_category,
+        "preview_source_account_id": source_account_id,
+        "preview_destination_account_id": destination_account_id,
+    })))
+}
+
+fn normalize_stage2_baseline_snapshot(value: &Value) -> Option<Value> {
+    let object = value.as_object()?;
+    let has_baseline_field = [
+        "preview_type",
+        "preview_main_category",
+        "preview_sub_category",
+        "preview_source_account_id",
+        "preview_destination_account_id",
+    ]
+    .iter()
+    .any(|field| object.contains_key(*field));
+    if !has_baseline_field {
+        return None;
+    }
+
+    Some(serde_json::json!({
+        "preview_type": snapshot_text(value, "preview_type"),
+        "preview_main_category": snapshot_text(value, "preview_main_category"),
+        "preview_sub_category": snapshot_text(value, "preview_sub_category"),
+        "preview_source_account_id": snapshot_account_id(value, "preview_source_account_id"),
+        "preview_destination_account_id": snapshot_account_id(value, "preview_destination_account_id"),
+    }))
+}
+
+fn value_to_positive_i64(value: &Value) -> Option<i64> {
+    if let Some(number) = value.as_i64() {
+        return (number > 0).then_some(number);
+    }
+    value.as_str().and_then(parse_positive_i64)
+}
+
 fn learning_accept_preview_snapshot(
     applied_result: Option<&ImportPreviewLearningApply>,
     preview: &ImportPreviewRow,
@@ -800,6 +894,28 @@ fn learning_preview_matches_snapshot(preview: &ImportPreviewRow, snapshot: &Valu
             == preview.preview_source_account_id
         && snapshot_account_id(snapshot, "preview_destination_account_id")
             == preview.preview_destination_account_id
+}
+
+fn transfer_preview_matches_snapshot(preview: &ImportPreviewRow, snapshot: &Value) -> bool {
+    snapshot_text(snapshot, "preview_type") == preview.preview_type
+        && snapshot_text(snapshot, "preview_main_category") == preview.preview_main_category
+        && snapshot_text(snapshot, "preview_sub_category") == preview.preview_sub_category
+        && snapshot_account_id(snapshot, "preview_source_account_id")
+            == preview.preview_source_account_id
+        && snapshot_account_id(snapshot, "preview_destination_account_id")
+            == preview.preview_destination_account_id
+        && snapshot_optional_i64(snapshot, "preview_recurring_id") == preview.preview_recurring_id
+        && snapshot_text(snapshot, "preview_recurring_name") == preview.preview_recurring_name
+        && snapshot_i64(snapshot, "preview_recurring_candidate_count")
+            == preview.preview_recurring_candidate_count
+        && (snapshot_f64(snapshot, "preview_recurring_match_score")
+            - preview.preview_recurring_match_score)
+            .abs()
+            < f64::EPSILON
+        && snapshot_text(snapshot, "preview_recurring_match_reasons")
+            == preview.preview_recurring_match_reasons
+        && snapshot_text(snapshot, "preview_recurring_matched_date")
+            == preview.preview_recurring_matched_date
 }
 
 fn preview_llm_not_found() -> ImportPreviewLlmDecisionResult {

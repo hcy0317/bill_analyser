@@ -306,6 +306,49 @@ describe('import preview server-paged reset guards', () => {
         expect(source).toContain('previewData.matching?.annotation?.is_manually_annotated');
     });
 
+    test('check-data manual edits clear only actionable suggestion families', () => {
+        const typeSource = readSource('src/views/desktop/transactions/import/checkDataTypes.ts');
+        const tabSource = readSource('src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue');
+
+        expect(typeSource).toContain('_shouldClearTransferDecision?: boolean;');
+        expect(typeSource).toContain('_shouldClearLearningDecision?: boolean;');
+        expect(typeSource).toContain('_shouldClearLlmDecision?: boolean;');
+        expect(tabSource).toContain('syncActionableSuggestionDraftState(item);');
+        expect(tabSource).toContain("const shouldClearTransferDecision = baseline.reviewStatus === 'pending';");
+        expect(tabSource).toContain('if (previewState._shouldClearLearningDecision) {');
+        expect(tabSource).toContain('if (!item.hasPendingLearningRecommendation()) {');
+        expect(tabSource).toContain('if (previewState._shouldClearLlmDecision) {');
+        expect(tabSource).toContain("clearLearningDecision ? 'learning' : ''");
+        expect(tabSource).toContain("clearLlmDecision ? 'llm' : ''");
+        expect(tabSource).toContain('clear_learning_decision: clearLearningDecision,');
+        expect(tabSource).toContain('clear_llm_decision: clearLlmDecision,');
+        expect(tabSource).toContain('clear_actionable_suggestions: clearActionableSuggestions,');
+        expect(tabSource.match(/syncTransferDecisionDraftState\(/g)).toHaveLength(3);
+    });
+
+    test('check-data keeps investment recognition out of actionable signal UI', () => {
+        const matchingSource = readSource('src/views/desktop/transactions/import/checkDataMatching.ts');
+        const signalCellSource = readSource('src/views/desktop/transactions/import/tabs/ImportPreviewSignalCell.vue');
+
+        expect(matchingSource).toContain('investment: null,');
+        expect(signalCellSource).not.toContain('investment-signal-group');
+        expect(signalCellSource).not.toContain('getInvestmentIcon');
+        expect(signalCellSource).not.toContain('mdiChartLine');
+    });
+
+    test('llm recommendation sync does not reset transfer suggestions blindly', () => {
+        const tabSource = readSource('src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue');
+        const functionIndex = tabSource.indexOf('function syncTransactionFromLLMPreviewPayload');
+        const nextFunctionIndex = tabSource.indexOf('function applyLLMSignalMemoryToTransactions', functionIndex);
+        const functionSource = tabSource.slice(functionIndex, nextFunctionIndex);
+
+        expect(functionIndex).toBeGreaterThanOrEqual(0);
+        expect(nextFunctionIndex).toBeGreaterThan(functionIndex);
+        expect(functionSource).not.toContain('resetTransferSuggestionDecisionState');
+        expect(functionSource).toContain('syncTransferDecisionBaseline(item);');
+        expect(functionSource).toContain('syncLearningDecisionBaseline(item);');
+    });
+
     test('transfer decision expected state tracks source and destination accounts', () => {
         const typeSource = readSource('src/views/desktop/transactions/import/checkDataTypes.ts');
         const tabSource = readSource('src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue');
