@@ -56,25 +56,9 @@
                                             </v-btn>
                                             <span>{{ tt('Account List') }}</span>
                                             <v-btn class="ms-3" color="default" variant="outlined"
-                                                   :prepend-icon="mdiShapePlusOutline"
-                                                   :disabled="loading">
+                                                   :disabled="loading"
+                                                   @click="addAccountForCurrentCategory">
                                                 {{ tt('Add') }}
-                                                <v-menu activator="parent">
-                                                    <v-list>
-                                                        <v-list-group value="add-account">
-                                                            <template #activator="{ props: addAccountProps }">
-                                                                <v-list-item v-bind="addAccountProps"
-                                                                             :title="tt('Add Account')"
-                                                                             :prepend-icon="mdiShapePlusOutline"></v-list-item>
-                                                            </template>
-                                                            <v-list-item :key="accountCategory.type"
-                                                                         :title="tt(accountCategory.name)"
-                                                                         :prepend-icon="mdiShapePlusOutline"
-                                                                         @click="addAccountForCategory(accountCategory.type)"
-                                                                         v-for="accountCategory in AccountCategory.values()"></v-list-item>
-                                                        </v-list-group>
-                                                    </v-list>
-                                                </v-menu>
                                             </v-btn>
                                             <settings-json-import-export-button
                                                 section-key="accounts"
@@ -377,8 +361,7 @@ import {
     mdiListBoxOutline,
     mdiInvoiceListOutline,
     mdiDrag,
-    mdiDotsVertical,
-    mdiShapePlusOutline
+    mdiDotsVertical
 } from '@mdi/js';
 
 type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
@@ -538,6 +521,10 @@ function addAccountForCategory(category: number): void {
             snackbar.value?.showError(error);
         }
     });
+}
+
+function addAccountForCurrentCategory(): void {
+    addAccountForCategory(activeAccountCategoryType.value);
 }
 
 function edit(account: Account): void {
