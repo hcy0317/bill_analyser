@@ -160,6 +160,20 @@ mod tests {
         );
         assert_eq!(
             connection.query_row(
+                "SELECT COUNT(*) FROM category_rules
+                 WHERE user_id = 1
+                   AND name IN (
+                       'default:投资收益/理财收益',
+                       'default:金融保险/投资支出',
+                       'default:交通出行/公交地铁'
+                   )",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?,
+            3
+        );
+        assert_eq!(
+            connection.query_row(
                 "SELECT name, aliases FROM accounts WHERE id = 1",
                 [],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),

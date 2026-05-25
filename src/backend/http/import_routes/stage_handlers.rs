@@ -218,6 +218,52 @@ struct ImportRecurringCandidateMatch {
     matched_occurrence_date: String,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ImportPreviewBuiltinCategoryFallback {
+    category_type: i64,
+    main_category: &'static str,
+    sub_category: &'static str,
+    keywords: &'static [&'static str],
+}
+
+const BUILTIN_CATEGORY_RULE_FALLBACKS: &[ImportPreviewBuiltinCategoryFallback] = &[
+    ImportPreviewBuiltinCategoryFallback {
+        category_type: 2,
+        main_category: "投资收益",
+        sub_category: "理财收益",
+        keywords: &[
+            "理财收益",
+            "收益发放",
+            "余额宝收益",
+            "零钱通收益",
+            "基金分红",
+            "股息",
+        ],
+    },
+    ImportPreviewBuiltinCategoryFallback {
+        category_type: 3,
+        main_category: "金融保险",
+        sub_category: "投资支出",
+        keywords: &[
+            "理财通购买",
+            "理财购买",
+            "购买理财",
+            "基金申购",
+            "基金定投",
+            "定投扣款",
+            "基金买入",
+            "证券买入",
+            "投资支出",
+        ],
+    },
+    ImportPreviewBuiltinCategoryFallback {
+        category_type: 3,
+        main_category: "交通出行",
+        sub_category: "公交地铁",
+        keywords: &["公共交通", "公交地铁", "轨道交通", "乘车码"],
+    },
+];
+
 fn apply_import_intelligence_chain(
     connection: &mut Connection,
     user_id: UserId,
@@ -259,7 +305,9 @@ fn apply_import_intelligence_chain(
     let mut applied_learning_rule_ids = Vec::new();
     for draft in &mut *drafts {
         ensure_base_matching_feedback(draft);
-        if apply_category_rule_match(draft, &category_rules) {
+        if apply_category_rule_match(draft, &category_rules)
+            || apply_builtin_category_rule_fallback(draft, &categories)
+        {
             stats.category_matched += 1;
         }
         if apply_transfer_pair_account_match(draft, &accounts) {
@@ -655,6 +703,82 @@ fn apply_category_rule_match(
         }
     }
     false
+}
+
+fn apply_builtin_category_rule_fallback(
+    draft: &mut ImportPreviewDraft,
+    categories: &[ImportIntelligenceCategory],
+) -> bool {
+    if preview_type_code(&draft.preview_type)
+        .is_some_and(|expected_type| preview_category_matches_type(draft, categories, expected_type))
+    {
+        return false;
+    }
+
+    let combined_text = normalize_category_fallback_text(&import_preview_rule_text(draft));
+    let current_category_text = normalize_category_fallback_text(&format!(
+        "{} {}",
+        draft.preview_main_category, draft.preview_sub_category
+    ));
+
+    for fallback in BUILTIN_CATEGORY_RULE_FALLBACKS {
+        if !category_type_matches_preview(fallback.category_type, &draft.preview_type)
+            || !fallback.keywords.iter().any(|keyword| {
+                let keyword = normalize_category_fallback_text(keyword);
+                !keyword.is_empty()
+                    && (combined_text.contains(&keyword)
+                        || current_category_text.contains(&keyword))
+            })
+        {
+            continue;
+        }
+
+        let Some(category) = find_import_intelligence_category(
+            categories,
+            fallback.category_type,
+            fallback.main_category,
+            fallback.sub_category,
+        ) else {
+            continue;
+        };
+
+        draft.preview_main_category = category.main_category.clone();
+        draft.preview_sub_category = category.sub_category.clone();
+        normalize_preview_type_for_category(draft, category.type_code);
+        matching_feedback_object_mut(draft).insert(
+            "category_rule".to_string(),
+            json!({
+                "rule_id": Value::Null,
+                "category_id": category.id,
+                "priority": Value::Null,
+                "reason": "built-in category rule fallback matched import text",
+                "review_status": "auto_applied",
+            }),
+        );
+        return true;
+    }
+
+    false
+}
+
+fn normalize_category_fallback_text(value: &str) -> String {
+    value
+        .trim()
+        .to_ascii_lowercase()
+        .replace(char::is_whitespace, "")
+}
+
+fn find_import_intelligence_category<'a>(
+    categories: &'a [ImportIntelligenceCategory],
+    category_type: i64,
+    main_category: &str,
+    sub_category: &str,
+) -> Option<&'a ImportIntelligenceCategory> {
+    categories.iter().find(|category| {
+        category.type_code == category_type
+            && category.main_category.trim() == main_category
+            && category.sub_category.trim() == sub_category
+    })
 }
 
 fn apply_account_alias_match(
@@ -2830,6 +2954,71 @@ mod stage_handler_transfer_account_tests {
         assert!(apply_transfer_pair_account_match(&mut draft, &transfer_accounts()));
         assert_eq!(draft.preview_source_account_id, Some(100));
         assert_eq!(draft.preview_destination_account_id, None);
+    }
+
+    fn fallback_categories() -> Vec<ImportIntelligenceCategory> {
+        vec![
+            ImportIntelligenceCategory {
+                id: 10,
+                type_code: 2,
+                main_category: "投资收益".to_string(),
+                sub_category: "理财收益".to_string(),
+            },
+            ImportIntelligenceCategory {
+                id: 11,
+                type_code: 3,
+                main_category: "金融保险".to_string(),
+                sub_category: "投资支出".to_string(),
+            },
+            ImportIntelligenceCategory {
+                id: 12,
+                type_code: 3,
+                main_category: "交通出行".to_string(),
+                sub_category: "公交地铁".to_string(),
+            },
+        ]
+    }
+
+    #[test]
+    fn builtin_category_rule_fallback_fills_investment_income_expense_and_transport_paths() {
+        let categories = fallback_categories();
+        let mut income = ImportPreviewDraft {
+            preview_type: "收入".to_string(),
+            preview_description: "余额宝-2026.01.14-收益发放".to_string(),
+            preview_counterparty: "支付宝（中国）网络技术有限公司".to_string(),
+            preview_payment_method: "余额宝".to_string(),
+            preview_parser_id: "alipay".to_string(),
+            ..ImportPreviewDraft::default()
+        };
+        assert!(apply_builtin_category_rule_fallback(&mut income, &categories));
+        assert_eq!(income.preview_main_category, "投资收益");
+        assert_eq!(income.preview_sub_category, "理财收益");
+        assert_eq!(
+            income
+                .preview_matching_feedback
+                .pointer("/category_rule/category_id")
+                .and_then(Value::as_i64),
+            Some(10)
+        );
+
+        let mut expense = ImportPreviewDraft {
+            preview_type: "支出".to_string(),
+            preview_description: "理财通购买".to_string(),
+            preview_parser_id: "wechat".to_string(),
+            ..ImportPreviewDraft::default()
+        };
+        assert!(apply_builtin_category_rule_fallback(&mut expense, &categories));
+        assert_eq!(expense.preview_main_category, "金融保险");
+        assert_eq!(expense.preview_sub_category, "投资支出");
+
+        let mut transport = ImportPreviewDraft {
+            preview_type: "支出".to_string(),
+            preview_sub_category: "公共交通".to_string(),
+            ..ImportPreviewDraft::default()
+        };
+        assert!(apply_builtin_category_rule_fallback(&mut transport, &categories));
+        assert_eq!(transport.preview_main_category, "交通出行");
+        assert_eq!(transport.preview_sub_category, "公交地铁");
     }
 
     #[test]
