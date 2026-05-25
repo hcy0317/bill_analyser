@@ -2547,7 +2547,7 @@ fn parser_templates_flow_through_smart_dedup_into_preview_drafts() -> Result<(),
     assert_eq!(preview_drafts.len(), 1);
     assert_eq!(preview_drafts[0].preview_type, "转账");
     assert_eq!(preview_drafts[0].preview_amount, 100.0);
-    assert_eq!(preview_drafts[0].preview_destination_amount, 0.0);
+    assert_eq!(preview_drafts[0].preview_destination_amount, 100.0);
     assert_eq!(preview_drafts[0].preview_source_account_id, Some(101));
     assert_eq!(preview_drafts[0].preview_destination_account_id, Some(202));
     assert_eq!(preview_drafts[0].dedup_type.as_deref(), Some("transfer"));

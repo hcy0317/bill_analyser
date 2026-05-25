@@ -38,11 +38,18 @@ fn parser_template_type(transaction_type: &str, amount: Money) -> String {
 }
 
 fn preview_destination_amount_for_bill(bill: &DedupBill, amount: f64) -> f64 {
-    if is_investment_type(&bill.transaction_type) {
+    if is_investment_type(&bill.transaction_type) || is_transfer_type(&bill.transaction_type) {
         amount.abs()
     } else {
         0.0
     }
+}
+
+fn is_transfer_type(bill_type: &str) -> bool {
+    matches!(
+        bill_type.trim().to_ascii_lowercase().as_str(),
+        "转账" | "transfer" | "4"
+    )
 }
 
 fn is_investment_type(bill_type: &str) -> bool {
@@ -188,6 +195,15 @@ mod import_value_helper_tests {
             investment.preview_parser_tags,
             Some(serde_json::json!(["parser:alipay"]))
         );
+
+        let transfer = preview_draft_from_dedup_bill(&DedupBill {
+            amount: Money::from_cents(3300),
+            transaction_type: "转账".to_string(),
+            source_account_id: "5".to_string(),
+            destination_account_id: Some("6".to_string()),
+            ..DedupBill::default()
+        });
+        assert_eq!(transfer.preview_destination_amount, 33.0);
 
         let no_tag_preview = preview_draft_from_dedup_bill(&DedupBill::default());
         assert!(no_tag_preview.preview_parser_tags.is_none());
