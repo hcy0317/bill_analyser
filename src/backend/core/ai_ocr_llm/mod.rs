@@ -8,6 +8,7 @@ mod llm_provider;
 mod llm_responses;
 mod ocr_config;
 mod ocr_parser;
+mod provider_auth;
 mod receipt_draft;
 mod secret_redaction;
 mod types;
@@ -39,11 +40,17 @@ pub use ocr_config::{
     normalize_ocr_provider_name, ocr_available_providers_with_disabled, ocr_error_http_status,
 };
 pub use ocr_parser::parse_payment_screenshot_text;
+pub use provider_auth::{
+    normalize_provider_auth_config, provider_auth_access_token,
+    provider_auth_has_refresh_credential, provider_auth_is_expired, provider_auth_refresh_token,
+    redact_provider_auth_config,
+};
 pub use receipt_draft::build_receipt_transaction_draft;
 pub use types::{
     AiRouteResponse, LlmProviderConfigContract, OcrConfigContract, OcrProviderTextLine,
     OcrProviderTextResult, PaymentScreenshotParseContract, ReceiptDraftAccount,
     ReceiptDraftCategory, ReceiptDraftCategoryRule, ReceiptDraftContext, ReceiptDraftField,
     ReceiptDraftTag, ReceiptTransactionDraft, LLM_AVAILABLE_PROVIDERS, LLM_SYSTEM_PROMPT,
-    OCR_AVAILABLE_PROVIDERS, OCR_DEFAULT_LANG, OCR_DISABLED_PROVIDER_NAME,
+    NETWORK_OCR_PROVIDER_NAME, OCR_AVAILABLE_PROVIDERS, OCR_DEFAULT_LANG,
+    OCR_DISABLED_PROVIDER_NAME,
 };

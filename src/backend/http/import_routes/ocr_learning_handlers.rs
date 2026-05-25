@@ -68,7 +68,7 @@ pub async fn ocr_recognition_runtime_handler(
     if let Err(response) = init_ocr_runtime_schema(&runtime) {
         return route_response(response);
     }
-    let config = match load_ocr_config_setting(runtime.connection()) {
+    let mut config = match load_ocr_config_setting(runtime.connection()) {
         Ok(config) => config,
         Err(error) => return route_response(db_error_response(error)),
     };
@@ -93,6 +93,49 @@ pub async fn ocr_recognition_runtime_handler(
             "rate_limited",
             Some("ocr per-user rate limit exceeded"),
         ));
+    }
+    if config.provider == NETWORK_OCR_PROVIDER_NAME
+        && provider_auth_is_expired(&config.credential_config, Utc::now())
+    {
+        let client = match reqwest::Client::builder()
+            .timeout(StdDuration::from_secs(60))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+        {
+            Ok(client) => client,
+            Err(_) => {
+                return ai_route_response(build_ocr_error_response(
+                    "provider_unconfigured",
+                    Some("OCR provider unavailable"),
+                ))
+            }
+        };
+        let refreshed =
+            match refresh_provider_auth_profile(&client, &config.credential_config, &config.base_url)
+                .await
+            {
+                Ok(refreshed) => refreshed,
+                Err(_) => {
+                    return ai_route_response(build_ocr_error_response(
+                        "provider_relogin_required",
+                        Some(
+                            "OCR provider authorization expired; sign in again or refresh credentials",
+                        ),
+                    ))
+                }
+            };
+        let stored_config = json!({
+            "provider": config.provider,
+            "lang": config.lang,
+            "model": config.model,
+            "base_url": config.base_url,
+            "parameters": config.parameters,
+            "credential_config": refreshed,
+        });
+        config = match store_ocr_config_setting(runtime.connection(), Some(&stored_config)) {
+            Ok(config) => config,
+            Err(error) => return route_response(db_error_response(error)),
+        };
     }
     let request_id = format!(
         "rust-ocr-{}",

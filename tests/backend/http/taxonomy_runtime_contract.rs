@@ -2857,6 +2857,7 @@ async fn taxonomy_settings_bundle_export_runtime_serves_raw_bundle_and_sensitive
     let bundle = read_json(export_response).await;
     assert_eq!(bundle["schemaVersion"], 1);
     assert_eq!(bundle["secretsPolicy"]["llmApiKeys"], "redacted");
+    assert_eq!(bundle["secretsPolicy"]["providerCredentials"], "redacted");
     assert_eq!(bundle["counts"]["accounts"], 2);
     assert_eq!(bundle["counts"]["transactionTags"], 2);
     assert_eq!(bundle["counts"]["categoryRecognitionRules"], 2);
@@ -2884,6 +2885,10 @@ async fn taxonomy_settings_bundle_export_runtime_serves_raw_bundle_and_sensitive
     );
     assert_eq!(bundle["sections"]["llmConfigs"][0]["apiKey"], "");
     assert_eq!(bundle["sections"]["llmConfigs"][0]["hasApiKey"], true);
+    assert_eq!(
+        bundle["sections"]["llmConfigs"][0]["credentialConfig"]["access_token"],
+        "********"
+    );
     assert_eq!(
         bundle["sections"]["llmConfigs"][0]["advancedSettings"]["reasoning_depth"],
         "high"
@@ -2952,12 +2957,24 @@ async fn taxonomy_settings_bundle_export_runtime_serves_raw_bundle_and_sensitive
         .await?;
     assert_eq!(sensitive_post_response.status(), StatusCode::OK);
     let sensitive_section = read_json(sensitive_post_response).await;
+    assert_eq!(sensitive_section["secretsPolicy"]["llmApiKeys"], "included");
+    assert_eq!(
+        sensitive_section["secretsPolicy"]["providerCredentials"],
+        "included"
+    );
     assert_eq!(sensitive_section["counts"]["llmConfigs"], 1);
     assert_eq!(
         sensitive_section["sections"]["llmConfigs"][0]["hasApiKey"],
         true
     );
-    assert!(!serde_json::to_string(&sensitive_section)?.contains("secret-key"));
+    assert_eq!(
+        sensitive_section["sections"]["llmConfigs"][0]["apiKey"],
+        "secret-key"
+    );
+    assert_eq!(
+        sensitive_section["sections"]["llmConfigs"][0]["credentialConfig"]["access_token"],
+        "secret-key"
+    );
 
     let invalid_section_response = app
         .clone()
@@ -3082,13 +3099,29 @@ async fn taxonomy_settings_bundle_import_runtime_previews_and_upserts_sections(
                 "model": "gpt-imported",
                 "apiKey": "sk-imported-secret",
                 "baseUrl": "https://example.test/v1",
+                "credentialConfig": {
+                    "credential_mode": "session_json",
+                    "credential_json": {
+                        "accessToken": "session-access",
+                        "refresh_token": "session-refresh"
+                    },
+                    "token_endpoint": "https://example.test/oauth/token",
+                    "refresh_body": {"client_id": "desktop"}
+                },
                 "advancedSettings": {"reasoning_depth": "medium"},
                 "isActive": true
             }],
             "ocrConfig": [{
                 "externalRef": "ocrConfig:receipt-recognition",
                 "provider": "cloud_stub",
-                "lang": "eng"
+                "lang": "eng",
+                "model": "vision-model",
+                "baseUrl": "https://ocr.example.test/v1",
+                "parameters": {"temperature": 0},
+                "credentialConfig": {
+                    "credential_mode": "access_token",
+                    "credential_json": {"access_token": "ocr-access"}
+                }
             }]
         }
     });
@@ -3147,9 +3180,12 @@ async fn taxonomy_settings_bundle_import_runtime_previews_and_upserts_sections(
             0
         )
     );
+    assert!(
+        llm_credential_config_by_name(&fixture.db_path, "导入 LLM")?.contains("session-refresh")
+    );
     assert_eq!(
         app_setting_value(&fixture.db_path, "receipt_ocr_config")?,
-        "{\"lang\":\"eng\",\"provider\":\"cloud_stub\"}"
+        "{\"base_url\":\"https://ocr.example.test/v1\",\"credential_config\":{\"access_token\":\"ocr-access\",\"credential_json\":{\"access_token\":\"ocr-access\"},\"credential_mode\":\"access_token\"},\"lang\":\"eng\",\"model\":\"vision-model\",\"parameters\":{\"temperature\":0},\"provider\":\"cloud_stub\"}"
     );
 
     let second_import = app
@@ -4950,6 +4986,14 @@ fn llm_config_by_name(path: &Path, name: &str) -> Result<(String, String, i64), 
                 row.get::<_, i64>(2)?,
             ))
         },
+    )?)
+}
+
+fn llm_credential_config_by_name(path: &Path, name: &str) -> Result<String, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT credential_config FROM llm_configs WHERE user_id = 42 AND name = ?1",
+        [name],
+        |row| row.get::<_, String>(0),
     )?)
 }
 

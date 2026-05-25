@@ -165,6 +165,9 @@ mod tests {
             config: build_llm_provider_config(provider, Some(&provider_config))
                 .expect("provider contract"),
             api_key: "secret-key".to_string(),
+            credential_config: json!({"access_token": "secret-key"}),
+            config_id: None,
+            user_id: None,
             system_prompt: "system prompt".to_string(),
             temperature: 0.25,
             max_tokens: 128,
@@ -183,6 +186,9 @@ mod tests {
                 provider_name: "openai_compatible".to_string(),
             },
             api_key: "secret-key".to_string(),
+            credential_config: json!({"access_token": "secret-key"}),
+            config_id: None,
+            user_id: None,
             system_prompt: "system prompt".to_string(),
             temperature: 0.25,
             max_tokens: 128,
@@ -443,6 +449,91 @@ mod tests {
         assert!(execute_llm_provider_request(&state, &refused, "transport")
             .await
             .is_err());
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn llm_provider_execution_refreshes_expired_access_tokens() {
+        let refresh_count = std::sync::Arc::new(AtomicU64::new(0));
+        let refresh_count_for_route = refresh_count.clone();
+        let app = Router::new()
+            .route(
+                "/oauth/token",
+                post(move || {
+                    let refresh_count = refresh_count_for_route.clone();
+                    async move {
+                        refresh_count.fetch_add(1, Ordering::SeqCst);
+                        Json(json!({
+                            "access_token": "fresh-token",
+                            "refresh_token": "fresh-refresh",
+                            "expires_in": 3600,
+                        }))
+                    }
+                }),
+            )
+            .route(
+                "/chat/completions",
+                post(|headers: HeaderMap| async move {
+                    if headers
+                        .get("authorization")
+                        .and_then(|value| value.to_str().ok())
+                        == Some("Bearer fresh-token")
+                    {
+                        (
+                            StatusCode::OK,
+                            Json(json!({"choices": [{"message": {"content": "[{\"bill_id\":1}]"}}]})),
+                        )
+                            .into_response()
+                    } else {
+                        (StatusCode::UNAUTHORIZED, "expired").into_response()
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let addr = listener.local_addr().expect("addr");
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("provider server");
+        });
+        let base_url = format!("http://{addr}");
+        let context = LlmProviderRequestContext {
+            config: LlmProviderConfigContract {
+                provider: "openai_compatible".to_string(),
+                normalized_provider: "openai_compatible".to_string(),
+                provider_kind: "openai_compatible".to_string(),
+                base_url: base_url.clone(),
+                model: "fake".to_string(),
+                provider_name: "openai_compatible".to_string(),
+            },
+            api_key: "expired-token".to_string(),
+            credential_config: json!({
+                "access_token": "expired-token",
+                "refresh_token": "refresh-token",
+                "expires_at": "2000-01-01T00:00:00Z",
+                "token_endpoint": format!("{base_url}/oauth/token"),
+            }),
+            config_id: None,
+            user_id: None,
+            system_prompt: "system prompt".to_string(),
+            temperature: 0.25,
+            max_tokens: 128,
+            reasoning_depth: "low".to_string(),
+        };
+        let config = HttpShellConfig::new_with_import_route_mode(
+            "http://127.0.0.1:9".to_string(),
+            StdDuration::from_millis(50),
+            1024,
+            crate::config::ImportRouteMode::ImportDbRuntime,
+        )
+        .expect("config");
+        let state = HttpAppState::new(config).expect("state");
+
+        let response = execute_llm_provider_request(&state, &context, "ok")
+            .await
+            .expect("refreshed provider response");
+        assert_eq!(response.content, "[{\"bill_id\":1}]");
+        assert_eq!(refresh_count.load(Ordering::SeqCst), 1);
         handle.abort();
     }
 

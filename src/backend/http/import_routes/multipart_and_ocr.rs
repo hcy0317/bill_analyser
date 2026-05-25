@@ -70,6 +70,9 @@ struct LegacyImportParseResult {
     detected_parser_type: String,
 }
 
+#[derive(Debug)]
+struct ProviderAuthRefreshError;
+
 fn content_type_from_headers(headers: &HeaderMap) -> String {
     headers
         .get(http::header::CONTENT_TYPE)
@@ -155,6 +158,7 @@ async fn run_ocr_provider(
         )),
         "tesseract" => run_tesseract_ocr(config.lang.clone(), image_bytes, mime).await,
         "local_json_ocr" => run_local_json_ocr(image_bytes, mime).await,
+        NETWORK_OCR_PROVIDER_NAME => run_network_llm_ocr(config, image_bytes, mime).await,
         _ => Err(build_ocr_error_response(
             "provider_unconfigured",
             Some("ocr provider not configured"),
@@ -674,9 +678,310 @@ fn llm_config_update_from_map(object: &Map<String, Value>) -> LlmConfigUpdate {
         model: object.get("model").and_then(value_to_text),
         api_key,
         base_url: object.get("base_url").and_then(value_to_text),
+        credential_config: first_value(
+            object,
+            &["credential_config", "credentialConfig", "auth_profile", "authProfile"],
+        )
+        .cloned(),
         advanced_settings: object.get("advanced_settings").cloned(),
         is_active: object.get("is_active").and_then(Value::as_bool),
     }
+}
+
+async fn refresh_provider_auth_profile(
+    client: &reqwest::Client,
+    credential_config: &Value,
+    provider_base_url: &str,
+) -> Result<Value, ProviderAuthRefreshError> {
+    let token_endpoint = credential_config
+        .get("token_endpoint")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or(ProviderAuthRefreshError)?;
+    validate_provider_token_endpoint(token_endpoint, provider_base_url)
+        .map_err(|_| ProviderAuthRefreshError)?;
+
+    let mut url = Url::parse(token_endpoint).map_err(|_| ProviderAuthRefreshError)?;
+    if let Some(params) = credential_config
+        .get("refresh_params")
+        .and_then(Value::as_object)
+        .or_else(|| {
+            credential_config
+                .get("request_params")
+                .and_then(Value::as_object)
+        })
+    {
+        for (key, value) in params {
+            if let Some(value) = header_value_text(value) {
+                url.query_pairs_mut().append_pair(key, &value);
+            }
+        }
+    }
+    let mut request = client.post(url);
+    if let Some(headers) = credential_config
+        .get("refresh_headers")
+        .and_then(Value::as_object)
+    {
+        for (key, value) in headers {
+            if let Some(value) = header_value_text(value) {
+                request = request.header(key, value);
+            }
+        }
+    }
+
+    let mut body = credential_config
+        .get("refresh_body")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    if !body.contains_key("grant_type") {
+        body.insert("grant_type".to_string(), json!("refresh_token"));
+    }
+    if !body.contains_key("refresh_token") {
+        let refresh_token =
+            provider_auth_refresh_token(credential_config).ok_or(ProviderAuthRefreshError)?;
+        body.insert("refresh_token".to_string(), json!(refresh_token));
+    }
+
+    let response = request
+        .header("content-type", "application/json")
+        .body(Value::Object(body).to_string())
+        .send()
+        .await
+        .map_err(|_| ProviderAuthRefreshError)?;
+    if !response.status().is_success() {
+        return Err(ProviderAuthRefreshError);
+    }
+    let raw_text = read_limited_llm_provider_body(response)
+        .await
+        .map_err(|_| ProviderAuthRefreshError)?;
+    let response_json =
+        serde_json::from_str::<Value>(&raw_text).map_err(|_| ProviderAuthRefreshError)?;
+    merge_refreshed_provider_auth_profile(credential_config, &response_json)
+        .ok_or(ProviderAuthRefreshError)
+}
+
+fn merge_refreshed_provider_auth_profile(current: &Value, response: &Value) -> Option<Value> {
+    let mut merged = current.as_object().cloned().unwrap_or_default();
+    let refreshed = normalize_provider_auth_config(Some(response));
+    let refreshed_object = refreshed.as_object()?;
+    for key in [
+        "access_token",
+        "refresh_token",
+        "expires_at",
+        "credential_mode",
+        "credential_json",
+    ] {
+        if let Some(value) = refreshed_object.get(key) {
+            merged.insert(key.to_string(), value.clone());
+        }
+    }
+    if !merged.contains_key("refresh_token") {
+        if let Some(refresh_token) = provider_auth_refresh_token(current) {
+            merged.insert("refresh_token".to_string(), json!(refresh_token));
+        }
+    }
+    if !merged.contains_key("token_endpoint") {
+        if let Some(token_endpoint) = current.get("token_endpoint").cloned() {
+            merged.insert("token_endpoint".to_string(), token_endpoint);
+        }
+    }
+    let normalized = normalize_provider_auth_config(Some(&Value::Object(merged)));
+    provider_auth_access_token(&normalized)?;
+    Some(normalized)
+}
+
+fn validate_provider_token_endpoint(
+    token_endpoint: &str,
+    provider_base_url: &str,
+) -> Result<(), String> {
+    let parsed = parse_provider_runtime_url(token_endpoint)?;
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("token endpoint must not contain credentials".to_string());
+    }
+    if provider_url_is_same_origin(&parsed, provider_base_url)
+        || provider_url_is_allowlisted(&parsed, "BILL_ANALYSER_LLM_TOKEN_URL_ALLOWLIST")
+    {
+        if parsed.scheme() == "https" || provider_url_is_local_http(&parsed) {
+            return Ok(());
+        }
+        return Err("token endpoint must use https unless it is local".to_string());
+    }
+    Err("token endpoint is not allowed".to_string())
+}
+
+fn parse_provider_runtime_url(value: &str) -> Result<Url, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.contains('\\') || trimmed.chars().any(char::is_control) {
+        return Err("provider url is not allowed".to_string());
+    }
+    let parsed = Url::parse(trimmed).map_err(|_| "provider url must be valid".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err("provider url must use http or https with a host".to_string());
+    }
+    Ok(parsed)
+}
+
+fn provider_url_is_same_origin(parsed: &Url, other_url: &str) -> bool {
+    Url::parse(other_url)
+        .map(|other| {
+            parsed.scheme() == other.scheme()
+                && parsed.host_str().map(str::to_ascii_lowercase)
+                    == other.host_str().map(str::to_ascii_lowercase)
+                && parsed.port_or_known_default() == other.port_or_known_default()
+        })
+        .unwrap_or(false)
+}
+
+fn provider_url_is_allowlisted(parsed: &Url, env_key: &str) -> bool {
+    let origin = provider_url_origin(parsed);
+    let full = parsed.as_str().trim_end_matches('/').to_ascii_lowercase();
+    env::var(env_key)
+        .unwrap_or_default()
+        .split([',', ';'])
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| entry.trim_end_matches('/').to_ascii_lowercase())
+        .any(|entry| entry == full || entry == origin)
+}
+
+fn provider_url_is_local_http(parsed: &Url) -> bool {
+    parsed.scheme() == "http"
+        && parsed.host_str().is_some_and(|host| {
+            host.eq_ignore_ascii_case("localhost")
+                || host.ends_with(".localhost")
+                || host == "127.0.0.1"
+                || host == "::1"
+        })
+}
+
+fn provider_url_origin(parsed: &Url) -> String {
+    let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
+    match parsed.port() {
+        Some(port) => format!("{}://{}:{port}", parsed.scheme(), host),
+        None => format!("{}://{}", parsed.scheme(), host),
+    }
+}
+
+fn header_value_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.trim().to_string()),
+        Value::Number(number) => Some(number.to_string()),
+        Value::Bool(flag) => Some(flag.to_string()),
+        _ => None,
+    }
+    .filter(|value| !value.is_empty())
+}
+
+async fn run_network_llm_ocr(
+    config: &OcrConfigContract,
+    image_bytes: Vec<u8>,
+    mime: String,
+) -> Result<OcrProviderTextResult, AiRouteResponse> {
+    let client = reqwest::Client::builder()
+        .timeout(StdDuration::from_secs(60))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| build_ocr_error_response("provider_unconfigured", Some("OCR provider unavailable")))?;
+    let mut credential_config = config.credential_config.clone();
+    if provider_auth_is_expired(&credential_config, Utc::now()) {
+        credential_config = refresh_provider_auth_profile(&client, &credential_config, &config.base_url)
+            .await
+            .map_err(|_| {
+                build_ocr_error_response(
+                    "provider_relogin_required",
+                    Some("OCR provider authorization expired; sign in again or refresh credentials"),
+                )
+            })?;
+    }
+    let Some(access_token) = provider_auth_access_token(&credential_config) else {
+        return Err(build_ocr_error_response(
+            "provider_relogin_required",
+            Some("OCR provider authorization is missing; sign in again or refresh credentials"),
+        ));
+    };
+    let base_url = config.base_url.trim_end_matches('/');
+    if base_url.is_empty() {
+        return Err(build_ocr_error_response(
+            "provider_unconfigured",
+            Some("OCR provider base URL is required"),
+        ));
+    }
+    let url = format!("{base_url}/chat/completions");
+    validate_provider_token_endpoint(&url, base_url).map_err(|_| {
+        build_ocr_error_response("provider_unconfigured", Some("OCR provider base URL is not allowed"))
+    })?;
+    let encoded = general_purpose::STANDARD.encode(&image_bytes);
+    let model = if config.model.trim().is_empty() {
+        "gpt-4o-mini".to_string()
+    } else {
+        config.model.clone()
+    };
+    let payload = json!({
+        "model": model,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Extract all visible receipt or payment screenshot text. Return plain text only."},
+                {"type": "image_url", "image_url": {"url": format!("data:{mime};base64,{encoded}")}}
+            ]
+        }],
+        "temperature": config.parameters.get("temperature").and_then(Value::as_f64).unwrap_or(0.0),
+        "max_tokens": config.parameters.get("max_tokens").and_then(Value::as_i64).unwrap_or(1200),
+    });
+    let response = client
+        .post(&url)
+        .header("authorization", format!("Bearer {access_token}"))
+        .header("content-type", "application/json")
+        .body(payload.to_string())
+        .send()
+        .await
+        .map_err(|_| build_ocr_error_response("provider_unconfigured", Some("OCR provider request failed")))?;
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(build_ocr_error_response(
+            "provider_relogin_required",
+            Some("OCR provider authorization expired; sign in again or refresh credentials"),
+        ));
+    }
+    if !response.status().is_success() {
+        return Err(build_ocr_error_response(
+            "provider_unconfigured",
+            Some("OCR provider returned an error"),
+        ));
+    }
+    let raw_text = read_limited_llm_provider_body(response)
+        .await
+        .map_err(|_| build_ocr_error_response("parse_error", Some("OCR provider returned invalid response")))?;
+    let raw_response = serde_json::from_str::<Value>(&raw_text)
+        .map_err(|_| build_ocr_error_response("parse_error", Some("OCR provider returned invalid JSON")))?;
+    let text = raw_response
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if text.is_empty() {
+        return Err(build_ocr_error_response(
+            "parse_error",
+            Some("OCR provider returned empty text"),
+        ));
+    }
+    Ok(OcrProviderTextResult {
+        text,
+        confidence: 0.8,
+        model,
+        raw_provider_response: json!({
+            "engine": NETWORK_OCR_PROVIDER_NAME,
+            "mime": mime,
+            "provider": raw_response,
+        }),
+        lines: Vec::new(),
+    })
 }
 
 fn llm_not_found_response(message: &str) -> ImportV2RouteResponse {

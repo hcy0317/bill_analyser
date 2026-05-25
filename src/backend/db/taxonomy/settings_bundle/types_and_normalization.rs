@@ -83,6 +83,7 @@ struct ExistingTags {
 struct ExistingLlmConfig {
     id: i64,
     api_key: String,
+    credential_config: String,
 }
 
 pub fn normalize_settings_bundle_sections(bundle: &Value) -> DbResult<Value> {

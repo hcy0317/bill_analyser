@@ -45,7 +45,7 @@ Rust auth runtime 校验 Bearer access token，2FA、step-up、user-data clear�
 
 ### LLM/OCR
 
-LLM 临时配置保存在 Rust 进程内 user-scoped map，saved config 落库并脱敏；provider 生成保留 allowlist/SSRF 防护、响应体上限、候选截断和 rate limit。OCR recognition 默认 disabled，配置后通过 provider 返回结构化交易草稿。
+LLM 临时配置保存在 Rust 进程内 user-scoped map，saved config 落库并按既有 API key 规则脱敏；saved config 还保存 provider auth profile，支持 API key、session/auth/account/Sub2API JSON、access token、refresh token、token endpoint 和刷新 headers/body/params。provider 生成保留 allowlist/SSRF 防护、响应体上限、候选截断和 rate limit，并在 access token 过期或 provider 返回 401 时尝试刷新，失败时返回前端可识别的重登状态。OCR recognition 默认 disabled，配置后可通过 Tesseract、本地 JSON OCR 或 LLM vision provider 返回结构化交易草稿；OCR 配置同样支持 model、base URL、parameters 和脱敏 auth profile。设置包普通导出脱敏 LLM/OCR 凭据，敏感分区导出需要密码并包含真实密钥。
 
 ### 前端主题
 

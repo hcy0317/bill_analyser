@@ -33,6 +33,7 @@ fn llm_runtime_persists_configs_and_candidates_with_review_decisions(
             model: "gpt-4.1-mini".to_string(),
             api_key: "secret-one".to_string(),
             base_url: "https://api.example.test".to_string(),
+            credential_config: json!({}),
             advanced_settings: json!({
                 "reasoning_depth": "high",
                 "temperature": 0.7,
@@ -44,6 +45,8 @@ fn llm_runtime_persists_configs_and_candidates_with_review_decisions(
     )?;
     assert_eq!(first["is_active"], 1);
     assert_eq!(first["advanced_settings"]["reasoning_depth"], "high");
+    assert_eq!(first["credential_config"]["access_token"], "secret-one");
+    assert_eq!(first["credential_config"]["credential_mode"], "api_key");
     assert_eq!(
         first["advanced_settings"]["ignored"],
         serde_json::Value::Null
@@ -58,6 +61,7 @@ fn llm_runtime_persists_configs_and_candidates_with_review_decisions(
             model: "claude-3-5-sonnet".to_string(),
             api_key: "secret-two".to_string(),
             base_url: "".to_string(),
+            credential_config: json!({}),
             advanced_settings: json!({}),
             is_active: true,
         },
@@ -128,6 +132,87 @@ fn llm_runtime_persists_configs_and_candidates_with_review_decisions(
 }
 
 #[test]
+fn llm_runtime_persists_provider_auth_profile_and_keeps_legacy_api_key(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let db_path = temp_dir.path().join("llm-auth-profile.db");
+    let runtime = SqliteRuntime::open(SqliteConnectionConfig {
+        path: SqliteDbPath::temporary_file(&db_path)?,
+        create_if_missing: true,
+        busy_timeout: Duration::from_secs(1),
+    })?;
+    init_llm_runtime_schema(runtime.connection())?;
+
+    let config = create_llm_config(
+        runtime.connection(),
+        42,
+        &LlmConfigDraft {
+            name: "token profile".to_string(),
+            provider: "openai".to_string(),
+            model: "gpt-4o-mini".to_string(),
+            api_key: "".to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            credential_config: json!({
+                "credentialMode": "auth_json",
+                "auth": {
+                    "accessToken": "profile-access",
+                    "refreshToken": "profile-refresh",
+                    "expiresAt": "2099-01-01T00:00:00Z"
+                },
+                "tokenEndpoint": "https://api.openai.com/oauth/token",
+                "refreshBody": {"client_secret": "client-secret"}
+            }),
+            advanced_settings: json!({}),
+            is_active: true,
+        },
+    )?;
+
+    assert_eq!(config["credential_config"]["credential_mode"], "auth_json");
+    assert_eq!(
+        config["credential_config"]["access_token"],
+        "profile-access"
+    );
+    assert_eq!(
+        config["credential_config"]["refresh_token"],
+        "profile-refresh"
+    );
+    let runtime_config = effective_llm_config_from_saved(runtime.connection(), 42)?;
+    assert_eq!(
+        runtime_config["provider_config"]["api_key"],
+        "profile-access"
+    );
+    assert_eq!(
+        runtime_config["credential_config"]["token_endpoint"],
+        "https://api.openai.com/oauth/token"
+    );
+
+    let updated = update_llm_config(
+        runtime.connection(),
+        config["id"].as_i64().expect("config id"),
+        42,
+        &LlmConfigUpdate {
+            credential_config: Some(json!({
+                "credential_mode": "access_token",
+                "access_token": "rotated-access",
+                "refresh_token": "rotated-refresh"
+            })),
+            ..LlmConfigUpdate::default()
+        },
+    )?
+    .expect("updated config");
+    assert_eq!(
+        updated["credential_config"]["access_token"],
+        "rotated-access"
+    );
+    assert_eq!(
+        effective_llm_config_from_saved(runtime.connection(), 42)?["provider_config"]["api_key"],
+        "rotated-access"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn llm_runtime_handles_legacy_schema_and_edge_decisions() -> Result<(), Box<dyn std::error::Error>>
 {
     let temp_dir = tempfile::tempdir()?;
@@ -171,6 +256,7 @@ fn llm_runtime_handles_legacy_schema_and_edge_decisions() -> Result<(), Box<dyn 
             model: "gpt-4.1-mini".to_string(),
             api_key: "active-secret".to_string(),
             base_url: "https://active.example.test".to_string(),
+            credential_config: json!({}),
             advanced_settings: json!({"temperature": 0.2}),
             is_active: true,
         },
@@ -184,6 +270,7 @@ fn llm_runtime_handles_legacy_schema_and_edge_decisions() -> Result<(), Box<dyn 
             model: "gpt-4.1".to_string(),
             api_key: "legacy-secret".to_string(),
             base_url: "".to_string(),
+            credential_config: json!({}),
             advanced_settings: json!({"max_tokens": 512}),
             is_active: false,
         },
@@ -207,6 +294,7 @@ fn llm_runtime_handles_legacy_schema_and_edge_decisions() -> Result<(), Box<dyn 
                 "unknown": true
             })),
             is_active: Some(true),
+            ..LlmConfigUpdate::default()
         },
     )?
     .expect("updated config");

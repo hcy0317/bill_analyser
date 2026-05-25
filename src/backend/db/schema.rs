@@ -567,6 +567,7 @@ fn create_core_tables(connection: &Connection) -> DbResult<()> {
             model TEXT NOT NULL DEFAULT '',
             api_key TEXT DEFAULT '',
             base_url TEXT DEFAULT '',
+            credential_config TEXT NOT NULL DEFAULT '{}',
             advanced_settings TEXT NOT NULL DEFAULT '{}',
             is_active INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
@@ -897,6 +898,16 @@ fn migrate_core_legacy_columns(connection: &Connection) -> DbResult<()> {
         ("bills", "created_from_template", "INTEGER"),
         ("bills", "created_from_recurring", "INTEGER"),
         ("bills", "import_history_id", "INTEGER"),
+        (
+            "llm_configs",
+            "advanced_settings",
+            "TEXT NOT NULL DEFAULT '{}'",
+        ),
+        (
+            "llm_configs",
+            "credential_config",
+            "TEXT NOT NULL DEFAULT '{}'",
+        ),
     ] {
         add_column_if_missing(connection, table, column, definition)?;
     }

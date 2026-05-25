@@ -4,6 +4,7 @@
 
 use bill_analyser_core::{
     build_runtime_llm_config_from_saved_config, normalize_llm_advanced_settings,
+    normalize_provider_auth_config,
 };
 use chrono::Utc;
 use rusqlite::types::{Value as SqlValue, ValueRef};
@@ -19,6 +20,7 @@ pub struct LlmConfigDraft {
     pub model: String,
     pub api_key: String,
     pub base_url: String,
+    pub credential_config: Value,
     pub advanced_settings: Value,
     pub is_active: bool,
 }
@@ -30,6 +32,7 @@ pub struct LlmConfigUpdate {
     pub model: Option<String>,
     pub api_key: Option<String>,
     pub base_url: Option<String>,
+    pub credential_config: Option<Value>,
     pub advanced_settings: Option<Value>,
     pub is_active: Option<bool>,
 }
@@ -78,6 +81,7 @@ pub fn init_llm_runtime_schema(connection: &Connection) -> DbResult<()> {
             model TEXT NOT NULL DEFAULT '',
             api_key TEXT DEFAULT '',
             base_url TEXT DEFAULT '',
+            credential_config TEXT NOT NULL DEFAULT '{}',
             advanced_settings TEXT NOT NULL DEFAULT '{}',
             is_active INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
@@ -91,6 +95,12 @@ pub fn init_llm_runtime_schema(connection: &Connection) -> DbResult<()> {
     if !table_has_column(connection, "llm_configs", "advanced_settings")? {
         connection.execute(
             "ALTER TABLE llm_configs ADD COLUMN advanced_settings TEXT NOT NULL DEFAULT '{}'",
+            [],
+        )?;
+    }
+    if !table_has_column(connection, "llm_configs", "credential_config")? {
+        connection.execute(
+            "ALTER TABLE llm_configs ADD COLUMN credential_config TEXT NOT NULL DEFAULT '{}'",
             [],
         )?;
     }
@@ -131,9 +141,9 @@ pub fn create_llm_config(
     connection.execute(
         "INSERT INTO llm_configs (
             user_id, name, provider, model, api_key, base_url,
-            advanced_settings, is_active, created_at, updated_at
+            credential_config, advanced_settings, is_active, created_at, updated_at
          )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
         params![
             user_id,
             draft.name,
@@ -141,6 +151,7 @@ pub fn create_llm_config(
             draft.model,
             draft.api_key,
             draft.base_url,
+            serialize_credential_config(&draft.credential_config, &draft.api_key),
             serialize_advanced_settings(&draft.advanced_settings),
             i64::from(draft.is_active),
             now,
@@ -191,6 +202,13 @@ pub fn update_llm_config(
     if let Some(base_url) = update.base_url.as_ref() {
         assignments.push("base_url = ?".to_string());
         values.push(SqlValue::Text(base_url.clone()));
+    }
+    if let Some(credential_config) = update.credential_config.as_ref() {
+        assignments.push("credential_config = ?".to_string());
+        values.push(SqlValue::Text(serialize_credential_config(
+            credential_config,
+            update.api_key.as_deref().unwrap_or_default(),
+        )));
     }
     if let Some(advanced_settings) = update.advanced_settings.as_ref() {
         assignments.push("advanced_settings = ?".to_string());
@@ -422,6 +440,7 @@ fn get_llm_config_by_id(
 
 fn llm_config_from_row(row: &Row<'_>) -> rusqlite::Result<Value> {
     let advanced_settings = row_text(row, "advanced_settings")?;
+    let credential_config = row_text(row, "credential_config")?;
     Ok(json!({
         "id": row.get::<_, i64>("id")?,
         "user_id": row.get::<_, i64>("user_id")?,
@@ -430,6 +449,7 @@ fn llm_config_from_row(row: &Row<'_>) -> rusqlite::Result<Value> {
         "model": row_text(row, "model")?,
         "api_key": row_text(row, "api_key")?,
         "base_url": row_text(row, "base_url")?,
+        "credential_config": normalized_credential_value(&Value::String(credential_config)),
         "advanced_settings": normalized_settings_value(&Value::String(advanced_settings)),
         "is_active": row.get::<_, i64>("is_active")?,
         "created_at": row_text(row, "created_at")?,
@@ -463,6 +483,35 @@ fn row_text(row: &Row<'_>, column: &str) -> rusqlite::Result<String> {
 
 fn serialize_advanced_settings(value: &Value) -> String {
     normalized_settings_value(value).to_string()
+}
+
+fn serialize_credential_config(value: &Value, legacy_api_key: &str) -> String {
+    let mut normalized = normalized_credential_value(value);
+    if normalized
+        .get("access_token")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+        && !legacy_api_key.trim().is_empty()
+    {
+        if let Some(object) = normalized.as_object_mut() {
+            object.insert("access_token".to_string(), json!(legacy_api_key.trim()));
+            object.insert("credential_mode".to_string(), json!("api_key"));
+        }
+    }
+    normalized.to_string()
+}
+
+fn normalized_credential_value(value: &Value) -> Value {
+    match value {
+        Value::String(text) if !text.trim().is_empty() => serde_json::from_str::<Value>(text)
+            .ok()
+            .map(|parsed| normalize_provider_auth_config(Some(&parsed)))
+            .unwrap_or_else(|| normalize_provider_auth_config(Some(value))),
+        Value::String(_) | Value::Null => json!({}),
+        _ => normalize_provider_auth_config(Some(value)),
+    }
 }
 
 fn normalized_settings_value(value: &Value) -> Value {

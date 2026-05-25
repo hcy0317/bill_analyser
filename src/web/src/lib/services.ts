@@ -314,6 +314,7 @@ interface CreateLLMConfigRequest {
     model: string;
     api_key?: string;
     base_url?: string;
+    credential_config?: Record<string, unknown>;
     is_active?: boolean;
     advanced_settings?: LLMAdvancedSettings;
 }
@@ -321,6 +322,10 @@ interface CreateLLMConfigRequest {
 export interface OCRConfigResponse {
     provider: string;
     lang: string;
+    model?: string;
+    base_url?: string;
+    parameters?: Record<string, unknown>;
+    credential_config?: Record<string, unknown>;
     available_providers: string[];
     configured: boolean;
 }
@@ -1535,7 +1540,14 @@ export default {
     getOCRConfig: (): ApiResponsePromise<OCRConfigResponse> => {
         return axios.get<ApiResponse<OCRConfigResponse>>('ml/receipt-recognition/config');
     },
-    updateOCRConfig: (config: { provider: string; lang: string }): ApiResponsePromise<OCRConfigResponse> => {
+    updateOCRConfig: (config: {
+        provider: string;
+        lang: string;
+        model?: string;
+        base_url?: string;
+        parameters?: Record<string, unknown>;
+        credential_config?: Record<string, unknown>;
+    }): ApiResponsePromise<OCRConfigResponse> => {
         return axios.put<ApiResponse<OCRConfigResponse>>('ml/receipt-recognition/config', config);
     },
     getLatestExchangeRates: (param: { ignoreError?: boolean, provider?: string }): ApiResponsePromise<LatestExchangeRateResponse> => {

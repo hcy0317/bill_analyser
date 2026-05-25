@@ -70,6 +70,10 @@ name = "ops_contracts"
 path = "../../../tests/backend/core/ops_contracts.rs"
 
 [[test]]
+name = "provider_auth_contracts"
+path = "../../../tests/backend/core/provider_auth_contracts.rs"
+
+[[test]]
 name = "response_contract"
 path = "../../../tests/backend/core/response_contract.rs"
 

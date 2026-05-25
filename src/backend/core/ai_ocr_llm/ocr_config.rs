@@ -5,6 +5,7 @@
 use serde_json::{json, Value};
 
 use super::ocr_parser::parse_payment_screenshot_text;
+use super::provider_auth::{normalize_provider_auth_config, redact_provider_auth_config};
 use super::receipt_draft::build_receipt_transaction_draft;
 use super::types::{
     AiRouteResponse, OcrConfigContract, OcrProviderTextResult, ReceiptDraftContext,
@@ -16,6 +17,7 @@ const OCR_ERROR_TIMEOUT: &str = "timeout";
 const OCR_ERROR_PARSE: &str = "parse_error";
 const OCR_ERROR_CANCELLED: &str = "cancelled";
 const OCR_ERROR_RATE_LIMITED: &str = "rate_limited";
+const OCR_ERROR_PROVIDER_RELOGIN_REQUIRED: &str = "provider_relogin_required";
 
 pub fn normalize_ocr_config(value: Option<&Value>) -> OcrConfigContract {
     let object = value.and_then(Value::as_object);
@@ -27,10 +29,40 @@ pub fn normalize_ocr_config(value: Option<&Value>) -> OcrConfigContract {
         .and_then(|item| item.get("lang"))
         .and_then(Value::as_str)
         .unwrap_or(OCR_DEFAULT_LANG);
+    let model = object
+        .and_then(|item| item.get("model"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let base_url = object
+        .and_then(|item| {
+            item.get("base_url")
+                .or_else(|| item.get("baseUrl"))
+                .and_then(Value::as_str)
+        })
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let parameters = object
+        .and_then(|item| item.get("parameters").or_else(|| item.get("params")))
+        .cloned()
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    let credential_config = normalize_provider_auth_config(object.and_then(|item| {
+        item.get("credential_config")
+            .or_else(|| item.get("credentialConfig"))
+            .or_else(|| item.get("auth_profile"))
+            .or_else(|| item.get("authProfile"))
+    }));
 
     OcrConfigContract {
         provider: normalize_ocr_provider_name(provider),
         lang: normalize_ocr_lang(lang),
+        model,
+        base_url,
+        parameters,
+        credential_config,
     }
 }
 
@@ -72,6 +104,10 @@ pub fn build_ocr_config_response_payload(config: &OcrConfigContract) -> Value {
     json!({
         "provider": config.provider,
         "lang": config.lang,
+        "model": config.model,
+        "base_url": config.base_url,
+        "parameters": config.parameters,
+        "credential_config": redact_provider_auth_config(&config.credential_config),
         "available_providers": ocr_available_providers_with_disabled(),
         "configured": config.provider != OCR_DISABLED_PROVIDER_NAME,
     })
@@ -176,6 +212,7 @@ pub fn ocr_error_http_status(code: &str) -> u16 {
         OCR_ERROR_PARSE => 422,
         OCR_ERROR_CANCELLED => 499,
         OCR_ERROR_RATE_LIMITED => 429,
+        OCR_ERROR_PROVIDER_RELOGIN_REQUIRED => 401,
         _ => 500,
     }
 }

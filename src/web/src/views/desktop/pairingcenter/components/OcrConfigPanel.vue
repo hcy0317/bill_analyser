@@ -59,6 +59,91 @@
                                       hide-details
                                       :disabled="ocrConfigForm.provider === 'disabled' || ocrConfigLoading || ocrConfigSaving" />
                     </v-col>
+                    <v-col cols="12" md="6">
+                        <v-text-field v-model="ocrConfigForm.model"
+                                      :label="tt('Model')"
+                                      variant="outlined"
+                                      density="comfortable"
+                                      hide-details
+                                      :disabled="ocrConfigForm.provider === 'disabled' || ocrConfigLoading || ocrConfigSaving" />
+                    </v-col>
+                    <v-col cols="12" md="6">
+                        <v-text-field v-model="ocrConfigForm.base_url"
+                                      :label="tt('Base URL')"
+                                      variant="outlined"
+                                      density="comfortable"
+                                      hide-details
+                                      :disabled="ocrConfigForm.provider !== 'llm_vision' || ocrConfigLoading || ocrConfigSaving" />
+                    </v-col>
+                    <v-col cols="12" md="6">
+                        <v-select v-model="ocrConfigForm.credential_mode"
+                                  :label="tt('Credential Mode')"
+                                  :items="credentialModeOptions"
+                                  item-title="title"
+                                  item-value="value"
+                                  variant="outlined"
+                                  density="comfortable"
+                                  hide-details
+                                  :disabled="ocrConfigForm.provider !== 'llm_vision' || ocrConfigLoading || ocrConfigSaving" />
+                    </v-col>
+                    <v-col cols="12" md="6">
+                        <v-text-field v-model="ocrConfigForm.token_endpoint"
+                                      :label="tt('Token Endpoint')"
+                                      variant="outlined"
+                                      density="comfortable"
+                                      hide-details
+                                      :disabled="ocrConfigForm.provider !== 'llm_vision' || ocrConfigLoading || ocrConfigSaving" />
+                    </v-col>
+                    <v-col cols="12" md="6">
+                        <v-textarea v-model="ocrConfigForm.credential_json"
+                                    :label="tt('Credential JSON')"
+                                    variant="outlined"
+                                    density="comfortable"
+                                    rows="3"
+                                    auto-grow
+                                    hide-details
+                                    :disabled="ocrConfigForm.provider !== 'llm_vision' || ocrConfigLoading || ocrConfigSaving" />
+                    </v-col>
+                    <v-col cols="12" md="6">
+                        <v-textarea v-model="ocrConfigForm.parameters"
+                                    :label="tt('Parameters JSON')"
+                                    variant="outlined"
+                                    density="comfortable"
+                                    rows="3"
+                                    auto-grow
+                                    hide-details
+                                    :disabled="ocrConfigForm.provider === 'disabled' || ocrConfigLoading || ocrConfigSaving" />
+                    </v-col>
+                    <v-col cols="12" md="4">
+                        <v-textarea v-model="ocrConfigForm.refresh_headers"
+                                    :label="tt('Refresh Headers')"
+                                    variant="outlined"
+                                    density="comfortable"
+                                    rows="2"
+                                    auto-grow
+                                    hide-details
+                                    :disabled="ocrConfigForm.provider !== 'llm_vision' || ocrConfigLoading || ocrConfigSaving" />
+                    </v-col>
+                    <v-col cols="12" md="4">
+                        <v-textarea v-model="ocrConfigForm.refresh_body"
+                                    :label="tt('Refresh Body')"
+                                    variant="outlined"
+                                    density="comfortable"
+                                    rows="2"
+                                    auto-grow
+                                    hide-details
+                                    :disabled="ocrConfigForm.provider !== 'llm_vision' || ocrConfigLoading || ocrConfigSaving" />
+                    </v-col>
+                    <v-col cols="12" md="4">
+                        <v-textarea v-model="ocrConfigForm.refresh_params"
+                                    :label="tt('Refresh Params')"
+                                    variant="outlined"
+                                    density="comfortable"
+                                    rows="2"
+                                    auto-grow
+                                    hide-details
+                                    :disabled="ocrConfigForm.provider !== 'llm_vision' || ocrConfigLoading || ocrConfigSaving" />
+                    </v-col>
                     <v-col cols="12" md="2" class="d-flex align-center">
                         <v-btn class="learning-panel-action w-100"
                                variant="outlined"
@@ -112,18 +197,40 @@ const error = ref('');
 const ocrConfig = ref<OCRConfigResponse>({
     provider: 'disabled',
     lang: 'chi_sim+eng',
-    available_providers: ['disabled', 'tesseract', 'cloud_stub'],
+    model: '',
+    base_url: '',
+    parameters: {},
+    credential_config: {},
+    available_providers: ['disabled', 'tesseract', 'cloud_stub', 'local_json_ocr', 'llm_vision'],
     configured: false,
 });
-const ocrConfigForm = ref<{ provider: string; lang: string }>({
+const ocrConfigForm = ref({
     provider: 'disabled',
     lang: 'chi_sim+eng',
+    model: '',
+    base_url: '',
+    parameters: '',
+    credential_mode: 'api_key',
+    credential_json: '',
+    token_endpoint: '',
+    refresh_headers: '',
+    refresh_body: '',
+    refresh_params: '',
 });
+const credentialModeOptions = [
+    { title: tt('API Key'), value: 'api_key' },
+    { title: tt('Session JSON'), value: 'session_json' },
+    { title: tt('Auth JSON'), value: 'auth_json' },
+    { title: tt('Account JSON'), value: 'account_json' },
+    { title: tt('Sub2API JSON'), value: 'sub2api_json' },
+    { title: tt('Access Token'), value: 'access_token' },
+    { title: tt('Refresh Token'), value: 'refresh_token' },
+];
 
 const ocrProviderOptions = computed<SelectOption[]>(() => {
     const providers = ocrConfig.value.available_providers.length
         ? ocrConfig.value.available_providers
-        : ['disabled', 'tesseract', 'cloud_stub'];
+        : ['disabled', 'tesseract', 'cloud_stub', 'local_json_ocr', 'llm_vision'];
     return providers.map(provider => ({
         title: ocrProviderLabel(provider),
         value: provider,
@@ -135,6 +242,8 @@ function ocrProviderLabel(provider: string): string {
         disabled: tt('Disabled'),
         tesseract: 'Tesseract',
         cloud_stub: 'Cloud Stub',
+        local_json_ocr: 'Local JSON OCR',
+        llm_vision: 'LLM Vision',
     };
     return labels[provider] ?? provider;
 }
@@ -143,15 +252,65 @@ function applyOCRConfig(config: OCRConfigResponse): void {
     ocrConfig.value = {
         provider: config.provider || 'disabled',
         lang: config.lang || 'chi_sim+eng',
+        model: config.model || '',
+        base_url: config.base_url || '',
+        parameters: config.parameters || {},
+        credential_config: config.credential_config || {},
         available_providers: Array.isArray(config.available_providers) && config.available_providers.length
             ? config.available_providers
-            : ['disabled', 'tesseract', 'cloud_stub'],
+            : ['disabled', 'tesseract', 'cloud_stub', 'local_json_ocr', 'llm_vision'],
         configured: !!config.configured,
     };
+    const credentialConfig = ocrConfig.value.credential_config || {};
     ocrConfigForm.value = {
         provider: ocrConfig.value.provider,
         lang: ocrConfig.value.lang,
+        model: ocrConfig.value.model || '',
+        base_url: ocrConfig.value.base_url || '',
+        parameters: JSON.stringify(ocrConfig.value.parameters || {}, null, 2),
+        credential_mode: String(credentialConfig['credential_mode'] || 'api_key'),
+        credential_json: JSON.stringify(credentialConfig['credential_json'] || {}, null, 2),
+        token_endpoint: String(credentialConfig['token_endpoint'] || ''),
+        refresh_headers: JSON.stringify(credentialConfig['refresh_headers'] || {}, null, 2),
+        refresh_body: JSON.stringify(credentialConfig['refresh_body'] || {}, null, 2),
+        refresh_params: JSON.stringify(credentialConfig['refresh_params'] || {}, null, 2),
     };
+}
+
+function parseOptionalJsonObject(text: string, label: string): Record<string, unknown> {
+    const trimmed = text.trim();
+    if (!trimmed) {
+        return {};
+    }
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error(`${label} must be a JSON object`);
+    }
+    return parsed as Record<string, unknown>;
+}
+
+function buildOcrCredentialConfig(): Record<string, unknown> {
+    const credentialConfig: Record<string, unknown> = {
+        credential_mode: ocrConfigForm.value.credential_mode,
+    };
+    const credentialJson = parseOptionalJsonObject(ocrConfigForm.value.credential_json, 'Credential JSON');
+    if (Object.keys(credentialJson).length > 0) {
+        credentialConfig['credential_json'] = credentialJson;
+    }
+    if (ocrConfigForm.value.token_endpoint.trim()) {
+        credentialConfig['token_endpoint'] = ocrConfigForm.value.token_endpoint.trim();
+    }
+    for (const [targetKey, formKey, label] of [
+        ['refresh_headers', 'refresh_headers', 'Refresh Headers'],
+        ['refresh_body', 'refresh_body', 'Refresh Body'],
+        ['refresh_params', 'refresh_params', 'Refresh Params'],
+    ] as const) {
+        const value = parseOptionalJsonObject(ocrConfigForm.value[formKey], label);
+        if (Object.keys(value).length > 0) {
+            credentialConfig[targetKey] = value;
+        }
+    }
+    return credentialConfig;
 }
 
 function extractPayloadMessage(payload: unknown, depth = 0): string | null {
@@ -212,9 +371,15 @@ async function loadOCRConfig() {
 async function saveOCRConfig() {
     ocrConfigSaving.value = true;
     try {
+        const parameters = parseOptionalJsonObject(ocrConfigForm.value.parameters, 'Parameters JSON');
+        const credentialConfig = buildOcrCredentialConfig();
         const resp = await services.updateOCRConfig({
             provider: ocrConfigForm.value.provider,
             lang: ocrConfigForm.value.lang.trim() || 'chi_sim+eng',
+            model: ocrConfigForm.value.model.trim(),
+            base_url: ocrConfigForm.value.base_url.trim(),
+            parameters,
+            credential_config: credentialConfig,
         });
         if (resp.data?.success && resp.data.result) {
             applyOCRConfig(resp.data.result);

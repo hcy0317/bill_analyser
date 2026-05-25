@@ -34,7 +34,7 @@ pub(super) fn redact_secrets_in_map(object: &mut Map<String, Value>) {
     }
 }
 
-fn redact_secrets_in_value(value: &mut Value) {
+pub(super) fn redact_secrets_in_value(value: &mut Value) {
     match value {
         Value::Object(object) => redact_secrets_in_map(object),
         Value::Array(items) => {

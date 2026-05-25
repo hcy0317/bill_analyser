@@ -4,6 +4,7 @@ export interface LLMConfigItem {
     provider: string;
     model: string;
     base_url?: string;
+    credential_config?: Record<string, unknown>;
     advanced_settings?: LLMAdvancedSettings;
     is_active?: boolean;
     created_at?: string;
@@ -25,6 +26,12 @@ export interface LLMConfigForm {
     model: string;
     api_key: string;
     base_url: string;
+    credential_mode: string;
+    credential_json: string;
+    token_endpoint: string;
+    refresh_headers: string;
+    refresh_body: string;
+    refresh_params: string;
     advancedMode: boolean;
     reasoning_depth: string;
     temperature: string;
@@ -145,6 +152,18 @@ export function createLLMReasoningDepthOptions(tt: Translate): SelectOption[] {
     ];
 }
 
+export function createLLMCredentialModeOptions(tt: Translate): SelectOption[] {
+    return [
+        { title: tt('API Key'), value: 'api_key' },
+        { title: tt('Session JSON'), value: 'session_json' },
+        { title: tt('Auth JSON'), value: 'auth_json' },
+        { title: tt('Account JSON'), value: 'account_json' },
+        { title: tt('Sub2API JSON'), value: 'sub2api_json' },
+        { title: tt('Access Token'), value: 'access_token' },
+        { title: tt('Refresh Token'), value: 'refresh_token' },
+    ];
+}
+
 export function createEmptyLLMConfigForm(): LLMConfigForm {
     return {
         name: '',
@@ -152,6 +171,12 @@ export function createEmptyLLMConfigForm(): LLMConfigForm {
         model: '',
         api_key: '',
         base_url: '',
+        credential_mode: 'api_key',
+        credential_json: '',
+        token_endpoint: '',
+        refresh_headers: '',
+        refresh_body: '',
+        refresh_params: '',
         advancedMode: false,
         reasoning_depth: '',
         temperature: '0.3',
@@ -160,6 +185,48 @@ export function createEmptyLLMConfigForm(): LLMConfigForm {
         classification_prompt_template: '',
         rule_prompt_template: '',
     };
+}
+
+function parseOptionalJsonObject(text: string, label: string): Record<string, unknown> {
+    const trimmed = text.trim();
+    if (!trimmed) {
+        return {};
+    }
+
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error(`${label} must be a JSON object`);
+    }
+
+    return parsed as Record<string, unknown>;
+}
+
+export function buildCredentialConfigPayload(form: LLMConfigForm): Record<string, unknown> {
+    const payload: Record<string, unknown> = {
+        credential_mode: form.credential_mode || 'api_key',
+    };
+    const credentialJson = parseOptionalJsonObject(form.credential_json, 'Credential JSON');
+    if (Object.keys(credentialJson).length > 0) {
+        payload['credential_json'] = credentialJson;
+    }
+    const tokenEndpoint = form.token_endpoint.trim();
+    if (tokenEndpoint) {
+        payload['token_endpoint'] = tokenEndpoint;
+    }
+    const refreshHeaders = parseOptionalJsonObject(form.refresh_headers, 'Refresh Headers');
+    if (Object.keys(refreshHeaders).length > 0) {
+        payload['refresh_headers'] = refreshHeaders;
+    }
+    const refreshBody = parseOptionalJsonObject(form.refresh_body, 'Refresh Body');
+    if (Object.keys(refreshBody).length > 0) {
+        payload['refresh_body'] = refreshBody;
+    }
+    const refreshParams = parseOptionalJsonObject(form.refresh_params, 'Refresh Params');
+    if (Object.keys(refreshParams).length > 0) {
+        payload['refresh_params'] = refreshParams;
+    }
+
+    return payload;
 }
 
 export function buildAdvancedSettingsPayload(form: LLMConfigForm): LLMAdvancedSettings {

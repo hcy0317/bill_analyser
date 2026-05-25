@@ -6,6 +6,9 @@
 struct LlmProviderRequestContext {
     config: LlmProviderConfigContract,
     api_key: String,
+    credential_config: Value,
+    config_id: Option<i64>,
+    user_id: Option<i64>,
     system_prompt: String,
     temperature: f64,
     max_tokens: i64,
@@ -187,9 +190,14 @@ fn llm_provider_context_from_config(
     let provider_contract = build_llm_provider_config(provider, Some(&provider_config))
         .map_err(|error| llm_contract_error_response(&error, "INVALID_REQUEST", 400))?;
     let provider_object = provider_config.as_object();
+    let credential_config = normalize_provider_auth_config(
+        object.and_then(|item| item.get("credential_config")),
+    );
     let api_key = provider_object
         .and_then(|item| item.get("api_key"))
         .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .or_else(|| provider_auth_access_token(&credential_config))
         .unwrap_or_default()
         .to_string();
     let advanced = object
@@ -218,6 +226,13 @@ fn llm_provider_context_from_config(
     Ok(LlmProviderRequestContext {
         config: provider_contract,
         api_key,
+        credential_config,
+        config_id: object
+            .and_then(|item| item.get("id"))
+            .and_then(Value::as_i64),
+        user_id: object
+            .and_then(|item| item.get("user_id"))
+            .and_then(Value::as_i64),
         system_prompt,
         temperature,
         max_tokens,
@@ -237,9 +252,18 @@ async fn execute_llm_provider_request(
         .map_err(|_| {
             llm_contract_error_response("LLM provider unavailable", "LLM_PROVIDER_UNAVAILABLE", 503)
         })?;
-    let (url, headers, payload) = llm_provider_http_request(context, prompt);
+    let mut context = context.clone();
+    if provider_auth_is_expired(&context.credential_config, Utc::now()) {
+        if provider_auth_has_refresh_credential(&context.credential_config) {
+            context = refresh_llm_provider_context(state, &client, &context).await?;
+        } else {
+            return Err(llm_relogin_required_response());
+        }
+    }
+    let mut did_refresh_after_unauthorized = false;
     let mut last_error = String::new();
     for attempt in 0..3 {
+        let (url, headers, payload) = llm_provider_http_request(&context, prompt);
         let mut request = client.post(&url);
         for (key, value) in &headers {
             request = request.header(*key, value);
@@ -255,6 +279,16 @@ async fn execute_llm_provider_request(
                         429,
                     ));
                 }
+                if status == reqwest::StatusCode::UNAUTHORIZED {
+                    if !did_refresh_after_unauthorized
+                        && provider_auth_has_refresh_credential(&context.credential_config)
+                    {
+                        context = refresh_llm_provider_context(state, &client, &context).await?;
+                        did_refresh_after_unauthorized = true;
+                        continue;
+                    }
+                    return Err(llm_relogin_required_response());
+                }
                 if status.is_success() {
                     let raw_text = read_limited_llm_provider_body(response).await?;
                     let raw_response = serde_json::from_str::<Value>(&raw_text).map_err(|_| {
@@ -264,7 +298,7 @@ async fn execute_llm_provider_request(
                             503,
                         )
                     })?;
-                    return llm_provider_runtime_response(context, raw_response);
+                    return llm_provider_runtime_response(&context, raw_response);
                 }
                 last_error = format!("provider status {}", status.as_u16());
                 if !status.is_server_error() || attempt == 2 {
@@ -292,6 +326,59 @@ async fn execute_llm_provider_request(
         "LLM_PROVIDER_UNAVAILABLE",
         503,
     ))
+}
+
+fn llm_relogin_required_response() -> ImportV2RouteResponse {
+    llm_contract_error_response(
+        "LLM provider authorization expired; sign in again or refresh credentials",
+        "LLM_RELOGIN_REQUIRED",
+        401,
+    )
+}
+
+async fn refresh_llm_provider_context(
+    state: &HttpAppState,
+    client: &reqwest::Client,
+    context: &LlmProviderRequestContext,
+) -> Result<LlmProviderRequestContext, ImportV2RouteResponse> {
+    let refreshed = refresh_provider_auth_profile(
+        client,
+        &context.credential_config,
+        &context.config.base_url,
+    )
+    .await
+    .map_err(|_| llm_relogin_required_response())?;
+    let Some(api_key) = provider_auth_access_token(&refreshed) else {
+        return Err(llm_relogin_required_response());
+    };
+    persist_refreshed_llm_credentials(state, context, &refreshed);
+    let mut updated = context.clone();
+    updated.api_key = api_key;
+    updated.credential_config = refreshed;
+    Ok(updated)
+}
+
+fn persist_refreshed_llm_credentials(
+    state: &HttpAppState,
+    context: &LlmProviderRequestContext,
+    credential_config: &Value,
+) {
+    let (Some(config_id), Some(user_id)) = (context.config_id, context.user_id) else {
+        return;
+    };
+    let Ok(runtime) = open_runtime(state) else {
+        return;
+    };
+    let _ = init_llm_config_runtime_schema(&runtime);
+    let _ = update_llm_config(
+        runtime.connection(),
+        config_id,
+        user_id,
+        &LlmConfigUpdate {
+            credential_config: Some(credential_config.clone()),
+            ..LlmConfigUpdate::default()
+        },
+    );
 }
 
 async fn read_limited_llm_provider_body(

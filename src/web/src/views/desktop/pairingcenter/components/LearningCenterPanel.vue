@@ -672,6 +672,57 @@
                                   @focus="unlockAutofillFields"
                                   density="compact"
                                   :placeholder="selectedLLMProviderOption.baseUrlPlaceholder" />
+                    <v-select v-model="newConfigForm.credential_mode"
+                              :label="tt('Credential Mode')"
+                              :items="llmCredentialModeOptions"
+                              item-title="title"
+                              item-value="value"
+                              autocomplete="off"
+                              density="compact"
+                              class="mb-3" />
+                    <v-textarea v-model="newConfigForm.credential_json"
+                                :label="tt('Credential JSON')"
+                                :name="llmConfigFieldNames.credentialJson"
+                                autocomplete="off"
+                                data-lpignore="true"
+                                data-1p-ignore="true"
+                                density="compact"
+                                rows="3"
+                                auto-grow
+                                class="mb-3" />
+                    <v-text-field v-model="newConfigForm.token_endpoint"
+                                  :label="tt('Token Endpoint')"
+                                  :name="llmConfigFieldNames.tokenEndpoint"
+                                  autocomplete="off"
+                                  density="compact"
+                                  class="mb-3"
+                                  placeholder="https://provider.example.com/oauth/token" />
+                    <div class="d-flex flex-wrap ga-3">
+                        <v-textarea v-model="newConfigForm.refresh_headers"
+                                    :label="tt('Refresh Headers')"
+                                    :name="llmConfigFieldNames.refreshHeaders"
+                                    autocomplete="off"
+                                    density="compact"
+                                    rows="2"
+                                    auto-grow
+                                    class="llm-config-json-field mb-3" />
+                        <v-textarea v-model="newConfigForm.refresh_body"
+                                    :label="tt('Refresh Body')"
+                                    :name="llmConfigFieldNames.refreshBody"
+                                    autocomplete="off"
+                                    density="compact"
+                                    rows="2"
+                                    auto-grow
+                                    class="llm-config-json-field mb-3" />
+                        <v-textarea v-model="newConfigForm.refresh_params"
+                                    :label="tt('Refresh Params')"
+                                    :name="llmConfigFieldNames.refreshParams"
+                                    autocomplete="off"
+                                    density="compact"
+                                    rows="2"
+                                    auto-grow
+                                    class="llm-config-json-field mb-3" />
+                    </div>
                     <v-switch v-model="newConfigForm.advancedMode"
                               :label="tt('Advanced Mode')"
                               color="primary"
@@ -759,7 +810,9 @@ import { getSuggestionFeatureChips, getRuleFeatureChips, getRuleFeatureSummary }
 import services from '@/lib/services.ts';
 import {
     buildAdvancedSettingsPayload,
+    buildCredentialConfigPayload,
     createEmptyLLMConfigForm,
+    createLLMCredentialModeOptions,
     createLLMProviderOptions,
     createLLMReasoningDepthOptions,
     getLLMProviderLabel,
@@ -830,6 +883,7 @@ const selectedLLMIds = ref<number[]>([]);
 const llmProviderOptions: LLMProviderOption[] = createLLMProviderOptions(tt);
 const defaultLLMProviderOption = llmProviderOptions[0] as LLMProviderOption;
 const llmReasoningDepthOptions = createLLMReasoningDepthOptions(tt);
+const llmCredentialModeOptions = createLLMCredentialModeOptions(tt);
 
 const loading = computed(() => (
     store.suggestionsLoading
@@ -1155,6 +1209,11 @@ const llmConfigFieldNames = computed(() => ({
     model: `llm-config-model-${autofillNonce.value}`,
     apiKey: `llm-config-credential-${autofillNonce.value}`,
     baseUrl: `llm-config-endpoint-${autofillNonce.value}`,
+    credentialJson: `llm-config-credential-json-${autofillNonce.value}`,
+    tokenEndpoint: `llm-config-token-endpoint-${autofillNonce.value}`,
+    refreshHeaders: `llm-config-refresh-headers-${autofillNonce.value}`,
+    refreshBody: `llm-config-refresh-body-${autofillNonce.value}`,
+    refreshParams: `llm-config-refresh-params-${autofillNonce.value}`,
     temperature: `llm-config-temperature-${autofillNonce.value}`,
     maxTokens: `llm-config-max-tokens-${autofillNonce.value}`,
     systemPrompt: `llm-config-system-prompt-${autofillNonce.value}`,
@@ -1277,12 +1336,20 @@ function openAddConfigDialog() {
 
 async function saveNewConfig() {
     const form = newConfigForm.value;
+    let credentialConfig: Record<string, unknown>;
+    try {
+        credentialConfig = buildCredentialConfigPayload(form);
+    } catch (error: unknown) {
+        store.error = error instanceof Error ? error.message : 'Invalid credential config';
+        return;
+    }
     const payload = {
         name: form.name.trim(),
         provider: form.provider,
         model: form.model.trim(),
         api_key: form.api_key.trim(),
         base_url: form.base_url.trim(),
+        credential_config: credentialConfig,
         advanced_settings: buildAdvancedSettingsPayload(form),
         is_active: llmSavedConfigs.value.length === 0,
     };
@@ -1604,6 +1671,10 @@ watch(activeTab, (tab) => {
 
 .llm-config-number-field {
     flex: 1 1 180px;
+}
+
+.llm-config-json-field {
+    flex: 1 1 220px;
 }
 
 .v-table :deep(td) {

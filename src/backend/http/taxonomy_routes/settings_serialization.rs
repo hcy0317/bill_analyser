@@ -21,7 +21,11 @@ fn category_rule_data_response(status: StatusCode, rule: CategoryRuleRecord) -> 
     )
 }
 
-fn build_settings_bundle(connection: &mut Connection, user_id: i64) -> Result<Value, String> {
+fn build_settings_bundle(
+    connection: &mut Connection,
+    user_id: i64,
+    include_secrets: bool,
+) -> Result<Value, String> {
     let accounts = {
         let mut repository = AccountsRepository::new(connection);
         repository
@@ -75,11 +79,11 @@ fn build_settings_bundle(connection: &mut Connection, user_id: i64) -> Result<Va
     );
     sections.insert(
         "llmConfigs".to_string(),
-        Value::Array(list_settings_llm_configs(connection, user_id)?),
+        Value::Array(list_settings_llm_configs(connection, user_id, include_secrets)?),
     );
     sections.insert(
         "ocrConfig".to_string(),
-        Value::Array(vec![export_settings_ocr_config(connection)?]),
+        Value::Array(vec![export_settings_ocr_config(connection, include_secrets)?]),
     );
 
     let counts = SETTINGS_BUNDLE_SECTION_KEYS
@@ -97,7 +101,10 @@ fn build_settings_bundle(connection: &mut Connection, user_id: i64) -> Result<Va
     Ok(json!({
         "schemaVersion": SETTINGS_BUNDLE_SCHEMA_VERSION,
         "exportedAt": Utc::now().naive_utc().format("%Y-%m-%dT%H:%M:%S%.f").to_string(),
-        "secretsPolicy": {"llmApiKeys": "redacted"},
+        "secretsPolicy": {
+            "llmApiKeys": if include_secrets { "included" } else { "redacted" },
+            "providerCredentials": if include_secrets { "included" } else { "redacted" },
+        },
         "sections": Value::Object(sections),
         "counts": Value::Object(counts),
     }))
@@ -256,14 +263,26 @@ fn serialize_settings_template_row(
     result
 }
 
-fn list_settings_llm_configs(connection: &Connection, user_id: i64) -> Result<Vec<Value>, String> {
+fn list_settings_llm_configs(
+    connection: &Connection,
+    user_id: i64,
+    include_secrets: bool,
+) -> Result<Vec<Value>, String> {
+    let has_credential_config =
+        connection_table_has_column(connection, "llm_configs", "credential_config")?;
+    let sql = if has_credential_config {
+        "SELECT id, name, provider, model, api_key, base_url, credential_config, advanced_settings, is_active
+         FROM llm_configs
+         WHERE user_id = ?1
+         ORDER BY id"
+    } else {
+        "SELECT id, name, provider, model, api_key, base_url, '{}' AS credential_config, advanced_settings, is_active
+         FROM llm_configs
+         WHERE user_id = ?1
+         ORDER BY id"
+    };
     let mut statement = connection
-        .prepare(
-            "SELECT id, name, provider, model, api_key, base_url, advanced_settings, is_active
-             FROM llm_configs
-             WHERE user_id = ?1
-             ORDER BY id",
-        )
+        .prepare(sql)
         .map_err(|error| error.to_string())?;
     let rows = statement
         .query_map(params![user_id], |row| {
@@ -271,14 +290,41 @@ fn list_settings_llm_configs(connection: &Connection, user_id: i64) -> Result<Ve
             let advanced_settings = row
                 .get::<_, Option<String>>("advanced_settings")?
                 .unwrap_or_default();
+            let credential_config = row
+                .get::<_, Option<String>>("credential_config")?
+                .unwrap_or_default();
+            let credential_config = serde_json::from_str::<Value>(&credential_config)
+                .unwrap_or_else(|_| json!({}));
+            let mut credential_config =
+                bill_analyser_core::normalize_provider_auth_config(Some(&credential_config));
+            if credential_config
+                .get("access_token")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
+                && !api_key.trim().is_empty()
+            {
+                if let Some(object) = credential_config.as_object_mut() {
+                    object.insert("access_token".to_string(), json!(api_key.trim()));
+                    object.insert("credential_mode".to_string(), json!("api_key"));
+                }
+            }
+            let exported_credential_config = if include_secrets {
+                credential_config.clone()
+            } else {
+                bill_analyser_core::redact_provider_auth_config(&credential_config)
+            };
             Ok(json!({
                 "externalRef": format!("llmConfig:{}", row.get::<_, i64>("id")?),
                 "name": row.get::<_, Option<String>>("name")?.unwrap_or_default(),
                 "provider": row.get::<_, Option<String>>("provider")?.unwrap_or_else(|| "openai".to_string()),
                 "model": row.get::<_, Option<String>>("model")?.unwrap_or_default(),
-                "apiKey": "",
+                "apiKey": if include_secrets { api_key.clone() } else { String::new() },
                 "hasApiKey": !api_key.is_empty(),
                 "baseUrl": row.get::<_, Option<String>>("base_url")?.unwrap_or_default(),
+                "credentialConfig": exported_credential_config.clone(),
+                "authProfile": exported_credential_config,
                 "advancedSettings": normalize_llm_advanced_settings(&advanced_settings),
                 "activeInSource": row.get::<_, Option<i64>>("is_active")?.unwrap_or(0) != 0,
             }))
@@ -288,7 +334,10 @@ fn list_settings_llm_configs(connection: &Connection, user_id: i64) -> Result<Ve
         .map_err(|error| error.to_string())
 }
 
-fn export_settings_ocr_config(connection: &Connection) -> Result<Value, String> {
+fn export_settings_ocr_config(
+    connection: &Connection,
+    include_secrets: bool,
+) -> Result<Value, String> {
     let raw_value = connection
         .query_row(
             "SELECT value FROM app_settings WHERE key = ?1",
@@ -301,11 +350,44 @@ fn export_settings_ocr_config(connection: &Connection) -> Result<Value, String> 
         .unwrap_or_default();
     let loaded = serde_json::from_str::<Value>(&raw_value).unwrap_or_else(|_| json!({}));
     let normalized = normalize_ocr_config(&loaded);
+    let credential_config = normalized
+        .get("credential_config")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let exported_credential_config = if include_secrets {
+        credential_config.clone()
+    } else {
+        bill_analyser_core::redact_provider_auth_config(&credential_config)
+    };
     Ok(json!({
         "externalRef": "ocrConfig:receipt-recognition",
         "provider": normalized["provider"],
         "lang": normalized["lang"],
+        "model": normalized["model"],
+        "baseUrl": normalized["base_url"],
+        "parameters": normalized["parameters"],
+        "credentialConfig": exported_credential_config.clone(),
+        "authProfile": exported_credential_config,
     }))
+}
+
+fn connection_table_has_column(
+    connection: &Connection,
+    table_name: &str,
+    column_name: &str,
+) -> Result<bool, String> {
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table_name})"))
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| error.to_string())?;
+    for row in rows {
+        if row.map_err(|error| error.to_string())? == column_name {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn export_settings_category_rule(
@@ -377,7 +459,7 @@ fn filter_settings_bundle_section(bundle: &Value, section_key: &str) -> Value {
         "secretsPolicy": bundle
             .get("secretsPolicy")
             .cloned()
-            .unwrap_or_else(|| json!({"llmApiKeys": "redacted"})),
+            .unwrap_or_else(|| json!({"llmApiKeys": "redacted", "providerCredentials": "redacted"})),
         "sections": Value::Object(sections),
         "counts": Value::Object(counts),
     })

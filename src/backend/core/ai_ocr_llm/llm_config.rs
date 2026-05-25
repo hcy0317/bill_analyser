@@ -5,6 +5,9 @@
 use serde_json::{json, Map, Value};
 
 use super::llm_provider::llm_available_providers;
+use super::provider_auth::{
+    normalize_provider_auth_config, provider_auth_access_token, redact_provider_auth_config,
+};
 use super::secret_redaction::{object_has_non_empty_secret, redact_secrets_in_map};
 use super::types::AiRouteResponse;
 use super::value_helpers::string_field_or;
@@ -70,14 +73,21 @@ pub fn safe_llm_config_payload(config: &Value) -> Value {
 
 pub fn build_runtime_llm_config_from_saved_config(config: &Value) -> Value {
     let object = config.as_object();
+    let auth_profile =
+        normalize_provider_auth_config(object.and_then(|item| item.get("credential_config")));
+    let legacy_api_key = string_field_or(object, "api_key", "");
+    let resolved_token = provider_auth_access_token(&auth_profile).unwrap_or(legacy_api_key);
     json!({
         "enabled": true,
+        "id": object.and_then(|item| item.get("id")).cloned().unwrap_or(Value::Null),
+        "user_id": object.and_then(|item| item.get("user_id")).cloned().unwrap_or(Value::Null),
         "provider": string_field_or(object, "provider", "openai"),
         "advanced_settings": Value::Object(normalize_llm_advanced_settings(
             object.and_then(|item| item.get("advanced_settings")),
         )),
+        "credential_config": auth_profile,
         "provider_config": {
-            "api_key": string_field_or(object, "api_key", ""),
+            "api_key": resolved_token,
             "base_url": string_field_or(object, "base_url", ""),
             "model": string_field_or(object, "model", ""),
         },
@@ -101,8 +111,14 @@ pub fn copy_runtime_llm_config(config: &Value) -> Value {
             .and_then(|item| item.get("enabled"))
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        "id": object.and_then(|item| item.get("id")).cloned().unwrap_or(Value::Null),
+        "user_id": object.and_then(|item| item.get("user_id")).cloned().unwrap_or(Value::Null),
         "provider": string_field_or(object, "provider", "openai"),
         "provider_config": provider_config,
+        "credential_config": object
+            .and_then(|item| item.get("credential_config"))
+            .cloned()
+            .unwrap_or_else(|| Value::Object(Map::new())),
         "advanced_settings": Value::Object(normalize_llm_advanced_settings(advanced_source)),
     })
 }
@@ -124,6 +140,10 @@ pub fn build_llm_config_get_response(config: &Value) -> AiRouteResponse {
                     .unwrap_or(false),
                 "provider": string_field_or(copied_object, "provider", "openai"),
                 "model": string_field_or(provider_config, "model", ""),
+                "credential_config": copied
+                    .get("credential_config")
+                    .map(redact_provider_auth_config)
+                    .unwrap_or_else(|| json!({})),
                 "advanced_settings": copied
                     .get("advanced_settings")
                     .cloned()

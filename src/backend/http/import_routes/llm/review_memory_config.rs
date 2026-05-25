@@ -322,6 +322,12 @@ pub async fn llm_configs_create_runtime_handler(
         model: text_from_map_or(&object, "model", ""),
         api_key: text_from_map_or(&object, "api_key", ""),
         base_url: text_from_map_or(&object, "base_url", ""),
+        credential_config: first_value(
+            &object,
+            &["credential_config", "credentialConfig", "auth_profile", "authProfile"],
+        )
+        .cloned()
+        .unwrap_or_else(|| json!({})),
         advanced_settings: object
             .get("advanced_settings")
             .cloned()

@@ -228,25 +228,14 @@ fn normalize_llm_advanced_settings(raw_value: &str) -> Value {
 }
 
 fn normalize_ocr_config(raw_value: &Value) -> Value {
-    let provider = raw_value
-        .get("provider")
-        .map(|value| string_or_default(Some(value), "disabled").to_ascii_lowercase())
-        .filter(|value| matches!(value.as_str(), "disabled" | "tesseract" | "cloud_stub"))
-        .unwrap_or_else(|| "disabled".to_string());
-    let lang = raw_value
-        .get("lang")
-        .map(|value| string_or_default(Some(value), "chi_sim+eng"))
-        .filter(|value| {
-            !value.is_empty()
-                && value.len() <= 64
-                && value
-                    .chars()
-                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '+' | '.' | '-'))
-        })
-        .unwrap_or_else(|| "chi_sim+eng".to_string());
+    let normalized = bill_analyser_core::normalize_ocr_config(Some(raw_value));
     json!({
-        "provider": provider,
-        "lang": lang,
+        "provider": normalized.provider,
+        "lang": normalized.lang,
+        "model": normalized.model,
+        "base_url": normalized.base_url,
+        "parameters": normalized.parameters,
+        "credential_config": normalized.credential_config,
     })
 }
 

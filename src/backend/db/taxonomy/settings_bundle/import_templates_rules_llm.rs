@@ -334,8 +334,10 @@ fn import_settings_llm_configs(
     user_id: i64,
     result: &mut ImportSections,
 ) -> DbResult<()> {
+    ensure_settings_llm_credential_column(transaction)?;
     let mut existing = load_existing_llm_configs(transaction, user_id)?;
     let has_timestamps = table_has_column(transaction, "llm_configs", "updated_at")?;
+    let has_credential_config = table_has_column(transaction, "llm_configs", "credential_config")?;
     for item in configs {
         let name = safe_text(item.get("name"), "");
         let section = result.get_mut("llmConfigs");
@@ -347,29 +349,73 @@ fn import_settings_llm_configs(
         let model = safe_text(item.get("model"), "");
         let incoming_secret = safe_text(get_any(item, &["apiKey", "api_key"]), "");
         let base_url = safe_text(get_any(item, &["baseUrl", "base_url"]), "");
+        let incoming_credential_config =
+            settings_llm_credential_config(item, &incoming_secret);
         let advanced_settings =
             dump_json_object(get_any(item, &["advancedSettings", "advanced_settings"]));
         let now = utc_now_iso();
 
         if let Some(row) = existing.get(&name).cloned() {
             let api_key = if is_masked_secret(&incoming_secret) {
-                row.api_key
+                row.api_key.clone()
             } else {
                 incoming_secret
             };
+            let credential_config = if settings_credential_config_is_masked(&incoming_credential_config) {
+                row.credential_config.clone()
+            } else {
+                incoming_credential_config.to_string()
+            };
             if has_timestamps {
+                if has_credential_config {
+                    transaction.execute(
+                        "UPDATE llm_configs
+                         SET provider = ?, model = ?, api_key = ?, base_url = ?,
+                             credential_config = ?, advanced_settings = ?, updated_at = ?
+                         WHERE id = ? AND user_id = ?",
+                        params![
+                            provider,
+                            model,
+                            api_key,
+                            base_url,
+                            credential_config,
+                            advanced_settings,
+                            now,
+                            row.id,
+                            user_id
+                        ],
+                    )?;
+                } else {
+                    transaction.execute(
+                        "UPDATE llm_configs
+                         SET provider = ?, model = ?, api_key = ?, base_url = ?,
+                             advanced_settings = ?, updated_at = ?
+                         WHERE id = ? AND user_id = ?",
+                        params![
+                            provider,
+                            model,
+                            api_key,
+                            base_url,
+                            advanced_settings,
+                            now,
+                            row.id,
+                            user_id
+                        ],
+                    )?;
+                }
+            } else if has_credential_config {
                 transaction.execute(
                     "UPDATE llm_configs
                      SET provider = ?, model = ?, api_key = ?, base_url = ?,
-                         advanced_settings = ?, updated_at = ?
+                         credential_config = ?, advanced_settings = ?
                      WHERE id = ? AND user_id = ?",
                     params![
                         provider,
                         model,
                         api_key,
                         base_url,
+                        credential_config,
                         advanced_settings,
-                        now,
                         row.id,
                         user_id
                     ],
@@ -396,6 +442,7 @@ fn import_settings_llm_configs(
                 ExistingLlmConfig {
                     id: row.id,
                     api_key,
+                    credential_config,
                 },
             );
             section.updated += 1;
@@ -407,12 +454,52 @@ fn import_settings_llm_configs(
         } else {
             incoming_secret
         };
+        let credential_config = incoming_credential_config.to_string();
         if has_timestamps {
+            if has_credential_config {
+                transaction.execute(
+                    "INSERT INTO llm_configs (
+                        user_id, name, provider, model, api_key, base_url,
+                        credential_config, advanced_settings, is_active, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+                    params![
+                        user_id,
+                        name,
+                        provider,
+                        model,
+                        stored_secret,
+                        base_url,
+                        credential_config,
+                        advanced_settings,
+                        now,
+                        now
+                    ],
+                )?;
+            } else {
+                transaction.execute(
+                    "INSERT INTO llm_configs (
+                        user_id, name, provider, model, api_key, base_url,
+                        advanced_settings, is_active, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+                    params![
+                        user_id,
+                        name,
+                        provider,
+                        model,
+                        stored_secret,
+                        base_url,
+                        advanced_settings,
+                        now,
+                        now
+                    ],
+                )?;
+            }
+        } else if has_credential_config {
             transaction.execute(
                 "INSERT INTO llm_configs (
                     user_id, name, provider, model, api_key, base_url,
-                    advanced_settings, is_active, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+                    credential_config, advanced_settings, is_active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)",
                 params![
                     user_id,
                     name,
@@ -420,9 +507,8 @@ fn import_settings_llm_configs(
                     model,
                     stored_secret,
                     base_url,
-                    advanced_settings,
-                    now,
-                    now
+                    credential_config,
+                    advanced_settings
                 ],
             )?;
         } else {
@@ -447,6 +533,7 @@ fn import_settings_llm_configs(
             ExistingLlmConfig {
                 id: transaction.last_insert_rowid(),
                 api_key: stored_secret,
+                credential_config,
             },
         );
         section.created += 1;
@@ -459,19 +546,80 @@ fn load_existing_llm_configs(
     transaction: &Transaction<'_>,
     user_id: i64,
 ) -> DbResult<BTreeMap<String, ExistingLlmConfig>> {
-    let mut statement =
-        transaction.prepare("SELECT id, name, api_key FROM llm_configs WHERE user_id = ?1")?;
+    let has_credential_config = table_has_column(transaction, "llm_configs", "credential_config")?;
+    let sql = if has_credential_config {
+        "SELECT id, name, api_key, credential_config FROM llm_configs WHERE user_id = ?1"
+    } else {
+        "SELECT id, name, api_key, '{}' AS credential_config FROM llm_configs WHERE user_id = ?1"
+    };
+    let mut statement = transaction.prepare(sql)?;
     let rows = statement.query_map(params![user_id], |row| {
         Ok((
             row.get::<_, Option<String>>("name")?.unwrap_or_default(),
             ExistingLlmConfig {
                 id: row.get::<_, i64>("id")?,
                 api_key: row.get::<_, Option<String>>("api_key")?.unwrap_or_default(),
+                credential_config: row
+                    .get::<_, Option<String>>("credential_config")?
+                    .unwrap_or_else(|| "{}".to_string()),
             },
         ))
     })?;
     rows.collect::<Result<BTreeMap<_, _>, _>>()
         .map_err(DbError::from)
+}
+
+fn ensure_settings_llm_credential_column(transaction: &Transaction<'_>) -> DbResult<()> {
+    if !table_has_column(transaction, "llm_configs", "credential_config")? {
+        transaction.execute(
+            "ALTER TABLE llm_configs ADD COLUMN credential_config TEXT NOT NULL DEFAULT '{}'",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn settings_llm_credential_config(item: &Value, api_key: &str) -> Value {
+    let source = get_any(
+        item,
+        &[
+            "credentialConfig",
+            "credential_config",
+            "authProfile",
+            "auth_profile",
+        ],
+    )
+    .cloned()
+    .unwrap_or_else(|| json!({}));
+    let mut normalized = bill_analyser_core::normalize_provider_auth_config(Some(&source));
+    if normalized
+        .get("access_token")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+        && !is_masked_secret(api_key)
+    {
+        if let Some(object) = normalized.as_object_mut() {
+            object.insert("access_token".to_string(), json!(api_key.trim()));
+            object.insert("credential_mode".to_string(), json!("api_key"));
+        }
+    }
+    normalized
+}
+
+fn settings_credential_config_is_masked(value: &Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    object
+        .get("access_token")
+        .and_then(Value::as_str)
+        .is_some_and(is_masked_secret)
+        || object
+            .get("refresh_token")
+            .and_then(Value::as_str)
+            .is_some_and(is_masked_secret)
 }
 
 fn import_settings_ocr_config(
@@ -485,6 +633,17 @@ fn import_settings_ocr_config(
     let normalized = normalize_ocr_config(&json!({
         "provider": safe_text(configs[0].get("provider"), "disabled"),
         "lang": safe_text(configs[0].get("lang"), "chi_sim+eng"),
+        "model": safe_text(configs[0].get("model"), ""),
+        "baseUrl": safe_text(get_any(&configs[0], &["baseUrl", "base_url"]), ""),
+        "parameters": get_any(&configs[0], &["parameters", "params"])
+            .cloned()
+            .unwrap_or_else(|| json!({})),
+        "credentialConfig": get_any(
+            &configs[0],
+            &["credentialConfig", "credential_config", "authProfile", "auth_profile"]
+        )
+        .cloned()
+        .unwrap_or_else(|| json!({})),
     }));
     let now = utc_now_iso();
     let existing = transaction

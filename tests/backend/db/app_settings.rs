@@ -123,6 +123,13 @@ fn ocr_config_setting_normalizes_rejects_unknown_and_stores_only_runtime_config(
         Some(&json!({
             "provider": "TESSERACT",
             "lang": " eng+chi_sim ",
+            "model": "vision-test",
+            "baseUrl": "https://ocr.example.test/v1",
+            "parameters": {"temperature": 0},
+            "credentialConfig": {
+                "credential_mode": "access_token",
+                "credential_json": {"access_token": "ocr-token"}
+            },
             "image": "should-not-persist",
             "result": {"amount": 12.5}
         })),
@@ -142,8 +149,16 @@ fn ocr_config_setting_normalizes_rejects_unknown_and_stores_only_runtime_config(
     assert_eq!(
         persisted,
         json!({
+            "base_url": "https://ocr.example.test/v1",
+            "credential_config": {
+                "access_token": "ocr-token",
+                "credential_json": {"access_token": "ocr-token"},
+                "credential_mode": "access_token"
+            },
             "provider": "tesseract",
-            "lang": "eng+chi_sim"
+            "lang": "eng+chi_sim",
+            "model": "vision-test",
+            "parameters": {"temperature": 0}
         })
     );
     assert!(persisted.get("image").is_none());

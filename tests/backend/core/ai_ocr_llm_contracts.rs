@@ -56,14 +56,24 @@ fn ocr_config_and_disabled_safe_errors_match_receipt_routes() {
     assert_eq!(configured.lang, "eng+chi_sim");
     assert_eq!(
         ocr_available_providers_with_disabled(),
-        vec!["disabled", "cloud_stub", "tesseract", "local_json_ocr"]
+        vec![
+            "disabled",
+            "cloud_stub",
+            "tesseract",
+            "local_json_ocr",
+            "llm_vision"
+        ]
     );
     assert_eq!(
         build_ocr_config_response_payload(&configured),
         json!({
             "provider": "tesseract",
             "lang": "eng+chi_sim",
-            "available_providers": ["disabled", "cloud_stub", "tesseract", "local_json_ocr"],
+            "model": "",
+            "base_url": "",
+            "parameters": {},
+            "credential_config": {},
+            "available_providers": ["disabled", "cloud_stub", "tesseract", "local_json_ocr", "llm_vision"],
             "configured": true,
         })
     );

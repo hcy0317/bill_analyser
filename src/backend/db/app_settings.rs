@@ -135,6 +135,10 @@ pub fn store_ocr_config_setting(
     let stored_value = json!({
         "provider": config.provider,
         "lang": config.lang,
+        "model": config.model,
+        "base_url": config.base_url,
+        "parameters": config.parameters,
+        "credential_config": config.credential_config,
     })
     .to_string();
     set_app_setting(

@@ -15,7 +15,7 @@ async fn export_settings_bundle_handler(
         Err(response) => return *response,
     };
 
-    match build_settings_bundle(runtime.connection_mut(), db_user_id(user_id)) {
+    match build_settings_bundle(runtime.connection_mut(), db_user_id(user_id), false) {
         Ok(bundle) => settings_bundle_download_response(bundle, "bill-analyser-settings.json"),
         Err(_) => settings_bundle_db_error_response(),
     }
@@ -77,7 +77,11 @@ async fn export_settings_bundle_section_post_handler(
         }
     }
 
-    match build_settings_bundle(runtime.connection_mut(), user_id) {
+    match build_settings_bundle(
+        runtime.connection_mut(),
+        user_id,
+        is_sensitive_settings_export_section(&section_key),
+    ) {
         Ok(bundle) => settings_bundle_download_response(
             filter_settings_bundle_section(&bundle, &section_key),
             &format!("bill-analyser-settings-{section_key}.json"),
@@ -100,7 +104,7 @@ fn export_settings_bundle_section(
         Err(response) => return *response,
     };
 
-    match build_settings_bundle(runtime.connection_mut(), db_user_id(user_id)) {
+    match build_settings_bundle(runtime.connection_mut(), db_user_id(user_id), false) {
         Ok(bundle) => settings_bundle_download_response(
             filter_settings_bundle_section(&bundle, section_key),
             &format!("bill-analyser-settings-{section_key}.json"),

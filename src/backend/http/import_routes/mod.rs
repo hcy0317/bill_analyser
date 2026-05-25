@@ -15,6 +15,7 @@ use axum::{
     routing::{delete, get, post, put},
     Json, Router,
 };
+use base64::{engine::general_purpose, Engine as _};
 use bill_analyser_core::{
     attach_import_preview_matching_payload, build_composite_match_features,
     build_import_preview_filter_index_item, build_learning_rule_result_summary,
@@ -30,14 +31,16 @@ use bill_analyser_core::{
     import_session_cancel_success_response, import_session_not_found_response,
     import_session_success, import_stage_confirm_success, import_stage_dedup_success,
     import_stage_parse_success, import_v2_data_response, import_v2_error_response,
-    normalize_import_preview_page_query, parse_llm_json_array_response,
-    preview_state_conflict_response, render_llm_prompt_template, safe_llm_config_payload,
-    score_learning_rule_similarity, AiRouteResponse, ImportPreviewIndexData, ImportPreviewPageData,
-    ImportSessionSummary, ImportStageConfirmData, ImportStageDedupData, ImportStageParseData,
-    ImportV2RouteResponse, LlmProviderConfigContract, OcrConfigContract, OcrProviderTextLine,
-    OcrProviderTextResult, ReceiptDraftAccount, ReceiptDraftCategory, ReceiptDraftCategoryRule,
-    ReceiptDraftContext, ReceiptDraftTag, SmartDeduplicationEngine, UserId,
-    IMPORT_PREVIEW_SORT_KEYS, LLM_SYSTEM_PROMPT, OCR_DISABLED_PROVIDER_NAME,
+    normalize_import_preview_page_query, normalize_provider_auth_config,
+    parse_llm_json_array_response, preview_state_conflict_response, provider_auth_access_token,
+    provider_auth_has_refresh_credential, provider_auth_is_expired, provider_auth_refresh_token,
+    render_llm_prompt_template, safe_llm_config_payload, score_learning_rule_similarity,
+    AiRouteResponse, ImportPreviewIndexData, ImportPreviewPageData, ImportSessionSummary,
+    ImportStageConfirmData, ImportStageDedupData, ImportStageParseData, ImportV2RouteResponse,
+    LlmProviderConfigContract, OcrConfigContract, OcrProviderTextLine, OcrProviderTextResult,
+    ReceiptDraftAccount, ReceiptDraftCategory, ReceiptDraftCategoryRule, ReceiptDraftContext,
+    ReceiptDraftTag, SmartDeduplicationEngine, UserId, IMPORT_PREVIEW_SORT_KEYS, LLM_SYSTEM_PROMPT,
+    NETWORK_OCR_PROVIDER_NAME, OCR_DISABLED_PROVIDER_NAME,
 };
 use bill_analyser_db::{
     accept_llm_candidate, activate_llm_config, apply_preview_llm_recommendation,
@@ -87,6 +90,7 @@ use std::{
     time::{Duration as StdDuration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::time::sleep;
+use url::Url;
 
 use crate::{auth::resolve_user_id_from_headers, config::HttpShellConfig, state::HttpAppState};
 
