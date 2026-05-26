@@ -33,7 +33,7 @@ pub const IMPORT_V2_PIPELINE_STEPS: &[&str] = &[
 // 导入步骤名用于状态响应和排错，不代表 handler 可以跳过 staging/preview/confirm
 // 的数据库生命周期。
 #[rustfmt::skip]
-pub const IMPORT_STAGING_TABLES: &[&str] = &["import_sessions", "import_sources", "import_standard_rows", "import_decision_groups", "import_decision_group_members", "bills_parser_template", "bills_preview"];
+pub const IMPORT_STAGING_TABLES: &[&str] = &["import_sessions", "import_sources", "import_standard_rows", "import_decision_groups", "import_decision_group_members", "import_history_materializations", "bills_parser_template", "bills_preview"];
 pub const BILLS_PREVIEW_CONTRACT_FIELDS: &[&str] = &[
     "preview_parser_id",
     "preview_parser_tags_json",

@@ -33,6 +33,7 @@ const SIMILARITY_THRESHOLD: f64 = 0.5;
 #[serde(rename_all = "snake_case")]
 pub enum DeduplicationType {
     Exact,
+    SameBatch,
     Transfer,
     PlatformBank,
     Similar,
@@ -44,6 +45,7 @@ impl DeduplicationType {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Exact => "exact",
+            Self::SameBatch => "same_batch",
             Self::Transfer => "transfer",
             Self::PlatformBank => "platform_bank",
             Self::Similar => "similar",
@@ -437,6 +439,7 @@ impl SmartDeduplicationEngine {
 
         duplicate_groups.extend(find_exact_duplicates(&mut bills));
         duplicate_groups.extend(find_platform_bank_duplicates(&mut bills));
+        duplicate_groups.extend(find_same_batch_duplicates(&mut bills));
         transfer_pairs.extend(find_transfer_pairs(&mut bills));
         duplicate_groups.extend(find_similar_duplicates(&mut bills));
         split_groups.extend(find_split_bills(&mut bills));
@@ -687,41 +690,9 @@ pub fn find_import_reconciliation_candidates(
     candidates
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
-fn find_exact_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup> {
-    let mut groups = Vec::new();
-    let mut by_key: HashMap<String, Vec<usize>> = HashMap::new();
+include!("smart_dedup/exact.rs");
 
-    for (index, bill) in bills.iter().enumerate() {
-        if !bill.removed {
-            by_key.entry(dedup_key(bill)).or_default().push(index);
-        }
-    }
-
-    for mut indices in by_key.into_values() {
-        if indices.len() <= 1 {
-            continue;
-        }
-        indices.sort_by_key(|index| source_priority(&bills[*index].source_type()));
-        let keep_index = indices[0];
-        let remove_indices = indices[1..].to_vec();
-        for index in &remove_indices {
-            bills[*index].removed = true;
-        }
-        groups.push(DuplicateGroup {
-            dedup_type: DeduplicationType::Exact,
-            bill_indices: indices,
-            keep_index,
-            remove_indices,
-            reason: format!(
-                "完全重复，保留 {} 来源",
-                bills[keep_index].source_identifier()
-            ),
-        });
-    }
-
-    groups
-}
+include!("smart_dedup/same_batch.rs");
 
 #[tracing::instrument(level = "debug", skip_all)]
 fn find_platform_bank_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup> {
@@ -1408,7 +1379,6 @@ fn dedup_key(bill: &DedupBill) -> String {
 
 fn clean_runtime_markers(mut bill: DedupBill) -> DedupBill {
     bill.removed = false;
-    bill.merged_from.clear();
     bill.duplicate_of_db_id = None;
     bill
 }
@@ -1435,7 +1405,7 @@ fn merge_bill_fields(target: &mut DedupBill, secondary: &DedupBill, merge_parser
     target.payment_method = merge_field_values(&target.payment_method, &secondary.payment_method);
     target.description = merge_field_values(&target.description, &secondary.description);
     target.merged_from.push(MergedBillSource {
-        source: secondary.source_account_id.clone(),
+        source: secondary.source_identifier(),
         date: secondary.date.clone(),
         amount: Some(secondary.amount.to_yuan_string()),
         template_id: secondary.template_id.clone(),
@@ -1780,12 +1750,12 @@ fn resolve_reconciliation_candidate_type(
         ));
     }
 
-    if amount_equal_same_direction(imported_bill.amount, existing_bill.amount) {
-        let mut reason = "same_amount|same_direction|same_day|time_close".to_string();
-        if duplicate_evidence {
-            reason.push_str("|duplicate_text_evidence");
-        }
-        return Some((ReconciliationCandidateType::Duplicate, reason));
+    if amount_equal_same_direction(imported_bill.amount, existing_bill.amount) && duplicate_evidence
+    {
+        return Some((
+            ReconciliationCandidateType::Duplicate,
+            "same_amount|same_direction|same_day|time_close|duplicate_text_evidence".to_string(),
+        ));
     }
 
     None
@@ -1808,7 +1778,7 @@ fn has_reconciliation_duplicate_evidence(
     let imported_text = bill_text_for_intent(imported_bill);
     let existing_text = bill_text_for_intent(existing_bill);
     if imported_text.is_empty() && existing_text.is_empty() {
-        return true;
+        return false;
     }
     text_evidence_matches(&imported_text, &existing_text, 0.62)
 }

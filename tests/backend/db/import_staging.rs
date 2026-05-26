@@ -4,14 +4,17 @@ use bill_analyser_core::{DedupBill, Money, SmartDeduplicationEngine, UserId};
 use bill_analyser_db::{
     apply_preview_learning_decision, apply_preview_llm_recommendation,
     apply_preview_patches_preserving_selection, apply_preview_transfer_decision,
-    batch_update_preview_classification, calculate_import_bill_hash, clear_session_data,
-    confirm_preview_to_bills, count_preview_by_session, create_import_session,
-    dedup_bills_from_parser_templates, get_import_annotation_samples, get_import_session,
-    get_import_sources_by_session, get_import_standard_rows_by_session, get_llm_memory_events,
-    get_parser_templates_by_session, get_preview_bill_by_id, get_preview_by_ids,
-    get_preview_by_session, get_preview_filter_index_by_session, get_preview_page_by_session,
-    get_unprocessed_templates_for_dedup, init_import_staging_schema, insert_parser_templates_batch,
-    insert_preview_bill, insert_preview_bills_batch,
+    batch_update_preview_classification, calculate_import_bill_hash,
+    clear_import_preview_materialization_state, clear_session_data, confirm_preview_to_bills,
+    count_preview_by_session, create_import_session, dedup_bills_from_parser_templates,
+    get_import_annotation_samples, get_import_decision_groups_by_session,
+    get_import_history_candidate_bills_for_session, get_import_history_materializations_by_session,
+    get_import_session, get_import_sources_by_session, get_import_standard_rows_by_session,
+    get_llm_memory_events, get_parser_templates_by_session, get_preview_bill_by_id,
+    get_preview_by_ids, get_preview_by_session, get_preview_filter_index_by_session,
+    get_preview_page_by_session, get_unprocessed_templates_for_dedup, init_import_staging_schema,
+    insert_import_decision_groups_batch, insert_import_history_materializations_batch,
+    insert_parser_templates_batch, insert_preview_bill, insert_preview_bills_batch,
     mark_unprocessed_parser_templates_processed_for_session,
     parser_template_drafts_from_standard_bills, preview_drafts_from_dedup_bills,
     query_preview_page_by_session, reset_session_preview_selection,
@@ -20,6 +23,7 @@ use bill_analyser_db::{
     update_import_session_status, update_parser_template_status, update_preview_bill,
     update_preview_bills_batch, update_preview_recurring_match_decision, update_preview_selection,
     update_session_preview_selection_by_query, ImportAnnotationSampleDraft,
+    ImportDecisionGroupDraft, ImportDecisionGroupMemberDraft, ImportHistoryMaterializationDraft,
     ImportParserTemplateDraft, ImportPreviewClassificationUpdate, ImportPreviewDecision,
     ImportPreviewDraft, ImportPreviewExpectedState, ImportPreviewLearningApply,
     ImportPreviewLlmApplyRequest, ImportPreviewLlmReviewRequest, ImportPreviewLlmSuggestion,
@@ -2693,6 +2697,180 @@ fn parser_templates_flow_through_smart_dedup_into_preview_drafts() -> Result<(),
         previews[0].preview_parser_tags,
         vec!["parser:abc", "channel:bank", "parser:cmbc"]
     );
+    Ok(())
+}
+
+#[test]
+fn decision_groups_and_history_materializations_are_persisted_and_cleaned(
+) -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("decision_groups.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: "session-groups".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+    let preview_id = insert_preview_bill(
+        runtime.connection(),
+        "session-groups",
+        user_id(42),
+        &preview_draft("2026-05-01 08:30:00", 9.25, "ledger row"),
+    )?;
+
+    let inserted_groups = insert_import_decision_groups_batch(
+        runtime.connection_mut(),
+        "session-groups",
+        user_id(42),
+        &[ImportDecisionGroupDraft {
+            group_type: "duplicate".to_string(),
+            group_key: "same_batch:1-2".to_string(),
+            decision_status: "merged".to_string(),
+            base_preview_row_id: Some(preview_id),
+            signal_payload: json!({
+                "signal": "duplicate",
+                "source_label": "来源1: 微信 | 来源2: 工商银行"
+            }),
+            members: vec![
+                ImportDecisionGroupMemberDraft {
+                    preview_row_id: Some(preview_id),
+                    standard_row_id: None,
+                    history_bill_id: None,
+                    member_role: "base".to_string(),
+                    parser_name: "微信".to_string(),
+                    metadata: json!({"template_id": 1}),
+                },
+                ImportDecisionGroupMemberDraft {
+                    preview_row_id: None,
+                    standard_row_id: None,
+                    history_bill_id: Some(9001),
+                    member_role: "history_base".to_string(),
+                    parser_name: "history_db".to_string(),
+                    metadata: json!({"planned_operation": "update_history"}),
+                },
+            ],
+        }],
+    )?;
+    assert_eq!(inserted_groups, 1);
+    insert_import_history_materializations_batch(
+        runtime.connection_mut(),
+        "session-groups",
+        user_id(42),
+        &[ImportHistoryMaterializationDraft {
+            history_bill_id: 9001,
+            history_bill_version: 1,
+            materialized_payload: json!({"operation": "update_history"}),
+            rewrite_reason: "same_amount|same_direction".to_string(),
+        }],
+    )?;
+
+    let groups =
+        get_import_decision_groups_by_session(runtime.connection(), "session-groups", user_id(42))?;
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].members.len(), 2);
+    assert_eq!(groups[0].signal_payload["signal"], "duplicate");
+    let materializations = get_import_history_materializations_by_session(
+        runtime.connection(),
+        "session-groups",
+        user_id(42),
+    )?;
+    assert_eq!(materializations.len(), 1);
+    assert_eq!(materializations[0].history_bill_id, 9001);
+
+    clear_import_preview_materialization_state(
+        runtime.connection_mut(),
+        "session-groups",
+        user_id(42),
+    )?;
+    assert!(
+        get_preview_by_session(runtime.connection(), "session-groups", user_id(42), false)?
+            .is_empty()
+    );
+    assert!(get_import_decision_groups_by_session(
+        runtime.connection(),
+        "session-groups",
+        user_id(42),
+    )?
+    .is_empty());
+    assert!(get_import_history_materializations_by_session(
+        runtime.connection(),
+        "session-groups",
+        user_id(42),
+    )?
+    .is_empty());
+
+    insert_preview_bill(
+        runtime.connection(),
+        "session-groups",
+        user_id(42),
+        &preview_draft("2026-05-01 08:30:00", 9.25, "ledger row after reset"),
+    )?;
+
+    clear_session_data(runtime.connection_mut(), "session-groups", user_id(42))?;
+    assert!(get_import_decision_groups_by_session(
+        runtime.connection(),
+        "session-groups",
+        user_id(42),
+    )?
+    .is_empty());
+    assert!(get_import_history_materializations_by_session(
+        runtime.connection(),
+        "session-groups",
+        user_id(42),
+    )?
+    .is_empty());
+    Ok(())
+}
+
+#[test]
+fn history_candidate_query_uses_standard_row_day_and_user_scope() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("history_candidates.db"))?;
+    seed_users(&runtime, &[42, 77])?;
+    init_bills_schema(&runtime)?;
+    init_import_staging_schema(runtime.connection())?;
+    stage_import_parser_templates_with_sources(
+        runtime.connection_mut(),
+        &ImportSessionDraft {
+            session_id: "session-history-query".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+        &[parser_template_draft(
+            "2026-05-01 08:30:00",
+            -9.25,
+            "ledger row",
+        )],
+        &[import_source_draft(0, "history-query-source")],
+        &[import_standard_row_draft(0, 0)],
+        false,
+    )?;
+    runtime.connection().execute(
+        "
+        INSERT INTO bills (
+            user_id, date, type, amount, counterparty, description,
+            payment_method, main_category, sub_category, hash, created_at, updated_at
+        ) VALUES
+            (42, '2026-05-01 08:30:10', '支出', -9.25, 'canteen', 'ledger row', 'card', '餐饮', '午餐', 'h-1', 'now', 'now'),
+            (77, '2026-05-01 08:30:10', '支出', -9.25, 'other user', 'hidden', 'card', '餐饮', '午餐', 'h-2', 'now', 'now'),
+            (42, '2026-05-02 08:30:10', '支出', -9.25, 'other day', 'hidden', 'card', '餐饮', '午餐', 'h-3', 'now', 'now')
+        ",
+        [],
+    )?;
+
+    let candidates = get_import_history_candidate_bills_for_session(
+        runtime.connection(),
+        "session-history-query",
+        user_id(42),
+    )?;
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].history_bill_id, 1);
+    assert_eq!(candidates[0].bill.counterparty, "canteen");
+    assert_eq!(candidates[0].bill.amount, Money::from_yuan_str("-9.25")?);
     Ok(())
 }
 

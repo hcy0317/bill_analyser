@@ -24,7 +24,7 @@ flowchart LR
 | DB | `src/backend/db/lib.rs` | SQLite 连接、PostgreSQL lazy runtime provider、schema、事务 helper、user-scope repository、staging 生命周期 | 不绕过事务边界、静默回退仓储 backend，或把 user_id 过滤留给调用方猜 |
 | Parsers | `src/backend/parsers/lib.rs` | provider 检测、账单解析、`RawBill` 到 `StandardBill` 标准化、fixture/golden 合同 | 不执行导入 staging、去重、分类或账户写入 |
 
-当前库存：`src/backend/http` 112 个 Rust 文件，`src/backend/db` 74 个，`src/backend/core` 54 个，`src/backend/parsers` 9 个，总计 249 个。每个后端 Rust 文件都在文件头保留中文导读注释，说明该文件所在层、核心职责和主要对接边界。
+当前库存：`src/backend/http` 118 个 Rust 文件，`src/backend/db` 84 个，`src/backend/core` 58 个，`src/backend/parsers` 9 个，总计 269 个。每个后端 Rust 文件都在文件头保留中文导读注释，说明该文件所在层、核心职责和主要对接边界。
 
 ### 常用根文件
 
@@ -70,7 +70,7 @@ flowchart TD
   Upload["multipart / JSON 上传"] --> Parse["parsers: exactly-one provider 检测 + RawBill"]
   Parse --> Standard["post_process_raw_bills -> StandardBill"]
   Standard --> Template["db/import_staging: source + standard row + template/session staging"]
-  Template --> Decisions["dedup + 分类规则 + transfer + recurring + learning"]
+  Template --> Decisions["same-batch/history dedup + 分类规则 + transfer + recurring + learning"]
   Decisions --> Preview["preview staging + page query"]
   Preview --> Mutations["update / reclassify / accept/reject/clear decisions"]
   Mutations --> Confirm["confirm_preview_to_bills transaction"]
@@ -83,6 +83,8 @@ flowchart TD
 - dedicated parser 自动识别必须产生 exactly-one 决策证据；未命中或多 parser 冲突停留在 unmatched 文件，不生成标准账单。
 - mixed multipart 必须保留每个文件自己的 parser id 和 parser tags。
 - `import_sources` 与 `import_standard_rows` 保存文件级 parser decision、标准化行、分单位金额和 parser payload，后续 duplicate/transfer/learning 切片以它们作为决策台账锚点。
+- 同批重复在 stage2 按秒级时间窗口、同向金额、方向和文本证据折叠，合并交易对方/支付方式/描述，并通过 `preview_matching_feedback_json.dedup.source_chain` 与 `import_decision_groups` 保留来源证据。
+- 历史重复查询正式 `bills` 时保持 user-scope，并以 `import_standard_rows` 的日期窗口限制候选；命中还需要金额方向和文本证据，之后生成 `database_duplicate` 预览行、`reconciliation.planned_operation=update_history` feedback 和 `import_history_materializations`，当前 confirm 会跳过带 `history_rewrite_pending` annotation 的预览行。
 - Check Data 首屏只读取 preview page；筛选、排序、计数和批量选择都由 Rust preview page/query/update 处理。
 - transfer、learning、recurring、dedup、parser、annotation、reconciliation 信号从 `preview_matching_feedback_json` 投影，缺分类/缺账户状态按当前预览字段动态计算；账户规则候选在 stage2 shadow 读取，正式账户字段仍由当前别名链路写入。
 - confirm 在事务内写正式 bills、tags、accounts、learning side effects；cancel 和失败后新建 session 清理 staging，不保留导入续传状态。
@@ -124,7 +126,7 @@ DB 层导读注释应优先解释：
 - repository facade 供哪个 route/runtime 调用。
 - user-scope 在哪里强制。
 - 哪些写入必须 rollback-on-error，哪些审计是 best-effort。
-- import staging 的 session/source/standard row/template/preview/decision/LLM memory/confirm 生命周期。
+- import staging 的 session/source/standard row/template/preview/decision/history materialization/LLM memory/confirm 生命周期。
 - row helper 负责数据库行和前端兼容 DTO 之间的字段转换。
 
 <a id="development-recipes"></a>

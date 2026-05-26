@@ -252,6 +252,7 @@ fn delete_import_ledger_for_session(
         "DELETE FROM import_decision_groups WHERE session_id = ?1 AND user_id = ?2",
         params![session_id, user_id],
     )?;
+    delete_import_history_materializations_for_session(connection, session_id, user_id)?;
     connection.execute(
         "DELETE FROM import_standard_rows WHERE session_id = ?1 AND user_id = ?2",
         params![session_id, user_id],

@@ -3,7 +3,7 @@
 导入主链在 Rust runtime 中完成，仍保持三阶段用户体验：
 
 1. **解析**：parser-first multipart 上传会并发检测多个上传文件并保持文件响应顺序；每个文件必须且只能由一个 dedicated parser 命中，命中结果会带 `parser_decision` 证据进入标准账单解析，未命中或多 parser 冲突会作为 unmatched 文件返回；JSON parse 使用已提供 parser id 生成标准账单 draft。
-2. **去重预览**：写入 session/source/template/standard-row staging，执行 dedup、账户别名匹配、分类规则匹配、transfer/recurring/learning/LLM decision，再批量写入 preview staging；stage2 默认不在响应内联全量 preview，前端首屏只请求 preview page，筛选/排序随 preview page query 由 Rust 端按条件分页并返回轻量 facets/counts，完整 preview 从 `preview_matching_feedback_json` 投影 parser/dedup/transfer/recurring/learning/LLM 信号。
+2. **去重预览**：写入 session/source/template/standard-row staging，执行同批重复折叠、历史重复 materialization、账户别名匹配、分类规则匹配、transfer/recurring/learning/LLM decision，再批量写入 preview staging；stage2 默认不在响应内联全量 preview，前端首屏只请求 preview page，筛选/排序随 preview page query 由 Rust 端按条件分页并返回轻量 facets/counts，完整 preview 从 `preview_matching_feedback_json` 投影 parser/dedup/reconciliation/transfer/recurring/learning/LLM 信号。
 3. **确认导入**：用户确认后在事务内写入正式账单表，并更新账户余额、学习事件和审计。
 
 ## 核心模块
@@ -21,6 +21,8 @@
 - 混合来源 multipart 上传必须按文件保持 parser id 和 parser tags，不允许使用首个文件 parser id 覆盖整批账单。
 - dedicated parser 自动识别必须返回 exactly-one 决策；`no_match` 和 `conflict` 不写入标准账单，只保留 unmatched 文件和 parser decision evidence。
 - `import_sources` 保存文件级 parser signal / confidence / decision metadata；`import_standard_rows` 保存标准化行、金额分单位、方向、parser payload 和原始标准 payload，source/row 写入必须与 parser template staging 处于同一事务。
+- 同批重复按时间窗口、同向金额、方向和文本证据合并，保留基底预览行并把来源链、合并原因和成员写入 `import_decision_groups` / `import_decision_group_members`。
+- 历史重复按当前用户、standard row 日期窗口、正式账单金额方向和文本证据查询；命中后以正式账单为基底生成 `database_duplicate` 预览行，`reconciliation` feedback 和 `import_history_materializations` 显式标记 `update_history`，当前 confirm 因 `history_rewrite_pending` annotation 跳过真实改写。
 - 多文件 parser work 可以并发执行，但 session/template staging 仍保持一次性写入。
 - stage2 processed 状态按 `session_id + user_id + parser_is_processed` 更新，避免大批量 `id IN (...)` 更新；preview 批量写入复用 prepared statement。
 - preview page 承担 Check Data 的分页、排序、筛选与轻量聚合 metadata；缺少分类、缺少账户和转账账户复核状态按当前预览字段计算，人工补齐后不会被历史 annotation 或人工编辑标记继续计为待标注；旧 preview index 路由仅作为兼容读取面，不再是首屏预览依赖。

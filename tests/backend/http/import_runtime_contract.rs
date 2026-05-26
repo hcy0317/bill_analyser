@@ -9,12 +9,13 @@ use axum::{
 use base64::{engine::general_purpose, Engine as _};
 use bill_analyser_core::{build_composite_match_features, composite_hash_from_features, UserId};
 use bill_analyser_db::{
-    create_import_session, get_import_session, get_import_sources_by_session,
-    get_import_standard_rows_by_session, get_parser_templates_by_session, get_preview_by_session,
-    init_import_staging_schema, insert_parser_templates_batch, insert_preview_bills_batch,
-    update_import_session_status, ImportParserTemplateDraft, ImportPreviewDraft, ImportPreviewRow,
-    ImportSessionDraft, ImportSessionStatusUpdate, SqliteConnectionConfig, SqliteDbPath,
-    SqliteRuntime,
+    create_import_session, get_import_decision_groups_by_session,
+    get_import_history_materializations_by_session, get_import_session,
+    get_import_sources_by_session, get_import_standard_rows_by_session,
+    get_parser_templates_by_session, get_preview_by_session, init_import_staging_schema,
+    insert_parser_templates_batch, insert_preview_bills_batch, update_import_session_status,
+    ImportParserTemplateDraft, ImportPreviewDraft, ImportPreviewRow, ImportSessionDraft,
+    ImportSessionStatusUpdate, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
 use bill_analyser_http::{
     build_router, HttpAppState, HttpShellConfig, ImportRouteMode, IMPORT_SKELETON_ROUTE_PATTERNS,
@@ -1485,6 +1486,51 @@ async fn import_db_runtime_parse_dedup_confirm_writes_import_chain() -> Result<(
 
     let preview = get_preview_by_session(db_runtime.connection(), &session_id, user_id(42), false)?;
     assert_eq!(preview.len(), 3);
+
+    let dedup_replay = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/dedup")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "session_id": session_id,
+                        "include_preview": true
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(dedup_replay.status(), StatusCode::OK);
+    let dedup_replay_body = read_json(dedup_replay).await;
+    assert_eq!(dedup_replay_body["data"]["total"], 3);
+    assert_eq!(dedup_replay_body["data"]["after_dedup"], 3);
+    assert_eq!(
+        dedup_replay_body["data"]["preview"]
+            .as_array()
+            .expect("replayed preview rows")
+            .len(),
+        3
+    );
+    assert_eq!(
+        dedup_replay_body["data"]["match_stats"]["idempotent_replay"],
+        true
+    );
+    let replay_session = get_import_session(db_runtime.connection(), &session_id, user_id(42))?
+        .expect("session remains preview");
+    assert_eq!(replay_session.status, "preview");
+    assert_eq!(replay_session.total_parsed, 3);
+    assert_eq!(replay_session.total_preview, 3);
+    let replay_preview =
+        get_preview_by_session(db_runtime.connection(), &session_id, user_id(42), false)?;
+    assert_eq!(replay_preview.len(), 3);
+
     let selected_preview = preview.first().expect("preview rows").id;
 
     let preview_index = app
@@ -3968,6 +4014,375 @@ async fn import_db_runtime_serves_preview_index_and_legacy_parser_catalog(
     assert!(parser_ids.contains(&"auto"));
     assert!(parser_ids.contains(&"wechat"));
     assert!(parser_ids.contains(&"ccb"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn import_dedup_materializes_historical_duplicates_into_preview() -> Result<(), Box<dyn Error>>
+{
+    let fixture = RuntimeFixture::new().await?;
+    let runtime = runtime_for(fixture.db_path())?;
+    seed_users(&runtime, &[42])?;
+    init_bills_schema(&runtime)?;
+    runtime.connection().execute(
+        "
+        INSERT INTO bills (
+            user_id, date, type, amount, counterparty, description,
+            payment_method, main_category, sub_category, source_account_id,
+            hash, created_at, updated_at
+        ) VALUES (
+            42, '2026-05-04 10:00:05', '支出', -20.00, 'coffee shop',
+            'latte', 'icbc', '餐饮', '咖啡', 101, 'history-hash',
+            '2026-05-04T10:00:05', '2026-05-04T10:00:05'
+        )
+        ",
+        [],
+    )?;
+    let history_bill_id = runtime.connection().last_insert_rowid();
+    let app = runtime_router(&fixture);
+
+    let parse = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/parse")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "parser_id": "wechat",
+                        "file_count": 1,
+                        "bills": [{
+                            "date": "2026-05-04 10:00:00",
+                            "type": "支出",
+                            "amount": -20.0,
+                            "description": "latte",
+                            "counterparty": "coffee shop",
+                            "payment_method": "wechat",
+                            "source_account_id": "1001",
+                            "main_category": "餐饮",
+                            "sub_category": "咖啡"
+                        }]
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(parse.status(), StatusCode::OK);
+    let session_id = read_json(parse).await["data"]["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    let dedup = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/dedup")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "session_id": session_id,
+                        "include_preview": true
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(dedup.status(), StatusCode::OK);
+    let dedup_body = read_json(dedup).await;
+    assert_eq!(dedup_body["data"]["after_dedup"], 1);
+    assert_eq!(dedup_body["data"]["match_stats"]["database_candidates"], 1);
+    let preview = dedup_body["data"]["preview"]
+        .as_array()
+        .expect("preview rows");
+    assert_eq!(preview.len(), 1);
+    assert_eq!(preview[0]["dedup_type"], "database_duplicate");
+    assert_eq!(
+        preview[0]["matching"]["reconciliation"]["planned_operation"],
+        "update_history"
+    );
+    assert_eq!(
+        preview[0]["matching"]["reconciliation"]["history_bill_id"],
+        history_bill_id
+    );
+    assert_eq!(
+        preview[0]["matching"]["annotation"]["type"],
+        "history_rewrite_pending"
+    );
+
+    let db_runtime = runtime_for(fixture.db_path())?;
+    let groups =
+        get_import_decision_groups_by_session(db_runtime.connection(), &session_id, user_id(42))?;
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].group_type, "historical_duplicate");
+    assert!(groups[0]
+        .members
+        .iter()
+        .any(|member| member.history_bill_id == Some(history_bill_id)));
+    let materializations = get_import_history_materializations_by_session(
+        db_runtime.connection(),
+        &session_id,
+        user_id(42),
+    )?;
+    assert_eq!(materializations.len(), 1);
+    assert_eq!(materializations[0].history_bill_id, history_bill_id);
+
+    let select_all = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::PUT)
+                .uri(format!(
+                    "/api/bills/import/v2/preview/{session_id}/selection"
+                ))
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "selectionAction": "select_all"
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(select_all.status(), StatusCode::OK);
+
+    let confirm = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/confirm")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "session_id": session_id
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(confirm.status(), StatusCode::OK);
+    let confirm_body = read_json(confirm).await;
+    assert_eq!(confirm_body["data"]["imported_count"], 0);
+    assert_eq!(confirm_body["data"]["skipped_count"], 1);
+    let remaining_history_rows: i64 = db_runtime.connection().query_row(
+        "SELECT COUNT(*) FROM bills WHERE user_id = 42 AND id = ?1",
+        [history_bill_id],
+        |row| row.get(0),
+    )?;
+    assert_eq!(remaining_history_rows, 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn import_dedup_keeps_distinct_same_amount_history_match_as_import_preview(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new().await?;
+    let runtime = runtime_for(fixture.db_path())?;
+    seed_users(&runtime, &[42])?;
+    init_bills_schema(&runtime)?;
+    runtime.connection().execute(
+        "
+        INSERT INTO bills (
+            user_id, date, type, amount, counterparty, description,
+            payment_method, main_category, sub_category, source_account_id,
+            hash, created_at, updated_at
+        ) VALUES (
+            42, '2026-05-04 10:00:05', '支出', -20.00, 'book store',
+            'magazine', 'icbc', '购物', '图书', 101, 'history-distinct-hash',
+            '2026-05-04T10:00:05', '2026-05-04T10:00:05'
+        )
+        ",
+        [],
+    )?;
+    let app = runtime_router(&fixture);
+
+    let parse = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/parse")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "parser_id": "wechat",
+                        "file_count": 1,
+                        "bills": [{
+                            "date": "2026-05-04 10:00:00",
+                            "type": "支出",
+                            "amount": -20.0,
+                            "description": "latte",
+                            "counterparty": "coffee shop",
+                            "payment_method": "wechat",
+                            "source_account_id": "1001"
+                        }]
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(parse.status(), StatusCode::OK);
+    let session_id = read_json(parse).await["data"]["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    let dedup = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/dedup")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "session_id": session_id,
+                        "include_preview": true
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(dedup.status(), StatusCode::OK);
+    let dedup_body = read_json(dedup).await;
+    assert_eq!(dedup_body["data"]["after_dedup"], 1);
+    assert_eq!(dedup_body["data"]["match_stats"]["database_candidates"], 0);
+    let preview = dedup_body["data"]["preview"]
+        .as_array()
+        .expect("preview rows");
+    assert_eq!(preview.len(), 1);
+    assert_ne!(preview[0]["dedup_type"], "database_duplicate");
+    assert_eq!(preview[0]["preview_counterparty"], "coffee shop");
+
+    let db_runtime = runtime_for(fixture.db_path())?;
+    assert!(get_import_history_materializations_by_session(
+        db_runtime.connection(),
+        &session_id,
+        user_id(42),
+    )?
+    .is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn import_dedup_persists_same_batch_duplicate_decision_group() -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new().await?;
+    let runtime = runtime_for(fixture.db_path())?;
+    seed_users(&runtime, &[42])?;
+    init_bills_schema(&runtime)?;
+    let app = runtime_router(&fixture);
+
+    let parse = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/parse")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "parser_id": "icbc",
+                        "file_count": 1,
+                        "bills": [
+                            {
+                                "date": "2026-05-04 10:00:00",
+                                "type": "支出",
+                                "amount": -18.60,
+                                "description": "bank card",
+                                "counterparty": "breakfast",
+                                "payment_method": "icbc",
+                                "source_account_id": "101"
+                            },
+                            {
+                                "date": "2026-05-04 10:00:20",
+                                "type": "支出",
+                                "amount": -18.60,
+                                "description": "wallet note",
+                                "counterparty": "breakfast shop",
+                                "payment_method": "wechat",
+                                "source_account_id": "202"
+                            }
+                        ]
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(parse.status(), StatusCode::OK);
+    let session_id = read_json(parse).await["data"]["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    let dedup = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/dedup")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "session_id": session_id,
+                        "include_preview": true
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(dedup.status(), StatusCode::OK);
+    let dedup_body = read_json(dedup).await;
+    assert_eq!(dedup_body["data"]["total"], 2);
+    assert_eq!(dedup_body["data"]["after_dedup"], 1);
+    assert_eq!(dedup_body["data"]["dedup_stats"]["duplicates"], 1);
+    let preview = dedup_body["data"]["preview"]
+        .as_array()
+        .expect("preview rows");
+    assert_eq!(preview[0]["dedup_type"], "same_batch");
+    assert_eq!(preview[0]["matching"]["dedup"]["source_count"], 2);
+    assert!(preview[0]["matching"]["dedup"]["source_label"]
+        .as_str()
+        .is_some_and(|value| value.contains("来源1")));
+
+    let db_runtime = runtime_for(fixture.db_path())?;
+    let groups =
+        get_import_decision_groups_by_session(db_runtime.connection(), &session_id, user_id(42))?;
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].group_type, "duplicate");
+    assert_eq!(groups[0].members.len(), 2);
+    assert_eq!(groups[0].signal_payload["dedup_type"], "same_batch");
     Ok(())
 }
 

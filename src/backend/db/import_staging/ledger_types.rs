@@ -67,3 +67,79 @@ pub struct ImportStandardRow {
     pub created_at: String,
     pub updated_at: String,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportDecisionGroupDraft {
+    pub group_type: String,
+    pub group_key: String,
+    pub decision_status: String,
+    pub base_preview_row_id: Option<i64>,
+    pub signal_payload: Value,
+    pub members: Vec<ImportDecisionGroupMemberDraft>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportDecisionGroupMemberDraft {
+    pub preview_row_id: Option<i64>,
+    pub standard_row_id: Option<i64>,
+    pub history_bill_id: Option<i64>,
+    pub member_role: String,
+    pub parser_name: String,
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportDecisionGroupRow {
+    pub id: i64,
+    pub session_id: String,
+    pub user_id: i64,
+    pub group_type: String,
+    pub group_key: String,
+    pub decision_status: String,
+    pub base_preview_row_id: Option<i64>,
+    pub signal_payload: Value,
+    pub members: Vec<ImportDecisionGroupMemberRow>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportDecisionGroupMemberRow {
+    pub id: i64,
+    pub group_id: i64,
+    pub preview_row_id: Option<i64>,
+    pub standard_row_id: Option<i64>,
+    pub history_bill_id: Option<i64>,
+    pub member_role: String,
+    pub parser_name: String,
+    pub metadata: Value,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportHistoryBillRow {
+    pub history_bill_id: i64,
+    pub history_bill_version: i64,
+    pub bill: DedupBill,
+    pub snapshot: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportHistoryMaterializationDraft {
+    pub history_bill_id: i64,
+    pub history_bill_version: i64,
+    pub materialized_payload: Value,
+    pub rewrite_reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportHistoryMaterializationRow {
+    pub id: i64,
+    pub session_id: String,
+    pub user_id: i64,
+    pub history_bill_id: i64,
+    pub history_bill_version: i64,
+    pub materialized_payload: Value,
+    pub rewrite_reason: String,
+    pub created_at: String,
+}

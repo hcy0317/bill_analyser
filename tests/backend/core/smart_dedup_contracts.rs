@@ -94,9 +94,73 @@ fn platform_bank_duplicate_keeps_platform_but_transfer_intent_pairs_transfer() {
 }
 
 #[test]
+fn same_batch_duplicate_group_merges_three_rows_with_bank_base() {
+    let mut wallet = bill("cash", "2026-01-02 08:00:00", "-18.60");
+    let mut bank = bill("icbc", "2026-01-02 08:00:15", "-18.60");
+    let mut other_bank = bill("abc", "2026-01-02 08:00:25", "-18.60");
+    wallet.counterparty = "早餐店".to_string();
+    bank.counterparty = "早餐店收款".to_string();
+    other_bank.counterparty = "早餐店".to_string();
+    wallet.description = "豆浆".to_string();
+    bank.description = "银行卡消费".to_string();
+    other_bank.description = "豆浆".to_string();
+    wallet.template_id = Some("tpl-wallet".to_string());
+    bank.template_id = Some("tpl-bank".to_string());
+    other_bank.template_id = Some("tpl-other-bank".to_string());
+
+    let result = SmartDeduplicationEngine.process(vec![wallet, bank, other_bank]);
+
+    assert_eq!(result.original_count, 3);
+    assert_eq!(result.removed_count, 2);
+    assert_eq!(result.duplicate_groups.len(), 1);
+    assert_eq!(
+        result.duplicate_groups[0].dedup_type,
+        DeduplicationType::SameBatch
+    );
+    assert_eq!(result.kept_bills[0].parser_id, "icbc");
+    assert_eq!(
+        result.kept_bills[0].dedup_type.as_deref(),
+        Some("same_batch")
+    );
+    assert_eq!(
+        result.kept_bills[0].dedup_source_ids(),
+        vec![
+            "tpl-bank".to_string(),
+            "tpl-other-bank".to_string(),
+            "tpl-wallet".to_string()
+        ]
+    );
+    assert!(result.kept_bills[0].counterparty.contains("早餐店收款"));
+    assert!(result.kept_bills[0].description.contains("银行卡消费"));
+    assert_eq!(result.kept_bills[0].merged_from.len(), 2);
+}
+
+#[test]
+fn same_batch_duplicate_requires_text_evidence_before_merging_amount_time_matches() {
+    let mut alipay = bill("alipay", "2026-01-02 08:00:00", "-18.60");
+    let mut wechat = bill("wechat", "2026-01-02 08:00:15", "-18.60");
+    alipay.counterparty = "早餐店".to_string();
+    alipay.description = "豆浆".to_string();
+    wechat.counterparty = "书店".to_string();
+    wechat.description = "杂志".to_string();
+    alipay.template_id = Some("tpl-alipay".to_string());
+    wechat.template_id = Some("tpl-wechat".to_string());
+
+    let result = SmartDeduplicationEngine.process(vec![alipay, wechat]);
+
+    assert_eq!(result.original_count, 2);
+    assert_eq!(result.removed_count, 0);
+    assert!(result
+        .duplicate_groups
+        .iter()
+        .all(|group| group.dedup_type != DeduplicationType::SameBatch));
+    assert_eq!(result.kept_bills.len(), 2);
+}
+
+#[test]
 fn similar_duplicates_and_split_groups_preserve_python_contract_edges() {
     let mut wechat = bill("wechat", "2026-01-03 10:00:00", "-8.80");
-    let mut alipay = bill("alipay", "2026-01-03 10:00:20", "-8.80");
+    let mut alipay = bill("alipay", "2026-01-03 10:00:20", "-8.81");
     wechat.counterparty = "咖啡店".to_string();
     alipay.counterparty = "咖啡店".to_string();
     wechat.template_id = Some("tpl-wechat".to_string());
@@ -407,5 +471,33 @@ fn reconciliation_candidate_contract_classifies_duplicates_and_transfers() {
     assert_eq!(
         transfer_candidates[0].candidate_type,
         ReconciliationCandidateType::Transfer
+    );
+
+    let mut imported_distinct = bill("wechat", "2026-01-07 12:00:00", "-30.00");
+    let mut existing_distinct = bill("icbc", "2026-01-07 12:00:20", "-30.00");
+    imported_distinct.counterparty = "咖啡店".to_string();
+    imported_distinct.description = "拿铁".to_string();
+    existing_distinct.counterparty = "书店".to_string();
+    existing_distinct.description = "杂志".to_string();
+    existing_distinct.id = Some("db-distinct".to_string());
+
+    assert!(
+        find_import_reconciliation_candidates(&[imported_distinct], &[existing_distinct])
+            .is_empty()
+    );
+
+    let mut imported_empty_text = bill("wechat", "2026-01-07 13:00:00", "-30.00");
+    let mut existing_empty_text = bill("icbc", "2026-01-07 13:00:20", "-30.00");
+    imported_empty_text.counterparty.clear();
+    imported_empty_text.payment_method.clear();
+    imported_empty_text.description.clear();
+    existing_empty_text.counterparty.clear();
+    existing_empty_text.payment_method.clear();
+    existing_empty_text.description.clear();
+    existing_empty_text.id = Some("db-empty-text".to_string());
+
+    assert!(
+        find_import_reconciliation_candidates(&[imported_empty_text], &[existing_empty_text])
+            .is_empty()
     );
 }

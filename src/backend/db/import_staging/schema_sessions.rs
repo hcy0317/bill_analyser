@@ -107,6 +107,21 @@ pub fn init_import_staging_schema(connection: &Connection) -> DbResult<()> {
         CREATE INDEX IF NOT EXISTS idx_import_decision_group_members_group
             ON import_decision_group_members(group_id, member_role);
 
+        CREATE TABLE IF NOT EXISTS import_history_materializations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            history_bill_id INTEGER NOT NULL,
+            history_bill_version INTEGER NOT NULL DEFAULT 1,
+            materialized_payload_json TEXT,
+            rewrite_reason TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(session_id, user_id, history_bill_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_import_history_materializations_session_history_bill
+            ON import_history_materializations(session_id, user_id, history_bill_id);
+
         CREATE TABLE IF NOT EXISTS bills_preview (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id TEXT NOT NULL,
@@ -273,6 +288,10 @@ pub fn clear_user_import_staging_data(connection: &Connection, user_id: i64) -> 
     };
     let decision_group_count =
         connection.execute("DELETE FROM import_decision_groups WHERE user_id = ?1", [user_id])?;
+    let history_materialization_count = connection.execute(
+        "DELETE FROM import_history_materializations WHERE user_id = ?1",
+        [user_id],
+    )?;
     let standard_count =
         connection.execute("DELETE FROM import_standard_rows WHERE user_id = ?1", [user_id])?;
     let source_count =
@@ -285,6 +304,7 @@ pub fn clear_user_import_staging_data(connection: &Connection, user_id: i64) -> 
     Ok(annotation_count
         + decision_member_count
         + decision_group_count
+        + history_materialization_count
         + standard_count
         + source_count
         + preview_count
