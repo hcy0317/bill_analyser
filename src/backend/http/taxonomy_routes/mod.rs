@@ -22,6 +22,7 @@ use bill_analyser_core::{
 use bill_analyser_db::{
     get_app_setting, set_app_setting, sync_all_account_balances,
     taxonomy::{
+        account_rules::{AccountRuleRecord, AccountRulesRepository},
         accounts::{AccountDisplayOrder, AccountRecord, AccountsRepository},
         categories::{CategoriesRepository, CategoryRecord, CategoryStatistic},
         category_rules::{CategoryRuleRecord, CategoryRulesRepository},
@@ -52,6 +53,7 @@ const SETTINGS_BUNDLE_SECTION_KEYS: &[&str] = &[
     "transactionTemplates",
     "scheduledTransactions",
     "categoryRecognitionRules",
+    "accountRecognitionRules",
     "llmConfigs",
     "ocrConfig",
 ];
@@ -127,6 +129,16 @@ pub const TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/category-rules/defaults"),
     ("POST", "/api/category-rules/migrate"),
     ("POST", "/api/category-rules/reorder"),
+];
+
+pub const TAXONOMY_ACCOUNT_RULE_ROUTE_PATTERNS: &[(&str, &str)] = &[
+    ("GET", "/api/account-rules/"),
+    ("POST", "/api/account-rules/"),
+    ("DELETE", "/api/account-rules/{rule_id}"),
+    ("PUT", "/api/account-rules/{rule_id}"),
+    ("POST", "/api/account-rules/{rule_id}/test"),
+    ("POST", "/api/account-rules/migrate-aliases"),
+    ("POST", "/api/account-rules/reorder"),
 ];
 
 pub const TAXONOMY_RULE_CENTER_ROUTE_PATTERNS: &[(&str, &str)] = &[("GET", "/api/rules/overview")];
@@ -309,6 +321,26 @@ pub fn taxonomy_runtime_router() -> Router<HttpAppState> {
             axum::routing::post(test_category_rule_handler),
         )
         .route(
+            "/api/account-rules/",
+            get(list_account_rules_handler).post(create_account_rule_handler),
+        )
+        .route(
+            "/api/account-rules/reorder",
+            axum::routing::post(reorder_account_rules_handler),
+        )
+        .route(
+            "/api/account-rules/migrate-aliases",
+            axum::routing::post(migrate_account_aliases_handler),
+        )
+        .route(
+            "/api/account-rules/:rule_id",
+            put(update_account_rule_handler).delete(delete_account_rule_handler),
+        )
+        .route(
+            "/api/account-rules/:rule_id/test",
+            axum::routing::post(test_account_rule_handler),
+        )
+        .route(
             "/api/categories/:category_id",
             get(get_category_handler)
                 .put(update_category_handler)
@@ -331,10 +363,19 @@ struct CategoryRulesQuery {
     enabled_only: Option<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct AccountRulesQuery {
+    account_id: Option<i64>,
+    enabled_only: Option<String>,
+    account_role_scope: Option<String>,
+    transaction_type_scope: Option<String>,
+}
+
 include!("account_handlers.rs");
 include!("tag_template_handlers.rs");
 include!("category_handlers.rs");
 include!("category_rule_handlers.rs");
+include!("account_rule_handlers.rs");
 include!("settings_bundle_handlers.rs");
 include!("account_category_formatters.rs");
 include!("settings_serialization.rs");

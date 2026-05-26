@@ -2048,6 +2048,56 @@ export default {
         });
     },
 
+    // ── Account Rules (账户识别规则) ──────────
+
+    getAccountRules: (accountId?: number): ApiResponsePromise<any> => {
+        const params: any = {};
+        if (accountId) params.account_id = accountId;
+        return axios.get('account-rules/', { params }).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    createAccountRule: (data: {
+        account_id: number;
+        name: string;
+        priority: number;
+        rule_expression: string;
+        regex_enabled?: boolean;
+        enabled?: boolean;
+        account_role_scope?: string;
+        transaction_type_scope?: string;
+        field_scope?: string;
+    }): ApiResponsePromise<any> => {
+        return axios.post('account-rules/', data).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    updateAccountRule: (id: number, data: Record<string, any>): ApiResponsePromise<any> => {
+        return axios.put(`account-rules/${id}`, data).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    deleteAccountRule: (id: number): ApiResponsePromise<any> => {
+        return axios.delete(`account-rules/${id}`).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    reorderAccountRules: (ruleIds: number[]): ApiResponsePromise<any> => {
+        return axios.post('account-rules/reorder', { rule_ids: ruleIds }).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    migrateAccountAliases: (): ApiResponsePromise<any> => {
+        return axios.post('account-rules/migrate-aliases').then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    testAccountRule: (id: number, context: Record<string, any>): ApiResponsePromise<any> => {
+        return axios.post(`account-rules/${id}/test`, context).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
     // ── LLM Learning (LLM 归纳学习) ──────────
 
     getLLMConfig: (): ApiResponsePromise<any> => {

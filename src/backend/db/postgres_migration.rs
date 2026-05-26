@@ -889,8 +889,16 @@ fn map_account_alias_rules(
                 "rule_expression",
                 json!({"operator":"contains_any","values":[alias],"source":"legacy_account_aliases"}),
             );
+            insert_bool(&mut values, "regex_enabled", false);
             insert_i64(&mut values, "priority", 1000);
             insert_bool(&mut values, "enabled", true);
+            insert_string(&mut values, "source", "legacy_account_aliases");
+            insert_string(
+                &mut values,
+                "source_key",
+                format!("legacy_alias:{}", alias.trim().to_ascii_lowercase()),
+            );
+            insert_i64(&mut values, "match_count", 0);
             insert_string(&mut values, "created_at", created_at.clone());
             insert_string(&mut values, "updated_at", updated_at.clone());
             insert_i64(&mut values, "version", 1);

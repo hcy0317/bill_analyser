@@ -173,6 +173,9 @@ pub use statistics::{
     query_top_merchants_payload, query_transaction_amount_period, upsert_user_custom_exchange_rate,
     StatisticsAllDateRange, StatisticsBillFilters, UserCustomExchangeRateUpsert,
 };
+pub use taxonomy::account_rules::{
+    AccountRuleMigrationSummary, AccountRuleRecord, AccountRulesRepository,
+};
 pub use transaction::run_transaction;
 pub use user_data::{
     clear_user_data, clear_user_transactions, get_user_data_statistics, list_user_data_categories,

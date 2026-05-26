@@ -168,6 +168,13 @@ fn category_rule_db_error_response() -> Response {
     )
 }
 
+fn account_rule_db_error_response() -> Response {
+    error_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Rust taxonomy account rules route runtime DB error",
+    )
+}
+
 fn template_db_error_response() -> Response {
     error_response(
         StatusCode::INTERNAL_SERVER_ERROR,

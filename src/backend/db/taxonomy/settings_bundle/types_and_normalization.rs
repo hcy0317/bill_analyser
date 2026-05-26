@@ -5,13 +5,14 @@
 const SETTINGS_BUNDLE_SCHEMA_VERSION: i64 = 1;
 const LOCAL_REF_NAMESPACE: &str = "__local_settings_bundle_id__";
 const OCR_CONFIG_SETTING_KEY: &str = "receipt_ocr_config";
-const SECTION_KEYS: [&str; 8] = [
+const SECTION_KEYS: [&str; 9] = [
     "accounts",
     "transactionCategories",
     "transactionTags",
     "transactionTemplates",
     "scheduledTransactions",
     "categoryRecognitionRules",
+    "accountRecognitionRules",
     "llmConfigs",
     "ocrConfig",
 ];

@@ -168,8 +168,13 @@ CREATE TABLE IF NOT EXISTS account_rules (
     transaction_type_scope TEXT NOT NULL DEFAULT 'all',
     field_scope JSONB NOT NULL DEFAULT '[]'::jsonb,
     rule_expression JSONB NOT NULL DEFAULT '{}'::jsonb,
+    regex_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     priority INTEGER NOT NULL DEFAULT 0,
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    source TEXT NOT NULL DEFAULT 'manual',
+    source_key TEXT,
+    match_count BIGINT NOT NULL DEFAULT 0,
+    last_matched_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     version BIGINT NOT NULL DEFAULT 1
@@ -529,7 +534,11 @@ CREATE INDEX IF NOT EXISTS idx_tags_user_lookup
 CREATE INDEX IF NOT EXISTS idx_category_rules_user_enabled_type_priority
     ON category_rules (user_id, enabled, transaction_type_scope, priority DESC, id);
 CREATE INDEX IF NOT EXISTS idx_account_rules_user_enabled_type_priority
-    ON account_rules (user_id, enabled, transaction_type_scope, priority DESC, id);
+    ON account_rules (user_id, enabled, transaction_type_scope, account_role_scope, priority, id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_account_rules_alias_source_unique
+    ON account_rules (user_id, account_id, source, source_key)
+    WHERE source_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_import_preview_rows_session_page_sort_key
     ON import_preview_rows (session_id, page_sort_key, id);
 CREATE INDEX IF NOT EXISTS idx_import_decision_groups_session_group_type

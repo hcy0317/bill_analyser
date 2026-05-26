@@ -8,6 +8,7 @@
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
 // 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
 
+pub mod account_rules;
 pub mod adapters;
 pub mod ai_ocr_llm;
 pub mod auth;

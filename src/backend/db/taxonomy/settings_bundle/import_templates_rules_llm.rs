@@ -2,6 +2,9 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
+type AccountRuleSettingsKey = (i64, String, String, String, String);
+type AccountRuleSettingsIndex = BTreeMap<AccountRuleSettingsKey, i64>;
+
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(level = "debug", skip_all)]
 fn import_settings_templates(
@@ -304,6 +307,188 @@ fn load_existing_category_rules(
     })?;
     rows.collect::<Result<BTreeMap<_, _>, _>>()
         .map_err(DbError::from)
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+fn import_settings_account_rules(
+    transaction: &Transaction<'_>,
+    rules: &[Value],
+    user_id: i64,
+    result: &mut ImportSections,
+    warnings: &mut Vec<String>,
+    account_ref_map: &BTreeMap<String, i64>,
+) -> DbResult<()> {
+    let mut existing = load_existing_account_rules(transaction, user_id)?;
+
+    for item in rules {
+        let account_id = resolve_settings_account_rule_account_id(item, account_ref_map).unwrap_or(0);
+        let rule_expression = safe_text(get_any(item, &["ruleExpression", "rule_expression"]), "");
+        let section = result.get_mut("accountRecognitionRules");
+        if account_id == 0 || rule_expression.is_empty() {
+            section.skipped += 1;
+            warnings.push("Skipped account rule with missing account or ruleExpression".to_string());
+            continue;
+        }
+        let account_role_scope = match bill_analyser_core::account_rules::normalize_account_role_scope(
+            get_any(item, &["accountRoleScope", "account_role_scope"]).and_then(Value::as_str),
+        ) {
+            Ok(value) => value,
+            Err(message) => {
+                section.skipped += 1;
+                warnings.push(format!("Skipped account rule with invalid role scope: {message}"));
+                continue;
+            }
+        };
+        let transaction_type_scope =
+            match bill_analyser_core::account_rules::normalize_transaction_type_scope(
+                get_any(item, &["transactionTypeScope", "transaction_type_scope"])
+                    .and_then(Value::as_str),
+            ) {
+                Ok(value) => value,
+                Err(message) => {
+                    section.skipped += 1;
+                    warnings.push(format!(
+                        "Skipped account rule with invalid transaction type scope: {message}"
+                    ));
+                    continue;
+                }
+            };
+        let field_scope = match bill_analyser_core::account_rules::normalize_account_rule_field_scope(
+            get_any(item, &["fieldScope", "field_scope"]),
+        ) {
+            Ok(value) => value,
+            Err(message) => {
+                section.skipped += 1;
+                warnings.push(format!("Skipped account rule with invalid field scope: {message}"));
+                continue;
+            }
+        };
+        let field_scope = serde_json::to_string(&field_scope).map_err(|error| {
+            DbError::InvalidOperation(format!("invalid account rule field scope: {error}"))
+        })?;
+        let name = safe_text(item.get("name"), "");
+        let priority = safe_int(item.get("priority"), 100);
+        let regex_enabled = i64::from(safe_bool(get_any(item, &["regexEnabled", "regex_enabled"])));
+        let enabled = i64::from(safe_bool_with_default(item.get("enabled"), true));
+        let source = safe_text(item.get("source"), "manual");
+        let source_key = safe_text(get_any(item, &["sourceKey", "source_key"]), "");
+        let now = utc_now_iso();
+        let key = (
+            account_id,
+            rule_expression.clone(),
+            name.clone(),
+            account_role_scope.clone(),
+            transaction_type_scope.clone(),
+        );
+
+        if let Some(rule_id) = existing.get(&key).copied() {
+            transaction.execute(
+                "UPDATE account_rules
+                 SET account_id = ?, name = ?, priority = ?, rule_expression = ?,
+                     regex_enabled = ?, enabled = ?, account_role_scope = ?,
+                     transaction_type_scope = ?, field_scope = ?, source = ?,
+                     source_key = NULLIF(?, ''), updated_at = ?
+                 WHERE id = ? AND user_id = ?",
+                params![
+                    account_id,
+                    name,
+                    priority,
+                    rule_expression,
+                    regex_enabled,
+                    enabled,
+                    account_role_scope,
+                    transaction_type_scope,
+                    field_scope,
+                    source,
+                    source_key,
+                    now,
+                    rule_id,
+                    user_id
+                ],
+            )?;
+            section.updated += 1;
+            continue;
+        }
+
+        transaction.execute(
+            "INSERT INTO account_rules (
+                user_id, account_id, name, priority, rule_expression,
+                regex_enabled, enabled, account_role_scope, transaction_type_scope,
+                field_scope, source, source_key, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)",
+            params![
+                user_id,
+                account_id,
+                name,
+                priority,
+                rule_expression,
+                regex_enabled,
+                enabled,
+                account_role_scope,
+                transaction_type_scope,
+                field_scope,
+                source,
+                source_key,
+                now,
+                now
+            ],
+        )?;
+        existing.insert(key, transaction.last_insert_rowid());
+        section.created += 1;
+    }
+
+    Ok(())
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+fn load_existing_account_rules(
+    transaction: &Transaction<'_>,
+    user_id: i64,
+) -> DbResult<AccountRuleSettingsIndex> {
+    let mut statement = transaction.prepare(
+        "SELECT id, account_id, rule_expression, name,
+                account_role_scope, transaction_type_scope
+         FROM account_rules WHERE user_id = ?1",
+    )?;
+    let rows = statement.query_map(params![user_id], |row| {
+        Ok((
+            (
+                row.get::<_, Option<i64>>("account_id")?.unwrap_or(0),
+                row.get::<_, Option<String>>("rule_expression")?
+                    .unwrap_or_default(),
+                row.get::<_, Option<String>>("name")?.unwrap_or_default(),
+                row.get::<_, Option<String>>("account_role_scope")?
+                    .unwrap_or_else(|| "any".to_string()),
+                row.get::<_, Option<String>>("transaction_type_scope")?
+                    .unwrap_or_else(|| "all".to_string()),
+            ),
+            row.get::<_, i64>("id")?,
+        ))
+    })?;
+    rows.collect::<Result<BTreeMap<_, _>, _>>()
+        .map_err(DbError::from)
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+fn resolve_settings_account_rule_account_id(
+    item: &Value,
+    account_ref_map: &BTreeMap<String, i64>,
+) -> Option<i64> {
+    let account_ref = safe_text(get_any(item, &["accountRef", "account_ref"]), "");
+    if let Some(account_id) = account_ref_map.get(&account_ref).copied() {
+        return Some(account_id);
+    }
+    let account_id = safe_int(get_any(item, &["accountId", "account_id"]), 0);
+    if let Some(account_id) = account_ref_map
+        .get(&local_id_ref("account", account_id))
+        .copied()
+    {
+        return Some(account_id);
+    }
+    let account_name = safe_text(get_any(item, &["accountName", "account_name"]), "");
+    account_ref_map
+        .get(&format!("accountName:{account_name}"))
+        .copied()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

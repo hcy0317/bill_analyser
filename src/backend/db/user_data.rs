@@ -164,6 +164,7 @@ pub fn clear_user_data(
         delete_if_table_exists(tx, "saved_filters", user_id)?;
         delete_if_table_exists(tx, "account_transfers", user_id)?;
         delete_if_table_exists(tx, "tags", user_id)?;
+        delete_if_table_exists(tx, "account_rules", user_id)?;
         delete_if_table_exists(tx, "category_rules", user_id)?;
         delete_if_table_exists(tx, "categories", user_id)?;
         delete_if_table_exists(tx, "account_types", user_id)?;
@@ -228,6 +229,7 @@ fn clear_all_counts(tx: &Transaction<'_>, user_id: i64) -> DbResult<BTreeMap<Str
         ("accounts", "accounts"),
         ("categories", "categories"),
         ("tags", "tags"),
+        ("account_rules", "account_rules"),
         ("category_rules", "category_rules"),
         ("templates", "bill_templates"),
         ("recurring_bills", "recurring_bills"),
@@ -380,6 +382,7 @@ mod tests {
             CREATE TABLE accounts (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL);
             CREATE TABLE categories (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL);
             CREATE TABLE category_rules (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL);
+            CREATE TABLE account_rules (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL);
             CREATE TABLE tags (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL);
             CREATE TABLE bill_templates (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL);
 
@@ -529,6 +532,7 @@ mod tests {
             r#"
             CREATE TABLE categories (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL);
             CREATE TABLE category_rules (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL);
+            CREATE TABLE account_rules (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL);
             CREATE TABLE tags (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL);
             CREATE TABLE bill_templates (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL);
             CREATE TABLE recurring_bills (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL);
@@ -547,6 +551,7 @@ mod tests {
             INSERT INTO accounts(id, user_id, balance, initial_balance, updated_at) VALUES (12, 42, 8.0, 8.0, 'old');
             INSERT INTO categories(id, user_id) VALUES (20, 42);
             INSERT INTO category_rules(id, user_id) VALUES (21, 42), (22, 77);
+            INSERT INTO account_rules(id, user_id) VALUES (23, 42), (24, 77);
             INSERT INTO tags(id, user_id) VALUES (30, 42);
             INSERT INTO bill_templates(id, user_id) VALUES (40, 42);
             INSERT INTO recurring_bills(id, user_id) VALUES (50, 42);
@@ -568,10 +573,13 @@ mod tests {
         assert_eq!(result.counts["accounts"], 2);
         assert_eq!(result.counts["templates"], 1);
         assert_eq!(result.counts["category_rules"], 1);
+        assert_eq!(result.counts["account_rules"], 1);
         assert_eq!(count_user_rows(&connection, "accounts", 42)?, 0);
         assert_eq!(count_user_rows(&connection, "categories", 42)?, 0);
         assert_eq!(count_user_rows(&connection, "category_rules", 42)?, 0);
         assert_eq!(count_user_rows(&connection, "category_rules", 77)?, 1);
+        assert_eq!(count_user_rows(&connection, "account_rules", 42)?, 0);
+        assert_eq!(count_user_rows(&connection, "account_rules", 77)?, 1);
         assert_eq!(count_user_rows(&connection, "budgets", 42)?, 0);
         assert_eq!(
             count_user_rows(&connection, "import_annotation_samples", 42)?,

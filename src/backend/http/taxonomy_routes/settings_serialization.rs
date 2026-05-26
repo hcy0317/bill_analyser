@@ -47,6 +47,7 @@ fn build_settings_bundle(
     let templates = list_settings_templates(connection, user_id, 1)?;
     let scheduled = list_settings_templates(connection, user_id, 2)?;
     let category_refs = category_ref_map(&categories);
+    let account_refs = account_ref_map(&accounts);
 
     let taxonomy_sections = export_taxonomy_sections(&json!({
         "accounts": records_to_array(&accounts),
@@ -74,6 +75,21 @@ fn build_settings_bundle(
             category_rules
                 .iter()
                 .map(|rule| export_settings_category_rule(rule, &category_refs))
+                .collect(),
+        ),
+    );
+    let account_rules = {
+        let mut repository = AccountRulesRepository::new(connection);
+        repository
+            .list_rules(user_id, None, false, None, None)
+            .map_err(|error| error.to_string())?
+    };
+    sections.insert(
+        "accountRecognitionRules".to_string(),
+        Value::Array(
+            account_rules
+                .iter()
+                .map(|rule| export_settings_account_rule(rule, &account_refs))
                 .collect(),
         ),
     );
@@ -408,6 +424,31 @@ fn export_settings_category_rule(
     })
 }
 
+fn export_settings_account_rule(
+    rule: &Map<String, Value>,
+    account_refs: &BTreeMap<i64, String>,
+) -> Value {
+    let account_id = value_as_i64_or(rule.get("account_id"), 0);
+    json!({
+        "externalRef": format!("accountRule:{}", value_string(rule.get("id"), "")),
+        "accountRef": account_refs.get(&account_id).cloned().unwrap_or_default(),
+        "accountName": string_or_default(rule.get("account_name"), ""),
+        "name": string_or_default(rule.get("name"), ""),
+        "priority": value_as_i64_or(rule.get("priority"), 100),
+        "ruleExpression": string_or_default(rule.get("rule_expression"), ""),
+        "regexEnabled": rule.get("regex_enabled").is_some_and(value_truthy),
+        "enabled": rule.get("enabled").map(value_truthy).unwrap_or(true),
+        "accountRoleScope": string_or_default(rule.get("account_role_scope"), "any"),
+        "transactionTypeScope": string_or_default(rule.get("transaction_type_scope"), "all"),
+        "fieldScope": rule
+            .get("field_scope")
+            .cloned()
+            .unwrap_or_else(|| json!(["counterparty", "payment_method", "description"])),
+        "source": string_or_default(rule.get("source"), "manual"),
+        "sourceKey": rule.get("source_key").cloned().unwrap_or(Value::Null),
+    })
+}
+
 fn category_ref_map(categories: &[CategoryRecord]) -> BTreeMap<i64, String> {
     categories
         .iter()
@@ -417,6 +458,16 @@ fn category_ref_map(categories: &[CategoryRecord]) -> BTreeMap<i64, String> {
                 .and_then(value_as_i64)
                 .unwrap_or_default();
             (id > 0).then(|| (id, format!("category:{id}")))
+        })
+        .collect()
+}
+
+fn account_ref_map(accounts: &[AccountRecord]) -> BTreeMap<i64, String> {
+    accounts
+        .iter()
+        .filter_map(|account| {
+            let id = account.get("id").and_then(value_as_i64).unwrap_or_default();
+            (id > 0).then(|| (id, format!("account:{id}")))
         })
         .collect()
 }

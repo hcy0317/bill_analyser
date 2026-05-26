@@ -32,7 +32,11 @@ PostgreSQL 迁移工具入口是 `bill_sqlite_to_postgres_migrate`，支持 `dry
 
 ### 导入
 
-导入链路由 Rust runtime 完成 parser-first 上传、JSON parse、session/template staging、dedup、账户别名匹配、分类规则、transfer/recurring/learning/LLM decision、preview page、preview update/reclassify、confirm 和 cleanup。混合来源上传按文件保留 parser id / tags；Check Data 首屏读取分页 preview page；默认分类规则和导入阶段内置兜底会把理财收益、投资支出、公交地铁等常见账单补齐到有效一级/二级分类路径；转账预览保留源金额和目标金额，供前端展示转出/转入金额。预览中的 transfer、learning 和 LLM 建议只在 pending 状态展示接受/拒绝动作，learning `auto_applied` / `auto-applied` 投影为已应用状态并只保留撤销入口；拒绝 pending 建议会回退到 stage2 已持久化的分类规则/账户基线，人工改字段只清除这些 actionable 建议提示而不覆盖人工值；确认、取消和失败后新建 session 都会清理当前用户的 import staging。
+导入链路由 Rust runtime 完成 parser-first 上传、JSON parse、session/template staging、dedup、账户别名匹配、分类规则、transfer/recurring/learning/LLM decision、preview page、preview update/reclassify、confirm 和 cleanup。混合来源上传按文件保留 parser id / tags；Check Data 首屏读取分页 preview page；默认分类规则和导入阶段内置兜底会把理财收益、投资支出、公交地铁等常见账单补齐到有效一级/二级分类路径；转账预览保留源金额和目标金额，供前端展示转出/转入金额。预览中的 transfer、learning 和 LLM 建议只在 pending 状态展示接受/拒绝动作，learning `auto_applied` / `auto-applied` 投影为已应用状态并只保留撤销入口；拒绝 pending 建议会回退到 stage2 已持久化的分类规则/账户基线，人工改字段只清除这些 actionable 建议提示而不覆盖人工值；确认、取消和失败后新建 session 都会清理当前用户的 import staging。账户识别规则已经有 Rust core、SQLite/PostgreSQL schema、user-scoped repository 和 API，但导入 stage2 当前只 shadow 读取规则候选，正式账户匹配仍保持既有别名链路，避免在 UI/导入切换切片完成前改变导入结果。
+
+### 分类与账户规则
+
+分类识别使用 canonical `category_rules` 规则表达式；账户识别使用 `account_rules` 表和与分类规则一致的规则表达式匹配器。账户规则按当前用户绑定到账户，支持账户角色范围、交易类型范围、字段范围、优先级、启停、正则开关、匹配计数，以及从可见账户别名幂等迁移的 source/source_key。REST API 覆盖 `GET|POST /api/account-rules/`、`PUT|DELETE /api/account-rules/{rule_id}`、`POST /api/account-rules/{rule_id}/test`、`POST /api/account-rules/reorder` 和 `POST /api/account-rules/migrate-aliases`；设置包导入导出包含 `accountRecognitionRules` 分区。
 
 ### Matching
 

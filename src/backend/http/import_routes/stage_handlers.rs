@@ -310,6 +310,7 @@ fn apply_import_intelligence_chain(
     let category_rules =
         load_import_intelligence_category_rules(connection, user_id_i64, &categories_by_id)?;
     let accounts = load_import_intelligence_accounts(connection, user_id_i64)?;
+    let _account_rules = load_import_intelligence_account_rules(connection, user_id_i64)?;
     let account_values = accounts
         .iter()
         .map(|account| json!({"id": account.id, "name": account.name}))
@@ -560,6 +561,64 @@ fn load_import_intelligence_accounts(
             id: row.get("id")?,
             name,
             aliases,
+        })
+    })?;
+    rows.collect()
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+fn load_import_intelligence_account_rules(
+    connection: &Connection,
+    user_id: i64,
+) -> rusqlite::Result<Vec<AccountRuleCandidate>> {
+    if !import_intelligence_table_exists(connection, "account_rules")? {
+        return Ok(Vec::new());
+    }
+    let regex_expr = sql_column_or_default(connection, "account_rules", "regex_enabled", "0")?;
+    let enabled_expr = sql_column_or_default(connection, "account_rules", "enabled", "1")?;
+    let priority_expr = sql_column_or_default(connection, "account_rules", "priority", "100")?;
+    let role_scope_expr =
+        sql_column_or_default(connection, "account_rules", "account_role_scope", "'any'")?;
+    let type_scope_expr =
+        sql_column_or_default(connection, "account_rules", "transaction_type_scope", "'all'")?;
+    let field_scope_expr = sql_column_or_default(
+        connection,
+        "account_rules",
+        "field_scope",
+        r#"'["counterparty","payment_method","description"]'"#,
+    )?;
+    let has_enabled = table_has_column(connection, "account_rules", "enabled")?;
+    let enabled_filter = if has_enabled { "enabled = 1" } else { "1 = 1" };
+    let mut statement = connection.prepare(&format!(
+        "
+        SELECT id, account_id, rule_expression, {regex_expr}, {priority_expr},
+               {enabled_expr}, {role_scope_expr}, {type_scope_expr}, {field_scope_expr}
+        FROM account_rules
+        WHERE user_id = ?1 AND {enabled_filter}
+        ORDER BY {priority_expr} ASC, id ASC
+        "
+    ))?;
+    let rows = statement.query_map(params![user_id], |row| {
+        let raw_field_scope = row
+            .get::<_, Option<String>>("field_scope")
+            .unwrap_or_default()
+            .unwrap_or_default();
+        Ok(AccountRuleCandidate {
+            rule_id: row.get("id")?,
+            account_id: row.get("account_id")?,
+            account_role_scope: row
+                .get::<_, Option<String>>("account_role_scope")?
+                .unwrap_or_else(|| "any".to_string()),
+            transaction_type_scope: row
+                .get::<_, Option<String>>("transaction_type_scope")?
+                .unwrap_or_else(|| "all".to_string()),
+            field_scope: parse_account_rule_field_scope(&raw_field_scope),
+            rule_expression: row
+                .get::<_, Option<String>>("rule_expression")?
+                .unwrap_or_default(),
+            regex_enabled: row.get::<_, Option<i64>>("regex_enabled")?.unwrap_or(0) != 0,
+            enabled: row.get::<_, Option<i64>>("enabled")?.unwrap_or(1) != 0,
+            priority: row.get::<_, Option<i64>>("priority")?.unwrap_or(100),
         })
     })?;
     rows.collect()
@@ -1514,6 +1573,19 @@ fn parse_account_aliases(raw_aliases: Option<&str>) -> Vec<String> {
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .collect()
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+fn parse_account_rule_field_scope(raw_field_scope: &str) -> Vec<String> {
+    bill_analyser_core::account_rules::normalize_account_rule_field_scope(Some(&Value::String(
+        raw_field_scope.to_string(),
+    )))
+    .unwrap_or_else(|_| {
+        bill_analyser_core::account_rules::DEFAULT_FIELD_SCOPES
+            .iter()
+            .map(|value| (*value).to_string())
+            .collect()
+    })
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -3029,6 +3101,43 @@ mod stage_handler_transfer_account_tests {
         ));
         assert!(account_matches_tokens(&account, &["零钱".to_string()]));
         assert!(!account_matches_tokens(&account, &["支付宝".to_string()]));
+    }
+
+    #[test]
+    fn account_rule_shadow_loader_reads_enabled_rules_without_cutting_over_alias_match() {
+        let connection = Connection::open_in_memory().expect("open");
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE account_rules (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    account_id INTEGER NOT NULL,
+                    rule_expression TEXT NOT NULL,
+                    regex_enabled INTEGER DEFAULT 0,
+                    enabled INTEGER DEFAULT 1,
+                    priority INTEGER DEFAULT 100,
+                    account_role_scope TEXT DEFAULT 'any',
+                    transaction_type_scope TEXT DEFAULT 'all',
+                    field_scope TEXT DEFAULT '["counterparty","payment_method","description"]'
+                );
+                INSERT INTO account_rules(
+                    id, user_id, account_id, rule_expression, regex_enabled, enabled,
+                    priority, account_role_scope, transaction_type_scope, field_scope
+                )
+                VALUES
+                    (1, 42, 10, 'OR={工资卡}', 0, 1, 3, 'source', 'expense', '["payment_method"]'),
+                    (2, 42, 11, 'OR={禁用}', 0, 0, 1, 'source', 'expense', '["counterparty"]'),
+                    (3, 77, 90, 'OR={其他}', 0, 1, 1, 'source', 'expense', '["counterparty"]');
+                "#,
+            )
+            .expect("schema");
+
+        let rules = load_import_intelligence_account_rules(&connection, 42).expect("rules");
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].rule_id, 1);
+        assert_eq!(rules[0].account_id, 10);
+        assert_eq!(rules[0].field_scope, vec!["payment_method"]);
     }
 
     #[test]

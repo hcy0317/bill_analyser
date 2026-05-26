@@ -17,13 +17,14 @@ use axum::{
 };
 use base64::{engine::general_purpose, Engine as _};
 use bill_analyser_core::{
-    attach_import_preview_matching_payload, build_composite_match_features,
-    build_import_preview_filter_index_item, build_learning_rule_result_summary,
-    build_llm_candidate_list_response, build_llm_candidate_reject_response,
-    build_llm_classification_prompt, build_llm_config_get_response,
-    build_llm_contract_error_response, build_llm_import_preview_recommendation_prompt,
-    build_llm_provider_config, build_llm_rule_expression_synthesis_prompt,
-    build_llm_rule_induction_prompt, build_ocr_config_success_response, build_ocr_error_response,
+    account_rules::AccountRuleCandidate, attach_import_preview_matching_payload,
+    build_composite_match_features, build_import_preview_filter_index_item,
+    build_learning_rule_result_summary, build_llm_candidate_list_response,
+    build_llm_candidate_reject_response, build_llm_classification_prompt,
+    build_llm_config_get_response, build_llm_contract_error_response,
+    build_llm_import_preview_recommendation_prompt, build_llm_provider_config,
+    build_llm_rule_expression_synthesis_prompt, build_llm_rule_induction_prompt,
+    build_ocr_config_success_response, build_ocr_error_response,
     build_ocr_recognition_success_response_with_context, build_unknown_ocr_provider_response,
     category_rules::match_rule_expression, coerce_preview_selected_value,
     composite_hash_from_features, copy_runtime_llm_config, import_preview_index_success,

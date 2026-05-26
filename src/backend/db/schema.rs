@@ -276,6 +276,7 @@ const USER_SCOPED_TABLES: &[&str] = &[
     "categories",
     "account_types",
     "accounts",
+    "account_rules",
     "account_transfers",
     "tags",
     "budgets",
@@ -417,6 +418,32 @@ fn create_core_tables(connection: &Connection) -> DbResult<()> {
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS account_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            account_id INTEGER NOT NULL,
+            name TEXT NOT NULL DEFAULT '',
+            priority INTEGER NOT NULL DEFAULT 100,
+            rule_expression TEXT NOT NULL,
+            regex_enabled BOOLEAN DEFAULT 0,
+            enabled BOOLEAN DEFAULT 1,
+            applied_count INTEGER DEFAULT 0,
+            last_applied_at TEXT,
+            match_count INTEGER DEFAULT 0,
+            last_matched_at TEXT,
+            account_role_scope TEXT NOT NULL DEFAULT 'any',
+            transaction_type_scope TEXT NOT NULL DEFAULT 'all',
+            field_scope TEXT NOT NULL DEFAULT '[\"counterparty\",\"payment_method\",\"description\"]',
+            source TEXT NOT NULL DEFAULT 'manual',
+            source_key TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            CHECK (account_role_scope IN ('any','source','destination','investment','payment_method_source')),
+            CHECK (transaction_type_scope IN ('all','income','expense','transfer','investment')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS account_transfers (
@@ -616,6 +643,13 @@ fn create_core_indexes(connection: &Connection) -> DbResult<()> {
         CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_id);
         CREATE INDEX IF NOT EXISTS idx_accounts_type ON accounts(type);
         CREATE INDEX IF NOT EXISTS idx_accounts_hidden ON accounts(hidden);
+        CREATE INDEX IF NOT EXISTS idx_account_rules_user_enabled_scope_priority
+            ON account_rules(user_id, enabled, transaction_type_scope, account_role_scope, priority, id);
+        CREATE INDEX IF NOT EXISTS idx_account_rules_user_account
+            ON account_rules(user_id, account_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_account_rules_alias_source_unique
+            ON account_rules(user_id, account_id, source, source_key)
+            WHERE source_key IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_account_types_user ON account_types(user_id);
         CREATE INDEX IF NOT EXISTS idx_account_types_type ON account_types(type);
         CREATE INDEX IF NOT EXISTS idx_account_transfers_from ON account_transfers(from_account_id);
@@ -884,6 +918,29 @@ fn migrate_core_legacy_columns(connection: &Connection) -> DbResult<()> {
         ("accounts", "currency", "TEXT DEFAULT 'CNY'"),
         ("accounts", "parent_id", "INTEGER DEFAULT 0"),
         ("accounts", "aliases", "TEXT"),
+        ("account_rules", "regex_enabled", "BOOLEAN DEFAULT 0"),
+        ("account_rules", "enabled", "BOOLEAN DEFAULT 1"),
+        ("account_rules", "applied_count", "INTEGER DEFAULT 0"),
+        ("account_rules", "last_applied_at", "TEXT"),
+        ("account_rules", "match_count", "INTEGER DEFAULT 0"),
+        ("account_rules", "last_matched_at", "TEXT"),
+        (
+            "account_rules",
+            "account_role_scope",
+            "TEXT NOT NULL DEFAULT 'any'",
+        ),
+        (
+            "account_rules",
+            "transaction_type_scope",
+            "TEXT NOT NULL DEFAULT 'all'",
+        ),
+        (
+            "account_rules",
+            "field_scope",
+            "TEXT NOT NULL DEFAULT '[\"counterparty\",\"payment_method\",\"description\"]'",
+        ),
+        ("account_rules", "source", "TEXT NOT NULL DEFAULT 'manual'"),
+        ("account_rules", "source_key", "TEXT"),
         ("account_transfers", "note", "TEXT"),
         ("tags", "hidden", "BOOLEAN DEFAULT 0"),
         ("budget_history", "budget_amount", "REAL DEFAULT 0"),

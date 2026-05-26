@@ -82,7 +82,7 @@ flowchart TD
 - parser 只负责识别来源和标准化账单，不写 staging。
 - mixed multipart 必须保留每个文件自己的 parser id 和 parser tags。
 - Check Data 首屏只读取 preview page；筛选、排序、计数和批量选择都由 Rust preview page/query/update 处理。
-- transfer、learning、recurring、dedup、parser、annotation、reconciliation 信号从 `preview_matching_feedback_json` 投影，缺分类/缺账户状态按当前预览字段动态计算。
+- transfer、learning、recurring、dedup、parser、annotation、reconciliation 信号从 `preview_matching_feedback_json` 投影，缺分类/缺账户状态按当前预览字段动态计算；账户规则候选在 stage2 shadow 读取，正式账户字段仍由当前别名链路写入。
 - confirm 在事务内写正式 bills、tags、accounts、learning side effects；cancel 和失败后新建 session 清理 staging，不保留导入续传状态。
 
 主要源码与测试：
@@ -92,8 +92,10 @@ flowchart TD
 - `src/backend/http/import_routes/preview_mutation_helpers.rs`
 - `src/backend/db/import_staging.rs`
 - `src/backend/db/import_staging/`
+- `src/backend/db/taxonomy/account_rules.rs`
 - `src/backend/core/import_pipeline.rs`
 - `src/backend/core/import_learning.rs`
+- `src/backend/core/account_rules/`
 - `tests/backend/http/import_runtime_contract.rs`
 - `tests/backend/core/import_pipeline_contracts.rs`
 - `tests/backend/core/import_learning_contracts.rs`

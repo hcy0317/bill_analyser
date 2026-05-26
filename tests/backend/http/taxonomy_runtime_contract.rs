@@ -7,9 +7,10 @@ use axum::{
 };
 use bill_analyser_http::{
     build_router, HttpAppState, HttpShellConfig, ImportRouteMode, TAXONOMY_ACCOUNT_ROUTE_PATTERNS,
-    TAXONOMY_CATEGORY_ROUTE_PATTERNS, TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS,
-    TAXONOMY_RULE_CENTER_ROUTE_PATTERNS, TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS,
-    TAXONOMY_TAG_ROUTE_PATTERNS, TAXONOMY_TEMPLATE_ROUTE_PATTERNS,
+    TAXONOMY_ACCOUNT_RULE_ROUTE_PATTERNS, TAXONOMY_CATEGORY_ROUTE_PATTERNS,
+    TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS, TAXONOMY_RULE_CENTER_ROUTE_PATTERNS,
+    TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS, TAXONOMY_TAG_ROUTE_PATTERNS,
+    TAXONOMY_TEMPLATE_ROUTE_PATTERNS,
 };
 use rusqlite::Connection;
 use serde_json::{json, Value};
@@ -2764,6 +2765,278 @@ async fn taxonomy_category_rules_runtime_lists_canonical_rules_contract(
 }
 
 #[tokio::test]
+async fn taxonomy_account_rules_runtime_manages_rules_without_import_cutover(
+) -> Result<(), Box<dyn Error>> {
+    assert!(TAXONOMY_ACCOUNT_RULE_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("GET", "/api/account-rules/")));
+    assert!(TAXONOMY_ACCOUNT_RULE_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/account-rules/migrate-aliases")));
+    assert!(TAXONOMY_ACCOUNT_RULE_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/account-rules/{rule_id}/test")));
+
+    let fixture = RuntimeFixture::new()?;
+    let app = runtime_router(&fixture);
+
+    let list_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/account-rules/",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(list_response.status(), StatusCode::OK);
+    let list_body = read_json(list_response).await;
+    assert_eq!(list_body["success"], true);
+    assert_eq!(list_body["total"], 1);
+    assert_eq!(list_body["data"][0]["id"], 80);
+    assert_eq!(list_body["data"][0]["accountId"], 11);
+    assert_eq!(list_body["data"][0]["accountRoleScope"], "source");
+    assert_eq!(list_body["data"][0]["transactionTypeScope"], "expense");
+    assert_eq!(
+        list_body["data"][0]["fieldScope"],
+        json!(["payment_method"])
+    );
+    assert!(!serde_json::to_string(&list_body)?.contains("其他用户账户规则"));
+
+    let missing_fields = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/account-rules/",
+            json!({"account_id": 11}),
+        ))
+        .await?;
+    assert_eq!(missing_fields.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(missing_fields).await["error"],
+        "account_id and rule_expression are required"
+    );
+
+    let invalid_scope = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/account-rules/",
+            json!({
+                "account_id": 11,
+                "rule_expression": "OR={招商}",
+                "account_role_scope": "wallet"
+            }),
+        ))
+        .await?;
+    assert_eq!(invalid_scope.status(), StatusCode::BAD_REQUEST);
+    assert!(read_json(invalid_scope).await["error"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("unsupported account_role_scope"));
+
+    let cross_account = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/account-rules/",
+            json!({"account_id": 99, "rule_expression": "OR={其他}"}),
+        ))
+        .await?;
+    assert_eq!(cross_account.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(cross_account).await["error"],
+        "Failed to create account rule"
+    );
+
+    let create_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/account-rules/",
+            json!({
+                "account_id": 11,
+                "name": "招商账户规则",
+                "priority": 4,
+                "rule_expression": "OR={招商}",
+                "regex_enabled": false,
+                "enabled": true,
+                "account_role_scope": "destination",
+                "transaction_type_scope": "transfer",
+                "field_scope": ["counterparty", "description"]
+            }),
+        ))
+        .await?;
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+    let create_body = read_json(create_response).await;
+    assert_eq!(create_body["data"]["name"], "招商账户规则");
+    assert_eq!(create_body["data"]["accountName"], "工资子账户");
+    let created_rule_id = create_body["data"]["id"].as_i64().expect("rule id");
+
+    let update_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            &format!("/api/account-rules/{created_rule_id}"),
+            json!({
+                "priority": 2,
+                "fieldScope": "parser,payment_method",
+                "transactionTypeScope": "expense"
+            }),
+        ))
+        .await?;
+    assert_eq!(update_response.status(), StatusCode::OK);
+    let update_body = read_json(update_response).await;
+    assert_eq!(update_body["data"]["priority"], 2);
+    assert_eq!(
+        update_body["data"]["fieldScope"],
+        json!(["parser", "payment_method"])
+    );
+
+    let duplicate_reorder = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/account-rules/reorder",
+            json!({"rule_ids": [created_rule_id, created_rule_id]}),
+        ))
+        .await?;
+    assert_eq!(duplicate_reorder.status(), StatusCode::BAD_REQUEST);
+
+    let reorder_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/account-rules/reorder",
+            json!({"rule_ids": [created_rule_id, 80]}),
+        ))
+        .await?;
+    assert_eq!(reorder_response.status(), StatusCode::OK);
+    assert_eq!(account_rule_priority(&fixture.db_path, created_rule_id)?, 1);
+    assert_eq!(account_rule_priority(&fixture.db_path, 80)?, 2);
+
+    let match_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            &format!("/api/account-rules/{created_rule_id}/test"),
+            json!({
+                "accountRoleScope": "destination",
+                "transactionTypeScope": "expense",
+                "context": {
+                    "paymentMethod": "招商银行",
+                    "parserId": "bank_csv"
+                }
+            }),
+        ))
+        .await?;
+    assert_eq!(match_response.status(), StatusCode::OK);
+    let match_body = read_json(match_response).await;
+    assert_eq!(match_body["data"]["matched"], true);
+    assert_eq!(
+        match_body["data"]["matchedFields"],
+        json!(["payment_method"])
+    );
+    assert_eq!(match_body["data"]["fallbackUsed"], false);
+
+    let miss_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            &format!("/api/account-rules/{created_rule_id}/test"),
+            json!({
+                "accountRoleScope": "destination",
+                "transactionTypeScope": "expense",
+                "context": {"paymentMethod": "微信零钱"}
+            }),
+        ))
+        .await?;
+    assert_eq!(miss_response.status(), StatusCode::OK);
+    assert_eq!(read_json(miss_response).await["data"]["matched"], false);
+
+    let migrate_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/account-rules/migrate-aliases",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(migrate_response.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(migrate_response).await["data"],
+        json!({"migrated": 1, "skipped": 2})
+    );
+    assert_eq!(
+        account_rule_count_by_source(&fixture.db_path, 42, "alias_migration")?,
+        1
+    );
+    let migrate_repeat = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/account-rules/migrate-aliases",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(migrate_repeat.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(migrate_repeat).await["data"],
+        json!({"migrated": 0, "skipped": 3})
+    );
+
+    let delete_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::DELETE,
+            &format!("/api/account-rules/{created_rule_id}"),
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(delete_response.status(), StatusCode::OK);
+    assert!(!account_rule_exists(&fixture.db_path, created_rule_id)?);
+
+    let unauthenticated_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/account-rules/")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(unauthenticated_response.status(), StatusCode::UNAUTHORIZED);
+
+    let no_db_app = runtime_router_without_db(&fixture);
+    let no_db_response = no_db_app
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/account-rules/",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(no_db_response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        read_json(no_db_response).await["error"],
+        "Rust taxonomy account rules DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH"
+    );
+
+    Connection::open(&fixture.db_path)?.execute("DROP TABLE account_rules", [])?;
+    let missing_schema_response = app
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/account-rules/",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(
+        missing_schema_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn taxonomy_rules_overview_runtime_aggregates_user_scoped_rule_sources(
 ) -> Result<(), Box<dyn Error>> {
     assert!(TAXONOMY_RULE_CENTER_ROUTE_PATTERNS
@@ -2861,6 +3134,7 @@ async fn taxonomy_settings_bundle_export_runtime_serves_raw_bundle_and_sensitive
     assert_eq!(bundle["counts"]["accounts"], 2);
     assert_eq!(bundle["counts"]["transactionTags"], 2);
     assert_eq!(bundle["counts"]["categoryRecognitionRules"], 2);
+    assert_eq!(bundle["counts"]["accountRecognitionRules"], 1);
     assert_eq!(bundle["counts"]["llmConfigs"], 1);
     assert_eq!(bundle["sections"]["accounts"][0]["name"], "工资卡");
     assert_eq!(
@@ -2882,6 +3156,14 @@ async fn taxonomy_settings_bundle_export_runtime_serves_raw_bundle_and_sensitive
     assert_eq!(
         bundle["sections"]["categoryRecognitionRules"][0]["ruleExpression"],
         "OR={午餐,饭}"
+    );
+    assert_eq!(
+        bundle["sections"]["accountRecognitionRules"][0]["accountRef"],
+        "account:11"
+    );
+    assert_eq!(
+        bundle["sections"]["accountRecognitionRules"][0]["ruleExpression"],
+        "OR={子卡}"
     );
     assert_eq!(bundle["sections"]["llmConfigs"][0]["apiKey"], "");
     assert_eq!(bundle["sections"]["llmConfigs"][0]["hasApiKey"], true);
@@ -3093,6 +3375,32 @@ async fn taxonomy_settings_bundle_import_runtime_previews_and_upserts_sections(
                 "regexEnabled": false,
                 "enabled": true
             }],
+            "accountRecognitionRules": [{
+                "accountRef": "account:source",
+                "name": "导入账户规则",
+                "priority": 3,
+                "ruleExpression": "OR={import-alias}",
+                "regexEnabled": false,
+                "enabled": true,
+                "accountRoleScope": "source",
+                "transactionTypeScope": "expense",
+                "fieldScope": ["payment_method"],
+                "source": "settings_bundle"
+            }, {
+                "accountRef": "account:missing",
+                "name": "缺账户规则",
+                "ruleExpression": "OR={missing-account}"
+            }, {
+                "accountRef": "account:source",
+                "name": "错误角色规则",
+                "ruleExpression": "OR={bad-role}",
+                "accountRoleScope": "wallet"
+            }, {
+                "accountRef": "account:source",
+                "name": "错误字段规则",
+                "ruleExpression": "OR={bad-field}",
+                "fieldScope": ["unknown-field"]
+            }],
             "llmConfigs": [{
                 "name": "导入 LLM",
                 "provider": "openai",
@@ -3159,6 +3467,14 @@ async fn taxonomy_settings_bundle_import_runtime_previews_and_upserts_sections(
         imported["result"]["sections"]["categoryRecognitionRules"]["created"],
         1
     );
+    assert_eq!(
+        imported["result"]["sections"]["accountRecognitionRules"]["created"],
+        1
+    );
+    assert_eq!(
+        imported["result"]["sections"]["accountRecognitionRules"]["skipped"],
+        3
+    );
     assert_eq!(imported["result"]["sections"]["ocrConfig"]["updated"], 1);
     assert_eq!(
         account_balance_by_name(&fixture.db_path, "导入账户")?,
@@ -3167,6 +3483,10 @@ async fn taxonomy_settings_bundle_import_runtime_previews_and_upserts_sections(
     assert_eq!(
         bill_template_amount_by_name(&fixture.db_path, "导入模板")?,
         66.0
+    );
+    assert_eq!(
+        row_count_by_name(&fixture.db_path, "account_rules", "导入账户规则")?,
+        1
     );
     assert_eq!(
         recurring_template_start_by_name(&fixture.db_path, "导入定时模板")?,
@@ -3200,6 +3520,14 @@ async fn taxonomy_settings_bundle_import_runtime_previews_and_upserts_sections(
     let second = read_json(second_import).await;
     assert_eq!(second["result"]["sections"]["accounts"]["updated"], 1);
     assert_eq!(second["result"]["sections"]["accounts"]["created"], 0);
+    assert_eq!(
+        second["result"]["sections"]["accountRecognitionRules"]["updated"],
+        1
+    );
+    assert_eq!(
+        second["result"]["sections"]["accountRecognitionRules"]["skipped"],
+        3
+    );
 
     let section_bundle = json!({
         "schemaVersion": 1,
@@ -4625,6 +4953,28 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             updated_at TEXT,
             FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
         );
+        CREATE TABLE account_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            account_id INTEGER NOT NULL,
+            name TEXT NOT NULL DEFAULT '',
+            priority INTEGER NOT NULL DEFAULT 100,
+            rule_expression TEXT NOT NULL,
+            regex_enabled INTEGER DEFAULT 0,
+            enabled INTEGER DEFAULT 1,
+            applied_count INTEGER DEFAULT 0,
+            last_applied_at TEXT,
+            match_count INTEGER DEFAULT 0,
+            last_matched_at TEXT,
+            account_role_scope TEXT NOT NULL DEFAULT 'any',
+            transaction_type_scope TEXT NOT NULL DEFAULT 'all',
+            field_scope TEXT NOT NULL DEFAULT '[\"counterparty\",\"payment_method\",\"description\"]',
+            source TEXT NOT NULL DEFAULT 'manual',
+            source_key TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+        );
         CREATE TABLE import_learning_rules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL DEFAULT 1,
@@ -4804,7 +5154,7 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
         )
         VALUES
             (10, 42, '工资卡', 1, 2, 'CNY', 'card', '#336699', 12.34, 12.34, 1, 1, '主账户', '[\"主卡\",\"工资\"]', 0, 'now', 'now'),
-            (11, 42, '工资子账户', 1, 2, 'CNY', 'wallet', '#336699', 0.50, 0.50, 0, 2, '', NULL, 10, 'now', 'now'),
+            (11, 42, '工资子账户', 1, 2, 'CNY', 'wallet', '#336699', 0.50, 0.50, 0, 2, '', '[\"子卡\"]', 10, 'now', 'now'),
             (99, 77, '其他用户', 1, 2, 'CNY', 'wallet', '#999999', 99.0, 99.0, 0, 0, '', NULL, 0, 'now', 'now')",
         [],
     )?;
@@ -4838,6 +5188,22 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             (60, 42, 31, '午餐规则', 10, 'OR={午餐,饭}', 0, 1, 2, '2026-01-02T00:00:00', 'now', 'now'),
             (61, 42, 31, '禁用规则', 20, 'OR={禁用}', 0, 0, 0, NULL, 'now', 'now'),
             (96, 77, 97, '其他用户规则', 1, 'OR={其他}', 0, 1, 1, NULL, 'now', 'now')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO account_rules(
+            id, user_id, account_id, name, priority, rule_expression,
+            regex_enabled, enabled, applied_count, last_applied_at,
+            match_count, last_matched_at,
+            account_role_scope, transaction_type_scope, field_scope, source, source_key,
+            created_at, updated_at
+        )
+        VALUES
+            (80, 42, 11, '工资子账户规则', 10, 'OR={子卡}', 0, 1, 2, '2026-01-02T00:00:00',
+             2, '2026-01-02T00:00:00', 'source', 'expense', '[\"payment_method\"]',
+             'manual', NULL, 'now', 'now'),
+            (90, 77, 99, '其他用户账户规则', 1, 'OR={其他}', 0, 1, 1, NULL,
+             1, NULL, 'any', 'all', '[\"counterparty\"]', 'manual', NULL, 'now', 'now')",
         [],
     )?;
     connection.execute(
@@ -4940,7 +5306,7 @@ fn row_count_by_name(path: &Path, table_name: &str, name: &str) -> Result<i64, B
     assert!(
         matches!(
             table_name,
-            "accounts" | "tags" | "bill_templates" | "category_rules"
+            "accounts" | "tags" | "bill_templates" | "category_rules" | "account_rules"
         ),
         "unexpected test table name"
     );
@@ -5111,6 +5477,34 @@ fn category_rule_priority(path: &Path, rule_id: i64) -> Result<i64, Box<dyn Erro
     Ok(Connection::open(path)?.query_row(
         "SELECT priority FROM category_rules WHERE id = ?1",
         [rule_id],
+        |row| row.get::<_, i64>(0),
+    )?)
+}
+
+fn account_rule_exists(path: &Path, rule_id: i64) -> Result<bool, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT COUNT(*) > 0 FROM account_rules WHERE id = ?1",
+        [rule_id],
+        |row| row.get::<_, bool>(0),
+    )?)
+}
+
+fn account_rule_priority(path: &Path, rule_id: i64) -> Result<i64, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT priority FROM account_rules WHERE id = ?1",
+        [rule_id],
+        |row| row.get::<_, i64>(0),
+    )?)
+}
+
+fn account_rule_count_by_source(
+    path: &Path,
+    user_id: i64,
+    source: &str,
+) -> Result<i64, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT COUNT(*) FROM account_rules WHERE user_id = ?1 AND source = ?2",
+        rusqlite::params![user_id, source],
         |row| row.get::<_, i64>(0),
     )?)
 }

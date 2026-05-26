@@ -57,7 +57,7 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
     let mut details = BTreeMap::new();
     details.insert(
         "owned_routes".to_string(),
-        "/api/health,/api/runtime,import/preview-adjacent runtime routes,bills CRUD runtime routes,bills picture runtime routes,bills export runtime route,bills recurring runtime routes,bills reconciliation runtime route,bills category actions runtime routes,budgets CRUD/execution/forecast/history/import runtime routes,matching/recurring/calendar/networth runtime routes,statistics read/analyzer/exchange runtime routes,taxonomy account CRUD/display-order/sync-balances/transaction-action runtime routes,taxonomy tag CRUD/display-order runtime routes,taxonomy category master-data/statistics/category-rule-list-test/rule-overview/settings-bundle import-export runtime routes,taxonomy templates CRUD/display-order runtime routes,global Learning Center suggestions/rules runtime routes,LLM config/candidates/provider-generation runtime routes,OCR config and receipt recognition runtime routes,auth login/register/token/account-recovery/OAuth2 authorize/profile/cloud/external-auth/system/user-data-statistics-export-clear/2fa-status/2fa-verify/2fa-recovery-verify/2fa-write/step-up runtime routes,backup ops runtime routes".to_string(),
+        "/api/health,/api/runtime,import/preview-adjacent runtime routes,bills CRUD runtime routes,bills picture runtime routes,bills export runtime route,bills recurring runtime routes,bills reconciliation runtime route,bills category actions runtime routes,budgets CRUD/execution/forecast/history/import runtime routes,matching/recurring/calendar/networth runtime routes,statistics read/analyzer/exchange runtime routes,taxonomy account CRUD/display-order/sync-balances/transaction-action/account-rule list-create-update-delete-reorder-migrate-test runtime routes,taxonomy tag CRUD/display-order runtime routes,taxonomy category master-data/statistics/category-rule-list-test/rule-overview/settings-bundle import-export runtime routes,taxonomy templates CRUD/display-order runtime routes,global Learning Center suggestions/rules runtime routes,LLM config/candidates/provider-generation runtime routes,OCR config and receipt recognition runtime routes,auth login/register/token/account-recovery/OAuth2 authorize/profile/cloud/external-auth/system/user-data-statistics-export-clear/2fa-status/2fa-verify/2fa-recovery-verify/2fa-write/step-up runtime routes,backup ops runtime routes".to_string(),
     );
     details.insert(
         "import_route_mode".to_string(),
@@ -133,7 +133,7 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
         );
         details.insert(
             "taxonomy_categories_runtime".to_string(),
-            "owned category list/tree/flat/detail/create/update/delete/batch/move/import/export/all/statistics routes plus category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, and settings bundle import/preview/export routes with user-scoped DB reads and writes".to_string(),
+            "owned category list/tree/flat/detail/create/update/delete/batch/move/import/export/all/statistics routes plus category-rule list/create/update/delete/reorder/defaults/migrate/test, account-rule list/create/update/delete/reorder/migrate-aliases/test, rule overview, and settings bundle import/preview/export routes with user-scoped DB reads and writes".to_string(),
         );
         details.insert(
             "taxonomy_templates_runtime".to_string(),
