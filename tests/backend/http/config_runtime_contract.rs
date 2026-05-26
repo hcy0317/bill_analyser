@@ -9,8 +9,8 @@ use bill_analyser_http::{
         DEFAULT_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS, DEFAULT_BACKUP_DIR, DEFAULT_BODY_LIMIT_BYTES,
         DEFAULT_DATA_DIR, DEFAULT_TIMEOUT_MS, DEFAULT_UPLOADS_DIR,
     },
-    http_shell_health, runtime_log_filter_from_directives, HttpShellConfig, HttpShellConfigError,
-    ImportRouteMode,
+    http_shell_health, runtime_log_filter_from_directives, HttpAppState, HttpShellConfig,
+    HttpShellConfigError, ImportRouteMode, RouteRepositoryBackend,
 };
 
 #[test]
@@ -406,6 +406,10 @@ fn http_shell_health_exposes_database_status_without_postgres_secret() {
     let health = http_shell_health(&config);
 
     assert_eq!(health.details["database_backend"], "postgres");
+    assert_eq!(
+        health.details["route_repository_backend"],
+        "postgres_pending_repositories"
+    );
     assert_eq!(health.details["sqlite_db_path_configured"], "true");
     assert_eq!(health.details["sqlite_legacy_path_configured"], "true");
     assert_eq!(health.details["postgres_configured"], "true");
@@ -421,4 +425,49 @@ fn http_shell_health_exposes_database_status_without_postgres_secret() {
     );
     assert_eq!(health.details["weaviate_status"], "placeholder:disabled");
     assert_eq!(health.details["require_postgres_after_cutover"], "true");
+}
+
+#[test]
+fn http_app_state_exposes_repository_boundary_without_postgres_cutover() {
+    let config = HttpShellConfig::default()
+        .with_database_backend(DatabaseBackend::Postgres)
+        .with_postgres_url("postgres://bill:secret@localhost:5432/bill_analyser")
+        .unwrap();
+    let state = HttpAppState::new(config).unwrap();
+
+    let boundary = state.database_runtime_boundary();
+    assert_eq!(
+        boundary.route_repository_backend,
+        RouteRepositoryBackend::PostgresPending
+    );
+    assert!(!boundary.sqlite_path_configured);
+    assert!(boundary.postgres_url_configured);
+
+    let error = match state.open_sqlite_repository_runtime("taxonomy") {
+        Ok(_) => panic!("postgres-pending route boundary should reject sqlite runtime opens"),
+        Err(error) => error,
+    };
+    assert_eq!(error.http_status_code(), 503);
+    assert!(error.to_string().contains("not wired for PostgreSQL yet"));
+}
+
+#[test]
+fn http_app_state_keeps_sqlite_runtime_path_error_behind_boundary() {
+    let state = HttpAppState::new(HttpShellConfig::default()).unwrap();
+
+    let boundary = state.database_runtime_boundary();
+    assert_eq!(
+        boundary.route_repository_backend,
+        RouteRepositoryBackend::SqliteLegacy
+    );
+    assert!(!boundary.sqlite_path_configured);
+
+    let error = match state.open_sqlite_repository_runtime("bills") {
+        Ok(_) => panic!("missing sqlite path should reject runtime opens"),
+        Err(error) => error,
+    };
+    assert_eq!(error.http_status_code(), 503);
+    assert!(error
+        .to_string()
+        .contains("Rust bills DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH"));
 }

@@ -15,7 +15,7 @@ Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预
 
 - `src/backend/http`：Axum 路由、认证上下文、上传处理、response envelope、structured error 和各业务 route facade。
 - `src/backend/core`：金额、时间、分类、统计、预算、导入、matching、LLM/OCR、认证与迁移治理等共享业务合同。
-- `src/backend/db`：SQLite WAL/FK 连接、schema 初始化、事务 helper、user-scope repository、导入 staging、auth、budget、matching、taxonomy/settings 等仓储模块；同时提供 PostgreSQL 迁移骨架与权威库 schema foundation，Postgres 目前作为配置可见的迁移目标，不接管业务 repository。
+- `src/backend/db`：SQLite WAL/FK 连接、schema 初始化、事务 helper、user-scope repository、导入 staging、auth、budget、matching、taxonomy/settings 等仓储模块；同时提供 PostgreSQL 迁移骨架、权威库 schema foundation、SQLite/Postgres repository runtime provider。Postgres 目前作为可配置的迁移目标和 lazy repository runtime，不静默接管业务 repository。
 - `src/backend/parsers`：微信、支付宝、工商银行、农业银行、建设银行、民生银行等 dedicated parser，以及 `RawBill` 到 `StandardBill` 的统一标准化。
 
 详细的代码阅读路径、请求生命周期、导入管线、repository 数据流和验证矩阵见 `docs/backend-map.md`。
@@ -24,7 +24,7 @@ Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预
 
 默认运行态仍使用 SQLite，`BILL_ANALYSER_SQLITE_DB_PATH` 指向当前业务库，`BILL_ANALYSER_SQLITE_LEGACY_PATH` 用于迁移期显式标识 legacy SQLite 来源；未配置 legacy path 时沿用当前 SQLite 路径。PostgreSQL 切换基座通过 `BILL_ANALYSER_DATABASE_BACKEND`、`BILL_ANALYSER_POSTGRES_URL`、`BILL_ANALYSER_MIGRATION_MODE` 和 `BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER` 暴露，默认 `database_backend=sqlite`、`migration_mode=disabled`，因此不影响本地 SQLite 启动链路。
 
-`/api/health` 的 details 暴露 `database_backend`、`postgres_configured`、`postgres_url_redacted`、`migration_mode`、`migration_status`、`weaviate_status` 与 `require_postgres_after_cutover`。健康信息只显示脱敏 Postgres URL；迁移和 Weaviate 状态在当前阶段是占位观测字段，后续切片会接入实际迁移 runner 和向量同步 outbox。
+`/api/health` 的 details 暴露 `database_backend`、`route_repository_backend`、`postgres_configured`、`postgres_url_redacted`、`migration_mode`、`migration_status`、`weaviate_status` 与 `require_postgres_after_cutover`。健康信息只显示脱敏 Postgres URL；`route_repository_backend=sqlite_legacy` 表示 route 仍通过统一边界打开 SQLite 仓储，`postgres_pending_repositories` 表示配置选择了 Postgres 但具体业务仓储尚未接管，route helper 会显式拒绝而不是静默回退。迁移和 Weaviate 状态在当前阶段是占位观测字段，后续切片会接入实际迁移 runner 和向量同步 outbox。
 
 PostgreSQL 迁移工具入口是 `bill_sqlite_to_postgres_migrate`，支持 `dry-run`、`export`、`import-check` 和事务性 `import`。它从 SQLite 读取 legacy 表，校验必需列，生成确定性 checksum，并把账户别名转换成目标 `account_rules` payload；`import` 通过 SQLx 写入 PostgreSQL、记录 `migration_audit_events`、修正 identity 序列，不改写 SQLite，也不把业务 repository 切到 Postgres。操作步骤见 [PostgreSQL migration tooling](postgres-migration.md)。
 

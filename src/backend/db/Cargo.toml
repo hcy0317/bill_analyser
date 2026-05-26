@@ -40,6 +40,10 @@ name = "app_settings"
 path = "../../../tests/backend/db/app_settings.rs"
 
 [[test]]
+name = "database_runtime"
+path = "../../../tests/backend/db/database_runtime.rs"
+
+[[test]]
 name = "auth_two_factor_recovery"
 path = "../../../tests/backend/db/auth_two_factor_recovery.rs"
 

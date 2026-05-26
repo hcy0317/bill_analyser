@@ -14,6 +14,7 @@ mod backup_sync;
 pub mod bill_routes;
 pub mod budget_routes;
 pub mod config;
+pub mod database_runtime;
 pub mod import_routes;
 pub mod logging;
 pub mod matching_routes;
@@ -34,6 +35,10 @@ pub use bill_routes::{bill_runtime_router, BILL_CRUD_ROUTE_PATTERNS};
 pub use budget_routes::{budget_runtime_router, BUDGET_CRUD_ROUTE_PATTERNS};
 pub use config::{
     DatabaseBackend, HttpShellConfig, HttpShellConfigError, ImportRouteMode, MigrationMode,
+};
+pub use database_runtime::{
+    DatabaseRuntimeBoundary, RouteRepositoryBackend, RouteRepositoryRuntimeError,
+    SqliteRepositoryOpenMode,
 };
 pub use import_routes::IMPORT_SKELETON_ROUTE_PATTERNS;
 #[cfg(not(coverage))]

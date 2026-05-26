@@ -6,7 +6,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{HttpShellConfig, ImportRouteMode};
+use crate::{
+    config::{HttpShellConfig, ImportRouteMode},
+    database_runtime::DatabaseRuntimeBoundary,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HttpShellIdentity {
@@ -63,6 +66,11 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
     details.insert(
         "database_backend".to_string(),
         config.database_backend.as_str().to_string(),
+    );
+    let database_boundary = DatabaseRuntimeBoundary::from_config(config);
+    details.insert(
+        "route_repository_backend".to_string(),
+        database_boundary.route_repository_backend_str().to_string(),
     );
     details.insert(
         "postgres_configured".to_string(),

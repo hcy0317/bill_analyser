@@ -43,7 +43,7 @@ use bill_analyser_db::{
     create_bill, delete_bill, get_bill_by_id, get_bill_recurring_candidates, get_bill_tags,
     get_bill_update_snapshot, get_first_account_id, list_bills, query_bills,
     unbind_bill_from_recurring, update_bill, BillCategoryFilter, BillCreateDraft, BillFilters,
-    BillRecord, BillUpdateDraft, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
+    BillRecord, BillUpdateDraft, SqliteRuntime,
 };
 use chrono::{DateTime, Local};
 use ring::rand::{SecureRandom, SystemRandom};

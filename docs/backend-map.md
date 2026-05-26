@@ -11,16 +11,17 @@ Canonical source: docs/backend-map.md
 flowchart LR
   Web["Vue / TypeScript 前端"] --> Http["src/backend/http\nAxum routes + auth + envelopes"]
   Http --> Core["src/backend/core\n业务合同 + 金额/时间/导入/匹配/预算/统计"]
-  Http --> Db["src/backend/db\nSQLite repository + transaction + user scope"]
+  Http --> Db["src/backend/db\nrepository runtime provider + transaction + user scope"]
   Core --> Parsers["src/backend/parsers\n账单解析 + RawBill/StandardBill"]
   Db --> SQLite["SQLite WAL + foreign keys"]
+  Db --> Postgres["PostgreSQL lazy repository runtime"]
 ```
 
 | 层 | 入口 | 责任 | 不能做 |
 | --- | --- | --- | --- |
 | HTTP | `src/backend/http/lib.rs`, `router.rs`, `bin/bill_http_server.rs` | 注册 `/api/...` 路由，解析认证上下文和请求 DTO，投影 response envelope | 不把复杂 SQL 或跨表事务散落在 handler 中 |
 | Core | `src/backend/core/lib.rs` | 稳定业务合同、金额/时间/分类/统计 primitive、导入/学习/匹配/LLM/OCR/预算规则 | 不直接依赖前端临时字段或数据库行形状 |
-| DB | `src/backend/db/lib.rs` | SQLite 连接、schema、事务 helper、user-scope repository、staging 生命周期 | 不绕过事务边界或把 user_id 过滤留给调用方猜 |
+| DB | `src/backend/db/lib.rs` | SQLite 连接、PostgreSQL lazy runtime provider、schema、事务 helper、user-scope repository、staging 生命周期 | 不绕过事务边界、静默回退仓储 backend，或把 user_id 过滤留给调用方猜 |
 | Parsers | `src/backend/parsers/lib.rs` | provider 检测、账单解析、`RawBill` 到 `StandardBill` 标准化、fixture/golden 合同 | 不执行导入 staging、去重、分类或账户写入 |
 
 当前库存：`src/backend/http` 112 个 Rust 文件，`src/backend/db` 74 个，`src/backend/core` 54 个，`src/backend/parsers` 9 个，总计 249 个。每个后端 Rust 文件都在文件头保留中文导读注释，说明该文件所在层、核心职责和主要对接边界。
@@ -30,7 +31,7 @@ flowchart LR
 - HTTP 运行态：`src/backend/http/lib.rs`、`src/backend/http/router.rs`、`src/backend/http/runtime.rs`、`src/backend/http/server.rs`、`src/backend/http/state.rs`、`src/backend/http/config.rs`、`src/backend/http/bin/bill_http_server.rs`
 - HTTP route facade：`src/backend/http/auth_routes/mod.rs`、`src/backend/http/import_routes/mod.rs`、`src/backend/http/backup_routes/mod.rs`、`src/backend/http/bill_routes/mod.rs`、`src/backend/http/budget_routes.rs`、`src/backend/http/matching_routes.rs`、`src/backend/http/statistics_routes/mod.rs`、`src/backend/http/taxonomy_routes/mod.rs`
 - Core 合同：`src/backend/core/import_pipeline.rs`、`src/backend/core/import_learning.rs`、`src/backend/core/matching.rs`、`src/backend/core/statistics.rs`、`src/backend/core/budgets.rs`、`src/backend/core/ai_ocr_llm/mod.rs`、`src/backend/core/primitives/mod.rs`、`src/backend/core/migration_governance.rs`
-- DB repository：`src/backend/db/connection.rs`、`src/backend/db/schema.rs`、`src/backend/db/transaction.rs`、`src/backend/db/user_scope.rs`、`src/backend/db/import_staging.rs`、`src/backend/db/bills.rs`、`src/backend/db/budgets.rs`、`src/backend/db/auth.rs`、`src/backend/db/taxonomy/mod.rs`、`src/backend/db/matching.rs`
+- DB repository：`src/backend/db/runtime.rs`、`src/backend/db/connection.rs`、`src/backend/db/schema.rs`、`src/backend/db/transaction.rs`、`src/backend/db/user_scope.rs`、`src/backend/db/import_staging.rs`、`src/backend/db/bills.rs`、`src/backend/db/budgets.rs`、`src/backend/db/auth.rs`、`src/backend/db/taxonomy/mod.rs`、`src/backend/db/matching.rs`
 - Parser：`src/backend/parsers/lib.rs`、`src/backend/parsers/dedicated/mod.rs`、`src/backend/parsers/dedicated/WeChat.rs`、`src/backend/parsers/dedicated/Alipay.rs`、`src/backend/parsers/dedicated/ICBC.rs`、`src/backend/parsers/dedicated/CMBC.rs`、`src/backend/parsers/dedicated/ABC.rs`、`src/backend/parsers/dedicated/CCB.rs`、`tests/backend/parsers`
 
 <a id="api-request-lifecycle"></a>
@@ -115,7 +116,7 @@ flowchart LR
 
 DB 层导读注释应优先解释：
 
-- WAL、foreign keys、SQLite path guard 和 schema 幂等初始化。
+- WAL、foreign keys、SQLite path guard、PostgreSQL lazy repository runtime 和 schema 幂等初始化。
 - repository facade 供哪个 route/runtime 调用。
 - user-scope 在哪里强制。
 - 哪些写入必须 rollback-on-error，哪些审计是 best-effort。

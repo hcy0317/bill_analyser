@@ -66,7 +66,7 @@ use bill_analyser_db::{
     ImportPreviewPatchField, ImportPreviewPatchValue, ImportPreviewQueryFilters,
     ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate, ImportPreviewRow,
     ImportSessionDraft, ImportSessionStatusUpdate, LlmCandidateDraft, LlmConfigDraft,
-    LlmConfigUpdate, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
+    LlmConfigUpdate, SqliteRuntime,
 };
 use bill_analyser_parsers::{
     parse_dedicated_import_bytes, post_process_raw_bills, RawBill, StandardBill,

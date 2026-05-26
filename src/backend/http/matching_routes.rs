@@ -29,8 +29,7 @@ use bill_analyser_db::{
     query_matching_pairs_payload, query_matching_session_candidates_payload,
     query_net_worth_payload, reject_recurring_suggestion, ImportPreviewExpectedState,
     ImportPreviewLearningApply, ImportPreviewRecurringCandidate, MatchingRuntimeError,
-    PreviewMatchingActionRequest, ReconciliationCandidateFilters, SqliteConnectionConfig,
-    SqliteDbPath, SqliteRuntime,
+    PreviewMatchingActionRequest, ReconciliationCandidateFilters, SqliteRuntime,
 };
 use chrono::NaiveDate;
 use serde::Deserialize;
@@ -757,25 +756,15 @@ async fn reconcile_history_handler(
     )
 }
 
-fn open_runtime(state: &HttpAppState, label: &str) -> RouteResult<SqliteRuntime> {
-    let db_path = state.config.sqlite_db_path.as_deref().ok_or_else(|| {
-        Box::new(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            format!("Rust {label} DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH"),
-        ))
-    })?;
-    let db_path = SqliteDbPath::application_file(db_path).map_err(|error| {
-        Box::new(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            error.to_string(),
-        ))
-    })?;
-    SqliteRuntime::open(SqliteConnectionConfig {
-        path: db_path,
-        create_if_missing: true,
-        busy_timeout: state.config.timeout,
-    })
-    .map_err(|error| Box::new(db_error_response(error)))
+fn open_runtime(state: &HttpAppState, label: &'static str) -> RouteResult<SqliteRuntime> {
+    state
+        .open_sqlite_repository_runtime(label)
+        .map_err(|error| {
+            Box::new(error_response(
+                status_or_internal(error.http_status_code()),
+                error.public_message("Rust matching route runtime DB error"),
+            ))
+        })
 }
 
 fn user_id_from_headers(headers: &HeaderMap, config: &HttpShellConfig) -> RouteResult<UserId> {

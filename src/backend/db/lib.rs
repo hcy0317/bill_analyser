@@ -22,6 +22,7 @@ pub mod path;
 pub mod postgres;
 pub mod postgres_migration;
 pub mod recurring;
+pub mod runtime;
 pub mod schema;
 pub mod statistics;
 pub mod taxonomy;
@@ -150,6 +151,10 @@ pub use recurring::{
     detect_and_save_recurring_suggestions, get_bills_linked_to_recurring,
     init_recurring_runtime_schema, list_recent_bills_for_recurring_detection,
     list_recurring_suggestions, reject_recurring_suggestion, RecurringSuggestionSaveSummary,
+};
+pub use runtime::{
+    DatabaseRuntimeBackend, DatabaseRuntimeConfig, DatabaseRuntimeProvider,
+    PostgresRepositoryRuntime, SqliteRuntimeOpenMode,
 };
 pub use schema::{
     init_auth_security_schema, init_foundational_schema, migrate_bills_hash_unique_constraint,

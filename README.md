@@ -128,7 +128,7 @@ $env:BILL_ANALYSER_POSTGRES_URL = "postgres://bill_analyser:bill_analyser_dev@12
 $env:BILL_ANALYSER_MIGRATION_MODE = "validate"
 ```
 
-`/api/health` 会显示 `database_backend`、`postgres_configured`、`postgres_url_redacted`、`migration_mode`、`migration_status` 和 `weaviate_status`，其中 Postgres URL 只输出脱敏形式。当前切片不切换业务 repository。
+`/api/health` 会显示 `database_backend`、`route_repository_backend`、`postgres_configured`、`postgres_url_redacted`、`migration_mode`、`migration_status` 和 `weaviate_status`，其中 Postgres URL 只输出脱敏形式。`route_repository_backend=postgres_pending_repositories` 表示 PostgreSQL runtime 已可被后续 repository 使用，但当前业务 route 尚未接管；在具体仓储切换完成前不要把生产业务流量切到 `database_backend=postgres`。
 
 SQLite 到 PostgreSQL 的迁移工具当前支持 dry-run、export 和 import-check：
 

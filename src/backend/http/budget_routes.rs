@@ -21,7 +21,7 @@ use bill_analyser_db::{
     get_budget_by_id, import_budgets, query_budget_execution_details,
     query_budget_execution_history, query_budget_forecast, query_budgets_for_listing,
     update_budget, BudgetCreateDraft, BudgetExecutionFilters, BudgetFilters, BudgetForecastFilters,
-    BudgetRecord, BudgetUpdateDraft, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
+    BudgetRecord, BudgetUpdateDraft, SqliteRuntime,
 };
 use chrono::Utc;
 use serde::Deserialize;

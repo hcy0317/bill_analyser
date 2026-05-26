@@ -8,7 +8,7 @@ use axum::{
     Json,
 };
 use bill_analyser_core::{statistics::StatisticsContractError, UserId};
-use bill_analyser_db::{SqliteConnectionConfig, SqliteDbPath, SqliteRuntime};
+use bill_analyser_db::SqliteRuntime;
 use serde_json::{json, Value};
 
 use crate::{auth::resolve_user_id_from_headers, config::HttpShellConfig, state::HttpAppState};
@@ -17,24 +17,14 @@ pub(super) const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-use
 
 pub(super) type RouteResult<T> = Result<T, Box<Response>>;
 pub(super) fn open_runtime(state: &HttpAppState) -> RouteResult<SqliteRuntime> {
-    let db_path = state.config.sqlite_db_path.as_deref().ok_or_else(|| {
-        Box::new(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Rust statistics DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH",
-        ))
-    })?;
-    let db_path = SqliteDbPath::application_file(db_path).map_err(|error| {
-        Box::new(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            error.to_string(),
-        ))
-    })?;
-    SqliteRuntime::open(SqliteConnectionConfig {
-        path: db_path,
-        create_if_missing: true,
-        busy_timeout: state.config.timeout,
-    })
-    .map_err(|_| Box::new(db_error_response()))
+    state
+        .open_sqlite_repository_runtime("statistics")
+        .map_err(|error| {
+            Box::new(error_response(
+                status_or_internal(error.http_status_code()),
+                error.public_message("Rust statistics route runtime DB error"),
+            ))
+        })
 }
 
 pub(super) fn user_id_from_headers(

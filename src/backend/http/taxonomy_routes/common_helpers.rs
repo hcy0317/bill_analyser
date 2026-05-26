@@ -93,25 +93,15 @@ fn parse_json_body(body: Bytes) -> RouteResult<Value> {
     serde_json::from_slice(&body).map_err(|_| Box::new(bad_request("Invalid JSON")))
 }
 
-fn open_runtime(state: &HttpAppState, runtime_label: &str) -> RouteResult<SqliteRuntime> {
-    let db_path = state.config.sqlite_db_path.as_deref().ok_or_else(|| {
-        Box::new(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            format!("Rust {runtime_label} DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH"),
-        ))
-    })?;
-    let db_path = SqliteDbPath::application_file(db_path).map_err(|error| {
-        Box::new(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            error.to_string(),
-        ))
-    })?;
-    SqliteRuntime::open(SqliteConnectionConfig {
-        path: db_path,
-        create_if_missing: true,
-        busy_timeout: state.config.timeout,
-    })
-    .map_err(|_| Box::new(db_error_response()))
+fn open_runtime(state: &HttpAppState, runtime_label: &'static str) -> RouteResult<SqliteRuntime> {
+    state
+        .open_sqlite_repository_runtime(runtime_label)
+        .map_err(|error| {
+            Box::new(error_response(
+                status_or_internal(error.http_status_code()),
+                error.public_message("Rust taxonomy route runtime DB error"),
+            ))
+        })
 }
 
 fn user_id_from_headers(headers: &HeaderMap, config: &HttpShellConfig) -> RouteResult<UserId> {

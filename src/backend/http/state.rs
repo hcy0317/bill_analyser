@@ -10,7 +10,14 @@ use std::{
 
 use serde_json::Value;
 
-use crate::config::HttpShellConfig;
+use crate::{
+    config::HttpShellConfig,
+    database_runtime::{
+        open_sqlite_repository_runtime, DatabaseRuntimeBoundary, RouteRepositoryRuntimeError,
+        SqliteRepositoryOpenMode,
+    },
+};
+use bill_analyser_db::SqliteRuntime;
 
 #[derive(Debug, Clone)]
 pub struct HttpAppState {
@@ -43,5 +50,31 @@ impl HttpAppState {
         if let Ok(mut configs) = self.llm_runtime_configs.lock() {
             configs.remove(&user_id);
         }
+    }
+
+    pub fn database_runtime_boundary(&self) -> DatabaseRuntimeBoundary {
+        DatabaseRuntimeBoundary::from_config(&self.config)
+    }
+
+    pub fn open_sqlite_repository_runtime(
+        &self,
+        runtime_label: &'static str,
+    ) -> Result<SqliteRuntime, RouteRepositoryRuntimeError> {
+        open_sqlite_repository_runtime(
+            &self.config,
+            runtime_label,
+            SqliteRepositoryOpenMode::CreateIfMissing,
+        )
+    }
+
+    pub fn open_existing_sqlite_repository_runtime(
+        &self,
+        runtime_label: &'static str,
+    ) -> Result<SqliteRuntime, RouteRepositoryRuntimeError> {
+        open_sqlite_repository_runtime(
+            &self.config,
+            runtime_label,
+            SqliteRepositoryOpenMode::ExistingOnly,
+        )
     }
 }

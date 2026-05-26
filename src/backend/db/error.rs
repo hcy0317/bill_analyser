@@ -14,6 +14,8 @@ pub enum DbError {
     InvalidOperation(String),
     #[error("sqlite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("postgres error: {0}")]
+    Postgres(#[from] sqlx::Error),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }

@@ -29,8 +29,7 @@ use bill_analyser_db::{
         tags::{TagDisplayOrder, TagRecord, TagsRepository},
         templates::{TemplateDisplayOrder, TemplateRecord, TemplatesRepository},
     },
-    AccountBalanceDiscrepancy, AppSettingDraft, SqliteConnectionConfig, SqliteDbPath,
-    SqliteRuntime, SyncAllAccountBalancesResult,
+    AccountBalanceDiscrepancy, AppSettingDraft, SqliteRuntime, SyncAllAccountBalancesResult,
 };
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};

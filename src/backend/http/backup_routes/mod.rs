@@ -31,7 +31,7 @@ use bill_analyser_db::{
     create_backup_audit_log_best_effort, create_or_update_backup_job, init_backup_ops_schema,
     list_backup_jobs, list_backup_records, update_backup_record_by_filename, upsert_backup_record,
     BackupAuditLogDraft, BackupJobDraft, BackupRecordDraft, BackupRecordRow, DbError,
-    SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
+    SqliteRuntime,
 };
 use chrono::{Local, Utc};
 use fernet::Fernet;

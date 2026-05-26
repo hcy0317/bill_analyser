@@ -48,8 +48,8 @@ use bill_analyser_db::{
     ApplicationCloudSettingDraft, ApplicationCloudSettingRow, AuthLogDraft, AuthLoginUserRow,
     AuthUserProfileRow, AuthUserProfileUpdate, BillCategoryFilter, BillFilters,
     CreateTokenSessionDraft, DbError, ExternalAuthRow, RegisterPresetCategory,
-    RegisterPresetSubCategory, RegisterUserDraft, SqliteConnectionConfig, SqliteDbPath,
-    SqliteRuntime, TokenSessionRow, UserDataExportBundle, UserDataExportCategory,
+    RegisterPresetSubCategory, RegisterUserDraft, SqliteRuntime, TokenSessionRow,
+    UserDataExportBundle, UserDataExportCategory,
 };
 use chrono::{Duration as ChronoDuration, Local, NaiveDateTime, TimeZone, Utc};
 use qrcodegen::{QrCode, QrCodeEcc};
