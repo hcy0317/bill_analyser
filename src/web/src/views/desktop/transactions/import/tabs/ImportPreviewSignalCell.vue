@@ -71,6 +71,49 @@
             </template>
         </div>
 
+        <div class="signal-group" v-if="viewModel.historyRewrite">
+            <div class="signal-stack signal-stack--history">
+                <v-menu
+                    v-if="hasSignalDetails(viewModel.historyRewrite.detailLines)"
+                    open-on-hover
+                    location="bottom start"
+                    :close-on-content-click="false">
+                    <template #activator="{ props: menuProps }">
+                        <v-chip
+                            v-bind="menuProps"
+                            class="signal-chip"
+                            :color="viewModel.historyRewrite.color"
+                            variant="tonal"
+                            size="x-small"
+                            :title="viewModel.historyRewrite.title"
+                            :prepend-icon="mdiAlertOutline">
+                            {{ tt(viewModel.historyRewrite.labelKey) }}
+                        </v-chip>
+                    </template>
+                    <v-card class="signal-detail-card" variant="outlined">
+                        <v-card-text class="pa-2">
+                            <div
+                                v-for="line in viewModel.historyRewrite.detailLines"
+                                :key="`history-${line}`"
+                                class="text-caption">
+                                {{ line }}
+                            </div>
+                        </v-card-text>
+                    </v-card>
+                </v-menu>
+                <v-chip
+                    v-else
+                    class="signal-chip"
+                    :color="viewModel.historyRewrite.color"
+                    variant="tonal"
+                    size="x-small"
+                    :title="viewModel.historyRewrite.title"
+                    :prepend-icon="mdiAlertOutline">
+                    {{ tt(viewModel.historyRewrite.labelKey) }}
+                </v-chip>
+            </div>
+        </div>
+
         <div class="signal-group" v-if="viewModel.transferSuggestion">
             <div class="signal-stack">
                 <v-menu
@@ -383,6 +426,10 @@ function emitLLMReview(decision: 'accept' | 'reject' | 'clear'): void {
 }
 
 .signal-stack--learning {
+    width: fit-content;
+}
+
+.signal-stack--history {
     width: fit-content;
 }
 

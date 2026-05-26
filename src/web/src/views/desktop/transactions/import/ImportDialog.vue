@@ -445,6 +445,12 @@ import type {
     PreviewPageRequestOptions
 } from './importPreviewIndex.ts';
 import {
+    buildImportPreviewHistoryRewriteAcknowledgement,
+    buildImportPreviewHistoryRewriteOperationAcknowledgement,
+    type ImportPreviewHistoryRewriteAcknowledgement,
+    type ImportPreviewHistoryRewriteAcknowledgementOperation
+} from './checkDataMatching.ts';
+import {
     extractApiErrorMessage,
     fetchImportStage
 } from './importDialogApi.ts';
@@ -1688,7 +1694,137 @@ async function cleanupServerSession(): Promise<void> {
     previewMetadata.value = null;
 }
 
-function submit(): void {
+function getPreviewIdFromTransaction(transaction: ImportTransaction): number | null {
+    const previewId = (transaction as ImportTransactionWithPreviewId)._previewId;
+    return typeof previewId === 'number' && Number.isFinite(previewId) && previewId > 0 ? previewId : null;
+}
+
+function getHistoryRewriteOperationFromTransaction(
+    transaction: ImportTransaction
+): ImportPreviewHistoryRewriteAcknowledgementOperation | null {
+    return buildImportPreviewHistoryRewriteOperationAcknowledgement(getPreviewIdFromTransaction(transaction), {
+        reconciliationPlannedOperation: transaction.matching?.reconciliation?.planned_operation,
+        reconciliationHistoryBillId: transaction.matching?.reconciliation?.history_bill_id,
+        reconciliationHistoryBillVersion: transaction.matching?.reconciliation?.history_bill_version,
+        reconciliationOperationId: transaction.matching?.reconciliation?.operation_id,
+        reconciliationAcknowledgementToken: transaction.matching?.reconciliation?.acknowledgement_token,
+        reconciliationDestructiveAckRequired: !!transaction.matching?.reconciliation?.destructive_ack_required
+    });
+}
+
+function getPreviewUpdateId(update: Record<string, unknown>): number | null {
+    const rawId = update['id'];
+    const numericId = typeof rawId === 'number' ? rawId : Number(String(rawId || '').trim());
+    return Number.isFinite(numericId) && numericId > 0 ? Math.trunc(numericId) : null;
+}
+
+async function fetchSelectedPreviewTransactionsForConfirm(
+    selectedCount: number
+): Promise<ImportTransaction[]> {
+    if (!serverSessionId.value) {
+        return [];
+    }
+
+    const token = getCurrentToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const searchParams = new URLSearchParams({
+        page: '1',
+        page_size: String(Math.max(selectedCount, 1)),
+        selected_only: 'true'
+    });
+    const response = await fetchImportStage(
+        `/api/bills/import/v2/preview/${encodeURIComponent(serverSessionId.value)}?${searchParams.toString()}`,
+        {
+            method: 'GET',
+            headers
+        },
+        '预览选中历史改写确认'
+    );
+    if (!response.ok) {
+        throw new Error(`获取选中预览失败: ${await response.text()}`);
+    }
+
+    const result = await response.json();
+    if (!result.success) {
+        throw new Error(result.error || '获取选中预览失败');
+    }
+
+    const previewData = Array.isArray(result.data?.preview) ? result.data.preview as ImportPreviewRecord[] : [];
+    return previewData.map((item, idx) => convertPreviewToImportTransaction(item, idx));
+}
+
+async function buildHistoryRewriteConfirmAcknowledgement({
+    selectedTransactions,
+    selectedPreviewUpdates,
+    selectedCount
+}: {
+    selectedTransactions: ImportTransaction[];
+    selectedPreviewUpdates: Record<string, unknown>[];
+    selectedCount: number;
+}): Promise<ImportPreviewHistoryRewriteAcknowledgement | null> {
+    const selectedPreviewIds = new Set<number>();
+    const operations = new Map<number, ImportPreviewHistoryRewriteAcknowledgementOperation>();
+    const addTransaction = (transaction: ImportTransaction): void => {
+        const previewId = getPreviewIdFromTransaction(transaction);
+        if (previewId === null || !transaction.selected) {
+            return;
+        }
+        selectedPreviewIds.add(previewId);
+        const operation = getHistoryRewriteOperationFromTransaction(transaction);
+        if (operation) {
+            operations.set(operation.preview_id, operation);
+        }
+    };
+
+    if (serverSessionId.value && serverPagedPreviewMode.value) {
+        const selectedServerTransactions = await fetchSelectedPreviewTransactionsForConfirm(selectedCount);
+        selectedServerTransactions.forEach(addTransaction);
+        (importTransactions.value || []).forEach(addTransaction);
+        for (const operation of importTransactionCheckDataTab.value?.getSelectedHistoryRewriteOperations?.() || []) {
+            operations.set(operation.preview_id, operation);
+        }
+
+        for (const update of selectedPreviewUpdates) {
+            const previewId = getPreviewUpdateId(update);
+            const selected = update['selected'];
+            if (previewId === null || typeof selected !== 'boolean') {
+                continue;
+            }
+            if (selected) {
+                selectedPreviewIds.add(previewId);
+            } else {
+                selectedPreviewIds.delete(previewId);
+                operations.delete(previewId);
+            }
+        }
+    } else {
+        selectedTransactions.forEach(addTransaction);
+    }
+
+    return buildImportPreviewHistoryRewriteAcknowledgement({
+        selectedPreviewIds: Array.from(selectedPreviewIds),
+        operations: Array.from(operations.values()).filter(operation => selectedPreviewIds.has(operation.preview_id)),
+        selectionScope: {
+            mode: serverPagedPreviewMode.value ? 'server-paged-selected-preview' : 'visible-preview',
+            preserve_unpatched_selection: serverPagedPreviewMode.value,
+            selected_visible_history_rewrite_count: importTransactionCheckDataTab.value?.getSelectedVisibleHistoryRewriteOperationCount?.() || 0
+        }
+    });
+}
+
+function buildHistoryRewriteConfirmDetails(
+    acknowledgement: ImportPreviewHistoryRewriteAcknowledgement | null
+): string[] {
+    return (acknowledgement?.operations || []).map(operation => (
+        `${operation.planned_operation} #${operation.history_bill_id} v${operation.history_bill_version}`
+    ));
+}
+
+async function submit(): Promise<void> {
     if (importTransactionCheckDataTab.value?.isEditing) {
         return;
     }
@@ -1718,9 +1854,31 @@ function submit(): void {
         return;
     }
 
+    let historyRewriteAcknowledgement: ImportPreviewHistoryRewriteAcknowledgement | null = null;
+    try {
+        historyRewriteAcknowledgement = serverSessionId.value
+            ? await buildHistoryRewriteConfirmAcknowledgement({
+                selectedTransactions,
+                selectedPreviewUpdates,
+                selectedCount
+            })
+            : null;
+    } catch (error) {
+        snackbar.value?.showError(extractApiErrorMessage(error, 'Failed to prepare history rewrite acknowledgement'));
+        return;
+    }
+
+    const historyRewriteDetails = buildHistoryRewriteConfirmDetails(historyRewriteAcknowledgement);
     confirmDialog.value?.open('format.misc.confirmImportTransactions', {
-        count: getDisplayCount(selectedCount)
-    }).then(async () => {
+        count: getDisplayCount(selectedCount),
+        warning: historyRewriteDetails.length > 0 ? 'History Rewrite' : undefined,
+        details: historyRewriteDetails,
+        color: historyRewriteDetails.length > 0 ? 'warning' : 'primary'
+    }).then(async confirmed => {
+        if (!confirmed) {
+            return;
+        }
+
         submitting.value = true;
         importProcess.value = 0;
 
@@ -1820,14 +1978,19 @@ function submit(): void {
                 headers['Authorization'] = `Bearer ${token}`;
             }
 
+            const confirmPayload: Record<string, unknown> = {
+                session_id: serverSessionId.value,
+                preserve_unpatched_selection: serverPagedPreviewMode.value,
+                preview_updates: previewUpdates
+            };
+            if (historyRewriteAcknowledgement) {
+                confirmPayload['history_rewrite_acknowledgement'] = historyRewriteAcknowledgement;
+            }
+
             const response = await fetchImportStage('/api/bills/import/v2/confirm', {
                 method: 'POST',
                 headers: headers,
-                body: JSON.stringify({
-                    session_id: serverSessionId.value,
-                    preserve_unpatched_selection: serverPagedPreviewMode.value,
-                    preview_updates: previewUpdates
-                })
+                body: JSON.stringify(confirmPayload)
             }, '阶段3确认导入', DEFAULT_IMPORT_API_TIMEOUT);
 
             if (!response.ok) {

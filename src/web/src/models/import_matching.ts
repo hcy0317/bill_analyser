@@ -80,6 +80,8 @@ export interface ImportMatchingParserPayload {
 
 export interface ImportMatchingAnnotationPayload {
     is_manually_annotated: boolean;
+    type?: string;
+    history_rewrite_notice?: string;
 }
 
 export interface ImportMatchingReconciliationPayload {
@@ -93,6 +95,15 @@ export interface ImportMatchingReconciliationPayload {
     reason?: string;
     signal_label?: string;
     source_chain?: ImportMatchingSourcePayload[];
+    planned_operation?: string;
+    history_bill_id?: number | null;
+    history_bill_version?: number | null;
+    history_role?: string;
+    group_key?: string;
+    operation_id?: string;
+    acknowledgement_token?: string;
+    destructive_ack_required?: boolean;
+    notice?: string;
 }
 
 export interface ImportMatchingStage2BaselinePayload {
