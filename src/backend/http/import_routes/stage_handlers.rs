@@ -2997,6 +2997,137 @@ mod stage_handler_transfer_account_tests {
     }
 
     #[test]
+    fn parse_account_aliases_keeps_json_and_delimited_alias_contract() {
+        assert_eq!(
+            parse_account_aliases(Some(r#"[" 微信钱包 ", "", 42, true, "余额宝"]"#)),
+            vec!["微信钱包", "42", "true", "余额宝"]
+        );
+        assert_eq!(
+            parse_account_aliases(Some(" 微信钱包,农业银行； 余额宝|零钱通 ")),
+            vec!["微信钱包", "农业银行", "余额宝", "零钱通"]
+        );
+        assert!(parse_account_aliases(Some("   ")).is_empty());
+        assert!(parse_account_aliases(None).is_empty());
+    }
+
+    #[test]
+    fn account_alias_match_uses_case_insensitive_overlap_tokens() {
+        let account = ImportIntelligenceAccount {
+            id: 10,
+            name: "微信钱包".to_string(),
+            aliases: vec![
+                "WeChat Wallet".to_string(),
+                "abc".to_string(),
+                "零钱".to_string(),
+            ],
+        };
+
+        assert!(account_matches_tokens(&account, &["wechat wallet".to_string()]));
+        assert!(account_matches_tokens(
+            &account,
+            &["parser:abc-bank".to_string()]
+        ));
+        assert!(account_matches_tokens(&account, &["零钱".to_string()]));
+        assert!(!account_matches_tokens(&account, &["支付宝".to_string()]));
+    }
+
+    #[test]
+    fn category_rule_is_applied_before_learning_can_override_current_preview() {
+        let mut draft = ImportPreviewDraft {
+            preview_type: "支出".to_string(),
+            preview_counterparty: "咖啡店".to_string(),
+            preview_description: "拿铁".to_string(),
+            preview_payment_method: "支付宝".to_string(),
+            preview_parser_id: "alipay".to_string(),
+            ..ImportPreviewDraft::default()
+        };
+        let food_category = ImportIntelligenceCategory {
+            id: 11,
+            type_code: 3,
+            main_category: "餐饮".to_string(),
+            sub_category: "咖啡".to_string(),
+        };
+        let shopping_category = ImportIntelligenceCategory {
+            id: 12,
+            type_code: 3,
+            main_category: "购物".to_string(),
+            sub_category: "日用".to_string(),
+        };
+        let categories_by_id = [food_category.clone(), shopping_category.clone()]
+            .into_iter()
+            .map(|category| (category.id, category))
+            .collect::<BTreeMap<_, _>>();
+        let category_values = categories_by_id
+            .values()
+            .map(|category| {
+                json!({
+                    "id": category.id,
+                    "main_category": category.main_category,
+                    "sub_category": category.sub_category,
+                    "type": category.type_code,
+                })
+            })
+            .collect::<Vec<_>>();
+        let rules = vec![ImportIntelligenceRule {
+            id: 501,
+            category_id: 11,
+            category_type: 3,
+            main_category: "餐饮".to_string(),
+            sub_category: "咖啡".to_string(),
+            priority: 1,
+            rule_expression: "咖啡店".to_string(),
+            regex_enabled: false,
+        }];
+        let learning_rules = vec![ImportIntelligenceLearningRule {
+            id: 601,
+            parser_id: "alipay".to_string(),
+            composite_hash: String::new(),
+            match_features: build_composite_match_features(
+                "alipay",
+                "咖啡店",
+                "拿铁",
+                "支付宝",
+            )
+            .expect("composite match features"),
+            learned_type: Some("支出".to_string()),
+            learned_category_id: Some(12),
+            learned_source_account_id: None,
+            learned_destination_account_id: None,
+        }];
+
+        assert!(apply_category_rule_match(&mut draft, &rules));
+        assert_eq!(draft.preview_main_category, "餐饮");
+        assert_eq!(draft.preview_sub_category, "咖啡");
+        assert_eq!(
+            draft
+                .preview_matching_feedback
+                .pointer("/category_rule/rule_id")
+                .and_then(Value::as_i64),
+            Some(501)
+        );
+
+        assert_eq!(
+            apply_learning_rule_match(
+                &mut draft,
+                &learning_rules,
+                &categories_by_id,
+                &category_values,
+                &[],
+            ),
+            Some(601)
+        );
+        assert_eq!(draft.preview_main_category, "购物");
+        assert_eq!(draft.preview_sub_category, "日用");
+        assert_eq!(
+            draft
+                .preview_matching_feedback
+                .pointer("/learning/rule_id")
+                .and_then(Value::as_i64),
+            Some(601)
+        );
+    }
+
+    #[test]
     fn transfer_pair_account_match_fills_source_and_destination_from_source_chain() {
         let mut draft = ImportPreviewDraft {
             preview_matching_feedback: json!({

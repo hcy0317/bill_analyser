@@ -1001,3 +1001,44 @@ fn llm_preview_matches_snapshot(preview: &ImportPreviewRow, snapshot: &Value) ->
         && snapshot_account_id(snapshot, "preview_destination_account_id")
             == preview.preview_destination_account_id
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transfer_account_aliases_preserve_json_and_delimited_inputs() {
+        assert_eq!(
+            parse_transfer_account_aliases(Some(r#"[" 工资卡 ", "", 100, true, "abc"]"#)),
+            vec!["工资卡", "100", "abc"]
+        );
+        assert_eq!(
+            parse_transfer_account_aliases(Some(" 工资卡,农业银行； abc|微信零钱 ")),
+            vec!["工资卡", "农业银行", "abc", "微信零钱"]
+        );
+        assert!(parse_transfer_account_aliases(Some(" ")).is_empty());
+        assert!(parse_transfer_account_aliases(None).is_empty());
+    }
+
+    #[test]
+    fn transfer_account_match_uses_expanded_parser_channel_and_source_tokens() {
+        let account = ImportPreviewTransferAccount {
+            id: 100,
+            aliases: vec!["农业银行".to_string(), "abc".to_string(), "工资卡".to_string()],
+        };
+        let tokens = [
+            expand_transfer_account_token("parser:abc"),
+            expand_transfer_account_token("channel:农业银行"),
+            expand_transfer_account_token("source:工资卡"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+
+        assert!(transfer_account_matches_tokens(&account, &tokens));
+        assert!(!transfer_account_matches_tokens(
+            &account,
+            &expand_transfer_account_token("parser:wechat")
+        ));
+    }
+}

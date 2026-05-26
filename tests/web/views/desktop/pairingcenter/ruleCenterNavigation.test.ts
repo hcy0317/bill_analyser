@@ -142,6 +142,17 @@ describe('rule center UX source guards', () => {
         expect(source).not.toContain('v-model="ruleEnabledFilter"');
     });
 
+    test('category recognition tab owns the current rule-builder surface before account rules expand it', () => {
+        const source = readSource('src/views/desktop/pairingcenter/components/RuleCenterPanel.vue');
+
+        expect(source).toContain("type RuleCenterPanelTab = 'rules' | 'learning' | 'recurring';");
+        expect(source).toContain('CategoryRuleBuilderFields');
+        expect(source).toContain('rule-center-rules-table');
+        expect(source).toContain("tt('No category rules')");
+        expect(source).not.toContain('account-recognition-rule');
+        expect(source).not.toContain("'accounts'");
+    });
+
     test('investment recognition settings page is removed from rule configuration', () => {
         const source = readSource('src/views/desktop/pairingcenter/ListPage.vue');
 
