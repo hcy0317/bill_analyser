@@ -1,6 +1,6 @@
 export type RuleCenterDomain = 'transfer' | 'duplicate' | 'investment' | 'learning' | 'llm';
 export type RuleCenterTab = 'overview' | 'rules' | 'config' | 'ocr-config';
-export type LegacyRuleTab = 'rules' | 'learning' | 'recurring';
+export type LegacyRuleTab = 'rules' | 'accounts' | 'learning' | 'recurring';
 
 export interface RuleCenterSelection {
     domain: RuleCenterDomain;
@@ -40,7 +40,7 @@ export function normalizeRuleCenterTab(domain: RuleCenterDomain, tab?: string): 
 }
 
 function normalizeLegacyRuleTab(tab?: string): LegacyRuleTab {
-    if (tab === 'learning' || tab === 'recurring') {
+    if (tab === 'accounts' || tab === 'learning' || tab === 'recurring') {
         return tab;
     }
 
@@ -193,8 +193,8 @@ export function buildRuleCenterQuery(
     }
 
     nextQuery['domain'] = domain;
-    nextQuery['tab'] = domain === 'transfer' && tab === 'rules' && legacyRuleTab === 'recurring'
-        ? 'recurring'
+    nextQuery['tab'] = domain === 'transfer' && tab === 'rules' && (legacyRuleTab === 'recurring' || legacyRuleTab === 'accounts')
+        ? legacyRuleTab
         : normalizeRuleCenterTab(domain, tab);
     return nextQuery;
 }

@@ -27,6 +27,7 @@ describe('settings JSON per-page import/export controls', () => {
         const tags = readSource('src/views/desktop/tags/ListPage.vue');
         const templates = readSource('src/views/desktop/templates/ListPage.vue');
         const rules = readSource('src/views/desktop/pairingcenter/components/RuleCenterPanel.vue');
+        const accountRules = readSource('src/views/desktop/pairingcenter/components/AccountRulePanel.vue');
         const learning = readSource('src/views/desktop/pairingcenter/components/LearningCenterPanel.vue');
 
         expect(accounts).toContain('section-key="accounts"');
@@ -35,6 +36,7 @@ describe('settings JSON per-page import/export controls', () => {
         expect(templates).toContain("'transactionTemplates'");
         expect(templates).toContain("'scheduledTransactions'");
         expect(rules).toContain('section-key="categoryRecognitionRules"');
+        expect(accountRules).toContain('section-key="accountRecognitionRules"');
         expect(learning).toContain('section-key="llmConfigs"');
     });
 

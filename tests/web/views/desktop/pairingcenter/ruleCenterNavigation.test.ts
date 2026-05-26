@@ -67,6 +67,13 @@ describe('rule center navigation mapping', () => {
             shouldRewriteQuery: true,
         });
 
+        expect(normalizeRuleCenterSelection({ view: 'rules', tab: 'accounts' })).toMatchObject({
+            domain: 'transfer',
+            tab: 'rules',
+            legacyRuleTab: 'accounts',
+            shouldRewriteQuery: true,
+        });
+
         expect(normalizeRuleCenterSelection({ view: 'rule-center' })).toMatchObject({
             domain: 'transfer',
             tab: 'rules',
@@ -91,6 +98,11 @@ describe('rule center navigation mapping', () => {
             foo: 'keep',
             domain: 'llm',
             tab: 'config',
+        });
+
+        expect(buildRuleCenterQuery({}, 'transfer', 'rules', 'accounts')).toMatchObject({
+            domain: 'transfer',
+            tab: 'accounts',
         });
     });
 });
@@ -142,15 +154,25 @@ describe('rule center UX source guards', () => {
         expect(source).not.toContain('v-model="ruleEnabledFilter"');
     });
 
-    test('category recognition tab owns the current rule-builder surface before account rules expand it', () => {
+    test('category and account recognition tabs own separate rule-builder surfaces', () => {
         const source = readSource('src/views/desktop/pairingcenter/components/RuleCenterPanel.vue');
+        const accountSource = readSource('src/views/desktop/pairingcenter/components/AccountRulePanel.vue');
+        const listSource = readSource('src/views/desktop/pairingcenter/ListPage.vue');
 
         expect(source).toContain("type RuleCenterPanelTab = 'rules' | 'learning' | 'recurring';");
         expect(source).toContain('CategoryRuleBuilderFields');
         expect(source).toContain('rule-center-rules-table');
         expect(source).toContain("tt('No category rules')");
-        expect(source).not.toContain('account-recognition-rule');
-        expect(source).not.toContain("'accounts'");
+        expect(accountSource).toContain('account-recognition-rule-panel');
+        expect(accountSource).toContain('section-key="accountRecognitionRules"');
+        expect(accountSource).toContain('services.getAccountRules');
+        expect(accountSource).toContain('services.createAccountRule');
+        expect(accountSource).toContain('services.reorderAccountRules');
+        expect(accountSource).toContain('services.testAccountRule');
+        expect(accountSource).toContain('services.migrateAccountAliases');
+        expect(listSource).toContain("value: 'account-recognition'");
+        expect(listSource).toContain("legacyRuleTab: 'accounts'");
+        expect(listSource).toContain('<AccountRulePanel');
     });
 
     test('investment recognition settings page is removed from rule configuration', () => {

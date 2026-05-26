@@ -177,6 +177,20 @@
                                         </template>
                                     </v-combobox>
                                 </v-col>
+                                <v-col
+                                    v-if="canManageSelectedAccountRules"
+                                    cols="12"
+                                    md="12"
+                                    class="account-rule-section"
+                                >
+                                    <AccountRulePanel
+                                        :account-id="selectedAccountRuleAccountId"
+                                        :title="tt('Account Recognition Rules')"
+                                        :show-settings-bundle-controls="false"
+                                        hide-header
+                                        embedded
+                                    />
+                                </v-col>
                                 <v-col class="py-0" cols="12" md="12" v-if="editAccountId && !isNewAccount(selectedAccount)">
                                     <v-switch :disabled="loading || submitting"
                                               :label="tt('Visible')" v-model="selectedAccount.visible"/>
@@ -212,6 +226,7 @@
 <script setup lang="ts">
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
+import AccountRulePanel from '@/views/desktop/pairingcenter/components/AccountRulePanel.vue';
 
 import { ref, computed, useTemplateRef, watch, onMounted, onUnmounted } from 'vue';
 
@@ -284,6 +299,16 @@ const selectedAccount = computed<Account>(() => {
 
     return subAccounts.value[currentAccountIndex.value] as Account;
 });
+
+const selectedAccountRuleAccountId = computed<number | null>(() => {
+    const accountId = Number.parseInt(String(selectedAccount.value.id || ''), 10);
+    return Number.isFinite(accountId) && accountId > 0 ? accountId : null;
+});
+const canManageSelectedAccountRules = computed<boolean>(() => (
+    !!editAccountId.value
+    && !isNewAccount(selectedAccount.value)
+    && selectedAccountRuleAccountId.value !== null
+));
 
 const accountAmountTitle = computed<string>(() => {
     if (currentAccountIndex.value < 0) {
@@ -446,3 +471,9 @@ defineExpose({
     open
 });
 </script>
+
+<style scoped>
+.account-rule-section {
+    min-width: 0;
+}
+</style>

@@ -38,6 +38,8 @@ PostgreSQL 迁移工具入口是 `bill_sqlite_to_postgres_migrate`，支持 `dry
 
 分类识别使用 canonical `category_rules` 规则表达式；账户识别使用 `account_rules` 表和与分类规则一致的规则表达式匹配器。账户规则按当前用户绑定到账户，支持账户角色范围、交易类型范围、字段范围、优先级、启停、正则开关、匹配计数，以及从可见账户别名幂等迁移的 source/source_key。REST API 覆盖 `GET|POST /api/account-rules/`、`PUT|DELETE /api/account-rules/{rule_id}`、`POST /api/account-rules/{rule_id}/test`、`POST /api/account-rules/reorder` 和 `POST /api/account-rules/migrate-aliases`；设置包导入导出包含 `accountRecognitionRules` 分区。
 
+桌面规则中心的“规则配置”包含分类识别、账户识别和周期识别三个二级页；账户识别页复用分类规则表达式展示密度，提供账户、角色范围、交易类型范围、字段范围、优先级、启停、正则、测试、重排、删除和别名迁移控件。桌面账户编辑保留旧别名输入，并在已持久化账户上嵌入该账户过滤后的规则管理面板。移动端通过 `/account/rules` 提供 Framework7 账户规则列表与紧凑编辑/测试/迁移入口，移动账户编辑页也保留别名输入并跳转到对应账户规则。
+
 ### Matching
 
 历史正式账单的转账候选与导入既有账单转账配对保持同一核心约束：同日、5 分钟内、金额绝对值在 1 分容差内且方向相反、来源账户不同，并排除已配对或已 suppressed 的账单。账单详情接受历史 `transfer` 候选时会保留当前账单 id，将两条收支合成为一条带来源账户、目标账户和目标金额的 `转账` 账单，并删除另一条账单；接受历史 `duplicate` 候选时会保留当前账单、合并标签并删除候选重复账单。拒绝 transfer/duplicate 会写入对应 suppression，避免同一对账单再次提示。

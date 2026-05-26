@@ -2066,7 +2066,7 @@ export default {
         enabled?: boolean;
         account_role_scope?: string;
         transaction_type_scope?: string;
-        field_scope?: string;
+        field_scope?: string | string[];
     }): ApiResponsePromise<any> => {
         return axios.post('account-rules/', data).then(response => {
             return buildApiResponse(response, response.data?.data);

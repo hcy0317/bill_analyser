@@ -119,6 +119,16 @@
                                     </div>
                                 </template>
 
+                                <template v-else-if="activeDomain === 'transfer' && activeTab === 'rules' && activeLegacyRuleTab === 'accounts'">
+                                    <div class="embedded-rule-panel">
+                                        <AccountRulePanel
+                                            ref="accountRulePanel"
+                                            :title="tt('Account Recognition')"
+                                            :header-actions-target="ruleHeaderActionsTarget"
+                                            hide-header />
+                                    </div>
+                                </template>
+
                                 <template v-else-if="activeDomain === 'transfer' && activeTab === 'rules' && activeLegacyRuleTab === 'recurring'">
                                     <div class="embedded-rule-panel">
                                         <rule-center-panel init-tab="recurring"
@@ -205,6 +215,7 @@ import {
 import type { BillMatchingPairDetail } from '@/models/bill_matching.ts';
 import { useMatchingStore } from '@/stores/matching.ts';
 import { useI18n } from '@/locales/helpers.ts';
+import AccountRulePanel from '@/views/desktop/pairingcenter/components/AccountRulePanel.vue';
 import LearningCenterPanel from '@/views/desktop/pairingcenter/components/LearningCenterPanel.vue';
 import OcrConfigPanel from '@/views/desktop/pairingcenter/components/OcrConfigPanel.vue';
 import PairsOverviewTable from '@/views/desktop/pairingcenter/components/PairsOverviewTable.vue';
@@ -224,6 +235,7 @@ type SecondaryNavValue =
     | 'transfer-overview'
     | 'duplicate-overview'
     | 'category-recognition'
+    | 'account-recognition'
     | 'recurring-recognition'
     | 'learning-overview'
     | 'learning-rules'
@@ -277,6 +289,7 @@ interface RefreshablePanel {
 }
 
 const categoryRulePanel = ref<RefreshablePanel | null>(null);
+const accountRulePanel = ref<RefreshablePanel | null>(null);
 const recurringRulePanel = ref<RefreshablePanel | null>(null);
 const ruleHeaderActionsTargetId = 'rule-center-rule-title-actions';
 const ruleHeaderActionsTarget = `#${ruleHeaderActionsTargetId}`;
@@ -331,6 +344,10 @@ const activeSecondary = computed<SecondaryNavValue>(() => {
 
     if (activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeLegacyRuleTab.value === 'recurring') {
         return 'recurring-recognition';
+    }
+
+    if (activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeLegacyRuleTab.value === 'accounts') {
+        return 'account-recognition';
     }
 
     if (activeDomain.value === 'transfer' && activeTab.value === 'rules') {
@@ -393,6 +410,15 @@ function secondaryTabsForPrimary(primary: PrimaryNavValue): SecondaryTabOption[]
                     domain: 'transfer',
                     tab: 'rules',
                     legacyRuleTab: 'rules',
+                },
+            },
+            {
+                value: 'account-recognition',
+                label: tt('Account Recognition'),
+                selection: {
+                    domain: 'transfer',
+                    tab: 'rules',
+                    legacyRuleTab: 'accounts',
                 },
             },
             {
@@ -476,11 +502,14 @@ const isCategoryRecognition = computed(() =>
 const isRecurringRecognition = computed(() =>
     activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeLegacyRuleTab.value === 'recurring'
 );
+const isAccountRecognition = computed(() =>
+    activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeLegacyRuleTab.value === 'accounts'
+);
 const showLearningHeaderActions = computed(() =>
     activeDomain.value === 'learning' || activeDomain.value === 'llm'
 );
 const showRuleHeaderActions = computed(() =>
-    isCategoryRecognition.value || isRecurringRecognition.value
+    isCategoryRecognition.value || isAccountRecognition.value || isRecurringRecognition.value
 );
 const currentPageTitle = computed(() => currentTabOption.value.label);
 const filteredPairs = computed(() => matchingStore.pairs.filter(pair => {
@@ -495,10 +524,11 @@ const showPairsError = computed(() => isPairingOverview.value && !!error.value);
 const canRefreshActiveView = computed(() => (
     isPairingOverview.value
         || isCategoryRecognition.value
+        || isAccountRecognition.value
         || isRecurringRecognition.value
 ));
 const showHeaderRefresh = computed(() => (
-    canRefreshActiveView.value && !isCategoryRecognition.value
+    canRefreshActiveView.value && !isCategoryRecognition.value && !isAccountRecognition.value
 ));
 const activeToolbarRefreshing = computed(() => (
     isPairingOverview.value
@@ -566,7 +596,9 @@ async function refreshActiveView(): Promise<void> {
 
     const activeRulePanel = isCategoryRecognition.value
         ? categoryRulePanel.value
-        : isRecurringRecognition.value
+        : isAccountRecognition.value
+            ? accountRulePanel.value
+            : isRecurringRecognition.value
             ? recurringRulePanel.value
             : null;
 

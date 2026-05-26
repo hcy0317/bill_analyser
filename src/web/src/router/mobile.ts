@@ -13,6 +13,7 @@ import TransactionAmountFilterPage from '@/views/mobile/transactions/AmountFilte
 
 import AccountListPage from '@/views/mobile/accounts/ListPage.vue';
 import AccountEditPage from '@/views/mobile/accounts/EditPage.vue';
+import AccountRuleListPage from '@/views/mobile/accounts/RuleListPage.vue';
 import AccountReconciliationStatementPage from '@/views/mobile/accounts/ReconciliationStatementPage.vue';
 import AccountMoveAllTransactionsPage from '@/views/mobile/accounts/MoveAllTransactionsPage.vue';
 
@@ -193,6 +194,11 @@ const routes: Router.RouteParameters[] = [
     {
         path: '/account/edit',
         async: asyncResolve(AccountEditPage),
+        beforeEnter: [checkLogin]
+    },
+    {
+        path: '/account/rules',
+        async: asyncResolve(AccountRuleListPage),
         beforeEnter: [checkLogin]
     },
     {
