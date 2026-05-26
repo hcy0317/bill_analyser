@@ -185,13 +185,16 @@ pub use smart_dedup::{
     TransferSourceSnapshot,
 };
 pub use weaviate_derived::{
+    build_import_learning_vector_recall_filters, build_import_learning_vector_recall_queries,
     build_weaviate_batch_upsert_payload, build_weaviate_collection_names,
     build_weaviate_delete_path, build_weaviate_derived_object, build_weaviate_graphql_query,
     build_weaviate_required_metadata, build_weaviate_schema_classes,
     derive_weaviate_feature_vector, deterministic_weaviate_object_id,
-    validate_weaviate_collection_prefix, WeaviateCollectionNames, WeaviateDerivedClass,
-    WeaviateDerivedObject, WeaviateFilterValue, WeaviateMetadataFilter,
-    WEAVIATE_CLASS_COUNTERPARTY_FEATURE, WEAVIATE_CLASS_DESCRIPTION_FEATURE,
-    WEAVIATE_CLASS_IMPORT_LEARNING_SAMPLE, WEAVIATE_CLASS_IMPORT_LEARNING_SUGGESTION_VECTOR,
-    WEAVIATE_DEFAULT_COLLECTION_PREFIX, WEAVIATE_DEFAULT_VECTOR_DIMENSIONS,
+    normalize_weaviate_transaction_type_scope, validate_weaviate_collection_prefix,
+    WeaviateCollectionNames, WeaviateDerivedClass, WeaviateDerivedObject, WeaviateFilterValue,
+    WeaviateImportLearningRecallQuery, WeaviateMetadataFilter, WEAVIATE_CLASS_COUNTERPARTY_FEATURE,
+    WEAVIATE_CLASS_DESCRIPTION_FEATURE, WEAVIATE_CLASS_IMPORT_LEARNING_SAMPLE,
+    WEAVIATE_CLASS_IMPORT_LEARNING_SUGGESTION_VECTOR, WEAVIATE_DEFAULT_COLLECTION_PREFIX,
+    WEAVIATE_DEFAULT_VECTOR_DIMENSIONS, WEAVIATE_RECALL_DEFAULT_LIMIT, WEAVIATE_RECALL_MAX_LIMIT,
+    WEAVIATE_RULE_STATE_POSTGRES_AUTHORITATIVE,
 };

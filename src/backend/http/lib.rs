@@ -27,6 +27,7 @@ pub mod state;
 pub mod statistics_routes;
 pub mod taxonomy_routes;
 pub mod weaviate;
+pub mod weaviate_recall;
 
 pub use auth::{
     resolve_authenticated_user_from_headers, resolve_user_id_from_headers, AuthenticatedUser,
@@ -72,7 +73,8 @@ pub use taxonomy_routes::{
 };
 pub use weaviate::{
     build_object_from_feature_source, probe_weaviate_health, process_weaviate_outbox_once,
-    rebuild_weaviate_from_postgres, WeaviateBatchReport, WeaviateBootstrapReport,
-    WeaviateHealthStatus, WeaviateHttpClient, WeaviateOutboxProcessReport, WeaviateRebuildReport,
-    WeaviateRuntimeError,
+    rebuild_weaviate_from_postgres, recall_import_learning_candidates, WeaviateBatchReport,
+    WeaviateBootstrapReport, WeaviateHealthStatus, WeaviateHttpClient,
+    WeaviateImportLearningRecallHit, WeaviateImportLearningRecallRequest,
+    WeaviateOutboxProcessReport, WeaviateRebuildReport, WeaviateRuntimeError,
 };

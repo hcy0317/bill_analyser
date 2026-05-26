@@ -1,13 +1,14 @@
 use bill_analyser_core::{
-    build_weaviate_batch_upsert_payload, build_weaviate_collection_names,
-    build_weaviate_delete_path, build_weaviate_derived_object, build_weaviate_graphql_query,
-    build_weaviate_required_metadata, build_weaviate_schema_classes,
+    build_import_learning_vector_recall_queries, build_weaviate_batch_upsert_payload,
+    build_weaviate_collection_names, build_weaviate_delete_path, build_weaviate_derived_object,
+    build_weaviate_graphql_query, build_weaviate_required_metadata, build_weaviate_schema_classes,
     derive_weaviate_feature_vector, deterministic_weaviate_object_id,
     validate_weaviate_collection_prefix, WeaviateDerivedClass, WeaviateFilterValue,
     WeaviateMetadataFilter, FEATURE_SCHEMA_VERSION, WEAVIATE_DEFAULT_COLLECTION_PREFIX,
-    WEAVIATE_DEFAULT_VECTOR_DIMENSIONS,
+    WEAVIATE_DEFAULT_VECTOR_DIMENSIONS, WEAVIATE_RULE_STATE_POSTGRES_AUTHORITATIVE,
 };
 use serde_json::json;
+use std::collections::BTreeMap;
 
 #[test]
 fn weaviate_collection_names_are_prefixed_and_validated() {
@@ -134,7 +135,13 @@ fn batch_delete_and_graphql_payloads_preserve_user_metadata_filters() {
             },
             WeaviateMetadataFilter {
                 path: "ruleState".to_string(),
-                value: WeaviateFilterValue::Text("green".to_string()),
+                value: WeaviateFilterValue::Text(
+                    WEAVIATE_RULE_STATE_POSTGRES_AUTHORITATIVE.to_string(),
+                ),
+            },
+            WeaviateMetadataFilter {
+                path: "transactionType".to_string(),
+                value: WeaviateFilterValue::Text("transfer".to_string()),
             },
         ],
     );
@@ -143,6 +150,46 @@ fn batch_delete_and_graphql_payloads_preserve_user_metadata_filters() {
     assert!(query_text.contains("limit: 7"));
     assert!(query_text.contains("operator: And"));
     assert!(query_text.contains("path: [\"userId\"]"));
+    assert!(query_text.contains("path: [\"featureSchemaVersion\"]"));
+    assert!(query_text.contains("path: [\"ruleState\"]"));
+    assert!(query_text.contains("path: [\"transactionType\"]"));
     assert!(query_text.contains("valueInt: 42"));
+    assert!(query_text.contains("valueText: \"transfer\""));
     assert!(query_text.contains("_additional { id distance }"));
+    assert!(query_text.contains("transactionType categoryId sourceAccountId destinationAccountId"));
+}
+
+#[test]
+fn import_learning_recall_queries_pin_schema_user_type_and_rule_state() {
+    let features = BTreeMap::from([
+        ("parser_id".to_string(), "cmb".to_string()),
+        ("counterparty".to_string(), "coffee".to_string()),
+        ("description".to_string(), "latte".to_string()),
+    ]);
+
+    let queries = build_import_learning_vector_recall_queries("BillDev", 42, &features, "支出", 50);
+
+    assert_eq!(queries.len(), 3);
+    assert!(queries.iter().all(|query| query.limit <= 20));
+    assert!(queries
+        .iter()
+        .any(|query| query.class_name == "BillDevCounterpartyFeature"));
+    assert!(queries
+        .iter()
+        .any(|query| query.class_name == "BillDevDescriptionFeature"));
+    assert!(queries
+        .iter()
+        .any(|query| query.class_name == "BillDevImportLearningSample"));
+    for query in &queries {
+        let filter_text = serde_json::to_string(&query.filters).expect("filters");
+        assert!(filter_text.contains("userId"));
+        assert!(filter_text.contains("featureSchemaVersion"));
+        assert!(filter_text.contains("transactionType"));
+        assert!(filter_text.contains("expense"));
+        assert!(filter_text.contains(WEAVIATE_RULE_STATE_POSTGRES_AUTHORITATIVE));
+        assert_eq!(
+            query.feature_payload["feature_schema_version"],
+            FEATURE_SCHEMA_VERSION
+        );
+    }
 }

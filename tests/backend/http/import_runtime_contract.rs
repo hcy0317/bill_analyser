@@ -21,7 +21,8 @@ use bill_analyser_db::{
     ImportSessionStatusUpdate, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
 use bill_analyser_http::{
-    build_router, HttpAppState, HttpShellConfig, ImportRouteMode, IMPORT_SKELETON_ROUTE_PATTERNS,
+    build_router, HttpAppState, HttpShellConfig, ImportRouteMode, WeaviateRuntimeConfig,
+    IMPORT_SKELETON_ROUTE_PATTERNS,
 };
 use chrono::{Duration as ChronoDuration, Local};
 use ring::hmac;
@@ -2102,6 +2103,85 @@ async fn import_db_runtime_stage2_restores_import_intelligence_chain() -> Result
         learning_suggestions_body["data"]["suggestions"][0]["rule_id"],
         7001
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn import_db_runtime_stage2_continues_when_weaviate_is_enabled_but_unavailable(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new().await?;
+    let mut runtime = runtime_for(fixture.db_path())?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+    let session_id = "session-stage2-weaviate-unavailable";
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: session_id.to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+    insert_parser_templates_batch(
+        runtime.connection_mut(),
+        session_id,
+        user_id(42),
+        &[ImportParserTemplateDraft {
+            parser_date: "2026-05-04 09:00:00".to_string(),
+            parser_amount: -21.0,
+            parser_type: "支出".to_string(),
+            parser_description: "拿铁".to_string(),
+            parser_id: "alipay".to_string(),
+            parser_tags: Some(json!(["parser:alipay", "channel:wallet"])),
+            parser_counterparty: "向量咖啡店".to_string(),
+            parser_payment_method: "支付宝余额".to_string(),
+            parser_original_type: "支出".to_string(),
+            parser_original_category: String::new(),
+            parser_account_id: "alipay".to_string(),
+        }],
+    )?;
+    drop(runtime);
+
+    let app = runtime_router_with_weaviate(
+        &fixture,
+        WeaviateRuntimeConfig {
+            enabled: true,
+            endpoint: Some("http://127.0.0.1:1".to_string()),
+            api_key: Some("test-secret".to_string()),
+            collection_prefix: "BillDev".to_string(),
+            timeout: Duration::from_millis(25),
+            retry_attempts: 0,
+            batch_size: 1,
+            vector_dimensions: 8,
+        },
+    );
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/dedup")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"session_id": session_id, "include_preview": true}).to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    assert_eq!(body["success"], true);
+    assert_eq!(
+        body["data"]["preview"].as_array().expect("preview").len(),
+        1
+    );
+    assert!(body["data"]["match_stats"]["learning_vector_status"]
+        .as_str()
+        .is_some_and(|status| status.starts_with("degraded:")));
+    assert_eq!(body["data"]["match_stats"]["learning_applied"], 0);
     Ok(())
 }
 
@@ -6041,6 +6121,25 @@ fn runtime_router(fixture: &RuntimeFixture) -> Router {
     .with_sqlite_db_path(fixture.db_path.display().to_string())
     .with_trusted_user_header_secret(TEST_AUTH_SECRET)
     .with_auth_jwt_secret(TEST_AUTH_SECRET);
+    let state = HttpAppState::new(config).expect("http app state");
+    build_router(state)
+}
+
+fn runtime_router_with_weaviate(
+    fixture: &RuntimeFixture,
+    weaviate: WeaviateRuntimeConfig,
+) -> Router {
+    let config = HttpShellConfig::new_with_import_route_mode(
+        fixture.upstream.clone(),
+        Duration::from_millis(200),
+        1024 * 1024,
+        ImportRouteMode::ImportDbRuntime,
+    )
+    .expect("config")
+    .with_sqlite_db_path(fixture.db_path.display().to_string())
+    .with_trusted_user_header_secret(TEST_AUTH_SECRET)
+    .with_auth_jwt_secret(TEST_AUTH_SECRET)
+    .with_weaviate_config(weaviate);
     let state = HttpAppState::new(config).expect("http app state");
     build_router(state)
 }

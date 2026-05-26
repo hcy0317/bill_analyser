@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     env,
     error::Error,
     process::Command,
@@ -12,11 +13,12 @@ use bill_analyser_core::{
 };
 use bill_analyser_db::{
     enqueue_vector_outbox_event, load_import_learning_feature_vector_sources,
-    run_postgres_migrations, VectorOutboxEventDraft,
+    run_postgres_migrations, ImportLearningFeatureVectorSource, VectorOutboxEventDraft,
 };
 use bill_analyser_http::{
     build_object_from_feature_source, probe_weaviate_health, process_weaviate_outbox_once,
-    rebuild_weaviate_from_postgres, HttpShellConfig, WeaviateHttpClient, WeaviateRuntimeConfig,
+    rebuild_weaviate_from_postgres, recall_import_learning_candidates, HttpShellConfig,
+    WeaviateHttpClient, WeaviateImportLearningRecallRequest, WeaviateRuntimeConfig,
     WeaviateRuntimeError,
 };
 use serde_json::json;
@@ -111,6 +113,100 @@ async fn enabled_weaviate_without_endpoint_degrades_not_panics() {
 
     let error = WeaviateHttpClient::new(&config.weaviate).unwrap_err();
     assert!(matches!(error, WeaviateRuntimeError::MissingEndpoint));
+}
+
+#[tokio::test]
+async fn enabled_weaviate_ready_failure_reports_degraded_without_secret_leakage(
+) -> Result<(), Box<dyn Error>> {
+    let (endpoint, _requests) =
+        spawn_weaviate_status_mock(1, "503 Service Unavailable", "{}").await?;
+    let config = HttpShellConfig::default().with_weaviate_config(WeaviateRuntimeConfig {
+        enabled: true,
+        endpoint: Some(endpoint),
+        api_key: Some("super-secret-weaviate-key".to_string()),
+        collection_prefix: "BillDev".to_string(),
+        timeout: Duration::from_secs(5),
+        retry_attempts: 1,
+        batch_size: 10,
+        vector_dimensions: WEAVIATE_DEFAULT_VECTOR_DIMENSIONS,
+    });
+
+    let status = probe_weaviate_health(&config).await;
+
+    assert_eq!(status.status, "degraded");
+    assert!(status.health_detail_value().starts_with("degraded:"));
+    let rendered = format!("{status:?} {}", status.health_detail_value());
+    assert!(!rendered.contains("super-secret-weaviate-key"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn weaviate_recall_search_filters_and_parses_derived_hits() -> Result<(), Box<dyn Error>> {
+    let body = r#"{"data":{"Get":{"BillDevCounterpartyFeature":[{"postgresSourceId":"feature:42","recommendationKey":"rk-42","featureKey":"counterparty","ruleState":"postgres_authoritative","transactionType":"transfer","categoryId":4,"sourceAccountId":10,"destinationAccountId":20,"payloadJson":"{\"target\":\"transfer\"}","_additional":{"id":"uuid-42","distance":0.125}},{"postgresSourceId":"feature:dup","recommendationKey":"rk-dup-old","featureKey":"counterparty","ruleState":"postgres_authoritative","transactionType":"transfer","_additional":{"distance":0.30}},{"postgresSourceId":"   ","_additional":{"distance":0.05}}],"BillDevDescriptionFeature":[{"postgresSourceId":"feature:dup","recommendationKey":"rk-dup-new","featureKey":"description","ruleState":"postgres_authoritative","transactionType":"转账","_additional":{"distance":0.20}}],"BillDevImportLearningSample":[]}}}"#;
+    let (endpoint, requests) = spawn_weaviate_graphql_mock(3, body).await?;
+    let config = weaviate_config(&endpoint);
+    let request = WeaviateImportLearningRecallRequest {
+        user_id: 42,
+        features: BTreeMap::from([
+            ("counterparty".to_string(), "wallet".to_string()),
+            ("description".to_string(), "internal transfer".to_string()),
+        ]),
+        transaction_type_scope: "转账".to_string(),
+        limit: 5,
+    };
+
+    let hits = recall_import_learning_candidates(&config, &request).await?;
+
+    assert_eq!(hits.len(), 2);
+    assert_eq!(hits[0].postgres_source_id, "feature:42");
+    assert_eq!(hits[0].transaction_type.as_deref(), Some("transfer"));
+    assert_eq!(hits[0].category_id, Some(4));
+    assert_eq!(hits[0].source_account_id, Some(10));
+    assert_eq!(hits[0].destination_account_id, Some(20));
+    assert!(hits[0].score > 0.87);
+    assert_eq!(hits[1].postgres_source_id, "feature:dup");
+    assert_eq!(hits[1].recommendation_key.as_deref(), Some("rk-dup-new"));
+    wait_for_requests(&requests, 3).await;
+    let joined = requests.lock().expect("request log").join("\n");
+    assert!(joined.contains("path: [\\\"userId\\\"]"));
+    assert!(joined.contains("path: [\\\"featureSchemaVersion\\\"]"));
+    assert!(joined.contains("path: [\\\"transactionType\\\"]"));
+    assert!(joined.contains("path: [\\\"ruleState\\\"]"));
+    assert!(joined.contains("valueText: \\\"transfer\\\""));
+    Ok(())
+}
+
+#[test]
+fn weaviate_feature_object_metadata_is_postgres_authoritative_without_postgres() {
+    let config = weaviate_config("http://127.0.0.1:1");
+    let object = build_object_from_feature_source(
+        &config,
+        &ImportLearningFeatureVectorSource {
+            feature_id: 7,
+            user_id: 42,
+            sample_id: 5,
+            sample_key: "sample-7".to_string(),
+            feature_key: "counterparty".to_string(),
+            feature_hash: "hash-7".to_string(),
+            feature_payload: json!({"counterparty": "基金公司"}),
+            normalized_features: json!({"parser_id": "manual-parser"}),
+            target_payload: json!({
+                "transaction_type": "投资",
+                "annotated_category_id": 8,
+                "annotated_source_account_id": 3,
+                "annotated_destination_account_id": 4
+            }),
+            source_payload: json!({}),
+        },
+    )
+    .expect("feature object");
+
+    assert_eq!(object.properties["parserId"], "manual-parser");
+    assert_eq!(object.properties["transactionType"], "investment");
+    assert_eq!(object.properties["categoryId"], 8);
+    assert_eq!(object.properties["sourceAccountId"], 3);
+    assert_eq!(object.properties["destinationAccountId"], 4);
+    assert_eq!(object.properties["ruleState"], "postgres_authoritative");
 }
 
 #[tokio::test]
@@ -365,6 +461,14 @@ async fn weaviate_http_client_processes_outbox_and_rebuilds_from_postgres_when_a
     );
     assert_eq!(object.properties["userId"], user_id);
     assert_eq!(object.properties["parserId"], "wechat");
+    assert_eq!(
+        object.properties["featureSchemaVersion"],
+        bill_analyser_core::FEATURE_SCHEMA_VERSION
+    );
+    assert_eq!(object.properties["transactionType"], "expense");
+    assert_eq!(object.properties["categoryId"], 8);
+    assert_eq!(object.properties["sourceAccountId"], 3);
+    assert_eq!(object.properties["ruleState"], "postgres_authoritative");
 
     let rebuild_report = rebuild_weaviate_from_postgres(&pool, &config, Some(user_id)).await?;
     assert_eq!(rebuild_report.source_count, 1);
@@ -515,6 +619,89 @@ async fn spawn_weaviate_mock(
             } else {
                 ("200 OK", "{}")
             };
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(response.as_bytes()).await;
+        }
+    });
+    Ok((format!("http://{addr}"), requests))
+}
+
+async fn spawn_weaviate_graphql_mock(
+    expected_requests: usize,
+    graphql_body: &'static str,
+) -> Result<(String, Arc<Mutex<Vec<String>>>), Box<dyn Error>> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let request_log = Arc::clone(&requests);
+    tokio::spawn(async move {
+        for _ in 0..expected_requests {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                return;
+            };
+            let mut bytes = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            loop {
+                let Ok(read) = stream.read(&mut buffer).await else {
+                    return;
+                };
+                if read == 0 {
+                    break;
+                }
+                bytes.extend_from_slice(&buffer[..read]);
+                if request_is_complete(&bytes) {
+                    break;
+                }
+            }
+            request_log
+                .lock()
+                .expect("request log")
+                .push(String::from_utf8_lossy(&bytes).to_string());
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{graphql_body}",
+                graphql_body.len()
+            );
+            let _ = stream.write_all(response.as_bytes()).await;
+        }
+    });
+    Ok((format!("http://{addr}"), requests))
+}
+
+async fn spawn_weaviate_status_mock(
+    expected_requests: usize,
+    status: &'static str,
+    body: &'static str,
+) -> Result<(String, Arc<Mutex<Vec<String>>>), Box<dyn Error>> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let request_log = Arc::clone(&requests);
+    tokio::spawn(async move {
+        for _ in 0..expected_requests {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                return;
+            };
+            let mut bytes = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            loop {
+                let Ok(read) = stream.read(&mut buffer).await else {
+                    return;
+                };
+                if read == 0 {
+                    break;
+                }
+                bytes.extend_from_slice(&buffer[..read]);
+                if request_is_complete(&bytes) {
+                    break;
+                }
+            }
+            request_log
+                .lock()
+                .expect("request log")
+                .push(String::from_utf8_lossy(&bytes).to_string());
             let response = format!(
                 "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()

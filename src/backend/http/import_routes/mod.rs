@@ -24,13 +24,13 @@ use bill_analyser_core::{
         TRANSACTION_SCOPE_TRANSFER,
     },
     amount_bucket, attach_import_preview_matching_payload, build_composite_match_features,
-    build_import_learning_recommendation_key, build_import_preview_filter_index_item,
-    build_learning_rule_result_summary, build_llm_candidate_list_response,
-    build_llm_candidate_reject_response, build_llm_classification_prompt,
-    build_llm_config_get_response, build_llm_contract_error_response,
-    build_llm_import_preview_recommendation_prompt, build_llm_provider_config,
-    build_llm_rule_expression_synthesis_prompt, build_llm_rule_induction_prompt,
-    build_ocr_config_success_response, build_ocr_error_response,
+    build_import_learning_recommendation_key, build_import_learning_vector_recall_queries,
+    build_import_preview_filter_index_item, build_learning_rule_result_summary,
+    build_llm_candidate_list_response, build_llm_candidate_reject_response,
+    build_llm_classification_prompt, build_llm_config_get_response,
+    build_llm_contract_error_response, build_llm_import_preview_recommendation_prompt,
+    build_llm_provider_config, build_llm_rule_expression_synthesis_prompt,
+    build_llm_rule_induction_prompt, build_ocr_config_success_response, build_ocr_error_response,
     build_ocr_recognition_success_response_with_context, build_unknown_ocr_provider_response,
     category_rules::match_rule_expression,
     coerce_preview_selected_value, composite_hash_from_features, copy_runtime_llm_config,
@@ -40,7 +40,8 @@ use bill_analyser_core::{
     import_session_success, import_stage_confirm_success, import_stage_dedup_success,
     import_stage_parse_success, import_v2_data_response, import_v2_error_response,
     normalize_import_preview_page_query, normalize_provider_auth_config,
-    parse_llm_json_array_response, preview_state_conflict_response, provider_auth_access_token,
+    normalize_weaviate_transaction_type_scope, parse_llm_json_array_response,
+    preview_state_conflict_response, provider_auth_access_token,
     provider_auth_has_refresh_credential, provider_auth_is_expired, provider_auth_refresh_token,
     render_llm_prompt_template, safe_llm_config_payload, score_learning_rule_similarity,
     AiRouteResponse, DedupBill, DuplicateGroup, ImportLearningRecommendationKeyInput,
@@ -50,7 +51,8 @@ use bill_analyser_core::{
     ReceiptDraftCategory, ReceiptDraftCategoryRule, ReceiptDraftContext, ReceiptDraftTag,
     ReconciliationCandidateType, SmartDeduplicationEngine, TransferPair, UserId,
     IMPORT_PREVIEW_SORT_KEYS, LLM_SYSTEM_PROMPT, NETWORK_OCR_PROVIDER_NAME,
-    OCR_DISABLED_PROVIDER_NAME,
+    OCR_DISABLED_PROVIDER_NAME, WEAVIATE_RECALL_DEFAULT_LIMIT,
+    WEAVIATE_RULE_STATE_POSTGRES_AUTHORITATIVE,
 };
 use bill_analyser_db::{
     accept_llm_candidate, activate_llm_config, apply_preview_llm_recommendation,
@@ -113,7 +115,15 @@ use std::{
 use tokio::time::sleep;
 use url::Url;
 
-use crate::{auth::resolve_user_id_from_headers, config::HttpShellConfig, state::HttpAppState};
+use crate::{
+    auth::resolve_user_id_from_headers,
+    config::HttpShellConfig,
+    state::HttpAppState,
+    weaviate::{
+        recall_import_learning_candidates, WeaviateImportLearningRecallHit,
+        WeaviateImportLearningRecallRequest,
+    },
+};
 
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
 static IMPORT_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -411,6 +421,7 @@ pub fn import_runtime_router() -> Router<HttpAppState> {
 }
 
 include!("legacy_handlers.rs");
+include!("stage_vector_recall.rs");
 include!("stage_handlers.rs");
 include!("stage_account_rule_matchers.rs");
 include!("duplicate_materialization.rs");

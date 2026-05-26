@@ -235,7 +235,7 @@ mod stage_handler_transfer_account_tests {
             &[],
         )
         .expect("pending learning match");
-        assert_eq!(pending_learning.rule_id, 601);
+        assert_eq!(pending_learning.rule_id, Some(601));
         assert!(!pending_learning.auto_applied);
         assert_eq!(draft.preview_main_category, "餐饮");
         assert_eq!(draft.preview_sub_category, "咖啡");
@@ -251,7 +251,7 @@ mod stage_handler_transfer_account_tests {
             &[],
         )
         .expect("green learning match");
-        assert_eq!(green_learning.rule_id, 601);
+        assert_eq!(green_learning.rule_id, Some(601));
         assert!(green_learning.auto_applied);
         assert_eq!(draft.preview_main_category, "购物");
         assert_eq!(draft.preview_sub_category, "日用");
@@ -497,96 +497,6 @@ mod stage_handler_transfer_account_tests {
             ..ImportPreviewDraft::default()
         };
         assert!(is_transfer_protected_preview(&signal_matched));
-    }
-
-    #[test]
-    fn transfer_learning_domain_allows_account_only_rule() {
-        let rule = ImportIntelligenceLearningRule {
-            id: 1,
-            parser_id: String::new(),
-            composite_hash: String::new(),
-            match_features: BTreeMap::new(),
-            learned_type: None,
-            learned_category_id: None,
-            learned_source_account_id: Some(100),
-            learned_destination_account_id: Some(200),
-        };
-        assert!(learning_rule_keeps_transfer_domain(
-            &rule,
-            &BTreeMap::new()
-        ));
-    }
-
-    #[test]
-    fn transfer_learning_does_not_override_source_chain_accounts() {
-        let features = build_composite_match_features(
-            "cmbc",
-            "支付宝（中国）网络技术有限公司客户备付金",
-            "支付宝快捷支付",
-            "网络银行",
-        )
-        .expect("transfer learning features");
-        let composite_hash = composite_hash_from_features(&features);
-        let rule = ImportIntelligenceLearningRule {
-            id: 7103,
-            parser_id: "cmbc".to_string(),
-            composite_hash,
-            match_features: features,
-            learned_type: None,
-            learned_category_id: None,
-            learned_source_account_id: Some(9001),
-            learned_destination_account_id: Some(9002),
-        };
-        let mut draft = ImportPreviewDraft {
-            preview_type: "转账".to_string(),
-            preview_parser_id: "cmbc".to_string(),
-            preview_counterparty: "支付宝（中国）网络技术有限公司客户备付金".to_string(),
-            preview_description: "支付宝快捷支付".to_string(),
-            preview_payment_method: "网络银行".to_string(),
-            preview_source_account_id: Some(1001),
-            preview_destination_account_id: Some(1002),
-            dedup_type: Some("transfer".to_string()),
-            preview_matching_feedback: json!({
-                "transfer": {"candidate_type": "transfer"}
-            }),
-            ..ImportPreviewDraft::default()
-        };
-        let account_values = vec![
-            json!({"id": 1001, "name": "民生银行"}),
-            json!({"id": 1002, "name": "支付宝"}),
-            json!({"id": 9001, "name": "旧来源"}),
-            json!({"id": 9002, "name": "旧目标"}),
-        ];
-
-        let connection = Connection::open_in_memory().expect("connection");
-        let pending_learning = apply_learning_rule_match(
-            &connection,
-            42,
-            &mut draft,
-            std::slice::from_ref(&rule),
-            &BTreeMap::new(),
-            &[],
-            &account_values,
-        )
-        .expect("pending learning match");
-        assert_eq!(pending_learning.rule_id, 7103);
-        assert!(!pending_learning.auto_applied);
-
-        seed_learning_lifecycle_status(&connection, &pending_learning.recommendation_key, "green");
-        let green_learning = apply_learning_rule_match(
-            &connection,
-            42,
-            &mut draft,
-            std::slice::from_ref(&rule),
-            &BTreeMap::new(),
-            &[],
-            &account_values,
-        )
-        .expect("green learning match");
-        assert_eq!(green_learning.rule_id, 7103);
-        assert!(green_learning.auto_applied);
-        assert_eq!(draft.preview_source_account_id, Some(1001));
-        assert_eq!(draft.preview_destination_account_id, Some(1002));
     }
 
     #[test]

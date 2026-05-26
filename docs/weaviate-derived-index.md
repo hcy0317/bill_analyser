@@ -56,9 +56,22 @@ cargo run -p bill-analyser-http --bin bill_weaviate_derived_index -- --mode rebu
 
 Rebuild requires `BILL_ANALYSER_POSTGRES_URL`. When `--user-id` is provided, the command deletes that user's derived objects in each Bill Analyser Weaviate collection before re-upserting objects from PostgreSQL feature rows.
 
+## Import recall
+
+Stage2 import learning first runs deterministic category/account/learning rules. When Weaviate is enabled, rows without a deterministic learning signal build normalized counterparty, description, and composite feature payloads and query the derived collections with metadata filters for:
+
+- `userId`
+- `featureSchemaVersion`
+- `transactionType`
+- `ruleState = postgres_authoritative`
+
+Vector hits are converted back into the same preview learning signal shape as deterministic learning, including recommendation key, previous/applied preview snapshots, score, source, and lifecycle counters. Weaviate metadata is derived evidence only: it can surface a pending recommendation, but it cannot by itself enable auto-apply. Green auto-apply still requires authoritative lifecycle state and a deterministic or otherwise authoritative projection.
+
+Transfer previews keep their `转账` type. Learning may recommend transfer-compatible category/account fields, but conflicting learned income/expense/investment types are ignored instead of changing the transfer row.
+
 ## Health semantics
 
 - `disabled`: vector service is off and deterministic import remains fully available.
 - `configured`: config has an endpoint; synchronous health rendering has not probed it.
 - `healthy`: `/v1/.well-known/ready` returned success.
-- `degraded:<reason>`: enabled but endpoint is missing or readiness failed. Deterministic import must continue without vector recall.
+- `degraded:<reason>`: enabled but endpoint is missing, readiness failed, or recall failed. Deterministic import must continue without vector recall.

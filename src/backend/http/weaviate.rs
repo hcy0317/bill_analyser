@@ -5,8 +5,9 @@
 use bill_analyser_core::{
     build_weaviate_batch_upsert_payload, build_weaviate_delete_path, build_weaviate_derived_object,
     build_weaviate_graphql_query, build_weaviate_required_metadata, build_weaviate_schema_classes,
-    derive_weaviate_feature_vector, WeaviateDerivedClass, WeaviateDerivedObject,
-    WeaviateMetadataFilter,
+    derive_weaviate_feature_vector, normalize_weaviate_transaction_type_scope,
+    WeaviateDerivedClass, WeaviateDerivedObject, WeaviateMetadataFilter,
+    WEAVIATE_RULE_STATE_POSTGRES_AUTHORITATIVE,
 };
 use bill_analyser_db::{
     claim_pending_vector_outbox_events, load_import_learning_feature_vector_sources,
@@ -20,6 +21,10 @@ use thiserror::Error;
 
 use crate::config::HttpShellConfig;
 use crate::config_weaviate::WeaviateRuntimeConfig;
+pub use crate::weaviate_recall::{
+    recall_import_learning_candidates, WeaviateImportLearningRecallHit,
+    WeaviateImportLearningRecallRequest,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WeaviateHealthStatus {
@@ -464,7 +469,10 @@ pub fn build_object_from_feature_source(
         .or_else(|| source.target_payload.get("transaction_type"))
         .and_then(Value::as_str)
     {
-        properties.insert("transactionType".to_string(), json!(transaction_type));
+        properties.insert(
+            "transactionType".to_string(),
+            json!(normalize_weaviate_transaction_type_scope(transaction_type)),
+        );
     }
     for (property, keys) in [
         ("categoryId", ["category_id", "annotated_category_id"]),
@@ -484,7 +492,10 @@ pub fn build_object_from_feature_source(
             properties.insert(property.to_string(), json!(value));
         }
     }
-    properties.insert("ruleState".to_string(), json!("postgres_authoritative"));
+    properties.insert(
+        "ruleState".to_string(),
+        json!(WEAVIATE_RULE_STATE_POSTGRES_AUTHORITATIVE),
+    );
 
     let vector = derive_weaviate_feature_vector(&source.feature_payload, config.vector_dimensions);
     Ok(build_weaviate_derived_object(

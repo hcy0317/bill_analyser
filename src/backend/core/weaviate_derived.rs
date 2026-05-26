@@ -7,7 +7,11 @@ use serde_json::{json, Map, Value};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 
-use crate::import_learning::{DEFAULT_FEATURE_DIMENSION, FEATURE_SCHEMA_VERSION};
+use std::collections::BTreeMap;
+
+use crate::import_learning::{
+    normalize_import_learning_text, DEFAULT_FEATURE_DIMENSION, FEATURE_SCHEMA_VERSION,
+};
 
 pub const WEAVIATE_DEFAULT_COLLECTION_PREFIX: &str = "BillAnalyser";
 pub const WEAVIATE_CLASS_IMPORT_LEARNING_SAMPLE: &str = "ImportLearningSample";
@@ -15,6 +19,9 @@ pub const WEAVIATE_CLASS_IMPORT_LEARNING_SUGGESTION_VECTOR: &str = "ImportLearni
 pub const WEAVIATE_CLASS_COUNTERPARTY_FEATURE: &str = "CounterpartyFeature";
 pub const WEAVIATE_CLASS_DESCRIPTION_FEATURE: &str = "DescriptionFeature";
 pub const WEAVIATE_DEFAULT_VECTOR_DIMENSIONS: usize = DEFAULT_FEATURE_DIMENSION;
+pub const WEAVIATE_RULE_STATE_POSTGRES_AUTHORITATIVE: &str = "postgres_authoritative";
+pub const WEAVIATE_RECALL_DEFAULT_LIMIT: usize = 5;
+pub const WEAVIATE_RECALL_MAX_LIMIT: usize = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -87,6 +94,15 @@ pub enum WeaviateFilterValue {
 pub struct WeaviateMetadataFilter {
     pub path: String,
     pub value: WeaviateFilterValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WeaviateImportLearningRecallQuery {
+    pub class_name: String,
+    pub feature_key: String,
+    pub feature_payload: Value,
+    pub filters: Vec<WeaviateMetadataFilter>,
+    pub limit: usize,
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -176,6 +192,106 @@ pub fn build_weaviate_required_metadata(
         json!(postgres_source_id.into()),
     );
     properties
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+pub fn normalize_weaviate_transaction_type_scope(value: &str) -> String {
+    match normalize_import_learning_text(Some(&json!(value))).as_str() {
+        "收入" | "income" | "2" => "income",
+        "支出" | "expense" | "3" => "expense",
+        "转账" | "transfer" | "4" => "transfer",
+        "投资" | "investment" | "5" => "investment",
+        other => other,
+    }
+    .to_string()
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+pub fn build_import_learning_vector_recall_filters(
+    user_id: i64,
+    transaction_type_scope: &str,
+) -> Vec<WeaviateMetadataFilter> {
+    let mut filters = vec![
+        WeaviateMetadataFilter {
+            path: "userId".to_string(),
+            value: WeaviateFilterValue::Int(user_id.max(0)),
+        },
+        WeaviateMetadataFilter {
+            path: "featureSchemaVersion".to_string(),
+            value: WeaviateFilterValue::Text(FEATURE_SCHEMA_VERSION.to_string()),
+        },
+        WeaviateMetadataFilter {
+            path: "ruleState".to_string(),
+            value: WeaviateFilterValue::Text(
+                WEAVIATE_RULE_STATE_POSTGRES_AUTHORITATIVE.to_string(),
+            ),
+        },
+    ];
+    let transaction_type = normalize_weaviate_transaction_type_scope(transaction_type_scope);
+    if !transaction_type.is_empty() {
+        filters.push(WeaviateMetadataFilter {
+            path: "transactionType".to_string(),
+            value: WeaviateFilterValue::Text(transaction_type),
+        });
+    }
+    filters
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+pub fn build_import_learning_vector_recall_queries(
+    collection_prefix: &str,
+    user_id: i64,
+    features: &BTreeMap<String, String>,
+    transaction_type_scope: &str,
+    limit: usize,
+) -> Vec<WeaviateImportLearningRecallQuery> {
+    let Some(names) = build_weaviate_collection_names(collection_prefix) else {
+        return Vec::new();
+    };
+    let limit = limit.clamp(1, WEAVIATE_RECALL_MAX_LIMIT);
+    let filters = build_import_learning_vector_recall_filters(user_id, transaction_type_scope);
+    let transaction_type = normalize_weaviate_transaction_type_scope(transaction_type_scope);
+    let feature_json = json!(features);
+    let mut queries = Vec::new();
+    for (feature_key, class_name) in [
+        ("counterparty", names.counterparty_feature.as_str()),
+        ("description", names.description_feature.as_str()),
+    ] {
+        let Some(feature_value) = features.get(feature_key) else {
+            continue;
+        };
+        if feature_value.trim().is_empty() {
+            continue;
+        }
+        queries.push(WeaviateImportLearningRecallQuery {
+            class_name: class_name.to_string(),
+            feature_key: feature_key.to_string(),
+            feature_payload: json!({
+                "feature_schema_version": FEATURE_SCHEMA_VERSION,
+                "feature_key": feature_key,
+                "feature_value": feature_value,
+                "transaction_type": transaction_type,
+                "features": feature_json,
+            }),
+            filters: filters.clone(),
+            limit,
+        });
+    }
+    if features.len() >= 2 {
+        queries.push(WeaviateImportLearningRecallQuery {
+            class_name: names.import_learning_sample,
+            feature_key: "composite".to_string(),
+            feature_payload: json!({
+                "feature_schema_version": FEATURE_SCHEMA_VERSION,
+                "feature_key": "composite",
+                "transaction_type": transaction_type,
+                "features": feature_json,
+            }),
+            filters,
+            limit,
+        });
+    }
+    queries
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -290,7 +406,7 @@ pub fn build_weaviate_graphql_query(
         .join(", ");
     let where_clause = build_graphql_where_clause(filters);
     let query = format!(
-        "{{ Get {{ {class_name}(nearVector: {{ vector: [{vector_literal}] }}{where_clause}, limit: {limit}) {{ postgresSourceId recommendationKey featureKey ruleState _additional {{ id distance }} }} }} }}"
+        "{{ Get {{ {class_name}(nearVector: {{ vector: [{vector_literal}] }}{where_clause}, limit: {limit}) {{ postgresSourceId recommendationKey featureKey ruleState transactionType categoryId sourceAccountId destinationAccountId payloadJson _additional {{ id distance }} }} }} }}"
     );
     json!({ "query": query })
 }

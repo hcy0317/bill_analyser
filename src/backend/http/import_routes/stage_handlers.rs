@@ -164,7 +164,7 @@ pub async fn import_dedup_runtime_handler(
             .iter()
             .map(|plan| plan.preview_draft.clone()),
     );
-    let intelligence_stats = match apply_import_intelligence_chain(
+    let mut intelligence_stats = match apply_import_intelligence_chain(
         runtime.connection_mut(),
         user_id,
         preview_drafts.as_mut_slice(),
@@ -172,6 +172,19 @@ pub async fn import_dedup_runtime_handler(
         Ok(stats) => stats,
         Err(error) => return route_response(db_error_response(error)),
     };
+    let user_id_i64 = match user_id_i64_for_sql(user_id) {
+        Ok(user_id) => user_id,
+        Err(error) => return route_response(db_error_response(error)),
+    };
+    match apply_import_learning_vector_recall_chain(
+        runtime.connection(),
+        &state.config,
+        user_id_i64,
+        preview_drafts.as_mut_slice(),
+    ) {
+        Ok(vector_stats) => intelligence_stats.merge_vector_recall(vector_stats),
+        Err(error) => return route_response(db_error_response(error)),
+    }
     enforce_import_preview_invariants(preview_drafts.as_mut_slice());
     refresh_history_duplicate_materialization_payloads(
         &mut history_duplicate_plan,
@@ -303,6 +316,8 @@ pub async fn import_dedup_runtime_handler(
             "category_matched": intelligence_stats.category_matched,
             "account_matched": intelligence_stats.account_matched,
             "learning_applied": intelligence_stats.learning_applied,
+            "learning_vector_recalled": intelligence_stats.learning_vector_recalled,
+            "learning_vector_status": intelligence_stats.learning_vector_status,
             "recurring_projected": intelligence_stats.recurring_projected,
             "database_candidates": history_duplicate_plan.len() + history_transfer_plan.len(),
             "provider_bypassed": false,
@@ -315,7 +330,23 @@ struct ImportIntelligenceStats {
     category_matched: usize,
     account_matched: usize,
     learning_applied: usize,
+    learning_vector_recalled: usize,
+    learning_vector_status: String,
     recurring_projected: usize,
+}
+
+impl ImportIntelligenceStats {
+    fn merge_vector_recall(&mut self, vector_stats: ImportLearningVectorRecallStats) {
+        self.learning_vector_recalled = vector_stats.recalled;
+        self.learning_vector_status = vector_stats.status;
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ImportLearningVectorRecallRequestDraft {
+    draft_index: usize,
+    features: BTreeMap<String, String>,
+    transaction_type_scope: String,
 }
 
 #[derive(Debug, Clone)]
@@ -380,7 +411,7 @@ struct ImportRecurringCandidateMatch {
 
 #[derive(Debug, Clone)]
 struct ImportLearningRuleMatchResult {
-    rule_id: i64,
+    rule_id: Option<i64>,
     recommendation_key: String,
     auto_applied: bool,
 }
@@ -510,7 +541,9 @@ fn apply_import_intelligence_chain(
         ) {
             if learning_match.auto_applied {
                 stats.learning_applied += 1;
-                applied_learning_rule_ids.push(learning_match.rule_id);
+                if let Some(rule_id) = learning_match.rule_id {
+                    applied_learning_rule_ids.push(rule_id);
+                }
                 record_import_learning_lifecycle_feedback(
                     connection,
                     user_id_i64,
@@ -518,7 +551,7 @@ fn apply_import_intelligence_chain(
                         recommendation_key: learning_match.recommendation_key,
                         recommendation_type: "import_preview".to_string(),
                         feedback: "auto_apply".to_string(),
-                        rule_id: Some(learning_match.rule_id),
+                        rule_id: learning_match.rule_id,
                         suggestion_id: None,
                         session_id: None,
                         preview_id: None,
@@ -1401,11 +1434,6 @@ fn apply_learning_rule_match(
         let Some((score, mode, reason)) = candidate else {
             continue;
         };
-        if transfer_protected
-            && !learning_rule_keeps_transfer_domain(rule, categories_by_id)
-        {
-            continue;
-        }
         if best
             .as_ref()
             .is_none_or(|(_, best_score, _, _)| score > *best_score)
@@ -1414,13 +1442,25 @@ fn apply_learning_rule_match(
         }
     }
     let (rule, score, mode, reason) = best?;
-    let learned_type = rule
+    let raw_learned_type = rule
         .learned_type
         .as_deref()
         .and_then(normalize_transaction_type_text);
-    let candidate_preview_type = learned_type
-        .as_deref()
-        .unwrap_or_else(|| draft.preview_type.trim());
+    let learned_type = if transfer_protected {
+        raw_learned_type
+            .as_deref()
+            .filter(|transaction_type| *transaction_type == "转账")
+            .map(ToOwned::to_owned)
+    } else {
+        raw_learned_type.clone()
+    };
+    let candidate_preview_type = if transfer_protected {
+        "转账"
+    } else {
+        learned_type
+            .as_deref()
+            .unwrap_or_else(|| draft.preview_type.trim())
+    };
     let learned_category = if let Some(category_id) = rule.learned_category_id {
         let Some(category) = categories_by_id.get(&category_id) else {
             if !transfer_protected {
@@ -1432,12 +1472,9 @@ fn apply_learning_rule_match(
             }
             return None;
         };
-        let candidate_type_for_category = if transfer_protected && category.type_code == 4 {
-            "转账"
-        } else {
-            candidate_preview_type
-        };
-        if !category_type_matches_preview(category.type_code, candidate_type_for_category) {
+        if transfer_protected && category.type_code != 4 {
+            None
+        } else if !category_type_matches_preview(category.type_code, candidate_preview_type) {
             if !transfer_protected {
                 annotate_learning_rule_skip(
                     draft,
@@ -1446,11 +1483,20 @@ fn apply_learning_rule_match(
                 );
             }
             return None;
+        } else {
+            Some(category)
         }
-        Some(category)
     } else {
         None
     };
+    let recommended_category_id = learned_category.map(|category| category.id);
+    if learned_type.is_none()
+        && recommended_category_id.is_none()
+        && rule.learned_source_account_id.is_none()
+        && rule.learned_destination_account_id.is_none()
+    {
+        return None;
+    }
     let mut recommended_draft = draft.clone();
     apply_learning_rule_projection(
         &mut recommended_draft,
@@ -1459,13 +1505,19 @@ fn apply_learning_rule_match(
         rule,
         transfer_protected,
     );
+    if learned_type.is_none()
+        && recommended_category_id.is_none()
+        && import_preview_stage2_snapshot(&recommended_draft) == import_preview_stage2_snapshot(draft)
+    {
+        return None;
+    }
     let recommendation_key = build_import_learning_recommendation_key(
         &ImportLearningRecommendationKeyInput {
             user_id,
             recommended_type: learned_type
                 .clone()
                 .unwrap_or_else(|| recommended_draft.preview_type.clone()),
-            recommended_category_id: rule.learned_category_id,
+            recommended_category_id,
             recommended_source_account_id: rule.learned_source_account_id,
             recommended_destination_account_id: rule.learned_destination_account_id,
             transaction_type_scope: draft.preview_type.clone(),
@@ -1486,10 +1538,10 @@ fn apply_learning_rule_match(
         return None;
     }
     let mut rule_payload = Map::new();
-    rule_payload.insert("learned_type".to_string(), json!(rule.learned_type));
+    rule_payload.insert("learned_type".to_string(), json!(learned_type));
     rule_payload.insert(
         "learned_category_id".to_string(),
-        json!(rule.learned_category_id),
+        json!(recommended_category_id),
     );
     rule_payload.insert(
         "learned_source_account_id".to_string(),
@@ -1540,7 +1592,7 @@ fn apply_learning_rule_match(
         }),
     );
     Some(ImportLearningRuleMatchResult {
-        rule_id: rule.id,
+        rule_id: Some(rule.id),
         recommendation_key,
         auto_applied,
     })
@@ -1571,31 +1623,6 @@ fn apply_learning_rule_projection(
             draft.preview_destination_account_id = Some(account_id);
         }
     }
-}
-
-fn learning_rule_keeps_transfer_domain(
-    rule: &ImportIntelligenceLearningRule,
-    categories_by_id: &BTreeMap<i64, ImportIntelligenceCategory>,
-) -> bool {
-    if rule
-        .learned_type
-        .as_deref()
-        .and_then(normalize_transaction_type_text)
-        .is_some_and(|transaction_type| transaction_type == "转账")
-    {
-        return true;
-    }
-
-    if let Some(category_id) = rule.learned_category_id {
-        return categories_by_id
-            .get(&category_id)
-            .is_some_and(|category| category.type_code == 4);
-    }
-
-    rule.learned_type
-        .as_deref()
-        .and_then(normalize_transaction_type_text)
-        .is_none()
 }
 
 fn learning_similarity_has_semantic_anchor(score: &Value) -> bool {
@@ -3420,3 +3447,5 @@ pub async fn import_learning_rule_delete_runtime_handler(
 
 #[cfg(test)]
 include!("stage_handlers_tests.rs");
+#[cfg(test)]
+include!("stage_learning_transfer_tests.rs");
