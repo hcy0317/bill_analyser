@@ -1866,6 +1866,182 @@ async fn import_db_runtime_parallel_parse_preserves_per_file_parser_identity(
 }
 
 #[tokio::test]
+async fn import_db_runtime_multipart_stage2_preview_confirm_covers_full_chain(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new().await?;
+    let runtime = runtime_for(fixture.db_path())?;
+    seed_users(&runtime, &[42])?;
+    init_bills_schema(&runtime)?;
+    seed_import_intelligence_tables(&runtime)?;
+    let app = runtime_router(&fixture);
+    let boundary = "rust-import-full-chain-boundary";
+    let body = multipart_body(
+        boundary,
+        &[("parser_type", "auto")],
+        &[
+            (
+                "files",
+                "alipay.csv",
+                "text/csv",
+                "交易时间,交易分类,交易对方,对方账号,商品说明,收/支,金额,收/付款方式,交易状态,交易订单号,商家订单号,备注\n2026-05-04 09:00:00,餐饮,支付宝咖啡店,,拿铁,支出,21.00,支付宝余额,交易成功,ali-full-1,,\n",
+            ),
+            (
+                "files",
+                "wechat.csv",
+                "text/csv",
+                "交易时间,收支类型,金额,交易对方,商品,支付方式\n2026-05-05 12:30:00,支出,45.00,学习超市,会员日采购,微信支付\n",
+            ),
+        ],
+    );
+
+    let parse = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/parse")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(parse.status(), StatusCode::OK);
+    let parse_body = read_json(parse).await;
+    assert_eq!(parse_body["data"]["parsed_count"], 2);
+    assert_eq!(parse_body["data"]["files"][0]["parser_id"], "alipay");
+    assert_eq!(parse_body["data"]["files"][1]["parser_id"], "wechat");
+    let session_id = parse_body["data"]["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    let standard_rows =
+        get_import_standard_rows_by_session(runtime.connection(), &session_id, user_id(42))?;
+    assert_eq!(standard_rows.len(), 2);
+    assert_eq!(standard_rows[0].parser_id, "alipay");
+    assert_eq!(standard_rows[0].amount_cents, -2100);
+    assert_eq!(standard_rows[1].parser_id, "wechat");
+    let sources = get_import_sources_by_session(runtime.connection(), &session_id, user_id(42))?;
+    assert_eq!(
+        sources
+            .iter()
+            .map(|source| source.parser_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["alipay", "wechat"]
+    );
+
+    let dedup = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/dedup")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"session_id": session_id, "include_preview": true}).to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(dedup.status(), StatusCode::OK);
+    let dedup_body = read_json(dedup).await;
+    assert_eq!(dedup_body["data"]["total"], 2);
+    assert_eq!(dedup_body["data"]["after_dedup"], 2);
+    let preview = dedup_body["data"]["preview"].as_array().expect("preview");
+    let coffee = preview
+        .iter()
+        .find(|row| row["preview_counterparty"] == "支付宝咖啡店")
+        .expect("coffee preview");
+    assert_eq!(coffee["preview_main_category"], "餐饮");
+    assert_eq!(coffee["preview_sub_category"], "咖啡");
+    assert_eq!(coffee["preview_source_account_id"], 1001);
+    assert_eq!(coffee["matching"]["parser"]["id"], "alipay");
+    let learned = preview
+        .iter()
+        .find(|row| row["preview_counterparty"] == "学习超市")
+        .or_else(|| {
+            preview
+                .iter()
+                .find(|row| row["preview_description"] == "会员日采购")
+        })
+        .expect("learning preview");
+    assert_eq!(learned["matching"]["learning"]["review_status"], "pending");
+    assert_eq!(learned["matching"]["learning"]["signal_state"], "yellow");
+    let coffee_id = coffee["id"].as_i64().expect("coffee id");
+
+    let parser_signal_page = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!(
+                    "/api/bills/import/v2/preview/{session_id}?signal=parser&page=1&page_size=10"
+                ))
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(parser_signal_page.status(), StatusCode::OK);
+    let parser_signal_page_body = read_json(parser_signal_page).await;
+    assert_eq!(parser_signal_page_body["data"]["total"], 2);
+    assert_eq!(
+        parser_signal_page_body["data"]["metadata"]["counts"]["signals"]["learning"],
+        1
+    );
+
+    let confirm = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/confirm")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "session_id": session_id,
+                        "preview_updates": [{
+                            "id": coffee_id,
+                            "isSelected": true
+                        }]
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(confirm.status(), StatusCode::OK);
+    let confirm_body = read_json(confirm).await;
+    assert_eq!(confirm_body["data"]["imported_count"], 1);
+    assert_eq!(confirm_body["data"]["skipped_count"], 0);
+
+    let (bill_type, bill_amount, bill_account): (String, f64, i64) =
+        runtime.connection().query_row(
+            "SELECT type, amount, source_account_id FROM bills WHERE user_id = ?1",
+            [42],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+    assert_eq!(bill_type, "支出");
+    assert_eq!(bill_amount, -21.0);
+    assert_eq!(bill_account, 1001);
+    assert!(get_import_session(runtime.connection(), &session_id, user_id(42))?.is_none());
+    Ok(())
+}
+
+#[tokio::test]
 async fn import_db_runtime_parser_conflict_is_unmatched_with_detection_evidence(
 ) -> Result<(), Box<dyn Error>> {
     let fixture = RuntimeFixture::new().await?;

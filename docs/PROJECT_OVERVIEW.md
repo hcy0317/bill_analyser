@@ -75,6 +75,7 @@ LLM 临时配置保存在 Rust 进程内 user-scoped map，saved config 落库�
 - [后端模块](overview-backend.md) — HTTP/Core/DB/Parser 责任边界
 - [API 路由](overview-api-routes.md) — `/api/...` route modules 和合同约束
 - [导入链路](overview-import.md) — v2 三阶段导入、preview、learning、LLM/OCR
+- [导入全链路验收场景](import-full-chain-scenarios.md) — parser-first、stage2、preview、confirm、PostgreSQL/Weaviate 开关矩阵
 - [数据库与数据流](overview-database.md) — repository、事务、user-scope 和 staging 生命周期
 - [PostgreSQL migration tooling](postgres-migration.md) — SQLite dry-run、导出 bundle、导入校验、retry/rollback
 - [Weaviate derived index](weaviate-derived-index.md) — 可选向量派生索引配置、bootstrap、outbox 和 rebuild
