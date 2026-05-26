@@ -24,9 +24,11 @@ Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预
 
 默认运行态仍使用 SQLite，`BILL_ANALYSER_SQLITE_DB_PATH` 指向当前业务库，`BILL_ANALYSER_SQLITE_LEGACY_PATH` 用于迁移期显式标识 legacy SQLite 来源；未配置 legacy path 时沿用当前 SQLite 路径。PostgreSQL 切换基座通过 `BILL_ANALYSER_DATABASE_BACKEND`、`BILL_ANALYSER_POSTGRES_URL`、`BILL_ANALYSER_MIGRATION_MODE` 和 `BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER` 暴露，默认 `database_backend=sqlite`、`migration_mode=disabled`，因此不影响本地 SQLite 启动链路。
 
-`/api/health` 的 details 暴露 `database_backend`、`route_repository_backend`、`postgres_configured`、`postgres_url_redacted`、`migration_mode`、`migration_status`、`weaviate_status` 与 `require_postgres_after_cutover`。健康信息只显示脱敏 Postgres URL；`route_repository_backend=sqlite_legacy` 表示 route 仍通过统一边界打开 SQLite 仓储，`postgres_pending_repositories` 表示配置选择了 Postgres 但具体业务仓储尚未接管，route helper 会显式拒绝而不是静默回退。迁移和 Weaviate 状态在当前阶段是占位观测字段，后续切片会接入实际迁移 runner 和向量同步 outbox。
+`/api/health` 的 details 暴露 `database_backend`、`route_repository_backend`、`postgres_configured`、`postgres_url_redacted`、`migration_mode`、`migration_status`、`weaviate_status`、`weaviate_endpoint_redacted`、`weaviate_api_key_configured`、`weaviate_collection_prefix` 与 `require_postgres_after_cutover`。健康信息只显示脱敏 Postgres URL 和不含密钥的 Weaviate endpoint；`route_repository_backend=sqlite_legacy` 表示 route 仍通过统一边界打开 SQLite 仓储，`postgres_pending_repositories` 表示配置选择了 Postgres 但具体业务仓储尚未接管，route helper 会显式拒绝而不是静默回退。迁移状态仍是占位观测字段；Weaviate 默认 `disabled`，启用后通过 `/v1/.well-known/ready` 报告 `healthy` 或 `degraded:<reason>`，不影响确定性导入链路。
 
 PostgreSQL 迁移工具入口是 `bill_sqlite_to_postgres_migrate`，支持 `dry-run`、`export`、`import-check` 和事务性 `import`。它从 SQLite 读取 legacy 表，校验必需列，生成确定性 checksum，并把账户别名转换成目标 `account_rules` payload；`import` 通过 SQLx 写入 PostgreSQL、记录 `migration_audit_events`、修正 identity 序列，不改写 SQLite，也不把业务 repository 切到 Postgres。操作步骤见 [PostgreSQL migration tooling](postgres-migration.md)。
+
+Weaviate 派生索引通过 `BILL_ANALYSER_WEAVIATE_ENABLED`、`BILL_ANALYSER_WEAVIATE_ENDPOINT`、`BILL_ANALYSER_WEAVIATE_API_KEY`、`BILL_ANALYSER_WEAVIATE_COLLECTION_PREFIX`、timeout、retry、batch size 和 vector dimensions 配置，默认禁用。`bill_weaviate_derived_index` CLI 提供 health、bootstrap、process-outbox 和 rebuild；`vector_outbox_events` 在 PostgreSQL 中记录待同步事件，Weaviate 只保存自供向量、特征副本和 metadata，可按用户从 PostgreSQL 权威学习特征表重建。
 
 ## 关键业务链路
 
@@ -75,6 +77,7 @@ LLM 临时配置保存在 Rust 进程内 user-scoped map，saved config 落库�
 - [导入链路](overview-import.md) — v2 三阶段导入、preview、learning、LLM/OCR
 - [数据库与数据流](overview-database.md) — repository、事务、user-scope 和 staging 生命周期
 - [PostgreSQL migration tooling](postgres-migration.md) — SQLite dry-run、导出 bundle、导入校验、retry/rollback
+- [Weaviate derived index](weaviate-derived-index.md) — 可选向量派生索引配置、bootstrap、outbox 和 rebuild
 - [Matching 域](overview-matching.md) — transfer/investment/learning/recurring 配对候选
 - [统计与汇率](overview-statistics.md) — 统计主链、汇率 REST 和用户数据管理
 - [认证与安全](overview-auth-security.md) — 认证、2FA、token、backup、step-up 和审计

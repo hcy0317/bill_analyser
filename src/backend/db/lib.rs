@@ -29,6 +29,7 @@ pub mod taxonomy;
 pub mod transaction;
 pub mod user_data;
 pub mod user_scope;
+pub mod vector_outbox;
 
 pub use app_settings::{
     get_app_setting, get_app_setting_row, init_app_settings_schema, load_ocr_config_setting,
@@ -196,3 +197,10 @@ pub use user_data::{
     load_user_data_export, UserDataClearAllResult, UserDataExportBundle, UserDataExportCategory,
 };
 pub use user_scope::UserScope;
+pub use vector_outbox::{
+    claim_pending_vector_outbox_events, enqueue_vector_outbox_event,
+    load_import_learning_feature_vector_sources, mark_vector_outbox_event_failed,
+    mark_vector_outbox_event_succeeded, ImportLearningFeatureVectorSource, VectorOutboxEvent,
+    VectorOutboxEventDraft, VECTOR_OUTBOX_STATUS_COMPLETED, VECTOR_OUTBOX_STATUS_FAILED,
+    VECTOR_OUTBOX_STATUS_PENDING, VECTOR_OUTBOX_STATUS_PROCESSING,
+};

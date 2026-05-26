@@ -18,10 +18,11 @@ use crate::{
     budget_routes::budget_runtime_router,
     import_routes::import_runtime_router,
     matching_routes::matching_recurring_calendar_networth_runtime_router,
-    runtime::{http_shell_health, HttpShellHealth, HttpShellIdentity},
+    runtime::{http_shell_health_with_weaviate_status, HttpShellHealth, HttpShellIdentity},
     state::HttpAppState,
     statistics_routes::statistics_runtime_router,
     taxonomy_routes::taxonomy_runtime_router,
+    weaviate::probe_weaviate_health,
 };
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -53,7 +54,11 @@ pub async fn health_handler(State(state): State<HttpAppState>) -> Json<HttpShell
         operation = "health_handler",
         "business operation entered"
     );
-    Json(http_shell_health(&state.config))
+    let weaviate_status = probe_weaviate_health(&state.config).await;
+    Json(http_shell_health_with_weaviate_status(
+        &state.config,
+        &weaviate_status.health_detail_value(),
+    ))
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

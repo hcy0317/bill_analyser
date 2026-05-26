@@ -27,6 +27,7 @@ pub mod response;
 pub mod runtime;
 pub mod smart_dedup;
 pub mod statistics;
+pub mod weaviate_derived;
 
 pub use adapters::{account, api, category, transaction};
 pub use ai_ocr_llm::{
@@ -182,4 +183,15 @@ pub use smart_dedup::{
     DeduplicationType, DuplicateGroup, ImportReconciliationCandidate, MergedBillSource,
     ReconciliationCandidateType, SmartDeduplicationEngine, SplitGroup, TransferPair,
     TransferSourceSnapshot,
+};
+pub use weaviate_derived::{
+    build_weaviate_batch_upsert_payload, build_weaviate_collection_names,
+    build_weaviate_delete_path, build_weaviate_derived_object, build_weaviate_graphql_query,
+    build_weaviate_required_metadata, build_weaviate_schema_classes,
+    derive_weaviate_feature_vector, deterministic_weaviate_object_id,
+    validate_weaviate_collection_prefix, WeaviateCollectionNames, WeaviateDerivedClass,
+    WeaviateDerivedObject, WeaviateFilterValue, WeaviateMetadataFilter,
+    WEAVIATE_CLASS_COUNTERPARTY_FEATURE, WEAVIATE_CLASS_DESCRIPTION_FEATURE,
+    WEAVIATE_CLASS_IMPORT_LEARNING_SAMPLE, WEAVIATE_CLASS_IMPORT_LEARNING_SUGGESTION_VECTOR,
+    WEAVIATE_DEFAULT_COLLECTION_PREFIX, WEAVIATE_DEFAULT_VECTOR_DIMENSIONS,
 };

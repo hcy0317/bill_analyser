@@ -10,7 +10,8 @@ use bill_analyser_http::{
         DEFAULT_DATA_DIR, DEFAULT_TIMEOUT_MS, DEFAULT_UPLOADS_DIR,
     },
     http_shell_health, runtime_log_filter_from_directives, HttpAppState, HttpShellConfig,
-    HttpShellConfigError, ImportRouteMode, RouteRepositoryBackend,
+    HttpShellConfigError, ImportRouteMode, RouteRepositoryBackend, DEFAULT_WEAVIATE_BATCH_SIZE,
+    DEFAULT_WEAVIATE_RETRY_ATTEMPTS, DEFAULT_WEAVIATE_TIMEOUT_MS,
 };
 
 #[test]
@@ -64,6 +65,21 @@ fn http_shell_config_ignores_legacy_upstream_and_uses_rust_runtime_defaults() {
         DEFAULT_AUTH_PASSWORD_MIN_LENGTH
     );
     assert_eq!(config.public_base_url, None);
+    assert!(!config.weaviate.enabled);
+    assert_eq!(config.weaviate.endpoint, None);
+    assert_eq!(config.weaviate.api_key, None);
+    assert_eq!(config.weaviate.collection_prefix, "BillAnalyser");
+    assert_eq!(
+        config.weaviate.timeout,
+        Duration::from_millis(DEFAULT_WEAVIATE_TIMEOUT_MS)
+    );
+    assert_eq!(
+        config.weaviate.retry_attempts,
+        DEFAULT_WEAVIATE_RETRY_ATTEMPTS
+    );
+    assert_eq!(config.weaviate.batch_size, DEFAULT_WEAVIATE_BATCH_SIZE);
+    assert_eq!(config.weaviate.vector_dimensions, 96);
+    assert_eq!(config.weaviate.status_without_probe(), "disabled");
     assert!(config.import_route_mode.intercepts_import_routes());
     assert_eq!(config.import_route_mode.as_str(), "import_db_runtime");
 }
@@ -201,6 +217,17 @@ fn http_shell_config_from_env_with_reads_rust_runtime_settings_and_legacy_auth_a
             "BILL_ANALYSER_PUBLIC_BASE_URL",
             " https://public.example.test/ ",
         ),
+        ("BILL_ANALYSER_WEAVIATE_ENABLED", "true"),
+        (
+            "BILL_ANALYSER_WEAVIATE_ENDPOINT",
+            " http://localhost:8080/ ",
+        ),
+        ("BILL_ANALYSER_WEAVIATE_API_KEY", " weaviate-secret "),
+        ("BILL_ANALYSER_WEAVIATE_COLLECTION_PREFIX", "BillDev"),
+        ("BILL_ANALYSER_WEAVIATE_TIMEOUT_MS", "1500"),
+        ("BILL_ANALYSER_WEAVIATE_RETRY_ATTEMPTS", "3"),
+        ("BILL_ANALYSER_WEAVIATE_BATCH_SIZE", "17"),
+        ("BILL_ANALYSER_WEAVIATE_VECTOR_DIMENSIONS", "32"),
     ]);
 
     let config =
@@ -254,6 +281,20 @@ fn http_shell_config_from_env_with_reads_rust_runtime_settings_and_legacy_auth_a
         config.public_base_url.as_deref(),
         Some("https://public.example.test")
     );
+    assert!(config.weaviate.enabled);
+    assert_eq!(
+        config.weaviate.endpoint.as_deref(),
+        Some("http://localhost:8080")
+    );
+    assert_eq!(config.weaviate.redacted_endpoint(), "http://localhost:8080");
+    assert_eq!(config.weaviate.api_key.as_deref(), Some("weaviate-secret"));
+    assert!(config.weaviate.api_key_configured());
+    assert_eq!(config.weaviate.collection_prefix, "BillDev");
+    assert_eq!(config.weaviate.timeout, Duration::from_millis(1500));
+    assert_eq!(config.weaviate.retry_attempts, 3);
+    assert_eq!(config.weaviate.batch_size, 17);
+    assert_eq!(config.weaviate.vector_dimensions, 32);
+    assert_eq!(config.weaviate.status_without_probe(), "configured");
 }
 
 #[test]
@@ -273,6 +314,10 @@ fn http_shell_config_from_env_with_keeps_empty_optional_values_at_defaults() {
         ("BILL_ANALYSER_AUTH_JWT_SECRET", "   "),
         ("BILL_ANALYSER_AUTH_JWT_ALGORITHM", "   "),
         ("BILL_ANALYSER_AUTH_OAUTH2_PROVIDER", "   "),
+        ("BILL_ANALYSER_WEAVIATE_ENABLED", "false"),
+        ("BILL_ANALYSER_WEAVIATE_ENDPOINT", "   "),
+        ("BILL_ANALYSER_WEAVIATE_API_KEY", "   "),
+        ("BILL_ANALYSER_WEAVIATE_COLLECTION_PREFIX", "   "),
     ]);
 
     let config =
@@ -294,6 +339,10 @@ fn http_shell_config_from_env_with_keeps_empty_optional_values_at_defaults() {
     assert_eq!(config.auth_jwt_secret, None);
     assert_eq!(config.auth_jwt_algorithm, DEFAULT_AUTH_JWT_ALGORITHM);
     assert_eq!(config.auth_oauth2_provider, "");
+    assert!(!config.weaviate.enabled);
+    assert_eq!(config.weaviate.endpoint, None);
+    assert_eq!(config.weaviate.api_key, None);
+    assert_eq!(config.weaviate.collection_prefix, "BillAnalyser");
 }
 
 #[test]
@@ -376,6 +425,36 @@ fn http_shell_config_reports_invalid_runtime_env_values() {
             "public.example.test",
             HttpShellConfigError::InvalidUpstream,
         ),
+        (
+            "BILL_ANALYSER_WEAVIATE_ENABLED",
+            "sometimes",
+            HttpShellConfigError::InvalidBoolean("BILL_ANALYSER_WEAVIATE_ENABLED"),
+        ),
+        (
+            "BILL_ANALYSER_WEAVIATE_ENDPOINT",
+            "ftp://localhost:8080",
+            HttpShellConfigError::InvalidWeaviateEndpoint,
+        ),
+        (
+            "BILL_ANALYSER_WEAVIATE_ENDPOINT",
+            "http://user:secret@localhost:8080",
+            HttpShellConfigError::InvalidWeaviateEndpoint,
+        ),
+        (
+            "BILL_ANALYSER_WEAVIATE_COLLECTION_PREFIX",
+            "bill-dev",
+            HttpShellConfigError::InvalidWeaviateCollectionPrefix,
+        ),
+        (
+            "BILL_ANALYSER_WEAVIATE_TIMEOUT_MS",
+            "0",
+            HttpShellConfigError::InvalidInteger("BILL_ANALYSER_WEAVIATE_TIMEOUT_MS"),
+        ),
+        (
+            "BILL_ANALYSER_WEAVIATE_BATCH_SIZE",
+            "0",
+            HttpShellConfigError::InvalidInteger("BILL_ANALYSER_WEAVIATE_BATCH_SIZE"),
+        ),
     ];
 
     for (name, value, expected) in invalids {
@@ -423,8 +502,48 @@ fn http_shell_health_exposes_database_status_without_postgres_secret() {
         health.details["migration_status"],
         "placeholder:not_started"
     );
-    assert_eq!(health.details["weaviate_status"], "placeholder:disabled");
+    assert_eq!(health.details["weaviate_status"], "disabled");
+    assert_eq!(health.details["weaviate_endpoint_redacted"], "unconfigured");
+    assert_eq!(health.details["weaviate_api_key_configured"], "false");
+    assert_eq!(health.details["weaviate_collection_prefix"], "BillAnalyser");
     assert_eq!(health.details["require_postgres_after_cutover"], "true");
+}
+
+#[test]
+fn http_shell_health_reports_config_gated_weaviate_without_secret_leakage() {
+    let env = HashMap::from([
+        ("BILL_ANALYSER_WEAVIATE_ENABLED", "true"),
+        (
+            "BILL_ANALYSER_WEAVIATE_ENDPOINT",
+            "https://weaviate.example.test:8080",
+        ),
+        ("BILL_ANALYSER_WEAVIATE_API_KEY", "super-secret"),
+        ("BILL_ANALYSER_WEAVIATE_COLLECTION_PREFIX", "BillProd"),
+    ]);
+    let config =
+        HttpShellConfig::from_env_with(|name| env.get(name).map(|value| value.to_string()))
+            .unwrap();
+    let health = http_shell_health(&config);
+
+    assert_eq!(health.details["weaviate_status"], "configured");
+    assert_eq!(
+        health.details["weaviate_endpoint_redacted"],
+        "https://weaviate.example.test:8080"
+    );
+    assert_eq!(health.details["weaviate_api_key_configured"], "true");
+    assert_eq!(health.details["weaviate_collection_prefix"], "BillProd");
+    assert!(!serde_json::to_string(&health)
+        .unwrap()
+        .contains("super-secret"));
+
+    let missing_endpoint = HttpShellConfig::from_env_with(|name| {
+        (name == "BILL_ANALYSER_WEAVIATE_ENABLED").then(|| "true".to_string())
+    })
+    .unwrap();
+    assert_eq!(
+        http_shell_health(&missing_endpoint).details["weaviate_status"],
+        "degraded:missing_endpoint"
+    );
 }
 
 #[test]

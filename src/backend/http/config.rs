@@ -7,7 +7,9 @@ use std::{env, time::Duration};
 use bill_analyser_core::auth::PasswordPolicy;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use url::Url;
+
+use crate::config_database::{normalize_postgres_url, redact_postgres_url};
+use crate::config_weaviate::WeaviateRuntimeConfig;
 
 pub const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 pub const DEFAULT_BODY_LIMIT_BYTES: usize = 10 * 1024 * 1024;
@@ -59,6 +61,7 @@ pub struct HttpShellConfig {
     pub auth_oauth2_provider: String,
     pub auth_password_policy: PasswordPolicy,
     pub public_base_url: Option<String>,
+    pub weaviate: WeaviateRuntimeConfig,
 }
 
 impl HttpShellConfig {
@@ -118,6 +121,7 @@ impl HttpShellConfig {
                 ..PasswordPolicy::default()
             },
             public_base_url: None,
+            weaviate: WeaviateRuntimeConfig::disabled(),
         })
     }
 
@@ -301,6 +305,12 @@ impl HttpShellConfig {
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
+    pub fn with_weaviate_config(mut self, weaviate: WeaviateRuntimeConfig) -> Self {
+        self.weaviate = weaviate;
+        self
+    }
+
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn from_env() -> Result<Self, HttpShellConfigError> {
         Self::from_env_with(|name| env::var(name).ok())
     }
@@ -462,6 +472,7 @@ impl HttpShellConfig {
         let public_base_url = lookup("BILL_ANALYSER_PUBLIC_BASE_URL")
             .map(normalize_upstream)
             .transpose()?;
+        let weaviate = WeaviateRuntimeConfig::from_env_with(&mut lookup)?;
 
         let mut config = Self::new_with_import_route_mode(
             "",
@@ -493,6 +504,7 @@ impl HttpShellConfig {
         config.auth_oauth2_provider = auth_oauth2_provider;
         config.auth_password_policy = auth_password_policy;
         config.public_base_url = public_base_url;
+        config.weaviate = weaviate;
         Ok(config)
     }
 }
@@ -526,6 +538,10 @@ pub enum HttpShellConfigError {
     InvalidMigrationMode,
     #[error("invalid PostgreSQL URL")]
     InvalidPostgresUrl,
+    #[error("invalid Weaviate endpoint")]
+    InvalidWeaviateEndpoint,
+    #[error("invalid Weaviate collection prefix")]
+    InvalidWeaviateCollectionPrefix,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -591,35 +607,6 @@ fn normalize_upstream(upstream: String) -> Result<String, HttpShellConfigError> 
         return Err(HttpShellConfigError::InvalidUpstream);
     }
     Ok(trimmed.to_string())
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn normalize_postgres_url(value: Option<String>) -> Result<Option<String>, HttpShellConfigError> {
-    let Some(value) = value else {
-        return Ok(None);
-    };
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Ok(None);
-    }
-
-    let parsed = Url::parse(trimmed).map_err(|_| HttpShellConfigError::InvalidPostgresUrl)?;
-    if !matches!(parsed.scheme(), "postgres" | "postgresql") || parsed.host_str().is_none() {
-        return Err(HttpShellConfigError::InvalidPostgresUrl);
-    }
-    Ok(Some(parsed.to_string()))
-}
-
-pub fn redact_postgres_url(postgres_url: &str) -> String {
-    let Ok(mut parsed) = Url::parse(postgres_url.trim()) else {
-        return "<invalid-postgres-url>".to_string();
-    };
-
-    if parsed.password().is_some() {
-        let _ = parsed.set_password(Some("***"));
-    }
-    parsed.set_query(None);
-    parsed.to_string()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

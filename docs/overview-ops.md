@@ -30,3 +30,13 @@
 ```
 
 该脚本运行 Rust fmt/clippy/test/coverage 和前端 lint/coverage/build。
+
+## PostgreSQL 与 Weaviate
+
+本地 Postgres/Weaviate 组合使用：
+
+```powershell
+docker compose -f docker-compose.postgres.yml up -d postgres weaviate
+```
+
+Weaviate 默认不参与运行时；需要设置 `BILL_ANALYSER_WEAVIATE_ENABLED=true` 和 `BILL_ANALYSER_WEAVIATE_ENDPOINT` 后才会启用派生向量索引。运维命令和重建流程见 [Weaviate derived index](weaviate-derived-index.md)。

@@ -14,6 +14,8 @@ mod backup_sync;
 pub mod bill_routes;
 pub mod budget_routes;
 pub mod config;
+pub mod config_database;
+pub mod config_weaviate;
 pub mod database_runtime;
 pub mod import_routes;
 pub mod logging;
@@ -24,6 +26,7 @@ pub mod server;
 pub mod state;
 pub mod statistics_routes;
 pub mod taxonomy_routes;
+pub mod weaviate;
 
 pub use auth::{
     resolve_authenticated_user_from_headers, resolve_user_id_from_headers, AuthenticatedUser,
@@ -35,6 +38,12 @@ pub use bill_routes::{bill_runtime_router, BILL_CRUD_ROUTE_PATTERNS};
 pub use budget_routes::{budget_runtime_router, BUDGET_CRUD_ROUTE_PATTERNS};
 pub use config::{
     DatabaseBackend, HttpShellConfig, HttpShellConfigError, ImportRouteMode, MigrationMode,
+};
+pub use config_database::redact_postgres_url;
+pub use config_weaviate::{
+    redact_weaviate_endpoint, WeaviateRuntimeConfig, DEFAULT_WEAVIATE_BATCH_SIZE,
+    DEFAULT_WEAVIATE_RETRY_ATTEMPTS, DEFAULT_WEAVIATE_TIMEOUT_MS, MAX_WEAVIATE_BATCH_SIZE,
+    MAX_WEAVIATE_RETRY_ATTEMPTS, MAX_WEAVIATE_TIMEOUT_MS, MAX_WEAVIATE_VECTOR_DIMENSIONS,
 };
 pub use database_runtime::{
     DatabaseRuntimeBoundary, RouteRepositoryBackend, RouteRepositoryRuntimeError,
@@ -49,7 +58,9 @@ pub use matching_routes::{
     MATCHING_RECURRING_CALENDAR_NETWORTH_ROUTE_PATTERNS,
 };
 pub use router::{build_router, health_handler, metadata_handler};
-pub use runtime::{http_shell_health, HttpShellHealth, HttpShellIdentity};
+pub use runtime::{
+    http_shell_health, http_shell_health_with_weaviate_status, HttpShellHealth, HttpShellIdentity,
+};
 pub use server::{bind_addr_from_env, bind_addr_from_env_with, run_http_server, DEFAULT_HTTP_BIND};
 pub use state::HttpAppState;
 pub use statistics_routes::{statistics_runtime_router, STATISTICS_ROUTE_PATTERNS};
@@ -58,4 +69,10 @@ pub use taxonomy_routes::{
     TAXONOMY_CATEGORY_ROUTE_PATTERNS, TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS,
     TAXONOMY_RULE_CENTER_ROUTE_PATTERNS, TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS,
     TAXONOMY_TAG_ROUTE_PATTERNS, TAXONOMY_TEMPLATE_ROUTE_PATTERNS,
+};
+pub use weaviate::{
+    build_object_from_feature_source, probe_weaviate_health, process_weaviate_outbox_once,
+    rebuild_weaviate_from_postgres, WeaviateBatchReport, WeaviateBootstrapReport,
+    WeaviateHealthStatus, WeaviateHttpClient, WeaviateOutboxProcessReport, WeaviateRebuildReport,
+    WeaviateRuntimeError,
 };

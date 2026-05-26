@@ -54,6 +54,14 @@ pub struct HttpShellHealth {
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
+    http_shell_health_with_weaviate_status(config, config.weaviate.status_without_probe())
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+pub fn http_shell_health_with_weaviate_status(
+    config: &HttpShellConfig,
+    weaviate_status: &str,
+) -> HttpShellHealth {
     let mut details = BTreeMap::new();
     details.insert(
         "owned_routes".to_string(),
@@ -90,9 +98,18 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
         "migration_status".to_string(),
         "placeholder:not_started".to_string(),
     );
+    details.insert("weaviate_status".to_string(), weaviate_status.to_string());
     details.insert(
-        "weaviate_status".to_string(),
-        "placeholder:disabled".to_string(),
+        "weaviate_endpoint_redacted".to_string(),
+        config.weaviate.redacted_endpoint(),
+    );
+    details.insert(
+        "weaviate_api_key_configured".to_string(),
+        config.weaviate.api_key_configured().to_string(),
+    );
+    details.insert(
+        "weaviate_collection_prefix".to_string(),
+        config.weaviate.collection_prefix.clone(),
     );
     details.insert(
         "require_postgres_after_cutover".to_string(),

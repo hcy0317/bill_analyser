@@ -87,5 +87,9 @@ path = "../../../tests/backend/db/sqlite_runtime.rs"
 name = "taxonomy_bridge_cli"
 path = "../../../tests/backend/db/taxonomy_bridge_cli.rs"
 
+[[test]]
+name = "vector_outbox"
+path = "../../../tests/backend/db/vector_outbox.rs"
+
 [lints]
 workspace = true

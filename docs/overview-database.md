@@ -8,9 +8,10 @@ repository 调用路径、事务边界和 row helper 约定见 [Rust 后端导�
 
 - SQLite path guard、连接初始化、foreign keys、WAL、Postgres lazy pool provider 和事务 helper。
 - schema 幂等初始化与 legacy 约束补齐。
-- bills、accounts、account rules、categories、tags、templates、budgets、statistics、matching、backup、auth、import staging、LLM/OCR settings 等 repository；其中 auth repository 已按 user/session/profile/cloud settings/2FA/log/row helper 拆分，auth registration 已按默认 seed/注册/分类/账户拆分，import staging repository 已按 session/template/preview/decision/LLM memory/confirm/row helper 拆分，matching repository 已按 schema/actions/candidate query/reconciliation/serialization/helper 拆分，budget repository 已按 CRUD/import/execution/history/forecast/hierarchy/row helper 拆分。
+- bills、accounts、account rules、categories、tags、templates、budgets、statistics、matching、backup、auth、import staging、LLM/OCR settings、vector outbox 等 repository；其中 auth repository 已按 user/session/profile/cloud settings/2FA/log/row helper 拆分，auth registration 已按默认 seed/注册/分类/账户拆分，import staging repository 已按 session/template/preview/decision/LLM memory/confirm/row helper 拆分，matching repository 已按 schema/actions/candidate query/reconciliation/serialization/helper 拆分，budget repository 已按 CRUD/import/execution/history/forecast/hierarchy/row helper 拆分。
 - user-scope 查询与写入。
 - 导入 session/source/standard-row/template/preview staging 只保存当前导入过程所需临时数据；source 与 standard row 台账记录 parser decision、标准化行和后续决策分组锚点，`import_decision_groups` / members 保存同批重复、同批转账、历史重复和历史转账的成员证据，`import_history_materializations` 保存历史账单预览改写/合并 payload；stage2 写入前会清理上一轮失败遗留的 preview/materialization/decision 状态；preview page 查询负责按条件分页和返回轻量 facets/counts；confirm、cancel、失败后新建 session 会清理对应用户的 import staging，未完成导入不作为可续传数据保留。
+- `vector_outbox_events` 是 PostgreSQL 权威 outbox，用于把学习样本/特征变化投递给可选 Weaviate 派生索引；claim 使用短事务和 `FOR UPDATE SKIP LOCKED`，失败按 attempts/backoff 回到 pending 或 failed，不影响业务表。
 
 ## 数据流
 
