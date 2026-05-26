@@ -2167,8 +2167,20 @@ pub async fn import_confirm_runtime_handler(
         }
     }
 
-    let result = match confirm_preview_to_bills(runtime.connection_mut(), &session_id, user_id) {
+    let history_acknowledgement = match history_rewrite_acknowledgement_from_payload(object) {
+        Ok(acknowledgement) => acknowledgement,
+        Err(response) => return route_response(response),
+    };
+    let result = match confirm_preview_to_bills_with_ack(
+        runtime.connection_mut(),
+        &session_id,
+        user_id,
+        history_acknowledgement.as_ref(),
+    ) {
         Ok(result) => result,
+        Err(bill_analyser_db::DbError::InvalidOperation(message)) => {
+            return route_response(import_v2_error_response(400, &message));
+        }
         Err(error) => return route_response(db_error_response(error)),
     };
     route_response(import_stage_confirm_success(ImportStageConfirmData {
@@ -2176,6 +2188,25 @@ pub async fn import_confirm_runtime_handler(
         skipped_count: result.skipped_count + result.duplicate_count,
         errors: result.errors,
     }))
+}
+
+fn history_rewrite_acknowledgement_from_payload(
+    object: &Map<String, Value>,
+) -> Result<Option<ImportHistoryRewriteAcknowledgement>, ImportV2RouteResponse> {
+    let Some(value) = first_value(
+        object,
+        &[
+            "history_rewrite_acknowledgement",
+            "historyRewriteAcknowledgement",
+            "history_rewrite_ack",
+            "historyRewriteAck",
+        ],
+    ) else {
+        return Ok(None);
+    };
+    serde_json::from_value::<ImportHistoryRewriteAcknowledgement>(value.clone())
+        .map(Some)
+        .map_err(|_| import_v2_error_response(400, "Invalid history rewrite acknowledgement"))
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

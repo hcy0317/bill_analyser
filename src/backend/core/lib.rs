@@ -73,7 +73,8 @@ pub use import_learning::{
     POLICY_VERSION,
 };
 pub use import_pipeline::{
-    attach_import_preview_matching_payload, build_import_preview_filter_index_item,
+    attach_import_preview_matching_payload, build_import_history_rewrite_ack_token,
+    build_import_history_rewrite_operation_id, build_import_preview_filter_index_item,
     build_import_preview_matching_payload, coerce_preview_selected_value,
     expected_preview_state_from_value, expected_preview_state_is_valid,
     import_preview_index_success, import_preview_page_success,
@@ -93,8 +94,9 @@ pub use import_pipeline::{
     ImportStageConfirmData, ImportStageDedupData, ImportStageParseData, ImportV2RouteResponse,
     InvestmentMatchingPayload, LearningMatchingPayload, LlmRecommendationPayload,
     ParserMatchingPayload, ReconciliationMatchingPayload, RecurringMatchingPayload,
-    TransferMatchingPayload, BILLS_PREVIEW_CONTRACT_FIELDS, IMPORT_PREVIEW_SELECTION_KEYS,
-    IMPORT_PREVIEW_SORT_KEYS, IMPORT_STAGING_TABLES, IMPORT_V2_PIPELINE_STEPS,
+    TransferMatchingPayload, BILLS_PREVIEW_CONTRACT_FIELDS, HISTORY_REWRITE_NOTICE,
+    IMPORT_PREVIEW_SELECTION_KEYS, IMPORT_PREVIEW_SORT_KEYS, IMPORT_STAGING_TABLES,
+    IMPORT_V2_PIPELINE_STEPS,
 };
 pub use matching::{
     bill_pair_feedback_payload_is_related, build_bill_pair_feedback_payload,

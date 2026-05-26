@@ -32,8 +32,6 @@ pub const IMPORT_V2_PIPELINE_STEPS: &[&str] = &[
 ];
 // 导入步骤名用于状态响应和排错，不代表 handler 可以跳过 staging/preview/confirm
 // 的数据库生命周期。
-#[rustfmt::skip]
-pub const IMPORT_STAGING_TABLES: &[&str] = &["import_sessions", "import_sources", "import_standard_rows", "import_decision_groups", "import_decision_group_members", "import_history_materializations", "bills_parser_template", "bills_preview"];
 pub const BILLS_PREVIEW_CONTRACT_FIELDS: &[&str] = &[
     "preview_parser_id",
     "preview_parser_tags_json",
@@ -51,6 +49,7 @@ pub const BILLS_PREVIEW_CONTRACT_FIELDS: &[&str] = &[
 ];
 // preview row 的兼容字段清单。任何删改都要同时复核后端投影、前端模型和
 // matching feedback 的 sparse payload 兼容性。
+include!("import_history_rewrite.rs");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -509,6 +508,7 @@ pub fn build_import_preview_matching_payload(preview_item: &Map<String, Value>) 
     populate_dedup_matching_section(payload_object, preview_item);
     populate_recurring_matching_section(payload_object, preview_item);
     populate_annotation_matching_section(payload_object, preview_item);
+    populate_history_rewrite_confirmation_section(payload_object, preview_item);
 
     payload
 }

@@ -3,8 +3,9 @@
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
 use bill_analyser_core::{
+    build_import_history_rewrite_ack_token, build_import_history_rewrite_operation_id,
     build_transfer_source_snapshot, normalize_bill_date_text, DedupBill, DeduplicationType, Money,
-    TransferSourceSnapshot, UserId,
+    TransferSourceSnapshot, UserId, HISTORY_REWRITE_NOTICE,
 };
 use bill_analyser_parsers::{parser_source_label, serialize_parser_tags, StandardBill};
 use chrono::Utc;

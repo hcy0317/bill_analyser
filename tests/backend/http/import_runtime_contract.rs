@@ -4200,7 +4200,8 @@ async fn import_dedup_materializes_historical_duplicates_into_preview() -> Resul
         .expect("response");
     assert_eq!(select_all.status(), StatusCode::OK);
 
-    let confirm = app
+    let confirm_without_ack = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method(Method::POST)
@@ -4218,16 +4219,58 @@ async fn import_dedup_materializes_historical_duplicates_into_preview() -> Resul
         )
         .await
         .expect("response");
-    assert_eq!(confirm.status(), StatusCode::OK);
-    let confirm_body = read_json(confirm).await;
-    assert_eq!(confirm_body["data"]["imported_count"], 0);
-    assert_eq!(confirm_body["data"]["skipped_count"], 1);
+    assert_eq!(confirm_without_ack.status(), StatusCode::BAD_REQUEST);
+    assert!(read_json(confirm_without_ack).await["error"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("history rewrite acknowledgement"));
     let remaining_history_rows: i64 = db_runtime.connection().query_row(
         "SELECT COUNT(*) FROM bills WHERE user_id = 42 AND id = ?1",
         [history_bill_id],
         |row| row.get(0),
     )?;
     assert_eq!(remaining_history_rows, 1);
+    let preview_id = preview[0]["id"].as_i64().expect("preview id");
+    let confirm_with_ack = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/confirm")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "session_id": session_id,
+                        "history_rewrite_acknowledgement": {
+                            "acknowledged": true,
+                            "selected_preview_ids": [preview_id],
+                            "selection_scope": {"mode": "select_all"},
+                            "operations": [{
+                                "preview_id": preview_id,
+                                "operation_id": preview[0]["matching"]["reconciliation"]["operation_id"],
+                                "planned_operation": "update_history",
+                                "history_bill_id": history_bill_id,
+                                "history_bill_version": preview[0]["matching"]["reconciliation"]["history_bill_version"],
+                                "acknowledgement_token": preview[0]["matching"]["reconciliation"]["acknowledgement_token"]
+                            }]
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(confirm_with_ack.status(), StatusCode::OK);
+    let confirm_body = read_json(confirm_with_ack).await;
+    assert_eq!(confirm_body["data"]["imported_count"], 1);
+    let updated_history_rows: i64 = db_runtime.connection().query_row(
+        "SELECT COUNT(*) FROM bills WHERE user_id = 42 AND id = ?1 AND import_history_id = 2",
+        [history_bill_id],
+        |row| row.get(0),
+    )?;
+    assert_eq!(updated_history_rows, 1);
     Ok(())
 }
 
@@ -4765,10 +4808,12 @@ async fn import_dedup_materializes_historical_transfers_into_preview() -> Result
         )
         .await
         .expect("response");
-    assert_eq!(confirm.status(), StatusCode::OK);
+    assert_eq!(confirm.status(), StatusCode::BAD_REQUEST);
     let confirm_body = read_json(confirm).await;
-    assert_eq!(confirm_body["data"]["imported_count"], 0);
-    assert_eq!(confirm_body["data"]["skipped_count"], 1);
+    assert!(confirm_body["error"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("history rewrite acknowledgement"));
     let remaining_history_rows: i64 = db_runtime.connection().query_row(
         "SELECT COUNT(*) FROM bills WHERE user_id = 42 AND id = ?1",
         [history_bill_id],

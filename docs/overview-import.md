@@ -4,7 +4,7 @@
 
 1. **解析**：parser-first multipart 上传会并发检测多个上传文件并保持文件响应顺序；每个文件必须且只能由一个 dedicated parser 命中，命中结果会带 `parser_decision` 证据进入标准账单解析，未命中或多 parser 冲突会作为 unmatched 文件返回；JSON parse 使用已提供 parser id 生成标准账单 draft。
 2. **去重预览**：写入 session/source/template/standard-row staging，执行同批重复折叠、同批转账配对、历史重复/历史转账 materialization、分类规则匹配、账户规则匹配、transfer/recurring/learning/LLM decision，再批量写入 preview staging；stage2 默认不在响应内联全量 preview，前端首屏只请求 preview page，筛选/排序随 preview page query 由 Rust 端按条件分页并返回轻量 facets/counts，完整 preview 从 `preview_matching_feedback_json` 投影 parser/dedup/reconciliation/transfer/recurring/learning/LLM 信号。
-3. **确认导入**：用户确认后在事务内写入正式账单表，并更新账户余额、学习事件和审计。
+3. **确认导入**：用户确认后在事务内写入正式账单表，并更新账户余额、学习事件和审计；涉及改写/合并历史账单的预览行必须带可见操作标记并提交服务端可验证 acknowledgement。
 
 ## 核心模块
 
@@ -22,9 +22,9 @@
 - dedicated parser 自动识别必须返回 exactly-one 决策；`no_match` 和 `conflict` 不写入标准账单，只保留 unmatched 文件和 parser decision evidence。
 - `import_sources` 保存文件级 parser signal / confidence / decision metadata；`import_standard_rows` 保存标准化行、金额分单位、方向、parser payload 和原始标准 payload，source/row 写入必须与 parser template staging 处于同一事务。
 - 同批重复按时间窗口、同向金额、方向和文本证据合并，保留基底预览行并把来源链、合并原因和成员写入 `import_decision_groups` / `import_decision_group_members`。
-- 历史重复按当前用户、standard row 日期窗口、正式账单金额方向和文本证据查询；命中后以正式账单为基底生成 `database_duplicate` 预览行，`reconciliation` feedback 和 `import_history_materializations` 显式标记 `update_history`，当前 confirm 因 `history_rewrite_pending` annotation 跳过真实改写。
+- 历史重复按当前用户、standard row 日期窗口、正式账单金额方向和文本证据查询；命中后以正式账单为基底生成 `database_duplicate` 预览行，`reconciliation` feedback 和 `import_history_materializations` 显式标记 `update_history`，并在 matching payload 暴露 `operation_id`、`acknowledgement_token` 与“将改写/合并历史账单”提示；confirm 会校验 selected preview ids、操作 id、历史账单 id/version、selection scope 与 ack token 后才更新历史账单并写入 `import_confirm_operations` 审计。
 - 同批转账按时间窗口、同额反向金额和不同来源配对，以支出侧为基底合并交易对方、支付方式和描述；支出/收入两侧原始交易对方、支付方式、描述、账户和 parser 信息保留在 `matching.transfer.source_chain`，并写入 `same_batch_transfer` decision group。
-- 历史转账按当前用户、standard row 日期窗口、同日时间容差、同额反向金额和不同来源查询正式账单；命中后以支出侧为基底生成 `transfer_cross_batch` 预览行，显式标记 `merge_transfer_history`，写入 `import_history_materializations` 和 `historical_transfer` decision group，当前 confirm 同样因 `history_rewrite_pending` annotation 跳过真实改写。
+- 历史转账按当前用户、standard row 日期窗口、同日时间容差、同额反向金额和不同来源查询正式账单；命中后以支出侧为基底生成 `transfer_cross_batch` 预览行，显式标记 `merge_transfer_history`，写入 `import_history_materializations` 和 `historical_transfer` decision group；confirm 在 ack 通过后以支出侧为基底更新历史账单或插入新转账基底并删除被合并的收入侧历史账单，保留标签/匹配反馈审计并同步相关账户余额。
 - stage2 账户识别以 `account_rules` 为权威：转账先用隐藏支出/收入侧字段分别匹配来源/目标账户；投资先按 parser/支付方式匹配来源账户，再按交易对方优先、描述兜底匹配投资账户；收入/支出只匹配当前类型的账户规则。旧账户别名只作为迁移规则输入，不再独立驱动导入账户字段。
 - 多文件 parser work 可以并发执行，但 session/template staging 仍保持一次性写入。
 - stage2 processed 状态按 `session_id + user_id + parser_is_processed` 更新，避免大批量 `id IN (...)` 更新；preview 批量写入复用 prepared statement。

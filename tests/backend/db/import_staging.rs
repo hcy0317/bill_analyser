@@ -1,18 +1,22 @@
 use std::{collections::BTreeSet, error::Error};
 
-use bill_analyser_core::{DedupBill, Money, SmartDeduplicationEngine, UserId};
+use bill_analyser_core::{
+    build_import_history_rewrite_ack_token, build_import_history_rewrite_operation_id, DedupBill,
+    Money, SmartDeduplicationEngine, UserId, HISTORY_REWRITE_NOTICE,
+};
 use bill_analyser_db::{
     apply_preview_learning_decision, apply_preview_llm_recommendation,
     apply_preview_patches_preserving_selection, apply_preview_transfer_decision,
     batch_update_preview_classification, calculate_import_bill_hash,
     clear_import_preview_materialization_state, clear_session_data, confirm_preview_to_bills,
-    count_preview_by_session, create_import_session, dedup_bills_from_parser_templates,
-    get_import_annotation_samples, get_import_decision_groups_by_session,
-    get_import_history_candidate_bills_for_session, get_import_history_materializations_by_session,
-    get_import_session, get_import_sources_by_session, get_import_standard_rows_by_session,
-    get_llm_memory_events, get_parser_templates_by_session, get_preview_bill_by_id,
-    get_preview_by_ids, get_preview_by_session, get_preview_filter_index_by_session,
-    get_preview_page_by_session, get_unprocessed_templates_for_dedup, init_import_staging_schema,
+    confirm_preview_to_bills_with_ack, count_preview_by_session, create_import_session,
+    dedup_bills_from_parser_templates, get_import_annotation_samples,
+    get_import_decision_groups_by_session, get_import_history_candidate_bills_for_session,
+    get_import_history_materializations_by_session, get_import_session,
+    get_import_sources_by_session, get_import_standard_rows_by_session, get_llm_memory_events,
+    get_parser_templates_by_session, get_preview_bill_by_id, get_preview_by_ids,
+    get_preview_by_session, get_preview_filter_index_by_session, get_preview_page_by_session,
+    get_unprocessed_templates_for_dedup, init_import_staging_schema,
     insert_import_decision_groups_batch, insert_import_history_materializations_batch,
     insert_parser_templates_batch, insert_preview_bill, insert_preview_bills_batch,
     mark_unprocessed_parser_templates_processed_for_session,
@@ -24,6 +28,7 @@ use bill_analyser_db::{
     update_preview_bills_batch, update_preview_recurring_match_decision, update_preview_selection,
     update_session_preview_selection_by_query, ImportAnnotationSampleDraft,
     ImportDecisionGroupDraft, ImportDecisionGroupMemberDraft, ImportHistoryMaterializationDraft,
+    ImportHistoryRewriteAcknowledgement, ImportHistoryRewriteAcknowledgementOperation,
     ImportParserTemplateDraft, ImportPreviewClassificationUpdate, ImportPreviewDecision,
     ImportPreviewDraft, ImportPreviewExpectedState, ImportPreviewLearningApply,
     ImportPreviewLlmApplyRequest, ImportPreviewLlmReviewRequest, ImportPreviewLlmSuggestion,
@@ -256,6 +261,80 @@ fn preview_draft(date: &str, amount: f64, description: &str) -> ImportPreviewDra
         dedup_type: Some("remaining".to_string()),
         dedup_source_ids: vec![11, 12],
         ..ImportPreviewDraft::default()
+    }
+}
+
+fn history_rewrite_preview_draft(
+    planned_operation: &str,
+    history_bill_id: i64,
+    history_bill_version: i64,
+    group_key: &str,
+    history_role: Option<&str>,
+    description: &str,
+) -> ImportPreviewDraft {
+    let mut draft = preview_draft("2026-05-01 08:30:00", 9.25, description);
+    draft.dedup_type = Some(
+        if planned_operation == "merge_transfer_history" {
+            "transfer_cross_batch"
+        } else {
+            "database_duplicate"
+        }
+        .to_string(),
+    );
+    let mut reconciliation = json!({
+        "planned_operation": planned_operation,
+        "history_bill_id": history_bill_id,
+        "history_bill_version": history_bill_version,
+        "group_key": group_key,
+        "notice": HISTORY_REWRITE_NOTICE,
+    });
+    if let Some(role) = history_role {
+        reconciliation["history_role"] = json!(role);
+    }
+    draft.preview_matching_feedback = json!({
+        "reconciliation": reconciliation,
+        "annotation": {
+            "type": "history_rewrite_pending",
+            "suppressed": true,
+        },
+    });
+    draft
+}
+
+fn history_rewrite_ack(
+    session_id: &str,
+    selected_preview_ids: Vec<i64>,
+    preview_id: i64,
+    planned_operation: &str,
+    history_bill_id: i64,
+    history_bill_version: i64,
+    group_key: &str,
+) -> ImportHistoryRewriteAcknowledgement {
+    let operation_id = build_import_history_rewrite_operation_id(
+        planned_operation,
+        history_bill_id,
+        history_bill_version,
+        group_key,
+    );
+    let acknowledgement_token = build_import_history_rewrite_ack_token(
+        session_id,
+        &operation_id,
+        planned_operation,
+        history_bill_id,
+        history_bill_version,
+    );
+    ImportHistoryRewriteAcknowledgement {
+        acknowledged: true,
+        selected_preview_ids,
+        operations: vec![ImportHistoryRewriteAcknowledgementOperation {
+            preview_id,
+            operation_id,
+            planned_operation: planned_operation.to_string(),
+            history_bill_id,
+            history_bill_version,
+            acknowledgement_token,
+        }],
+        selection_scope: json!({"mode": "selected_ids"}),
     }
 }
 
@@ -3273,6 +3352,480 @@ fn confirm_preview_to_bills_inserts_selected_rows_and_marks_session_completed(
         |row| row.get(0),
     )?;
     assert_eq!(total_after_retry, 1);
+    Ok(())
+}
+
+#[test]
+fn confirm_history_rewrite_rejects_missing_acknowledgement() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("history_ack_missing.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_bills_schema(&runtime)?;
+    init_import_staging_schema(runtime.connection())?;
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: "session-history-ack-missing".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+    runtime.connection().execute(
+        "
+        INSERT INTO bills(
+            id, user_id, date, type, amount, counterparty, description,
+            payment_method, main_category, sub_category, hash, created_at, updated_at,
+            import_history_id
+        ) VALUES (9001, 42, '2026-05-01 08:30:00', '支出', -9.25, 'old',
+                  'old note', 'card', '餐饮', '午餐', 'old-hash', 'old', 'old', 1)
+        ",
+        [],
+    )?;
+    let preview_id = insert_preview_bill(
+        runtime.connection(),
+        "session-history-ack-missing",
+        user_id(42),
+        &history_rewrite_preview_draft(
+            "update_history",
+            9001,
+            1,
+            "history-duplicate:9001",
+            None,
+            "merged note",
+        ),
+    )?;
+    insert_import_history_materializations_batch(
+        runtime.connection_mut(),
+        "session-history-ack-missing",
+        user_id(42),
+        &[ImportHistoryMaterializationDraft {
+            history_bill_id: 9001,
+            history_bill_version: 1,
+            materialized_payload: json!({"operation": "update_history"}),
+            rewrite_reason: "same_amount|same_direction".to_string(),
+        }],
+    )?;
+    update_preview_selection(runtime.connection_mut(), &[preview_id], true, user_id(42))?;
+
+    let result = confirm_preview_to_bills(
+        runtime.connection_mut(),
+        "session-history-ack-missing",
+        user_id(42),
+    );
+
+    assert!(result
+        .expect_err("missing ack is rejected")
+        .to_string()
+        .contains("history rewrite acknowledgement is required"));
+    let description: String = runtime.connection().query_row(
+        "SELECT description FROM bills WHERE id = 9001 AND user_id = 42",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(description, "old note");
+    assert!(get_import_session(
+        runtime.connection(),
+        "session-history-ack-missing",
+        user_id(42)
+    )?
+    .is_some());
+    Ok(())
+}
+
+#[test]
+fn confirm_history_rewrite_rejects_missing_visible_marker() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("history_ack_marker.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: "session-history-marker".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+    let mut draft = history_rewrite_preview_draft(
+        "update_history",
+        9001,
+        1,
+        "history-duplicate:9001",
+        None,
+        "merged note",
+    );
+    draft.preview_matching_feedback["annotation"]["type"] = json!("manual_review");
+    let preview_id = insert_preview_bill(
+        runtime.connection(),
+        "session-history-marker",
+        user_id(42),
+        &draft,
+    )?;
+    update_preview_selection(runtime.connection_mut(), &[preview_id], true, user_id(42))?;
+
+    let result = confirm_preview_to_bills(
+        runtime.connection_mut(),
+        "session-history-marker",
+        user_id(42),
+    );
+
+    assert!(result
+        .expect_err("missing visible marker is rejected")
+        .to_string()
+        .contains("visible preview marker"));
+    assert!(
+        get_import_session(runtime.connection(), "session-history-marker", user_id(42))?.is_some()
+    );
+    Ok(())
+}
+
+#[test]
+fn confirm_history_duplicate_ack_updates_history_and_audits() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("history_ack_update.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_bills_schema(&runtime)?;
+    init_import_staging_schema(runtime.connection())?;
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: "session-history-ack-update".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+    runtime.connection().execute(
+        "
+        INSERT INTO bills(
+            id, user_id, date, type, amount, counterparty, description,
+            payment_method, main_category, sub_category, hash, created_at, updated_at,
+            source_account_id, import_history_id
+        ) VALUES (9001, 42, '2026-05-01 08:30:00', '支出', -9.25, 'old',
+                  'old note', 'card', '餐饮', '午餐', 'old-hash', 'old', 'old', 101, 1)
+        ",
+        [],
+    )?;
+    let mut draft = history_rewrite_preview_draft(
+        "update_history",
+        9001,
+        1,
+        "history-duplicate:9001",
+        None,
+        "merged note",
+    );
+    draft.preview_counterparty = "old | imported".to_string();
+    draft.preview_source_account_id = Some(101);
+    let preview_id = insert_preview_bill(
+        runtime.connection(),
+        "session-history-ack-update",
+        user_id(42),
+        &draft,
+    )?;
+    insert_import_history_materializations_batch(
+        runtime.connection_mut(),
+        "session-history-ack-update",
+        user_id(42),
+        &[ImportHistoryMaterializationDraft {
+            history_bill_id: 9001,
+            history_bill_version: 1,
+            materialized_payload: json!({"operation": "update_history"}),
+            rewrite_reason: "same_amount|same_direction".to_string(),
+        }],
+    )?;
+    update_preview_selection(runtime.connection_mut(), &[preview_id], true, user_id(42))?;
+    let ack = history_rewrite_ack(
+        "session-history-ack-update",
+        vec![preview_id],
+        preview_id,
+        "update_history",
+        9001,
+        1,
+        "history-duplicate:9001",
+    );
+
+    let result = confirm_preview_to_bills_with_ack(
+        runtime.connection_mut(),
+        "session-history-ack-update",
+        user_id(42),
+        Some(&ack),
+    )?;
+
+    assert_eq!(result.confirmed_count, 1);
+    let bill = runtime.connection().query_row(
+        "
+        SELECT counterparty, description, import_history_id
+        FROM bills WHERE id = 9001 AND user_id = 42
+        ",
+        [],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        },
+    )?;
+    assert_eq!(bill.0, "old | imported");
+    assert_eq!(bill.1, "merged note");
+    assert_eq!(bill.2, 2);
+    let operations: i64 = runtime.connection().query_row(
+        "
+        SELECT COUNT(*) FROM import_confirm_operations
+        WHERE session_id = 'session-history-ack-update'
+          AND user_id = 42
+          AND operation_kind = 'update_history'
+          AND history_bill_id = 9001
+          AND status = 'applied'
+        ",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(operations, 1);
+    assert!(get_import_session(
+        runtime.connection(),
+        "session-history-ack-update",
+        user_id(42)
+    )?
+    .is_none());
+    Ok(())
+}
+
+#[test]
+fn confirm_history_rewrite_rejects_stale_history_version() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("history_ack_stale.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_bills_schema(&runtime)?;
+    init_import_staging_schema(runtime.connection())?;
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: "session-history-ack-stale".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+    runtime.connection().execute(
+        "
+        INSERT INTO bills(
+            id, user_id, date, type, amount, counterparty, description,
+            payment_method, main_category, sub_category, hash, created_at, updated_at,
+            import_history_id
+        ) VALUES (9001, 42, '2026-05-01 08:30:00', '支出', -9.25, 'old',
+                  'old note', 'card', '餐饮', '午餐', 'old-hash', 'old', 'old', 2)
+        ",
+        [],
+    )?;
+    let preview_id = insert_preview_bill(
+        runtime.connection(),
+        "session-history-ack-stale",
+        user_id(42),
+        &history_rewrite_preview_draft(
+            "update_history",
+            9001,
+            1,
+            "history-duplicate:9001",
+            None,
+            "merged note",
+        ),
+    )?;
+    insert_import_history_materializations_batch(
+        runtime.connection_mut(),
+        "session-history-ack-stale",
+        user_id(42),
+        &[ImportHistoryMaterializationDraft {
+            history_bill_id: 9001,
+            history_bill_version: 1,
+            materialized_payload: json!({"operation": "update_history"}),
+            rewrite_reason: "same_amount|same_direction".to_string(),
+        }],
+    )?;
+    update_preview_selection(runtime.connection_mut(), &[preview_id], true, user_id(42))?;
+    let ack = history_rewrite_ack(
+        "session-history-ack-stale",
+        vec![preview_id],
+        preview_id,
+        "update_history",
+        9001,
+        1,
+        "history-duplicate:9001",
+    );
+
+    let result = confirm_preview_to_bills_with_ack(
+        runtime.connection_mut(),
+        "session-history-ack-stale",
+        user_id(42),
+        Some(&ack),
+    );
+
+    assert!(result
+        .expect_err("stale history version is rejected")
+        .to_string()
+        .contains("history bill version is stale"));
+    let version: i64 = runtime.connection().query_row(
+        "SELECT import_history_id FROM bills WHERE id = 9001 AND user_id = 42",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(version, 2);
+    assert!(get_import_session(
+        runtime.connection(),
+        "session-history-ack-stale",
+        user_id(42)
+    )?
+    .is_some());
+    Ok(())
+}
+
+#[test]
+fn confirm_history_transfer_ack_inserts_base_and_deletes_history_counterpart(
+) -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("history_ack_transfer.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_bills_schema(&runtime)?;
+    init_import_staging_schema(runtime.connection())?;
+    runtime.connection().execute_batch(
+        "
+        CREATE TABLE accounts (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            balance REAL DEFAULT 0,
+            initial_balance REAL DEFAULT 0,
+            updated_at TEXT
+        );
+        CREATE TABLE tags (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL
+        );
+        CREATE TABLE bill_tags (
+            bill_id INTEGER NOT NULL,
+            tag_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (bill_id, tag_id)
+        );
+        INSERT INTO accounts(id, user_id, name, balance, initial_balance, updated_at)
+        VALUES (100, 42, 'wallet', 1000.0, 1000.0, 'old'),
+               (200, 42, 'bank', 50.0, 50.0, 'old');
+        INSERT INTO tags(id, user_id, name) VALUES (7, 42, 'history-tag');
+        INSERT INTO bills(
+            id, user_id, date, type, amount, counterparty, description,
+            payment_method, main_category, sub_category, hash, created_at, updated_at,
+            source_account_id, import_history_id
+        ) VALUES (9002, 42, '2026-05-01 08:30:00', '收入', 100.0, 'bank',
+                  'incoming side', 'bank-card', '转账', '入账', 'old-transfer',
+                  'old', 'old', 200, 1);
+        INSERT INTO bill_tags(bill_id, tag_id, created_at) VALUES (9002, 7, 'old');
+        ",
+    )?;
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: "session-history-transfer-ack".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+    let mut draft = history_rewrite_preview_draft(
+        "merge_transfer_history",
+        9002,
+        1,
+        "history-transfer:9002",
+        Some("incoming"),
+        "merged transfer",
+    );
+    draft.preview_type = "转账".to_string();
+    draft.preview_amount = 100.0;
+    draft.preview_destination_amount = 100.0;
+    draft.preview_counterparty = "wallet | bank".to_string();
+    draft.preview_source_account_id = Some(100);
+    draft.preview_destination_account_id = Some(200);
+    let preview_id = insert_preview_bill(
+        runtime.connection(),
+        "session-history-transfer-ack",
+        user_id(42),
+        &draft,
+    )?;
+    insert_import_history_materializations_batch(
+        runtime.connection_mut(),
+        "session-history-transfer-ack",
+        user_id(42),
+        &[ImportHistoryMaterializationDraft {
+            history_bill_id: 9002,
+            history_bill_version: 1,
+            materialized_payload: json!({"operation": "merge_transfer_history"}),
+            rewrite_reason: "same_amount|opposite_direction".to_string(),
+        }],
+    )?;
+    update_preview_selection(runtime.connection_mut(), &[preview_id], true, user_id(42))?;
+    let ack = history_rewrite_ack(
+        "session-history-transfer-ack",
+        vec![preview_id],
+        preview_id,
+        "merge_transfer_history",
+        9002,
+        1,
+        "history-transfer:9002",
+    );
+
+    let result = confirm_preview_to_bills_with_ack(
+        runtime.connection_mut(),
+        "session-history-transfer-ack",
+        user_id(42),
+        Some(&ack),
+    )?;
+
+    assert_eq!(result.confirmed_count, 1);
+    let bills = runtime.connection().query_row(
+        "
+        SELECT COUNT(*), MIN(id), MAX(type), MAX(source_account_id), MAX(destination_account_id)
+        FROM bills WHERE user_id = 42
+        ",
+        [],
+        |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        },
+    )?;
+    assert_eq!(bills.0, 1);
+    assert_ne!(bills.1, 9002);
+    assert_eq!(bills.2, "转账");
+    assert_eq!(bills.3, 100);
+    assert_eq!(bills.4, 200);
+    let moved_tags: i64 = runtime.connection().query_row(
+        "SELECT COUNT(*) FROM bill_tags WHERE tag_id = 7 AND bill_id != 9002",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(moved_tags, 1);
+    let balances = runtime.connection().query_row(
+        "
+        SELECT
+            (SELECT balance FROM accounts WHERE id = 100 AND user_id = 42),
+            (SELECT balance FROM accounts WHERE id = 200 AND user_id = 42)
+        ",
+        [],
+        |row| Ok((row.get::<_, f64>(0)?, row.get::<_, f64>(1)?)),
+    )?;
+    assert_eq!(balances, (900.0, 150.0));
+    let audit: i64 = runtime.connection().query_row(
+        "
+        SELECT COUNT(*) FROM import_confirm_operations
+        WHERE operation_kind = 'merge_transfer_history'
+          AND history_bill_id = 9002
+          AND deleted_bill_id = 9002
+        ",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(audit, 1);
     Ok(())
 }
 

@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use bill_analyser_core::{
+    build_import_history_rewrite_ack_token, build_import_history_rewrite_operation_id,
     build_import_preview_filter_index_item, build_import_preview_matching_payload,
     coerce_preview_selected_value, expected_preview_state_is_valid, import_preview_index_success,
     import_preview_page_success, import_session_cancel_missing_response,
@@ -14,8 +15,8 @@ use bill_analyser_core::{
     sort_import_preview_page_items, AccountLookup, CategoryLookup, ExpectedPreviewState,
     ImportPreviewIndexData, ImportPreviewMatchingPayload, ImportPreviewPageData,
     ImportPreviewSortDirection, ImportSessionSummary, ImportStageConfirmData, ImportStageDedupData,
-    ImportStageParseData, BILLS_PREVIEW_CONTRACT_FIELDS, IMPORT_STAGING_TABLES,
-    IMPORT_V2_PIPELINE_STEPS,
+    ImportStageParseData, BILLS_PREVIEW_CONTRACT_FIELDS, HISTORY_REWRITE_NOTICE,
+    IMPORT_STAGING_TABLES, IMPORT_V2_PIPELINE_STEPS,
 };
 use serde_json::{json, Map};
 
@@ -180,6 +181,48 @@ fn preview_matching_payload_preserves_sparse_feedback_extras_and_parser_aliases(
     assert_eq!(matching["learning"]["auto_apply"], true);
     assert_eq!(matching["learning"]["model_version"], "v2");
     assert_eq!(matching["reconciliation"]["candidate_type"], "duplicate");
+}
+
+#[test]
+fn history_rewrite_matching_payload_exposes_operation_ack_evidence() {
+    let operation_id =
+        build_import_history_rewrite_operation_id("update_history", 9001, 3, "hist:9001");
+    let expected_token = build_import_history_rewrite_ack_token(
+        "session-history",
+        &operation_id,
+        "update_history",
+        9001,
+        3,
+    );
+    let preview = json!({
+        "id": 77,
+        "session_id": "session-history",
+        "matching": {
+            "reconciliation": {
+                "planned_operation": "update_history",
+                "history_bill_id": 9001,
+                "history_bill_version": 3,
+                "group_key": "hist:9001",
+                "notice": HISTORY_REWRITE_NOTICE,
+            },
+            "annotation": {
+                "type": "history_rewrite_pending",
+                "suppressed": true,
+            }
+        }
+    });
+    let matching = build_import_preview_matching_payload(preview.as_object().unwrap());
+
+    assert_eq!(matching["reconciliation"]["operation_id"], operation_id);
+    assert_eq!(
+        matching["reconciliation"]["acknowledgement_token"],
+        expected_token
+    );
+    assert_eq!(matching["reconciliation"]["destructive_ack_required"], true);
+    assert_eq!(
+        matching["annotation"]["history_rewrite_notice"],
+        HISTORY_REWRITE_NOTICE
+    );
 }
 
 #[test]
@@ -413,6 +456,8 @@ fn stage_envelopes_and_matching_payload_pin_pipeline_wire_contracts() {
     assert!(IMPORT_STAGING_TABLES.contains(&"import_standard_rows"));
     assert!(IMPORT_STAGING_TABLES.contains(&"import_decision_groups"));
     assert!(IMPORT_STAGING_TABLES.contains(&"import_decision_group_members"));
+    assert!(IMPORT_STAGING_TABLES.contains(&"import_history_materializations"));
+    assert!(IMPORT_STAGING_TABLES.contains(&"import_confirm_operations"));
     assert!(IMPORT_STAGING_TABLES.contains(&"bills_parser_template"));
     assert!(IMPORT_STAGING_TABLES.contains(&"bills_preview"));
     assert!(BILLS_PREVIEW_CONTRACT_FIELDS.contains(&"preview_parser_tags_json"));

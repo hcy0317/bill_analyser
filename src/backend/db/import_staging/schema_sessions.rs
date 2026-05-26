@@ -122,6 +122,22 @@ pub fn init_import_staging_schema(connection: &Connection) -> DbResult<()> {
         CREATE INDEX IF NOT EXISTS idx_import_history_materializations_session_history_bill
             ON import_history_materializations(session_id, user_id, history_bill_id);
 
+        CREATE TABLE IF NOT EXISTS import_confirm_operations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            operation_kind TEXT NOT NULL,
+            preview_row_id INTEGER,
+            history_bill_id INTEGER,
+            created_bill_id INTEGER,
+            deleted_bill_id INTEGER,
+            status TEXT NOT NULL DEFAULT 'pending',
+            payload_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(session_id, user_id, operation_kind, preview_row_id, history_bill_id)
+        );
+
         CREATE TABLE IF NOT EXISTS bills_preview (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id TEXT NOT NULL,
@@ -292,6 +308,10 @@ pub fn clear_user_import_staging_data(connection: &Connection, user_id: i64) -> 
         "DELETE FROM import_history_materializations WHERE user_id = ?1",
         [user_id],
     )?;
+    let confirm_operation_count = connection.execute(
+        "DELETE FROM import_confirm_operations WHERE user_id = ?1",
+        [user_id],
+    )?;
     let standard_count =
         connection.execute("DELETE FROM import_standard_rows WHERE user_id = ?1", [user_id])?;
     let source_count =
@@ -305,6 +325,7 @@ pub fn clear_user_import_staging_data(connection: &Connection, user_id: i64) -> 
         + decision_member_count
         + decision_group_count
         + history_materialization_count
+        + confirm_operation_count
         + standard_count
         + source_count
         + preview_count

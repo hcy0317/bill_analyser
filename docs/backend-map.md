@@ -85,8 +85,8 @@ flowchart TD
 - `import_sources` 与 `import_standard_rows` 保存文件级 parser decision、标准化行、分单位金额和 parser payload，后续 duplicate/transfer/learning 切片以它们作为决策台账锚点。
 - 同批重复在 stage2 按秒级时间窗口、同向金额、方向和文本证据折叠，合并交易对方/支付方式/描述，并通过 `preview_matching_feedback_json.dedup.source_chain` 与 `import_decision_groups` 保留来源证据。
 - 同批转账按秒级时间窗口、同额反向金额和不同来源配对，以支出侧为基底合并交易对方/支付方式/描述；支出/收入两侧原始字段保存在 `preview_matching_feedback_json.transfer.source_chain`，并通过 `same_batch_transfer` decision group 保留成员证据。
-- 历史重复查询正式 `bills` 时保持 user-scope，并以 `import_standard_rows` 的日期窗口限制候选；命中还需要金额方向和文本证据，之后生成 `database_duplicate` 预览行、`reconciliation.planned_operation=update_history` feedback 和 `import_history_materializations`，当前 confirm 会跳过带 `history_rewrite_pending` annotation 的预览行。
-- 历史转账同样保持 user-scope 和 standard-row 日期窗口，以同日时间容差、同额反向金额和不同来源命中正式账单；stage2 生成 `transfer_cross_batch` 预览行、`reconciliation.planned_operation=merge_transfer_history` feedback、`import_history_materializations` 和 `historical_transfer` decision group，当前 confirm 继续跳过真实历史改写。
+- 历史重复查询正式 `bills` 时保持 user-scope，并以 `import_standard_rows` 的日期窗口限制候选；命中还需要金额方向和文本证据，之后生成 `database_duplicate` 预览行、`reconciliation.planned_operation=update_history` feedback 和 `import_history_materializations`。confirm 必须校验 selected preview ids、operation id、history bill id/version、acknowledgement token 和可见“将改写/合并历史账单”标记，验证通过后在事务中更新历史账单并写入 `import_confirm_operations`。
+- 历史转账同样保持 user-scope 和 standard-row 日期窗口，以同日时间容差、同额反向金额和不同来源命中正式账单；stage2 生成 `transfer_cross_batch` 预览行、`reconciliation.planned_operation=merge_transfer_history` feedback、`import_history_materializations` 和 `historical_transfer` decision group。confirm ack 通过后会更新历史支出侧或创建转账基底并删除被合并历史收入侧，移动历史标签、清理 matching suppression 残留并同步账户余额。
 - Check Data 首屏只读取 preview page；筛选、排序、计数和批量选择都由 Rust preview page/query/update 处理。
 - transfer、learning、recurring、dedup、parser、annotation、reconciliation 信号从 `preview_matching_feedback_json` 投影，缺分类/缺账户状态按当前预览字段动态计算；stage2 账户识别以 `account_rules` 为权威，转账使用隐藏支出/收入侧字段分别匹配来源/目标账户，投资使用 parser/支付方式匹配来源账户并按交易对方优先、描述兜底匹配投资账户，收入/支出只匹配当前类型账户规则；旧账户别名仅作为规则迁移输入。
 - confirm 在事务内写正式 bills、tags、accounts、learning side effects；cancel 和失败后新建 session 清理 staging，不保留导入续传状态。
