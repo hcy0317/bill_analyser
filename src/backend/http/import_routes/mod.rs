@@ -17,22 +17,28 @@ use axum::{
 };
 use base64::{engine::general_purpose, Engine as _};
 use bill_analyser_core::{
-    account_rules::AccountRuleCandidate, attach_import_preview_matching_payload,
-    build_composite_match_features, build_import_preview_filter_index_item,
-    build_learning_rule_result_summary, build_llm_candidate_list_response,
-    build_llm_candidate_reject_response, build_llm_classification_prompt,
-    build_llm_config_get_response, build_llm_contract_error_response,
-    build_llm_import_preview_recommendation_prompt, build_llm_provider_config,
-    build_llm_rule_expression_synthesis_prompt, build_llm_rule_induction_prompt,
-    build_ocr_config_success_response, build_ocr_error_response,
+    account_rules::{
+        match_account_rules, AccountRuleCandidate, AccountRuleMatch, AccountRuleMatchContext,
+        ACCOUNT_ROLE_DESTINATION, ACCOUNT_ROLE_INVESTMENT, ACCOUNT_ROLE_SOURCE,
+        TRANSACTION_SCOPE_EXPENSE, TRANSACTION_SCOPE_INCOME, TRANSACTION_SCOPE_INVESTMENT,
+        TRANSACTION_SCOPE_TRANSFER,
+    },
+    attach_import_preview_matching_payload, build_composite_match_features,
+    build_import_preview_filter_index_item, build_learning_rule_result_summary,
+    build_llm_candidate_list_response, build_llm_candidate_reject_response,
+    build_llm_classification_prompt, build_llm_config_get_response,
+    build_llm_contract_error_response, build_llm_import_preview_recommendation_prompt,
+    build_llm_provider_config, build_llm_rule_expression_synthesis_prompt,
+    build_llm_rule_induction_prompt, build_ocr_config_success_response, build_ocr_error_response,
     build_ocr_recognition_success_response_with_context, build_unknown_ocr_provider_response,
-    category_rules::match_rule_expression, coerce_preview_selected_value,
-    composite_hash_from_features, copy_runtime_llm_config, find_import_reconciliation_candidates,
-    import_preview_index_success, import_preview_page_success,
-    import_session_cancel_missing_response, import_session_cancel_success_response,
-    import_session_not_found_response, import_session_success, import_stage_confirm_success,
-    import_stage_dedup_success, import_stage_parse_success, import_v2_data_response,
-    import_v2_error_response, normalize_import_preview_page_query, normalize_provider_auth_config,
+    category_rules::match_rule_expression,
+    coerce_preview_selected_value, composite_hash_from_features, copy_runtime_llm_config,
+    find_import_reconciliation_candidates, import_preview_index_success,
+    import_preview_page_success, import_session_cancel_missing_response,
+    import_session_cancel_success_response, import_session_not_found_response,
+    import_session_success, import_stage_confirm_success, import_stage_dedup_success,
+    import_stage_parse_success, import_v2_data_response, import_v2_error_response,
+    normalize_import_preview_page_query, normalize_provider_auth_config,
     parse_llm_json_array_response, preview_state_conflict_response, provider_auth_access_token,
     provider_auth_has_refresh_credential, provider_auth_is_expired, provider_auth_refresh_token,
     render_llm_prompt_template, safe_llm_config_payload, score_learning_rule_similarity,
@@ -401,6 +407,7 @@ pub fn import_runtime_router() -> Router<HttpAppState> {
 
 include!("legacy_handlers.rs");
 include!("stage_handlers.rs");
+include!("stage_account_rule_matchers.rs");
 include!("duplicate_materialization.rs");
 include!("transfer_materialization.rs");
 include!("llm_handlers.rs");

@@ -455,7 +455,7 @@ fn apply_import_intelligence_chain(
     let category_rules =
         load_import_intelligence_category_rules(connection, user_id_i64, &categories_by_id)?;
     let accounts = load_import_intelligence_accounts(connection, user_id_i64)?;
-    let _account_rules = load_import_intelligence_account_rules(connection, user_id_i64)?;
+    let account_rules = load_import_intelligence_account_rules(connection, user_id_i64)?;
     let account_values = accounts
         .iter()
         .map(|account| json!({"id": account.id, "name": account.name}))
@@ -467,16 +467,29 @@ fn apply_import_intelligence_chain(
     let mut applied_learning_rule_ids = Vec::new();
     for draft in &mut *drafts {
         ensure_base_matching_feedback(draft);
-        if apply_category_rule_match(draft, &category_rules)
-            || apply_builtin_category_rule_fallback(draft, &categories)
-        {
+        if is_transfer_protected_preview(draft) {
+            if apply_transfer_category_rule_match(draft, &category_rules)
+                || apply_transfer_default_category(draft, &categories, default_transfer_category)
+            {
+                stats.category_matched += 1;
+            }
+            if apply_transfer_account_rule_match(draft, &account_rules, &accounts) {
+                stats.account_matched += 1;
+            }
+        } else if apply_investment_category_rule_match(draft, &category_rules) {
             stats.category_matched += 1;
-        }
-        if apply_transfer_pair_account_match(draft, &accounts) {
-            stats.account_matched += 1;
-        }
-        if apply_account_alias_match(draft, &accounts) {
-            stats.account_matched += 1;
+            if apply_investment_account_rule_match(draft, &account_rules, &accounts) {
+                stats.account_matched += 1;
+            }
+        } else {
+            if apply_income_expense_category_rule_match(draft, &category_rules)
+                || apply_builtin_category_rule_fallback(draft, &categories)
+            {
+                stats.category_matched += 1;
+            }
+            if apply_standard_account_rule_match(draft, &account_rules, &accounts) {
+                stats.account_matched += 1;
+            }
         }
         persist_stage2_actionable_baseline(draft);
         if let Some(applied_rule_id) = apply_learning_rule_match(
@@ -488,9 +501,6 @@ fn apply_import_intelligence_chain(
         ) {
             stats.learning_applied += 1;
             applied_learning_rule_ids.push(applied_rule_id);
-        }
-        if apply_transfer_default_category(draft, &categories, default_transfer_category) {
-            stats.category_matched += 1;
         }
         if let Some(candidate) = best_recurring_candidate_for_draft(draft, &recurring_templates) {
             apply_recurring_candidate(draft, candidate);
@@ -902,15 +912,68 @@ fn matching_feedback_object_mut(draft: &mut ImportPreviewDraft) -> &mut Map<Stri
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+#[cfg(test)]
 fn apply_category_rule_match(
     draft: &mut ImportPreviewDraft,
     rules: &[ImportIntelligenceRule],
 ) -> bool {
     let combined_text = import_preview_rule_text(draft);
+    apply_category_rule_match_filtered(draft, rules, &combined_text, |rule, draft| {
+        category_type_matches_preview(rule.category_type, &draft.preview_type)
+    })
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+fn apply_transfer_category_rule_match(
+    draft: &mut ImportPreviewDraft,
+    rules: &[ImportIntelligenceRule],
+) -> bool {
+    let combined_text = import_preview_transfer_rule_text(draft);
+    apply_category_rule_match_filtered(draft, rules, &combined_text, |rule, _| {
+        rule.category_type == 4
+    })
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+fn apply_investment_category_rule_match(
+    draft: &mut ImportPreviewDraft,
+    rules: &[ImportIntelligenceRule],
+) -> bool {
+    let combined_text = import_preview_visible_rule_text(draft);
+    apply_category_rule_match_filtered(draft, rules, &combined_text, |rule, _| {
+        rule.category_type == 5
+    })
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+fn apply_income_expense_category_rule_match(
+    draft: &mut ImportPreviewDraft,
+    rules: &[ImportIntelligenceRule],
+) -> bool {
+    let Some(expected_type) = preview_type_code(&draft.preview_type).filter(|value| {
+        matches!(*value, 2 | 3)
+    }) else {
+        return false;
+    };
+    let combined_text = import_preview_rule_text(draft);
+    apply_category_rule_match_filtered(draft, rules, &combined_text, |rule, _| {
+        rule.category_type == expected_type
+    })
+}
+
+fn apply_category_rule_match_filtered<F>(
+    draft: &mut ImportPreviewDraft,
+    rules: &[ImportIntelligenceRule],
+    combined_text: &str,
+    mut rule_filter: F,
+) -> bool
+where
+    F: FnMut(&ImportIntelligenceRule, &ImportPreviewDraft) -> bool,
+{
     for rule in rules {
         if rule.rule_expression.trim().is_empty()
-            || !category_type_matches_preview(rule.category_type, &draft.preview_type)
-            || !match_rule_expression(&combined_text, &rule.rule_expression, rule.regex_enabled)
+            || !rule_filter(rule, draft)
+            || !match_rule_expression(combined_text, &rule.rule_expression, rule.regex_enabled)
         {
             continue;
         }
@@ -1014,32 +1077,6 @@ fn find_import_intelligence_category<'a>(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn apply_account_alias_match(
-    draft: &mut ImportPreviewDraft,
-    accounts: &[ImportIntelligenceAccount],
-) -> bool {
-    if draft.preview_source_account_id.is_some() {
-        return false;
-    }
-    let tokens = import_preview_account_tokens(draft);
-    let Some(account) = accounts.iter().find(|account| account_matches_tokens(account, &tokens))
-    else {
-        return false;
-    };
-    draft.preview_source_account_id = Some(account.id);
-    matching_feedback_object_mut(draft).insert(
-        "account".to_string(),
-        json!({
-            "source_account_id": account.id,
-            "source_account_name": account.name,
-            "reason": "account alias matched parser payment method",
-            "review_status": "auto_applied",
-        }),
-    );
-    true
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
 fn persist_stage2_actionable_baseline(draft: &mut ImportPreviewDraft) {
     let snapshot = import_preview_stage2_snapshot(draft);
 
@@ -1078,6 +1115,7 @@ fn import_preview_transfer_applied_snapshot(draft: &ImportPreviewDraft) -> Value
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+#[cfg(test)]
 fn apply_transfer_pair_account_match(
     draft: &mut ImportPreviewDraft,
     accounts: &[ImportIntelligenceAccount],
@@ -1173,6 +1211,7 @@ fn transfer_chain_entry_for_roles<'a>(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+#[cfg(test)]
 fn resolve_transfer_account_from_entry(
     entry: &Value,
     accounts: &[ImportIntelligenceAccount],
@@ -1210,6 +1249,7 @@ fn resolve_transfer_account_from_entry(
         .map(|account| account.id)
 }
 
+#[cfg(test)]
 fn transfer_account_id_from_value(value: &Value) -> Option<i64> {
     if let Some(number) = value.as_i64() {
         return (number > 0).then_some(number);
@@ -1217,6 +1257,7 @@ fn transfer_account_id_from_value(value: &Value) -> Option<i64> {
     value.as_str().and_then(|text| text.trim().parse::<i64>().ok().filter(|value| *value > 0))
 }
 
+#[cfg(test)]
 fn transfer_account_tokens_from_entry(entry: &Value) -> Vec<String> {
     let mut tokens = Vec::new();
     for field in [
@@ -1244,6 +1285,7 @@ fn transfer_account_tokens_from_entry(entry: &Value) -> Vec<String> {
     tokens
 }
 
+#[cfg(test)]
 fn expand_transfer_account_token(value: &str) -> Vec<String> {
     let normalized = normalize_account_match_text(value);
     if normalized.is_empty() {
@@ -1764,6 +1806,19 @@ fn import_preview_rule_text(draft: &ImportPreviewDraft) -> String {
         .join(" ")
 }
 
+fn import_preview_visible_rule_text(draft: &ImportPreviewDraft) -> String {
+    [
+        draft.preview_counterparty.clone(),
+        draft.preview_payment_method.clone(),
+        draft.preview_description.clone(),
+    ]
+    .into_iter()
+    .map(|value| value.trim().to_string())
+    .filter(|value| !value.is_empty())
+    .collect::<Vec<_>>()
+    .join(" ")
+}
+
 fn category_type_matches_preview(category_type: i64, preview_type: &str) -> bool {
     if matches!(category_type, 0 | 1) {
         return true;
@@ -1817,14 +1872,21 @@ fn import_preview_account_tokens(draft: &ImportPreviewDraft) -> Vec<String> {
             let normalized = normalize_account_match_text(&token);
             [
                 normalized.clone(),
-                normalized.strip_prefix("parser:").unwrap_or(&normalized).to_string(),
-                normalized.strip_prefix("channel:").unwrap_or(&normalized).to_string(),
+                normalized
+                    .strip_prefix("parser:")
+                    .unwrap_or(&normalized)
+                    .to_string(),
+                normalized
+                    .strip_prefix("channel:")
+                    .unwrap_or(&normalized)
+                    .to_string(),
             ]
         })
         .filter(|token| !token.is_empty())
         .collect()
 }
 
+#[cfg(test)]
 fn account_matches_tokens(account: &ImportIntelligenceAccount, tokens: &[String]) -> bool {
     account.aliases.iter().any(|alias| {
         let alias = normalize_account_match_text(alias);
@@ -1835,6 +1897,7 @@ fn account_matches_tokens(account: &ImportIntelligenceAccount, tokens: &[String]
     })
 }
 
+#[cfg(test)]
 fn account_exactly_matches_tokens(account: &ImportIntelligenceAccount, tokens: &[String]) -> bool {
     account.aliases.iter().any(|alias| {
         let alias = normalize_account_match_text(alias);

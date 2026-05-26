@@ -2267,7 +2267,7 @@ async fn import_db_runtime_stage2_learning_does_not_override_transfer_pair_type(
 }
 
 #[tokio::test]
-async fn import_db_runtime_stage2_prefers_exact_transfer_account_aliases_over_fuzzy_names(
+async fn import_db_runtime_stage2_uses_transfer_account_rules_over_fuzzy_names(
 ) -> Result<(), Box<dyn Error>> {
     let fixture = RuntimeFixture::new().await?;
     let mut runtime = runtime_for(fixture.db_path())?;
@@ -2284,6 +2284,15 @@ async fn import_db_runtime_stage2_prefers_exact_transfer_account_aliases_over_fu
          VALUES
          (42, 42, '民生银行', '[\"网络银行\", \"民生银行\"]', 0),
          (312, 42, '支付宝', '[\"余额宝\", \"Alipay\", \"alipay\"]', 0)",
+        [],
+    )?;
+    runtime.connection().execute(
+        "INSERT INTO account_rules(
+             id, user_id, account_id, rule_expression, enabled, priority,
+             account_role_scope, transaction_type_scope, field_scope
+         ) VALUES
+             (8201, 42, 42, 'OR={网络银行}', 1, 1, 'source', 'transfer', '[\"expense_payment_method\"]'),
+             (8202, 42, 312, 'OR={alipay}', 1, 1, 'destination', 'transfer', '[\"parser\"]')",
         [],
     )?;
     let session_id = "session-stage2-transfer-exact-account-alias";
@@ -5989,6 +5998,18 @@ fn seed_import_intelligence_tables(runtime: &SqliteRuntime) -> Result<(), Box<dy
             created_at TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT ''
         );
+        CREATE TABLE IF NOT EXISTS account_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            account_id INTEGER NOT NULL,
+            rule_expression TEXT NOT NULL,
+            regex_enabled INTEGER DEFAULT 0,
+            enabled INTEGER DEFAULT 1,
+            priority INTEGER DEFAULT 100,
+            account_role_scope TEXT DEFAULT 'any',
+            transaction_type_scope TEXT DEFAULT 'all',
+            field_scope TEXT DEFAULT '[\"counterparty\",\"payment_method\",\"description\"]'
+        );
         CREATE TABLE IF NOT EXISTS import_learning_rules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL DEFAULT 1,
@@ -6049,6 +6070,14 @@ fn seed_import_intelligence_tables(runtime: &SqliteRuntime) -> Result<(), Box<dy
          VALUES
          (1001, 42, '支付宝账户', '[\"alipay\",\"支付宝\",\"支付宝余额\"]'),
          (1002, 42, '微信账户', '[\"wechat\",\"微信\",\"微信支付\"]')",
+        [],
+    )?;
+    runtime.connection().execute(
+        "INSERT INTO account_rules(
+             id, user_id, account_id, rule_expression, enabled, priority,
+             account_role_scope, transaction_type_scope, field_scope
+         ) VALUES
+             (8001, 42, 1001, 'OR={alipay,支付宝余额}', 1, 1, 'source', 'expense', '[\"parser\",\"payment_method\"]')",
         [],
     )?;
     runtime.connection().execute(

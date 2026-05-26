@@ -57,7 +57,20 @@ mod stage_handler_transfer_account_tests {
     }
 
     #[test]
-    fn account_rule_shadow_loader_reads_enabled_rules_without_cutting_over_alias_match() {
+    fn import_preview_account_tokens_expand_parser_and_channel_prefixes() {
+        let draft = ImportPreviewDraft {
+            preview_parser_tags: Some(json!(["parser:abc", "channel:wallet"])),
+            ..ImportPreviewDraft::default()
+        };
+
+        let tokens = import_preview_account_tokens(&draft);
+
+        assert!(tokens.iter().any(|token| token == "abc"));
+        assert!(tokens.iter().any(|token| token == "wallet"));
+    }
+
+    #[test]
+    fn account_rule_loader_reads_enabled_rules_for_import_cutover() {
         let connection = Connection::open_in_memory().expect("open");
         connection
             .execute_batch(
@@ -321,56 +334,24 @@ mod stage_handler_transfer_account_tests {
     }
 
     #[test]
-    fn transfer_pair_account_match_runs_before_generic_alias_match_in_chain() -> rusqlite::Result<()>
-    {
-        let mut connection = Connection::open_in_memory()?;
-        connection.execute_batch(
-            "
-            CREATE TABLE accounts (
-                id INTEGER PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                aliases TEXT,
-                hidden INTEGER DEFAULT 0
-            );
-            INSERT INTO accounts(id, user_id, name, aliases, hidden)
-            VALUES
-                (1, 42, '零钱', '[\"微信钱包\", \"wallet\"]', 0),
-                (100, 42, '工资卡', '[\"农业银行\", \"abc\"]', 0);
-            ",
-        )?;
-        let mut drafts = vec![ImportPreviewDraft {
-            preview_parser_id: "wechat".to_string(),
-            preview_payment_method: "微信钱包".to_string(),
-            preview_parser_tags: Some(json!(["parser:abc", "parser:wechat", "channel:wallet"])),
-            preview_matching_feedback: json!({
-                "transfer": {
-                    "pair_order": "outgoing_first",
-                    "source_chain": [
-                        {
-                            "role": "outgoing",
-                            "parser_id": "abc",
-                            "payment_method": "农业银行",
-                            "account_name": "工资卡",
-                            "source_account_id": "abc"
-                        },
-                        {
-                            "role": "incoming",
-                            "payment_method": "微信钱包",
-                            "account_name": "零钱",
-                            "source_account_id": "wallet"
-                        }
-                    ]
-                }
-            }),
+    fn income_expense_category_rule_skips_unknown_preview_type() {
+        let mut draft = ImportPreviewDraft {
+            preview_type: "未知".to_string(),
+            preview_counterparty: "公司".to_string(),
             ..ImportPreviewDraft::default()
+        };
+        let rules = vec![ImportIntelligenceRule {
+            id: 1,
+            category_id: 1,
+            category_type: 2,
+            main_category: "工资".to_string(),
+            sub_category: "月薪".to_string(),
+            priority: 1,
+            rule_expression: "公司".to_string(),
+            regex_enabled: false,
         }];
 
-        apply_import_intelligence_chain(&mut connection, UserId::new(42).unwrap(), &mut drafts)?;
-
-        assert_eq!(drafts[0].preview_source_account_id, Some(100));
-        assert_eq!(drafts[0].preview_destination_account_id, Some(1));
-        Ok(())
+        assert!(!apply_income_expense_category_rule_match(&mut draft, &rules));
     }
 
     #[test]
