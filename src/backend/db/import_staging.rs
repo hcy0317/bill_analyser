@@ -20,6 +20,7 @@ const LLM_MEMORY_PROMPT_TEXT_MAX_BYTES: usize = 16_384;
 // 与 confirm 分片。路由层可以编排这些函数，但 staging 生命周期和 row mapping
 // 必须继续留在这些 include 分片中。
 include!("import_staging/types.rs");
+include!("import_staging/ledger_types.rs");
 include!("import_staging/schema_sessions.rs");
 include!("import_staging/preview_reads.rs");
 include!("import_staging/parser_templates.rs");

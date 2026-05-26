@@ -1,7 +1,8 @@
 use bill_analyser_parsers::{
-    aggregate_description, build_parser_tags, normalize_amount_text, normalize_parser_tags,
-    normalize_transaction_type, parse_dedicated_import_bytes, parser_registry, parser_source_label,
-    post_process_raw_bills, resolve_parser_tags, serialize_parser_tags, RawBill, StandardBill,
+    aggregate_description, build_parser_tags, detect_dedicated_import_bytes, normalize_amount_text,
+    normalize_parser_tags, normalize_transaction_type, parse_dedicated_import_bytes,
+    parser_registry, parser_source_label, post_process_raw_bills, resolve_parser_tags,
+    serialize_parser_tags, RawBill, StandardBill,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -329,6 +330,54 @@ fn dedicated_rust_parser_rejects_generic_csv_fixture() {
     let bytes = std::fs::read(import_sample_path(filename)).expect("fixture reads");
 
     assert!(parse_dedicated_import_bytes(filename, &bytes, "auto").is_none());
+}
+
+#[test]
+fn dedicated_parser_detector_records_exactly_one_no_match_and_conflict_evidence() {
+    let wechat_bytes =
+        std::fs::read(import_sample_path("wechat_statement_sample.csv")).expect("fixture reads");
+    let matched =
+        detect_dedicated_import_bytes("wechat_statement_sample.csv", &wechat_bytes, "auto");
+    assert_eq!(matched.status, "matched");
+    assert_eq!(matched.selected_parser_id.as_deref(), Some("wechat"));
+    assert_eq!(matched.candidates.len(), 1);
+    assert_eq!(matched.candidates[0].parser_id, "wechat");
+    assert_eq!(matched.candidates[0].parser_label, "微信");
+    assert_eq!(matched.candidates[0].parsed_count, 7);
+    assert!(matched.candidates[0]
+        .evidence
+        .iter()
+        .any(|item| item == "parsed_count=7"));
+
+    let generic_bytes =
+        std::fs::read(import_sample_path("generic_statement_sample.csv")).expect("fixture reads");
+    let no_match =
+        detect_dedicated_import_bytes("generic_statement_sample.csv", &generic_bytes, "auto");
+    assert_eq!(no_match.status, "no_match");
+    assert!(no_match.selected_parser_id.is_none());
+    assert!(no_match.candidates.is_empty());
+
+    let conflict_csv = "\
+交易日期,交易金额,对手信息,对方户名,对方账号
+2026-05-04,12.34,张三,张三,6222000000000000
+";
+    let conflict =
+        detect_dedicated_import_bytes("ambiguous-bank.csv", conflict_csv.as_bytes(), "auto");
+    assert_eq!(conflict.status, "conflict");
+    assert!(conflict.selected_parser_id.is_none());
+    assert_eq!(
+        conflict
+            .candidates
+            .iter()
+            .map(|candidate| candidate.parser_id.as_str())
+            .collect::<Vec<_>>(),
+        ["icbc", "abc"]
+    );
+    assert_eq!(conflict.conflict_group, ["icbc", "abc"]);
+    assert!(
+        parse_dedicated_import_bytes("ambiguous-bank.csv", conflict_csv.as_bytes(), "auto")
+            .is_none()
+    );
 }
 
 #[test]

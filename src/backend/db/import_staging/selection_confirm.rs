@@ -207,6 +207,7 @@ pub fn clear_session_data(
     tracing::info!(domain = "import_parser", operation = "clear_session_data", "business operation entered");
     run_transaction(connection, |tx| {
         let user_id = user_id_i64(user_id)?;
+        delete_import_ledger_for_session(tx, session_id, user_id)?;
         let parser_count = tx.execute(
             "DELETE FROM bills_parser_template WHERE session_id = ?1 AND user_id = ?2",
             params![session_id, user_id],
@@ -230,6 +231,36 @@ pub fn clear_session_data(
             session_count,
         })
     })
+}
+
+fn delete_import_ledger_for_session(
+    connection: &Connection,
+    session_id: &str,
+    user_id: i64,
+) -> DbResult<()> {
+    connection.execute(
+        "
+        DELETE FROM import_decision_group_members
+        WHERE group_id IN (
+            SELECT id FROM import_decision_groups
+            WHERE session_id = ?1 AND user_id = ?2
+        )
+        ",
+        params![session_id, user_id],
+    )?;
+    connection.execute(
+        "DELETE FROM import_decision_groups WHERE session_id = ?1 AND user_id = ?2",
+        params![session_id, user_id],
+    )?;
+    connection.execute(
+        "DELETE FROM import_standard_rows WHERE session_id = ?1 AND user_id = ?2",
+        params![session_id, user_id],
+    )?;
+    connection.execute(
+        "DELETE FROM import_sources WHERE session_id = ?1 AND user_id = ?2",
+        params![session_id, user_id],
+    )?;
+    Ok(())
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -313,6 +344,7 @@ pub fn confirm_preview_to_bills(
             }
         }
 
+        delete_import_ledger_for_session(tx, session_id, user_id)?;
         tx.execute(
             "DELETE FROM import_annotation_samples WHERE session_id = ?1 AND user_id = ?2",
             params![session_id, user_id],

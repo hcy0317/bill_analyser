@@ -409,6 +409,10 @@ fn stage_envelopes_and_matching_payload_pin_pipeline_wire_contracts() {
         ]
     );
     assert!(IMPORT_STAGING_TABLES.contains(&"import_sessions"));
+    assert!(IMPORT_STAGING_TABLES.contains(&"import_sources"));
+    assert!(IMPORT_STAGING_TABLES.contains(&"import_standard_rows"));
+    assert!(IMPORT_STAGING_TABLES.contains(&"import_decision_groups"));
+    assert!(IMPORT_STAGING_TABLES.contains(&"import_decision_group_members"));
     assert!(IMPORT_STAGING_TABLES.contains(&"bills_parser_template"));
     assert!(IMPORT_STAGING_TABLES.contains(&"bills_preview"));
     assert!(BILLS_PREVIEW_CONTRACT_FIELDS.contains(&"preview_parser_tags_json"));

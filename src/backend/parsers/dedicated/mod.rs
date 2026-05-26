@@ -2,7 +2,9 @@
 // 维护重点：只保留来源识别、字段清洗和 parser_tags，不写入导入 staging、分类、账户或数据库。
 // 不变式：解析结果的金额、时间、类型和来源标签必须在进入导入管线前保持可复核的原始来源语义。
 
-use crate::StandardBill;
+use serde::Serialize;
+
+use crate::{parser_source_label, StandardBill};
 
 mod common;
 
@@ -24,6 +26,32 @@ pub struct DedicatedParseResult {
     pub parser_id: String,
     pub bills: Vec<StandardBill>,
     pub delimiter: Option<char>,
+    pub decision: DedicatedParserDecision,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DedicatedParseSelectionResult {
+    pub decision: DedicatedParserDecision,
+    pub parsed: Option<DedicatedParseResult>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DedicatedParserDecision {
+    pub requested_parser: String,
+    pub status: String,
+    pub selected_parser_id: Option<String>,
+    pub candidates: Vec<DedicatedParserCandidate>,
+    pub conflict_group: Vec<String>,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DedicatedParserCandidate {
+    pub parser_id: String,
+    pub parser_label: String,
+    pub confidence: f64,
+    pub parsed_count: usize,
+    pub evidence: Vec<String>,
 }
 
 struct DedicatedParser {
@@ -58,6 +86,25 @@ const AUTO_PARSERS: &[DedicatedParser] = &[
     },
 ];
 
+struct DedicatedParserMatch {
+    candidate: DedicatedParserCandidate,
+    bills: Vec<StandardBill>,
+}
+
+struct DedicatedParserSelection {
+    decision: DedicatedParserDecision,
+    selected: Option<DedicatedParserMatch>,
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+pub fn detect_dedicated_import_bytes(
+    filename: &str,
+    bytes: &[u8],
+    requested_parser: &str,
+) -> DedicatedParserDecision {
+    select_dedicated_import_bytes(filename, bytes, requested_parser).decision
+}
+
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_dedicated_import_bytes(
     filename: &str,
@@ -70,24 +117,63 @@ pub fn parse_dedicated_import_bytes(
         operation = "parse_dedicated_import_bytes",
         "business operation entered"
     );
+    parse_dedicated_import_bytes_with_decision(filename, bytes, requested_parser).parsed
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+pub fn parse_dedicated_import_bytes_with_decision(
+    filename: &str,
+    bytes: &[u8],
+    requested_parser: &str,
+) -> DedicatedParseSelectionResult {
+    let selection = select_dedicated_import_bytes(filename, bytes, requested_parser);
+    let decision = selection.decision;
+    let parsed = selection.selected.map(|selected| DedicatedParseResult {
+        parser_id: selected.candidate.parser_id,
+        bills: selected.bills,
+        delimiter: None,
+        decision: decision.clone(),
+    });
+    DedicatedParseSelectionResult { decision, parsed }
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+fn select_dedicated_import_bytes(
+    filename: &str,
+    bytes: &[u8],
+    requested_parser: &str,
+) -> DedicatedParserSelection {
     let requested = requested_parser.trim().to_ascii_lowercase();
     if matches!(
         requested.as_str(),
         "generic" | "csv" | "xlsx" | "xls" | "txt"
     ) {
-        return None;
+        return DedicatedParserSelection {
+            decision: no_match_decision(
+                requested,
+                "Requested parser is generic or column-mapped and is not a dedicated parser",
+            ),
+            selected: None,
+        };
     }
 
-    if requested.is_empty() || requested == "auto" {
-        return AUTO_PARSERS
+    let matches = if requested.is_empty() || requested == "auto" {
+        AUTO_PARSERS
             .iter()
-            .find_map(|parser| parse_with_parser(parser, filename, bytes));
-    }
+            .filter_map(|parser| parse_with_parser(parser, filename, bytes))
+            .collect::<Vec<_>>()
+    } else if let Some(parser) = AUTO_PARSERS.iter().find(|parser| parser.id == requested) {
+        parse_with_parser(parser, filename, bytes)
+            .into_iter()
+            .collect::<Vec<_>>()
+    } else {
+        return DedicatedParserSelection {
+            decision: no_match_decision(requested, "Requested parser is not registered"),
+            selected: None,
+        };
+    };
 
-    AUTO_PARSERS
-        .iter()
-        .find(|parser| parser.id == requested)
-        .and_then(|parser| parse_with_parser(parser, filename, bytes))
+    dedicated_selection_from_matches(requested, matches)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -95,15 +181,102 @@ fn parse_with_parser(
     parser: &DedicatedParser,
     filename: &str,
     bytes: &[u8],
-) -> Option<DedicatedParseResult> {
+) -> Option<DedicatedParserMatch> {
     let bills = (parser.parse)(filename, bytes);
     if bills.is_empty() {
         None
     } else {
-        Some(DedicatedParseResult {
-            parser_id: parser.id.to_string(),
+        Some(DedicatedParserMatch {
+            candidate: DedicatedParserCandidate {
+                parser_id: parser.id.to_string(),
+                parser_label: parser_source_label(parser.id).into_owned(),
+                confidence: 1.0,
+                parsed_count: bills.len(),
+                evidence: parser_evidence(parser.id, &bills),
+            },
             bills,
-            delimiter: None,
         })
     }
+}
+
+fn dedicated_selection_from_matches(
+    requested: String,
+    mut matches: Vec<DedicatedParserMatch>,
+) -> DedicatedParserSelection {
+    match matches.len() {
+        0 => DedicatedParserSelection {
+            decision: no_match_decision(
+                requested,
+                "No dedicated Rust parser matched the uploaded file",
+            ),
+            selected: None,
+        },
+        1 => {
+            let selected = matches.remove(0);
+            DedicatedParserSelection {
+                decision: DedicatedParserDecision {
+                    requested_parser: requested,
+                    status: "matched".to_string(),
+                    selected_parser_id: Some(selected.candidate.parser_id.clone()),
+                    candidates: vec![selected.candidate.clone()],
+                    conflict_group: Vec::new(),
+                    reason: "Exactly one dedicated Rust parser matched the uploaded file"
+                        .to_string(),
+                },
+                selected: Some(selected),
+            }
+        }
+        _ => {
+            let candidates = matches
+                .into_iter()
+                .map(|candidate_match| candidate_match.candidate)
+                .collect::<Vec<_>>();
+            DedicatedParserSelection {
+                decision: DedicatedParserDecision {
+                    requested_parser: requested,
+                    status: "conflict".to_string(),
+                    selected_parser_id: None,
+                    conflict_group: candidates
+                        .iter()
+                        .map(|candidate| candidate.parser_id.clone())
+                        .collect(),
+                    candidates,
+                    reason: "Multiple dedicated Rust parsers matched the uploaded file".to_string(),
+                },
+                selected: None,
+            }
+        }
+    }
+}
+
+fn no_match_decision(requested_parser: String, reason: &str) -> DedicatedParserDecision {
+    DedicatedParserDecision {
+        requested_parser,
+        status: "no_match".to_string(),
+        selected_parser_id: None,
+        candidates: Vec::new(),
+        conflict_group: Vec::new(),
+        reason: reason.to_string(),
+    }
+}
+
+fn parser_evidence(parser_id: &str, bills: &[StandardBill]) -> Vec<String> {
+    let mut evidence = vec![
+        format!("parsed_count={}", bills.len()),
+        format!("parser_label={}", parser_source_label(parser_id)),
+    ];
+    if bills.iter().any(|bill| {
+        bill.parser_tags
+            .iter()
+            .any(|tag| tag == &format!("parser:{parser_id}"))
+    }) {
+        evidence.push(format!("parser_tag=parser:{parser_id}"));
+    }
+    if bills.iter().any(|bill| !bill.date.trim().is_empty()) {
+        evidence.push("has_transaction_time=true".to_string());
+    }
+    if bills.iter().any(|bill| bill.amount.to_cents() != 0) {
+        evidence.push("has_amount=true".to_string());
+    }
+    evidence
 }

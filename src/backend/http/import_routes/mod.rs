@@ -57,7 +57,7 @@ use bill_analyser_db::{
     parser_template_draft_from_standard_bill, preview_drafts_from_dedup_bills,
     query_preview_page_by_session, reject_llm_candidate, replace_preview_selection_with_patches,
     reset_session_preview_selection, review_preview_llm_recommendation,
-    save_import_annotation_samples, set_app_setting, stage_import_parser_templates,
+    save_import_annotation_samples, set_app_setting, stage_import_parser_templates_with_sources,
     store_ocr_config_setting, update_import_session_status, update_llm_config, update_preview_bill,
     update_preview_bills_batch, update_preview_recurring_match_decision, update_preview_selection,
     update_session_preview_selection_by_query, AppSettingDraft, ImportAnnotationSampleDraft,
@@ -66,11 +66,12 @@ use bill_analyser_db::{
     ImportPreviewLlmSuggestion, ImportPreviewPageRequest, ImportPreviewPatch,
     ImportPreviewPatchField, ImportPreviewPatchValue, ImportPreviewQueryFilters,
     ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate, ImportPreviewRow,
-    ImportSessionDraft, ImportSessionStatusUpdate, LlmCandidateDraft, LlmConfigDraft,
-    LlmConfigUpdate, SqliteRuntime,
+    ImportSessionDraft, ImportSessionStatusUpdate, ImportSourceDraft, ImportStandardRowDraft,
+    LlmCandidateDraft, LlmConfigDraft, LlmConfigUpdate, SqliteRuntime,
 };
 use bill_analyser_parsers::{
-    parse_dedicated_import_bytes, post_process_raw_bills, RawBill, StandardBill,
+    parse_dedicated_import_bytes, parse_dedicated_import_bytes_with_decision, parser_source_label,
+    post_process_raw_bills, DedicatedParserDecision, RawBill, StandardBill,
 };
 use bytes::{Bytes, BytesMut};
 use chrono::{NaiveDate, Utc};
@@ -78,6 +79,7 @@ use encoding_rs::GBK;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     env, fs, io,
@@ -395,6 +397,7 @@ include!("stage_handlers.rs");
 include!("llm_handlers.rs");
 include!("ocr_learning_handlers.rs");
 include!("response_payload.rs");
+include!("response_payload_ledger.rs");
 include!("multipart_and_ocr.rs");
 include!("parser_mapping.rs");
 include!("legacy_import_helpers.rs");

@@ -28,6 +28,23 @@ const INSERT_PARSER_TEMPLATE_SQL: &str = "
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, '0', ?14)
         ";
 
+const INSERT_IMPORT_SOURCE_SQL: &str = "
+        INSERT INTO import_sources (
+            session_id, user_id, source_index, original_file_name,
+            parser_id, parser_name, parser_signal, parser_confidence,
+            feature_signature, metadata_json, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)
+        ";
+
+const INSERT_IMPORT_STANDARD_ROW_SQL: &str = "
+        INSERT INTO import_standard_rows (
+            session_id, source_id, user_id, source_row_index,
+            occurred_at, amount_cents, direction, transaction_type,
+            merchant, payment_method, description,
+            parser_payload_json, standard_payload_json, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14)
+        ";
+
 #[tracing::instrument(level = "debug", skip_all)]
 fn insert_preview_bill_on_connection(
     connection: &Connection,
@@ -149,6 +166,56 @@ fn insert_parser_template_with_statement(
             created_at,
         ],
     )?;
+    Ok(())
+}
+
+fn insert_import_source_with_statement(
+    statement: &mut rusqlite::Statement<'_>,
+    session_id: &str,
+    user_id: i64,
+    draft: &ImportSourceDraft,
+    created_at: &str,
+) -> DbResult<()> {
+    statement.execute(params![
+        session_id,
+        user_id,
+        draft.source_index,
+        draft.original_file_name,
+        draft.parser_id,
+        draft.parser_name,
+        draft.parser_signal,
+        draft.parser_confidence,
+        draft.feature_signature,
+        draft.metadata.to_string(),
+        created_at,
+    ])?;
+    Ok(())
+}
+
+fn insert_import_standard_row_with_statement(
+    statement: &mut rusqlite::Statement<'_>,
+    session_id: &str,
+    source_id: i64,
+    user_id: i64,
+    draft: &ImportStandardRowDraft,
+    created_at: &str,
+) -> DbResult<()> {
+    statement.execute(params![
+        session_id,
+        source_id,
+        user_id,
+        draft.source_row_index,
+        normalize_bill_date_text(&draft.occurred_at),
+        draft.amount_cents,
+        draft.direction,
+        draft.transaction_type,
+        draft.merchant,
+        draft.payment_method,
+        draft.description,
+        draft.parser_payload.to_string(),
+        draft.standard_payload.to_string(),
+        created_at,
+    ])?;
     Ok(())
 }
 
@@ -301,6 +368,62 @@ fn parser_template_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImportP
             .unwrap_or_default(),
         parser_is_processed: row.get::<_, String>("parser_is_processed")? == "1",
         created_at: row.get("created_at")?,
+    })
+}
+
+fn import_source_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImportSourceRow> {
+    let metadata_json: Option<String> = row.get("metadata_json")?;
+    Ok(ImportSourceRow {
+        id: row.get("id")?,
+        session_id: row.get("session_id")?,
+        user_id: row.get("user_id")?,
+        source_index: row.get("source_index")?,
+        original_file_name: row
+            .get::<_, Option<String>>("original_file_name")?
+            .unwrap_or_default(),
+        parser_id: row.get("parser_id")?,
+        parser_name: row.get("parser_name")?,
+        parser_signal: row
+            .get::<_, Option<String>>("parser_signal")?
+            .unwrap_or_default(),
+        parser_confidence: row
+            .get::<_, Option<f64>>("parser_confidence")?
+            .unwrap_or_default(),
+        feature_signature: row.get("feature_signature")?,
+        metadata: parse_json_object(metadata_json.as_deref()),
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+fn import_standard_row_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ImportStandardRow> {
+    let parser_payload_json: Option<String> = row.get("parser_payload_json")?;
+    let standard_payload_json: Option<String> = row.get("standard_payload_json")?;
+    Ok(ImportStandardRow {
+        id: row.get("id")?,
+        session_id: row.get("session_id")?,
+        source_id: row.get("source_id")?,
+        user_id: row.get("user_id")?,
+        source_index: row.get("source_index")?,
+        source_row_index: row.get("source_row_index")?,
+        parser_id: row.get("parser_id")?,
+        occurred_at: row.get("occurred_at")?,
+        amount_cents: row.get("amount_cents")?,
+        direction: row.get("direction")?,
+        transaction_type: row.get("transaction_type")?,
+        merchant: row.get::<_, Option<String>>("merchant")?.unwrap_or_default(),
+        payment_method: row
+            .get::<_, Option<String>>("payment_method")?
+            .unwrap_or_default(),
+        description: row
+            .get::<_, Option<String>>("description")?
+            .unwrap_or_default(),
+        parser_payload: parse_json_object(parser_payload_json.as_deref()),
+        standard_payload: parse_json_object(standard_payload_json.as_deref()),
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
     })
 }
 

@@ -7,24 +7,26 @@ use bill_analyser_db::{
     batch_update_preview_classification, calculate_import_bill_hash, clear_session_data,
     confirm_preview_to_bills, count_preview_by_session, create_import_session,
     dedup_bills_from_parser_templates, get_import_annotation_samples, get_import_session,
-    get_llm_memory_events, get_parser_templates_by_session, get_preview_bill_by_id,
-    get_preview_by_ids, get_preview_by_session, get_preview_filter_index_by_session,
-    get_preview_page_by_session, get_unprocessed_templates_for_dedup, init_import_staging_schema,
-    insert_parser_templates_batch, insert_preview_bill, insert_preview_bills_batch,
+    get_import_sources_by_session, get_import_standard_rows_by_session, get_llm_memory_events,
+    get_parser_templates_by_session, get_preview_bill_by_id, get_preview_by_ids,
+    get_preview_by_session, get_preview_filter_index_by_session, get_preview_page_by_session,
+    get_unprocessed_templates_for_dedup, init_import_staging_schema, insert_parser_templates_batch,
+    insert_preview_bill, insert_preview_bills_batch,
     mark_unprocessed_parser_templates_processed_for_session,
     parser_template_drafts_from_standard_bills, preview_drafts_from_dedup_bills,
     query_preview_page_by_session, reset_session_preview_selection,
     review_preview_llm_recommendation, save_import_annotation_samples,
-    stage_import_parser_templates, update_import_session_status, update_parser_template_status,
-    update_preview_bill, update_preview_bills_batch, update_preview_recurring_match_decision,
-    update_preview_selection, update_session_preview_selection_by_query,
-    ImportAnnotationSampleDraft, ImportParserTemplateDraft, ImportPreviewClassificationUpdate,
-    ImportPreviewDecision, ImportPreviewDraft, ImportPreviewExpectedState,
-    ImportPreviewLearningApply, ImportPreviewLlmApplyRequest, ImportPreviewLlmReviewRequest,
-    ImportPreviewLlmSuggestion, ImportPreviewPageRequest, ImportPreviewPatch,
-    ImportPreviewPatchField, ImportPreviewPatchValue, ImportPreviewQueryFilters,
-    ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate, ImportSessionDraft,
-    ImportSessionStatusUpdate, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
+    stage_import_parser_templates, stage_import_parser_templates_with_sources,
+    update_import_session_status, update_parser_template_status, update_preview_bill,
+    update_preview_bills_batch, update_preview_recurring_match_decision, update_preview_selection,
+    update_session_preview_selection_by_query, ImportAnnotationSampleDraft,
+    ImportParserTemplateDraft, ImportPreviewClassificationUpdate, ImportPreviewDecision,
+    ImportPreviewDraft, ImportPreviewExpectedState, ImportPreviewLearningApply,
+    ImportPreviewLlmApplyRequest, ImportPreviewLlmReviewRequest, ImportPreviewLlmSuggestion,
+    ImportPreviewPageRequest, ImportPreviewPatch, ImportPreviewPatchField, ImportPreviewPatchValue,
+    ImportPreviewQueryFilters, ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate,
+    ImportSessionDraft, ImportSessionStatusUpdate, ImportSourceDraft, ImportStandardRowDraft,
+    SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
 use bill_analyser_parsers::{post_process_raw_bills, RawBill};
 use serde_json::json;
@@ -269,6 +271,49 @@ fn parser_template_draft(date: &str, amount: f64, description: &str) -> ImportPa
     }
 }
 
+fn import_source_draft(source_index: i64, signature: &str) -> ImportSourceDraft {
+    ImportSourceDraft {
+        source_index,
+        original_file_name: format!("source-{source_index}.csv"),
+        parser_id: "wechat".to_string(),
+        parser_name: "微信".to_string(),
+        parser_signal: "matched".to_string(),
+        parser_confidence: 1.0,
+        feature_signature: signature.to_string(),
+        metadata: json!({
+            "parser_decision": {
+                "status": "matched",
+                "selected_parser_id": "wechat"
+            }
+        }),
+    }
+}
+
+fn import_standard_row_draft(source_index: i64, source_row_index: i64) -> ImportStandardRowDraft {
+    ImportStandardRowDraft {
+        source_index,
+        source_row_index,
+        occurred_at: "2026-05-01 08:30:00".to_string(),
+        amount_cents: -925,
+        direction: "expense".to_string(),
+        transaction_type: "expense".to_string(),
+        merchant: "canteen".to_string(),
+        payment_method: "wallet".to_string(),
+        description: "ledger row".to_string(),
+        parser_payload: json!({
+            "parser_id": "wechat",
+            "parser_decision": {
+                "status": "matched"
+            }
+        }),
+        standard_payload: json!({
+            "date": "2026-05-01 08:30:00",
+            "amount": -9.25,
+            "type": "支出"
+        }),
+    }
+}
+
 #[test]
 fn import_session_lifecycle_is_user_scoped() -> Result<(), Box<dyn Error>> {
     let temp_dir = tempfile::tempdir()?;
@@ -451,6 +496,27 @@ fn preview_batch_insert_read_page_selection_and_clear_match_staging_semantics(
          VALUES (?1, ?2, ?3, ?4, ?4)",
         ("session-preview", 42, id_order[0], "2026-05-01T00:00:00"),
     )?;
+    stage_import_parser_templates_with_sources(
+        runtime.connection_mut(),
+        &ImportSessionDraft {
+            session_id: "session-preview".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+        &[],
+        &[import_source_draft(0, "clear-source")],
+        &[import_standard_row_draft(0, 0)],
+        true,
+    )?;
+    assert_eq!(
+        get_import_sources_by_session(runtime.connection(), "session-preview", user_id(42))?.len(),
+        1
+    );
+    assert_eq!(
+        get_import_standard_rows_by_session(runtime.connection(), "session-preview", user_id(42))?
+            .len(),
+        1
+    );
 
     let cleared = clear_session_data(runtime.connection_mut(), "session-preview", user_id(42))?;
     assert_eq!(cleared.parser_count, 1);
@@ -461,7 +527,52 @@ fn preview_batch_insert_read_page_selection_and_clear_match_staging_semantics(
         count_preview_by_session(runtime.connection(), "session-preview", user_id(42), false)?,
         0
     );
+    assert!(
+        get_import_sources_by_session(runtime.connection(), "session-preview", user_id(42))?
+            .is_empty()
+    );
+    assert!(get_import_standard_rows_by_session(
+        runtime.connection(),
+        "session-preview",
+        user_id(42)
+    )?
+    .is_empty());
     assert!(get_import_session(runtime.connection(), "session-preview", user_id(42))?.is_none());
+    Ok(())
+}
+
+#[test]
+fn standard_row_ledger_requires_matching_import_source() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("standard_row_source.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+
+    let result = stage_import_parser_templates_with_sources(
+        runtime.connection_mut(),
+        &ImportSessionDraft {
+            session_id: "session-ledger".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+        &[],
+        &[import_source_draft(0, "valid-source")],
+        &[import_standard_row_draft(99, 0)],
+        false,
+    );
+
+    assert!(result.is_err());
+    assert!(
+        get_import_sources_by_session(runtime.connection(), "session-ledger", user_id(42))?
+            .is_empty()
+    );
+    assert!(get_import_standard_rows_by_session(
+        runtime.connection(),
+        "session-ledger",
+        user_id(42)
+    )?
+    .is_empty());
+    assert!(get_import_session(runtime.connection(), "session-ledger", user_id(42))?.is_none());
     Ok(())
 }
 
@@ -2874,6 +2985,18 @@ fn confirm_preview_to_bills_inserts_selected_rows_and_marks_session_completed(
             file_count: 1,
         },
     )?;
+    stage_import_parser_templates_with_sources(
+        runtime.connection_mut(),
+        &ImportSessionDraft {
+            session_id: "session-confirm".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+        &[],
+        &[import_source_draft(0, "confirm-source")],
+        &[import_standard_row_draft(0, 0)],
+        true,
+    )?;
 
     let mut numeric_expense = preview_draft("2026/05/01 08:30", 9.25, "selected expense");
     numeric_expense.preview_type = "3".to_string();
@@ -2953,6 +3076,16 @@ fn confirm_preview_to_bills_inserts_selected_rows_and_marks_session_completed(
         get_preview_by_session(runtime.connection(), "session-confirm", user_id(42), false)?
             .is_empty()
     );
+    assert!(
+        get_import_sources_by_session(runtime.connection(), "session-confirm", user_id(42))?
+            .is_empty()
+    );
+    assert!(get_import_standard_rows_by_session(
+        runtime.connection(),
+        "session-confirm",
+        user_id(42)
+    )?
+    .is_empty());
 
     let retry = confirm_preview_to_bills(runtime.connection_mut(), "session-confirm", user_id(42));
     assert!(retry.is_err());

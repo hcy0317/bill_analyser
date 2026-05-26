@@ -9,11 +9,12 @@ use axum::{
 use base64::{engine::general_purpose, Engine as _};
 use bill_analyser_core::{build_composite_match_features, composite_hash_from_features, UserId};
 use bill_analyser_db::{
-    create_import_session, get_import_session, get_parser_templates_by_session,
-    get_preview_by_session, init_import_staging_schema, insert_parser_templates_batch,
-    insert_preview_bills_batch, update_import_session_status, ImportParserTemplateDraft,
-    ImportPreviewDraft, ImportPreviewRow, ImportSessionDraft, ImportSessionStatusUpdate,
-    SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
+    create_import_session, get_import_session, get_import_sources_by_session,
+    get_import_standard_rows_by_session, get_parser_templates_by_session, get_preview_by_session,
+    init_import_staging_schema, insert_parser_templates_batch, insert_preview_bills_batch,
+    update_import_session_status, ImportParserTemplateDraft, ImportPreviewDraft, ImportPreviewRow,
+    ImportSessionDraft, ImportSessionStatusUpdate, SqliteConnectionConfig, SqliteDbPath,
+    SqliteRuntime,
 };
 use bill_analyser_http::{
     build_router, HttpAppState, HttpShellConfig, ImportRouteMode, IMPORT_SKELETON_ROUTE_PATTERNS,
@@ -1788,6 +1789,88 @@ async fn import_db_runtime_parallel_parse_preserves_per_file_parser_identity(
         .parser_tags
         .iter()
         .any(|tag| tag == "parser:wechat"));
+    let sources = get_import_sources_by_session(db_runtime.connection(), session_id, user_id(42))?;
+    assert_eq!(sources.len(), 2);
+    assert_eq!(sources[0].source_index, 0);
+    assert_eq!(sources[0].parser_id, "alipay");
+    assert_eq!(sources[0].parser_signal, "matched");
+    assert_eq!(
+        sources[0].metadata["parser_decision"]["selected_parser_id"],
+        "alipay"
+    );
+    assert_eq!(sources[1].source_index, 1);
+    assert_eq!(sources[1].parser_id, "wechat");
+
+    let standard_rows =
+        get_import_standard_rows_by_session(db_runtime.connection(), session_id, user_id(42))?;
+    assert_eq!(standard_rows.len(), 2);
+    assert_eq!(standard_rows[0].source_index, 0);
+    assert_eq!(standard_rows[0].source_row_index, 0);
+    assert_eq!(standard_rows[0].parser_id, "alipay");
+    assert_eq!(standard_rows[0].amount_cents, -2100);
+    assert_eq!(standard_rows[0].direction, "expense");
+    assert_eq!(standard_rows[0].parser_payload["parser_id"], "alipay");
+    assert_eq!(standard_rows[1].source_index, 1);
+    assert_eq!(standard_rows[1].parser_id, "wechat");
+    Ok(())
+}
+
+#[tokio::test]
+async fn import_db_runtime_parser_conflict_is_unmatched_with_detection_evidence(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new().await?;
+    let runtime = runtime_for(fixture.db_path())?;
+    seed_users(&runtime, &[42])?;
+    let app = runtime_router(&fixture);
+    let boundary = "rust-import-parser-conflict-boundary";
+    let body = multipart_body(
+        boundary,
+        &[("parser_type", "auto")],
+        &[(
+            "files",
+            "ambiguous-bank.csv",
+            "text/csv",
+            "交易日期,交易金额,对手信息,对方户名,对方账号\n2026-05-04,12.34,张三,张三,6222000000000000\n",
+        )],
+    );
+
+    let parse = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/parse")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(parse.status(), StatusCode::OK);
+    let parse_body = read_json(parse).await;
+    assert_eq!(parse_body["success"], true);
+    assert_eq!(parse_body["data"]["parsed_count"], 0);
+    let unmatched = parse_body["data"]["unmatched_files"]
+        .as_array()
+        .expect("unmatched");
+    assert_eq!(unmatched.len(), 1);
+    assert_eq!(unmatched[0]["parser_id"], "rust-import");
+    assert_eq!(
+        unmatched[0]["parser_decision"]["status"], "conflict",
+        "{parse_body:?}"
+    );
+    assert_eq!(
+        unmatched[0]["parser_decision"]["conflict_group"],
+        json!(["icbc", "abc"])
+    );
+    assert!(unmatched[0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("Multiple dedicated Rust parsers matched"));
     Ok(())
 }
 

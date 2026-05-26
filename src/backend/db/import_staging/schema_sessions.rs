@@ -25,6 +25,88 @@ pub fn init_import_staging_schema(connection: &Connection) -> DbResult<()> {
         CREATE INDEX IF NOT EXISTS idx_import_sessions_user ON import_sessions(user_id);
         CREATE INDEX IF NOT EXISTS idx_import_sessions_status ON import_sessions(status);
 
+        CREATE TABLE IF NOT EXISTS import_sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            source_index INTEGER NOT NULL,
+            original_file_name TEXT,
+            parser_id TEXT NOT NULL,
+            parser_name TEXT NOT NULL,
+            parser_signal TEXT,
+            parser_confidence REAL DEFAULT 0,
+            feature_signature TEXT NOT NULL,
+            metadata_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(session_id, user_id, source_index),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_import_sources_session_user
+            ON import_sources(session_id, user_id, source_index);
+        CREATE INDEX IF NOT EXISTS idx_import_sources_parser_id
+            ON import_sources(user_id, parser_id);
+
+        CREATE TABLE IF NOT EXISTS import_standard_rows (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            source_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            source_row_index INTEGER NOT NULL,
+            occurred_at TEXT NOT NULL,
+            amount_cents INTEGER NOT NULL,
+            direction TEXT NOT NULL,
+            transaction_type TEXT NOT NULL,
+            merchant TEXT,
+            payment_method TEXT,
+            description TEXT,
+            parser_payload_json TEXT,
+            standard_payload_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(source_id, source_row_index),
+            FOREIGN KEY (source_id) REFERENCES import_sources(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_import_standard_rows_session_user
+            ON import_standard_rows(session_id, user_id, occurred_at, id);
+        CREATE INDEX IF NOT EXISTS idx_import_standard_rows_match_key
+            ON import_standard_rows(user_id, occurred_at, amount_cents, direction);
+
+        CREATE TABLE IF NOT EXISTS import_decision_groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            group_type TEXT NOT NULL,
+            group_key TEXT NOT NULL,
+            decision_status TEXT NOT NULL DEFAULT 'pending',
+            base_preview_row_id INTEGER,
+            signal_payload_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(session_id, user_id, group_type, group_key),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_import_decision_groups_session_group_type
+            ON import_decision_groups(session_id, user_id, group_type);
+
+        CREATE TABLE IF NOT EXISTS import_decision_group_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            preview_row_id INTEGER,
+            standard_row_id INTEGER,
+            history_bill_id INTEGER,
+            member_role TEXT NOT NULL,
+            parser_name TEXT,
+            metadata_json TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE(group_id, preview_row_id, standard_row_id, history_bill_id, member_role),
+            FOREIGN KEY (group_id) REFERENCES import_decision_groups(id) ON DELETE CASCADE,
+            FOREIGN KEY (standard_row_id) REFERENCES import_standard_rows(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_import_decision_group_members_group
+            ON import_decision_group_members(group_id, member_role);
+
         CREATE TABLE IF NOT EXISTS bills_preview (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id TEXT NOT NULL,
@@ -172,12 +254,42 @@ pub fn clear_user_import_staging_data(connection: &Connection, user_id: i64) -> 
         "DELETE FROM import_annotation_samples WHERE user_id = ?1",
         [user_id],
     )?;
+    let group_ids = {
+        let mut statement =
+            connection.prepare("SELECT id FROM import_decision_groups WHERE user_id = ?1")?;
+        let rows = statement.query_map([user_id], |row| row.get::<_, i64>(0))?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    let decision_member_count = if group_ids.is_empty() {
+        0
+    } else {
+        let placeholders = std::iter::repeat_n("?", group_ids.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        connection.execute(
+            &format!("DELETE FROM import_decision_group_members WHERE group_id IN ({placeholders})"),
+            rusqlite::params_from_iter(group_ids.iter().copied()),
+        )?
+    };
+    let decision_group_count =
+        connection.execute("DELETE FROM import_decision_groups WHERE user_id = ?1", [user_id])?;
+    let standard_count =
+        connection.execute("DELETE FROM import_standard_rows WHERE user_id = ?1", [user_id])?;
+    let source_count =
+        connection.execute("DELETE FROM import_sources WHERE user_id = ?1", [user_id])?;
     let preview_count = connection.execute("DELETE FROM bills_preview WHERE user_id = ?1", [user_id])?;
     let parser_count =
         connection.execute("DELETE FROM bills_parser_template WHERE user_id = ?1", [user_id])?;
     let session_count =
         connection.execute("DELETE FROM import_sessions WHERE user_id = ?1", [user_id])?;
-    Ok(annotation_count + preview_count + parser_count + session_count)
+    Ok(annotation_count
+        + decision_member_count
+        + decision_group_count
+        + standard_count
+        + source_count
+        + preview_count
+        + parser_count
+        + session_count)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
