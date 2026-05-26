@@ -3,13 +3,14 @@ use std::{collections::HashMap, time::Duration};
 use bill_analyser_core::auth::PasswordPolicy;
 use bill_analyser_http::{
     config::{
-        DEFAULT_AUTH_JWT_ALGORITHM, DEFAULT_AUTH_JWT_EXPIRATION_DAYS,
-        DEFAULT_AUTH_LOCKOUT_DURATION_MINUTES, DEFAULT_AUTH_MAX_LOGIN_ATTEMPTS,
-        DEFAULT_AUTH_PASSWORD_MIN_LENGTH, DEFAULT_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS,
-        DEFAULT_BACKUP_DIR, DEFAULT_BODY_LIMIT_BYTES, DEFAULT_DATA_DIR, DEFAULT_TIMEOUT_MS,
-        DEFAULT_UPLOADS_DIR,
+        DatabaseBackend, MigrationMode, DEFAULT_AUTH_JWT_ALGORITHM,
+        DEFAULT_AUTH_JWT_EXPIRATION_DAYS, DEFAULT_AUTH_LOCKOUT_DURATION_MINUTES,
+        DEFAULT_AUTH_MAX_LOGIN_ATTEMPTS, DEFAULT_AUTH_PASSWORD_MIN_LENGTH,
+        DEFAULT_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS, DEFAULT_BACKUP_DIR, DEFAULT_BODY_LIMIT_BYTES,
+        DEFAULT_DATA_DIR, DEFAULT_TIMEOUT_MS, DEFAULT_UPLOADS_DIR,
     },
-    runtime_log_filter_from_directives, HttpShellConfig, HttpShellConfigError, ImportRouteMode,
+    http_shell_health, runtime_log_filter_from_directives, HttpShellConfig, HttpShellConfigError,
+    ImportRouteMode,
 };
 
 #[test]
@@ -24,6 +25,16 @@ fn http_shell_config_ignores_legacy_upstream_and_uses_rust_runtime_defaults() {
     assert_eq!(config.backup_encryption_key, None);
     assert_eq!(config.import_route_mode, ImportRouteMode::ImportDbRuntime);
     assert_eq!(config.sqlite_db_path, None);
+    assert_eq!(config.sqlite_legacy_path, None);
+    assert_eq!(config.postgres_url, None);
+    assert_eq!(config.database_backend, DatabaseBackend::Sqlite);
+    assert_eq!(config.database_backend.as_str(), "sqlite");
+    assert!(!config.database_backend.uses_postgres());
+    assert_eq!(config.migration_mode, MigrationMode::Disabled);
+    assert_eq!(config.migration_mode.as_str(), "disabled");
+    assert!(!config.require_postgres_after_cutover);
+    assert!(!config.postgres_configured());
+    assert_eq!(config.redacted_postgres_url(), None);
     assert_eq!(config.trusted_user_header_secret, None);
     assert_eq!(config.auth_jwt_secret, None);
     assert_eq!(config.auth_jwt_algorithm, DEFAULT_AUTH_JWT_ALGORITHM);
@@ -80,6 +91,10 @@ fn http_shell_config_builder_trims_optional_paths_and_auth_settings() {
 
     let config = HttpShellConfig::default()
         .with_sqlite_db_path("data/app.db")
+        .with_sqlite_legacy_path(" data/legacy.db ")
+        .with_database_backend(DatabaseBackend::Postgres)
+        .with_migration_mode(MigrationMode::Validate)
+        .with_require_postgres_after_cutover(true)
         .with_uploads_dir(" ")
         .with_data_dir(" data/runtime ")
         .with_backup_dir(" ")
@@ -97,9 +112,20 @@ fn http_shell_config_builder_trims_optional_paths_and_auth_settings() {
         .with_auth_enable_oauth2(true)
         .with_auth_oauth2_provider(" github ")
         .with_auth_password_policy(policy)
-        .with_public_base_url(" https://example.test/api/ ");
+        .with_public_base_url(" https://example.test/api/ ")
+        .with_postgres_url(" postgres://bill:secret@localhost:5432/bill_analyser?sslmode=disable ")
+        .unwrap();
 
     assert_eq!(config.sqlite_db_path.as_deref(), Some("data/app.db"));
+    assert_eq!(config.sqlite_legacy_path.as_deref(), Some("data/legacy.db"));
+    assert_eq!(config.database_backend, DatabaseBackend::Postgres);
+    assert!(config.database_backend.uses_postgres());
+    assert_eq!(config.migration_mode, MigrationMode::Validate);
+    assert!(config.require_postgres_after_cutover);
+    assert_eq!(
+        config.redacted_postgres_url().as_deref(),
+        Some("postgres://bill:***@localhost:5432/bill_analyser")
+    );
     assert_eq!(config.uploads_dir, DEFAULT_UPLOADS_DIR);
     assert_eq!(config.data_dir, "data/runtime");
     assert_eq!(config.backup_dir, DEFAULT_BACKUP_DIR);
@@ -139,6 +165,14 @@ fn http_shell_config_from_env_with_reads_rust_runtime_settings_and_legacy_auth_a
         ("BILL_ANALYSER_HTTP_BODY_LIMIT_BYTES", "2048"),
         ("BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE", "runtime"),
         ("BILL_ANALYSER_SQLITE_DB_PATH", " data/app.db "),
+        ("BILL_ANALYSER_SQLITE_LEGACY_PATH", " data/legacy.db "),
+        (
+            "BILL_ANALYSER_POSTGRES_URL",
+            " postgres://bill:secret@localhost:5432/bill_analyser?sslmode=disable ",
+        ),
+        ("BILL_ANALYSER_DATABASE_BACKEND", "postgresql"),
+        ("BILL_ANALYSER_MIGRATION_MODE", "apply"),
+        ("BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER", "true"),
         ("BILL_ANALYSER_UPLOADS_DIR", " data/uploads-custom "),
         ("BILL_ANALYSER_DATA_DIR", " data/runtime "),
         ("BILL_ANALYSER_BACKUP_DIR", " backup/runtime "),
@@ -177,6 +211,18 @@ fn http_shell_config_from_env_with_reads_rust_runtime_settings_and_legacy_auth_a
     assert_eq!(config.body_limit_bytes, 2048);
     assert_eq!(config.import_route_mode, ImportRouteMode::ImportDbRuntime);
     assert_eq!(config.sqlite_db_path.as_deref(), Some("data/app.db"));
+    assert_eq!(config.sqlite_legacy_path.as_deref(), Some("data/legacy.db"));
+    assert_eq!(
+        config.postgres_url.as_deref(),
+        Some("postgres://bill:secret@localhost:5432/bill_analyser?sslmode=disable")
+    );
+    assert_eq!(
+        config.redacted_postgres_url().as_deref(),
+        Some("postgres://bill:***@localhost:5432/bill_analyser")
+    );
+    assert_eq!(config.database_backend, DatabaseBackend::Postgres);
+    assert_eq!(config.migration_mode, MigrationMode::Apply);
+    assert!(config.require_postgres_after_cutover);
     assert_eq!(config.uploads_dir, "data/uploads-custom");
     assert_eq!(config.data_dir, "data/runtime");
     assert_eq!(config.backup_dir, "backup/runtime");
@@ -215,6 +261,10 @@ fn http_shell_config_from_env_with_keeps_empty_optional_values_at_defaults() {
     let env = HashMap::from([
         ("BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE", "import_db_runtime"),
         ("BILL_ANALYSER_SQLITE_DB_PATH", "   "),
+        ("BILL_ANALYSER_SQLITE_LEGACY_PATH", "   "),
+        ("BILL_ANALYSER_POSTGRES_URL", "   "),
+        ("BILL_ANALYSER_DATABASE_BACKEND", "   "),
+        ("BILL_ANALYSER_MIGRATION_MODE", "   "),
         ("BILL_ANALYSER_UPLOADS_DIR", "   "),
         ("BILL_ANALYSER_DATA_DIR", "   "),
         ("BILL_ANALYSER_BACKUP_DIR", "   "),
@@ -232,6 +282,10 @@ fn http_shell_config_from_env_with_keeps_empty_optional_values_at_defaults() {
     assert_eq!(config.timeout, Duration::from_millis(DEFAULT_TIMEOUT_MS));
     assert_eq!(config.body_limit_bytes, DEFAULT_BODY_LIMIT_BYTES);
     assert_eq!(config.sqlite_db_path, None);
+    assert_eq!(config.sqlite_legacy_path, None);
+    assert_eq!(config.postgres_url, None);
+    assert_eq!(config.database_backend, DatabaseBackend::Sqlite);
+    assert_eq!(config.migration_mode, MigrationMode::Disabled);
     assert_eq!(config.uploads_dir, DEFAULT_UPLOADS_DIR);
     assert_eq!(config.data_dir, DEFAULT_DATA_DIR);
     assert_eq!(config.backup_dir, DEFAULT_BACKUP_DIR);
@@ -264,6 +318,21 @@ fn http_shell_config_reports_invalid_runtime_env_values() {
             "BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE",
             "python_proxy",
             HttpShellConfigError::InvalidImportRouteMode,
+        ),
+        (
+            "BILL_ANALYSER_DATABASE_BACKEND",
+            "mongo",
+            HttpShellConfigError::InvalidDatabaseBackend,
+        ),
+        (
+            "BILL_ANALYSER_MIGRATION_MODE",
+            "rewrite",
+            HttpShellConfigError::InvalidMigrationMode,
+        ),
+        (
+            "BILL_ANALYSER_POSTGRES_URL",
+            "sqlite://data/app.db",
+            HttpShellConfigError::InvalidPostgresUrl,
         ),
         (
             "BILL_ANALYSER_AUTH_JWT_EXPIRATION_DAYS",
@@ -321,4 +390,35 @@ fn http_shell_config_reports_invalid_runtime_env_values() {
         HttpShellConfig::new("", Duration::from_millis(1), 0).unwrap_err(),
         HttpShellConfigError::InvalidBodyLimit
     );
+}
+
+#[test]
+fn http_shell_health_exposes_database_status_without_postgres_secret() {
+    let config = HttpShellConfig::default()
+        .with_sqlite_db_path("data/app.db")
+        .with_sqlite_legacy_path("data/legacy.db")
+        .with_database_backend(DatabaseBackend::Postgres)
+        .with_migration_mode(MigrationMode::Apply)
+        .with_require_postgres_after_cutover(true)
+        .with_postgres_url("postgres://bill:secret@localhost:5432/bill_analyser?sslmode=disable")
+        .unwrap();
+
+    let health = http_shell_health(&config);
+
+    assert_eq!(health.details["database_backend"], "postgres");
+    assert_eq!(health.details["sqlite_db_path_configured"], "true");
+    assert_eq!(health.details["sqlite_legacy_path_configured"], "true");
+    assert_eq!(health.details["postgres_configured"], "true");
+    assert_eq!(
+        health.details["postgres_url_redacted"],
+        "postgres://bill:***@localhost:5432/bill_analyser"
+    );
+    assert!(!health.details["postgres_url_redacted"].contains("secret"));
+    assert_eq!(health.details["migration_mode"], "apply");
+    assert_eq!(
+        health.details["migration_status"],
+        "placeholder:not_started"
+    );
+    assert_eq!(health.details["weaviate_status"], "placeholder:disabled");
+    assert_eq!(health.details["require_postgres_after_cutover"], "true");
 }

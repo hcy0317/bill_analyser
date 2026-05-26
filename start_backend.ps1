@@ -87,6 +87,18 @@ if (-not $env:BILL_ANALYSER_SQLITE_DB_PATH) {
     $env:BILL_ANALYSER_SQLITE_DB_PATH = $DefaultDbPath
 }
 
+if (-not $env:BILL_ANALYSER_SQLITE_LEGACY_PATH) {
+    $env:BILL_ANALYSER_SQLITE_LEGACY_PATH = $env:BILL_ANALYSER_SQLITE_DB_PATH
+}
+
+if (-not $env:BILL_ANALYSER_DATABASE_BACKEND) {
+    $env:BILL_ANALYSER_DATABASE_BACKEND = "sqlite"
+}
+
+if (-not $env:BILL_ANALYSER_MIGRATION_MODE) {
+    $env:BILL_ANALYSER_MIGRATION_MODE = "disabled"
+}
+
 if (-not $env:BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE) {
     $env:BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE = "import_db_runtime"
 }
@@ -175,6 +187,9 @@ if ($ConfiguredServer) {
 Write-Host "Rust HTTP server: $env:BILL_ANALYSER_RUST_HTTP_SERVER" -ForegroundColor Gray
 Write-Host "Rust import mode: $env:BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE" -ForegroundColor Gray
 Write-Host "SQLite DB: $env:BILL_ANALYSER_SQLITE_DB_PATH" -ForegroundColor Gray
+Write-Host "Database backend: $env:BILL_ANALYSER_DATABASE_BACKEND" -ForegroundColor Gray
+Write-Host "Migration mode: $env:BILL_ANALYSER_MIGRATION_MODE" -ForegroundColor Gray
+Write-Host "Postgres configured: $([bool]$env:BILL_ANALYSER_POSTGRES_URL)" -ForegroundColor Gray
 Write-Host "Listening on: http://$env:BILL_ANALYSER_HTTP_BIND" -ForegroundColor Cyan
 Write-Host "Health check: http://127.0.0.1:5000/api/health" -ForegroundColor Cyan
 Write-Host ""

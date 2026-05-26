@@ -60,10 +60,44 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
         "import_route_mode".to_string(),
         config.import_route_mode.as_str().to_string(),
     );
+    details.insert(
+        "database_backend".to_string(),
+        config.database_backend.as_str().to_string(),
+    );
+    details.insert(
+        "postgres_configured".to_string(),
+        config.postgres_configured().to_string(),
+    );
+    details.insert(
+        "postgres_url_redacted".to_string(),
+        config
+            .redacted_postgres_url()
+            .unwrap_or_else(|| "unconfigured".to_string()),
+    );
+    details.insert(
+        "migration_mode".to_string(),
+        config.migration_mode.as_str().to_string(),
+    );
+    details.insert(
+        "migration_status".to_string(),
+        "placeholder:not_started".to_string(),
+    );
+    details.insert(
+        "weaviate_status".to_string(),
+        "placeholder:disabled".to_string(),
+    );
+    details.insert(
+        "require_postgres_after_cutover".to_string(),
+        config.require_postgres_after_cutover.to_string(),
+    );
     if config.import_route_mode == ImportRouteMode::ImportDbRuntime {
         details.insert(
             "sqlite_db_path_configured".to_string(),
             config.sqlite_db_path.is_some().to_string(),
+        );
+        details.insert(
+            "sqlite_legacy_path_configured".to_string(),
+            config.sqlite_legacy_path.is_some().to_string(),
         );
         details.insert(
             "bills_crud_runtime".to_string(),

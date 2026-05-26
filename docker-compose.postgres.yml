@@ -1,0 +1,24 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bill-analyser-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${BILL_ANALYSER_POSTGRES_DB:-bill_analyser}
+      POSTGRES_USER: ${BILL_ANALYSER_POSTGRES_USER:-bill_analyser}
+      POSTGRES_PASSWORD: ${BILL_ANALYSER_POSTGRES_PASSWORD:-bill_analyser_dev}
+    ports:
+      - "${BILL_ANALYSER_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - bill_analyser_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  bill_analyser_postgres_data:

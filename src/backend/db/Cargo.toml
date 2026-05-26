@@ -3,7 +3,7 @@ name = "bill-analyser-db"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Internal SQLite runtime and schema foundations for Bill Analyser."
+description = "Internal SQLite runtime and PostgreSQL migration foundations for Bill Analyser."
 publish = false
 
 [lib]
@@ -19,11 +19,13 @@ rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+sqlx.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+tokio.workspace = true
 
 [[bin]]
 name = "bill_taxonomy_bridge"

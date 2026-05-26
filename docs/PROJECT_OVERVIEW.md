@@ -15,10 +15,16 @@ Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预
 
 - `src/backend/http`：Axum 路由、认证上下文、上传处理、response envelope、structured error 和各业务 route facade。
 - `src/backend/core`：金额、时间、分类、统计、预算、导入、matching、LLM/OCR、认证与迁移治理等共享业务合同。
-- `src/backend/db`：SQLite WAL/FK 连接、schema 初始化、事务 helper、user-scope repository、导入 staging、auth、budget、matching、taxonomy/settings 等仓储模块。
+- `src/backend/db`：SQLite WAL/FK 连接、schema 初始化、事务 helper、user-scope repository、导入 staging、auth、budget、matching、taxonomy/settings 等仓储模块；同时提供 PostgreSQL 迁移骨架与权威库 schema foundation，Postgres 目前作为配置可见的迁移目标，不接管业务 repository。
 - `src/backend/parsers`：微信、支付宝、工商银行、农业银行、建设银行、民生银行等 dedicated parser，以及 `RawBill` 到 `StandardBill` 的统一标准化。
 
 详细的代码阅读路径、请求生命周期、导入管线、repository 数据流和验证矩阵见 `docs/backend-map.md`。
+
+## 数据库运行配置
+
+默认运行态仍使用 SQLite，`BILL_ANALYSER_SQLITE_DB_PATH` 指向当前业务库，`BILL_ANALYSER_SQLITE_LEGACY_PATH` 用于迁移期显式标识 legacy SQLite 来源；未配置 legacy path 时沿用当前 SQLite 路径。PostgreSQL 切换基座通过 `BILL_ANALYSER_DATABASE_BACKEND`、`BILL_ANALYSER_POSTGRES_URL`、`BILL_ANALYSER_MIGRATION_MODE` 和 `BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER` 暴露，默认 `database_backend=sqlite`、`migration_mode=disabled`，因此不影响本地 SQLite 启动链路。
+
+`/api/health` 的 details 暴露 `database_backend`、`postgres_configured`、`postgres_url_redacted`、`migration_mode`、`migration_status`、`weaviate_status` 与 `require_postgres_after_cutover`。健康信息只显示脱敏 Postgres URL；迁移和 Weaviate 状态在当前阶段是占位观测字段，后续切片会接入实际迁移 runner 和向量同步 outbox。
 
 ## 关键业务链路
 

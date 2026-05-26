@@ -1,4 +1,4 @@
-//! Internal SQLite runtime foundations for the Bill Analyser Rust migration.
+//! Internal SQLite runtime and PostgreSQL migration foundations for the Bill Analyser Rust migration.
 //!
 //! Rust-owned HTTP domains use this crate for their SQLite repositories while
 //! domain repositories now execute through the Rust SQLite runtime.
@@ -19,6 +19,7 @@ pub mod import_staging;
 pub mod llm;
 pub mod matching;
 pub mod path;
+pub mod postgres;
 pub mod recurring;
 pub mod schema;
 pub mod statistics;
@@ -129,6 +130,11 @@ pub use matching::{
     PreviewMatchingActionRequest, ReconciliationCandidateFilters,
 };
 pub use path::SqliteDbPath;
+pub use postgres::{
+    postgres_initial_schema_path, postgres_migration_manifest, postgres_migrations_dir,
+    run_postgres_migrations, PostgresMigrationDescriptor, PostgresPool,
+    POSTGRES_INITIAL_SCHEMA_FILE, POSTGRES_MIGRATIONS_RELATIVE_DIR,
+};
 pub use recurring::{
     accept_recurring_suggestion, count_recurring_suggestions,
     detect_and_save_recurring_suggestions, get_bills_linked_to_recurring,

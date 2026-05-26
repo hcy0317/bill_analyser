@@ -32,7 +32,9 @@ pub use auth_routes::{auth_token_runtime_router, AUTH_TOKEN_ROUTE_PATTERNS};
 pub use backup_routes::{backup_ops_runtime_router, BACKUP_OPS_ROUTE_PATTERNS};
 pub use bill_routes::{bill_runtime_router, BILL_CRUD_ROUTE_PATTERNS};
 pub use budget_routes::{budget_runtime_router, BUDGET_CRUD_ROUTE_PATTERNS};
-pub use config::{HttpShellConfig, HttpShellConfigError, ImportRouteMode};
+pub use config::{
+    DatabaseBackend, HttpShellConfig, HttpShellConfigError, ImportRouteMode, MigrationMode,
+};
 pub use import_routes::IMPORT_SKELETON_ROUTE_PATTERNS;
 #[cfg(not(coverage))]
 pub use logging::init_runtime_tracing;

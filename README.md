@@ -2,7 +2,7 @@
 
 Bill Analyser 是一个面向个人与家庭场景的账单分析系统，支持多来源账单导入、智能去重、自动分类、预算管理和统计分析。
 
-本项目当前后端运行态是 Rust Axum `bill_http_server`，Rust workspace 位于 `src/backend/*`，数据库使用 SQLite WAL，前端使用 Vue 3 + TypeScript + Vite。
+本项目当前后端运行态是 Rust Axum `bill_http_server`，Rust workspace 位于 `src/backend/*`。默认数据库仍为 SQLite WAL；PostgreSQL 迁移骨架已提供配置、schema 和本地 compose，但业务路由在切换前继续走 SQLite。前端使用 Vue 3 + TypeScript + Vite。
 
 ## 核心能力
 
@@ -23,6 +23,7 @@ Bill Analyser 是一个面向个人与家庭场景的账单分析系统，支持
 | Axum | HTTP API |
 | Tokio | 异步运行时 |
 | Rusqlite / SQLite WAL | 数据访问 |
+| SQLx / PostgreSQL | Postgres 迁移与后续权威库基座 |
 | cargo-llvm-cov | 覆盖率门禁 |
 
 ### 前端
@@ -112,7 +113,22 @@ cd ..\..
 
 - `BILL_ANALYSER_HTTP_BIND=127.0.0.1:5000`
 - `BILL_ANALYSER_SQLITE_DB_PATH=data\bills.db`
+- `BILL_ANALYSER_DATABASE_BACKEND=sqlite`
+- `BILL_ANALYSER_MIGRATION_MODE=disabled`
 - `BILL_ANALYSER_RUST_HTTP_SERVER` 可指定已构建的 `bill_http_server` 可执行文件，未指定时脚本会自动构建 debug 版本
+
+### 本地 PostgreSQL 骨架
+
+SQLite 仍是默认运行路径。需要验证 Postgres 配置和 migration skeleton 时，可先启动本地数据库：
+
+```powershell
+docker compose -f docker-compose.postgres.yml up -d
+$env:BILL_ANALYSER_DATABASE_BACKEND = "postgres"
+$env:BILL_ANALYSER_POSTGRES_URL = "postgres://bill_analyser:bill_analyser_dev@127.0.0.1:5432/bill_analyser"
+$env:BILL_ANALYSER_MIGRATION_MODE = "validate"
+```
+
+`/api/health` 会显示 `database_backend`、`postgres_configured`、`postgres_url_redacted`、`migration_mode`、`migration_status` 和 `weaviate_status`，其中 Postgres URL 只输出脱敏形式。当前切片不切换业务 repository。
 
 ### 手动启动
 
