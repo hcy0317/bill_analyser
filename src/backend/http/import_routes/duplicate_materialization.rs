@@ -12,6 +12,17 @@ struct HistoryDuplicatePreviewPlan {
     materialization: ImportHistoryMaterializationDraft,
 }
 
+struct ImportMatchDecisionGroupInput<'a> {
+    session_id: &'a str,
+    duplicate_groups: &'a [DuplicateGroup],
+    transfer_pairs: &'a [TransferPair],
+    templates: &'a [bill_analyser_db::ImportParserTemplateRow],
+    standard_rows: &'a [bill_analyser_db::ImportStandardRow],
+    preview_rows: &'a [ImportPreviewRow],
+    history_duplicate_plan: &'a [HistoryDuplicatePreviewPlan],
+    history_transfer_plan: &'a [HistoryTransferPreviewPlan],
+}
+
 fn build_history_duplicate_preview_plan(
     imported_bills: &[DedupBill],
     history_bills: &[ImportHistoryBillRow],
@@ -129,22 +140,19 @@ fn import_reconciliation_key_for_bill(bill: &DedupBill) -> String {
     )
 }
 
-fn build_import_duplicate_decision_groups(
-    session_id: &str,
-    duplicate_groups: &[DuplicateGroup],
-    templates: &[bill_analyser_db::ImportParserTemplateRow],
-    standard_rows: &[bill_analyser_db::ImportStandardRow],
-    preview_rows: &[ImportPreviewRow],
-    history_plan: &[HistoryDuplicatePreviewPlan],
+fn build_import_match_decision_groups(
+    input: ImportMatchDecisionGroupInput<'_>,
 ) -> Vec<ImportDecisionGroupDraft> {
-    let template_standard_rows = build_template_standard_row_map(templates, standard_rows);
-    let preview_by_source_id = build_preview_by_source_id(preview_rows);
-    let templates_by_index = templates.iter().collect::<Vec<_>>();
-    let mut groups = duplicate_groups
+    let template_standard_rows =
+        build_template_standard_row_map(input.templates, input.standard_rows);
+    let preview_by_source_id = build_preview_by_source_id(input.preview_rows);
+    let templates_by_index = input.templates.iter().collect::<Vec<_>>();
+    let mut groups = input
+        .duplicate_groups
         .iter()
         .filter_map(|group| {
             build_same_batch_decision_group(
-                session_id,
+                input.session_id,
                 group,
                 &templates_by_index,
                 &template_standard_rows,
@@ -152,15 +160,29 @@ fn build_import_duplicate_decision_groups(
             )
         })
         .collect::<Vec<_>>();
+    groups.extend(input.transfer_pairs.iter().filter_map(|pair| {
+        build_same_batch_transfer_decision_group(
+            input.session_id,
+            pair,
+            &templates_by_index,
+            &template_standard_rows,
+            &preview_by_source_id,
+        )
+    }));
     groups.extend(build_history_duplicate_decision_groups(
-        history_plan,
+        input.history_duplicate_plan,
         &template_standard_rows,
-        preview_rows,
+        input.preview_rows,
+    ));
+    groups.extend(build_history_transfer_decision_groups(
+        input.history_transfer_plan,
+        &template_standard_rows,
+        input.preview_rows,
     ));
     groups
 }
 
-fn refresh_history_materialization_payloads(
+fn refresh_history_duplicate_materialization_payloads(
     history_plan: &mut [HistoryDuplicatePreviewPlan],
     preview_drafts: &[ImportPreviewDraft],
 ) {

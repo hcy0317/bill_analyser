@@ -4120,6 +4120,37 @@ async fn import_dedup_materializes_historical_duplicates_into_preview() -> Resul
         "history_rewrite_pending"
     );
 
+    let replay = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/dedup")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "session_id": session_id,
+                        "include_preview": true
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(replay.status(), StatusCode::OK);
+    let replay_body = read_json(replay).await;
+    assert_eq!(
+        replay_body["data"]["match_stats"]["idempotent_replay"],
+        true
+    );
+    assert_eq!(
+        replay_body["data"]["preview"][0]["dedup_type"],
+        "database_duplicate"
+    );
+
     let db_runtime = runtime_for(fixture.db_path())?;
     let groups =
         get_import_decision_groups_by_session(db_runtime.connection(), &session_id, user_id(42))?;
@@ -4383,6 +4414,358 @@ async fn import_dedup_persists_same_batch_duplicate_decision_group() -> Result<(
     assert_eq!(groups[0].group_type, "duplicate");
     assert_eq!(groups[0].members.len(), 2);
     assert_eq!(groups[0].signal_payload["dedup_type"], "same_batch");
+    Ok(())
+}
+
+#[tokio::test]
+async fn import_dedup_persists_same_batch_transfer_decision_group() -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new().await?;
+    let mut runtime = runtime_for(fixture.db_path())?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+    let session_id = "session-same-batch-transfer-group";
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: session_id.to_string(),
+            user_id: user_id(42),
+            file_count: 2,
+        },
+    )?;
+    insert_parser_templates_batch(
+        runtime.connection_mut(),
+        session_id,
+        user_id(42),
+        &[
+            ImportParserTemplateDraft {
+                parser_date: "2026-05-04 10:00:00".to_string(),
+                parser_amount: -125.0,
+                parser_type: "支出".to_string(),
+                parser_description: "outgoing wallet note".to_string(),
+                parser_id: "wechat".to_string(),
+                parser_tags: Some(json!(["parser:wechat"])),
+                parser_counterparty: "wallet transfer".to_string(),
+                parser_payment_method: "wechat balance".to_string(),
+                parser_original_type: "支出".to_string(),
+                parser_original_category: String::new(),
+                parser_account_id: "1001".to_string(),
+            },
+            ImportParserTemplateDraft {
+                parser_date: "2026-05-04 10:00:12".to_string(),
+                parser_amount: 125.0,
+                parser_type: "收入".to_string(),
+                parser_description: "incoming bank note".to_string(),
+                parser_id: "icbc".to_string(),
+                parser_tags: Some(json!(["parser:icbc"])),
+                parser_counterparty: "bank transfer".to_string(),
+                parser_payment_method: "icbc card".to_string(),
+                parser_original_type: "收入".to_string(),
+                parser_original_category: String::new(),
+                parser_account_id: "1002".to_string(),
+            },
+        ],
+    )?;
+    drop(runtime);
+
+    let app = runtime_router(&fixture);
+    let dedup = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/dedup")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "session_id": session_id,
+                        "include_preview": true
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(dedup.status(), StatusCode::OK);
+    let dedup_body = read_json(dedup).await;
+    assert_eq!(dedup_body["data"]["total"], 2);
+    assert_eq!(dedup_body["data"]["after_dedup"], 1);
+    assert_eq!(dedup_body["data"]["dedup_stats"]["transfer_pairs"], 1);
+    let preview = dedup_body["data"]["preview"]
+        .as_array()
+        .expect("preview rows");
+    assert_eq!(preview[0]["dedup_type"], "transfer");
+    assert_eq!(preview[0]["preview_type"], "转账");
+    assert_eq!(preview[0]["preview_source_account_id"], 1001);
+    assert_eq!(preview[0]["preview_destination_account_id"], 1002);
+    assert_eq!(
+        preview[0]["matching"]["transfer"]["source_chain"][0]["description"],
+        "outgoing wallet note"
+    );
+    assert_eq!(
+        preview[0]["matching"]["transfer"]["source_chain"][1]["description"],
+        "incoming bank note"
+    );
+    assert!(preview[0]["matching"]["transfer"]["source_label"]
+        .as_str()
+        .is_some_and(|value| value.contains("匹配 | 微信 | 工商银行")));
+
+    let db_runtime = runtime_for(fixture.db_path())?;
+    let groups =
+        get_import_decision_groups_by_session(db_runtime.connection(), session_id, user_id(42))?;
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].group_type, "same_batch_transfer");
+    assert_eq!(groups[0].decision_status, "matched");
+    assert_eq!(groups[0].members.len(), 2);
+    assert_eq!(
+        groups[0].signal_payload["planned_operation"],
+        "merge_transfer"
+    );
+    assert_eq!(
+        groups[0].signal_payload["source_chain"][0]["description"],
+        "outgoing wallet note"
+    );
+    assert!(groups[0]
+        .members
+        .iter()
+        .any(|member| member.member_role == "outgoing"));
+    assert!(groups[0]
+        .members
+        .iter()
+        .any(|member| member.member_role == "incoming"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn import_dedup_materializes_historical_transfers_into_preview() -> Result<(), Box<dyn Error>>
+{
+    let fixture = RuntimeFixture::new().await?;
+    let runtime = runtime_for(fixture.db_path())?;
+    seed_users(&runtime, &[42])?;
+    init_bills_schema(&runtime)?;
+    runtime.connection().execute(
+        "
+        INSERT INTO bills (
+            user_id, date, type, amount, counterparty, description,
+            payment_method, main_category, sub_category, source_account_id,
+            hash, created_at, updated_at
+        ) VALUES (
+            42, '2026-05-04 10:04:00', '收入', 300.00, 'bank incoming',
+            'incoming bank note', 'icbc', '一般转账', '电子支付', 2002,
+            'history-transfer-hash', '2026-05-04T10:04:00', '2026-05-04T10:04:00'
+        )
+        ",
+        [],
+    )?;
+    let history_bill_id = runtime.connection().last_insert_rowid();
+    let app = runtime_router(&fixture);
+
+    let parse = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/parse")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "parser_id": "wechat",
+                        "file_count": 1,
+                        "bills": [{
+                            "date": "2026-05-04 10:00:00",
+                            "type": "支出",
+                            "amount": -300.0,
+                            "description": "outgoing wallet note",
+                            "counterparty": "wallet transfer",
+                            "payment_method": "wechat balance",
+                            "source_account_id": "1001",
+                            "main_category": "一般转账",
+                            "sub_category": "电子支付"
+                        }]
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(parse.status(), StatusCode::OK);
+    let session_id = read_json(parse).await["data"]["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    let dedup = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/dedup")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "session_id": session_id,
+                        "include_preview": true
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(dedup.status(), StatusCode::OK);
+    let dedup_body = read_json(dedup).await;
+    assert_eq!(dedup_body["data"]["after_dedup"], 1);
+    assert_eq!(dedup_body["data"]["match_stats"]["database_candidates"], 1);
+    let preview = dedup_body["data"]["preview"]
+        .as_array()
+        .expect("preview rows");
+    assert_eq!(preview.len(), 1);
+    assert_eq!(preview[0]["dedup_type"], "transfer_cross_batch");
+    assert_eq!(preview[0]["preview_type"], "转账");
+    assert_eq!(preview[0]["preview_source_account_id"], 1001);
+    assert_eq!(preview[0]["preview_destination_account_id"], 2002);
+    assert_eq!(
+        preview[0]["matching"]["transfer"]["candidate_type"],
+        "transfer_cross_batch"
+    );
+    assert_eq!(
+        preview[0]["matching"]["transfer"]["source_chain"][0]["description"],
+        "outgoing wallet note"
+    );
+    assert_eq!(
+        preview[0]["matching"]["transfer"]["source_chain"][1]["description"],
+        "incoming bank note"
+    );
+    assert_eq!(
+        preview[0]["matching"]["reconciliation"]["planned_operation"],
+        "merge_transfer_history"
+    );
+    assert_eq!(
+        preview[0]["matching"]["reconciliation"]["history_bill_id"],
+        history_bill_id
+    );
+    assert_eq!(
+        preview[0]["matching"]["reconciliation"]["time_diff_seconds"],
+        240
+    );
+    assert_eq!(
+        preview[0]["matching"]["annotation"]["type"],
+        "history_rewrite_pending"
+    );
+
+    let replay = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/dedup")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "session_id": session_id,
+                        "include_preview": true
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(replay.status(), StatusCode::OK);
+    let replay_body = read_json(replay).await;
+    assert_eq!(
+        replay_body["data"]["match_stats"]["idempotent_replay"],
+        true
+    );
+    assert_eq!(
+        replay_body["data"]["preview"][0]["dedup_type"],
+        "transfer_cross_batch"
+    );
+
+    let db_runtime = runtime_for(fixture.db_path())?;
+    let groups =
+        get_import_decision_groups_by_session(db_runtime.connection(), &session_id, user_id(42))?;
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].group_type, "historical_transfer");
+    assert_eq!(
+        groups[0].signal_payload["planned_operation"],
+        "merge_transfer_history"
+    );
+    assert!(groups[0]
+        .members
+        .iter()
+        .any(|member| member.history_bill_id == Some(history_bill_id)));
+    let materializations = get_import_history_materializations_by_session(
+        db_runtime.connection(),
+        &session_id,
+        user_id(42),
+    )?;
+    assert_eq!(materializations.len(), 1);
+    assert_eq!(materializations[0].history_bill_id, history_bill_id);
+    assert_eq!(
+        materializations[0].materialized_payload["operation"],
+        "merge_transfer_history"
+    );
+
+    let select_all = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::PUT)
+                .uri(format!(
+                    "/api/bills/import/v2/preview/{session_id}/selection"
+                ))
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "selectionAction": "select_all"
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(select_all.status(), StatusCode::OK);
+
+    let confirm = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/import/v2/confirm")
+                .header("x-user-id", "42")
+                .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "session_id": session_id
+                    })
+                    .to_string(),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(confirm.status(), StatusCode::OK);
+    let confirm_body = read_json(confirm).await;
+    assert_eq!(confirm_body["data"]["imported_count"], 0);
+    assert_eq!(confirm_body["data"]["skipped_count"], 1);
+    let remaining_history_rows: i64 = db_runtime.connection().query_row(
+        "SELECT COUNT(*) FROM bills WHERE user_id = 42 AND id = ?1",
+        [history_bill_id],
+        |row| row.get(0),
+    )?;
+    assert_eq!(remaining_history_rows, 1);
     Ok(())
 }
 

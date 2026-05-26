@@ -162,7 +162,7 @@ pub use runtime::{
     runtime_health, runtime_identity_json, RuntimeHealth, RuntimeIdentity, RuntimeStatus,
 };
 pub use smart_dedup::{
-    find_cross_batch_transfer_pairs, find_database_duplicates,
+    build_transfer_source_snapshot, find_cross_batch_transfer_pairs, find_database_duplicates,
     find_import_reconciliation_candidates, CrossBatchTransferMatch, DedupBill, DeduplicationResult,
     DeduplicationType, DuplicateGroup, ImportReconciliationCandidate, MergedBillSource,
     ReconciliationCandidateType, SmartDeduplicationEngine, SplitGroup, TransferPair,

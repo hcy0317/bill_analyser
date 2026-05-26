@@ -88,6 +88,7 @@ fn preview_matching_feedback_from_dedup_bill(
                 "review_status": "pending",
                 "pair_order": bill.transfer_pair_order,
                 "source_chain": &bill.transfer_pair_sources,
+                "source_label": transfer_source_label(&bill.transfer_pair_sources),
             }),
         );
     }
@@ -203,6 +204,18 @@ pub struct ImportHistoryDuplicatePreviewInput<'a> {
     pub reason: &'a str,
 }
 
+#[derive(Debug, Clone)]
+pub struct ImportHistoryTransferPreviewInput<'a> {
+    pub imported_bill: &'a DedupBill,
+    pub history_bill: &'a ImportHistoryBillRow,
+    pub candidate_id: &'a str,
+    pub group_key: &'a str,
+    pub time_diff_seconds: i64,
+    pub score_percent: u8,
+    pub level: &'a str,
+    pub reason: &'a str,
+}
+
 pub fn preview_draft_from_history_duplicate(
     input: ImportHistoryDuplicatePreviewInput<'_>,
 ) -> ImportPreviewDraft {
@@ -301,6 +314,154 @@ pub fn preview_draft_from_history_duplicate(
     }
 }
 
+pub fn preview_draft_from_history_transfer(
+    input: ImportHistoryTransferPreviewInput<'_>,
+) -> ImportPreviewDraft {
+    let history = &input.history_bill.bill;
+    let import_is_outgoing = input.imported_bill.amount.is_negative();
+    let (outgoing, incoming, outgoing_role, incoming_role) = if import_is_outgoing {
+        (
+            input.imported_bill,
+            history,
+            "import_outgoing",
+            "history_incoming",
+        )
+    } else {
+        (
+            history,
+            input.imported_bill,
+            "history_outgoing",
+            "import_incoming",
+        )
+    };
+    let amount = money_to_yuan_f64(outgoing.amount);
+    let destination_amount = money_to_yuan_f64(incoming.amount).abs();
+    let source_ids = input
+        .imported_bill
+        .dedup_source_ids()
+        .iter()
+        .filter_map(|value| parse_positive_i64(value))
+        .collect::<Vec<_>>();
+    let counterparty = merge_preview_text(&outgoing.counterparty, &incoming.counterparty);
+    let payment_method = merge_preview_text(&outgoing.payment_method, &incoming.payment_method);
+    let description = merge_preview_text(&outgoing.description, &incoming.description);
+    let transfer_sources = vec![
+        build_transfer_source_snapshot(outgoing, "outgoing"),
+        build_transfer_source_snapshot(incoming, "incoming"),
+    ];
+    let source_label = transfer_source_label(&transfer_sources);
+    let source_chain = serde_json::json!([
+        {
+            "role": outgoing_role,
+            "history_bill_id": if outgoing_role.starts_with("history") { Some(input.history_bill.history_bill_id) } else { None },
+            "history_bill_version": if outgoing_role.starts_with("history") { Some(input.history_bill.history_bill_version) } else { None },
+            "template_id": if outgoing_role.starts_with("import") { input.imported_bill.template_id.clone() } else { None },
+            "parser_id": outgoing.parser_id,
+            "source": outgoing.source_identifier(),
+            "date": outgoing.date,
+            "amount": outgoing.amount.to_yuan_string(),
+            "counterparty": outgoing.counterparty,
+            "payment_method": outgoing.payment_method,
+            "description": outgoing.description,
+        },
+        {
+            "role": incoming_role,
+            "history_bill_id": if incoming_role.starts_with("history") { Some(input.history_bill.history_bill_id) } else { None },
+            "history_bill_version": if incoming_role.starts_with("history") { Some(input.history_bill.history_bill_version) } else { None },
+            "template_id": if incoming_role.starts_with("import") { input.imported_bill.template_id.clone() } else { None },
+            "parser_id": incoming.parser_id,
+            "source": incoming.source_identifier(),
+            "date": incoming.date,
+            "amount": incoming.amount.to_yuan_string(),
+            "counterparty": incoming.counterparty,
+            "payment_method": incoming.payment_method,
+            "description": incoming.description,
+        }
+    ]);
+
+    ImportPreviewDraft {
+        preview_date: outgoing.date.clone(),
+        preview_type: "转账".to_string(),
+        preview_amount: amount.abs(),
+        preview_destination_amount: destination_amount,
+        preview_main_category: outgoing.main_category.clone(),
+        preview_sub_category: outgoing.sub_category.clone(),
+        preview_source_account_id: parse_positive_i64(&outgoing.source_account_id),
+        preview_destination_account_id: parse_positive_i64(&incoming.source_account_id),
+        preview_counterparty: counterparty,
+        preview_payment_method: payment_method,
+        preview_description: description,
+        preview_parser_id: outgoing.parser_id.clone(),
+        preview_parser_tags: Some(serde_json::json!([
+            "history:db",
+            "signal:database_transfer",
+            format!("parser:{}", outgoing.parser_id),
+            format!("parser:{}", incoming.parser_id),
+        ])),
+        preview_selected: false,
+        dedup_type: Some("transfer_cross_batch".to_string()),
+        dedup_source_ids: source_ids.clone(),
+        preview_matching_feedback: serde_json::json!({
+            "parser": {
+                "parser_id": outgoing.parser_id,
+                "parser_tags": [
+                    "history:db",
+                    "signal:database_transfer",
+                    format!("parser:{}", outgoing.parser_id),
+                    format!("parser:{}", incoming.parser_id),
+                ],
+                "payment_method": outgoing.payment_method,
+                "counterparty": outgoing.counterparty,
+            },
+            "dedup": {
+                "type": "transfer_cross_batch",
+                "source_ids": source_ids,
+                "source_count": input.imported_bill.dedup_source_ids().len(),
+                "history_bill_id": input.history_bill.history_bill_id,
+                "history_bill_version": input.history_bill.history_bill_version,
+                "planned_operation": "merge_transfer_history",
+                "source_chain": source_chain,
+                "source_label": source_label,
+            },
+            "transfer": {
+                "candidate_type": "transfer_cross_batch",
+                "score": f64::from(input.score_percent) / 100.0,
+                "level": input.level,
+                "reason": "historical transfer pair",
+                "review_status": "pending",
+                "pair_order": if import_is_outgoing { "outgoing_import" } else { "outgoing_history" },
+                "source_chain": transfer_sources,
+                "source_label": source_label,
+            },
+            "reconciliation": {
+                "candidate_id": input.candidate_id,
+                "candidate_type": "transfer",
+                "group_key": input.group_key,
+                "history_bill_id": input.history_bill.history_bill_id,
+                "history_bill_version": input.history_bill.history_bill_version,
+                "row_origin": "history",
+                "planned_operation": "merge_transfer_history",
+                "history_role": if import_is_outgoing { "incoming" } else { "outgoing" },
+                "import_role": if import_is_outgoing { "outgoing" } else { "incoming" },
+                "review_status": "pending",
+                "time_diff_seconds": input.time_diff_seconds,
+                "score": f64::from(input.score_percent) / 100.0,
+                "level": input.level,
+                "reason": input.reason,
+                "notice": "将改写/合并历史账单",
+            },
+            "annotation": {
+                "status": "needs_review",
+                "type": "history_rewrite_pending",
+                "review_status": "requires_history_confirm_runtime",
+                "suppressed": true,
+                "reason": "historical transfer is materialized for preview; confirm rewrite is handled by history-confirm operation",
+            }
+        }),
+        ..ImportPreviewDraft::default()
+    }
+}
+
 impl Default for ImportPreviewDraft {
     fn default() -> Self {
         Self {
@@ -331,6 +492,24 @@ impl Default for ImportPreviewDraft {
     }
 }
 
+fn transfer_source_label(sources: &[TransferSourceSnapshot]) -> String {
+    let outgoing = sources
+        .iter()
+        .find(|source| source.role == "outgoing")
+        .or_else(|| sources.first());
+    let incoming = sources
+        .iter()
+        .find(|source| source.role == "incoming")
+        .or_else(|| sources.get(1));
+    let outgoing_label = outgoing
+        .map(|source| parser_source_label(&source.parser_id).into_owned())
+        .unwrap_or_default();
+    let incoming_label = incoming
+        .map(|source| parser_source_label(&source.parser_id).into_owned())
+        .unwrap_or_default();
+    format!("匹配 | {outgoing_label} | {incoming_label}")
+}
+
 fn merge_preview_text(left: &str, right: &str) -> String {
     let left = left.trim();
     let right = right.trim();
@@ -359,4 +538,81 @@ fn merge_preview_text(left: &str, right: &str) -> String {
         }
     }
     values.join(" | ")
+}
+
+#[cfg(test)]
+mod preview_draft_tests {
+    use super::*;
+
+    fn transfer_bill(parser_id: &str, amount: &str, account_id: &str) -> DedupBill {
+        DedupBill {
+            id: Some(format!("db-{parser_id}")),
+            date: "2026-05-04 10:00:05".to_string(),
+            amount: Money::from_yuan_str(amount).unwrap(),
+            transaction_type: if amount.starts_with('-') {
+                "支出".to_string()
+            } else {
+                "收入".to_string()
+            },
+            source_account_id: account_id.to_string(),
+            parser_id: parser_id.to_string(),
+            source: parser_id.to_string(),
+            counterparty: format!("{parser_id} counterparty"),
+            payment_method: format!("{parser_id} payment"),
+            description: format!("{parser_id} description"),
+            main_category: "一般转账".to_string(),
+            sub_category: "电子支付".to_string(),
+            ..DedupBill::default()
+        }
+    }
+
+    fn history_row(bill: DedupBill) -> ImportHistoryBillRow {
+        ImportHistoryBillRow {
+            history_bill_id: 88,
+            history_bill_version: 3,
+            snapshot: serde_json::json!({
+                "id": 88,
+                "amount": bill.amount.to_yuan_string(),
+            }),
+            bill,
+        }
+    }
+
+    #[test]
+    fn history_transfer_preview_uses_history_outgoing_when_import_is_income() {
+        let imported = DedupBill {
+            template_id: Some("901".to_string()),
+            session_id: Some("session-history-transfer".to_string()),
+            ..transfer_bill("wechat", "300.00", "2002")
+        };
+        let history = history_row(transfer_bill("icbc", "-300.00", "1001"));
+
+        let draft = preview_draft_from_history_transfer(ImportHistoryTransferPreviewInput {
+            imported_bill: &imported,
+            history_bill: &history,
+            candidate_id: "candidate",
+            group_key: "group",
+            time_diff_seconds: 5,
+            score_percent: 99,
+            level: "high",
+            reason: "opposite_amount|same_day|time_close",
+        });
+
+        assert_eq!(draft.preview_type, "转账");
+        assert_eq!(draft.preview_source_account_id, Some(1001));
+        assert_eq!(draft.preview_destination_account_id, Some(2002));
+        assert_eq!(draft.dedup_type.as_deref(), Some("transfer_cross_batch"));
+        assert_eq!(
+            draft.preview_matching_feedback["reconciliation"]["history_role"],
+            "outgoing"
+        );
+        assert_eq!(
+            draft.preview_matching_feedback["transfer"]["source_chain"][0]["description"],
+            "icbc description"
+        );
+        assert_eq!(
+            draft.preview_matching_feedback["transfer"]["source_chain"][1]["description"],
+            "wechat description"
+        );
+    }
 }

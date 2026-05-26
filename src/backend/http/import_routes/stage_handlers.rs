@@ -110,8 +110,22 @@ pub async fn import_dedup_runtime_handler(
         Ok(rows) => rows,
         Err(error) => return route_response(db_error_response(error)),
     };
-    let mut history_plan =
+    let mut history_duplicate_plan =
         build_history_duplicate_preview_plan(&dedup_result.kept_bills, &history_bills);
+    let history_duplicate_import_keys = history_duplicate_plan
+        .iter()
+        .map(|plan| plan.import_bill_key.clone())
+        .collect::<HashSet<_>>();
+    let history_duplicate_ids = history_duplicate_plan
+        .iter()
+        .map(|plan| plan.history_bill_id)
+        .collect::<HashSet<_>>();
+    let mut history_transfer_plan = build_history_transfer_preview_plan(
+        &dedup_result.kept_bills,
+        &history_bills,
+        &history_duplicate_import_keys,
+        &history_duplicate_ids,
+    );
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
@@ -124,9 +138,14 @@ pub async fn import_dedup_runtime_handler(
         elapsed_ms = import_stage_elapsed_ms(_dedup_started_at),
         "stage2 smart dedup complete"
     );
-    let history_import_keys = history_plan
+    let history_import_keys = history_duplicate_plan
         .iter()
         .map(|plan| plan.import_bill_key.clone())
+        .chain(
+            history_transfer_plan
+                .iter()
+                .map(|plan| plan.import_bill_key.clone()),
+        )
         .collect::<HashSet<_>>();
     let previewable_bills = dedup_result
         .kept_bills
@@ -135,7 +154,16 @@ pub async fn import_dedup_runtime_handler(
         .cloned()
         .collect::<Vec<_>>();
     let mut preview_drafts = preview_drafts_from_dedup_bills(&previewable_bills);
-    preview_drafts.extend(history_plan.iter().map(|plan| plan.preview_draft.clone()));
+    preview_drafts.extend(
+        history_duplicate_plan
+            .iter()
+            .map(|plan| plan.preview_draft.clone()),
+    );
+    preview_drafts.extend(
+        history_transfer_plan
+            .iter()
+            .map(|plan| plan.preview_draft.clone()),
+    );
     let intelligence_stats = match apply_import_intelligence_chain(
         runtime.connection_mut(),
         user_id,
@@ -145,7 +173,11 @@ pub async fn import_dedup_runtime_handler(
         Err(error) => return route_response(db_error_response(error)),
     };
     enforce_import_preview_invariants(preview_drafts.as_mut_slice());
-    refresh_history_materialization_payloads(&mut history_plan, &preview_drafts);
+    refresh_history_duplicate_materialization_payloads(
+        &mut history_duplicate_plan,
+        &preview_drafts,
+    );
+    refresh_history_transfer_materialization_payloads(&mut history_transfer_plan, &preview_drafts);
     let _preview_insert_started_at = Instant::now();
     if !templates.is_empty() {
         if let Err(error) =
@@ -167,9 +199,14 @@ pub async fn import_dedup_runtime_handler(
         runtime.connection_mut(),
         &session_id,
         user_id,
-        &history_plan
+        &history_duplicate_plan
             .iter()
             .map(|plan| plan.materialization.clone())
+            .chain(
+                history_transfer_plan
+                    .iter()
+                    .map(|plan| plan.materialization.clone()),
+            )
             .collect::<Vec<_>>(),
     ) {
         return route_response(db_error_response(error));
@@ -179,14 +216,16 @@ pub async fn import_dedup_runtime_handler(
             Ok(rows) => rows,
             Err(error) => return route_response(db_error_response(error)),
         };
-    let decision_groups = build_import_duplicate_decision_groups(
-        &session_id,
-        &dedup_result.duplicate_groups,
-        &templates,
-        &standard_rows,
-        &preview_rows_for_groups,
-        &history_plan,
-    );
+    let decision_groups = build_import_match_decision_groups(ImportMatchDecisionGroupInput {
+        session_id: &session_id,
+        duplicate_groups: &dedup_result.duplicate_groups,
+        transfer_pairs: &dedup_result.transfer_pairs,
+        templates: &templates,
+        standard_rows: &standard_rows,
+        preview_rows: &preview_rows_for_groups,
+        history_duplicate_plan: &history_duplicate_plan,
+        history_transfer_plan: &history_transfer_plan,
+    });
     if let Err(error) = insert_import_decision_groups_batch(
         runtime.connection_mut(),
         &session_id,
@@ -265,7 +304,7 @@ pub async fn import_dedup_runtime_handler(
             "account_matched": intelligence_stats.account_matched,
             "learning_applied": intelligence_stats.learning_applied,
             "recurring_projected": intelligence_stats.recurring_projected,
-            "database_candidates": history_plan.len(),
+            "database_candidates": history_duplicate_plan.len() + history_transfer_plan.len(),
             "provider_bypassed": false,
         }),
     }))

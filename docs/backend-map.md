@@ -24,7 +24,7 @@ flowchart LR
 | DB | `src/backend/db/lib.rs` | SQLite 连接、PostgreSQL lazy runtime provider、schema、事务 helper、user-scope repository、staging 生命周期 | 不绕过事务边界、静默回退仓储 backend，或把 user_id 过滤留给调用方猜 |
 | Parsers | `src/backend/parsers/lib.rs` | provider 检测、账单解析、`RawBill` 到 `StandardBill` 标准化、fixture/golden 合同 | 不执行导入 staging、去重、分类或账户写入 |
 
-当前库存：`src/backend/http` 118 个 Rust 文件，`src/backend/db` 84 个，`src/backend/core` 58 个，`src/backend/parsers` 9 个，总计 269 个。每个后端 Rust 文件都在文件头保留中文导读注释，说明该文件所在层、核心职责和主要对接边界。
+当前库存：`src/backend/http` 119 个 Rust 文件，`src/backend/db` 84 个，`src/backend/core` 58 个，`src/backend/parsers` 9 个，总计 270 个。每个后端 Rust 文件都在文件头保留中文导读注释，说明该文件所在层、核心职责和主要对接边界。
 
 ### 常用根文件
 
@@ -84,7 +84,9 @@ flowchart TD
 - mixed multipart 必须保留每个文件自己的 parser id 和 parser tags。
 - `import_sources` 与 `import_standard_rows` 保存文件级 parser decision、标准化行、分单位金额和 parser payload，后续 duplicate/transfer/learning 切片以它们作为决策台账锚点。
 - 同批重复在 stage2 按秒级时间窗口、同向金额、方向和文本证据折叠，合并交易对方/支付方式/描述，并通过 `preview_matching_feedback_json.dedup.source_chain` 与 `import_decision_groups` 保留来源证据。
+- 同批转账按秒级时间窗口、同额反向金额和不同来源配对，以支出侧为基底合并交易对方/支付方式/描述；支出/收入两侧原始字段保存在 `preview_matching_feedback_json.transfer.source_chain`，并通过 `same_batch_transfer` decision group 保留成员证据。
 - 历史重复查询正式 `bills` 时保持 user-scope，并以 `import_standard_rows` 的日期窗口限制候选；命中还需要金额方向和文本证据，之后生成 `database_duplicate` 预览行、`reconciliation.planned_operation=update_history` feedback 和 `import_history_materializations`，当前 confirm 会跳过带 `history_rewrite_pending` annotation 的预览行。
+- 历史转账同样保持 user-scope 和 standard-row 日期窗口，以同日时间容差、同额反向金额和不同来源命中正式账单；stage2 生成 `transfer_cross_batch` 预览行、`reconciliation.planned_operation=merge_transfer_history` feedback、`import_history_materializations` 和 `historical_transfer` decision group，当前 confirm 继续跳过真实历史改写。
 - Check Data 首屏只读取 preview page；筛选、排序、计数和批量选择都由 Rust preview page/query/update 处理。
 - transfer、learning、recurring、dedup、parser、annotation、reconciliation 信号从 `preview_matching_feedback_json` 投影，缺分类/缺账户状态按当前预览字段动态计算；账户规则候选在 stage2 shadow 读取，正式账户字段仍由当前别名链路写入。
 - confirm 在事务内写正式 bills、tags、accounts、learning side effects；cancel 和失败后新建 session 清理 staging，不保留导入续传状态。

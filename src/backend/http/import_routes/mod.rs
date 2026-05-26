@@ -41,7 +41,7 @@ use bill_analyser_core::{
     ImportV2RouteResponse, LlmProviderConfigContract, OcrConfigContract, OcrProviderTextLine,
     OcrProviderTextResult, ReceiptDraftAccount, ReceiptDraftCategory, ReceiptDraftCategoryRule,
     ReceiptDraftContext, ReceiptDraftTag, ReconciliationCandidateType, SmartDeduplicationEngine,
-    UserId, IMPORT_PREVIEW_SORT_KEYS, LLM_SYSTEM_PROMPT, NETWORK_OCR_PROVIDER_NAME,
+    TransferPair, UserId, IMPORT_PREVIEW_SORT_KEYS, LLM_SYSTEM_PROMPT, NETWORK_OCR_PROVIDER_NAME,
     OCR_DISABLED_PROVIDER_NAME,
 };
 use bill_analyser_db::{
@@ -59,18 +59,19 @@ use bill_analyser_db::{
     list_llm_configs, load_ocr_config_setting,
     mark_unprocessed_parser_templates_processed_for_session,
     parser_template_draft_from_standard_bill, preview_draft_from_history_duplicate,
-    preview_drafts_from_dedup_bills, query_preview_page_by_session, reject_llm_candidate,
-    replace_preview_selection_with_patches, reset_session_preview_selection,
-    review_preview_llm_recommendation, save_import_annotation_samples, set_app_setting,
-    stage_import_parser_templates_with_sources, store_ocr_config_setting,
-    update_import_session_status, update_llm_config, update_preview_bill,
+    preview_draft_from_history_transfer, preview_drafts_from_dedup_bills,
+    query_preview_page_by_session, reject_llm_candidate, replace_preview_selection_with_patches,
+    reset_session_preview_selection, review_preview_llm_recommendation,
+    save_import_annotation_samples, set_app_setting, stage_import_parser_templates_with_sources,
+    store_ocr_config_setting, update_import_session_status, update_llm_config, update_preview_bill,
     update_preview_bills_batch, update_preview_recurring_match_decision, update_preview_selection,
     update_session_preview_selection_by_query, AppSettingDraft, ImportAnnotationSampleDraft,
     ImportDecisionGroupDraft, ImportDecisionGroupMemberDraft, ImportHistoryBillRow,
-    ImportHistoryDuplicatePreviewInput, ImportHistoryMaterializationDraft, ImportPreviewDecision,
-    ImportPreviewDecisionResult, ImportPreviewDraft, ImportPreviewExpectedState,
-    ImportPreviewLlmDecisionResult, ImportPreviewLlmReviewRequest, ImportPreviewLlmSuggestion,
-    ImportPreviewPageRequest, ImportPreviewPatch, ImportPreviewPatchField, ImportPreviewPatchValue,
+    ImportHistoryDuplicatePreviewInput, ImportHistoryMaterializationDraft,
+    ImportHistoryTransferPreviewInput, ImportPreviewDecision, ImportPreviewDecisionResult,
+    ImportPreviewDraft, ImportPreviewExpectedState, ImportPreviewLlmDecisionResult,
+    ImportPreviewLlmReviewRequest, ImportPreviewLlmSuggestion, ImportPreviewPageRequest,
+    ImportPreviewPatch, ImportPreviewPatchField, ImportPreviewPatchValue,
     ImportPreviewQueryFilters, ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate,
     ImportPreviewRow, ImportSessionDraft, ImportSessionStatusUpdate, ImportSourceDraft,
     ImportStandardRowDraft, LlmCandidateDraft, LlmConfigDraft, LlmConfigUpdate, SqliteRuntime,
@@ -401,6 +402,7 @@ pub fn import_runtime_router() -> Router<HttpAppState> {
 include!("legacy_handlers.rs");
 include!("stage_handlers.rs");
 include!("duplicate_materialization.rs");
+include!("transfer_materialization.rs");
 include!("llm_handlers.rs");
 include!("ocr_learning_handlers.rs");
 include!("response_payload.rs");
