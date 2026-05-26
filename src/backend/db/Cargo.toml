@@ -21,15 +21,19 @@ serde_json.workspace = true
 sha2.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-tokio.workspace = true
 
 [[bin]]
 name = "bill_taxonomy_bridge"
 path = "bin/bill_taxonomy_bridge.rs"
+
+[[bin]]
+name = "bill_sqlite_to_postgres_migrate"
+path = "bin/bill_sqlite_to_postgres_migrate.rs"
 
 [[test]]
 name = "app_settings"
@@ -58,6 +62,10 @@ path = "../../../tests/backend/db/import_staging.rs"
 [[test]]
 name = "llm_runtime"
 path = "../../../tests/backend/db/llm_runtime.rs"
+
+[[test]]
+name = "sqlite_postgres_migration_cli"
+path = "../../../tests/backend/db/sqlite_postgres_migration_cli.rs"
 
 [[test]]
 name = "matching_runtime"

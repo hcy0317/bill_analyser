@@ -130,6 +130,17 @@ $env:BILL_ANALYSER_MIGRATION_MODE = "validate"
 
 `/api/health` 会显示 `database_backend`、`postgres_configured`、`postgres_url_redacted`、`migration_mode`、`migration_status` 和 `weaviate_status`，其中 Postgres URL 只输出脱敏形式。当前切片不切换业务 repository。
 
+SQLite 到 PostgreSQL 的迁移工具当前支持 dry-run、export 和 import-check：
+
+```powershell
+cargo run -p bill-analyser-db --bin bill_sqlite_to_postgres_migrate -- --mode dry-run --sqlite data\bills.db --output migration-report.json
+cargo run -p bill-analyser-db --bin bill_sqlite_to_postgres_migrate -- --mode export --sqlite data\bills.db --output migration-bundle.json
+cargo run -p bill-analyser-db --bin bill_sqlite_to_postgres_migrate -- --mode import-check --bundle migration-bundle.json --output migration-import-check.json
+cargo run -p bill-analyser-db --bin bill_sqlite_to_postgres_migrate -- --mode import --bundle migration-bundle.json --postgres-url $env:BILL_ANALYSER_POSTGRES_URL --output migration-import-report.json
+```
+
+详见 `docs/postgres-migration.md`。
+
 ### 手动启动
 
 ```powershell

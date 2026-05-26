@@ -20,6 +20,7 @@ pub mod llm;
 pub mod matching;
 pub mod path;
 pub mod postgres;
+pub mod postgres_migration;
 pub mod recurring;
 pub mod schema;
 pub mod statistics;
@@ -134,6 +135,15 @@ pub use postgres::{
     postgres_initial_schema_path, postgres_migration_manifest, postgres_migrations_dir,
     run_postgres_migrations, PostgresMigrationDescriptor, PostgresPool,
     POSTGRES_INITIAL_SCHEMA_FILE, POSTGRES_MIGRATIONS_RELATIVE_DIR,
+};
+pub use postgres_migration::{
+    export_sqlite_to_postgres_bundle, export_sqlite_to_postgres_bundle_from_connection,
+    import_postgres_bundle_to_postgres, import_postgres_bundle_to_postgres_with_name,
+    import_postgres_bundle_to_sink, load_sqlite_to_postgres_bundle_json,
+    sqlite_to_postgres_dry_run, sqlite_to_postgres_dry_run_from_connection,
+    write_sqlite_to_postgres_json, MigrationTableStatus, PostgresImportSink, PostgresTargetRow,
+    SqliteToPostgresDryRunReport, SqliteToPostgresExportBundle, SqliteToPostgresImportCheckReport,
+    SqliteToPostgresTableExport, SqliteToPostgresTableReport,
 };
 pub use recurring::{
     accept_recurring_suggestion, count_recurring_suggestions,

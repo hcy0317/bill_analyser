@@ -26,6 +26,8 @@ Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预
 
 `/api/health` 的 details 暴露 `database_backend`、`postgres_configured`、`postgres_url_redacted`、`migration_mode`、`migration_status`、`weaviate_status` 与 `require_postgres_after_cutover`。健康信息只显示脱敏 Postgres URL；迁移和 Weaviate 状态在当前阶段是占位观测字段，后续切片会接入实际迁移 runner 和向量同步 outbox。
 
+PostgreSQL 迁移工具入口是 `bill_sqlite_to_postgres_migrate`，支持 `dry-run`、`export`、`import-check` 和事务性 `import`。它从 SQLite 读取 legacy 表，校验必需列，生成确定性 checksum，并把账户别名转换成目标 `account_rules` payload；`import` 通过 SQLx 写入 PostgreSQL、记录 `migration_audit_events`、修正 identity 序列，不改写 SQLite，也不把业务 repository 切到 Postgres。操作步骤见 [PostgreSQL migration tooling](postgres-migration.md)。
+
 ## 关键业务链路
 
 ### 导入
@@ -66,6 +68,7 @@ LLM 临时配置保存在 Rust 进程内 user-scoped map，saved config 落库�
 - [API 路由](overview-api-routes.md) — `/api/...` route modules 和合同约束
 - [导入链路](overview-import.md) — v2 三阶段导入、preview、learning、LLM/OCR
 - [数据库与数据流](overview-database.md) — repository、事务、user-scope 和 staging 生命周期
+- [PostgreSQL migration tooling](postgres-migration.md) — SQLite dry-run、导出 bundle、导入校验、retry/rollback
 - [Matching 域](overview-matching.md) — transfer/investment/learning/recurring 配对候选
 - [统计与汇率](overview-statistics.md) — 统计主链、汇率 REST 和用户数据管理
 - [认证与安全](overview-auth-security.md) — 认证、2FA、token、backup、step-up 和审计
