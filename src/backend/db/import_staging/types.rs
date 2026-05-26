@@ -486,6 +486,33 @@ pub struct ImportPreviewDecisionResult {
     pub invalid_recurring_id: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportLearningLifecycleView {
+    pub recommendation_key: String,
+    pub recommendation_type: String,
+    pub status: String,
+    pub signal_state: String,
+    pub accepted_count: i64,
+    pub rejected_count: i64,
+    pub auto_applied_count: i64,
+    pub auto_apply_enabled: bool,
+    pub suppressed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportLearningLifecycleRecordInput {
+    pub recommendation_key: String,
+    pub recommendation_type: String,
+    pub feedback: String,
+    pub rule_id: Option<i64>,
+    pub suggestion_id: Option<i64>,
+    pub session_id: Option<String>,
+    pub preview_id: Option<i64>,
+    pub bill_id: Option<i64>,
+    pub candidate_id: Option<String>,
+    pub payload_json: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ImportPreviewLearningApply {
     pub preview_type: Option<String>,

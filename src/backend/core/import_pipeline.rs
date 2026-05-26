@@ -4,6 +4,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
+use crate::import_pipeline_learning::LearningMatchingPayload;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Number, Value};
 
@@ -785,19 +786,6 @@ pub struct InvestmentMatchingPayload {
     pub reason: String,
     pub platform: String,
     pub product: String,
-    pub review_status: String,
-    pub suppressed: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-#[serde(default)]
-pub struct LearningMatchingPayload {
-    pub rule_id: Option<i64>,
-    pub score: f64,
-    pub level: String,
-    pub reason: String,
-    pub recommended_type: String,
-    pub summary: String,
     pub review_status: String,
     pub suppressed: bool,
 }

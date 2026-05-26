@@ -109,6 +109,7 @@ export interface ImportPreviewSignalState extends ImportCheckMatchingContextStat
     learningTitle?: string;
     learningSummary?: string;
     learningMode?: ImportPreviewLearningMode | string;
+    learningSignalState?: string;
     learningAutoApplied?: boolean;
     llmStatus?: ImportPreviewSignalStatus | null;
     llmTitle?: string;
@@ -776,29 +777,33 @@ export function buildImportPreviewSignalViewModel(
     );
     const learningDetailLines = buildLearningDetailLines(state, options);
     const normalizedLearningMode = (state.learningMode || '').trim().toLowerCase();
-    const isBlueLearning = normalizedLearningMode === 'blue' || !!state.learningAutoApplied;
-    const learningReviewedActions = isBlueLearning
-        ? [{ decision: 'clear', labelKey: 'Undo Learning Auto Apply', color: 'primary' } as ImportPreviewSignalDecision]
+    const normalizedLearningSignalState = (state.learningSignalState || '').trim().toLowerCase();
+    const isGreenLearning = normalizedLearningSignalState === 'green'
+        || normalizedLearningSignalState === 'auto_applied'
+        || normalizedLearningMode === 'green'
+        || !!state.learningAutoApplied;
+    const learningReviewedActions = isGreenLearning
+        ? [{ decision: 'reject', labelKey: 'Reject Learning Suggestion', color: 'error' } as ImportPreviewSignalDecision]
         : [];
     const learning = buildReviewView(
         state.learningStatus,
         buildSignalTitle(learningDetailLines, state.learningTitle),
-        isBlueLearning ? 'Blue Learning Auto Apply' : 'Learning Suggestion',
-        isBlueLearning ? 'Blue Learning Applied' : 'Learning Suggestion Accepted',
+        isGreenLearning ? 'Learning Auto Apply' : 'Learning Suggestion',
+        isGreenLearning ? 'Learning Applied' : 'Learning Suggestion Accepted',
         'Learning Suggestion Rejected',
         [
-            { decision: 'accept', labelKey: 'Apply Suggestion', color: isBlueLearning ? 'primary' : 'secondary' },
+            { decision: 'accept', labelKey: 'Apply Suggestion', color: isGreenLearning ? 'success' : 'secondary' },
             { decision: 'reject', labelKey: 'Reject Learning Suggestion', color: 'error' }
         ],
         undefined,
         state.learningSummary,
         learningReviewedActions,
         learningDetailLines,
-        'info',
+        'warning',
         'Learning Suggestion Skipped'
     );
-    if (learning && isBlueLearning) {
-        learning.color = 'primary';
+    if (learning && isGreenLearning) {
+        learning.color = 'success';
     }
     const llmDetailLines = buildLLMDetailLines(state, options);
     const llm = buildReviewView(

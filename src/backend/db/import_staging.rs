@@ -3,8 +3,12 @@
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
 use bill_analyser_core::{
-    build_import_history_rewrite_ack_token, build_import_history_rewrite_operation_id,
-    build_transfer_source_snapshot, normalize_bill_date_text, DedupBill, DeduplicationType, Money,
+    amount_bucket, build_import_history_rewrite_ack_token,
+    build_import_history_rewrite_operation_id, build_import_learning_recommendation_key,
+    build_transfer_source_snapshot, learning_lifecycle_is_auto_eligible,
+    learning_lifecycle_signal_state, normalize_bill_date_text,
+    transition_import_learning_lifecycle, DedupBill, DeduplicationType,
+    ImportLearningLifecycleState, ImportLearningRecommendationKeyInput, Money,
     TransferSourceSnapshot, UserId, HISTORY_REWRITE_NOTICE,
 };
 use bill_analyser_parsers::{parser_source_label, serialize_parser_tags, StandardBill};
@@ -36,6 +40,7 @@ include!("import_staging/selection_confirm.rs");
 include!("import_staging/rows.rs");
 include!("import_staging/row_value_helpers.rs");
 include!("import_staging/decision_snapshot_helpers.rs");
+include!("import_staging/learning_lifecycle.rs");
 include!("import_staging/llm_payload_helpers.rs");
 include!("import_staging/import_value_helpers.rs");
 include!("import_staging/schema_legacy_helpers.rs");

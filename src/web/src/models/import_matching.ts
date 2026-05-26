@@ -47,6 +47,12 @@ export interface ImportMatchingLearningPayload {
     confidence?: number;
     margin?: number;
     confirmations?: number;
+    recommendation_key?: string;
+    lifecycle_status?: string;
+    signal_state?: string;
+    accepted_count?: number;
+    rejected_count?: number;
+    auto_applied_count?: number;
 }
 
 export interface ImportMatchingRecurringPayload {

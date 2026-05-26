@@ -210,6 +210,7 @@ describe('checkDataMatching helpers', () => {
             'Apply Suggestion',
             'Reject Learning Suggestion'
         ]);
+        expect(viewModel.learning?.color).toBe('warning');
         expect(viewModel.investment).toBeNull();
     });
 
@@ -575,10 +576,10 @@ describe('checkDataMatching helpers', () => {
         ]);
     });
 
-    test('keeps blue learning suggestions highlighted and supports review rendering', () => {
-        const bluePending = buildImportPreviewSignalViewModel({
+    test('renders yellow and green learning lifecycle review actions', () => {
+        const yellowPending = buildImportPreviewSignalViewModel({
             learningStatus: 'pending',
-            learningMode: 'blue',
+            learningSignalState: 'yellow',
             learningSummary: '支出 | 餐饮/咖啡'
         }, {
             infoLabels: {
@@ -599,8 +600,9 @@ describe('checkDataMatching helpers', () => {
                 accountRouteLabel: '账户链路'
             }
         });
-        const acceptedBlue = buildImportPreviewSignalViewModel({
+        const acceptedGreen = buildImportPreviewSignalViewModel({
             learningStatus: 'accepted',
+            learningSignalState: 'green',
             learningAutoApplied: true,
             learningSummary: '支出 | 餐饮/咖啡'
         }, {
@@ -612,15 +614,16 @@ describe('checkDataMatching helpers', () => {
             }
         });
 
-        expect(bluePending.learning?.color).toBe('primary');
-        expect(bluePending.learning?.labelKey).toBe('Blue Learning Auto Apply');
-        expect(bluePending.learning?.actions.map(action => action.labelKey)).toStrictEqual([
+        expect(yellowPending.learning?.color).toBe('warning');
+        expect(yellowPending.learning?.labelKey).toBe('Learning Suggestion');
+        expect(yellowPending.learning?.actions.map(action => action.labelKey)).toStrictEqual([
             'Apply Suggestion',
             'Reject Learning Suggestion'
         ]);
-        expect(acceptedBlue.learning?.labelKey).toBe('Blue Learning Applied');
-        expect(acceptedBlue.learning?.actions).toStrictEqual([
-            { decision: 'clear', labelKey: 'Undo Learning Auto Apply', color: 'primary' }
+        expect(acceptedGreen.learning?.color).toBe('success');
+        expect(acceptedGreen.learning?.labelKey).toBe('Learning Applied');
+        expect(acceptedGreen.learning?.actions).toStrictEqual([
+            { decision: 'reject', labelKey: 'Reject Learning Suggestion', color: 'error' }
         ]);
         expect(rejected.learning?.labelKey).toBe('Learning Suggestion Rejected');
         expect(rejected.learning?.color).toBe('error');

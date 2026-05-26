@@ -12,27 +12,29 @@ use bill_analyser_db::{
     confirm_preview_to_bills_with_ack, count_preview_by_session, create_import_session,
     dedup_bills_from_parser_templates, get_import_annotation_samples,
     get_import_decision_groups_by_session, get_import_history_candidate_bills_for_session,
-    get_import_history_materializations_by_session, get_import_session,
-    get_import_sources_by_session, get_import_standard_rows_by_session, get_llm_memory_events,
-    get_parser_templates_by_session, get_preview_bill_by_id, get_preview_by_ids,
-    get_preview_by_session, get_preview_filter_index_by_session, get_preview_page_by_session,
-    get_unprocessed_templates_for_dedup, init_import_staging_schema,
+    get_import_history_materializations_by_session, get_import_learning_lifecycle_view,
+    get_import_session, get_import_sources_by_session, get_import_standard_rows_by_session,
+    get_llm_memory_events, get_parser_templates_by_session, get_preview_bill_by_id,
+    get_preview_by_ids, get_preview_by_session, get_preview_filter_index_by_session,
+    get_preview_page_by_session, get_unprocessed_templates_for_dedup, init_import_staging_schema,
     insert_import_decision_groups_batch, insert_import_history_materializations_batch,
     insert_parser_templates_batch, insert_preview_bill, insert_preview_bills_batch,
     mark_unprocessed_parser_templates_processed_for_session,
     parser_template_drafts_from_standard_bills, preview_drafts_from_dedup_bills,
-    query_preview_page_by_session, reset_session_preview_selection,
-    review_preview_llm_recommendation, save_import_annotation_samples,
-    stage_import_parser_templates, stage_import_parser_templates_with_sources,
-    update_import_session_status, update_parser_template_status, update_preview_bill,
-    update_preview_bills_batch, update_preview_recurring_match_decision, update_preview_selection,
+    query_preview_page_by_session, record_import_learning_lifecycle_feedback,
+    reset_session_preview_selection, review_preview_llm_recommendation,
+    save_import_annotation_samples, stage_import_parser_templates,
+    stage_import_parser_templates_with_sources, update_import_session_status,
+    update_parser_template_status, update_preview_bill, update_preview_bills_batch,
+    update_preview_recurring_match_decision, update_preview_selection,
     update_session_preview_selection_by_query, ImportAnnotationSampleDraft,
     ImportDecisionGroupDraft, ImportDecisionGroupMemberDraft, ImportHistoryMaterializationDraft,
     ImportHistoryRewriteAcknowledgement, ImportHistoryRewriteAcknowledgementOperation,
-    ImportParserTemplateDraft, ImportPreviewClassificationUpdate, ImportPreviewDecision,
-    ImportPreviewDraft, ImportPreviewExpectedState, ImportPreviewLearningApply,
-    ImportPreviewLlmApplyRequest, ImportPreviewLlmReviewRequest, ImportPreviewLlmSuggestion,
-    ImportPreviewPageRequest, ImportPreviewPatch, ImportPreviewPatchField, ImportPreviewPatchValue,
+    ImportLearningLifecycleRecordInput, ImportParserTemplateDraft,
+    ImportPreviewClassificationUpdate, ImportPreviewDecision, ImportPreviewDraft,
+    ImportPreviewExpectedState, ImportPreviewLearningApply, ImportPreviewLlmApplyRequest,
+    ImportPreviewLlmReviewRequest, ImportPreviewLlmSuggestion, ImportPreviewPageRequest,
+    ImportPreviewPatch, ImportPreviewPatchField, ImportPreviewPatchValue,
     ImportPreviewQueryFilters, ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate,
     ImportSessionDraft, ImportSessionStatusUpdate, ImportSourceDraft, ImportStandardRowDraft,
     SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
@@ -239,6 +241,59 @@ fn foreign_key_targets(
         .prepare(&format!("PRAGMA foreign_key_list({table})"))?;
     let rows = statement.query_map([], |row| row.get::<_, String>(2))?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+fn init_learning_lifecycle_schema(runtime: &SqliteRuntime) -> Result<(), Box<dyn Error>> {
+    runtime.connection().execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS import_learning_lifecycle (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            recommendation_key TEXT NOT NULL,
+            recommendation_type TEXT NOT NULL DEFAULT 'import_preview',
+            status TEXT NOT NULL DEFAULT 'yellow',
+            accepted_count INTEGER NOT NULL DEFAULT 0,
+            rejected_count INTEGER NOT NULL DEFAULT 0,
+            auto_applied_count INTEGER NOT NULL DEFAULT 0,
+            auto_apply_enabled INTEGER NOT NULL DEFAULT 0,
+            suppressed_until TEXT,
+            last_feedback_at TEXT,
+            metadata_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, recommendation_key)
+        );
+        CREATE TABLE IF NOT EXISTS import_learning_feedback_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            event_type TEXT NOT NULL,
+            rule_id INTEGER,
+            suggestion_id INTEGER,
+            lifecycle_id INTEGER,
+            recommendation_key TEXT,
+            session_id TEXT,
+            preview_id INTEGER,
+            bill_id INTEGER,
+            candidate_id TEXT,
+            previous_signal_state TEXT,
+            next_signal_state TEXT,
+            payload_json TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS import_learning_suppressions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            recommendation_key TEXT NOT NULL,
+            suppression_reason TEXT NOT NULL,
+            suppressed_until TEXT,
+            metadata_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, recommendation_key)
+        );
+        ",
+    )?;
+    Ok(())
 }
 
 fn user_id(value: u64) -> UserId {
@@ -2268,6 +2323,238 @@ fn preview_learning_decision_applies_rejects_and_clears_with_snapshot_restore(
         .preview_matching_feedback
         .get("learning")
         .is_none());
+    Ok(())
+}
+
+#[test]
+fn learning_lifecycle_feedback_persists_events_thresholds_and_user_scope(
+) -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("learning_lifecycle.db"))?;
+    init_learning_lifecycle_schema(&runtime)?;
+    let key = "import-learning-recommendation-key-v1:test";
+
+    for _ in 0..2 {
+        let view = record_import_learning_lifecycle_feedback(
+            runtime.connection_mut(),
+            42,
+            &ImportLearningLifecycleRecordInput {
+                recommendation_key: key.to_string(),
+                recommendation_type: "import_preview".to_string(),
+                feedback: "accept".to_string(),
+                rule_id: Some(7),
+                suggestion_id: None,
+                session_id: Some("session-learning".to_string()),
+                preview_id: Some(11),
+                bill_id: None,
+                candidate_id: Some("preview:11:learning".to_string()),
+                payload_json: Some(json!({"source": "test"}).to_string()),
+            },
+        )?;
+        assert_eq!(view.signal_state, "yellow");
+        assert!(!view.auto_apply_enabled);
+    }
+
+    let green = record_import_learning_lifecycle_feedback(
+        runtime.connection_mut(),
+        42,
+        &ImportLearningLifecycleRecordInput {
+            recommendation_key: key.to_string(),
+            recommendation_type: "import_preview".to_string(),
+            feedback: "accept".to_string(),
+            rule_id: Some(7),
+            suggestion_id: None,
+            session_id: Some("session-learning".to_string()),
+            preview_id: Some(11),
+            bill_id: None,
+            candidate_id: Some("preview:11:learning".to_string()),
+            payload_json: Some(json!({"source": "test"}).to_string()),
+        },
+    )?;
+    assert_eq!(green.status, "green");
+    assert_eq!(green.accepted_count, 3);
+    assert!(green.auto_apply_enabled);
+
+    let other_user =
+        get_import_learning_lifecycle_view(runtime.connection(), 77, key, "import_preview")?;
+    assert_eq!(other_user.signal_state, "yellow");
+    assert_eq!(other_user.accepted_count, 0);
+
+    let auto_applied = record_import_learning_lifecycle_feedback(
+        runtime.connection_mut(),
+        42,
+        &ImportLearningLifecycleRecordInput {
+            recommendation_key: key.to_string(),
+            recommendation_type: "import_preview".to_string(),
+            feedback: "auto_apply".to_string(),
+            rule_id: Some(7),
+            suggestion_id: None,
+            session_id: Some("session-learning".to_string()),
+            preview_id: Some(12),
+            bill_id: None,
+            candidate_id: Some("preview:12:learning".to_string()),
+            payload_json: Some(json!({"source": "test"}).to_string()),
+        },
+    )?;
+    assert_eq!(auto_applied.status, "auto_applied");
+    assert_eq!(auto_applied.auto_applied_count, 1);
+
+    for _ in 0..2 {
+        record_import_learning_lifecycle_feedback(
+            runtime.connection_mut(),
+            42,
+            &ImportLearningLifecycleRecordInput {
+                recommendation_key: key.to_string(),
+                recommendation_type: "import_preview".to_string(),
+                feedback: "reject".to_string(),
+                rule_id: Some(7),
+                suggestion_id: None,
+                session_id: Some("session-learning".to_string()),
+                preview_id: Some(12),
+                bill_id: None,
+                candidate_id: Some("preview:12:learning".to_string()),
+                payload_json: Some(json!({"source": "test"}).to_string()),
+            },
+        )?;
+    }
+    let downgraded =
+        get_import_learning_lifecycle_view(runtime.connection(), 42, key, "import_preview")?;
+    assert_eq!(downgraded.status, "downgraded");
+    assert_eq!(downgraded.signal_state, "yellow");
+
+    let suppressed_key = "import-learning-recommendation-key-v1:suppressed";
+    for _ in 0..3 {
+        record_import_learning_lifecycle_feedback(
+            runtime.connection_mut(),
+            42,
+            &ImportLearningLifecycleRecordInput {
+                recommendation_key: suppressed_key.to_string(),
+                recommendation_type: "import_preview".to_string(),
+                feedback: "reject".to_string(),
+                rule_id: Some(9),
+                suggestion_id: None,
+                session_id: None,
+                preview_id: None,
+                bill_id: None,
+                candidate_id: None,
+                payload_json: Some(json!({"source": "test"}).to_string()),
+            },
+        )?;
+    }
+    let suppressed = get_import_learning_lifecycle_view(
+        runtime.connection(),
+        42,
+        suppressed_key,
+        "import_preview",
+    )?;
+    assert!(suppressed.suppressed);
+    let suppression_count: i64 = runtime.connection().query_row(
+        "SELECT COUNT(*) FROM import_learning_suppressions WHERE user_id = 42 AND recommendation_key = ?1",
+        [suppressed_key],
+        |row| row.get(0),
+    )?;
+    assert_eq!(suppression_count, 1);
+    let event_count: i64 = runtime.connection().query_row(
+        "SELECT COUNT(*) FROM import_learning_feedback_events WHERE user_id = 42 AND recommendation_key = ?1",
+        [key],
+        |row| row.get(0),
+    )?;
+    assert_eq!(event_count, 6);
+    Ok(())
+}
+
+#[test]
+fn preview_learning_decision_records_recommendation_key_lifecycle_feedback(
+) -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("preview_learning_lifecycle.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+    init_learning_lifecycle_schema(&runtime)?;
+    seed_category(&runtime, 21, 42, 2, "工资", "奖金")?;
+    seed_import_learning_rule(&runtime, 12, 42, 21)?;
+    let recommendation_key = "import-learning-recommendation-key-v1:preview-test";
+    let mut draft = preview_draft("2026-05-01", 88.0, "learning candidate");
+    draft.preview_matching_feedback = json!({
+        "learning": {
+            "rule_id": 12,
+            "review_status": "pending",
+            "recommendation_key": recommendation_key,
+            "applied_preview": {
+                "preview_type": "收入",
+                "preview_main_category": "工资",
+                "preview_sub_category": "奖金",
+                "preview_source_account_id": null,
+                "preview_destination_account_id": 200
+            }
+        }
+    });
+    insert_preview_bills_batch(
+        runtime.connection_mut(),
+        "session-learning-lifecycle",
+        user_id(42),
+        &[draft],
+    )?;
+    let preview = get_preview_by_session(
+        runtime.connection(),
+        "session-learning-lifecycle",
+        user_id(42),
+        false,
+    )?
+    .remove(0);
+    let accepted = apply_preview_learning_decision(
+        runtime.connection_mut(),
+        preview.id,
+        user_id(42),
+        ImportPreviewDecision::Accept,
+        Some(&ImportPreviewLearningApply {
+            rule_id: Some(12),
+            ..ImportPreviewLearningApply::default()
+        }),
+        None,
+    )?;
+    let accepted_preview = accepted.preview.expect("accepted preview");
+    assert_eq!(accepted_preview.preview_type, "收入");
+    assert_eq!(accepted_preview.preview_destination_account_id, Some(200));
+    assert_eq!(
+        accepted_preview
+            .preview_matching_feedback
+            .pointer("/learning/recommendation_key")
+            .and_then(serde_json::Value::as_str),
+        Some(recommendation_key)
+    );
+    assert_eq!(
+        accepted_preview
+            .preview_matching_feedback
+            .pointer("/learning/accepted_count")
+            .and_then(serde_json::Value::as_i64),
+        Some(1)
+    );
+    let rejected = apply_preview_learning_decision(
+        runtime.connection_mut(),
+        preview.id,
+        user_id(42),
+        ImportPreviewDecision::Reject,
+        Some(&ImportPreviewLearningApply {
+            rule_id: Some(12),
+            ..ImportPreviewLearningApply::default()
+        }),
+        None,
+    )?;
+    let rejected_preview = rejected.preview.expect("rejected preview");
+    assert_eq!(
+        rejected_preview
+            .preview_matching_feedback
+            .pointer("/learning/rejected_count")
+            .and_then(serde_json::Value::as_i64),
+        Some(1)
+    );
+    let event_count: i64 = runtime.connection().query_row(
+        "SELECT COUNT(*) FROM import_learning_feedback_events WHERE recommendation_key = ?1",
+        [recommendation_key],
+        |row| row.get(0),
+    )?;
+    assert_eq!(event_count, 2);
     Ok(())
 }
 

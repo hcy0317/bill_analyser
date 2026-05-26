@@ -6,6 +6,49 @@
 mod stage_handler_transfer_account_tests {
     use super::*;
 
+    fn seed_learning_lifecycle_status(
+        connection: &Connection,
+        recommendation_key: &str,
+        status: &str,
+    ) {
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE IF NOT EXISTS import_learning_lifecycle (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL DEFAULT 1,
+                    recommendation_key TEXT NOT NULL,
+                    recommendation_type TEXT NOT NULL DEFAULT 'import_preview',
+                    status TEXT NOT NULL DEFAULT 'yellow',
+                    accepted_count INTEGER NOT NULL DEFAULT 0,
+                    rejected_count INTEGER NOT NULL DEFAULT 0,
+                    auto_applied_count INTEGER NOT NULL DEFAULT 0,
+                    auto_apply_enabled INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT '',
+                    UNIQUE(user_id, recommendation_key)
+                );
+                ",
+            )
+            .expect("learning lifecycle schema");
+        connection
+            .execute(
+                "
+                INSERT INTO import_learning_lifecycle (
+                    user_id, recommendation_key, recommendation_type, status,
+                    accepted_count, rejected_count, auto_applied_count, auto_apply_enabled,
+                    created_at, updated_at
+                ) VALUES (42, ?1, 'import_preview', ?2, 3, 0, 0, 1, '', '')
+                ON CONFLICT(user_id, recommendation_key) DO UPDATE SET
+                    status = excluded.status,
+                    accepted_count = excluded.accepted_count,
+                    auto_apply_enabled = excluded.auto_apply_enabled
+                ",
+                params![recommendation_key, status],
+            )
+            .expect("learning lifecycle row");
+    }
+
     fn transfer_accounts() -> Vec<ImportIntelligenceAccount> {
         vec![
             ImportIntelligenceAccount {
@@ -181,16 +224,35 @@ mod stage_handler_transfer_account_tests {
             Some(501)
         );
 
-        assert_eq!(
-            apply_learning_rule_match(
-                &mut draft,
-                &learning_rules,
-                &categories_by_id,
-                &category_values,
-                &[],
-            ),
-            Some(601)
-        );
+        let connection = Connection::open_in_memory().expect("connection");
+        let pending_learning = apply_learning_rule_match(
+            &connection,
+            42,
+            &mut draft,
+            &learning_rules,
+            &categories_by_id,
+            &category_values,
+            &[],
+        )
+        .expect("pending learning match");
+        assert_eq!(pending_learning.rule_id, 601);
+        assert!(!pending_learning.auto_applied);
+        assert_eq!(draft.preview_main_category, "餐饮");
+        assert_eq!(draft.preview_sub_category, "咖啡");
+
+        seed_learning_lifecycle_status(&connection, &pending_learning.recommendation_key, "green");
+        let green_learning = apply_learning_rule_match(
+            &connection,
+            42,
+            &mut draft,
+            &learning_rules,
+            &categories_by_id,
+            &category_values,
+            &[],
+        )
+        .expect("green learning match");
+        assert_eq!(green_learning.rule_id, 601);
+        assert!(green_learning.auto_applied);
         assert_eq!(draft.preview_main_category, "购物");
         assert_eq!(draft.preview_sub_category, "日用");
         assert_eq!(
@@ -496,16 +558,33 @@ mod stage_handler_transfer_account_tests {
             json!({"id": 9002, "name": "旧目标"}),
         ];
 
-        assert_eq!(
-            apply_learning_rule_match(
-                &mut draft,
-                &[rule],
-                &BTreeMap::new(),
-                &[],
-                &account_values,
-            ),
-            Some(7103)
-        );
+        let connection = Connection::open_in_memory().expect("connection");
+        let pending_learning = apply_learning_rule_match(
+            &connection,
+            42,
+            &mut draft,
+            std::slice::from_ref(&rule),
+            &BTreeMap::new(),
+            &[],
+            &account_values,
+        )
+        .expect("pending learning match");
+        assert_eq!(pending_learning.rule_id, 7103);
+        assert!(!pending_learning.auto_applied);
+
+        seed_learning_lifecycle_status(&connection, &pending_learning.recommendation_key, "green");
+        let green_learning = apply_learning_rule_match(
+            &connection,
+            42,
+            &mut draft,
+            std::slice::from_ref(&rule),
+            &BTreeMap::new(),
+            &[],
+            &account_values,
+        )
+        .expect("green learning match");
+        assert_eq!(green_learning.rule_id, 7103);
+        assert!(green_learning.auto_applied);
         assert_eq!(draft.preview_source_account_id, Some(1001));
         assert_eq!(draft.preview_destination_account_id, Some(1002));
     }

@@ -131,6 +131,12 @@ function normalizeImportMatchingPayload(matching?: SparseImportMatchingPayload):
             mode: '',
             auto_apply: false,
             model_version: '',
+            recommendation_key: '',
+            lifecycle_status: '',
+            signal_state: '',
+            accepted_count: 0,
+            rejected_count: 0,
+            auto_applied_count: 0,
             ...matching.learning,
         },
         recurring: {

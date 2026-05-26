@@ -1627,6 +1627,12 @@ function clearLearningRecommendationState(item: ImportTransaction): void {
         item.matching.learning.mode = '';
         item.matching.learning.auto_apply = false;
         item.matching.learning.model_version = '';
+        item.matching.learning.recommendation_key = '';
+        item.matching.learning.lifecycle_status = '';
+        item.matching.learning.signal_state = '';
+        item.matching.learning.accepted_count = 0;
+        item.matching.learning.rejected_count = 0;
+        item.matching.learning.auto_applied_count = 0;
     }
 
     updateTransactionData(item);
@@ -1668,6 +1674,12 @@ function syncLearningCandidateFromSessionCandidate(item: ImportTransaction, cand
         item.matching.learning.mode = details.mode || '';
         item.matching.learning.auto_apply = !!details.auto_apply;
         item.matching.learning.model_version = details.model_version || '';
+        item.matching.learning.recommendation_key = details.recommendation_key || '';
+        item.matching.learning.lifecycle_status = details.lifecycle_status || '';
+        item.matching.learning.signal_state = details.signal_state || '';
+        item.matching.learning.accepted_count = Number(details.accepted_count || 0);
+        item.matching.learning.rejected_count = Number(details.rejected_count || 0);
+        item.matching.learning.auto_applied_count = Number(details.auto_applied_count || 0);
     }
 
     updateTransactionData(item);
@@ -2758,6 +2770,12 @@ function buildImportPreviewSignalCacheSignature(item: ImportTransaction): string
         item.learningRecommendationSummary || '',
         item.matching?.learning.mode || '',
         String(!!item.matching?.learning.auto_apply),
+        item.matching?.learning.recommendation_key || '',
+        item.matching?.learning.lifecycle_status || '',
+        item.matching?.learning.signal_state || '',
+        Number(item.matching?.learning.accepted_count || 0),
+        Number(item.matching?.learning.rejected_count || 0),
+        Number(item.matching?.learning.auto_applied_count || 0),
         getLLMSignalStatus(item) || '',
         String(llmPayload.suggested_main_category || ''),
         String(llmPayload.suggested_sub_category || ''),
@@ -2803,6 +2821,7 @@ function getImportPreviewSignalViewModel(item: ImportTransaction): ImportPreview
         learningTitle: item.learningRecommendationReason,
         learningSummary: item.learningRecommendationSummary,
         learningMode: item.matching?.learning.mode || '',
+        learningSignalState: item.matching?.learning.signal_state || '',
         learningAutoApplied: !!item.matching?.learning.auto_apply,
         llmStatus: getLLMSignalStatus(item),
         llmTitle: String(llmPayload.reason || ''),

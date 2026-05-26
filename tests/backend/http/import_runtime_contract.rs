@@ -7,7 +7,10 @@ use axum::{
     Router,
 };
 use base64::{engine::general_purpose, Engine as _};
-use bill_analyser_core::{build_composite_match_features, composite_hash_from_features, UserId};
+use bill_analyser_core::{
+    amount_bucket, build_composite_match_features, build_import_learning_recommendation_key,
+    composite_hash_from_features, ImportLearningRecommendationKeyInput, UserId,
+};
 use bill_analyser_db::{
     create_import_session, get_import_decision_groups_by_session,
     get_import_history_materializations_by_session, get_import_session,
@@ -1993,9 +1996,9 @@ async fn import_db_runtime_stage2_restores_import_intelligence_chain() -> Result
     let body = read_json(response).await;
     assert_eq!(body["success"], true);
     assert_eq!(body["data"]["match_stats"]["provider_bypassed"], false);
-    assert_eq!(body["data"]["match_stats"]["category_matched"], 2);
-    assert_eq!(body["data"]["match_stats"]["account_matched"], 2);
-    assert_eq!(body["data"]["match_stats"]["learning_applied"], 1);
+    assert_eq!(body["data"]["match_stats"]["category_matched"], 1);
+    assert_eq!(body["data"]["match_stats"]["account_matched"], 1);
+    assert_eq!(body["data"]["match_stats"]["learning_applied"], 0);
     let preview = body["data"]["preview"].as_array().expect("preview");
     assert_eq!(preview.len(), 2);
 
@@ -2053,11 +2056,28 @@ async fn import_db_runtime_stage2_restores_import_intelligence_chain() -> Result
         .iter()
         .find(|item| item["preview_counterparty"] == "学习超市")
         .expect("learned preview");
-    assert_eq!(learned["preview_main_category"], "生活");
-    assert_eq!(learned["preview_sub_category"], "超市");
-    assert_eq!(learned["preview_source_account_id"], 1002);
+    assert_eq!(learned["preview_main_category"], "");
+    assert_eq!(learned["preview_sub_category"], "");
+    assert_eq!(learned["preview_source_account_id"], Value::Null);
     assert_eq!(learned["matching"]["learning"]["rule_id"], 7001);
-    assert_eq!(learned["matching"]["learning"]["auto_apply"], true);
+    assert_eq!(learned["matching"]["learning"]["review_status"], "pending");
+    assert_eq!(learned["matching"]["learning"]["auto_apply"], false);
+    assert_eq!(learned["matching"]["learning"]["signal_state"], "yellow");
+    assert!(learned["matching"]["learning"]["recommendation_key"]
+        .as_str()
+        .is_some_and(|value| value.starts_with("import-learning-recommendation-key-v1:")));
+    assert_eq!(
+        learned["matching"]["learning"]["applied_preview"]["preview_main_category"],
+        "生活"
+    );
+    assert_eq!(
+        learned["matching"]["learning"]["applied_preview"]["preview_sub_category"],
+        "超市"
+    );
+    assert_eq!(
+        learned["matching"]["learning"]["applied_preview"]["preview_source_account_id"],
+        1002
+    );
     let learning_suggestions = app
         .oneshot(
             Request::builder()
@@ -2402,6 +2422,34 @@ async fn import_db_runtime_stage2_allows_transfer_domain_learning_for_transfer_p
             enabled, parser_id, composite_match_hash, match_features_json, created_at, updated_at
          ) VALUES (7102, 42, 'composite', ?1, ?1, '转账', 904, 1001, 1002, 1, 'cmbc', ?1, ?2, '2026-05-01', '2026-05-01')",
         [composite_hash, serde_json::to_string(&features)?],
+    )?;
+    let recommendation_key =
+        build_import_learning_recommendation_key(&ImportLearningRecommendationKeyInput {
+            user_id: 42,
+            recommended_type: "转账".to_string(),
+            recommended_category_id: Some(904),
+            recommended_source_account_id: Some(1001),
+            recommended_destination_account_id: Some(1002),
+            transaction_type_scope: "转账".to_string(),
+            parser_bucket: "cmbc".to_string(),
+            counterparty_bucket: "支付宝（中国）网络技术有限公司客户备付金".to_string(),
+            payment_bucket: "网络银行 | alipay".to_string(),
+            description_bucket: "支付宝快捷支付".to_string(),
+            amount_bucket: Some(amount_bucket(Some(&json!(-6000.0))).to_string()),
+            transfer_protected: true,
+            ..ImportLearningRecommendationKeyInput::default()
+        });
+    seed_learning_lifecycle(
+        &runtime,
+        LearningLifecycleSeed {
+            user_id: 42,
+            recommendation_key: &recommendation_key,
+            status: "green",
+            accepted_count: 3,
+            rejected_count: 0,
+            auto_applied_count: 0,
+            auto_apply_enabled: true,
+        },
     )?;
     let session_id = "session-stage2-transfer-domain-learning";
     create_import_session(
@@ -5624,6 +5672,22 @@ async fn import_db_runtime_owns_global_learning_center_routes() -> Result<(), Bo
         .expect("suggestions");
     assert_eq!(suggestions.len(), 2);
     assert_eq!(suggestions[0]["match_type"], "composite");
+    assert_eq!(suggestions[0]["signal_state"], "yellow");
+    assert!(suggestions[0]["recommendation_key"]
+        .as_str()
+        .is_some_and(|value| value.starts_with("import-learning-recommendation-key-v1:")));
+    assert_eq!(suggestions[1]["signal_state"], "yellow");
+    assert!(suggestions[1]["recommendation_key"]
+        .as_str()
+        .is_some_and(|value| value.starts_with("import-learning-recommendation-key-v1:")));
+    let accept_key = suggestions[0]["recommendation_key"]
+        .as_str()
+        .expect("accept recommendation key")
+        .to_string();
+    let reject_key = suggestions[1]["recommendation_key"]
+        .as_str()
+        .expect("reject recommendation key")
+        .to_string();
     let accept_id = suggestions[0]["id"].as_i64().expect("accept suggestion id");
     let reject_id = suggestions[1]["id"].as_i64().expect("reject suggestion id");
 
@@ -5661,6 +5725,38 @@ async fn import_db_runtime_owns_global_learning_center_routes() -> Result<(), Bo
         .expect("response");
     assert_eq!(reject_response.status(), StatusCode::OK);
     assert_eq!(read_json(reject_response).await["success"], true);
+    let (accept_status, accept_count): (String, i64) = runtime.connection().query_row(
+        "
+        SELECT status, accepted_count
+        FROM import_learning_lifecycle
+        WHERE user_id = 42 AND recommendation_key = ?1
+        ",
+        params![&accept_key],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    assert_eq!(accept_status, "yellow");
+    assert_eq!(accept_count, 1);
+    let (reject_status, reject_count): (String, i64) = runtime.connection().query_row(
+        "
+        SELECT status, rejected_count
+        FROM import_learning_lifecycle
+        WHERE user_id = 42 AND recommendation_key = ?1
+        ",
+        params![&reject_key],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    assert_eq!(reject_status, "yellow");
+    assert_eq!(reject_count, 1);
+    let lifecycle_event_count: i64 = runtime.connection().query_row(
+        "
+        SELECT COUNT(*)
+        FROM import_learning_feedback_events
+        WHERE user_id = 42 AND recommendation_key IN (?1, ?2)
+        ",
+        params![&accept_key, &reject_key],
+        |row| row.get(0),
+    )?;
+    assert_eq!(lifecycle_event_count, 2);
 
     let rules_response = app
         .clone()
@@ -6143,6 +6239,85 @@ fn seed_import_intelligence_tables(runtime: &SqliteRuntime) -> Result<(), Box<dy
             enabled, parser_id, composite_match_hash, match_features_json, created_at, updated_at
          ) VALUES (7001, 42, 'composite', ?1, ?1, '支出', 901, 1002, NULL, 1, 'wechat', ?1, ?2, '2026-05-01', '2026-05-01')",
         [composite_hash, serde_json::to_string(&features)?],
+    )?;
+    Ok(())
+}
+
+struct LearningLifecycleSeed<'a> {
+    user_id: i64,
+    recommendation_key: &'a str,
+    status: &'a str,
+    accepted_count: i64,
+    rejected_count: i64,
+    auto_applied_count: i64,
+    auto_apply_enabled: bool,
+}
+
+fn seed_learning_lifecycle(
+    runtime: &SqliteRuntime,
+    seed: LearningLifecycleSeed<'_>,
+) -> Result<(), Box<dyn Error>> {
+    runtime.connection().execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS import_learning_lifecycle (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            recommendation_key TEXT NOT NULL,
+            recommendation_type TEXT NOT NULL DEFAULT 'import_preview',
+            status TEXT NOT NULL DEFAULT 'yellow',
+            accepted_count INTEGER NOT NULL DEFAULT 0,
+            rejected_count INTEGER NOT NULL DEFAULT 0,
+            auto_applied_count INTEGER NOT NULL DEFAULT 0,
+            auto_apply_enabled INTEGER NOT NULL DEFAULT 0,
+            suppressed_until TEXT,
+            last_feedback_at TEXT,
+            metadata_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, recommendation_key)
+        );
+        CREATE TABLE IF NOT EXISTS import_learning_feedback_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            event_type TEXT NOT NULL,
+            rule_id INTEGER,
+            suggestion_id INTEGER,
+            lifecycle_id INTEGER,
+            recommendation_key TEXT,
+            session_id TEXT,
+            preview_id INTEGER,
+            bill_id INTEGER,
+            candidate_id TEXT,
+            previous_signal_state TEXT,
+            next_signal_state TEXT,
+            payload_json TEXT,
+            created_at TEXT NOT NULL
+        );
+        ",
+    )?;
+    runtime.connection().execute(
+        "
+        INSERT INTO import_learning_lifecycle (
+            user_id, recommendation_key, recommendation_type, status,
+            accepted_count, rejected_count, auto_applied_count, auto_apply_enabled,
+            last_feedback_at, metadata_json, created_at, updated_at
+        ) VALUES (?1, ?2, 'import_preview', ?3, ?4, ?5, ?6, ?7, '2026-05-01', '{}', '2026-05-01', '2026-05-01')
+        ON CONFLICT(user_id, recommendation_key) DO UPDATE SET
+            status = excluded.status,
+            accepted_count = excluded.accepted_count,
+            rejected_count = excluded.rejected_count,
+            auto_applied_count = excluded.auto_applied_count,
+            auto_apply_enabled = excluded.auto_apply_enabled
+        ",
+        params![
+            seed.user_id,
+            seed.recommendation_key,
+            seed.status,
+            seed.accepted_count,
+            seed.rejected_count,
+            seed.auto_applied_count,
+            i64::from(seed.auto_apply_enabled),
+        ],
     )?;
     Ok(())
 }

@@ -378,6 +378,13 @@ struct ImportRecurringCandidateMatch {
     matched_occurrence_date: String,
 }
 
+#[derive(Debug, Clone)]
+struct ImportLearningRuleMatchResult {
+    rule_id: i64,
+    recommendation_key: String,
+    auto_applied: bool,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct ImportPreviewBuiltinCategoryFallback {
     category_type: i64,
@@ -492,15 +499,42 @@ fn apply_import_intelligence_chain(
             }
         }
         persist_stage2_actionable_baseline(draft);
-        if let Some(applied_rule_id) = apply_learning_rule_match(
+        if let Some(learning_match) = apply_learning_rule_match(
+            connection,
+            user_id_i64,
             draft,
             &learning_rules,
             &categories_by_id,
             &category_values,
             &account_values,
         ) {
-            stats.learning_applied += 1;
-            applied_learning_rule_ids.push(applied_rule_id);
+            if learning_match.auto_applied {
+                stats.learning_applied += 1;
+                applied_learning_rule_ids.push(learning_match.rule_id);
+                record_import_learning_lifecycle_feedback(
+                    connection,
+                    user_id_i64,
+                    &ImportLearningLifecycleRecordInput {
+                        recommendation_key: learning_match.recommendation_key,
+                        recommendation_type: "import_preview".to_string(),
+                        feedback: "auto_apply".to_string(),
+                        rule_id: Some(learning_match.rule_id),
+                        suggestion_id: None,
+                        session_id: None,
+                        preview_id: None,
+                        bill_id: None,
+                        candidate_id: None,
+                        payload_json: Some(
+                            json!({
+                                "source": "import_learning_rules",
+                                "stage": "import_stage2"
+                            })
+                            .to_string(),
+                        ),
+                    },
+                )
+                .map_err(|_| rusqlite::Error::InvalidQuery)?;
+            }
         }
         if let Some(candidate) = best_recurring_candidate_for_draft(draft, &recurring_templates) {
             apply_recurring_candidate(draft, candidate);
@@ -1318,12 +1352,14 @@ fn transfer_entry_text(value: Option<&Value>) -> Option<String> {
 
 #[tracing::instrument(level = "debug", skip_all)]
 fn apply_learning_rule_match(
+    connection: &Connection,
+    user_id: i64,
     draft: &mut ImportPreviewDraft,
     rules: &[ImportIntelligenceLearningRule],
     categories_by_id: &BTreeMap<i64, ImportIntelligenceCategory>,
     category_values: &[Value],
     account_values: &[Value],
-) -> Option<i64> {
+) -> Option<ImportLearningRuleMatchResult> {
     let transfer_protected = is_transfer_protected_preview(draft);
     let features = build_composite_match_features(
         &draft.preview_parser_id,
@@ -1415,23 +1451,39 @@ fn apply_learning_rule_match(
     } else {
         None
     };
-    if let Some(learned_type) = learned_type {
-        draft.preview_type = learned_type;
-    }
-    if let Some(category) = learned_category {
-        draft.preview_main_category = category.main_category.clone();
-        draft.preview_sub_category = category.sub_category.clone();
-        normalize_preview_type_for_category(draft, category.type_code);
-    }
-    if let Some(account_id) = rule.learned_source_account_id {
-        if !transfer_protected || draft.preview_source_account_id.is_none() {
-            draft.preview_source_account_id = Some(account_id);
-        }
-    }
-    if let Some(account_id) = rule.learned_destination_account_id {
-        if !transfer_protected || draft.preview_destination_account_id.is_none() {
-            draft.preview_destination_account_id = Some(account_id);
-        }
+    let mut recommended_draft = draft.clone();
+    apply_learning_rule_projection(
+        &mut recommended_draft,
+        learned_type.as_deref(),
+        learned_category,
+        rule,
+        transfer_protected,
+    );
+    let recommendation_key = build_import_learning_recommendation_key(
+        &ImportLearningRecommendationKeyInput {
+            user_id,
+            recommended_type: learned_type
+                .clone()
+                .unwrap_or_else(|| recommended_draft.preview_type.clone()),
+            recommended_category_id: rule.learned_category_id,
+            recommended_source_account_id: rule.learned_source_account_id,
+            recommended_destination_account_id: rule.learned_destination_account_id,
+            transaction_type_scope: draft.preview_type.clone(),
+            parser_bucket: draft.preview_parser_id.clone(),
+            counterparty_bucket: draft.preview_counterparty.clone(),
+            payment_bucket: draft.preview_payment_method.clone(),
+            description_bucket: draft.preview_description.clone(),
+            amount_bucket: Some(amount_bucket(Some(&json!(draft.preview_amount))).to_string()),
+            transfer_protected,
+            ..ImportLearningRecommendationKeyInput::default()
+        },
+    );
+    let lifecycle =
+        get_import_learning_lifecycle_view(connection, user_id, &recommendation_key, "import_preview")
+            .map_err(|_| rusqlite::Error::InvalidQuery)
+            .ok()?;
+    if lifecycle.suppressed {
+        return None;
     }
     let mut rule_payload = Map::new();
     rule_payload.insert("learned_type".to_string(), json!(rule.learned_type));
@@ -1449,7 +1501,22 @@ fn apply_learning_rule_match(
     );
     let summary =
         build_learning_rule_result_summary(&rule_payload, category_values, account_values);
-    let applied_preview = import_preview_stage2_snapshot(draft);
+    let previous_preview = import_preview_stage2_snapshot(draft);
+    let applied_preview = import_preview_stage2_snapshot(&recommended_draft);
+    let auto_applied = lifecycle.auto_apply_enabled;
+    if auto_applied {
+        apply_learning_rule_projection(
+            draft,
+            learned_type.as_deref(),
+            learned_category,
+            rule,
+            transfer_protected,
+        );
+    }
+    let recommended_type_value = applied_preview
+        .get("preview_type")
+        .cloned()
+        .unwrap_or_else(|| json!(draft.preview_type.clone()));
     matching_feedback_object_mut(draft).insert(
         "learning".to_string(),
         json!({
@@ -1458,13 +1525,52 @@ fn apply_learning_rule_match(
             "mode": mode,
             "reason": reason,
             "summary": summary,
-            "review_status": "auto_applied",
-            "auto_apply": true,
+            "recommended_type": recommended_type_value,
+            "review_status": if auto_applied { "auto_applied" } else { "pending" },
+            "auto_apply": auto_applied,
             "source": "import_learning_rules",
+            "recommendation_key": recommendation_key.clone(),
+            "lifecycle_status": lifecycle.status.clone(),
+            "signal_state": lifecycle.signal_state.clone(),
+            "accepted_count": lifecycle.accepted_count,
+            "rejected_count": lifecycle.rejected_count,
+            "auto_applied_count": lifecycle.auto_applied_count,
+            "previous_preview": previous_preview,
             "applied_preview": applied_preview,
         }),
     );
-    Some(rule.id)
+    Some(ImportLearningRuleMatchResult {
+        rule_id: rule.id,
+        recommendation_key,
+        auto_applied,
+    })
+}
+
+fn apply_learning_rule_projection(
+    draft: &mut ImportPreviewDraft,
+    learned_type: Option<&str>,
+    learned_category: Option<&ImportIntelligenceCategory>,
+    rule: &ImportIntelligenceLearningRule,
+    transfer_protected: bool,
+) {
+    if let Some(learned_type) = learned_type {
+        draft.preview_type = learned_type.to_string();
+    }
+    if let Some(category) = learned_category {
+        draft.preview_main_category = category.main_category.clone();
+        draft.preview_sub_category = category.sub_category.clone();
+        normalize_preview_type_for_category(draft, category.type_code);
+    }
+    if let Some(account_id) = rule.learned_source_account_id {
+        if !transfer_protected || draft.preview_source_account_id.is_none() {
+            draft.preview_source_account_id = Some(account_id);
+        }
+    }
+    if let Some(account_id) = rule.learned_destination_account_id {
+        if !transfer_protected || draft.preview_destination_account_id.is_none() {
+            draft.preview_destination_account_id = Some(account_id);
+        }
+    }
 }
 
 fn learning_rule_keeps_transfer_domain(
@@ -3089,6 +3195,30 @@ fn build_import_learning_suggestions_from_preview(
                     .get("auto_apply")
                     .cloned()
                     .unwrap_or(Value::Bool(false)),
+                "recommendation_key": learning
+                    .get("recommendation_key")
+                    .cloned()
+                    .unwrap_or_else(|| json!("")),
+                "lifecycle_status": learning
+                    .get("lifecycle_status")
+                    .cloned()
+                    .unwrap_or_else(|| json!("yellow")),
+                "signal_state": learning
+                    .get("signal_state")
+                    .cloned()
+                    .unwrap_or_else(|| json!("yellow")),
+                "accepted_count": learning
+                    .get("accepted_count")
+                    .cloned()
+                    .unwrap_or_else(|| json!(0)),
+                "rejected_count": learning
+                    .get("rejected_count")
+                    .cloned()
+                    .unwrap_or_else(|| json!(0)),
+                "auto_applied_count": learning
+                    .get("auto_applied_count")
+                    .cloned()
+                    .unwrap_or_else(|| json!(0)),
             }))
         })
         .collect()

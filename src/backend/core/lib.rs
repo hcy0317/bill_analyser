@@ -16,7 +16,9 @@ pub mod budgets;
 pub mod category_rules;
 pub mod error;
 pub mod import_learning;
+pub mod import_learning_lifecycle;
 pub mod import_pipeline;
+pub mod import_pipeline_learning;
 pub mod matching;
 pub mod migration_governance;
 pub mod ops;
@@ -72,6 +74,17 @@ pub use import_learning::{
     GREEN_MARGIN_THRESHOLD, HIDDEN_DIMENSION, MIN_TRAINING_SAMPLES, MODEL_FAMILY, MODEL_KEY,
     POLICY_VERSION,
 };
+pub use import_learning_lifecycle::{
+    build_import_learning_recommendation_key, learning_lifecycle_is_auto_eligible,
+    learning_lifecycle_signal_state, normalize_learning_lifecycle_status,
+    transition_import_learning_lifecycle, ImportLearningLifecycleState,
+    ImportLearningLifecycleTransition, ImportLearningRecommendationKeyInput,
+    LEARNING_LIFECYCLE_ACCEPTS_TO_GREEN, LEARNING_LIFECYCLE_GREEN_REJECTS_TO_DOWNGRADE,
+    LEARNING_LIFECYCLE_STATUS_AUTO_APPLIED, LEARNING_LIFECYCLE_STATUS_DOWNGRADED,
+    LEARNING_LIFECYCLE_STATUS_GREEN, LEARNING_LIFECYCLE_STATUS_SUPPRESSED,
+    LEARNING_LIFECYCLE_STATUS_YELLOW, LEARNING_LIFECYCLE_YELLOW_REJECTS_TO_SUPPRESS,
+    RECOMMENDATION_KEY_SCHEMA_VERSION,
+};
 pub use import_pipeline::{
     attach_import_preview_matching_payload, build_import_history_rewrite_ack_token,
     build_import_history_rewrite_operation_id, build_import_preview_filter_index_item,
@@ -92,12 +105,12 @@ pub use import_pipeline::{
     ImportPreviewIndexData, ImportPreviewMatchingPayload, ImportPreviewPageData,
     ImportPreviewPageQuery, ImportPreviewSortDirection, ImportSessionSummary,
     ImportStageConfirmData, ImportStageDedupData, ImportStageParseData, ImportV2RouteResponse,
-    InvestmentMatchingPayload, LearningMatchingPayload, LlmRecommendationPayload,
-    ParserMatchingPayload, ReconciliationMatchingPayload, RecurringMatchingPayload,
-    TransferMatchingPayload, BILLS_PREVIEW_CONTRACT_FIELDS, HISTORY_REWRITE_NOTICE,
-    IMPORT_PREVIEW_SELECTION_KEYS, IMPORT_PREVIEW_SORT_KEYS, IMPORT_STAGING_TABLES,
-    IMPORT_V2_PIPELINE_STEPS,
+    InvestmentMatchingPayload, LlmRecommendationPayload, ParserMatchingPayload,
+    ReconciliationMatchingPayload, RecurringMatchingPayload, TransferMatchingPayload,
+    BILLS_PREVIEW_CONTRACT_FIELDS, HISTORY_REWRITE_NOTICE, IMPORT_PREVIEW_SELECTION_KEYS,
+    IMPORT_PREVIEW_SORT_KEYS, IMPORT_STAGING_TABLES, IMPORT_V2_PIPELINE_STEPS,
 };
+pub use import_pipeline_learning::LearningMatchingPayload;
 pub use matching::{
     bill_pair_feedback_payload_is_related, build_bill_pair_feedback_payload,
     build_duplicate_bill_candidate, build_duplicate_bill_candidates,
