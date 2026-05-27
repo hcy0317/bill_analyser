@@ -39,9 +39,9 @@
 docker compose -f docker-compose.postgres.yml up -d postgres weaviate
 ```
 
-Weaviate 默认不参与运行时；需要设置 `BILL_ANALYSER_WEAVIATE_ENABLED=true` 和 `BILL_ANALYSER_WEAVIATE_ENDPOINT` 后才会启用派生向量索引。运维命令和重建流程见 [Weaviate derived index](weaviate-derived-index.md)。
+Weaviate 默认参与运行时；`BILL_ANALYSER_WEAVIATE_ENABLED=true` 和 `BILL_ANALYSER_WEAVIATE_ENDPOINT=http://127.0.0.1:8088` 是本地默认值。运维命令和重建流程见 [Weaviate derived index](weaviate-derived-index.md)。
 
-导入主链默认在 SQLite / 规则链路下可验收；开启 PostgreSQL 或 Weaviate 后的运行开关、场景矩阵和本地测试命令见 [导入全链路验收场景](import-full-chain-scenarios.md)。
+导入主链默认在 PostgreSQL + Weaviate 运行态下验收；SQLite 仅用于迁移来源、legacy fixture 和显式兼容测试。运行开关、场景矩阵和本地测试命令见 [导入全链路验收场景](import-full-chain-scenarios.md)。
 
 PostgreSQL cutover 验证时设置：
 

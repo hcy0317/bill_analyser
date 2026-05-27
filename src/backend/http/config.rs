@@ -26,6 +26,8 @@ pub const DEFAULT_AUTH_REQUIRE_EMAIL_VERIFICATION: bool = false;
 pub const DEFAULT_AUTH_ENABLE_USER_FORGET_PASSWORD: bool = false;
 pub const DEFAULT_AUTH_ENABLE_OAUTH2: bool = false;
 pub const DEFAULT_AUTH_PASSWORD_MIN_LENGTH: usize = 8;
+pub const DEFAULT_LOCAL_POSTGRES_URL: &str =
+    "postgres://bill_analyser:bill_analyser_dev@127.0.0.1:5432/bill_analyser";
 pub const MAX_AUTH_JWT_EXPIRATION_DAYS: i64 = 365;
 pub const MAX_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS: i64 = 365;
 pub const MAX_AUTH_MAX_LOGIN_ATTEMPTS: i64 = 100;
@@ -338,15 +340,20 @@ impl HttpShellConfig {
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .or_else(|| sqlite_db_path.clone());
-        let postgres_url = normalize_postgres_url(lookup("BILL_ANALYSER_POSTGRES_URL"))?;
+        let postgres_url = normalize_postgres_url(
+            lookup("BILL_ANALYSER_POSTGRES_URL")
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| Some(DEFAULT_LOCAL_POSTGRES_URL.to_string())),
+        )?;
         let database_backend =
             parse_database_backend(lookup("BILL_ANALYSER_DATABASE_BACKEND").as_deref())?;
         let migration_mode =
             parse_migration_mode(lookup("BILL_ANALYSER_MIGRATION_MODE").as_deref())?;
         let require_postgres_after_cutover = parse_env_bool_value(
             "BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER",
-            lookup("BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER"),
-            false,
+            lookup("BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER")
+                .filter(|value| !value.trim().is_empty()),
+            true,
         )?;
         let uploads_dir = lookup("BILL_ANALYSER_UPLOADS_DIR")
             .map(|value| value.trim().to_string())
@@ -705,7 +712,8 @@ fn parse_import_route_mode(value: Option<&str>) -> Result<ImportRouteMode, HttpS
 fn parse_database_backend(value: Option<&str>) -> Result<DatabaseBackend, HttpShellConfigError> {
     let normalized = value.unwrap_or("").trim().to_ascii_lowercase();
     match normalized.as_str() {
-        "" | "sqlite" | "legacy_sqlite" | "sqlite_legacy" => Ok(DatabaseBackend::Sqlite),
+        "" => Ok(DatabaseBackend::Postgres),
+        "sqlite" | "legacy_sqlite" | "sqlite_legacy" => Ok(DatabaseBackend::Sqlite),
         "postgres" | "postgresql" => Ok(DatabaseBackend::Postgres),
         _ => Err(HttpShellConfigError::InvalidDatabaseBackend),
     }

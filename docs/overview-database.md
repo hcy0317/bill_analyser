@@ -1,6 +1,6 @@
 # 数据库与数据流
 
-数据库运行态由 `src/backend/db` 提供，默认使用 SQLite WAL 模式。迁移期同时提供 `DatabaseRuntimeProvider`，用于描述 SQLite legacy 与 PostgreSQL repository runtime 的选择；Postgres pool 采用 lazy 构造，具体业务仓储未迁移前不会静默回退或接管 route。开启 `BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER=true` 后，业务 route 禁止打开 SQLite runtime，health 会把未满足的 Postgres 权威条件标为 unhealthy。
+数据库运行态由 `src/backend/db` 提供，默认要求 PostgreSQL cutover 配置和 Weaviate 服务可达。迁移期同时提供 `DatabaseRuntimeProvider`，用于描述 SQLite legacy 与 PostgreSQL repository runtime 的选择；Postgres pool 采用 lazy 构造，具体业务仓储未迁移前不会静默回退或接管 route。开启 `BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER=true` 后，业务 route 禁止打开 SQLite runtime，health 会把未满足的 Postgres 权威条件或未 ready 的 Weaviate 标为 unhealthy。
 
 repository 调用路径、事务边界和 row helper 约定见 [Rust 后端导航图](backend-map.md#repository-data-flow)。本页保留数据库运行态职责摘要。
 
@@ -11,11 +11,11 @@ repository 调用路径、事务边界和 row helper 约定见 [Rust 后端导�
 - bills、accounts、account rules、categories、tags、templates、budgets、statistics、matching、backup、auth、import staging、LLM/OCR settings、vector outbox 等 repository；其中 auth repository 已按 user/session/profile/cloud settings/2FA/log/row helper 拆分，auth registration 已按默认 seed/注册/分类/账户拆分，import staging repository 已按 session/template/preview/decision/LLM memory/confirm/row helper 拆分，matching repository 已按 schema/actions/candidate query/reconciliation/serialization/helper 拆分，budget repository 已按 CRUD/import/execution/history/forecast/hierarchy/row helper 拆分。
 - user-scope 查询与写入。
 - 导入 session/source/standard-row/template/preview staging 只保存当前导入过程所需临时数据；source 与 standard row 台账记录 parser decision、标准化行和后续决策分组锚点，`import_decision_groups` / members 保存同批重复、同批转账、历史重复和历史转账的成员证据，`import_history_materializations` 保存历史账单预览改写/合并 payload；stage2 写入前会清理上一轮失败遗留的 preview/materialization/decision 状态；preview page 查询负责按条件分页和返回轻量 facets/counts；confirm、cancel、失败后新建 session 会清理对应用户的 import staging，未完成导入不作为可续传数据保留。
-- `vector_outbox_events` 是 PostgreSQL 权威 outbox，用于把学习样本/特征变化投递给可选 Weaviate 派生索引；claim 使用短事务和 `FOR UPDATE SKIP LOCKED`，失败按 attempts/backoff 回到 pending 或 failed，不影响业务表。
+- `vector_outbox_events` 是 PostgreSQL 权威 outbox，用于把学习样本/特征变化投递给必需 Weaviate 派生索引；claim 使用短事务和 `FOR UPDATE SKIP LOCKED`，失败按 attempts/backoff 回到 pending 或 failed，不影响业务表。
 
 ## 数据流
 
-HTTP route 解析当前用户与请求 DTO 后调用 domain runtime；route helper 先通过 `HttpAppState` 的 repository boundary 打开当前仓储运行时，再由 repository 层开启事务并执行读写；响应由 HTTP 层投影为前端兼容 DTO。当前默认边界是 `sqlite_legacy`；开启 cutover 但 backend/URL 不满足时边界为 `postgres_required_after_cutover`；配置为 Postgres 但业务仓储尚未切换时会得到显式未接管错误。
+HTTP route 解析当前用户与请求 DTO 后调用 domain runtime；route helper 先通过 `HttpAppState` 的 repository boundary 打开当前仓储运行时，再由 repository 层开启事务并执行读写；响应由 HTTP 层投影为前端兼容 DTO。当前运行态默认边界是 Postgres cutover；显式 legacy/test 配置才会出现 `sqlite_legacy`。开启 cutover 但 backend/URL 不满足时边界为 `postgres_required_after_cutover`；配置为 Postgres 但业务仓储尚未切换时会得到显式未接管错误。
 
 ## 约束
 

@@ -1,5 +1,5 @@
 // 中文导读：导入 learning 运行态 schema 初始化。
-// 维护重点：SQLite 默认链路必须可独立运行，同时保持 lifecycle/event/suppression 表与 Postgres 权威 schema 对齐。
+// 维护重点：SQLite legacy/test 链路必须可独立运行，同时保持 lifecycle/event/suppression 表与 Postgres 权威 schema 对齐。
 // 不变式：旧库升级必须幂等补列，不能破坏既有 learning rules/suggestions 数据。
 
 fn init_import_learning_runtime_schema(

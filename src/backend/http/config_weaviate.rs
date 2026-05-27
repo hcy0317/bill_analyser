@@ -1,5 +1,5 @@
-// 中文导读：HTTP Weaviate 配置层，负责解析和脱敏可选派生向量索引配置。
-// 维护重点：默认禁用；endpoint/API key 只来自运行环境，不通过请求输入动态改写。
+// 中文导读：HTTP Weaviate 配置层，负责解析和脱敏必需的派生向量索引配置。
+// 维护重点：运行态默认启用本地 Weaviate；endpoint/API key 只来自运行环境，不通过请求输入动态改写。
 // 不变式：健康输出只暴露 endpoint 和 key 是否配置，不能泄露 API key。
 
 use std::time::Duration;
@@ -13,6 +13,7 @@ use url::Url;
 use crate::config::HttpShellConfigError;
 
 pub const DEFAULT_WEAVIATE_TIMEOUT_MS: u64 = 2_000;
+pub const DEFAULT_WEAVIATE_ENDPOINT: &str = "http://127.0.0.1:8088";
 pub const DEFAULT_WEAVIATE_RETRY_ATTEMPTS: usize = 2;
 pub const DEFAULT_WEAVIATE_BATCH_SIZE: usize = 64;
 pub const MAX_WEAVIATE_TIMEOUT_MS: u64 = 60_000;
@@ -51,10 +52,14 @@ impl WeaviateRuntimeConfig {
     ) -> Result<Self, HttpShellConfigError> {
         let enabled = parse_env_bool_value(
             "BILL_ANALYSER_WEAVIATE_ENABLED",
-            lookup("BILL_ANALYSER_WEAVIATE_ENABLED"),
-            false,
+            lookup("BILL_ANALYSER_WEAVIATE_ENABLED").filter(|value| !value.trim().is_empty()),
+            true,
         )?;
-        let endpoint = normalize_weaviate_endpoint(lookup("BILL_ANALYSER_WEAVIATE_ENDPOINT"))?;
+        let endpoint = normalize_weaviate_endpoint(
+            lookup("BILL_ANALYSER_WEAVIATE_ENDPOINT")
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| Some(DEFAULT_WEAVIATE_ENDPOINT.to_string())),
+        )?;
         let api_key = lookup("BILL_ANALYSER_WEAVIATE_API_KEY")
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());

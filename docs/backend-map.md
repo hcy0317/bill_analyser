@@ -15,7 +15,7 @@ flowchart LR
   Core --> Parsers["src/backend/parsers\n账单解析 + RawBill/StandardBill"]
   Db --> SQLite["SQLite WAL + foreign keys"]
   Db --> Postgres["PostgreSQL lazy repository runtime"]
-  Http --> Weaviate["Weaviate optional derived index"]
+  Http --> Weaviate["Weaviate required derived index"]
   Db --> Outbox["vector_outbox_events"]
   Outbox --> Weaviate
 ```
@@ -93,7 +93,7 @@ flowchart TD
 - Check Data 首屏只读取 preview page；筛选、排序、计数和批量选择都由 Rust preview page/query/update 处理。
 - transfer、learning、recurring、dedup、parser、annotation、reconciliation 信号从 `preview_matching_feedback_json` 投影，缺分类/缺账户状态按当前预览字段动态计算；stage2 账户识别以 `account_rules` 为权威，转账使用隐藏支出/收入侧字段分别匹配来源/目标账户，投资使用 parser/支付方式匹配来源账户并按交易对方优先、描述兜底匹配投资账户，收入/支出只匹配当前类型账户规则；旧账户别名仅作为规则迁移输入。learning 信号通过 `recommendation_key` 连接 `import_learning_lifecycle`、`import_learning_feedback_events` 和 `import_learning_suppressions`：yellow 只推荐，green/auto-applied 才能自动投影分类/账户，转账证据存在时类型受保护。
 - confirm 在事务内写正式 bills、tags、accounts、learning side effects；cancel 和失败后新建 session 清理 staging，不保留导入续传状态。
-- Weaviate 派生索引不参与 parser/dedup/transfer/rule/lifecycle 决策。`vector_outbox_events` 只记录待同步派生对象，`bill_weaviate_derived_index` 负责 health、schema bootstrap、outbox batch 和按用户 rebuild；禁用或 degraded 时确定性导入链路继续运行。
+- Weaviate 派生索引不参与 parser/dedup/transfer/rule/lifecycle 决策。`vector_outbox_events` 只记录待同步派生对象，`bill_weaviate_derived_index` 负责 health、schema bootstrap、outbox batch 和按用户 rebuild；运行态 health 要求 Weaviate ready，显式禁用仅用于 isolated tests/fixtures。
 
 主要源码与测试：
 

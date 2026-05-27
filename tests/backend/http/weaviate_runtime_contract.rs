@@ -42,7 +42,7 @@ fn weaviate_cli_health_is_safe_when_disabled() {
     let bin = env!("CARGO_BIN_EXE_bill_weaviate_derived_index");
     let output = Command::new(bin)
         .args(["--mode", "health"])
-        .env_remove("BILL_ANALYSER_WEAVIATE_ENABLED")
+        .env("BILL_ANALYSER_WEAVIATE_ENABLED", "false")
         .env_remove("BILL_ANALYSER_WEAVIATE_ENDPOINT")
         .env_remove("BILL_ANALYSER_WEAVIATE_API_KEY")
         .output()
@@ -68,7 +68,7 @@ fn weaviate_cli_covers_help_disabled_bootstrap_and_config_errors() {
 
     let bootstrap = Command::new(bin)
         .arg("--mode=bootstrap")
-        .env_remove("BILL_ANALYSER_WEAVIATE_ENABLED")
+        .env("BILL_ANALYSER_WEAVIATE_ENABLED", "false")
         .env_remove("BILL_ANALYSER_WEAVIATE_ENDPOINT")
         .output()
         .expect("run weaviate cli bootstrap");
@@ -77,14 +77,13 @@ fn weaviate_cli_covers_help_disabled_bootstrap_and_config_errors() {
         .expect("utf8 bootstrap")
         .contains("\"enabled\": false"));
 
-    let missing_postgres = Command::new(bin)
+    let invalid_postgres = Command::new(bin)
         .args(["--mode", "process-outbox"])
-        .env_remove("BILL_ANALYSER_POSTGRES_URL")
+        .env("BILL_ANALYSER_POSTGRES_URL", "sqlite://data/app.db")
         .output()
-        .expect("run weaviate cli process-outbox without postgres");
-    assert!(!missing_postgres.status.success());
-    assert!(String::from_utf8_lossy(&missing_postgres.stderr)
-        .contains("BILL_ANALYSER_POSTGRES_URL is required"));
+        .expect("run weaviate cli process-outbox with invalid postgres url");
+    assert!(!invalid_postgres.status.success());
+    assert!(String::from_utf8_lossy(&invalid_postgres.stderr).contains("invalid PostgreSQL URL"));
 
     let unknown = Command::new(bin)
         .arg("unknown-mode")
@@ -518,7 +517,7 @@ async fn weaviate_http_client_processes_outbox_and_rebuilds_from_postgres_when_a
     let cli_process = Command::new(bin)
         .args(["--mode", "process-outbox"])
         .env("BILL_ANALYSER_POSTGRES_URL", &postgres_url)
-        .env_remove("BILL_ANALYSER_WEAVIATE_ENABLED")
+        .env("BILL_ANALYSER_WEAVIATE_ENABLED", "false")
         .output()
         .expect("run process-outbox cli disabled");
     assert!(cli_process.status.success());
@@ -529,7 +528,7 @@ async fn weaviate_http_client_processes_outbox_and_rebuilds_from_postgres_when_a
     let cli_rebuild = Command::new(bin)
         .args(["--mode", "rebuild", "--user-id", &user_id.to_string()])
         .env("BILL_ANALYSER_POSTGRES_URL", &postgres_url)
-        .env_remove("BILL_ANALYSER_WEAVIATE_ENABLED")
+        .env("BILL_ANALYSER_WEAVIATE_ENABLED", "false")
         .output()
         .expect("run rebuild cli disabled");
     assert!(cli_rebuild.status.success());

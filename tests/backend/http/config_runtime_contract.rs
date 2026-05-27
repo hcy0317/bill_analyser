@@ -7,11 +7,12 @@ use bill_analyser_http::{
         DEFAULT_AUTH_JWT_EXPIRATION_DAYS, DEFAULT_AUTH_LOCKOUT_DURATION_MINUTES,
         DEFAULT_AUTH_MAX_LOGIN_ATTEMPTS, DEFAULT_AUTH_PASSWORD_MIN_LENGTH,
         DEFAULT_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS, DEFAULT_BACKUP_DIR, DEFAULT_BODY_LIMIT_BYTES,
-        DEFAULT_DATA_DIR, DEFAULT_TIMEOUT_MS, DEFAULT_UPLOADS_DIR,
+        DEFAULT_DATA_DIR, DEFAULT_LOCAL_POSTGRES_URL, DEFAULT_TIMEOUT_MS, DEFAULT_UPLOADS_DIR,
     },
-    http_shell_health, runtime_log_filter_from_directives, HttpAppState, HttpShellConfig,
-    HttpShellConfigError, ImportRouteMode, RouteRepositoryBackend, DEFAULT_WEAVIATE_BATCH_SIZE,
-    DEFAULT_WEAVIATE_RETRY_ATTEMPTS, DEFAULT_WEAVIATE_TIMEOUT_MS,
+    http_shell_health, http_shell_health_with_weaviate_status, runtime_log_filter_from_directives,
+    HttpAppState, HttpShellConfig, HttpShellConfigError, ImportRouteMode, RouteRepositoryBackend,
+    DEFAULT_WEAVIATE_BATCH_SIZE, DEFAULT_WEAVIATE_ENDPOINT, DEFAULT_WEAVIATE_RETRY_ATTEMPTS,
+    DEFAULT_WEAVIATE_TIMEOUT_MS,
 };
 
 #[test]
@@ -298,13 +299,32 @@ fn http_shell_config_from_env_with_reads_rust_runtime_settings_and_legacy_auth_a
 }
 
 #[test]
-fn http_shell_config_from_env_with_keeps_empty_optional_values_at_defaults() {
+fn http_shell_config_from_env_defaults_to_postgres_cutover_and_required_weaviate() {
+    let config = HttpShellConfig::from_env_with(|_| None).unwrap();
+
+    assert_eq!(config.database_backend, DatabaseBackend::Postgres);
+    assert_eq!(
+        config.postgres_url.as_deref(),
+        Some(DEFAULT_LOCAL_POSTGRES_URL)
+    );
+    assert!(config.require_postgres_after_cutover);
+    assert!(config.weaviate.enabled);
+    assert_eq!(
+        config.weaviate.endpoint.as_deref(),
+        Some(DEFAULT_WEAVIATE_ENDPOINT)
+    );
+    assert_eq!(config.weaviate.status_without_probe(), "configured");
+}
+
+#[test]
+fn http_shell_config_from_env_with_keeps_empty_values_at_hard_runtime_defaults() {
     let env = HashMap::from([
         ("BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE", "import_db_runtime"),
         ("BILL_ANALYSER_SQLITE_DB_PATH", "   "),
         ("BILL_ANALYSER_SQLITE_LEGACY_PATH", "   "),
         ("BILL_ANALYSER_POSTGRES_URL", "   "),
         ("BILL_ANALYSER_DATABASE_BACKEND", "   "),
+        ("BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER", "   "),
         ("BILL_ANALYSER_MIGRATION_MODE", "   "),
         ("BILL_ANALYSER_UPLOADS_DIR", "   "),
         ("BILL_ANALYSER_DATA_DIR", "   "),
@@ -314,7 +334,6 @@ fn http_shell_config_from_env_with_keeps_empty_optional_values_at_defaults() {
         ("BILL_ANALYSER_AUTH_JWT_SECRET", "   "),
         ("BILL_ANALYSER_AUTH_JWT_ALGORITHM", "   "),
         ("BILL_ANALYSER_AUTH_OAUTH2_PROVIDER", "   "),
-        ("BILL_ANALYSER_WEAVIATE_ENABLED", "false"),
         ("BILL_ANALYSER_WEAVIATE_ENDPOINT", "   "),
         ("BILL_ANALYSER_WEAVIATE_API_KEY", "   "),
         ("BILL_ANALYSER_WEAVIATE_COLLECTION_PREFIX", "   "),
@@ -328,9 +347,13 @@ fn http_shell_config_from_env_with_keeps_empty_optional_values_at_defaults() {
     assert_eq!(config.body_limit_bytes, DEFAULT_BODY_LIMIT_BYTES);
     assert_eq!(config.sqlite_db_path, None);
     assert_eq!(config.sqlite_legacy_path, None);
-    assert_eq!(config.postgres_url, None);
-    assert_eq!(config.database_backend, DatabaseBackend::Sqlite);
+    assert_eq!(
+        config.postgres_url.as_deref(),
+        Some(DEFAULT_LOCAL_POSTGRES_URL)
+    );
+    assert_eq!(config.database_backend, DatabaseBackend::Postgres);
     assert_eq!(config.migration_mode, MigrationMode::Disabled);
+    assert!(config.require_postgres_after_cutover);
     assert_eq!(config.uploads_dir, DEFAULT_UPLOADS_DIR);
     assert_eq!(config.data_dir, DEFAULT_DATA_DIR);
     assert_eq!(config.backup_dir, DEFAULT_BACKUP_DIR);
@@ -339,8 +362,11 @@ fn http_shell_config_from_env_with_keeps_empty_optional_values_at_defaults() {
     assert_eq!(config.auth_jwt_secret, None);
     assert_eq!(config.auth_jwt_algorithm, DEFAULT_AUTH_JWT_ALGORITHM);
     assert_eq!(config.auth_oauth2_provider, "");
-    assert!(!config.weaviate.enabled);
-    assert_eq!(config.weaviate.endpoint, None);
+    assert!(config.weaviate.enabled);
+    assert_eq!(
+        config.weaviate.endpoint.as_deref(),
+        Some(DEFAULT_WEAVIATE_ENDPOINT)
+    );
     assert_eq!(config.weaviate.api_key, None);
     assert_eq!(config.weaviate.collection_prefix, "BillAnalyser");
 }
@@ -511,11 +537,12 @@ fn http_shell_health_exposes_database_status_without_postgres_secret() {
     assert_eq!(health.details["weaviate_endpoint_redacted"], "unconfigured");
     assert_eq!(health.details["weaviate_api_key_configured"], "false");
     assert_eq!(health.details["weaviate_collection_prefix"], "BillAnalyser");
+    assert_eq!(health.details["weaviate_required"], "true");
     assert_eq!(health.details["require_postgres_after_cutover"], "true");
 }
 
 #[test]
-fn http_shell_health_reports_config_gated_weaviate_without_secret_leakage() {
+fn http_shell_health_requires_ready_weaviate_without_secret_leakage() {
     let env = HashMap::from([
         ("BILL_ANALYSER_WEAVIATE_ENABLED", "true"),
         (
@@ -530,6 +557,7 @@ fn http_shell_health_reports_config_gated_weaviate_without_secret_leakage() {
             .unwrap();
     let health = http_shell_health(&config);
 
+    assert_eq!(health.status, "unhealthy");
     assert_eq!(health.details["weaviate_status"], "configured");
     assert_eq!(
         health.details["weaviate_endpoint_redacted"],
@@ -541,14 +569,26 @@ fn http_shell_health_reports_config_gated_weaviate_without_secret_leakage() {
         .unwrap()
         .contains("super-secret"));
 
-    let missing_endpoint = HttpShellConfig::from_env_with(|name| {
-        (name == "BILL_ANALYSER_WEAVIATE_ENABLED").then(|| "true".to_string())
-    })
-    .unwrap();
     assert_eq!(
-        http_shell_health(&missing_endpoint).details["weaviate_status"],
-        "degraded:missing_endpoint"
+        http_shell_health_with_weaviate_status(&config, "degraded:connection_refused").details
+            ["weaviate_status"],
+        "degraded:connection_refused"
     );
+}
+
+#[test]
+fn http_shell_health_can_report_ok_only_when_postgres_and_weaviate_are_ready() {
+    let config = HttpShellConfig::default()
+        .with_database_backend(DatabaseBackend::Sqlite)
+        .with_require_postgres_after_cutover(false);
+
+    let disabled = http_shell_health(&config);
+    assert_eq!(disabled.status, "unhealthy");
+    assert_eq!(disabled.details["weaviate_status"], "disabled");
+
+    let ready = http_shell_health_with_weaviate_status(&config, "healthy");
+    assert_eq!(ready.status, "ok");
+    assert_eq!(ready.details["weaviate_status"], "healthy");
 }
 
 #[test]

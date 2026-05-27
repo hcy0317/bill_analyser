@@ -39,12 +39,14 @@ pub use bill_routes::{bill_runtime_router, BILL_CRUD_ROUTE_PATTERNS};
 pub use budget_routes::{budget_runtime_router, BUDGET_CRUD_ROUTE_PATTERNS};
 pub use config::{
     DatabaseBackend, HttpShellConfig, HttpShellConfigError, ImportRouteMode, MigrationMode,
+    DEFAULT_LOCAL_POSTGRES_URL,
 };
 pub use config_database::redact_postgres_url;
 pub use config_weaviate::{
     redact_weaviate_endpoint, WeaviateRuntimeConfig, DEFAULT_WEAVIATE_BATCH_SIZE,
-    DEFAULT_WEAVIATE_RETRY_ATTEMPTS, DEFAULT_WEAVIATE_TIMEOUT_MS, MAX_WEAVIATE_BATCH_SIZE,
-    MAX_WEAVIATE_RETRY_ATTEMPTS, MAX_WEAVIATE_TIMEOUT_MS, MAX_WEAVIATE_VECTOR_DIMENSIONS,
+    DEFAULT_WEAVIATE_ENDPOINT, DEFAULT_WEAVIATE_RETRY_ATTEMPTS, DEFAULT_WEAVIATE_TIMEOUT_MS,
+    MAX_WEAVIATE_BATCH_SIZE, MAX_WEAVIATE_RETRY_ATTEMPTS, MAX_WEAVIATE_TIMEOUT_MS,
+    MAX_WEAVIATE_VECTOR_DIMENSIONS,
 };
 pub use database_runtime::{
     DatabaseRuntimeBoundary, RouteRepositoryBackend, RouteRepositoryRuntimeError,

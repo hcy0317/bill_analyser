@@ -112,6 +112,31 @@ function Get-NpmCommand {
     return $null
 }
 
+function Start-RequiredRuntimeServices {
+    param([string]$Root)
+
+    $dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
+    if (-not $dockerCmd) {
+        Write-Err "未找到 Docker。后端现在要求 Postgres 和 Weaviate 运行。"
+        Write-Warn "请先安装 Docker Desktop，或手动提供可达的 BILL_ANALYSER_POSTGRES_URL / BILL_ANALYSER_WEAVIATE_ENDPOINT。"
+        exit 1
+    }
+
+    $composeFile = Join-Path $Root "docker-compose.postgres.yml"
+    if (-not (Test-Path $composeFile)) {
+        Write-Err "找不到 compose 文件: $composeFile"
+        exit 1
+    }
+
+    Write-Gray "  正在确保 Postgres 和 Weaviate compose 服务运行..."
+    & $dockerCmd.Source compose -f $composeFile up -d postgres weaviate
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "  ✗ Postgres/Weaviate compose 服务启动失败"
+        exit 1
+    }
+    Write-Success "  ✓ Postgres 和 Weaviate 已启动或已在运行"
+}
+
 # 获取项目根目录
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ProjectRoot
@@ -248,6 +273,8 @@ $backendStarted = $false
 if (-not $FrontendOnly) {
     Write-Info "[步骤 2/3] 启动后端服务器..."
     Write-Host ""
+
+    Start-RequiredRuntimeServices -Root $ProjectRoot
 
     # 启动后端（在新窗口中）
     $backendScript = Join-Path $ProjectRoot "start_backend.ps1"

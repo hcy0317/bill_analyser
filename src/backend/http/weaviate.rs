@@ -1,5 +1,5 @@
-// 中文导读：Weaviate 派生索引运行适配层，负责可选健康检查、schema bootstrap 和 HTTP 请求。
-// 维护重点：默认禁用；启用后失败只能降级向量链路，不得阻断确定性导入和 PostgreSQL 权威状态。
+// 中文导读：Weaviate 派生索引运行适配层，负责必需健康检查、schema bootstrap 和 HTTP 请求。
+// 维护重点：运行态默认启用；失败会让 health 不健康，但不得把 Weaviate 变成业务权威数据源。
 // 不变式：所有外部请求使用配置 endpoint/API key，响应和日志不能泄露密钥。
 
 use bill_analyser_core::{

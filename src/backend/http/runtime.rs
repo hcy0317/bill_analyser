@@ -116,6 +116,7 @@ pub fn http_shell_health_with_weaviate_status(
         "weaviate_collection_prefix".to_string(),
         config.weaviate.collection_prefix.clone(),
     );
+    details.insert("weaviate_required".to_string(), "true".to_string());
     details.insert(
         "require_postgres_after_cutover".to_string(),
         config.require_postgres_after_cutover.to_string(),
@@ -173,7 +174,9 @@ pub fn http_shell_health_with_weaviate_status(
     details.insert("business_api".to_string(), "rust-only-http".to_string());
 
     HttpShellHealth {
-        status: if DatabaseRuntimeBoundary::postgres_cutover_is_healthy(config) {
+        status: if DatabaseRuntimeBoundary::postgres_cutover_is_healthy(config)
+            && weaviate_status == "healthy"
+        {
             "ok".to_string()
         } else {
             "unhealthy".to_string()

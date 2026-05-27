@@ -1,6 +1,6 @@
 # Weaviate derived index
 
-Weaviate is optional derived infrastructure for import learning recall. PostgreSQL remains authoritative for learning samples, features, lifecycle state, feedback counters, suppressions, audit, and outbox state. Deleting or rebuilding Weaviate must not change business data.
+Weaviate is required derived infrastructure for the runtime health gate and import learning recall. PostgreSQL remains authoritative for learning samples, features, lifecycle state, feedback counters, suppressions, audit, and outbox state. Deleting or rebuilding Weaviate must not change business data, but the service must be reachable for the Rust backend to report healthy.
 
 ## Local compose
 
@@ -12,13 +12,7 @@ The compose service uses `cr.weaviate.io/semitechnologies/weaviate:1.37.4` by de
 
 ## Runtime config
 
-Default config keeps Weaviate disabled:
-
-```powershell
-$env:BILL_ANALYSER_WEAVIATE_ENABLED = "false"
-```
-
-Enable local Weaviate:
+Runtime defaults enable local Weaviate:
 
 ```powershell
 $env:BILL_ANALYSER_WEAVIATE_ENABLED = "true"
@@ -26,7 +20,7 @@ $env:BILL_ANALYSER_WEAVIATE_ENDPOINT = "http://127.0.0.1:8088"
 $env:BILL_ANALYSER_WEAVIATE_COLLECTION_PREFIX = "BillAnalyser"
 ```
 
-`BILL_ANALYSER_WEAVIATE_API_KEY` is optional for local anonymous compose and is only reported as configured/unconfigured in health output.
+`BILL_ANALYSER_WEAVIATE_API_KEY` is optional for local anonymous compose and is only reported as configured/unconfigured in health output. Explicitly disabling Weaviate is reserved for isolated tests and CLI fixtures; normal backend startup treats it as a configuration error.
 
 ## Operations
 
@@ -58,7 +52,7 @@ Rebuild requires `BILL_ANALYSER_POSTGRES_URL`. When `--user-id` is provided, the
 
 ## Import recall
 
-Stage2 import learning first runs deterministic category/account/learning rules. When Weaviate is enabled, rows without a deterministic learning signal build normalized counterparty, description, and composite feature payloads and query the derived collections with metadata filters for:
+Stage2 import learning first runs deterministic category/account/learning rules. Rows without a deterministic learning signal build normalized counterparty, description, and composite feature payloads and query the derived collections with metadata filters for:
 
 - `userId`
 - `featureSchemaVersion`
@@ -71,7 +65,7 @@ Transfer previews keep their `转账` type. Learning may recommend transfer-comp
 
 ## Health semantics
 
-- `disabled`: vector service is off and deterministic import remains fully available.
-- `configured`: config has an endpoint; synchronous health rendering has not probed it.
+- `disabled`: explicit test/fixture mode; runtime health is unhealthy.
+- `configured`: config has an endpoint; synchronous health rendering has not probed it, so runtime health is unhealthy until the async readiness probe succeeds.
 - `healthy`: `/v1/.well-known/ready` returned success.
-- `degraded:<reason>`: enabled but endpoint is missing, readiness failed, or recall failed. Deterministic import must continue without vector recall.
+- `degraded:<reason>`: enabled but endpoint is missing, readiness failed, or recall failed. Runtime health is unhealthy and `start_backend.ps1` fails early when the configured endpoint port is unreachable.
