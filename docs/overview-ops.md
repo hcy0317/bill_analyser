@@ -42,3 +42,13 @@ docker compose -f docker-compose.postgres.yml up -d postgres weaviate
 Weaviate 默认不参与运行时；需要设置 `BILL_ANALYSER_WEAVIATE_ENABLED=true` 和 `BILL_ANALYSER_WEAVIATE_ENDPOINT` 后才会启用派生向量索引。运维命令和重建流程见 [Weaviate derived index](weaviate-derived-index.md)。
 
 导入主链默认在 SQLite / 规则链路下可验收；开启 PostgreSQL 或 Weaviate 后的运行开关、场景矩阵和本地测试命令见 [导入全链路验收场景](import-full-chain-scenarios.md)。
+
+PostgreSQL cutover 验证时设置：
+
+```powershell
+$env:BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER = "true"
+$env:BILL_ANALYSER_DATABASE_BACKEND = "postgres"
+$env:BILL_ANALYSER_POSTGRES_URL = "postgres://bill_analyser:bill_analyser_dev@127.0.0.1:5432/bill_analyser"
+```
+
+cutover 开关开启后，业务 route 不再允许 SQLite runtime 作为 fallback；`/api/health` 会用 `postgres_cutover_status` 标明 backend 未切 Postgres、Postgres URL 缺失或仓储仍待接管。

@@ -10,6 +10,7 @@ use crate::config::{DatabaseBackend, HttpShellConfig};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteRepositoryBackend {
     SqliteLegacy,
+    PostgresRequiredAfterCutover,
     PostgresPending,
 }
 
@@ -17,6 +18,7 @@ impl RouteRepositoryBackend {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::SqliteLegacy => "sqlite_legacy",
+            Self::PostgresRequiredAfterCutover => "postgres_required_after_cutover",
             Self::PostgresPending => "postgres_pending_repositories",
         }
     }
@@ -31,9 +33,15 @@ pub struct DatabaseRuntimeBoundary {
 
 impl DatabaseRuntimeBoundary {
     pub fn from_config(config: &HttpShellConfig) -> Self {
-        let route_repository_backend = match config.database_backend {
-            DatabaseBackend::Sqlite => RouteRepositoryBackend::SqliteLegacy,
-            DatabaseBackend::Postgres => RouteRepositoryBackend::PostgresPending,
+        let route_repository_backend = if config.require_postgres_after_cutover
+            && (!config.database_backend.uses_postgres() || !config.postgres_configured())
+        {
+            RouteRepositoryBackend::PostgresRequiredAfterCutover
+        } else {
+            match config.database_backend {
+                DatabaseBackend::Sqlite => RouteRepositoryBackend::SqliteLegacy,
+                DatabaseBackend::Postgres => RouteRepositoryBackend::PostgresPending,
+            }
         };
         Self {
             route_repository_backend,
@@ -44,6 +52,23 @@ impl DatabaseRuntimeBoundary {
 
     pub const fn route_repository_backend_str(&self) -> &'static str {
         self.route_repository_backend.as_str()
+    }
+
+    pub fn postgres_cutover_status(config: &HttpShellConfig) -> &'static str {
+        if !config.database_backend.uses_postgres() {
+            if !config.require_postgres_after_cutover {
+                return "not_required";
+            }
+            return "blocked:database_backend_not_postgres";
+        }
+        if !config.postgres_configured() {
+            return "blocked:postgres_url_unconfigured";
+        }
+        "blocked:postgres_repositories_pending"
+    }
+
+    pub fn postgres_cutover_is_healthy(config: &HttpShellConfig) -> bool {
+        !Self::postgres_cutover_status(config).starts_with("blocked:")
     }
 }
 
@@ -64,9 +89,16 @@ pub enum RouteRepositoryRuntimeError {
     #[error("Rust {runtime_label} DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH")]
     MissingSqliteDbPath { runtime_label: &'static str },
     #[error(
-        "Rust {runtime_label} repository is not wired for PostgreSQL yet; keep BILL_ANALYSER_DATABASE_BACKEND=sqlite until this repository slice is complete"
+        "Rust {runtime_label} repository is not wired for PostgreSQL yet; PostgreSQL-selected business routes fail explicitly instead of falling back to SQLite"
     )]
     PostgresRepositoryPending { runtime_label: &'static str },
+    #[error(
+        "Rust {runtime_label} DB runtime cannot open SQLite because BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER=true ({reason}); no silent SQLite business fallback is allowed"
+    )]
+    PostgresCutoverRequired {
+        runtime_label: &'static str,
+        reason: &'static str,
+    },
     #[error("{source}")]
     UnsafeSqlitePath { source: DbError },
     #[error("SQLite repository runtime open failed: {source}")]
@@ -78,6 +110,7 @@ impl RouteRepositoryRuntimeError {
         match self {
             Self::MissingSqliteDbPath { .. }
             | Self::PostgresRepositoryPending { .. }
+            | Self::PostgresCutoverRequired { .. }
             | Self::UnsafeSqlitePath { .. } => 503,
             Self::SqliteOpen { .. } => 500,
         }
@@ -88,6 +121,7 @@ impl RouteRepositoryRuntimeError {
             Self::SqliteOpen { .. } => sqlite_open_message.to_string(),
             Self::MissingSqliteDbPath { .. }
             | Self::PostgresRepositoryPending { .. }
+            | Self::PostgresCutoverRequired { .. }
             | Self::UnsafeSqlitePath { .. } => self.to_string(),
         }
     }
@@ -98,6 +132,12 @@ pub fn open_sqlite_repository_runtime(
     runtime_label: &'static str,
     mode: SqliteRepositoryOpenMode,
 ) -> Result<SqliteRuntime, RouteRepositoryRuntimeError> {
+    if config.require_postgres_after_cutover {
+        return Err(RouteRepositoryRuntimeError::PostgresCutoverRequired {
+            runtime_label,
+            reason: DatabaseRuntimeBoundary::postgres_cutover_status(config),
+        });
+    }
     if config.database_backend.uses_postgres() {
         return Err(RouteRepositoryRuntimeError::PostgresRepositoryPending { runtime_label });
     }

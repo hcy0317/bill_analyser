@@ -115,6 +115,7 @@ cd ..\..
 - `BILL_ANALYSER_SQLITE_DB_PATH=data\bills.db`
 - `BILL_ANALYSER_DATABASE_BACKEND=sqlite`
 - `BILL_ANALYSER_MIGRATION_MODE=disabled`
+- 如果设置 `BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER=true`，脚本会默认选择 `BILL_ANALYSER_DATABASE_BACKEND=postgres`；cutover 模式下未显式配置 Postgres URL 时，使用本地 compose 默认 `BILL_ANALYSER_POSTGRES_URL`
 - `BILL_ANALYSER_RUST_HTTP_SERVER` 可指定已构建的 `bill_http_server` 可执行文件，未指定时脚本会自动构建 debug 版本
 
 ### 本地 PostgreSQL 骨架
@@ -126,9 +127,10 @@ docker compose -f docker-compose.postgres.yml up -d
 $env:BILL_ANALYSER_DATABASE_BACKEND = "postgres"
 $env:BILL_ANALYSER_POSTGRES_URL = "postgres://bill_analyser:bill_analyser_dev@127.0.0.1:5432/bill_analyser"
 $env:BILL_ANALYSER_MIGRATION_MODE = "validate"
+$env:BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER = "true"
 ```
 
-`/api/health` 会显示 `database_backend`、`route_repository_backend`、`postgres_configured`、`postgres_url_redacted`、`migration_mode`、`migration_status` 和 `weaviate_status`，其中 Postgres URL 只输出脱敏形式。`route_repository_backend=postgres_pending_repositories` 表示 PostgreSQL runtime 已可被后续 repository 使用，但当前业务 route 尚未接管；在具体仓储切换完成前不要把生产业务流量切到 `database_backend=postgres`。
+`/api/health` 会显示 `database_backend`、`route_repository_backend`、`postgres_cutover_status`、`postgres_configured`、`postgres_url_redacted`、`migration_mode`、`migration_status` 和 `weaviate_status`，其中 Postgres URL 只输出脱敏形式。`route_repository_backend=postgres_required_after_cutover` 表示 cutover 开关已经禁止 SQLite fallback 但 backend 或 Postgres URL 仍未满足要求；`route_repository_backend=postgres_pending_repositories` 表示 PostgreSQL runtime 已可被后续 repository 使用，但当前业务 route 尚未接管。开启 `BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER=true` 后业务 route 会显式失败，而不是静默回退到 SQLite。
 
 SQLite 到 PostgreSQL 的迁移工具当前支持 dry-run、export 和 import-check：
 

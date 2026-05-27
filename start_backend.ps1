@@ -58,6 +58,16 @@ function Read-DotenvSettings {
     return $settings
 }
 
+function Test-TruthyEnvValue {
+    param([string]$Value)
+
+    if (-not $Value) {
+        return $false
+    }
+    $normalized = $Value.Trim().ToLowerInvariant()
+    return @("1", "true", "yes", "on") -contains $normalized
+}
+
 function Set-RustAuthEnvFromServerConfig {
     param(
         [object]$Config,
@@ -83,6 +93,19 @@ function Set-RustAuthEnvFromServerConfig {
 
 $DotenvSettings = Read-DotenvSettings -Path $DotenvPath
 
+foreach ($databaseEnvName in @(
+    "BILL_ANALYSER_DATABASE_BACKEND",
+    "BILL_ANALYSER_POSTGRES_URL",
+    "BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER",
+    "BILL_ANALYSER_MIGRATION_MODE"
+)) {
+    if (-not [Environment]::GetEnvironmentVariable($databaseEnvName) -and $DotenvSettings.ContainsKey($databaseEnvName)) {
+        Set-Item -Path "Env:$databaseEnvName" -Value ([string]$DotenvSettings[$databaseEnvName])
+    }
+}
+
+$RequirePostgresAfterCutover = Test-TruthyEnvValue -Value $env:BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER
+
 if (-not $env:BILL_ANALYSER_SQLITE_DB_PATH) {
     $env:BILL_ANALYSER_SQLITE_DB_PATH = $DefaultDbPath
 }
@@ -92,7 +115,13 @@ if (-not $env:BILL_ANALYSER_SQLITE_LEGACY_PATH) {
 }
 
 if (-not $env:BILL_ANALYSER_DATABASE_BACKEND) {
-    $env:BILL_ANALYSER_DATABASE_BACKEND = "sqlite"
+    $env:BILL_ANALYSER_DATABASE_BACKEND = if ($RequirePostgresAfterCutover) { "postgres" } else { "sqlite" }
+}
+
+$SelectedDatabaseBackend = $env:BILL_ANALYSER_DATABASE_BACKEND.Trim().ToLowerInvariant()
+if ($RequirePostgresAfterCutover -and ($SelectedDatabaseBackend -in @("postgres", "postgresql")) -and -not $env:BILL_ANALYSER_POSTGRES_URL) {
+    $env:BILL_ANALYSER_POSTGRES_URL = "postgres://bill_analyser:bill_analyser_dev@127.0.0.1:5432/bill_analyser"
+    Write-Host "Info: cutover mode requested without BILL_ANALYSER_POSTGRES_URL; using local docker-compose default." -ForegroundColor Yellow
 }
 
 if (-not $env:BILL_ANALYSER_MIGRATION_MODE) {

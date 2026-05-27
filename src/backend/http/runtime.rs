@@ -80,6 +80,11 @@ pub fn http_shell_health_with_weaviate_status(
         "route_repository_backend".to_string(),
         database_boundary.route_repository_backend_str().to_string(),
     );
+    let postgres_cutover_status = DatabaseRuntimeBoundary::postgres_cutover_status(config);
+    details.insert(
+        "postgres_cutover_status".to_string(),
+        postgres_cutover_status.to_string(),
+    );
     details.insert(
         "postgres_configured".to_string(),
         config.postgres_configured().to_string(),
@@ -168,7 +173,11 @@ pub fn http_shell_health_with_weaviate_status(
     details.insert("business_api".to_string(), "rust-only-http".to_string());
 
     HttpShellHealth {
-        status: "ok".to_string(),
+        status: if DatabaseRuntimeBoundary::postgres_cutover_is_healthy(config) {
+            "ok".to_string()
+        } else {
+            "unhealthy".to_string()
+        },
         identity: HttpShellIdentity::for_import_route_mode(config.import_route_mode),
         details,
     }

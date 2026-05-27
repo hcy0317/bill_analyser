@@ -8,7 +8,7 @@
 | --- | --- | --- | --- |
 | 默认 SQLite / 规则链路 | `BILL_ANALYSER_DATABASE_BACKEND` 未设置或为 `sqlite`；`BILL_ANALYSER_WEAVIATE_ENABLED=false` | parser-first multipart 上传、文件级 exactly-one parser 决策、standard rows、dedup、stage2 分类/账户、learning yellow、preview page signal filter、selected-only confirm、staging cleanup | 每个文件保留自己的 parser id / source signal；未被选中的预览行不会写入正式账单；confirm 后当前 session staging 被清理 |
 | 历史改写/合并 | 默认 SQLite 或 PostgreSQL 权威库 | 历史重复、历史转账、`import_history_materializations`、preview 可见改写标记、acknowledgement payload、confirm 审计 | 预览行显式显示“将改写/合并历史账单”；confirm 校验 history bill id/version、operation id 与 acknowledgement token 后才改写历史账单、删除合并侧并同步账户余额 |
-| PostgreSQL 权威库 | `BILL_ANALYSER_DATABASE_BACKEND=postgres`、`BILL_ANALYSER_POSTGRES_URL`、按 cutover 阶段设置 `BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER` | 迁移后 repository 边界、正式账单/反馈/审计事务、健康检查 | PostgreSQL 是业务主数据权威；SQLite 不作为静默回退；不支持的 repository 明确拒绝 |
+| PostgreSQL 权威库 | `BILL_ANALYSER_DATABASE_BACKEND=postgres`、`BILL_ANALYSER_POSTGRES_URL`、按 cutover 阶段设置 `BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER=true` | 迁移后 repository 边界、正式账单/反馈/审计事务、健康检查 | PostgreSQL 是业务主数据权威；cutover 后业务 SQLite runtime 被拒绝；不支持的 repository 明确拒绝并让 health 暴露 unhealthy/阻塞原因 |
 | 可选 Weaviate 召回 | PostgreSQL 权威库基础上设置 `BILL_ANALYSER_WEAVIATE_ENABLED=true`、`BILL_ANALYSER_WEAVIATE_ENDPOINT`，可选 `BILL_ANALYSER_WEAVIATE_API_KEY` 和 `BILL_ANALYSER_WEAVIATE_COLLECTION_PREFIX` | deterministic stage2 之后的向量召回、metadata filter、derived index health、outbox/rebuild | Weaviate 只保存向量、特征副本和 metadata；召回建议仍写入本地 recommendation key / lifecycle；Weaviate 不可用时记录 degraded 并继续导入 |
 
 ## 本地合同测试

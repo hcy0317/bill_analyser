@@ -484,10 +484,15 @@ fn http_shell_health_exposes_database_status_without_postgres_secret() {
 
     let health = http_shell_health(&config);
 
+    assert_eq!(health.status, "unhealthy");
     assert_eq!(health.details["database_backend"], "postgres");
     assert_eq!(
         health.details["route_repository_backend"],
         "postgres_pending_repositories"
+    );
+    assert_eq!(
+        health.details["postgres_cutover_status"],
+        "blocked:postgres_repositories_pending"
     );
     assert_eq!(health.details["sqlite_db_path_configured"], "true");
     assert_eq!(health.details["sqlite_legacy_path_configured"], "true");
@@ -552,6 +557,14 @@ fn http_app_state_exposes_repository_boundary_without_postgres_cutover() {
         .with_database_backend(DatabaseBackend::Postgres)
         .with_postgres_url("postgres://bill:secret@localhost:5432/bill_analyser")
         .unwrap();
+
+    let health = http_shell_health(&config);
+    assert_eq!(health.status, "unhealthy");
+    assert_eq!(
+        health.details["postgres_cutover_status"],
+        "blocked:postgres_repositories_pending"
+    );
+
     let state = HttpAppState::new(config).unwrap();
 
     let boundary = state.database_runtime_boundary();
@@ -568,6 +581,61 @@ fn http_app_state_exposes_repository_boundary_without_postgres_cutover() {
     };
     assert_eq!(error.http_status_code(), 503);
     assert!(error.to_string().contains("not wired for PostgreSQL yet"));
+}
+
+#[test]
+fn http_app_state_rejects_sqlite_runtime_after_postgres_cutover() {
+    let config = HttpShellConfig::default()
+        .with_sqlite_db_path("data/app.db")
+        .with_require_postgres_after_cutover(true);
+    let health = http_shell_health(&config);
+
+    assert_eq!(health.status, "unhealthy");
+    assert_eq!(
+        health.details["route_repository_backend"],
+        "postgres_required_after_cutover"
+    );
+    assert_eq!(
+        health.details["postgres_cutover_status"],
+        "blocked:database_backend_not_postgres"
+    );
+
+    let state = HttpAppState::new(config).unwrap();
+    let boundary = state.database_runtime_boundary();
+    assert_eq!(
+        boundary.route_repository_backend,
+        RouteRepositoryBackend::PostgresRequiredAfterCutover
+    );
+
+    let error = match state.open_sqlite_repository_runtime("import") {
+        Ok(_) => panic!("cutover mode must not open sqlite business runtimes"),
+        Err(error) => error,
+    };
+    assert_eq!(error.http_status_code(), 503);
+    assert!(error
+        .to_string()
+        .contains("BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER=true"));
+    assert!(error
+        .to_string()
+        .contains("blocked:database_backend_not_postgres"));
+}
+
+#[test]
+fn http_shell_health_reports_cutover_missing_postgres_url() {
+    let config = HttpShellConfig::default()
+        .with_database_backend(DatabaseBackend::Postgres)
+        .with_require_postgres_after_cutover(true);
+    let health = http_shell_health(&config);
+
+    assert_eq!(health.status, "unhealthy");
+    assert_eq!(
+        health.details["route_repository_backend"],
+        "postgres_required_after_cutover"
+    );
+    assert_eq!(
+        health.details["postgres_cutover_status"],
+        "blocked:postgres_url_unconfigured"
+    );
 }
 
 #[test]

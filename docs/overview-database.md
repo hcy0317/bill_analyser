@@ -1,6 +1,6 @@
 # 数据库与数据流
 
-数据库运行态由 `src/backend/db` 提供，默认使用 SQLite WAL 模式。迁移期同时提供 `DatabaseRuntimeProvider`，用于描述 SQLite legacy 与 PostgreSQL repository runtime 的选择；Postgres pool 采用 lazy 构造，具体业务仓储未迁移前不会静默回退或接管 route。
+数据库运行态由 `src/backend/db` 提供，默认使用 SQLite WAL 模式。迁移期同时提供 `DatabaseRuntimeProvider`，用于描述 SQLite legacy 与 PostgreSQL repository runtime 的选择；Postgres pool 采用 lazy 构造，具体业务仓储未迁移前不会静默回退或接管 route。开启 `BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER=true` 后，业务 route 禁止打开 SQLite runtime，health 会把未满足的 Postgres 权威条件标为 unhealthy。
 
 repository 调用路径、事务边界和 row helper 约定见 [Rust 后端导航图](backend-map.md#repository-data-flow)。本页保留数据库运行态职责摘要。
 
@@ -15,7 +15,7 @@ repository 调用路径、事务边界和 row helper 约定见 [Rust 后端导�
 
 ## 数据流
 
-HTTP route 解析当前用户与请求 DTO 后调用 domain runtime；route helper 先通过 `HttpAppState` 的 repository boundary 打开当前仓储运行时，再由 repository 层开启事务并执行读写；响应由 HTTP 层投影为前端兼容 DTO。当前默认边界是 `sqlite_legacy`，配置为 Postgres 但业务仓储尚未切换时会得到显式未接管错误。
+HTTP route 解析当前用户与请求 DTO 后调用 domain runtime；route helper 先通过 `HttpAppState` 的 repository boundary 打开当前仓储运行时，再由 repository 层开启事务并执行读写；响应由 HTTP 层投影为前端兼容 DTO。当前默认边界是 `sqlite_legacy`；开启 cutover 但 backend/URL 不满足时边界为 `postgres_required_after_cutover`；配置为 Postgres 但业务仓储尚未切换时会得到显式未接管错误。
 
 ## 约束
 
