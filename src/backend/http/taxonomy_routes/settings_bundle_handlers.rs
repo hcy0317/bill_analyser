@@ -344,6 +344,66 @@ async fn import_categories_handler(
         return bad_request("Invalid format, expected list of categories");
     };
 
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy categories") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let user_id = db_user_id(user_id);
+        let mut imported = 0;
+        let mut updated = 0;
+        let mut skipped = 0;
+
+        for category in categories {
+            let main_category = string_or_default(category.get("main_category"), "");
+            if main_category.trim().is_empty() {
+                skipped += 1;
+                continue;
+            }
+            let sub_category = string_or_default(category.get("sub_category"), "");
+            let payload = Value::Object(import_category_payload(
+                category,
+                &main_category,
+                &sub_category,
+            ));
+            match get_postgres_category_by_name(
+                runtime.pool(),
+                &main_category,
+                &sub_category,
+                user_id,
+            )
+            .await
+            {
+                Ok(Some(existing)) => {
+                    if let Some(category_id) = existing.get("id").and_then(value_as_i64) {
+                        if update_postgres_category(runtime.pool(), category_id, &payload, user_id)
+                            .await
+                            .is_err()
+                        {
+                            return category_db_error_response();
+                        }
+                    }
+                    updated += 1;
+                }
+                Ok(None) => {
+                    if create_postgres_category(runtime.pool(), &payload, user_id)
+                        .await
+                        .is_err()
+                    {
+                        return category_db_error_response();
+                    }
+                    imported += 1;
+                }
+                Err(_) => return category_db_error_response(),
+            }
+        }
+
+        return success_result(
+            StatusCode::OK,
+            json!({ "imported": imported, "updated": updated, "skipped": skipped }),
+        );
+    }
+
     let mut runtime = match open_runtime(&state, "taxonomy categories") {
         Ok(value) => value,
         Err(response) => return *response,

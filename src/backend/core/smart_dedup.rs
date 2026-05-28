@@ -12,18 +12,6 @@ use crate::primitives::{parse_bill_datetime, Money};
 
 const PLATFORM_SOURCES: &[&str] = &["wechat", "alipay"];
 const BANK_SOURCES: &[&str] = &["icbc", "cmbc", "abc", "ccb"];
-const TRANSFER_INTENT_KEYWORDS: &[&str] = &[
-    "转账",
-    "转入",
-    "转出",
-    "提现",
-    "充值",
-    "还款",
-    "划转",
-    "内部转",
-    "存入",
-    "取出",
-];
 const TIME_TOLERANCE_SECONDS: i64 = 30;
 const DATABASE_TIME_TOLERANCE_SECONDS: i64 = 300;
 const AMOUNT_TOLERANCE_CENTS: i128 = 1;
@@ -33,6 +21,7 @@ const SIMILARITY_THRESHOLD: f64 = 0.5;
 #[serde(rename_all = "snake_case")]
 pub enum DeduplicationType {
     Exact,
+    SameBatch,
     Transfer,
     PlatformBank,
     Similar,
@@ -44,6 +33,7 @@ impl DeduplicationType {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Exact => "exact",
+            Self::SameBatch => "same_batch",
             Self::Transfer => "transfer",
             Self::PlatformBank => "platform_bank",
             Self::Similar => "similar",
@@ -95,13 +85,21 @@ pub struct TransferSourceSnapshot {
     #[serde(default, deserialize_with = "deserialize_stringish")]
     pub parser_id: String,
     #[serde(default, deserialize_with = "deserialize_stringish")]
+    pub source: String,
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     pub payment_method: String,
     #[serde(default, deserialize_with = "deserialize_stringish")]
     pub counterparty: String,
+    #[serde(default, deserialize_with = "deserialize_stringish")]
+    pub description: String,
     #[serde(default, deserialize_with = "deserialize_optional_stringish")]
     pub source_account_id: Option<String>,
     #[serde(default, deserialize_with = "deserialize_stringish")]
     pub account_name: String,
+    #[serde(default, deserialize_with = "deserialize_optional_stringish")]
+    pub bill_id: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_stringish")]
+    pub template_id: Option<String>,
     #[serde(default, deserialize_with = "deserialize_string_vec")]
     pub tags: Vec<String>,
 }
@@ -437,6 +435,7 @@ impl SmartDeduplicationEngine {
 
         duplicate_groups.extend(find_exact_duplicates(&mut bills));
         duplicate_groups.extend(find_platform_bank_duplicates(&mut bills));
+        duplicate_groups.extend(find_same_batch_duplicates(&mut bills));
         transfer_pairs.extend(find_transfer_pairs(&mut bills));
         duplicate_groups.extend(find_similar_duplicates(&mut bills));
         split_groups.extend(find_split_bills(&mut bills));
@@ -573,12 +572,7 @@ pub fn find_cross_batch_transfer_pairs(
                 continue;
             }
 
-            let imported_source = imported_bill.source_type();
-            let existing_source = existing_bill.source_type();
-            if !imported_source.is_empty()
-                && !existing_source.is_empty()
-                && imported_source == existing_source
-            {
+            if !has_distinct_reconciliation_transfer_sources(imported_bill, existing_bill) {
                 continue;
             }
 
@@ -586,6 +580,26 @@ pub fn find_cross_batch_transfer_pairs(
             imported_bill.transaction_type = "转账".to_string();
             imported_bill.dedup_type = Some("transfer_cross_batch".to_string());
             imported_bill.cross_batch_db_id = existing_bill.id.clone();
+            imported_bill.transfer_pair_order = Some("outgoing_import".to_string());
+            imported_bill.transfer_pair_sources = vec![
+                build_transfer_source_snapshot(imported_bill, "outgoing"),
+                build_transfer_source_snapshot(existing_bill, "incoming"),
+            ];
+            imported_bill.destination_parser_id = existing_bill.parser_id.clone();
+            imported_bill.destination_payment_method = existing_bill.payment_method.clone();
+            imported_bill.destination_counterparty = existing_bill.counterparty.clone();
+            imported_bill.destination_account_id =
+                Some(existing_bill.source_account_id.clone()).filter(|value| !value.is_empty());
+            imported_bill.destination_account_name = first_non_empty([
+                existing_bill.account_name.as_str(),
+                existing_bill.payment_method.as_str(),
+            ]);
+            imported_bill.counterparty =
+                merge_field_values(&imported_bill.counterparty, &existing_bill.counterparty);
+            imported_bill.payment_method =
+                merge_field_values(&imported_bill.payment_method, &existing_bill.payment_method);
+            imported_bill.description =
+                merge_field_values(&imported_bill.description, &existing_bill.description);
             matches.push(CrossBatchTransferMatch {
                 imported_index,
                 existing_index,
@@ -629,7 +643,7 @@ pub fn find_import_reconciliation_candidates(
                 continue;
             }
             let time_diff_seconds = (imported_dt - existing_dt).num_seconds().abs();
-            if time_diff_seconds > TIME_TOLERANCE_SECONDS {
+            if time_diff_seconds > DATABASE_TIME_TOLERANCE_SECONDS {
                 continue;
             }
 
@@ -638,6 +652,10 @@ pub fn find_import_reconciliation_candidates(
             else {
                 continue;
             };
+            let tolerance_seconds = reconciliation_candidate_time_tolerance_seconds(candidate_type);
+            if time_diff_seconds > tolerance_seconds {
+                continue;
+            }
             let existing_bill_id = existing_bill.id.clone();
             let pair_key = format!(
                 "{}|{}|{}",
@@ -658,8 +676,8 @@ pub fn find_import_reconciliation_candidates(
                 amount_abs.to_yuan_string(),
                 day_key
             );
-            let time_score_percent = 100
-                - ((time_diff_seconds * 100) / TIME_TOLERANCE_SECONDS.max(1)).clamp(0, 100) as u8;
+            let time_score_percent =
+                100 - ((time_diff_seconds * 100) / tolerance_seconds.max(1)).clamp(0, 100) as u8;
             let score_percent = 80 + ((19 * u16::from(time_score_percent)) / 100) as u8;
             candidates.push(ImportReconciliationCandidate {
                 candidate_id: build_reconciliation_candidate_id(
@@ -687,41 +705,9 @@ pub fn find_import_reconciliation_candidates(
     candidates
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
-fn find_exact_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup> {
-    let mut groups = Vec::new();
-    let mut by_key: HashMap<String, Vec<usize>> = HashMap::new();
+include!("smart_dedup/exact.rs");
 
-    for (index, bill) in bills.iter().enumerate() {
-        if !bill.removed {
-            by_key.entry(dedup_key(bill)).or_default().push(index);
-        }
-    }
-
-    for mut indices in by_key.into_values() {
-        if indices.len() <= 1 {
-            continue;
-        }
-        indices.sort_by_key(|index| source_priority(&bills[*index].source_type()));
-        let keep_index = indices[0];
-        let remove_indices = indices[1..].to_vec();
-        for index in &remove_indices {
-            bills[*index].removed = true;
-        }
-        groups.push(DuplicateGroup {
-            dedup_type: DeduplicationType::Exact,
-            bill_indices: indices,
-            keep_index,
-            remove_indices,
-            reason: format!(
-                "完全重复，保留 {} 来源",
-                bills[keep_index].source_identifier()
-            ),
-        });
-    }
-
-    groups
-}
+include!("smart_dedup/same_batch.rs");
 
 #[tracing::instrument(level = "debug", skip_all)]
 fn find_platform_bank_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup> {
@@ -904,6 +890,14 @@ fn find_transfer_pairs(bills: &mut [DedupBill]) -> Vec<TransferPair> {
             incoming_bill.payment_method.as_str(),
         ]);
         merge_template_ids_from_bill(&mut bills[outgoing_index], &incoming_bill);
+        bills[outgoing_index].counterparty = merge_field_values(
+            &bills[outgoing_index].counterparty,
+            &incoming_bill.counterparty,
+        );
+        bills[outgoing_index].payment_method = merge_field_values(
+            &bills[outgoing_index].payment_method,
+            &incoming_bill.payment_method,
+        );
         bills[outgoing_index].description = merge_field_values(
             &bills[outgoing_index].description,
             &incoming_bill.description,
@@ -1408,7 +1402,6 @@ fn dedup_key(bill: &DedupBill) -> String {
 
 fn clean_runtime_markers(mut bill: DedupBill) -> DedupBill {
     bill.removed = false;
-    bill.merged_from.clear();
     bill.duplicate_of_db_id = None;
     bill
 }
@@ -1435,7 +1428,7 @@ fn merge_bill_fields(target: &mut DedupBill, secondary: &DedupBill, merge_parser
     target.payment_method = merge_field_values(&target.payment_method, &secondary.payment_method);
     target.description = merge_field_values(&target.description, &secondary.description);
     target.merged_from.push(MergedBillSource {
-        source: secondary.source_account_id.clone(),
+        source: secondary.source_identifier(),
         date: secondary.date.clone(),
         amount: Some(secondary.amount.to_yuan_string()),
         template_id: secondary.template_id.clone(),
@@ -1517,15 +1510,19 @@ fn normalized_parser_tags(bill: &DedupBill) -> Vec<String> {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn build_transfer_source_snapshot(bill: &DedupBill, role: &str) -> TransferSourceSnapshot {
+pub fn build_transfer_source_snapshot(bill: &DedupBill, role: &str) -> TransferSourceSnapshot {
     TransferSourceSnapshot {
         role: role.to_string(),
         original_type: bill.original_type.clone(),
         parser_id: bill.parser_id.clone(),
+        source: bill.source_identifier(),
         payment_method: bill.payment_method.clone(),
         counterparty: bill.counterparty.clone(),
+        description: bill.description.clone(),
         source_account_id: Some(bill.source_account_id.clone()).filter(|value| !value.is_empty()),
         account_name: first_non_empty([bill.account_name.as_str(), bill.payment_method.as_str()]),
+        bill_id: bill.id.clone(),
+        template_id: bill.template_id.clone(),
         tags: normalized_parser_tags(bill),
     }
 }
@@ -1560,44 +1557,7 @@ fn append_id(target: &mut Vec<String>, value: &str) {
 }
 
 fn is_platform_bank_duplicate_candidate(platform_bill: &DedupBill, bank_bill: &DedupBill) -> bool {
-    if amount_same_direction(platform_bill.amount, bank_bill.amount) {
-        return true;
-    }
-    if has_transfer_intent_keywords(platform_bill) || has_transfer_intent_keywords(bank_bill) {
-        return false;
-    }
-    has_platform_bank_duplicate_text_evidence(platform_bill, bank_bill)
-}
-
-fn has_transfer_intent_keywords(bill: &DedupBill) -> bool {
-    let text = bill_text_for_intent(bill).to_lowercase();
-    TRANSFER_INTENT_KEYWORDS
-        .iter()
-        .any(|keyword| text.contains(&keyword.to_lowercase()))
-}
-
-fn has_platform_bank_duplicate_text_evidence(
-    platform_bill: &DedupBill,
-    bank_bill: &DedupBill,
-) -> bool {
-    for (left, right) in [
-        (&platform_bill.counterparty, &bank_bill.counterparty),
-        (&platform_bill.description, &bank_bill.description),
-        (&platform_bill.payment_method, &bank_bill.payment_method),
-        (
-            &platform_bill.original_category,
-            &bank_bill.original_category,
-        ),
-    ] {
-        if text_evidence_matches(left, right, SIMILARITY_THRESHOLD) {
-            return true;
-        }
-    }
-    text_evidence_matches(
-        &bill_text_for_intent(platform_bill),
-        &bill_text_for_intent(bank_bill),
-        0.62,
-    )
+    amount_same_direction(platform_bill.amount, bank_bill.amount)
 }
 
 fn duplicate_text_match(left: &DedupBill, right: &DedupBill, is_platform_bank_pair: bool) -> bool {
@@ -1746,6 +1706,15 @@ fn build_reconciliation_candidate_id(
     )
 }
 
+fn reconciliation_candidate_time_tolerance_seconds(
+    candidate_type: ReconciliationCandidateType,
+) -> i64 {
+    match candidate_type {
+        ReconciliationCandidateType::Duplicate => TIME_TOLERANCE_SECONDS,
+        ReconciliationCandidateType::Transfer => DATABASE_TIME_TOLERANCE_SECONDS,
+    }
+}
+
 #[tracing::instrument(level = "debug", skip_all)]
 fn resolve_reconciliation_candidate_type(
     imported_bill: &DedupBill,
@@ -1757,21 +1726,10 @@ fn resolve_reconciliation_candidate_type(
         return None;
     }
 
-    let imported_has_transfer_intent = has_transfer_intent_keywords(imported_bill);
-    let existing_has_transfer_intent = has_transfer_intent_keywords(existing_bill);
     let duplicate_evidence = has_reconciliation_duplicate_evidence(imported_bill, existing_bill);
 
     if amount_opposite(imported_bill.amount, existing_bill.amount) {
-        if duplicate_evidence && !(imported_has_transfer_intent || existing_has_transfer_intent) {
-            return Some((
-                ReconciliationCandidateType::Duplicate,
-                "opposite_amount|duplicate_text_evidence".to_string(),
-            ));
-        }
-
-        let imported_source = reconciliation_source_token(imported_bill);
-        let existing_source = reconciliation_source_token(existing_bill);
-        if !imported_source.is_empty() && imported_source == existing_source {
+        if !has_distinct_reconciliation_transfer_sources(imported_bill, existing_bill) {
             return None;
         }
         return Some((
@@ -1780,12 +1738,12 @@ fn resolve_reconciliation_candidate_type(
         ));
     }
 
-    if amount_equal_same_direction(imported_bill.amount, existing_bill.amount) {
-        let mut reason = "same_amount|same_direction|same_day|time_close".to_string();
-        if duplicate_evidence {
-            reason.push_str("|duplicate_text_evidence");
-        }
-        return Some((ReconciliationCandidateType::Duplicate, reason));
+    if amount_equal_same_direction(imported_bill.amount, existing_bill.amount) && duplicate_evidence
+    {
+        return Some((
+            ReconciliationCandidateType::Duplicate,
+            "same_amount|same_direction|same_day|time_close|duplicate_text_evidence".to_string(),
+        ));
     }
 
     None
@@ -1808,24 +1766,58 @@ fn has_reconciliation_duplicate_evidence(
     let imported_text = bill_text_for_intent(imported_bill);
     let existing_text = bill_text_for_intent(existing_bill);
     if imported_text.is_empty() && existing_text.is_empty() {
-        return true;
+        return false;
     }
     text_evidence_matches(&imported_text, &existing_text, 0.62)
 }
 
-fn reconciliation_source_token(bill: &DedupBill) -> String {
+fn has_distinct_reconciliation_transfer_sources(left: &DedupBill, right: &DedupBill) -> bool {
+    let left_account = normalized_non_zero_source(&left.source_account_id);
+    let right_account = normalized_non_zero_source(&right.source_account_id);
+    if !left_account.is_empty() && !right_account.is_empty() {
+        return left_account != right_account;
+    }
+
+    let left_real_source = reconciliation_real_source_token(left);
+    let right_real_source = reconciliation_real_source_token(right);
+    if !left_real_source.is_empty() && !right_real_source.is_empty() {
+        return left_real_source != right_real_source;
+    }
+
+    let left_parser = reconciliation_parser_source_token(left);
+    let right_parser = reconciliation_parser_source_token(right);
+    !left_parser.is_empty() && !right_parser.is_empty() && left_parser != right_parser
+}
+
+fn reconciliation_real_source_token(bill: &DedupBill) -> String {
     for value in [
-        bill.parser_id.as_str(),
-        bill.source.as_str(),
         bill.source_account_id.as_str(),
         bill.payment_method.as_str(),
+        bill.source.as_str(),
     ] {
-        let value = value.trim().to_lowercase();
-        if !value.is_empty() && value != "0" {
+        let value = normalized_non_zero_source(value);
+        if !value.is_empty() {
             return value;
         }
     }
     String::new()
+}
+
+fn reconciliation_parser_source_token(bill: &DedupBill) -> String {
+    let parser_id = normalized_non_zero_source(&bill.parser_id);
+    if parser_id == "history_db" {
+        String::new()
+    } else {
+        parser_id
+    }
+}
+
+fn normalized_non_zero_source(value: &str) -> String {
+    let value = normalized_source(value);
+    if value == "0" {
+        return String::new();
+    }
+    value
 }
 
 fn stable_hash_hex(input: &str) -> String {

@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bill-analyser-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${BILL_ANALYSER_POSTGRES_DB:-bill_analyser}
+      POSTGRES_USER: ${BILL_ANALYSER_POSTGRES_USER:-bill_analyser}
+      POSTGRES_PASSWORD: ${BILL_ANALYSER_POSTGRES_PASSWORD:-bill_analyser_dev}
+    ports:
+      - "${BILL_ANALYSER_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - bill_analyser_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  weaviate:
+    image: ${BILL_ANALYSER_WEAVIATE_IMAGE:-cr.weaviate.io/semitechnologies/weaviate:1.37.4}
+    container_name: bill-analyser-weaviate
+    restart: unless-stopped
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --scheme
+      - http
+    environment:
+      QUERY_DEFAULTS_LIMIT: ${BILL_ANALYSER_WEAVIATE_QUERY_LIMIT:-25}
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: ${BILL_ANALYSER_WEAVIATE_ANONYMOUS_ACCESS:-true}
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+      CLUSTER_HOSTNAME: node1
+    ports:
+      - "${BILL_ANALYSER_WEAVIATE_PORT:-8088}:8080"
+      - "${BILL_ANALYSER_WEAVIATE_GRPC_PORT:-50051}:50051"
+    volumes:
+      - bill_analyser_weaviate_data:/var/lib/weaviate
+
+volumes:
+  bill_analyser_postgres_data:
+  bill_analyser_weaviate_data:

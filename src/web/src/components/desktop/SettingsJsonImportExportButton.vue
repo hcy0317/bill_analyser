@@ -86,6 +86,7 @@ const sectionLabels: Record<SettingsBundleSectionKey, string> = {
     transactionTemplates: 'Transaction Templates',
     scheduledTransactions: 'Scheduled Transactions',
     categoryRecognitionRules: 'Category Recognition Rules',
+    accountRecognitionRules: 'Account Recognition Rules',
     llmConfigs: 'LLM Configs',
     ocrConfig: 'OCR Config',
 };

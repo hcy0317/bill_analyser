@@ -111,9 +111,17 @@ pub(super) async fn download_backup_handler(
         operation = "download_backup_handler",
         "business operation entered"
     );
-    match prepare_download_backup_response(&state, &headers, &filename) {
-        Ok((file, safe_filename)) => stream_backup_download_response(file, &safe_filename),
-        Err(response) => *response,
+    match tokio::task::spawn_blocking(move || {
+        prepare_download_backup_response(&state, &headers, &filename)
+    })
+    .await
+    {
+        Ok(Ok((file, safe_filename))) => stream_backup_download_response(file, &safe_filename),
+        Ok(Err(response)) => *response,
+        Err(error) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("backup download prepare task failed: {error}"),
+        ),
     }
 }
 

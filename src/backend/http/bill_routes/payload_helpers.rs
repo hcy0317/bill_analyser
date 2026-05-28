@@ -78,6 +78,100 @@ fn update_draft_from_payload(
     Ok(BillUpdateDraft { fields, tag_ids })
 }
 
+async fn create_draft_from_payload_postgres(
+    pool: &PostgresPool,
+    user_id: UserId,
+    payload: &Value,
+) -> RouteResult<BillCreateDraft> {
+    let fallback_account_id = get_first_postgres_account_id(pool, user_id.get() as i64)
+        .await
+        .map_err(|_| Box::new(db_error_response()))?;
+    let (mut fields, tag_ids, category_id) = if is_frontend_mutation(payload) {
+        let (mut backend_data, metadata) = frontend_transaction_mutation_to_backend(
+            payload,
+            UtcOffsetMinutes::new(DEFAULT_UTC_OFFSET_MINUTES),
+        )
+        .map_err(|error| Box::new(bad_request(error.to_string())))?;
+        apply_manual_create_defaults(&mut backend_data, payload, fallback_account_id)
+            .map_err(|error| Box::new(bad_request(error.to_string())))?;
+        (backend_data, metadata.tag_ids, metadata.category_id)
+    } else {
+        let mut fields = payload_object(payload)?.clone();
+        let tag_ids = extract_tag_ids(&fields)?;
+        let category_id = value_string(
+            fields
+                .get("categoryId")
+                .or_else(|| fields.get("category_id")),
+        )
+        .unwrap_or_default();
+        strip_route_only_keys(&mut fields);
+        normalize_bill_create_aliases(&mut fields);
+        apply_manual_create_defaults(&mut fields, payload, fallback_account_id)
+            .map_err(|error| Box::new(bad_request(error.to_string())))?;
+        (fields, tag_ids, category_id)
+    };
+
+    apply_postgres_category_id(pool, user_id, &mut fields, &category_id).await?;
+    let category_pair = category_pair_from_fields(&fields);
+    apply_create_category_contract(
+        &mut fields,
+        category_pair
+            .as_ref()
+            .map(|(main, sub)| (main.as_str(), sub.as_str())),
+        None,
+    );
+    ensure_create_defaults(&mut fields);
+    Ok(BillCreateDraft { fields, tag_ids })
+}
+
+async fn update_draft_from_payload_postgres(
+    pool: &PostgresPool,
+    user_id: UserId,
+    payload: &Value,
+) -> RouteResult<BillUpdateDraft> {
+    let (mut fields, tag_ids, category_id) = if is_frontend_mutation(payload) {
+        let (backend_data, metadata) = frontend_transaction_mutation_to_backend(
+            payload,
+            UtcOffsetMinutes::new(DEFAULT_UTC_OFFSET_MINUTES),
+        )
+        .map_err(|error| Box::new(bad_request(error.to_string())))?;
+        (backend_data, Some(metadata.tag_ids), metadata.category_id)
+    } else {
+        let mut fields = payload_object(payload)?.clone();
+        let tag_ids = tag_ids_for_update(&fields)?;
+        let category_id = value_string(
+            fields
+                .get("categoryId")
+                .or_else(|| fields.get("category_id")),
+        )
+        .unwrap_or_default();
+        strip_route_only_keys(&mut fields);
+        sanitize_backend_update_fields(&mut fields, payload);
+        (fields, tag_ids, category_id)
+    };
+    apply_postgres_category_id(pool, user_id, &mut fields, &category_id).await?;
+    Ok(BillUpdateDraft { fields, tag_ids })
+}
+
+async fn apply_postgres_category_id(
+    pool: &PostgresPool,
+    user_id: UserId,
+    fields: &mut Map<String, Value>,
+    category_id: &str,
+) -> RouteResult<()> {
+    let Some(category_id) = parse_positive_i64(category_id) else {
+        return Ok(());
+    };
+    let category = resolve_postgres_category_by_id(pool, user_id.get() as i64, category_id)
+        .await
+        .map_err(|_| Box::new(db_error_response()))?;
+    if let Some((main, sub)) = category {
+        fields.insert("main_category".to_string(), Value::String(main));
+        fields.insert("sub_category".to_string(), Value::String(sub));
+    }
+    Ok(())
+}
+
 fn payload_object(payload: &Value) -> RouteResult<&Map<String, Value>> {
     payload
         .as_object()

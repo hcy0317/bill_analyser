@@ -58,6 +58,103 @@ function Read-DotenvSettings {
     return $settings
 }
 
+function Test-TruthyEnvValue {
+    param([string]$Value)
+
+    if (-not $Value) {
+        return $false
+    }
+    $normalized = $Value.Trim().ToLowerInvariant()
+    return @("1", "true", "yes", "on") -contains $normalized
+}
+
+function Resolve-ConfiguredPort {
+    param(
+        [string]$Name,
+        [string]$Value,
+        [int]$DefaultPort
+    )
+
+    if (-not $Value) {
+        return $DefaultPort
+    }
+
+    $port = 0
+    if ([int]::TryParse($Value, [ref]$port) -and $port -gt 0 -and $port -le 65535) {
+        return $port
+    }
+
+    Write-Host "Warning: Invalid $Name='$Value'; using default port $DefaultPort." -ForegroundColor Yellow
+    return $DefaultPort
+}
+
+function ConvertTo-UrlPart {
+    param([string]$Value)
+    return [System.Uri]::EscapeDataString($Value)
+}
+
+function Resolve-RequiredEndpoint {
+    param(
+        [string]$Name,
+        [string]$Url,
+        [int]$DefaultPort
+    )
+
+    try {
+        $uri = [System.Uri]$Url
+    } catch {
+        Write-Host "Error: Invalid $Name URL: $Url" -ForegroundColor Red
+        exit 1
+    }
+
+    if (-not $uri.Host) {
+        Write-Host "Error: Invalid $Name URL without host: $Url" -ForegroundColor Red
+        exit 1
+    }
+
+    $port = if ($uri.Port -gt 0) { $uri.Port } else { $DefaultPort }
+    return @{
+        Name = $Name
+        Host = $uri.Host
+        Port = $port
+        Url = $Url
+    }
+}
+
+function Test-TcpEndpoint {
+    param(
+        [string]$HostName,
+        [int]$Port,
+        [int]$TimeoutMs = 1200
+    )
+
+    $client = [System.Net.Sockets.TcpClient]::new()
+    try {
+        $connection = $client.BeginConnect($HostName, $Port, $null, $null)
+        if (-not $connection.AsyncWaitHandle.WaitOne($TimeoutMs, $false)) {
+            return $false
+        }
+        $client.EndConnect($connection)
+        return $true
+    } catch {
+        return $false
+    } finally {
+        $client.Dispose()
+    }
+}
+
+function Assert-RequiredRuntimeService {
+    param([hashtable]$Endpoint)
+
+    if (Test-TcpEndpoint -HostName $Endpoint.Host -Port $Endpoint.Port) {
+        return
+    }
+
+    Write-Host "Error: Required $($Endpoint.Name) service is not reachable at $($Endpoint.Host):$($Endpoint.Port)." -ForegroundColor Red
+    Write-Host "Start required services first: docker compose -f docker-compose.postgres.yml up -d postgres weaviate" -ForegroundColor Yellow
+    exit 1
+}
+
 function Set-RustAuthEnvFromServerConfig {
     param(
         [object]$Config,
@@ -83,8 +180,96 @@ function Set-RustAuthEnvFromServerConfig {
 
 $DotenvSettings = Read-DotenvSettings -Path $DotenvPath
 
+foreach ($databaseEnvName in @(
+    "BILL_ANALYSER_DATABASE_BACKEND",
+    "BILL_ANALYSER_POSTGRES_URL",
+    "BILL_ANALYSER_POSTGRES_DB",
+    "BILL_ANALYSER_POSTGRES_USER",
+    "BILL_ANALYSER_POSTGRES_PASSWORD",
+    "BILL_ANALYSER_POSTGRES_PORT",
+    "BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER",
+    "BILL_ANALYSER_MIGRATION_MODE",
+    "BILL_ANALYSER_WEAVIATE_ENABLED",
+    "BILL_ANALYSER_WEAVIATE_ENDPOINT",
+    "BILL_ANALYSER_WEAVIATE_PORT",
+    "BILL_ANALYSER_WEAVIATE_API_KEY",
+    "BILL_ANALYSER_WEAVIATE_COLLECTION_PREFIX",
+    "BILL_ANALYSER_WEAVIATE_TIMEOUT_MS",
+    "BILL_ANALYSER_WEAVIATE_RETRY_ATTEMPTS",
+    "BILL_ANALYSER_WEAVIATE_BATCH_SIZE",
+    "BILL_ANALYSER_WEAVIATE_VECTOR_DIMENSIONS"
+)) {
+    if (-not [Environment]::GetEnvironmentVariable($databaseEnvName) -and $DotenvSettings.ContainsKey($databaseEnvName)) {
+        Set-Item -Path "Env:$databaseEnvName" -Value ([string]$DotenvSettings[$databaseEnvName])
+    }
+}
+
+if (-not $env:BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER) {
+    $env:BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER = "true"
+}
+
+$RequirePostgresAfterCutover = Test-TruthyEnvValue -Value $env:BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER
+
 if (-not $env:BILL_ANALYSER_SQLITE_DB_PATH) {
     $env:BILL_ANALYSER_SQLITE_DB_PATH = $DefaultDbPath
+}
+
+if (-not $env:BILL_ANALYSER_SQLITE_LEGACY_PATH) {
+    $env:BILL_ANALYSER_SQLITE_LEGACY_PATH = $env:BILL_ANALYSER_SQLITE_DB_PATH
+}
+
+if (-not $env:BILL_ANALYSER_DATABASE_BACKEND) {
+    $env:BILL_ANALYSER_DATABASE_BACKEND = "postgres"
+}
+
+$SelectedDatabaseBackend = $env:BILL_ANALYSER_DATABASE_BACKEND.Trim().ToLowerInvariant()
+$UsePostgresRuntime = $SelectedDatabaseBackend -in @("postgres", "postgresql")
+if ($SelectedDatabaseBackend -notin @("sqlite", "sqlite_legacy", "legacy_sqlite", "postgres", "postgresql")) {
+    Write-Host "Error: Unsupported BILL_ANALYSER_DATABASE_BACKEND='$env:BILL_ANALYSER_DATABASE_BACKEND'." -ForegroundColor Red
+    exit 1
+}
+
+if ($RequirePostgresAfterCutover -and -not $UsePostgresRuntime) {
+    Write-Host "Error: BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER=true requires BILL_ANALYSER_DATABASE_BACKEND=postgres." -ForegroundColor Red
+    exit 1
+}
+
+if (-not $UsePostgresRuntime) {
+    Write-Host "Error: Normal HTTP business runtime requires BILL_ANALYSER_DATABASE_BACKEND=postgres. SQLite is legacy migration/test input only." -ForegroundColor Red
+    exit 1
+}
+
+if ($UsePostgresRuntime -and -not $env:BILL_ANALYSER_POSTGRES_URL) {
+    $postgresPort = Resolve-ConfiguredPort -Name "BILL_ANALYSER_POSTGRES_PORT" -Value $env:BILL_ANALYSER_POSTGRES_PORT -DefaultPort 5432
+    $postgresDb = if ($env:BILL_ANALYSER_POSTGRES_DB) { $env:BILL_ANALYSER_POSTGRES_DB } else { "bill_analyser" }
+    $postgresUser = if ($env:BILL_ANALYSER_POSTGRES_USER) { $env:BILL_ANALYSER_POSTGRES_USER } else { "bill_analyser" }
+    $postgresPassword = if ($env:BILL_ANALYSER_POSTGRES_PASSWORD) { $env:BILL_ANALYSER_POSTGRES_PASSWORD } else { "bill_analyser_dev" }
+    $env:BILL_ANALYSER_POSTGRES_URL = "postgres://$(ConvertTo-UrlPart $postgresUser):$(ConvertTo-UrlPart $postgresPassword)@127.0.0.1:$postgresPort/$(ConvertTo-UrlPart $postgresDb)"
+    Write-Host "Info: BILL_ANALYSER_POSTGRES_URL not set; using local docker-compose port $postgresPort." -ForegroundColor Yellow
+}
+
+if (-not $env:BILL_ANALYSER_WEAVIATE_ENABLED) {
+    $env:BILL_ANALYSER_WEAVIATE_ENABLED = "true"
+}
+
+if (-not (Test-TruthyEnvValue -Value $env:BILL_ANALYSER_WEAVIATE_ENABLED)) {
+    Write-Host "Error: Rust backend now requires BILL_ANALYSER_WEAVIATE_ENABLED=true." -ForegroundColor Red
+    exit 1
+}
+
+if (-not $env:BILL_ANALYSER_WEAVIATE_ENDPOINT) {
+    $weaviatePort = Resolve-ConfiguredPort -Name "BILL_ANALYSER_WEAVIATE_PORT" -Value $env:BILL_ANALYSER_WEAVIATE_PORT -DefaultPort 8088
+    $env:BILL_ANALYSER_WEAVIATE_ENDPOINT = "http://127.0.0.1:$weaviatePort"
+    Write-Host "Info: BILL_ANALYSER_WEAVIATE_ENDPOINT not set; using local docker-compose port $weaviatePort." -ForegroundColor Yellow
+}
+
+$WeaviateEndpoint = Resolve-RequiredEndpoint -Name "Weaviate" -Url $env:BILL_ANALYSER_WEAVIATE_ENDPOINT -DefaultPort 8080
+$PostgresEndpoint = Resolve-RequiredEndpoint -Name "Postgres" -Url $env:BILL_ANALYSER_POSTGRES_URL -DefaultPort 5432
+Assert-RequiredRuntimeService -Endpoint $PostgresEndpoint
+Assert-RequiredRuntimeService -Endpoint $WeaviateEndpoint
+
+if (-not $env:BILL_ANALYSER_MIGRATION_MODE) {
+    $env:BILL_ANALYSER_MIGRATION_MODE = "disabled"
 }
 
 if (-not $env:BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE) {
@@ -175,6 +360,10 @@ if ($ConfiguredServer) {
 Write-Host "Rust HTTP server: $env:BILL_ANALYSER_RUST_HTTP_SERVER" -ForegroundColor Gray
 Write-Host "Rust import mode: $env:BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE" -ForegroundColor Gray
 Write-Host "SQLite DB: $env:BILL_ANALYSER_SQLITE_DB_PATH" -ForegroundColor Gray
+Write-Host "Database backend: $env:BILL_ANALYSER_DATABASE_BACKEND" -ForegroundColor Gray
+Write-Host "Migration mode: $env:BILL_ANALYSER_MIGRATION_MODE" -ForegroundColor Gray
+Write-Host "Postgres configured: $([bool]$env:BILL_ANALYSER_POSTGRES_URL)" -ForegroundColor Gray
+Write-Host "Weaviate endpoint: $env:BILL_ANALYSER_WEAVIATE_ENDPOINT" -ForegroundColor Gray
 Write-Host "Listening on: http://$env:BILL_ANALYSER_HTTP_BIND" -ForegroundColor Cyan
 Write-Host "Health check: http://127.0.0.1:5000/api/health" -ForegroundColor Cyan
 Write-Host ""

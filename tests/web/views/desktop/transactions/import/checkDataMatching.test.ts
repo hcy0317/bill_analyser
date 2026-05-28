@@ -1,6 +1,8 @@
 import { describe, expect, test } from '@jest/globals';
 
 import {
+    buildImportPreviewHistoryRewriteAcknowledgement,
+    buildImportPreviewHistoryRewriteOperationAcknowledgement,
     buildImportPreviewSignalViewModel,
     buildImportPreviewTypeColumnViewModel,
     getImportCheckMatchingContextSummary,
@@ -210,6 +212,7 @@ describe('checkDataMatching helpers', () => {
             'Apply Suggestion',
             'Reject Learning Suggestion'
         ]);
+        expect(viewModel.learning?.color).toBe('warning');
         expect(viewModel.investment).toBeNull();
     });
 
@@ -575,10 +578,10 @@ describe('checkDataMatching helpers', () => {
         ]);
     });
 
-    test('keeps blue learning suggestions highlighted and supports review rendering', () => {
-        const bluePending = buildImportPreviewSignalViewModel({
+    test('renders yellow and green learning lifecycle review actions', () => {
+        const yellowPending = buildImportPreviewSignalViewModel({
             learningStatus: 'pending',
-            learningMode: 'blue',
+            learningSignalState: 'yellow',
             learningSummary: '支出 | 餐饮/咖啡'
         }, {
             infoLabels: {
@@ -599,8 +602,9 @@ describe('checkDataMatching helpers', () => {
                 accountRouteLabel: '账户链路'
             }
         });
-        const acceptedBlue = buildImportPreviewSignalViewModel({
+        const acceptedGreen = buildImportPreviewSignalViewModel({
             learningStatus: 'accepted',
+            learningSignalState: 'green',
             learningAutoApplied: true,
             learningSummary: '支出 | 餐饮/咖啡'
         }, {
@@ -612,15 +616,16 @@ describe('checkDataMatching helpers', () => {
             }
         });
 
-        expect(bluePending.learning?.color).toBe('primary');
-        expect(bluePending.learning?.labelKey).toBe('Blue Learning Auto Apply');
-        expect(bluePending.learning?.actions.map(action => action.labelKey)).toStrictEqual([
+        expect(yellowPending.learning?.color).toBe('warning');
+        expect(yellowPending.learning?.labelKey).toBe('Learning Suggestion');
+        expect(yellowPending.learning?.actions.map(action => action.labelKey)).toStrictEqual([
             'Apply Suggestion',
             'Reject Learning Suggestion'
         ]);
-        expect(acceptedBlue.learning?.labelKey).toBe('Blue Learning Applied');
-        expect(acceptedBlue.learning?.actions).toStrictEqual([
-            { decision: 'clear', labelKey: 'Undo Learning Auto Apply', color: 'primary' }
+        expect(acceptedGreen.learning?.color).toBe('success');
+        expect(acceptedGreen.learning?.labelKey).toBe('Learning Applied');
+        expect(acceptedGreen.learning?.actions).toStrictEqual([
+            { decision: 'reject', labelKey: 'Reject Learning Suggestion', color: 'error' }
         ]);
         expect(rejected.learning?.labelKey).toBe('Learning Suggestion Rejected');
         expect(rejected.learning?.color).toBe('error');
@@ -688,6 +693,19 @@ describe('checkDataMatching helpers', () => {
             learningStatus: 'pending',
             learningSummary: '收入 | 其他收入/原路退款 | 民生银行'
         });
+        const historyViewModel = buildImportPreviewSignalViewModel({
+            reconciliationTitle: '将改写/合并历史账单',
+            reconciliationPlannedOperation: 'update_history',
+            reconciliationHistoryBillId: 88,
+            reconciliationHistoryBillVersion: 3,
+            reconciliationOperationId: 'history:abc',
+            reconciliationAcknowledgementToken: 'ack-token',
+            reconciliationDestructiveAckRequired: true
+        });
+        const llmViewModel = buildImportPreviewSignalViewModel({
+            llmStatus: 'pending',
+            llmTitle: 'LLM 推荐'
+        });
 
         expect(matchesImportPreviewSignalFilter(parserViewModel, 'parser')).toBe(true);
         expect(matchesImportPreviewSignalFilter(platformDuplicateViewModel, 'parser')).toBe(false);
@@ -700,9 +718,63 @@ describe('checkDataMatching helpers', () => {
         });
         expect(matchesImportPreviewSignalFilter(crossBatchTransferViewModel, 'transfer')).toBe(true);
 
+        expect(matchesImportPreviewSignalFilter(historyViewModel, 'history')).toBe(true);
         expect(matchesImportPreviewSignalFilter(learningViewModel, 'learning')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(llmViewModel, 'llm')).toBe(true);
         expect(matchesImportPreviewSignalFilter(learningViewModel, null)).toBe(true);
         expect(matchesImportPreviewSignalFilter(learningViewModel, 'unexpected' as never)).toBe(true);
+    });
+
+    test('builds explicit history rewrite signal and acknowledgement payloads', () => {
+        const state = {
+            reconciliationTitle: '将改写/合并历史账单',
+            reconciliationPlannedOperation: 'merge_transfer_history',
+            reconciliationHistoryBillId: 901,
+            reconciliationHistoryBillVersion: 4,
+            reconciliationOperationId: 'history:merge',
+            reconciliationAcknowledgementToken: 'ack-merge',
+            reconciliationDestructiveAckRequired: true,
+            reconciliationSourceChain: [
+                { role: 'outgoing', parser_label: '民生银行', label: '民生银行卡' },
+                { role: 'incoming', parser_label: '微信', label: '微信' }
+            ]
+        };
+        const viewModel = buildImportPreviewSignalViewModel(state);
+
+        expect(viewModel.dedup).toBeNull();
+        expect(viewModel.historyRewrite?.labelKey).toBe('Merge History Transfer');
+        expect(viewModel.historyRewrite?.color).toBe('warning');
+        expect(viewModel.historyRewrite?.actions).toStrictEqual([]);
+        expect(viewModel.historyRewrite?.detailLines).toContain('Operation: merge_transfer_history');
+        expect(viewModel.historyRewrite?.detailLines).toContain('History Bill: #901 v4');
+
+        const operation = buildImportPreviewHistoryRewriteOperationAcknowledgement(77, state);
+        expect(operation).toStrictEqual({
+            preview_id: 77,
+            operation_id: 'history:merge',
+            planned_operation: 'merge_transfer_history',
+            history_bill_id: 901,
+            history_bill_version: 4,
+            acknowledgement_token: 'ack-merge'
+        });
+
+        const acknowledgement = buildImportPreviewHistoryRewriteAcknowledgement({
+            selectedPreviewIds: [77, '78', 77],
+            operations: [operation!],
+            selectionScope: {
+                mode: 'visible-preview'
+            }
+        });
+        expect(acknowledgement).toStrictEqual({
+            acknowledged: true,
+            selected_preview_ids: [77, 78],
+            operations: [operation!],
+            selection_scope: {
+                mode: 'visible-preview',
+                selected_count: 2,
+                history_rewrite_count: 1
+            }
+        });
     });
 
     test('keeps parser and investment signals out of the type column model', () => {
@@ -800,5 +872,63 @@ describe('checkDataMatching helpers', () => {
             dedupSourceIds: ['11'],
             isManuallyAnnotated: false
         })).toStrictEqual(['cmbc', 'wechat']);
+    });
+
+    test('rejects incomplete history rewrite acknowledgements and omits empty acknowledgement payloads', () => {
+        expect(buildImportPreviewHistoryRewriteOperationAcknowledgement(null, {
+            reconciliationPlannedOperation: 'update_history',
+            reconciliationHistoryBillId: { invalid: true } as unknown as string,
+            reconciliationOperationId: 'history:update',
+            reconciliationAcknowledgementToken: 'ack-update',
+            reconciliationDestructiveAckRequired: true
+        })).toBeNull();
+
+        expect(buildImportPreviewHistoryRewriteOperationAcknowledgement(88, {
+            reconciliationPlannedOperation: 'remaining',
+            reconciliationHistoryBillId: 9,
+            reconciliationOperationId: 'history:update',
+            reconciliationAcknowledgementToken: 'ack-update',
+            reconciliationDestructiveAckRequired: true
+        })).toBeNull();
+
+        expect(buildImportPreviewHistoryRewriteAcknowledgement({
+            selectedPreviewIds: [88],
+            operations: [],
+            selectionScope: { mode: 'empty' }
+        })).toBeNull();
+    });
+
+    test('sorts multiple history rewrite operations and preserves default bill versions', () => {
+        const updateOperation = buildImportPreviewHistoryRewriteOperationAcknowledgement('99', {
+            reconciliationPlannedOperation: 'update_history',
+            reconciliationHistoryBillId: '700',
+            reconciliationOperationId: 'history:update',
+            reconciliationAcknowledgementToken: 'ack-update',
+            reconciliationDestructiveAckRequired: true
+        });
+        const mergeOperation = buildImportPreviewHistoryRewriteOperationAcknowledgement(77, {
+            reconciliationPlannedOperation: 'merge_transfer_history',
+            reconciliationHistoryBillId: 701,
+            reconciliationHistoryBillVersion: 2,
+            reconciliationOperationId: 'history:merge',
+            reconciliationAcknowledgementToken: 'ack-merge',
+            reconciliationDestructiveAckRequired: true
+        });
+
+        expect(updateOperation?.history_bill_version).toBe(1);
+        expect(buildImportPreviewHistoryRewriteAcknowledgement({
+            selectedPreviewIds: [99, 77],
+            operations: [updateOperation!, mergeOperation!],
+            selectionScope: { mode: 'sorted' }
+        })?.operations.map(operation => operation.preview_id)).toStrictEqual([77, 99]);
+    });
+
+    test('shows source counts for similar duplicate title fallbacks', () => {
+        const summary = getImportCheckMatchingContextSummary({
+            dedupType: 'similar',
+            dedupSourceIds: [10, 11]
+        });
+
+        expect(getImportCheckMatchingDedupTitle(summary)).toBe('Similar Duplicate');
     });
 });

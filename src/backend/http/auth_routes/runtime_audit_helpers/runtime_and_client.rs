@@ -3,32 +3,27 @@
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
 fn open_runtime(state: &HttpAppState) -> RouteResult<SqliteRuntime> {
-    let db_path = state.config.sqlite_db_path.as_deref().ok_or_else(|| {
-        Box::new(auth_rest_error_response(AuthRestError::new(
-            503,
-            "Service Unavailable",
-            "Rust auth token runtime requires BILL_ANALYSER_SQLITE_DB_PATH",
-        )))
-    })?;
-    let db_path = SqliteDbPath::application_file(db_path).map_err(|error| {
-        Box::new(auth_rest_error_response(AuthRestError::new(
-            503,
-            "Service Unavailable",
-            error.to_string(),
-        )))
-    })?;
-    let runtime = SqliteRuntime::open(SqliteConnectionConfig {
-        path: db_path,
-        create_if_missing: false,
-        busy_timeout: state.config.timeout,
-    })
-    .map_err(|error| {
-        Box::new(auth_rest_error_response(AuthRestError::new(
-            503,
-            "Service Unavailable",
-            format!("Rust auth token runtime cannot open configured SQLite database: {error}"),
-        )))
-    })?;
+    let runtime = state
+        .open_existing_sqlite_repository_runtime("auth token")
+        .map_err(|error| {
+            let status = error.http_status_code();
+            let title = if status == 503 {
+                "Service Unavailable"
+            } else {
+                "Internal Server Error"
+            };
+            let message = match error {
+                crate::RouteRepositoryRuntimeError::MissingSqliteDbPath { .. } => {
+                    "Rust auth token runtime requires BILL_ANALYSER_SQLITE_DB_PATH".to_string()
+                }
+                _ => error.public_message("Rust auth token runtime DB error"),
+            };
+            Box::new(auth_rest_error_response(AuthRestError::new(
+                status,
+                title,
+                message,
+            )))
+        })?;
     init_auth_security_schema(runtime.connection()).map_err(|error| {
         Box::new(auth_rest_error_response(AuthRestError::new(
             500,
@@ -37,6 +32,24 @@ fn open_runtime(state: &HttpAppState) -> RouteResult<SqliteRuntime> {
         )))
     })?;
     Ok(runtime)
+}
+
+fn open_postgres_runtime(state: &HttpAppState) -> RouteResult<PostgresRepositoryRuntime> {
+    state
+        .open_postgres_repository_runtime("auth")
+        .map_err(|error| {
+            let status = error.http_status_code();
+            let title = if status == 503 {
+                "Service Unavailable"
+            } else {
+                "Internal Server Error"
+            };
+            Box::new(auth_rest_error_response(AuthRestError::new(
+                status,
+                title,
+                error.public_message("Rust auth PostgreSQL runtime DB error"),
+            )))
+        })
 }
 
 fn client_ip(headers: &HeaderMap, peer_addr: Option<SocketAddr>) -> String {

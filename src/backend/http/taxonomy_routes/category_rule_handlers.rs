@@ -14,6 +14,23 @@ async fn list_category_rules_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy category rules") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match list_postgres_category_rules(
+            runtime.pool(),
+            db_user_id(user_id),
+            query.category_id,
+            category_rules_enabled_only(&query),
+        )
+        .await
+        {
+            Ok(rules) => json_response(StatusCode::OK, format_category_rules_response(rules)),
+            Err(_) => category_rule_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy category rules") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -55,6 +72,23 @@ async fn create_category_rule_handler(
         return bad_request("category_id and rule_expression are required");
     }
 
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy category rules") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let user_id = db_user_id(user_id);
+        let rule_id = match create_postgres_category_rule(runtime.pool(), &body, user_id).await {
+            Ok(Some(value)) => value,
+            Ok(None) => return bad_request("Failed to create rule"),
+            Err(_) => return category_rule_db_error_response(),
+        };
+        return match get_postgres_category_rule(runtime.pool(), rule_id, user_id).await {
+            Ok(Some(rule)) => category_rule_data_response(StatusCode::CREATED, rule),
+            Ok(None) => category_rule_db_error_response(),
+            Err(_) => category_rule_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy category rules") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -85,6 +119,25 @@ async fn get_legacy_category_rules_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy legacy category rules") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let user_id = db_user_id(user_id);
+        let config_key = legacy_category_rules_setting_key(user_id);
+        match get_postgres_legacy_category_rules_setting(runtime.pool(), &config_key, user_id)
+            .await
+        {
+            Ok(Some(rules)) => return success_result(StatusCode::OK, rules),
+            Ok(None) => {}
+            Err(_) => return category_rule_db_error_response(),
+        }
+        return match list_postgres_legacy_category_engine_rules(runtime.pool(), user_id).await {
+            Ok(rules) => success_result(StatusCode::OK, Value::Array(rules)),
+            Err(_) => category_rule_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy legacy category rules") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -131,6 +184,28 @@ async fn update_legacy_category_rules_handler(
         Ok(value) => value,
         Err(_) => return category_rule_db_error_response(),
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy legacy category rules") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let user_id = db_user_id(user_id);
+        let config_key = legacy_category_rules_setting_key(user_id);
+        return match set_postgres_legacy_category_rules_setting(
+            runtime.pool(),
+            &config_key,
+            rules,
+            user_id,
+        )
+        .await
+        {
+            Ok(_) => json_response(
+                StatusCode::OK,
+                json!({"success": true, "message": "Category rules updated successfully"}),
+            ),
+            Err(_) => category_rule_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy legacy category rules") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -176,6 +251,22 @@ async fn update_category_rule_handler(
     {
         return bad_request("rule_expression is required");
     }
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy category rules") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let user_id = db_user_id(user_id);
+        return match update_postgres_category_rule(runtime.pool(), rule_id, &body, user_id).await {
+            Ok(true) => match get_postgres_category_rule(runtime.pool(), rule_id, user_id).await {
+                Ok(Some(rule)) => category_rule_data_response(StatusCode::OK, rule),
+                Ok(None) => category_rule_db_error_response(),
+                Err(_) => category_rule_db_error_response(),
+            },
+            Ok(false) => not_found("Rule not found or no change"),
+            Err(_) => category_rule_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy category rules") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -206,6 +297,19 @@ async fn delete_category_rule_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy category rules") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match delete_postgres_category_rule(runtime.pool(), rule_id, db_user_id(user_id))
+            .await
+        {
+            Ok(true) => json_response(StatusCode::OK, json!({"success": true})),
+            Ok(false) => not_found("Rule not found"),
+            Err(_) => category_rule_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy category rules") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -249,6 +353,23 @@ async fn reorder_category_rules_handler(
         parsed_rule_ids.push(rule_id);
     }
 
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy category rules") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match reorder_postgres_category_rules(
+            runtime.pool(),
+            &parsed_rule_ids,
+            db_user_id(user_id),
+        )
+        .await
+        {
+            Ok(true) => json_response(StatusCode::OK, json!({"success": true})),
+            Ok(false) => category_rule_db_error_response(),
+            Err(_) => category_rule_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy category rules") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -272,6 +393,34 @@ async fn ensure_category_rule_defaults_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy category rules") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match ensure_postgres_category_rule_defaults(runtime.pool(), db_user_id(user_id))
+            .await
+        {
+            Ok(summary) => json_response(
+                StatusCode::OK,
+                json!({
+                    "success": true,
+                    "data": {
+                        "categories": {
+                            "created": summary.categories_created,
+                            "skipped": summary.categories_skipped,
+                        },
+                        "rules": {
+                            "created": summary.rules_created,
+                            "skipped": summary.rules_skipped,
+                            "missingCategories": summary.rules_missing_categories,
+                        }
+                    }
+                }),
+            ),
+            Err(_) => category_rule_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy category rules") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -311,6 +460,30 @@ async fn migrate_category_keywords_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy category rules") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match migrate_postgres_category_keywords_to_rules(
+            runtime.pool(),
+            db_user_id(user_id),
+        )
+        .await
+        {
+            Ok(summary) => json_response(
+                StatusCode::OK,
+                json!({
+                    "success": true,
+                    "data": {
+                        "migrated": summary.migrated,
+                        "skipped": summary.skipped,
+                    }
+                }),
+            ),
+            Err(_) => category_rule_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy category rules") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -353,6 +526,29 @@ async fn test_category_rule_handler(
         return bad_request("text is required");
     };
 
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy category rules") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match get_postgres_category_rule(runtime.pool(), rule_id, db_user_id(user_id)).await {
+            Ok(Some(rule)) => {
+                let rule_expression = string_or_default(rule.get("rule_expression"), "");
+                let regex_enabled = rule.get("regex_enabled").is_some_and(value_truthy);
+                json_response(
+                    StatusCode::OK,
+                    json!({
+                        "success": true,
+                        "data": {
+                            "matched": match_rule_expression(text, &rule_expression, regex_enabled)
+                        }
+                    }),
+                )
+            }
+            Ok(None) => not_found("Rule not found"),
+            Err(_) => category_rule_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy category rules") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -386,6 +582,24 @@ async fn rules_overview_handler(State(state): State<HttpAppState>, headers: Head
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy rules overview") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match query_postgres_rules_overview_payload(runtime.pool(), db_user_id(user_id))
+            .await
+        {
+            Ok(payload) => json_response(
+                StatusCode::OK,
+                json!({
+                    "success": true,
+                    "data": payload,
+                }),
+            ),
+            Err(_) => category_rule_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy rules overview") {
         Ok(value) => value,
         Err(response) => return *response,

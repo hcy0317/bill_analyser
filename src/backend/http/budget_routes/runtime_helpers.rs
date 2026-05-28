@@ -4,24 +4,25 @@
 
 
 fn open_runtime(state: &HttpAppState) -> RouteResult<SqliteRuntime> {
-    let db_path = state.config.sqlite_db_path.as_deref().ok_or_else(|| {
-        Box::new(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Rust budget DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH",
-        ))
-    })?;
-    let db_path = SqliteDbPath::application_file(db_path).map_err(|error| {
-        Box::new(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            error.to_string(),
-        ))
-    })?;
-    SqliteRuntime::open(SqliteConnectionConfig {
-        path: db_path,
-        create_if_missing: true,
-        busy_timeout: state.config.timeout,
-    })
-    .map_err(|_| Box::new(db_error_response()))
+    state
+        .open_sqlite_repository_runtime("budget")
+        .map_err(|error| {
+            Box::new(error_response(
+                status_or_internal(error.http_status_code()),
+                error.public_message("Rust budget route runtime DB error"),
+            ))
+        })
+}
+
+fn open_postgres_runtime(state: &HttpAppState) -> RouteResult<PostgresRepositoryRuntime> {
+    state
+        .open_postgres_repository_runtime("budget")
+        .map_err(|error| {
+            Box::new(error_response(
+                status_or_internal(error.http_status_code()),
+                error.public_message("Rust budget route PostgreSQL runtime DB error"),
+            ))
+        })
 }
 
 fn user_id_from_headers(headers: &HeaderMap, config: &HttpShellConfig) -> RouteResult<UserId> {

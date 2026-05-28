@@ -15,7 +15,7 @@ pub(super) fn prepare_sync_backup_response(
         Ok(payload) => payload,
         Err(message) => {
             write_backup_sync_audit(
-                auth_runtime.runtime.connection(),
+                &auth_runtime.runtime,
                 auth_runtime.user_id,
                 headers,
                 json!({}),
@@ -33,7 +33,7 @@ pub(super) fn prepare_sync_backup_response(
             Ok(contract) => contract,
             Err(error) => {
                 write_backup_sync_audit(
-                    auth_runtime.runtime.connection(),
+                    &auth_runtime.runtime,
                     auth_runtime.user_id,
                     headers,
                     sync_config_validation_audit_details(&config),
@@ -49,7 +49,7 @@ pub(super) fn prepare_sync_backup_response(
         };
     if let Err(error) = validate_sync_upload_config(&config, &provisional_contract) {
         write_backup_sync_audit(
-            auth_runtime.runtime.connection(),
+            &auth_runtime.runtime,
             auth_runtime.user_id,
             headers,
             sync_config_audit_details(&provisional_contract),
@@ -80,7 +80,7 @@ pub(super) fn prepare_sync_backup_response(
         Ok(Some(path)) => path,
         Ok(None) => {
             write_backup_sync_audit(
-                auth_runtime.runtime.connection(),
+                &auth_runtime.runtime,
                 user_id,
                 headers,
                 sync_config_audit_details(&provisional_contract),
@@ -95,7 +95,7 @@ pub(super) fn prepare_sync_backup_response(
         }
         Err(error) => {
             write_backup_sync_audit(
-                auth_runtime.runtime.connection(),
+                &auth_runtime.runtime,
                 user_id,
                 headers,
                 sync_config_audit_details(&provisional_contract),
@@ -111,7 +111,7 @@ pub(super) fn prepare_sync_backup_response(
         build_runtime_backup_info(&file_path, state.config.backup_encryption_key.as_deref())
             .map_err(|error| {
                 write_backup_sync_audit(
-                    auth_runtime.runtime.connection(),
+                    &auth_runtime.runtime,
                     user_id,
                     headers,
                     json!({
@@ -133,7 +133,7 @@ pub(super) fn prepare_sync_backup_response(
             backup_info.error.clone()
         };
         write_backup_sync_audit(
-            auth_runtime.runtime.connection(),
+            &auth_runtime.runtime,
             user_id,
             headers,
             json!({
@@ -156,10 +156,10 @@ pub(super) fn prepare_sync_backup_response(
     validate_sync_upload_config(&config, &contract)
         .expect("validated sync upload config must remain valid after backup creation");
 
-    upsert_backup_record_from_info(auth_runtime.runtime.connection(), &backup_info)
+    upsert_backup_record_from_info(&auth_runtime.runtime, &backup_info)
         .map_err(|_| Box::new(db_error_response()))?;
     write_backup_audit_event(
-        auth_runtime.runtime.connection(),
+        &auth_runtime.runtime,
         user_id,
         headers,
         "backup_created",
@@ -196,8 +196,8 @@ pub(super) fn finish_sync_backup_response(
     match upload_result {
         Ok(result) => {
             let safe_config = audit_safe_sync_config(&prepared.contract.safe_config);
-            update_backup_record_by_filename(
-                auth_runtime.runtime.connection(),
+            update_backup_record_for_runtime(
+                &auth_runtime.runtime,
                 &filename,
                 None,
                 json!({
@@ -210,7 +210,7 @@ pub(super) fn finish_sync_backup_response(
             )
             .map_err(|_| Box::new(db_error_response()))?;
             write_backup_sync_audit(
-                auth_runtime.runtime.connection(),
+                &auth_runtime.runtime,
                 prepared.user_id,
                 headers,
                 json!({
@@ -243,8 +243,8 @@ pub(super) fn finish_sync_backup_response(
         }
         Err(error) => {
             let safe_config = audit_safe_sync_config(&prepared.contract.safe_config);
-            update_backup_record_by_filename(
-                auth_runtime.runtime.connection(),
+            update_backup_record_for_runtime(
+                &auth_runtime.runtime,
                 &filename,
                 None,
                 json!({
@@ -257,7 +257,7 @@ pub(super) fn finish_sync_backup_response(
             )
             .map_err(|_| Box::new(db_error_response()))?;
             write_backup_sync_audit(
-                auth_runtime.runtime.connection(),
+                &auth_runtime.runtime,
                 prepared.user_id,
                 headers,
                 json!({

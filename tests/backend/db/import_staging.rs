@@ -1,30 +1,43 @@
 use std::{collections::BTreeSet, error::Error};
 
-use bill_analyser_core::{DedupBill, Money, SmartDeduplicationEngine, UserId};
+use bill_analyser_core::{
+    build_import_history_rewrite_ack_token, build_import_history_rewrite_operation_id, DedupBill,
+    Money, SmartDeduplicationEngine, UserId, HISTORY_REWRITE_NOTICE,
+};
 use bill_analyser_db::{
     apply_preview_learning_decision, apply_preview_llm_recommendation,
     apply_preview_patches_preserving_selection, apply_preview_transfer_decision,
-    batch_update_preview_classification, calculate_import_bill_hash, clear_session_data,
-    confirm_preview_to_bills, count_preview_by_session, create_import_session,
-    dedup_bills_from_parser_templates, get_import_annotation_samples, get_import_session,
+    batch_update_preview_classification, calculate_import_bill_hash,
+    clear_import_preview_materialization_state, clear_session_data, confirm_preview_to_bills,
+    confirm_preview_to_bills_with_ack, count_preview_by_session, create_import_session,
+    dedup_bills_from_parser_templates, get_import_annotation_samples,
+    get_import_decision_groups_by_session, get_import_history_candidate_bills_for_session,
+    get_import_history_materializations_by_session, get_import_learning_lifecycle_view,
+    get_import_session, get_import_sources_by_session, get_import_standard_rows_by_session,
     get_llm_memory_events, get_parser_templates_by_session, get_preview_bill_by_id,
     get_preview_by_ids, get_preview_by_session, get_preview_filter_index_by_session,
     get_preview_page_by_session, get_unprocessed_templates_for_dedup, init_import_staging_schema,
+    insert_import_decision_groups_batch, insert_import_history_materializations_batch,
     insert_parser_templates_batch, insert_preview_bill, insert_preview_bills_batch,
     mark_unprocessed_parser_templates_processed_for_session,
     parser_template_drafts_from_standard_bills, preview_drafts_from_dedup_bills,
-    query_preview_page_by_session, reset_session_preview_selection,
-    review_preview_llm_recommendation, save_import_annotation_samples,
-    stage_import_parser_templates, update_import_session_status, update_parser_template_status,
-    update_preview_bill, update_preview_bills_batch, update_preview_recurring_match_decision,
-    update_preview_selection, update_session_preview_selection_by_query,
-    ImportAnnotationSampleDraft, ImportParserTemplateDraft, ImportPreviewClassificationUpdate,
-    ImportPreviewDecision, ImportPreviewDraft, ImportPreviewExpectedState,
-    ImportPreviewLearningApply, ImportPreviewLlmApplyRequest, ImportPreviewLlmReviewRequest,
-    ImportPreviewLlmSuggestion, ImportPreviewPageRequest, ImportPreviewPatch,
-    ImportPreviewPatchField, ImportPreviewPatchValue, ImportPreviewQueryFilters,
-    ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate, ImportSessionDraft,
-    ImportSessionStatusUpdate, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
+    query_preview_page_by_session, record_import_learning_lifecycle_feedback,
+    reset_session_preview_selection, review_preview_llm_recommendation,
+    save_import_annotation_samples, stage_import_parser_templates,
+    stage_import_parser_templates_with_sources, update_import_session_status,
+    update_parser_template_status, update_preview_bill, update_preview_bills_batch,
+    update_preview_recurring_match_decision, update_preview_selection,
+    update_session_preview_selection_by_query, ImportAnnotationSampleDraft,
+    ImportDecisionGroupDraft, ImportDecisionGroupMemberDraft, ImportHistoryMaterializationDraft,
+    ImportHistoryRewriteAcknowledgement, ImportHistoryRewriteAcknowledgementOperation,
+    ImportLearningLifecycleRecordInput, ImportParserTemplateDraft,
+    ImportPreviewClassificationUpdate, ImportPreviewDecision, ImportPreviewDraft,
+    ImportPreviewExpectedState, ImportPreviewLearningApply, ImportPreviewLlmApplyRequest,
+    ImportPreviewLlmReviewRequest, ImportPreviewLlmSuggestion, ImportPreviewPageRequest,
+    ImportPreviewPatch, ImportPreviewPatchField, ImportPreviewPatchValue,
+    ImportPreviewQueryFilters, ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate,
+    ImportSessionDraft, ImportSessionStatusUpdate, ImportSourceDraft, ImportStandardRowDraft,
+    SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
 use bill_analyser_parsers::{post_process_raw_bills, RawBill};
 use serde_json::json;
@@ -230,6 +243,59 @@ fn foreign_key_targets(
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
+fn init_learning_lifecycle_schema(runtime: &SqliteRuntime) -> Result<(), Box<dyn Error>> {
+    runtime.connection().execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS import_learning_lifecycle (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            recommendation_key TEXT NOT NULL,
+            recommendation_type TEXT NOT NULL DEFAULT 'import_preview',
+            status TEXT NOT NULL DEFAULT 'yellow',
+            accepted_count INTEGER NOT NULL DEFAULT 0,
+            rejected_count INTEGER NOT NULL DEFAULT 0,
+            auto_applied_count INTEGER NOT NULL DEFAULT 0,
+            auto_apply_enabled INTEGER NOT NULL DEFAULT 0,
+            suppressed_until TEXT,
+            last_feedback_at TEXT,
+            metadata_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, recommendation_key)
+        );
+        CREATE TABLE IF NOT EXISTS import_learning_feedback_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            event_type TEXT NOT NULL,
+            rule_id INTEGER,
+            suggestion_id INTEGER,
+            lifecycle_id INTEGER,
+            recommendation_key TEXT,
+            session_id TEXT,
+            preview_id INTEGER,
+            bill_id INTEGER,
+            candidate_id TEXT,
+            previous_signal_state TEXT,
+            next_signal_state TEXT,
+            payload_json TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS import_learning_suppressions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            recommendation_key TEXT NOT NULL,
+            suppression_reason TEXT NOT NULL,
+            suppressed_until TEXT,
+            metadata_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, recommendation_key)
+        );
+        ",
+    )?;
+    Ok(())
+}
+
 fn user_id(value: u64) -> UserId {
     UserId::new(value).expect("positive test user id")
 }
@@ -253,6 +319,80 @@ fn preview_draft(date: &str, amount: f64, description: &str) -> ImportPreviewDra
     }
 }
 
+fn history_rewrite_preview_draft(
+    planned_operation: &str,
+    history_bill_id: i64,
+    history_bill_version: i64,
+    group_key: &str,
+    history_role: Option<&str>,
+    description: &str,
+) -> ImportPreviewDraft {
+    let mut draft = preview_draft("2026-05-01 08:30:00", 9.25, description);
+    draft.dedup_type = Some(
+        if planned_operation == "merge_transfer_history" {
+            "transfer_cross_batch"
+        } else {
+            "database_duplicate"
+        }
+        .to_string(),
+    );
+    let mut reconciliation = json!({
+        "planned_operation": planned_operation,
+        "history_bill_id": history_bill_id,
+        "history_bill_version": history_bill_version,
+        "group_key": group_key,
+        "notice": HISTORY_REWRITE_NOTICE,
+    });
+    if let Some(role) = history_role {
+        reconciliation["history_role"] = json!(role);
+    }
+    draft.preview_matching_feedback = json!({
+        "reconciliation": reconciliation,
+        "annotation": {
+            "type": "history_rewrite_pending",
+            "suppressed": true,
+        },
+    });
+    draft
+}
+
+fn history_rewrite_ack(
+    session_id: &str,
+    selected_preview_ids: Vec<i64>,
+    preview_id: i64,
+    planned_operation: &str,
+    history_bill_id: i64,
+    history_bill_version: i64,
+    group_key: &str,
+) -> ImportHistoryRewriteAcknowledgement {
+    let operation_id = build_import_history_rewrite_operation_id(
+        planned_operation,
+        history_bill_id,
+        history_bill_version,
+        group_key,
+    );
+    let acknowledgement_token = build_import_history_rewrite_ack_token(
+        session_id,
+        &operation_id,
+        planned_operation,
+        history_bill_id,
+        history_bill_version,
+    );
+    ImportHistoryRewriteAcknowledgement {
+        acknowledged: true,
+        selected_preview_ids,
+        operations: vec![ImportHistoryRewriteAcknowledgementOperation {
+            preview_id,
+            operation_id,
+            planned_operation: planned_operation.to_string(),
+            history_bill_id,
+            history_bill_version,
+            acknowledgement_token,
+        }],
+        selection_scope: json!({"mode": "selected_ids"}),
+    }
+}
+
 fn parser_template_draft(date: &str, amount: f64, description: &str) -> ImportParserTemplateDraft {
     ImportParserTemplateDraft {
         parser_date: date.to_string(),
@@ -266,6 +406,49 @@ fn parser_template_draft(date: &str, amount: f64, description: &str) -> ImportPa
         parser_original_type: "商户消费".to_string(),
         parser_original_category: "餐饮".to_string(),
         parser_account_id: String::new(),
+    }
+}
+
+fn import_source_draft(source_index: i64, signature: &str) -> ImportSourceDraft {
+    ImportSourceDraft {
+        source_index,
+        original_file_name: format!("source-{source_index}.csv"),
+        parser_id: "wechat".to_string(),
+        parser_name: "微信".to_string(),
+        parser_signal: "matched".to_string(),
+        parser_confidence: 1.0,
+        feature_signature: signature.to_string(),
+        metadata: json!({
+            "parser_decision": {
+                "status": "matched",
+                "selected_parser_id": "wechat"
+            }
+        }),
+    }
+}
+
+fn import_standard_row_draft(source_index: i64, source_row_index: i64) -> ImportStandardRowDraft {
+    ImportStandardRowDraft {
+        source_index,
+        source_row_index,
+        occurred_at: "2026-05-01 08:30:00".to_string(),
+        amount_cents: -925,
+        direction: "expense".to_string(),
+        transaction_type: "expense".to_string(),
+        merchant: "canteen".to_string(),
+        payment_method: "wallet".to_string(),
+        description: "ledger row".to_string(),
+        parser_payload: json!({
+            "parser_id": "wechat",
+            "parser_decision": {
+                "status": "matched"
+            }
+        }),
+        standard_payload: json!({
+            "date": "2026-05-01 08:30:00",
+            "amount": -9.25,
+            "type": "支出"
+        }),
     }
 }
 
@@ -451,6 +634,27 @@ fn preview_batch_insert_read_page_selection_and_clear_match_staging_semantics(
          VALUES (?1, ?2, ?3, ?4, ?4)",
         ("session-preview", 42, id_order[0], "2026-05-01T00:00:00"),
     )?;
+    stage_import_parser_templates_with_sources(
+        runtime.connection_mut(),
+        &ImportSessionDraft {
+            session_id: "session-preview".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+        &[],
+        &[import_source_draft(0, "clear-source")],
+        &[import_standard_row_draft(0, 0)],
+        true,
+    )?;
+    assert_eq!(
+        get_import_sources_by_session(runtime.connection(), "session-preview", user_id(42))?.len(),
+        1
+    );
+    assert_eq!(
+        get_import_standard_rows_by_session(runtime.connection(), "session-preview", user_id(42))?
+            .len(),
+        1
+    );
 
     let cleared = clear_session_data(runtime.connection_mut(), "session-preview", user_id(42))?;
     assert_eq!(cleared.parser_count, 1);
@@ -461,7 +665,52 @@ fn preview_batch_insert_read_page_selection_and_clear_match_staging_semantics(
         count_preview_by_session(runtime.connection(), "session-preview", user_id(42), false)?,
         0
     );
+    assert!(
+        get_import_sources_by_session(runtime.connection(), "session-preview", user_id(42))?
+            .is_empty()
+    );
+    assert!(get_import_standard_rows_by_session(
+        runtime.connection(),
+        "session-preview",
+        user_id(42)
+    )?
+    .is_empty());
     assert!(get_import_session(runtime.connection(), "session-preview", user_id(42))?.is_none());
+    Ok(())
+}
+
+#[test]
+fn standard_row_ledger_requires_matching_import_source() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("standard_row_source.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+
+    let result = stage_import_parser_templates_with_sources(
+        runtime.connection_mut(),
+        &ImportSessionDraft {
+            session_id: "session-ledger".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+        &[],
+        &[import_source_draft(0, "valid-source")],
+        &[import_standard_row_draft(99, 0)],
+        false,
+    );
+
+    assert!(result.is_err());
+    assert!(
+        get_import_sources_by_session(runtime.connection(), "session-ledger", user_id(42))?
+            .is_empty()
+    );
+    assert!(get_import_standard_rows_by_session(
+        runtime.connection(),
+        "session-ledger",
+        user_id(42)
+    )?
+    .is_empty());
+    assert!(get_import_session(runtime.connection(), "session-ledger", user_id(42))?.is_none());
     Ok(())
 }
 
@@ -2078,6 +2327,238 @@ fn preview_learning_decision_applies_rejects_and_clears_with_snapshot_restore(
 }
 
 #[test]
+fn learning_lifecycle_feedback_persists_events_thresholds_and_user_scope(
+) -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("learning_lifecycle.db"))?;
+    init_learning_lifecycle_schema(&runtime)?;
+    let key = "import-learning-recommendation-key-v1:test";
+
+    for _ in 0..2 {
+        let view = record_import_learning_lifecycle_feedback(
+            runtime.connection_mut(),
+            42,
+            &ImportLearningLifecycleRecordInput {
+                recommendation_key: key.to_string(),
+                recommendation_type: "import_preview".to_string(),
+                feedback: "accept".to_string(),
+                rule_id: Some(7),
+                suggestion_id: None,
+                session_id: Some("session-learning".to_string()),
+                preview_id: Some(11),
+                bill_id: None,
+                candidate_id: Some("preview:11:learning".to_string()),
+                payload_json: Some(json!({"source": "test"}).to_string()),
+            },
+        )?;
+        assert_eq!(view.signal_state, "yellow");
+        assert!(!view.auto_apply_enabled);
+    }
+
+    let green = record_import_learning_lifecycle_feedback(
+        runtime.connection_mut(),
+        42,
+        &ImportLearningLifecycleRecordInput {
+            recommendation_key: key.to_string(),
+            recommendation_type: "import_preview".to_string(),
+            feedback: "accept".to_string(),
+            rule_id: Some(7),
+            suggestion_id: None,
+            session_id: Some("session-learning".to_string()),
+            preview_id: Some(11),
+            bill_id: None,
+            candidate_id: Some("preview:11:learning".to_string()),
+            payload_json: Some(json!({"source": "test"}).to_string()),
+        },
+    )?;
+    assert_eq!(green.status, "green");
+    assert_eq!(green.accepted_count, 3);
+    assert!(green.auto_apply_enabled);
+
+    let other_user =
+        get_import_learning_lifecycle_view(runtime.connection(), 77, key, "import_preview")?;
+    assert_eq!(other_user.signal_state, "yellow");
+    assert_eq!(other_user.accepted_count, 0);
+
+    let auto_applied = record_import_learning_lifecycle_feedback(
+        runtime.connection_mut(),
+        42,
+        &ImportLearningLifecycleRecordInput {
+            recommendation_key: key.to_string(),
+            recommendation_type: "import_preview".to_string(),
+            feedback: "auto_apply".to_string(),
+            rule_id: Some(7),
+            suggestion_id: None,
+            session_id: Some("session-learning".to_string()),
+            preview_id: Some(12),
+            bill_id: None,
+            candidate_id: Some("preview:12:learning".to_string()),
+            payload_json: Some(json!({"source": "test"}).to_string()),
+        },
+    )?;
+    assert_eq!(auto_applied.status, "auto_applied");
+    assert_eq!(auto_applied.auto_applied_count, 1);
+
+    for _ in 0..2 {
+        record_import_learning_lifecycle_feedback(
+            runtime.connection_mut(),
+            42,
+            &ImportLearningLifecycleRecordInput {
+                recommendation_key: key.to_string(),
+                recommendation_type: "import_preview".to_string(),
+                feedback: "reject".to_string(),
+                rule_id: Some(7),
+                suggestion_id: None,
+                session_id: Some("session-learning".to_string()),
+                preview_id: Some(12),
+                bill_id: None,
+                candidate_id: Some("preview:12:learning".to_string()),
+                payload_json: Some(json!({"source": "test"}).to_string()),
+            },
+        )?;
+    }
+    let downgraded =
+        get_import_learning_lifecycle_view(runtime.connection(), 42, key, "import_preview")?;
+    assert_eq!(downgraded.status, "downgraded");
+    assert_eq!(downgraded.signal_state, "yellow");
+
+    let suppressed_key = "import-learning-recommendation-key-v1:suppressed";
+    for _ in 0..3 {
+        record_import_learning_lifecycle_feedback(
+            runtime.connection_mut(),
+            42,
+            &ImportLearningLifecycleRecordInput {
+                recommendation_key: suppressed_key.to_string(),
+                recommendation_type: "import_preview".to_string(),
+                feedback: "reject".to_string(),
+                rule_id: Some(9),
+                suggestion_id: None,
+                session_id: None,
+                preview_id: None,
+                bill_id: None,
+                candidate_id: None,
+                payload_json: Some(json!({"source": "test"}).to_string()),
+            },
+        )?;
+    }
+    let suppressed = get_import_learning_lifecycle_view(
+        runtime.connection(),
+        42,
+        suppressed_key,
+        "import_preview",
+    )?;
+    assert!(suppressed.suppressed);
+    let suppression_count: i64 = runtime.connection().query_row(
+        "SELECT COUNT(*) FROM import_learning_suppressions WHERE user_id = 42 AND recommendation_key = ?1",
+        [suppressed_key],
+        |row| row.get(0),
+    )?;
+    assert_eq!(suppression_count, 1);
+    let event_count: i64 = runtime.connection().query_row(
+        "SELECT COUNT(*) FROM import_learning_feedback_events WHERE user_id = 42 AND recommendation_key = ?1",
+        [key],
+        |row| row.get(0),
+    )?;
+    assert_eq!(event_count, 6);
+    Ok(())
+}
+
+#[test]
+fn preview_learning_decision_records_recommendation_key_lifecycle_feedback(
+) -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("preview_learning_lifecycle.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+    init_learning_lifecycle_schema(&runtime)?;
+    seed_category(&runtime, 21, 42, 2, "工资", "奖金")?;
+    seed_import_learning_rule(&runtime, 12, 42, 21)?;
+    let recommendation_key = "import-learning-recommendation-key-v1:preview-test";
+    let mut draft = preview_draft("2026-05-01", 88.0, "learning candidate");
+    draft.preview_matching_feedback = json!({
+        "learning": {
+            "rule_id": 12,
+            "review_status": "pending",
+            "recommendation_key": recommendation_key,
+            "applied_preview": {
+                "preview_type": "收入",
+                "preview_main_category": "工资",
+                "preview_sub_category": "奖金",
+                "preview_source_account_id": null,
+                "preview_destination_account_id": 200
+            }
+        }
+    });
+    insert_preview_bills_batch(
+        runtime.connection_mut(),
+        "session-learning-lifecycle",
+        user_id(42),
+        &[draft],
+    )?;
+    let preview = get_preview_by_session(
+        runtime.connection(),
+        "session-learning-lifecycle",
+        user_id(42),
+        false,
+    )?
+    .remove(0);
+    let accepted = apply_preview_learning_decision(
+        runtime.connection_mut(),
+        preview.id,
+        user_id(42),
+        ImportPreviewDecision::Accept,
+        Some(&ImportPreviewLearningApply {
+            rule_id: Some(12),
+            ..ImportPreviewLearningApply::default()
+        }),
+        None,
+    )?;
+    let accepted_preview = accepted.preview.expect("accepted preview");
+    assert_eq!(accepted_preview.preview_type, "收入");
+    assert_eq!(accepted_preview.preview_destination_account_id, Some(200));
+    assert_eq!(
+        accepted_preview
+            .preview_matching_feedback
+            .pointer("/learning/recommendation_key")
+            .and_then(serde_json::Value::as_str),
+        Some(recommendation_key)
+    );
+    assert_eq!(
+        accepted_preview
+            .preview_matching_feedback
+            .pointer("/learning/accepted_count")
+            .and_then(serde_json::Value::as_i64),
+        Some(1)
+    );
+    let rejected = apply_preview_learning_decision(
+        runtime.connection_mut(),
+        preview.id,
+        user_id(42),
+        ImportPreviewDecision::Reject,
+        Some(&ImportPreviewLearningApply {
+            rule_id: Some(12),
+            ..ImportPreviewLearningApply::default()
+        }),
+        None,
+    )?;
+    let rejected_preview = rejected.preview.expect("rejected preview");
+    assert_eq!(
+        rejected_preview
+            .preview_matching_feedback
+            .pointer("/learning/rejected_count")
+            .and_then(serde_json::Value::as_i64),
+        Some(1)
+    );
+    let event_count: i64 = runtime.connection().query_row(
+        "SELECT COUNT(*) FROM import_learning_feedback_events WHERE recommendation_key = ?1",
+        [recommendation_key],
+        |row| row.get(0),
+    )?;
+    assert_eq!(event_count, 2);
+    Ok(())
+}
+
+#[test]
 fn preview_learning_decision_clears_generated_category_names_without_taxonomy_match(
 ) -> Result<(), Box<dyn Error>> {
     let temp_dir = tempfile::tempdir()?;
@@ -2586,6 +3067,180 @@ fn parser_templates_flow_through_smart_dedup_into_preview_drafts() -> Result<(),
 }
 
 #[test]
+fn decision_groups_and_history_materializations_are_persisted_and_cleaned(
+) -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("decision_groups.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: "session-groups".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+    let preview_id = insert_preview_bill(
+        runtime.connection(),
+        "session-groups",
+        user_id(42),
+        &preview_draft("2026-05-01 08:30:00", 9.25, "ledger row"),
+    )?;
+
+    let inserted_groups = insert_import_decision_groups_batch(
+        runtime.connection_mut(),
+        "session-groups",
+        user_id(42),
+        &[ImportDecisionGroupDraft {
+            group_type: "duplicate".to_string(),
+            group_key: "same_batch:1-2".to_string(),
+            decision_status: "merged".to_string(),
+            base_preview_row_id: Some(preview_id),
+            signal_payload: json!({
+                "signal": "duplicate",
+                "source_label": "来源1: 微信 | 来源2: 工商银行"
+            }),
+            members: vec![
+                ImportDecisionGroupMemberDraft {
+                    preview_row_id: Some(preview_id),
+                    standard_row_id: None,
+                    history_bill_id: None,
+                    member_role: "base".to_string(),
+                    parser_name: "微信".to_string(),
+                    metadata: json!({"template_id": 1}),
+                },
+                ImportDecisionGroupMemberDraft {
+                    preview_row_id: None,
+                    standard_row_id: None,
+                    history_bill_id: Some(9001),
+                    member_role: "history_base".to_string(),
+                    parser_name: "history_db".to_string(),
+                    metadata: json!({"planned_operation": "update_history"}),
+                },
+            ],
+        }],
+    )?;
+    assert_eq!(inserted_groups, 1);
+    insert_import_history_materializations_batch(
+        runtime.connection_mut(),
+        "session-groups",
+        user_id(42),
+        &[ImportHistoryMaterializationDraft {
+            history_bill_id: 9001,
+            history_bill_version: 1,
+            materialized_payload: json!({"operation": "update_history"}),
+            rewrite_reason: "same_amount|same_direction".to_string(),
+        }],
+    )?;
+
+    let groups =
+        get_import_decision_groups_by_session(runtime.connection(), "session-groups", user_id(42))?;
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].members.len(), 2);
+    assert_eq!(groups[0].signal_payload["signal"], "duplicate");
+    let materializations = get_import_history_materializations_by_session(
+        runtime.connection(),
+        "session-groups",
+        user_id(42),
+    )?;
+    assert_eq!(materializations.len(), 1);
+    assert_eq!(materializations[0].history_bill_id, 9001);
+
+    clear_import_preview_materialization_state(
+        runtime.connection_mut(),
+        "session-groups",
+        user_id(42),
+    )?;
+    assert!(
+        get_preview_by_session(runtime.connection(), "session-groups", user_id(42), false)?
+            .is_empty()
+    );
+    assert!(get_import_decision_groups_by_session(
+        runtime.connection(),
+        "session-groups",
+        user_id(42),
+    )?
+    .is_empty());
+    assert!(get_import_history_materializations_by_session(
+        runtime.connection(),
+        "session-groups",
+        user_id(42),
+    )?
+    .is_empty());
+
+    insert_preview_bill(
+        runtime.connection(),
+        "session-groups",
+        user_id(42),
+        &preview_draft("2026-05-01 08:30:00", 9.25, "ledger row after reset"),
+    )?;
+
+    clear_session_data(runtime.connection_mut(), "session-groups", user_id(42))?;
+    assert!(get_import_decision_groups_by_session(
+        runtime.connection(),
+        "session-groups",
+        user_id(42),
+    )?
+    .is_empty());
+    assert!(get_import_history_materializations_by_session(
+        runtime.connection(),
+        "session-groups",
+        user_id(42),
+    )?
+    .is_empty());
+    Ok(())
+}
+
+#[test]
+fn history_candidate_query_uses_standard_row_day_and_user_scope() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("history_candidates.db"))?;
+    seed_users(&runtime, &[42, 77])?;
+    init_bills_schema(&runtime)?;
+    init_import_staging_schema(runtime.connection())?;
+    stage_import_parser_templates_with_sources(
+        runtime.connection_mut(),
+        &ImportSessionDraft {
+            session_id: "session-history-query".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+        &[parser_template_draft(
+            "2026-05-01 08:30:00",
+            -9.25,
+            "ledger row",
+        )],
+        &[import_source_draft(0, "history-query-source")],
+        &[import_standard_row_draft(0, 0)],
+        false,
+    )?;
+    runtime.connection().execute(
+        "
+        INSERT INTO bills (
+            user_id, date, type, amount, counterparty, description,
+            payment_method, main_category, sub_category, hash, created_at, updated_at
+        ) VALUES
+            (42, '2026-05-01 08:30:10', '支出', -9.25, 'canteen', 'ledger row', 'card', '餐饮', '午餐', 'h-1', 'now', 'now'),
+            (77, '2026-05-01 08:30:10', '支出', -9.25, 'other user', 'hidden', 'card', '餐饮', '午餐', 'h-2', 'now', 'now'),
+            (42, '2026-05-02 08:30:10', '支出', -9.25, 'other day', 'hidden', 'card', '餐饮', '午餐', 'h-3', 'now', 'now')
+        ",
+        [],
+    )?;
+
+    let candidates = get_import_history_candidate_bills_for_session(
+        runtime.connection(),
+        "session-history-query",
+        user_id(42),
+    )?;
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].history_bill_id, 1);
+    assert_eq!(candidates[0].bill.counterparty, "canteen");
+    assert_eq!(candidates[0].bill.amount, Money::from_yuan_str("-9.25")?);
+    Ok(())
+}
+
+#[test]
 fn no_income_expenditure_transfer_pair_is_suppressed_and_skipped_on_confirm(
 ) -> Result<(), Box<dyn Error>> {
     let temp_dir = tempfile::tempdir()?;
@@ -2874,6 +3529,18 @@ fn confirm_preview_to_bills_inserts_selected_rows_and_marks_session_completed(
             file_count: 1,
         },
     )?;
+    stage_import_parser_templates_with_sources(
+        runtime.connection_mut(),
+        &ImportSessionDraft {
+            session_id: "session-confirm".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+        &[],
+        &[import_source_draft(0, "confirm-source")],
+        &[import_standard_row_draft(0, 0)],
+        true,
+    )?;
 
     let mut numeric_expense = preview_draft("2026/05/01 08:30", 9.25, "selected expense");
     numeric_expense.preview_type = "3".to_string();
@@ -2953,6 +3620,16 @@ fn confirm_preview_to_bills_inserts_selected_rows_and_marks_session_completed(
         get_preview_by_session(runtime.connection(), "session-confirm", user_id(42), false)?
             .is_empty()
     );
+    assert!(
+        get_import_sources_by_session(runtime.connection(), "session-confirm", user_id(42))?
+            .is_empty()
+    );
+    assert!(get_import_standard_rows_by_session(
+        runtime.connection(),
+        "session-confirm",
+        user_id(42)
+    )?
+    .is_empty());
 
     let retry = confirm_preview_to_bills(runtime.connection_mut(), "session-confirm", user_id(42));
     assert!(retry.is_err());
@@ -2962,6 +3639,480 @@ fn confirm_preview_to_bills_inserts_selected_rows_and_marks_session_completed(
         |row| row.get(0),
     )?;
     assert_eq!(total_after_retry, 1);
+    Ok(())
+}
+
+#[test]
+fn confirm_history_rewrite_rejects_missing_acknowledgement() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("history_ack_missing.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_bills_schema(&runtime)?;
+    init_import_staging_schema(runtime.connection())?;
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: "session-history-ack-missing".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+    runtime.connection().execute(
+        "
+        INSERT INTO bills(
+            id, user_id, date, type, amount, counterparty, description,
+            payment_method, main_category, sub_category, hash, created_at, updated_at,
+            import_history_id
+        ) VALUES (9001, 42, '2026-05-01 08:30:00', '支出', -9.25, 'old',
+                  'old note', 'card', '餐饮', '午餐', 'old-hash', 'old', 'old', 1)
+        ",
+        [],
+    )?;
+    let preview_id = insert_preview_bill(
+        runtime.connection(),
+        "session-history-ack-missing",
+        user_id(42),
+        &history_rewrite_preview_draft(
+            "update_history",
+            9001,
+            1,
+            "history-duplicate:9001",
+            None,
+            "merged note",
+        ),
+    )?;
+    insert_import_history_materializations_batch(
+        runtime.connection_mut(),
+        "session-history-ack-missing",
+        user_id(42),
+        &[ImportHistoryMaterializationDraft {
+            history_bill_id: 9001,
+            history_bill_version: 1,
+            materialized_payload: json!({"operation": "update_history"}),
+            rewrite_reason: "same_amount|same_direction".to_string(),
+        }],
+    )?;
+    update_preview_selection(runtime.connection_mut(), &[preview_id], true, user_id(42))?;
+
+    let result = confirm_preview_to_bills(
+        runtime.connection_mut(),
+        "session-history-ack-missing",
+        user_id(42),
+    );
+
+    assert!(result
+        .expect_err("missing ack is rejected")
+        .to_string()
+        .contains("history rewrite acknowledgement is required"));
+    let description: String = runtime.connection().query_row(
+        "SELECT description FROM bills WHERE id = 9001 AND user_id = 42",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(description, "old note");
+    assert!(get_import_session(
+        runtime.connection(),
+        "session-history-ack-missing",
+        user_id(42)
+    )?
+    .is_some());
+    Ok(())
+}
+
+#[test]
+fn confirm_history_rewrite_rejects_missing_visible_marker() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("history_ack_marker.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_import_staging_schema(runtime.connection())?;
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: "session-history-marker".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+    let mut draft = history_rewrite_preview_draft(
+        "update_history",
+        9001,
+        1,
+        "history-duplicate:9001",
+        None,
+        "merged note",
+    );
+    draft.preview_matching_feedback["annotation"]["type"] = json!("manual_review");
+    let preview_id = insert_preview_bill(
+        runtime.connection(),
+        "session-history-marker",
+        user_id(42),
+        &draft,
+    )?;
+    update_preview_selection(runtime.connection_mut(), &[preview_id], true, user_id(42))?;
+
+    let result = confirm_preview_to_bills(
+        runtime.connection_mut(),
+        "session-history-marker",
+        user_id(42),
+    );
+
+    assert!(result
+        .expect_err("missing visible marker is rejected")
+        .to_string()
+        .contains("visible preview marker"));
+    assert!(
+        get_import_session(runtime.connection(), "session-history-marker", user_id(42))?.is_some()
+    );
+    Ok(())
+}
+
+#[test]
+fn confirm_history_duplicate_ack_updates_history_and_audits() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("history_ack_update.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_bills_schema(&runtime)?;
+    init_import_staging_schema(runtime.connection())?;
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: "session-history-ack-update".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+    runtime.connection().execute(
+        "
+        INSERT INTO bills(
+            id, user_id, date, type, amount, counterparty, description,
+            payment_method, main_category, sub_category, hash, created_at, updated_at,
+            source_account_id, import_history_id
+        ) VALUES (9001, 42, '2026-05-01 08:30:00', '支出', -9.25, 'old',
+                  'old note', 'card', '餐饮', '午餐', 'old-hash', 'old', 'old', 101, 1)
+        ",
+        [],
+    )?;
+    let mut draft = history_rewrite_preview_draft(
+        "update_history",
+        9001,
+        1,
+        "history-duplicate:9001",
+        None,
+        "merged note",
+    );
+    draft.preview_counterparty = "old | imported".to_string();
+    draft.preview_source_account_id = Some(101);
+    let preview_id = insert_preview_bill(
+        runtime.connection(),
+        "session-history-ack-update",
+        user_id(42),
+        &draft,
+    )?;
+    insert_import_history_materializations_batch(
+        runtime.connection_mut(),
+        "session-history-ack-update",
+        user_id(42),
+        &[ImportHistoryMaterializationDraft {
+            history_bill_id: 9001,
+            history_bill_version: 1,
+            materialized_payload: json!({"operation": "update_history"}),
+            rewrite_reason: "same_amount|same_direction".to_string(),
+        }],
+    )?;
+    update_preview_selection(runtime.connection_mut(), &[preview_id], true, user_id(42))?;
+    let ack = history_rewrite_ack(
+        "session-history-ack-update",
+        vec![preview_id],
+        preview_id,
+        "update_history",
+        9001,
+        1,
+        "history-duplicate:9001",
+    );
+
+    let result = confirm_preview_to_bills_with_ack(
+        runtime.connection_mut(),
+        "session-history-ack-update",
+        user_id(42),
+        Some(&ack),
+    )?;
+
+    assert_eq!(result.confirmed_count, 1);
+    let bill = runtime.connection().query_row(
+        "
+        SELECT counterparty, description, import_history_id
+        FROM bills WHERE id = 9001 AND user_id = 42
+        ",
+        [],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        },
+    )?;
+    assert_eq!(bill.0, "old | imported");
+    assert_eq!(bill.1, "merged note");
+    assert_eq!(bill.2, 2);
+    let operations: i64 = runtime.connection().query_row(
+        "
+        SELECT COUNT(*) FROM import_confirm_operations
+        WHERE session_id = 'session-history-ack-update'
+          AND user_id = 42
+          AND operation_kind = 'update_history'
+          AND history_bill_id = 9001
+          AND status = 'applied'
+        ",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(operations, 1);
+    assert!(get_import_session(
+        runtime.connection(),
+        "session-history-ack-update",
+        user_id(42)
+    )?
+    .is_none());
+    Ok(())
+}
+
+#[test]
+fn confirm_history_rewrite_rejects_stale_history_version() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("history_ack_stale.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_bills_schema(&runtime)?;
+    init_import_staging_schema(runtime.connection())?;
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: "session-history-ack-stale".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+    runtime.connection().execute(
+        "
+        INSERT INTO bills(
+            id, user_id, date, type, amount, counterparty, description,
+            payment_method, main_category, sub_category, hash, created_at, updated_at,
+            import_history_id
+        ) VALUES (9001, 42, '2026-05-01 08:30:00', '支出', -9.25, 'old',
+                  'old note', 'card', '餐饮', '午餐', 'old-hash', 'old', 'old', 2)
+        ",
+        [],
+    )?;
+    let preview_id = insert_preview_bill(
+        runtime.connection(),
+        "session-history-ack-stale",
+        user_id(42),
+        &history_rewrite_preview_draft(
+            "update_history",
+            9001,
+            1,
+            "history-duplicate:9001",
+            None,
+            "merged note",
+        ),
+    )?;
+    insert_import_history_materializations_batch(
+        runtime.connection_mut(),
+        "session-history-ack-stale",
+        user_id(42),
+        &[ImportHistoryMaterializationDraft {
+            history_bill_id: 9001,
+            history_bill_version: 1,
+            materialized_payload: json!({"operation": "update_history"}),
+            rewrite_reason: "same_amount|same_direction".to_string(),
+        }],
+    )?;
+    update_preview_selection(runtime.connection_mut(), &[preview_id], true, user_id(42))?;
+    let ack = history_rewrite_ack(
+        "session-history-ack-stale",
+        vec![preview_id],
+        preview_id,
+        "update_history",
+        9001,
+        1,
+        "history-duplicate:9001",
+    );
+
+    let result = confirm_preview_to_bills_with_ack(
+        runtime.connection_mut(),
+        "session-history-ack-stale",
+        user_id(42),
+        Some(&ack),
+    );
+
+    assert!(result
+        .expect_err("stale history version is rejected")
+        .to_string()
+        .contains("history bill version is stale"));
+    let version: i64 = runtime.connection().query_row(
+        "SELECT import_history_id FROM bills WHERE id = 9001 AND user_id = 42",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(version, 2);
+    assert!(get_import_session(
+        runtime.connection(),
+        "session-history-ack-stale",
+        user_id(42)
+    )?
+    .is_some());
+    Ok(())
+}
+
+#[test]
+fn confirm_history_transfer_ack_inserts_base_and_deletes_history_counterpart(
+) -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("history_ack_transfer.db"))?;
+    seed_users(&runtime, &[42])?;
+    init_bills_schema(&runtime)?;
+    init_import_staging_schema(runtime.connection())?;
+    runtime.connection().execute_batch(
+        "
+        CREATE TABLE accounts (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            balance REAL DEFAULT 0,
+            initial_balance REAL DEFAULT 0,
+            updated_at TEXT
+        );
+        CREATE TABLE tags (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL
+        );
+        CREATE TABLE bill_tags (
+            bill_id INTEGER NOT NULL,
+            tag_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (bill_id, tag_id)
+        );
+        INSERT INTO accounts(id, user_id, name, balance, initial_balance, updated_at)
+        VALUES (100, 42, 'wallet', 1000.0, 1000.0, 'old'),
+               (200, 42, 'bank', 50.0, 50.0, 'old');
+        INSERT INTO tags(id, user_id, name) VALUES (7, 42, 'history-tag');
+        INSERT INTO bills(
+            id, user_id, date, type, amount, counterparty, description,
+            payment_method, main_category, sub_category, hash, created_at, updated_at,
+            source_account_id, import_history_id
+        ) VALUES (9002, 42, '2026-05-01 08:30:00', '收入', 100.0, 'bank',
+                  'incoming side', 'bank-card', '转账', '入账', 'old-transfer',
+                  'old', 'old', 200, 1);
+        INSERT INTO bill_tags(bill_id, tag_id, created_at) VALUES (9002, 7, 'old');
+        ",
+    )?;
+    create_import_session(
+        runtime.connection(),
+        &ImportSessionDraft {
+            session_id: "session-history-transfer-ack".to_string(),
+            user_id: user_id(42),
+            file_count: 1,
+        },
+    )?;
+    let mut draft = history_rewrite_preview_draft(
+        "merge_transfer_history",
+        9002,
+        1,
+        "history-transfer:9002",
+        Some("incoming"),
+        "merged transfer",
+    );
+    draft.preview_type = "转账".to_string();
+    draft.preview_amount = 100.0;
+    draft.preview_destination_amount = 100.0;
+    draft.preview_counterparty = "wallet | bank".to_string();
+    draft.preview_source_account_id = Some(100);
+    draft.preview_destination_account_id = Some(200);
+    let preview_id = insert_preview_bill(
+        runtime.connection(),
+        "session-history-transfer-ack",
+        user_id(42),
+        &draft,
+    )?;
+    insert_import_history_materializations_batch(
+        runtime.connection_mut(),
+        "session-history-transfer-ack",
+        user_id(42),
+        &[ImportHistoryMaterializationDraft {
+            history_bill_id: 9002,
+            history_bill_version: 1,
+            materialized_payload: json!({"operation": "merge_transfer_history"}),
+            rewrite_reason: "same_amount|opposite_direction".to_string(),
+        }],
+    )?;
+    update_preview_selection(runtime.connection_mut(), &[preview_id], true, user_id(42))?;
+    let ack = history_rewrite_ack(
+        "session-history-transfer-ack",
+        vec![preview_id],
+        preview_id,
+        "merge_transfer_history",
+        9002,
+        1,
+        "history-transfer:9002",
+    );
+
+    let result = confirm_preview_to_bills_with_ack(
+        runtime.connection_mut(),
+        "session-history-transfer-ack",
+        user_id(42),
+        Some(&ack),
+    )?;
+
+    assert_eq!(result.confirmed_count, 1);
+    let bills = runtime.connection().query_row(
+        "
+        SELECT COUNT(*), MIN(id), MAX(type), MAX(source_account_id), MAX(destination_account_id)
+        FROM bills WHERE user_id = 42
+        ",
+        [],
+        |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        },
+    )?;
+    assert_eq!(bills.0, 1);
+    assert_ne!(bills.1, 9002);
+    assert_eq!(bills.2, "转账");
+    assert_eq!(bills.3, 100);
+    assert_eq!(bills.4, 200);
+    let moved_tags: i64 = runtime.connection().query_row(
+        "SELECT COUNT(*) FROM bill_tags WHERE tag_id = 7 AND bill_id != 9002",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(moved_tags, 1);
+    let balances = runtime.connection().query_row(
+        "
+        SELECT
+            (SELECT balance FROM accounts WHERE id = 100 AND user_id = 42),
+            (SELECT balance FROM accounts WHERE id = 200 AND user_id = 42)
+        ",
+        [],
+        |row| Ok((row.get::<_, f64>(0)?, row.get::<_, f64>(1)?)),
+    )?;
+    assert_eq!(balances, (900.0, 150.0));
+    let audit: i64 = runtime.connection().query_row(
+        "
+        SELECT COUNT(*) FROM import_confirm_operations
+        WHERE operation_kind = 'merge_transfer_history'
+          AND history_bill_id = 9002
+          AND deleted_bill_id = 9002
+        ",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(audit, 1);
     Ok(())
 }
 

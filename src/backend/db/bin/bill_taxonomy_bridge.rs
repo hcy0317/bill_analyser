@@ -355,6 +355,7 @@ fn db_error_message(error: &DbError) -> String {
     match error {
         DbError::InvalidOperation(message) | DbError::UnsafePath(message) => message.clone(),
         DbError::Sqlite(error) => error.to_string(),
+        DbError::Postgres(error) => error.to_string(),
         DbError::Io(error) => error.to_string(),
     }
 }

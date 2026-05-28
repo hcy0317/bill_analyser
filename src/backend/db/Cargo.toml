@@ -3,7 +3,7 @@ name = "bill-analyser-db"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Internal SQLite runtime and schema foundations for Bill Analyser."
+description = "Internal SQLite runtime and PostgreSQL migration foundations for Bill Analyser."
 publish = false
 
 [lib]
@@ -19,7 +19,9 @@ rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+sqlx.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
@@ -29,9 +31,21 @@ tempfile.workspace = true
 name = "bill_taxonomy_bridge"
 path = "bin/bill_taxonomy_bridge.rs"
 
+[[bin]]
+name = "bill_sqlite_to_postgres_migrate"
+path = "bin/bill_sqlite_to_postgres_migrate.rs"
+
+[[bin]]
+name = "bill_postgres_account_recovery"
+path = "bin/bill_postgres_account_recovery.rs"
+
 [[test]]
 name = "app_settings"
 path = "../../../tests/backend/db/app_settings.rs"
+
+[[test]]
+name = "database_runtime"
+path = "../../../tests/backend/db/database_runtime.rs"
 
 [[test]]
 name = "auth_two_factor_recovery"
@@ -58,6 +72,14 @@ name = "llm_runtime"
 path = "../../../tests/backend/db/llm_runtime.rs"
 
 [[test]]
+name = "sqlite_postgres_migration_cli"
+path = "../../../tests/backend/db/sqlite_postgres_migration_cli.rs"
+
+[[test]]
+name = "postgres_account_recovery_cli"
+path = "../../../tests/backend/db/postgres_account_recovery_cli.rs"
+
+[[test]]
 name = "matching_runtime"
 path = "../../../tests/backend/db/matching_runtime.rs"
 
@@ -72,6 +94,10 @@ path = "../../../tests/backend/db/sqlite_runtime.rs"
 [[test]]
 name = "taxonomy_bridge_cli"
 path = "../../../tests/backend/db/taxonomy_bridge_cli.rs"
+
+[[test]]
+name = "vector_outbox"
+path = "../../../tests/backend/db/vector_outbox.rs"
 
 [lints]
 workspace = true

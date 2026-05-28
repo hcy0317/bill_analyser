@@ -87,6 +87,7 @@ export interface ImportPreviewSignalViewModel {
     parser: ImportPreviewSignalParserView | null;
     dedup: ImportPreviewSignalDedupView | null;
     isManuallyAnnotated: boolean;
+    historyRewrite: ImportPreviewSignalReviewView | null;
     transferSuggestion: ImportPreviewSignalReviewView | null;
     investment: ImportPreviewSignalReviewView | null;
     learning: ImportPreviewSignalReviewView | null;
@@ -95,7 +96,29 @@ export interface ImportPreviewSignalViewModel {
     hasAnySignal: boolean;
 }
 
-export type ImportPreviewVisibleSignalFilterValue = 'parser' | 'platform_duplicate' | 'transfer' | 'learning';
+export type ImportPreviewVisibleSignalFilterValue =
+    | 'parser'
+    | 'platform_duplicate'
+    | 'transfer'
+    | 'history'
+    | 'learning'
+    | 'llm';
+
+export interface ImportPreviewHistoryRewriteAcknowledgementOperation {
+    preview_id: number;
+    operation_id: string;
+    planned_operation: string;
+    history_bill_id: number;
+    history_bill_version: number;
+    acknowledgement_token: string;
+}
+
+export interface ImportPreviewHistoryRewriteAcknowledgement {
+    acknowledged: true;
+    selected_preview_ids: number[];
+    operations: ImportPreviewHistoryRewriteAcknowledgementOperation[];
+    selection_scope: Record<string, unknown>;
+}
 
 export interface ImportPreviewSignalState extends ImportCheckMatchingContextState {
     transferStatus?: ImportPreviewSignalStatus | null;
@@ -109,6 +132,7 @@ export interface ImportPreviewSignalState extends ImportCheckMatchingContextStat
     learningTitle?: string;
     learningSummary?: string;
     learningMode?: ImportPreviewLearningMode | string;
+    learningSignalState?: string;
     learningAutoApplied?: boolean;
     llmStatus?: ImportPreviewSignalStatus | null;
     llmTitle?: string;
@@ -125,6 +149,15 @@ export interface ImportPreviewSignalState extends ImportCheckMatchingContextStat
     reconciliationStatus?: string;
     reconciliationTitle?: string;
     reconciliationSourceChain?: ImportMatchingSourcePayload[];
+    reconciliationPlannedOperation?: string;
+    reconciliationHistoryBillId?: number | string | null;
+    reconciliationHistoryBillVersion?: number | string | null;
+    reconciliationHistoryRole?: string;
+    reconciliationGroupKey?: string;
+    reconciliationOperationId?: string;
+    reconciliationAcknowledgementToken?: string;
+    reconciliationDestructiveAckRequired?: boolean;
+    reconciliationNotice?: string;
     hasRecurringMatch?: boolean;
     recurringTitle?: string;
     recurringCandidateCount?: number;
@@ -169,6 +202,11 @@ const DEFAULT_SIGNAL_INFO_LABELS: ImportPreviewSignalInfoLabels = {
     recommendedCategoryLabel: 'Recommended Category',
     accountRouteLabel: 'Account Route'
 };
+const HISTORY_REWRITE_NOTICE = '将改写/合并历史账单';
+const HISTORY_REWRITE_OPERATION_LABELS: Record<string, string> = {
+    update_history: 'History Rewrite',
+    merge_transfer_history: 'Merge History Transfer'
+};
 
 function humanizeDedupType(rawType: string): string {
     return rawType
@@ -182,9 +220,36 @@ function normalizeDedupType(rawType: string | undefined): string {
     return (rawType || '').trim().toLowerCase();
 }
 
+function normalizeTextValue(value: unknown): string {
+    return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizePositiveInteger(value: unknown): number {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return Math.trunc(value);
+    }
+
+    if (typeof value === 'string') {
+        const parsedValue = Number(value.trim());
+        return Number.isFinite(parsedValue) ? Math.trunc(parsedValue) : 0;
+    }
+
+    return 0;
+}
+
 function isTransferLikeDedupType(rawType: string | undefined): boolean {
     const normalizedDedupType = normalizeDedupType(rawType);
     return normalizedDedupType === 'transfer' || normalizedDedupType === 'transfer_cross_batch';
+}
+
+export function isImportPreviewHistoryRewriteOperation(rawOperation: string | undefined): boolean {
+    const normalizedOperation = normalizeTextValue(rawOperation).toLowerCase();
+    return normalizedOperation === 'update_history' || normalizedOperation === 'merge_transfer_history';
+}
+
+export function getImportPreviewHistoryRewriteLabelKey(rawOperation: string | undefined): string {
+    const normalizedOperation = normalizeTextValue(rawOperation).toLowerCase();
+    return HISTORY_REWRITE_OPERATION_LABELS[normalizedOperation] || 'History Rewrite';
 }
 
 export function getImportCheckMatchingContextSummary(
@@ -545,6 +610,129 @@ function buildLLMDetailLines(
     return state.llmTitle ? [state.llmTitle] : [];
 }
 
+function buildHistoryRewriteDetailLines(
+    state: ImportPreviewSignalState,
+    options: ImportCheckMatchingDedupTitleOptions
+): string[] {
+    const lines: string[] = [];
+    const notice = normalizeTextValue(state.reconciliationNotice) || HISTORY_REWRITE_NOTICE;
+    const title = normalizeTextValue(state.reconciliationTitle);
+    const plannedOperation = normalizeTextValue(state.reconciliationPlannedOperation);
+    const historyBillId = normalizePositiveInteger(state.reconciliationHistoryBillId);
+    const historyBillVersion = normalizePositiveInteger(state.reconciliationHistoryBillVersion);
+    const sourceLabels = getSourceChainDisplayLabels(state.reconciliationSourceChain, options);
+
+    lines.push(title || notice);
+    if (plannedOperation) {
+        lines.push(formatInfoLine('Operation', plannedOperation));
+    }
+    if (historyBillId > 0) {
+        lines.push(formatInfoLine(
+            'History Bill',
+            historyBillVersion > 0 ? `#${historyBillId} v${historyBillVersion}` : `#${historyBillId}`
+        ));
+    }
+    if (sourceLabels.length > 0) {
+        lines.push(formatInfoLine(getSignalInfoLabels(options).sourceLabel, sourceLabels.join('|')));
+    }
+    if (state.reconciliationDestructiveAckRequired) {
+        lines.push(notice);
+    }
+
+    return dedupeTextItems(lines);
+}
+
+function buildHistoryRewriteSignalView(
+    state: ImportPreviewSignalState,
+    options: ImportCheckMatchingDedupTitleOptions
+): ImportPreviewSignalReviewView | null {
+    const plannedOperation = normalizeTextValue(state.reconciliationPlannedOperation);
+    const hasHistoryRewriteMarker = isImportPreviewHistoryRewriteOperation(plannedOperation)
+        || !!state.reconciliationDestructiveAckRequired;
+    if (!hasHistoryRewriteMarker) {
+        return null;
+    }
+
+    const detailLines = buildHistoryRewriteDetailLines(state, options);
+    const labelKey = getImportPreviewHistoryRewriteLabelKey(plannedOperation);
+    return {
+        status: 'pending',
+        labelKey,
+        title: buildSignalTitle(detailLines, state.reconciliationTitle || HISTORY_REWRITE_NOTICE),
+        color: 'warning',
+        actions: [],
+        detailLines
+    };
+}
+
+export function buildImportPreviewHistoryRewriteOperationAcknowledgement(
+    previewId: number | string | null | undefined,
+    state: ImportPreviewSignalState
+): ImportPreviewHistoryRewriteAcknowledgementOperation | null {
+    const normalizedPreviewId = normalizePositiveInteger(previewId);
+    const plannedOperation = normalizeTextValue(state.reconciliationPlannedOperation);
+    const operationId = normalizeTextValue(state.reconciliationOperationId);
+    const acknowledgementToken = normalizeTextValue(state.reconciliationAcknowledgementToken);
+    const historyBillId = normalizePositiveInteger(state.reconciliationHistoryBillId);
+    const historyBillVersion = normalizePositiveInteger(state.reconciliationHistoryBillVersion) || 1;
+
+    if (
+        normalizedPreviewId <= 0
+        || !isImportPreviewHistoryRewriteOperation(plannedOperation)
+        || !operationId
+        || !acknowledgementToken
+        || historyBillId <= 0
+    ) {
+        return null;
+    }
+
+    return {
+        preview_id: normalizedPreviewId,
+        operation_id: operationId,
+        planned_operation: plannedOperation,
+        history_bill_id: historyBillId,
+        history_bill_version: historyBillVersion,
+        acknowledgement_token: acknowledgementToken
+    };
+}
+
+export function buildImportPreviewHistoryRewriteAcknowledgement({
+    selectedPreviewIds,
+    operations,
+    selectionScope
+}: {
+    selectedPreviewIds: Array<number | string | null | undefined>;
+    operations: ImportPreviewHistoryRewriteAcknowledgementOperation[];
+    selectionScope: Record<string, unknown>;
+}): ImportPreviewHistoryRewriteAcknowledgement | null {
+    const normalizedSelectedIds = selectedPreviewIds
+        .map(previewId => normalizePositiveInteger(previewId))
+        .filter(previewId => previewId > 0)
+        .sort((left, right) => left - right)
+        .filter((previewId, index, ids) => index === 0 || ids[index - 1] !== previewId);
+    const uniqueOperations = new Map<number, ImportPreviewHistoryRewriteAcknowledgementOperation>();
+    for (const operation of operations) {
+        if (operation.preview_id > 0) {
+            uniqueOperations.set(operation.preview_id, operation);
+        }
+    }
+
+    if (uniqueOperations.size < 1) {
+        return null;
+    }
+
+    return {
+        acknowledged: true,
+        selected_preview_ids: normalizedSelectedIds,
+        operations: Array.from(uniqueOperations.values()).sort((left, right) => left.preview_id - right.preview_id),
+        selection_scope: {
+            ...selectionScope,
+            selected_count: normalizedSelectedIds.length,
+            history_rewrite_count: uniqueOperations.size
+        }
+    };
+}
+
 function buildSignalTitle(detailLines: string[], fallbackTitle: string | undefined = ''): string {
     return detailLines.length > 0 ? detailLines.join(' | ') : (fallbackTitle || '');
 }
@@ -737,7 +925,8 @@ export function buildImportPreviewSignalViewModel(
     );
     const dedupDetailLines = buildDedupDetailLines(matchingSummary, state, options);
     const reconciliationTitle = (state.reconciliationTitle || '').trim();
-    const reconciliationDedup = reconciliationTitle
+    const historyRewrite = buildHistoryRewriteSignalView(state, options);
+    const reconciliationDedup = reconciliationTitle && !historyRewrite
         ? {
             dedupType: state.reconciliationType || 'reconciliation',
             labelKey: state.reconciliationType || 'reconciliation',
@@ -776,29 +965,33 @@ export function buildImportPreviewSignalViewModel(
     );
     const learningDetailLines = buildLearningDetailLines(state, options);
     const normalizedLearningMode = (state.learningMode || '').trim().toLowerCase();
-    const isBlueLearning = normalizedLearningMode === 'blue' || !!state.learningAutoApplied;
-    const learningReviewedActions = isBlueLearning
-        ? [{ decision: 'clear', labelKey: 'Undo Learning Auto Apply', color: 'primary' } as ImportPreviewSignalDecision]
+    const normalizedLearningSignalState = (state.learningSignalState || '').trim().toLowerCase();
+    const isGreenLearning = normalizedLearningSignalState === 'green'
+        || normalizedLearningSignalState === 'auto_applied'
+        || normalizedLearningMode === 'green'
+        || !!state.learningAutoApplied;
+    const learningReviewedActions = isGreenLearning
+        ? [{ decision: 'reject', labelKey: 'Reject Learning Suggestion', color: 'error' } as ImportPreviewSignalDecision]
         : [];
     const learning = buildReviewView(
         state.learningStatus,
         buildSignalTitle(learningDetailLines, state.learningTitle),
-        isBlueLearning ? 'Blue Learning Auto Apply' : 'Learning Suggestion',
-        isBlueLearning ? 'Blue Learning Applied' : 'Learning Suggestion Accepted',
+        isGreenLearning ? 'Learning Auto Apply' : 'Learning Suggestion',
+        isGreenLearning ? 'Learning Applied' : 'Learning Suggestion Accepted',
         'Learning Suggestion Rejected',
         [
-            { decision: 'accept', labelKey: 'Apply Suggestion', color: isBlueLearning ? 'primary' : 'secondary' },
+            { decision: 'accept', labelKey: 'Apply Suggestion', color: isGreenLearning ? 'success' : 'secondary' },
             { decision: 'reject', labelKey: 'Reject Learning Suggestion', color: 'error' }
         ],
         undefined,
         state.learningSummary,
         learningReviewedActions,
         learningDetailLines,
-        'info',
+        'warning',
         'Learning Suggestion Skipped'
     );
-    if (learning && isBlueLearning) {
-        learning.color = 'primary';
+    if (learning && isGreenLearning) {
+        learning.color = 'success';
     }
     const llmDetailLines = buildLLMDetailLines(state, options);
     const llm = buildReviewView(
@@ -830,6 +1023,7 @@ export function buildImportPreviewSignalViewModel(
         parser,
         dedup,
         isManuallyAnnotated: matchingSummary.isManuallyAnnotated,
+        historyRewrite,
         transferSuggestion,
         investment: null,
         learning,
@@ -837,6 +1031,7 @@ export function buildImportPreviewSignalViewModel(
         recurring,
         hasAnySignal: !!parser
             || !!dedup
+            || !!historyRewrite
             || !!transferSuggestion
             || !!learning
             || !!llm
@@ -865,8 +1060,16 @@ export function matchesImportPreviewSignalFilter(
         return isTransferLikeDedupType(normalizedDedupType) || !!viewModel.transferSuggestion;
     }
 
+    if (filter === 'history') {
+        return !!viewModel.historyRewrite;
+    }
+
     if (filter === 'learning') {
         return !!viewModel.learning;
+    }
+
+    if (filter === 'llm') {
+        return !!viewModel.llm;
     }
 
     return true;

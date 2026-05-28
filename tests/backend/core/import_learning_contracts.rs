@@ -2,20 +2,28 @@ use std::collections::BTreeMap;
 
 use bill_analyser_core::{
     amount_bucket, build_composite_match_features, build_composite_match_hash,
-    build_dataset_snapshot_payload, build_feature_payload, build_label_confirmation_counts,
+    build_dataset_snapshot_payload, build_feature_payload,
+    build_import_learning_recommendation_key, build_label_confirmation_counts,
     build_llm_preview_apply_plan, build_model_registry_payload, build_route_label,
     build_semantic_label, build_semantic_label_counts, evaluate_learning_policy,
     import_learning_model_version, iter_feature_tokens, learning_batch_accept_response,
-    learning_center_page_response, legacy_learning_rules_page_response, llm_error_response,
+    learning_center_page_response, learning_lifecycle_is_auto_eligible,
+    learning_lifecycle_signal_state, legacy_learning_rules_page_response, llm_error_response,
     llm_memory_events_success, normalize_import_learning_suggestion_id,
     normalize_import_learning_text, normalize_learning_text, normalize_llm_preview_review_decision,
     parse_composite_match_value, parse_learning_suggestion_ids, parse_preview_ids,
     parse_route_label, parse_semantic_label, prepare_training_samples,
-    should_restore_llm_previous_preview, ImportLearningPrediction, LlmMemoryEventContract,
-    LlmPreviewSnapshot, LlmPreviewSuggestion, BLUE_ACCEPT_CONFIRMATION_THRESHOLD,
-    BLUE_CONFIDENCE_THRESHOLD, BLUE_MARGIN_THRESHOLD, DEFAULT_FEATURE_DIMENSION,
-    FEATURE_SCHEMA_VERSION, GREEN_CONFIDENCE_THRESHOLD, GREEN_MARGIN_THRESHOLD, HIDDEN_DIMENSION,
-    MIN_TRAINING_SAMPLES, MODEL_FAMILY, MODEL_KEY, POLICY_VERSION,
+    should_restore_llm_previous_preview, transition_import_learning_lifecycle,
+    ImportLearningLifecycleState, ImportLearningPrediction, ImportLearningRecommendationKeyInput,
+    LlmMemoryEventContract, LlmPreviewSnapshot, LlmPreviewSuggestion,
+    BLUE_ACCEPT_CONFIRMATION_THRESHOLD, BLUE_CONFIDENCE_THRESHOLD, BLUE_MARGIN_THRESHOLD,
+    DEFAULT_FEATURE_DIMENSION, FEATURE_SCHEMA_VERSION, GREEN_CONFIDENCE_THRESHOLD,
+    GREEN_MARGIN_THRESHOLD, HIDDEN_DIMENSION, LEARNING_LIFECYCLE_ACCEPTS_TO_GREEN,
+    LEARNING_LIFECYCLE_GREEN_REJECTS_TO_DOWNGRADE, LEARNING_LIFECYCLE_STATUS_AUTO_APPLIED,
+    LEARNING_LIFECYCLE_STATUS_DOWNGRADED, LEARNING_LIFECYCLE_STATUS_GREEN,
+    LEARNING_LIFECYCLE_STATUS_SUPPRESSED, LEARNING_LIFECYCLE_STATUS_YELLOW,
+    LEARNING_LIFECYCLE_YELLOW_REJECTS_TO_SUPPRESS, MIN_TRAINING_SAMPLES, MODEL_FAMILY, MODEL_KEY,
+    POLICY_VERSION, RECOMMENDATION_KEY_SCHEMA_VERSION,
 };
 use serde_json::json;
 
@@ -57,6 +65,150 @@ fn composite_match_hash_and_parser_preserve_learning_rule_contract() {
     assert_eq!(
         normalize_import_learning_suggestion_id(Some(&json!(0))),
         None
+    );
+}
+
+#[test]
+fn recommendation_key_is_stable_for_similar_features_and_invalidates_on_schema_or_tuple() {
+    assert_eq!(
+        RECOMMENDATION_KEY_SCHEMA_VERSION,
+        "import-learning-recommendation-key-v1"
+    );
+    let base = ImportLearningRecommendationKeyInput {
+        user_id: 42,
+        recommendation_type: "import_preview".to_string(),
+        recommended_type: "支出".to_string(),
+        recommended_category_id: Some(12),
+        recommended_source_account_id: Some(3),
+        recommended_destination_account_id: None,
+        transaction_type_scope: "支出".to_string(),
+        parser_bucket: " WeChat ".to_string(),
+        counterparty_bucket: " 早餐  店 ".to_string(),
+        payment_bucket: "零钱".to_string(),
+        description_bucket: "豆浆 | 包子".to_string(),
+        amount_bucket: Some("lt20".to_string()),
+        suppression_scope: "default".to_string(),
+        transfer_protected: false,
+        ..ImportLearningRecommendationKeyInput::default()
+    };
+    let same = ImportLearningRecommendationKeyInput {
+        parser_bucket: "wechat".to_string(),
+        counterparty_bucket: "早餐 店".to_string(),
+        payment_bucket: " 零钱 ".to_string(),
+        description_bucket: "豆浆|包子".to_string(),
+        ..base.clone()
+    };
+    assert_eq!(
+        build_import_learning_recommendation_key(&base),
+        build_import_learning_recommendation_key(&same)
+    );
+
+    let changed_tuple = ImportLearningRecommendationKeyInput {
+        recommended_category_id: Some(13),
+        ..base.clone()
+    };
+    assert_ne!(
+        build_import_learning_recommendation_key(&base),
+        build_import_learning_recommendation_key(&changed_tuple)
+    );
+
+    let migrated_schema = ImportLearningRecommendationKeyInput {
+        feature_schema_version: "import-learning-recommendation-key-v2".to_string(),
+        ..base.clone()
+    };
+    assert_ne!(
+        build_import_learning_recommendation_key(&base),
+        build_import_learning_recommendation_key(&migrated_schema)
+    );
+}
+
+#[test]
+fn learning_lifecycle_thresholds_have_no_off_by_one_and_transfer_signal_states() {
+    assert_eq!(LEARNING_LIFECYCLE_ACCEPTS_TO_GREEN, 3);
+    assert_eq!(LEARNING_LIFECYCLE_GREEN_REJECTS_TO_DOWNGRADE, 2);
+    assert_eq!(LEARNING_LIFECYCLE_YELLOW_REJECTS_TO_SUPPRESS, 3);
+
+    let yellow_two_accepts = ImportLearningLifecycleState {
+        accepted_count: 2,
+        rejected_count: 2,
+        ..ImportLearningLifecycleState::default()
+    };
+    let third_accept = transition_import_learning_lifecycle(&yellow_two_accepts, "accept");
+    assert_eq!(
+        third_accept.previous_status,
+        LEARNING_LIFECYCLE_STATUS_YELLOW
+    );
+    assert_eq!(third_accept.next_status, LEARNING_LIFECYCLE_STATUS_GREEN);
+    assert_eq!(third_accept.signal_state, "green");
+    assert_eq!(third_accept.rejected_count, 0);
+    assert!(third_accept.auto_apply_enabled);
+
+    let first_green_reject = transition_import_learning_lifecycle(
+        &ImportLearningLifecycleState {
+            status: LEARNING_LIFECYCLE_STATUS_GREEN.to_string(),
+            accepted_count: third_accept.accepted_count,
+            rejected_count: third_accept.rejected_count,
+            auto_applied_count: 0,
+        },
+        "reject",
+    );
+    assert_eq!(
+        first_green_reject.next_status,
+        LEARNING_LIFECYCLE_STATUS_GREEN
+    );
+    assert_eq!(first_green_reject.accepted_count, 3);
+    assert_eq!(first_green_reject.rejected_count, 1);
+
+    let green_one_reject = ImportLearningLifecycleState {
+        status: LEARNING_LIFECYCLE_STATUS_GREEN.to_string(),
+        accepted_count: 3,
+        rejected_count: 1,
+        auto_applied_count: 0,
+    };
+    let second_green_reject = transition_import_learning_lifecycle(&green_one_reject, "reject");
+    assert_eq!(
+        second_green_reject.next_status,
+        LEARNING_LIFECYCLE_STATUS_DOWNGRADED
+    );
+    assert_eq!(second_green_reject.event_type, "downgrade");
+    assert_eq!(second_green_reject.signal_state, "yellow");
+    assert_eq!(second_green_reject.accepted_count, 0);
+    assert_eq!(second_green_reject.rejected_count, 0);
+    assert!(!second_green_reject.auto_apply_enabled);
+
+    let yellow_two_rejects = ImportLearningLifecycleState {
+        rejected_count: 2,
+        ..ImportLearningLifecycleState::default()
+    };
+    let third_yellow_reject = transition_import_learning_lifecycle(&yellow_two_rejects, "reject");
+    assert_eq!(
+        third_yellow_reject.next_status,
+        LEARNING_LIFECYCLE_STATUS_SUPPRESSED
+    );
+    assert_eq!(third_yellow_reject.event_type, "suppress");
+    assert_eq!(third_yellow_reject.signal_state, "suppressed");
+    assert!(third_yellow_reject.suppressed);
+
+    let auto_applied = transition_import_learning_lifecycle(
+        &ImportLearningLifecycleState {
+            status: LEARNING_LIFECYCLE_STATUS_GREEN.to_string(),
+            accepted_count: 3,
+            rejected_count: 0,
+            auto_applied_count: 0,
+        },
+        "auto_apply",
+    );
+    assert_eq!(
+        auto_applied.next_status,
+        LEARNING_LIFECYCLE_STATUS_AUTO_APPLIED
+    );
+    assert_eq!(auto_applied.auto_applied_count, 1);
+    assert!(learning_lifecycle_is_auto_eligible(
+        &auto_applied.next_status
+    ));
+    assert_eq!(
+        learning_lifecycle_signal_state(LEARNING_LIFECYCLE_STATUS_DOWNGRADED),
+        "yellow"
     );
 }
 

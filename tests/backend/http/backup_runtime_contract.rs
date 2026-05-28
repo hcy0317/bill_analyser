@@ -19,14 +19,17 @@ use axum::{
     Router,
 };
 use base64::{engine::general_purpose, Engine as _};
+use bill_analyser_db::run_postgres_migrations;
 use bill_analyser_http::{
-    build_router, HttpAppState, HttpShellConfig, ImportRouteMode, BACKUP_OPS_ROUTE_PATTERNS,
+    build_router, config::DatabaseBackend, HttpAppState, HttpShellConfig, ImportRouteMode,
+    BACKUP_OPS_ROUTE_PATTERNS,
 };
 use chrono::{Duration as ChronoDuration, Local};
 use ring::hmac;
 use rusqlite::Connection;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use sqlx::{postgres::PgPoolOptions, Row};
 use tempfile::TempDir;
 use tower::ServiceExt;
 use zip::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
@@ -36,6 +39,211 @@ const TEST_AUTH_SECRET: &str = "backup-auth-secret";
 const TEST_USER_ID: &str = "42";
 const BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV: &str = "BILL_ANALYSER_BACKUP_SYNC_ENDPOINT_ALLOWLIST";
 static BACKUP_SYNC_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+#[tokio::test]
+async fn backup_postgres_runtime_serves_jobs_and_files_without_sqlite_fallback(
+) -> Result<(), Box<dyn Error>> {
+    let Ok(postgres_url) = env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+        eprintln!("skipping backup postgres contract without BILL_ANALYSER_TEST_POSTGRES_URL");
+        return Ok(());
+    };
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&postgres_url)
+        .await?;
+    run_postgres_migrations(&pool).await?;
+
+    let unique = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
+    let user_id: i64 =
+        sqlx::query("INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id")
+            .bind(format!("backup-pg-{unique}"))
+            .bind(format!("backup-pg-{unique}@example.test"))
+            .fetch_one(&pool)
+            .await?
+            .try_get("id")?;
+    let fixture = RuntimeFixture::new()?;
+    fs::create_dir_all(fixture.data_dir.join("nested"))?;
+    fs::write(
+        fixture.data_dir.join("nested").join("records.json"),
+        b"postgres backup records",
+    )?;
+    let app = postgres_runtime_router(&fixture, &postgres_url)?;
+    let user_header = user_id.to_string();
+
+    let empty_jobs_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/backup/jobs",
+            Body::empty(),
+            &user_header,
+        ))
+        .await?;
+    assert_eq!(empty_jobs_response.status(), StatusCode::OK);
+    let empty_jobs_body = read_json(empty_jobs_response).await;
+    assert_eq!(empty_jobs_body["success"], true);
+    assert_eq!(empty_jobs_body["data"].as_array().expect("jobs").len(), 0);
+
+    let save_job_response = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/backup/jobs",
+            json!({
+                "job_type": "manual",
+                "schedule_expr": "0 3 * * *",
+                "retention_days": 14,
+                "retention_count": 3,
+                "enabled": true
+            }),
+            &user_header,
+        ))
+        .await?;
+    assert_eq!(save_job_response.status(), StatusCode::OK);
+    let save_job_body = read_json(save_job_response).await;
+    assert_eq!(save_job_body["success"], true);
+    assert_eq!(save_job_body["data"]["job_type"], "manual");
+    let job_id = save_job_body["data"]["id"].as_i64().expect("job id");
+
+    let update_job_response = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/backup/jobs",
+            json!({
+                "id": job_id,
+                "job_type": "manual",
+                "schedule_expr": "0 4 * * *",
+                "retention_days": 21,
+                "retention_count": 5,
+                "enabled": false,
+                "last_status": "ok"
+            }),
+            &user_header,
+        ))
+        .await?;
+    assert_eq!(update_job_response.status(), StatusCode::OK);
+    let update_job_body = read_json(update_job_response).await;
+    assert_eq!(update_job_body["data"]["id"], job_id);
+    assert_eq!(update_job_body["data"]["schedule_expr"], "0 4 * * *");
+
+    let list_jobs_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/backup/jobs",
+            Body::empty(),
+            &user_header,
+        ))
+        .await?;
+    assert_eq!(list_jobs_response.status(), StatusCode::OK);
+    let list_jobs_body = read_json(list_jobs_response).await;
+    let jobs = list_jobs_body["data"].as_array().expect("jobs");
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0]["enabled"], false);
+    assert_eq!(jobs[0]["last_status"], "ok");
+
+    let create_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::POST,
+            "/api/backup/create",
+            Body::empty(),
+            &user_header,
+        ))
+        .await?;
+    assert_eq!(create_response.status(), StatusCode::OK);
+    let create_body = read_json(create_response).await;
+    let filename = create_body["data"]["filename"]
+        .as_str()
+        .expect("created filename")
+        .to_string();
+    assert!(fixture.backup_dir.join(&filename).exists());
+
+    let list_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/backup/",
+            Body::empty(),
+            &user_header,
+        ))
+        .await?;
+    assert_eq!(list_response.status(), StatusCode::OK);
+    let list_body = read_json(list_response).await;
+    assert_eq!(list_body["success"], true);
+    assert_eq!(list_body["data"][0]["filename"], filename);
+    assert_eq!(list_body["data"][0]["recordStatus"], "created");
+
+    let metadata_updated = bill_analyser_db::update_postgres_backup_record_by_filename(
+        &pool,
+        &filename,
+        None,
+        json!({"download_probe": true}),
+    )
+    .await?;
+    assert!(metadata_updated);
+
+    let delete_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::DELETE,
+            &format!("/api/backup/delete/{filename}"),
+            Body::empty(),
+            &user_header,
+        ))
+        .await?;
+    assert_eq!(delete_response.status(), StatusCode::OK);
+
+    let job_count: i64 =
+        sqlx::query("SELECT COUNT(*) AS count FROM backup_jobs WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await?
+            .try_get("count")?;
+    assert_eq!(job_count, 1);
+    let record_count: i64 =
+        sqlx::query("SELECT COUNT(*) AS count FROM backup_records WHERE backup_name = $1")
+            .bind(&filename)
+            .fetch_one(&pool)
+            .await?
+            .try_get("count")?;
+    assert_eq!(record_count, 1);
+    let deleted_record =
+        sqlx::query("SELECT status, metadata FROM backup_records WHERE backup_name = $1 LIMIT 1")
+            .bind(&filename)
+            .fetch_one(&pool)
+            .await?;
+    let deleted_status: String = deleted_record.try_get("status")?;
+    let deleted_metadata: Value = deleted_record.try_get("metadata")?;
+    assert_eq!(deleted_status, "deleted");
+    assert_eq!(deleted_metadata["download_probe"], true);
+    assert_eq!(deleted_metadata["deleted_reason"], "manual_delete");
+    let foreign_update = bill_analyser_db::create_or_update_postgres_backup_job(
+        &pool,
+        bill_analyser_core::UserId::new(u64::try_from(user_id + 1)?)?,
+        bill_analyser_db::BackupJobDraft {
+            id: Some(job_id),
+            job_type: "manual".to_string(),
+            schedule_expr: String::new(),
+            retention_days: 30,
+            retention_count: 10,
+            enabled: true,
+            last_status: None,
+        },
+    )
+    .await
+    .expect_err("foreign job id should not update");
+    assert!(foreign_update.to_string().contains("backup job not found"));
+    let audit_count: i64 =
+        sqlx::query("SELECT COUNT(*) AS count FROM backup_audit_logs WHERE status = 'success'")
+            .fetch_one(&pool)
+            .await?
+            .try_get("count")?;
+    assert!(audit_count >= 2);
+
+    Ok(())
+}
 
 struct EnvVarRestore {
     name: &'static str,
@@ -274,6 +482,9 @@ async fn backup_jobs_runtime_requires_auth_and_sqlite_path() -> Result<(), Box<d
         1024 * 1024,
         ImportRouteMode::ImportDbRuntime,
     )?
+    .with_database_backend(DatabaseBackend::Sqlite)
+    .with_require_postgres_after_cutover(false)
+    .with_legacy_sqlite_runtime_for_tests()
     .with_trusted_user_header_secret(TEST_TRUST_SECRET);
     let state = HttpAppState::new(config)?;
     let missing_db_app = build_router(state);
@@ -1527,6 +1738,24 @@ fn runtime_router_with_auth_secret(fixture: &RuntimeFixture) -> Router {
     runtime_router_with_options(fixture, None, Some(TEST_AUTH_SECRET))
 }
 
+fn postgres_runtime_router(
+    fixture: &RuntimeFixture,
+    postgres_url: &str,
+) -> Result<Router, Box<dyn Error>> {
+    let config = HttpShellConfig::new_with_import_route_mode(
+        "http://127.0.0.1:5001",
+        Duration::from_secs(1),
+        1024 * 1024,
+        ImportRouteMode::ImportDbRuntime,
+    )?
+    .with_database_backend(DatabaseBackend::Postgres)
+    .with_postgres_url(postgres_url)?
+    .with_trusted_user_header_secret(TEST_TRUST_SECRET)
+    .with_data_dir(fixture.data_dir.to_string_lossy().to_string())
+    .with_backup_dir(fixture.backup_dir.to_string_lossy().to_string());
+    Ok(build_router(HttpAppState::new(config)?))
+}
+
 fn runtime_router_with_data_dir(fixture: &RuntimeFixture, data_dir: &str) -> Router {
     let config = HttpShellConfig::new_with_import_route_mode(
         "http://127.0.0.1:5001",
@@ -1535,6 +1764,9 @@ fn runtime_router_with_data_dir(fixture: &RuntimeFixture, data_dir: &str) -> Rou
         ImportRouteMode::ImportDbRuntime,
     )
     .expect("config")
+    .with_database_backend(DatabaseBackend::Sqlite)
+    .with_require_postgres_after_cutover(false)
+    .with_legacy_sqlite_runtime_for_tests()
     .with_trusted_user_header_secret(TEST_TRUST_SECRET)
     .with_sqlite_db_path(fixture.db_path.to_string_lossy().to_string())
     .with_data_dir(data_dir.to_string())
@@ -1554,6 +1786,9 @@ fn runtime_router_with_options(
         ImportRouteMode::ImportDbRuntime,
     )
     .expect("config")
+    .with_database_backend(DatabaseBackend::Sqlite)
+    .with_require_postgres_after_cutover(false)
+    .with_legacy_sqlite_runtime_for_tests()
     .with_sqlite_db_path(fixture.db_path.to_string_lossy().to_string())
     .with_data_dir(fixture.data_dir.to_string_lossy().to_string())
     .with_backup_dir(fixture.backup_dir.to_string_lossy().to_string())

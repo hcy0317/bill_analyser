@@ -10,7 +10,9 @@ use bill_analyser_core::{
     },
     UserId,
 };
-use bill_analyser_db::{find_statistics_all_date_range, StatisticsBillFilters};
+use bill_analyser_db::{
+    find_statistics_all_date_range, StatisticsAllDateRange, StatisticsBillFilters,
+};
 use chrono::{Datelike, Local, NaiveDate, TimeZone};
 use serde::Deserialize;
 use serde_json::Value;
@@ -146,12 +148,27 @@ pub(super) fn year_month_range_from_query(
             (format!("{}01", now.year()), format!("{}12", now.year()))
         }
     };
-    match parse_statistics_year_month_range(Some(&start_raw), Some(&end_raw)) {
+    let all_range = if matches!(
+        parse_statistics_year_month_range(Some(&start_raw), Some(&end_raw)),
+        Ok(StatisticsYearMonthRangeMode::All)
+    ) {
+        find_statistics_all_date_range(connection, user_id)
+            .map_err(|_| Box::new(db_error_response()))?
+    } else {
+        None
+    };
+    year_month_range_from_values(&start_raw, &end_raw, all_range)
+}
+
+pub(super) fn year_month_range_from_values(
+    start_raw: &str,
+    end_raw: &str,
+    all_range: Option<StatisticsAllDateRange>,
+) -> RouteResult<Option<StatisticsYearMonthRange>> {
+    match parse_statistics_year_month_range(Some(start_raw), Some(end_raw)) {
         Ok(StatisticsYearMonthRangeMode::Bounded(range)) => Ok(Some(range)),
         Ok(StatisticsYearMonthRangeMode::All) => {
-            let Some(range) = find_statistics_all_date_range(connection, user_id)
-                .map_err(|_| Box::new(db_error_response()))?
-            else {
+            let Some(range) = all_range else {
                 return Ok(None);
             };
             let start = range.start_date.chars().take(7).collect::<String>();
@@ -163,6 +180,19 @@ pub(super) fn year_month_range_from_query(
             }
         }
         Err(error) => Err(Box::new(statistics_error_response(error, true))),
+    }
+}
+
+pub(super) fn default_year_month_query_values(
+    start_raw: Option<&str>,
+    end_raw: Option<&str>,
+) -> (String, String) {
+    match (start_raw, end_raw) {
+        (Some(start), Some(end)) => (start.to_string(), end.to_string()),
+        _ => {
+            let now = Local::now();
+            (format!("{}01", now.year()), format!("{}12", now.year()))
+        }
     }
 }
 
@@ -178,12 +208,27 @@ pub(super) fn asset_date_range_from_query(
         else {
             return Ok(None);
         };
-        return Ok(Some((
-            parse_date_prefix(&range.start_date)?,
-            parse_date_prefix(&range.end_date)?,
-        )));
+        return asset_date_range_from_all_range(Some(range));
     }
     let range = timestamp_range_from_query(start_raw, end_raw, true)?;
+    asset_date_range_from_timestamp_range(range)
+}
+
+pub(super) fn asset_date_range_from_all_range(
+    all_range: Option<StatisticsAllDateRange>,
+) -> RouteResult<Option<(NaiveDate, NaiveDate)>> {
+    let Some(range) = all_range else {
+        return Ok(None);
+    };
+    Ok(Some((
+        parse_date_prefix(&range.start_date)?,
+        parse_date_prefix(&range.end_date)?,
+    )))
+}
+
+pub(super) fn asset_date_range_from_timestamp_range(
+    range: ResolvedTimestampRange,
+) -> RouteResult<Option<(NaiveDate, NaiveDate)>> {
     let (Some(start_date), Some(end_date)) = (range.start_date, range.end_date) else {
         return Ok(None);
     };

@@ -98,6 +98,13 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(!rust_owned.contains(&("DELETE", "/api/category-rules/{rule_id}")));
     assert!(!rust_owned.contains(&("POST", "/api/category-rules/{rule_id}/test")));
     assert!(!rust_owned.contains(&("POST", "/api/category-rules/reorder")));
+    assert!(rust_owned.contains(&("GET", "/api/account-rules/")));
+    assert!(rust_owned.contains(&("POST", "/api/account-rules/")));
+    assert!(rust_owned.contains(&("PUT", "/api/account-rules/{rule_id}")));
+    assert!(rust_owned.contains(&("DELETE", "/api/account-rules/{rule_id}")));
+    assert!(rust_owned.contains(&("POST", "/api/account-rules/{rule_id}/test")));
+    assert!(rust_owned.contains(&("POST", "/api/account-rules/migrate-aliases")));
+    assert!(rust_owned.contains(&("POST", "/api/account-rules/reorder")));
     assert!(!rust_owned.contains(&("GET", "/api/rules/overview")));
     assert!(!rust_owned.contains(&("GET", "/api/settings/encryption/status")));
     let python_deleted_routes: Vec<_> = endpoints_by_owner(MigrationState::PythonDeleted)
@@ -629,6 +636,26 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_remainder() {
             .find(|entry| entry.endpoint == endpoint)
             .unwrap_or_else(|| panic!("taxonomy category-rules route is present: {endpoint}"));
         assert_eq!(entry.state, MigrationState::PythonDeleted);
+        assert_eq!(entry.handler, RouteHandlerId::TaxonomyRuntime);
+        assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessData);
+        assert!(entry.deletion_blockers.is_empty());
+        assert_eq!(entry.decision_required, DecisionRequired::None);
+    }
+
+    for endpoint in [
+        "GET /api/account-rules/",
+        "POST /api/account-rules/",
+        "PUT /api/account-rules/{rule_id}",
+        "DELETE /api/account-rules/{rule_id}",
+        "POST /api/account-rules/{rule_id}/test",
+        "POST /api/account-rules/migrate-aliases",
+        "POST /api/account-rules/reorder",
+    ] {
+        let entry = manifest
+            .iter()
+            .find(|entry| entry.endpoint == endpoint)
+            .unwrap_or_else(|| panic!("taxonomy account-rules route is present: {endpoint}"));
+        assert_eq!(entry.state, MigrationState::RustOwnedVerified);
         assert_eq!(entry.handler, RouteHandlerId::TaxonomyRuntime);
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessData);
         assert!(entry.deletion_blockers.is_empty());

@@ -31,11 +31,11 @@ pub async fn import_dedup_runtime_handler(
     if let Err(response) = init_global_learning_runtime_schema(&runtime) {
         return route_response(response);
     }
-    match get_import_session(runtime.connection(), &session_id, user_id) {
-        Ok(Some(_)) => {}
+    let session = match get_import_session(runtime.connection(), &session_id, user_id) {
+        Ok(Some(session)) => session,
         Ok(None) => return route_response(import_session_not_found_response()),
         Err(error) => return route_response(db_error_response(error)),
-    }
+    };
 
     let _stage_started_at = Instant::now();
     let _template_query_started_at = Instant::now();
@@ -44,6 +44,46 @@ pub async fn import_dedup_runtime_handler(
             Ok(templates) => templates,
             Err(error) => return route_response(db_error_response(error)),
         };
+    if templates.is_empty() && session.status == "preview" {
+        let persisted_preview =
+            match get_preview_by_session(runtime.connection(), &session_id, user_id, false) {
+                Ok(rows) => rows,
+                Err(error) => return route_response(db_error_response(error)),
+            };
+        let persisted_preview_count = persisted_preview.len();
+        let preview = if include_preview {
+            persisted_preview
+                .into_iter()
+                .map(preview_row_to_value)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let total = usize::try_from(session.total_parsed.max(0)).unwrap_or(usize::MAX);
+        return route_response(import_stage_dedup_success(ImportStageDedupData {
+            session_id,
+            preview,
+            preview_included: include_preview,
+            total,
+            after_dedup: persisted_preview_count,
+            dedup_stats: json!({
+                "removed": total.saturating_sub(persisted_preview_count),
+                "duplicates": 0,
+                "transfer_pairs": 0,
+                "split_merge": 0,
+            }),
+            match_stats: json!({
+                "runtime": "rust",
+                "category_matched": 0,
+                "account_matched": 0,
+                "learning_applied": 0,
+                "recurring_projected": 0,
+                "database_candidates": 0,
+                "provider_bypassed": false,
+                "idempotent_replay": true,
+            }),
+        }));
+    }
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
@@ -57,6 +97,35 @@ pub async fn import_dedup_runtime_handler(
     let _dedup_started_at = Instant::now();
     let dedup_input = dedup_bills_from_parser_templates(&templates);
     let dedup_result = SmartDeduplicationEngine.process(dedup_input);
+    let standard_rows =
+        match get_import_standard_rows_by_session(runtime.connection(), &session_id, user_id) {
+            Ok(rows) => rows,
+            Err(error) => return route_response(db_error_response(error)),
+        };
+    let history_bills = match get_import_history_candidate_bills_for_session(
+        runtime.connection(),
+        &session_id,
+        user_id,
+    ) {
+        Ok(rows) => rows,
+        Err(error) => return route_response(db_error_response(error)),
+    };
+    let mut history_duplicate_plan =
+        build_history_duplicate_preview_plan(&dedup_result.kept_bills, &history_bills);
+    let history_duplicate_import_keys = history_duplicate_plan
+        .iter()
+        .map(|plan| plan.import_bill_key.clone())
+        .collect::<HashSet<_>>();
+    let history_duplicate_ids = history_duplicate_plan
+        .iter()
+        .map(|plan| plan.history_bill_id)
+        .collect::<HashSet<_>>();
+    let mut history_transfer_plan = build_history_transfer_preview_plan(
+        &dedup_result.kept_bills,
+        &history_bills,
+        &history_duplicate_import_keys,
+        &history_duplicate_ids,
+    );
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
@@ -69,8 +138,33 @@ pub async fn import_dedup_runtime_handler(
         elapsed_ms = import_stage_elapsed_ms(_dedup_started_at),
         "stage2 smart dedup complete"
     );
-    let mut preview_drafts = preview_drafts_from_dedup_bills(&dedup_result.kept_bills);
-    let intelligence_stats = match apply_import_intelligence_chain(
+    let history_import_keys = history_duplicate_plan
+        .iter()
+        .map(|plan| plan.import_bill_key.clone())
+        .chain(
+            history_transfer_plan
+                .iter()
+                .map(|plan| plan.import_bill_key.clone()),
+        )
+        .collect::<HashSet<_>>();
+    let previewable_bills = dedup_result
+        .kept_bills
+        .iter()
+        .filter(|bill| !history_import_keys.contains(&import_reconciliation_key_for_bill(bill)))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut preview_drafts = preview_drafts_from_dedup_bills(&previewable_bills);
+    preview_drafts.extend(
+        history_duplicate_plan
+            .iter()
+            .map(|plan| plan.preview_draft.clone()),
+    );
+    preview_drafts.extend(
+        history_transfer_plan
+            .iter()
+            .map(|plan| plan.preview_draft.clone()),
+    );
+    let mut intelligence_stats = match apply_import_intelligence_chain(
         runtime.connection_mut(),
         user_id,
         preview_drafts.as_mut_slice(),
@@ -78,8 +172,33 @@ pub async fn import_dedup_runtime_handler(
         Ok(stats) => stats,
         Err(error) => return route_response(db_error_response(error)),
     };
+    let user_id_i64 = match user_id_i64_for_sql(user_id) {
+        Ok(user_id) => user_id,
+        Err(error) => return route_response(db_error_response(error)),
+    };
+    match apply_import_learning_vector_recall_chain(
+        runtime.connection(),
+        &state.config,
+        user_id_i64,
+        preview_drafts.as_mut_slice(),
+    ) {
+        Ok(vector_stats) => intelligence_stats.merge_vector_recall(vector_stats),
+        Err(error) => return route_response(db_error_response(error)),
+    }
     enforce_import_preview_invariants(preview_drafts.as_mut_slice());
+    refresh_history_duplicate_materialization_payloads(
+        &mut history_duplicate_plan,
+        &preview_drafts,
+    );
+    refresh_history_transfer_materialization_payloads(&mut history_transfer_plan, &preview_drafts);
     let _preview_insert_started_at = Instant::now();
+    if !templates.is_empty() {
+        if let Err(error) =
+            clear_import_preview_materialization_state(runtime.connection_mut(), &session_id, user_id)
+        {
+            return route_response(db_error_response(error));
+        }
+    }
     let inserted_preview = match insert_preview_bills_batch(
         runtime.connection_mut(),
         &session_id,
@@ -89,6 +208,45 @@ pub async fn import_dedup_runtime_handler(
         Ok(inserted) => inserted,
         Err(error) => return route_response(db_error_response(error)),
     };
+    if let Err(error) = insert_import_history_materializations_batch(
+        runtime.connection_mut(),
+        &session_id,
+        user_id,
+        &history_duplicate_plan
+            .iter()
+            .map(|plan| plan.materialization.clone())
+            .chain(
+                history_transfer_plan
+                    .iter()
+                    .map(|plan| plan.materialization.clone()),
+            )
+            .collect::<Vec<_>>(),
+    ) {
+        return route_response(db_error_response(error));
+    }
+    let preview_rows_for_groups =
+        match get_preview_by_session(runtime.connection(), &session_id, user_id, false) {
+            Ok(rows) => rows,
+            Err(error) => return route_response(db_error_response(error)),
+        };
+    let decision_groups = build_import_match_decision_groups(ImportMatchDecisionGroupInput {
+        session_id: &session_id,
+        duplicate_groups: &dedup_result.duplicate_groups,
+        transfer_pairs: &dedup_result.transfer_pairs,
+        templates: &templates,
+        standard_rows: &standard_rows,
+        preview_rows: &preview_rows_for_groups,
+        history_duplicate_plan: &history_duplicate_plan,
+        history_transfer_plan: &history_transfer_plan,
+    });
+    if let Err(error) = insert_import_decision_groups_batch(
+        runtime.connection_mut(),
+        &session_id,
+        user_id,
+        &decision_groups,
+    ) {
+        return route_response(db_error_response(error));
+    }
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
@@ -100,14 +258,6 @@ pub async fn import_dedup_runtime_handler(
         "stage2 preview inserted"
     );
     let _status_update_started_at = Instant::now();
-    let _updated_templates = match mark_unprocessed_parser_templates_processed_for_session(
-        runtime.connection_mut(),
-        &session_id,
-        user_id,
-    ) {
-        Ok(updated) => updated,
-        Err(error) => return route_response(db_error_response(error)),
-    };
     if let Err(error) = update_import_session_status(
         runtime.connection(),
         &ImportSessionStatusUpdate {
@@ -121,6 +271,14 @@ pub async fn import_dedup_runtime_handler(
     ) {
         return route_response(db_error_response(error));
     }
+    let _updated_templates = match mark_unprocessed_parser_templates_processed_for_session(
+        runtime.connection_mut(),
+        &session_id,
+        user_id,
+    ) {
+        Ok(updated) => updated,
+        Err(error) => return route_response(db_error_response(error)),
+    };
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
@@ -158,8 +316,10 @@ pub async fn import_dedup_runtime_handler(
             "category_matched": intelligence_stats.category_matched,
             "account_matched": intelligence_stats.account_matched,
             "learning_applied": intelligence_stats.learning_applied,
+            "learning_vector_recalled": intelligence_stats.learning_vector_recalled,
+            "learning_vector_status": intelligence_stats.learning_vector_status,
             "recurring_projected": intelligence_stats.recurring_projected,
-            "database_candidates": 0,
+            "database_candidates": history_duplicate_plan.len() + history_transfer_plan.len(),
             "provider_bypassed": false,
         }),
     }))
@@ -170,7 +330,23 @@ struct ImportIntelligenceStats {
     category_matched: usize,
     account_matched: usize,
     learning_applied: usize,
+    learning_vector_recalled: usize,
+    learning_vector_status: String,
     recurring_projected: usize,
+}
+
+impl ImportIntelligenceStats {
+    fn merge_vector_recall(&mut self, vector_stats: ImportLearningVectorRecallStats) {
+        self.learning_vector_recalled = vector_stats.recalled;
+        self.learning_vector_status = vector_stats.status;
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ImportLearningVectorRecallRequestDraft {
+    draft_index: usize,
+    features: BTreeMap<String, String>,
+    transaction_type_scope: String,
 }
 
 #[derive(Debug, Clone)]
@@ -231,6 +407,13 @@ struct ImportRecurringCandidateMatch {
     match_score: f64,
     match_reasons: Vec<String>,
     matched_occurrence_date: String,
+}
+
+#[derive(Debug, Clone)]
+struct ImportLearningRuleMatchResult {
+    rule_id: Option<i64>,
+    recommendation_key: String,
+    auto_applied: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -310,6 +493,7 @@ fn apply_import_intelligence_chain(
     let category_rules =
         load_import_intelligence_category_rules(connection, user_id_i64, &categories_by_id)?;
     let accounts = load_import_intelligence_accounts(connection, user_id_i64)?;
+    let account_rules = load_import_intelligence_account_rules(connection, user_id_i64)?;
     let account_values = accounts
         .iter()
         .map(|account| json!({"id": account.id, "name": account.name}))
@@ -321,30 +505,69 @@ fn apply_import_intelligence_chain(
     let mut applied_learning_rule_ids = Vec::new();
     for draft in &mut *drafts {
         ensure_base_matching_feedback(draft);
-        if apply_category_rule_match(draft, &category_rules)
-            || apply_builtin_category_rule_fallback(draft, &categories)
-        {
+        if is_transfer_protected_preview(draft) {
+            if apply_transfer_category_rule_match(draft, &category_rules)
+                || apply_transfer_default_category(draft, &categories, default_transfer_category)
+            {
+                stats.category_matched += 1;
+            }
+            if apply_transfer_account_rule_match(draft, &account_rules, &accounts) {
+                stats.account_matched += 1;
+            }
+        } else if apply_investment_category_rule_match(draft, &category_rules) {
             stats.category_matched += 1;
-        }
-        if apply_transfer_pair_account_match(draft, &accounts) {
-            stats.account_matched += 1;
-        }
-        if apply_account_alias_match(draft, &accounts) {
-            stats.account_matched += 1;
+            if apply_investment_account_rule_match(draft, &account_rules, &accounts) {
+                stats.account_matched += 1;
+            }
+        } else {
+            if apply_income_expense_category_rule_match(draft, &category_rules)
+                || apply_builtin_category_rule_fallback(draft, &categories)
+            {
+                stats.category_matched += 1;
+            }
+            if apply_standard_account_rule_match(draft, &account_rules, &accounts) {
+                stats.account_matched += 1;
+            }
         }
         persist_stage2_actionable_baseline(draft);
-        if let Some(applied_rule_id) = apply_learning_rule_match(
+        if let Some(learning_match) = apply_learning_rule_match(
+            connection,
+            user_id_i64,
             draft,
             &learning_rules,
             &categories_by_id,
             &category_values,
             &account_values,
         ) {
-            stats.learning_applied += 1;
-            applied_learning_rule_ids.push(applied_rule_id);
-        }
-        if apply_transfer_default_category(draft, &categories, default_transfer_category) {
-            stats.category_matched += 1;
+            if learning_match.auto_applied {
+                stats.learning_applied += 1;
+                if let Some(rule_id) = learning_match.rule_id {
+                    applied_learning_rule_ids.push(rule_id);
+                }
+                record_import_learning_lifecycle_feedback(
+                    connection,
+                    user_id_i64,
+                    &ImportLearningLifecycleRecordInput {
+                        recommendation_key: learning_match.recommendation_key,
+                        recommendation_type: "import_preview".to_string(),
+                        feedback: "auto_apply".to_string(),
+                        rule_id: learning_match.rule_id,
+                        suggestion_id: None,
+                        session_id: None,
+                        preview_id: None,
+                        bill_id: None,
+                        candidate_id: None,
+                        payload_json: Some(
+                            json!({
+                                "source": "import_learning_rules",
+                                "stage": "import_stage2"
+                            })
+                            .to_string(),
+                        ),
+                    },
+                )
+                .map_err(|_| rusqlite::Error::InvalidQuery)?;
+            }
         }
         if let Some(candidate) = best_recurring_candidate_for_draft(draft, &recurring_templates) {
             apply_recurring_candidate(draft, candidate);
@@ -566,6 +789,64 @@ fn load_import_intelligence_accounts(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+fn load_import_intelligence_account_rules(
+    connection: &Connection,
+    user_id: i64,
+) -> rusqlite::Result<Vec<AccountRuleCandidate>> {
+    if !import_intelligence_table_exists(connection, "account_rules")? {
+        return Ok(Vec::new());
+    }
+    let regex_expr = sql_column_or_default(connection, "account_rules", "regex_enabled", "0")?;
+    let enabled_expr = sql_column_or_default(connection, "account_rules", "enabled", "1")?;
+    let priority_expr = sql_column_or_default(connection, "account_rules", "priority", "100")?;
+    let role_scope_expr =
+        sql_column_or_default(connection, "account_rules", "account_role_scope", "'any'")?;
+    let type_scope_expr =
+        sql_column_or_default(connection, "account_rules", "transaction_type_scope", "'all'")?;
+    let field_scope_expr = sql_column_or_default(
+        connection,
+        "account_rules",
+        "field_scope",
+        r#"'["counterparty","payment_method","description"]'"#,
+    )?;
+    let has_enabled = table_has_column(connection, "account_rules", "enabled")?;
+    let enabled_filter = if has_enabled { "enabled = 1" } else { "1 = 1" };
+    let mut statement = connection.prepare(&format!(
+        "
+        SELECT id, account_id, rule_expression, {regex_expr}, {priority_expr},
+               {enabled_expr}, {role_scope_expr}, {type_scope_expr}, {field_scope_expr}
+        FROM account_rules
+        WHERE user_id = ?1 AND {enabled_filter}
+        ORDER BY {priority_expr} ASC, id ASC
+        "
+    ))?;
+    let rows = statement.query_map(params![user_id], |row| {
+        let raw_field_scope = row
+            .get::<_, Option<String>>("field_scope")
+            .unwrap_or_default()
+            .unwrap_or_default();
+        Ok(AccountRuleCandidate {
+            rule_id: row.get("id")?,
+            account_id: row.get("account_id")?,
+            account_role_scope: row
+                .get::<_, Option<String>>("account_role_scope")?
+                .unwrap_or_else(|| "any".to_string()),
+            transaction_type_scope: row
+                .get::<_, Option<String>>("transaction_type_scope")?
+                .unwrap_or_else(|| "all".to_string()),
+            field_scope: parse_account_rule_field_scope(&raw_field_scope),
+            rule_expression: row
+                .get::<_, Option<String>>("rule_expression")?
+                .unwrap_or_default(),
+            regex_enabled: row.get::<_, Option<i64>>("regex_enabled")?.unwrap_or(0) != 0,
+            enabled: row.get::<_, Option<i64>>("enabled")?.unwrap_or(1) != 0,
+            priority: row.get::<_, Option<i64>>("priority")?.unwrap_or(100),
+        })
+    })?;
+    rows.collect()
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
 fn load_import_intelligence_learning_rules(
     connection: &Connection,
     user_id: i64,
@@ -698,15 +979,68 @@ fn matching_feedback_object_mut(draft: &mut ImportPreviewDraft) -> &mut Map<Stri
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+#[cfg(test)]
 fn apply_category_rule_match(
     draft: &mut ImportPreviewDraft,
     rules: &[ImportIntelligenceRule],
 ) -> bool {
     let combined_text = import_preview_rule_text(draft);
+    apply_category_rule_match_filtered(draft, rules, &combined_text, |rule, draft| {
+        category_type_matches_preview(rule.category_type, &draft.preview_type)
+    })
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+fn apply_transfer_category_rule_match(
+    draft: &mut ImportPreviewDraft,
+    rules: &[ImportIntelligenceRule],
+) -> bool {
+    let combined_text = import_preview_transfer_rule_text(draft);
+    apply_category_rule_match_filtered(draft, rules, &combined_text, |rule, _| {
+        rule.category_type == 4
+    })
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+fn apply_investment_category_rule_match(
+    draft: &mut ImportPreviewDraft,
+    rules: &[ImportIntelligenceRule],
+) -> bool {
+    let combined_text = import_preview_visible_rule_text(draft);
+    apply_category_rule_match_filtered(draft, rules, &combined_text, |rule, _| {
+        rule.category_type == 5
+    })
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+fn apply_income_expense_category_rule_match(
+    draft: &mut ImportPreviewDraft,
+    rules: &[ImportIntelligenceRule],
+) -> bool {
+    let Some(expected_type) = preview_type_code(&draft.preview_type).filter(|value| {
+        matches!(*value, 2 | 3)
+    }) else {
+        return false;
+    };
+    let combined_text = import_preview_rule_text(draft);
+    apply_category_rule_match_filtered(draft, rules, &combined_text, |rule, _| {
+        rule.category_type == expected_type
+    })
+}
+
+fn apply_category_rule_match_filtered<F>(
+    draft: &mut ImportPreviewDraft,
+    rules: &[ImportIntelligenceRule],
+    combined_text: &str,
+    mut rule_filter: F,
+) -> bool
+where
+    F: FnMut(&ImportIntelligenceRule, &ImportPreviewDraft) -> bool,
+{
     for rule in rules {
         if rule.rule_expression.trim().is_empty()
-            || !category_type_matches_preview(rule.category_type, &draft.preview_type)
-            || !match_rule_expression(&combined_text, &rule.rule_expression, rule.regex_enabled)
+            || !rule_filter(rule, draft)
+            || !match_rule_expression(combined_text, &rule.rule_expression, rule.regex_enabled)
         {
             continue;
         }
@@ -810,32 +1144,6 @@ fn find_import_intelligence_category<'a>(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn apply_account_alias_match(
-    draft: &mut ImportPreviewDraft,
-    accounts: &[ImportIntelligenceAccount],
-) -> bool {
-    if draft.preview_source_account_id.is_some() {
-        return false;
-    }
-    let tokens = import_preview_account_tokens(draft);
-    let Some(account) = accounts.iter().find(|account| account_matches_tokens(account, &tokens))
-    else {
-        return false;
-    };
-    draft.preview_source_account_id = Some(account.id);
-    matching_feedback_object_mut(draft).insert(
-        "account".to_string(),
-        json!({
-            "source_account_id": account.id,
-            "source_account_name": account.name,
-            "reason": "account alias matched parser payment method",
-            "review_status": "auto_applied",
-        }),
-    );
-    true
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
 fn persist_stage2_actionable_baseline(draft: &mut ImportPreviewDraft) {
     let snapshot = import_preview_stage2_snapshot(draft);
 
@@ -874,6 +1182,7 @@ fn import_preview_transfer_applied_snapshot(draft: &ImportPreviewDraft) -> Value
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+#[cfg(test)]
 fn apply_transfer_pair_account_match(
     draft: &mut ImportPreviewDraft,
     accounts: &[ImportIntelligenceAccount],
@@ -969,6 +1278,7 @@ fn transfer_chain_entry_for_roles<'a>(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+#[cfg(test)]
 fn resolve_transfer_account_from_entry(
     entry: &Value,
     accounts: &[ImportIntelligenceAccount],
@@ -1006,6 +1316,7 @@ fn resolve_transfer_account_from_entry(
         .map(|account| account.id)
 }
 
+#[cfg(test)]
 fn transfer_account_id_from_value(value: &Value) -> Option<i64> {
     if let Some(number) = value.as_i64() {
         return (number > 0).then_some(number);
@@ -1013,6 +1324,7 @@ fn transfer_account_id_from_value(value: &Value) -> Option<i64> {
     value.as_str().and_then(|text| text.trim().parse::<i64>().ok().filter(|value| *value > 0))
 }
 
+#[cfg(test)]
 fn transfer_account_tokens_from_entry(entry: &Value) -> Vec<String> {
     let mut tokens = Vec::new();
     for field in [
@@ -1040,6 +1352,7 @@ fn transfer_account_tokens_from_entry(entry: &Value) -> Vec<String> {
     tokens
 }
 
+#[cfg(test)]
 fn expand_transfer_account_token(value: &str) -> Vec<String> {
     let normalized = normalize_account_match_text(value);
     if normalized.is_empty() {
@@ -1072,12 +1385,14 @@ fn transfer_entry_text(value: Option<&Value>) -> Option<String> {
 
 #[tracing::instrument(level = "debug", skip_all)]
 fn apply_learning_rule_match(
+    connection: &Connection,
+    user_id: i64,
     draft: &mut ImportPreviewDraft,
     rules: &[ImportIntelligenceLearningRule],
     categories_by_id: &BTreeMap<i64, ImportIntelligenceCategory>,
     category_values: &[Value],
     account_values: &[Value],
-) -> Option<i64> {
+) -> Option<ImportLearningRuleMatchResult> {
     let transfer_protected = is_transfer_protected_preview(draft);
     let features = build_composite_match_features(
         &draft.preview_parser_id,
@@ -1119,11 +1434,6 @@ fn apply_learning_rule_match(
         let Some((score, mode, reason)) = candidate else {
             continue;
         };
-        if transfer_protected
-            && !learning_rule_keeps_transfer_domain(rule, categories_by_id)
-        {
-            continue;
-        }
         if best
             .as_ref()
             .is_none_or(|(_, best_score, _, _)| score > *best_score)
@@ -1132,13 +1442,25 @@ fn apply_learning_rule_match(
         }
     }
     let (rule, score, mode, reason) = best?;
-    let learned_type = rule
+    let raw_learned_type = rule
         .learned_type
         .as_deref()
         .and_then(normalize_transaction_type_text);
-    let candidate_preview_type = learned_type
-        .as_deref()
-        .unwrap_or_else(|| draft.preview_type.trim());
+    let learned_type = if transfer_protected {
+        raw_learned_type
+            .as_deref()
+            .filter(|transaction_type| *transaction_type == "转账")
+            .map(ToOwned::to_owned)
+    } else {
+        raw_learned_type.clone()
+    };
+    let candidate_preview_type = if transfer_protected {
+        "转账"
+    } else {
+        learned_type
+            .as_deref()
+            .unwrap_or_else(|| draft.preview_type.trim())
+    };
     let learned_category = if let Some(category_id) = rule.learned_category_id {
         let Some(category) = categories_by_id.get(&category_id) else {
             if !transfer_protected {
@@ -1150,12 +1472,9 @@ fn apply_learning_rule_match(
             }
             return None;
         };
-        let candidate_type_for_category = if transfer_protected && category.type_code == 4 {
-            "转账"
-        } else {
-            candidate_preview_type
-        };
-        if !category_type_matches_preview(category.type_code, candidate_type_for_category) {
+        if transfer_protected && category.type_code != 4 {
+            None
+        } else if !category_type_matches_preview(category.type_code, candidate_preview_type) {
             if !transfer_protected {
                 annotate_learning_rule_skip(
                     draft,
@@ -1164,13 +1483,130 @@ fn apply_learning_rule_match(
                 );
             }
             return None;
+        } else {
+            Some(category)
         }
-        Some(category)
     } else {
         None
     };
+    let recommended_category_id = learned_category.map(|category| category.id);
+    if learned_type.is_none()
+        && recommended_category_id.is_none()
+        && rule.learned_source_account_id.is_none()
+        && rule.learned_destination_account_id.is_none()
+    {
+        return None;
+    }
+    let mut recommended_draft = draft.clone();
+    apply_learning_rule_projection(
+        &mut recommended_draft,
+        learned_type.as_deref(),
+        learned_category,
+        rule,
+        transfer_protected,
+    );
+    if learned_type.is_none()
+        && recommended_category_id.is_none()
+        && import_preview_stage2_snapshot(&recommended_draft) == import_preview_stage2_snapshot(draft)
+    {
+        return None;
+    }
+    let recommendation_key = build_import_learning_recommendation_key(
+        &ImportLearningRecommendationKeyInput {
+            user_id,
+            recommended_type: learned_type
+                .clone()
+                .unwrap_or_else(|| recommended_draft.preview_type.clone()),
+            recommended_category_id,
+            recommended_source_account_id: rule.learned_source_account_id,
+            recommended_destination_account_id: rule.learned_destination_account_id,
+            transaction_type_scope: draft.preview_type.clone(),
+            parser_bucket: draft.preview_parser_id.clone(),
+            counterparty_bucket: draft.preview_counterparty.clone(),
+            payment_bucket: draft.preview_payment_method.clone(),
+            description_bucket: draft.preview_description.clone(),
+            amount_bucket: Some(amount_bucket(Some(&json!(draft.preview_amount))).to_string()),
+            transfer_protected,
+            ..ImportLearningRecommendationKeyInput::default()
+        },
+    );
+    let lifecycle =
+        get_import_learning_lifecycle_view(connection, user_id, &recommendation_key, "import_preview")
+            .map_err(|_| rusqlite::Error::InvalidQuery)
+            .ok()?;
+    if lifecycle.suppressed {
+        return None;
+    }
+    let mut rule_payload = Map::new();
+    rule_payload.insert("learned_type".to_string(), json!(learned_type));
+    rule_payload.insert(
+        "learned_category_id".to_string(),
+        json!(recommended_category_id),
+    );
+    rule_payload.insert(
+        "learned_source_account_id".to_string(),
+        json!(rule.learned_source_account_id),
+    );
+    rule_payload.insert(
+        "learned_destination_account_id".to_string(),
+        json!(rule.learned_destination_account_id),
+    );
+    let summary =
+        build_learning_rule_result_summary(&rule_payload, category_values, account_values);
+    let previous_preview = import_preview_stage2_snapshot(draft);
+    let applied_preview = import_preview_stage2_snapshot(&recommended_draft);
+    let auto_applied = lifecycle.auto_apply_enabled;
+    if auto_applied {
+        apply_learning_rule_projection(
+            draft,
+            learned_type.as_deref(),
+            learned_category,
+            rule,
+            transfer_protected,
+        );
+    }
+    let recommended_type_value = applied_preview
+        .get("preview_type")
+        .cloned()
+        .unwrap_or_else(|| json!(draft.preview_type.clone()));
+    matching_feedback_object_mut(draft).insert(
+        "learning".to_string(),
+        json!({
+            "rule_id": rule.id,
+            "score": score,
+            "mode": mode,
+            "reason": reason,
+            "summary": summary,
+            "recommended_type": recommended_type_value,
+            "review_status": if auto_applied { "auto_applied" } else { "pending" },
+            "auto_apply": auto_applied,
+            "source": "import_learning_rules",
+            "recommendation_key": recommendation_key.clone(),
+            "lifecycle_status": lifecycle.status.clone(),
+            "signal_state": lifecycle.signal_state.clone(),
+            "accepted_count": lifecycle.accepted_count,
+            "rejected_count": lifecycle.rejected_count,
+            "auto_applied_count": lifecycle.auto_applied_count,
+            "previous_preview": previous_preview,
+            "applied_preview": applied_preview,
+        }),
+    );
+    Some(ImportLearningRuleMatchResult {
+        rule_id: Some(rule.id),
+        recommendation_key,
+        auto_applied,
+    })
+}
+
+fn apply_learning_rule_projection(
+    draft: &mut ImportPreviewDraft,
+    learned_type: Option<&str>,
+    learned_category: Option<&ImportIntelligenceCategory>,
+    rule: &ImportIntelligenceLearningRule,
+    transfer_protected: bool,
+) {
     if let Some(learned_type) = learned_type {
-        draft.preview_type = learned_type;
+        draft.preview_type = learned_type.to_string();
     }
     if let Some(category) = learned_category {
         draft.preview_main_category = category.main_category.clone();
@@ -1187,63 +1623,6 @@ fn apply_learning_rule_match(
             draft.preview_destination_account_id = Some(account_id);
         }
     }
-    let mut rule_payload = Map::new();
-    rule_payload.insert("learned_type".to_string(), json!(rule.learned_type));
-    rule_payload.insert(
-        "learned_category_id".to_string(),
-        json!(rule.learned_category_id),
-    );
-    rule_payload.insert(
-        "learned_source_account_id".to_string(),
-        json!(rule.learned_source_account_id),
-    );
-    rule_payload.insert(
-        "learned_destination_account_id".to_string(),
-        json!(rule.learned_destination_account_id),
-    );
-    let summary =
-        build_learning_rule_result_summary(&rule_payload, category_values, account_values);
-    let applied_preview = import_preview_stage2_snapshot(draft);
-    matching_feedback_object_mut(draft).insert(
-        "learning".to_string(),
-        json!({
-            "rule_id": rule.id,
-            "score": score,
-            "mode": mode,
-            "reason": reason,
-            "summary": summary,
-            "review_status": "auto_applied",
-            "auto_apply": true,
-            "source": "import_learning_rules",
-            "applied_preview": applied_preview,
-        }),
-    );
-    Some(rule.id)
-}
-
-fn learning_rule_keeps_transfer_domain(
-    rule: &ImportIntelligenceLearningRule,
-    categories_by_id: &BTreeMap<i64, ImportIntelligenceCategory>,
-) -> bool {
-    if rule
-        .learned_type
-        .as_deref()
-        .and_then(normalize_transaction_type_text)
-        .is_some_and(|transaction_type| transaction_type == "转账")
-    {
-        return true;
-    }
-
-    if let Some(category_id) = rule.learned_category_id {
-        return categories_by_id
-            .get(&category_id)
-            .is_some_and(|category| category.type_code == 4);
-    }
-
-    rule.learned_type
-        .as_deref()
-        .and_then(normalize_transaction_type_text)
-        .is_none()
 }
 
 fn learning_similarity_has_semantic_anchor(score: &Value) -> bool {
@@ -1517,6 +1896,19 @@ fn parse_account_aliases(raw_aliases: Option<&str>) -> Vec<String> {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+fn parse_account_rule_field_scope(raw_field_scope: &str) -> Vec<String> {
+    bill_analyser_core::account_rules::normalize_account_rule_field_scope(Some(&Value::String(
+        raw_field_scope.to_string(),
+    )))
+    .unwrap_or_else(|_| {
+        bill_analyser_core::account_rules::DEFAULT_FIELD_SCOPES
+            .iter()
+            .map(|value| (*value).to_string())
+            .collect()
+    })
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_learning_features(raw_features: &str) -> BTreeMap<String, String> {
     serde_json::from_str::<BTreeMap<String, String>>(raw_features.trim())
         .unwrap_or_default()
@@ -1545,6 +1937,19 @@ fn import_preview_rule_text(draft: &ImportPreviewDraft) -> String {
         .filter(|value| !value.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn import_preview_visible_rule_text(draft: &ImportPreviewDraft) -> String {
+    [
+        draft.preview_counterparty.clone(),
+        draft.preview_payment_method.clone(),
+        draft.preview_description.clone(),
+    ]
+    .into_iter()
+    .map(|value| value.trim().to_string())
+    .filter(|value| !value.is_empty())
+    .collect::<Vec<_>>()
+    .join(" ")
 }
 
 fn category_type_matches_preview(category_type: i64, preview_type: &str) -> bool {
@@ -1600,14 +2005,21 @@ fn import_preview_account_tokens(draft: &ImportPreviewDraft) -> Vec<String> {
             let normalized = normalize_account_match_text(&token);
             [
                 normalized.clone(),
-                normalized.strip_prefix("parser:").unwrap_or(&normalized).to_string(),
-                normalized.strip_prefix("channel:").unwrap_or(&normalized).to_string(),
+                normalized
+                    .strip_prefix("parser:")
+                    .unwrap_or(&normalized)
+                    .to_string(),
+                normalized
+                    .strip_prefix("channel:")
+                    .unwrap_or(&normalized)
+                    .to_string(),
             ]
         })
         .filter(|token| !token.is_empty())
         .collect()
 }
 
+#[cfg(test)]
 fn account_matches_tokens(account: &ImportIntelligenceAccount, tokens: &[String]) -> bool {
     account.aliases.iter().any(|alias| {
         let alias = normalize_account_match_text(alias);
@@ -1618,6 +2030,7 @@ fn account_matches_tokens(account: &ImportIntelligenceAccount, tokens: &[String]
     })
 }
 
+#[cfg(test)]
 fn account_exactly_matches_tokens(account: &ImportIntelligenceAccount, tokens: &[String]) -> bool {
     account.aliases.iter().any(|alias| {
         let alias = normalize_account_match_text(alias);
@@ -1887,8 +2300,20 @@ pub async fn import_confirm_runtime_handler(
         }
     }
 
-    let result = match confirm_preview_to_bills(runtime.connection_mut(), &session_id, user_id) {
+    let history_acknowledgement = match history_rewrite_acknowledgement_from_payload(object) {
+        Ok(acknowledgement) => acknowledgement,
+        Err(response) => return route_response(response),
+    };
+    let result = match confirm_preview_to_bills_with_ack(
+        runtime.connection_mut(),
+        &session_id,
+        user_id,
+        history_acknowledgement.as_ref(),
+    ) {
         Ok(result) => result,
+        Err(bill_analyser_db::DbError::InvalidOperation(message)) => {
+            return route_response(import_v2_error_response(400, &message));
+        }
         Err(error) => return route_response(db_error_response(error)),
     };
     route_response(import_stage_confirm_success(ImportStageConfirmData {
@@ -1896,6 +2321,25 @@ pub async fn import_confirm_runtime_handler(
         skipped_count: result.skipped_count + result.duplicate_count,
         errors: result.errors,
     }))
+}
+
+fn history_rewrite_acknowledgement_from_payload(
+    object: &Map<String, Value>,
+) -> Result<Option<ImportHistoryRewriteAcknowledgement>, ImportV2RouteResponse> {
+    let Some(value) = first_value(
+        object,
+        &[
+            "history_rewrite_acknowledgement",
+            "historyRewriteAcknowledgement",
+            "history_rewrite_ack",
+            "historyRewriteAck",
+        ],
+    ) else {
+        return Ok(None);
+    };
+    serde_json::from_value::<ImportHistoryRewriteAcknowledgement>(value.clone())
+        .map(Some)
+        .map_err(|_| import_v2_error_response(400, "Invalid history rewrite acknowledgement"))
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -2778,6 +3222,30 @@ fn build_import_learning_suggestions_from_preview(
                     .get("auto_apply")
                     .cloned()
                     .unwrap_or(Value::Bool(false)),
+                "recommendation_key": learning
+                    .get("recommendation_key")
+                    .cloned()
+                    .unwrap_or_else(|| json!("")),
+                "lifecycle_status": learning
+                    .get("lifecycle_status")
+                    .cloned()
+                    .unwrap_or_else(|| json!("yellow")),
+                "signal_state": learning
+                    .get("signal_state")
+                    .cloned()
+                    .unwrap_or_else(|| json!("yellow")),
+                "accepted_count": learning
+                    .get("accepted_count")
+                    .cloned()
+                    .unwrap_or_else(|| json!(0)),
+                "rejected_count": learning
+                    .get("rejected_count")
+                    .cloned()
+                    .unwrap_or_else(|| json!(0)),
+                "auto_applied_count": learning
+                    .get("auto_applied_count")
+                    .cloned()
+                    .unwrap_or_else(|| json!(0)),
             }))
         })
         .collect()
@@ -2978,382 +3446,6 @@ pub async fn import_learning_rule_delete_runtime_handler(
 }
 
 #[cfg(test)]
-mod stage_handler_transfer_account_tests {
-    use super::*;
-
-    fn transfer_accounts() -> Vec<ImportIntelligenceAccount> {
-        vec![
-            ImportIntelligenceAccount {
-                id: 100,
-                name: "工资卡".to_string(),
-                aliases: vec!["工资卡".to_string(), "农业银行".to_string(), "abc".to_string()],
-            },
-            ImportIntelligenceAccount {
-                id: 200,
-                name: "零钱".to_string(),
-                aliases: vec!["零钱".to_string(), "微信钱包".to_string(), "wallet".to_string()],
-            },
-        ]
-    }
-
-    #[test]
-    fn transfer_pair_account_match_fills_source_and_destination_from_source_chain() {
-        let mut draft = ImportPreviewDraft {
-            preview_matching_feedback: json!({
-                "transfer": {
-                    "pair_order": "outgoing_first",
-                    "source_chain": [
-                        {
-                            "role": "outgoing",
-                            "parser_id": "abc",
-                            "payment_method": "农业银行",
-                            "account_name": "工资卡",
-                            "source_account_id": "abc",
-                            "tags": ["parser:abc"]
-                        },
-                        {
-                            "role": "incoming",
-                            "payment_method": "微信钱包",
-                            "account_name": "零钱",
-                            "source_account_id": "wallet",
-                            "tags": ["channel:wallet"]
-                        }
-                    ]
-                }
-            }),
-            ..ImportPreviewDraft::default()
-        };
-
-        assert!(apply_transfer_pair_account_match(&mut draft, &transfer_accounts()));
-        assert_eq!(draft.preview_source_account_id, Some(100));
-        assert_eq!(draft.preview_destination_account_id, Some(200));
-        assert_eq!(
-            draft
-                .preview_matching_feedback
-                .pointer("/transfer/resolved_source_account_id")
-                .and_then(Value::as_i64),
-            Some(100)
-        );
-        assert_eq!(
-            draft
-                .preview_matching_feedback
-                .pointer("/transfer/resolved_destination_account_id")
-                .and_then(Value::as_i64),
-            Some(200)
-        );
-    }
-
-    #[test]
-    fn transfer_pair_account_match_does_not_fill_same_destination_account() {
-        let mut draft = ImportPreviewDraft {
-            preview_matching_feedback: json!({
-                "transfer": {
-                    "source_chain": [
-                        {"role": "outgoing", "source_account_id": 100},
-                        {"role": "incoming", "source_account_id": 100}
-                    ]
-                }
-            }),
-            ..ImportPreviewDraft::default()
-        };
-
-        assert!(apply_transfer_pair_account_match(&mut draft, &transfer_accounts()));
-        assert_eq!(draft.preview_source_account_id, Some(100));
-        assert_eq!(draft.preview_destination_account_id, None);
-    }
-
-    fn fallback_categories() -> Vec<ImportIntelligenceCategory> {
-        vec![
-            ImportIntelligenceCategory {
-                id: 10,
-                type_code: 2,
-                main_category: "投资收益".to_string(),
-                sub_category: "理财收益".to_string(),
-            },
-            ImportIntelligenceCategory {
-                id: 11,
-                type_code: 3,
-                main_category: "金融保险".to_string(),
-                sub_category: "投资支出".to_string(),
-            },
-            ImportIntelligenceCategory {
-                id: 12,
-                type_code: 3,
-                main_category: "交通出行".to_string(),
-                sub_category: "公交地铁".to_string(),
-            },
-        ]
-    }
-
-    #[test]
-    fn builtin_category_rule_fallback_fills_investment_income_expense_and_transport_paths() {
-        let categories = fallback_categories();
-        let mut income = ImportPreviewDraft {
-            preview_type: "收入".to_string(),
-            preview_description: "余额宝-2026.01.14-收益发放".to_string(),
-            preview_counterparty: "支付宝（中国）网络技术有限公司".to_string(),
-            preview_payment_method: "余额宝".to_string(),
-            preview_parser_id: "alipay".to_string(),
-            ..ImportPreviewDraft::default()
-        };
-        assert!(apply_builtin_category_rule_fallback(&mut income, &categories));
-        assert_eq!(income.preview_main_category, "投资收益");
-        assert_eq!(income.preview_sub_category, "理财收益");
-        assert_eq!(
-            income
-                .preview_matching_feedback
-                .pointer("/category_rule/category_id")
-                .and_then(Value::as_i64),
-            Some(10)
-        );
-
-        let mut expense = ImportPreviewDraft {
-            preview_type: "支出".to_string(),
-            preview_description: "理财通购买".to_string(),
-            preview_parser_id: "wechat".to_string(),
-            ..ImportPreviewDraft::default()
-        };
-        assert!(apply_builtin_category_rule_fallback(&mut expense, &categories));
-        assert_eq!(expense.preview_main_category, "金融保险");
-        assert_eq!(expense.preview_sub_category, "投资支出");
-
-        let mut transport = ImportPreviewDraft {
-            preview_type: "支出".to_string(),
-            preview_sub_category: "公共交通".to_string(),
-            ..ImportPreviewDraft::default()
-        };
-        assert!(apply_builtin_category_rule_fallback(&mut transport, &categories));
-        assert_eq!(transport.preview_main_category, "交通出行");
-        assert_eq!(transport.preview_sub_category, "公交地铁");
-    }
-
-    #[test]
-    fn transfer_pair_account_match_runs_before_generic_alias_match_in_chain() -> rusqlite::Result<()>
-    {
-        let mut connection = Connection::open_in_memory()?;
-        connection.execute_batch(
-            "
-            CREATE TABLE accounts (
-                id INTEGER PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                aliases TEXT,
-                hidden INTEGER DEFAULT 0
-            );
-            INSERT INTO accounts(id, user_id, name, aliases, hidden)
-            VALUES
-                (1, 42, '零钱', '[\"微信钱包\", \"wallet\"]', 0),
-                (100, 42, '工资卡', '[\"农业银行\", \"abc\"]', 0);
-            ",
-        )?;
-        let mut drafts = vec![ImportPreviewDraft {
-            preview_parser_id: "wechat".to_string(),
-            preview_payment_method: "微信钱包".to_string(),
-            preview_parser_tags: Some(json!(["parser:abc", "parser:wechat", "channel:wallet"])),
-            preview_matching_feedback: json!({
-                "transfer": {
-                    "pair_order": "outgoing_first",
-                    "source_chain": [
-                        {
-                            "role": "outgoing",
-                            "parser_id": "abc",
-                            "payment_method": "农业银行",
-                            "account_name": "工资卡",
-                            "source_account_id": "abc"
-                        },
-                        {
-                            "role": "incoming",
-                            "payment_method": "微信钱包",
-                            "account_name": "零钱",
-                            "source_account_id": "wallet"
-                        }
-                    ]
-                }
-            }),
-            ..ImportPreviewDraft::default()
-        }];
-
-        apply_import_intelligence_chain(&mut connection, UserId::new(42).unwrap(), &mut drafts)?;
-
-        assert_eq!(drafts[0].preview_source_account_id, Some(100));
-        assert_eq!(drafts[0].preview_destination_account_id, Some(1));
-        Ok(())
-    }
-
-    #[test]
-    fn user_cash_transfer_category_id_reads_optional_profile_setting() -> rusqlite::Result<()> {
-        let connection = Connection::open_in_memory()?;
-        connection.execute_batch(
-            "
-            CREATE TABLE users (
-                id INTEGER PRIMARY KEY,
-                cash_transfer_category_id INTEGER
-            );
-            INSERT INTO users(id, cash_transfer_category_id) VALUES (42, 904);
-            ",
-        )?;
-
-        assert_eq!(load_user_cash_transfer_category_id(&connection, 42)?, Some(904));
-        assert_eq!(load_user_cash_transfer_category_id(&connection, 77)?, None);
-        Ok(())
-    }
-
-    #[test]
-    fn transfer_default_category_prefers_user_cash_transfer_category() {
-        let categories = vec![
-            ImportIntelligenceCategory {
-                id: 901,
-                type_code: 4,
-                main_category: "一般转账".to_string(),
-                sub_category: "银行转账".to_string(),
-            },
-            ImportIntelligenceCategory {
-                id: 904,
-                type_code: 4,
-                main_category: "账户互转".to_string(),
-                sub_category: "电子支付".to_string(),
-            },
-        ];
-        let categories_by_id = categories
-            .iter()
-            .cloned()
-            .map(|category| (category.id, category))
-            .collect::<BTreeMap<_, _>>();
-
-        let selected = default_transfer_category(&categories, &categories_by_id, Some(904))
-            .expect("user transfer category");
-        assert_eq!(selected.id, 904);
-
-        let mut draft = ImportPreviewDraft {
-            preview_type: "转账".to_string(),
-            dedup_type: Some("transfer".to_string()),
-            ..ImportPreviewDraft::default()
-        };
-        assert!(apply_transfer_default_category(
-            &mut draft,
-            &categories,
-            Some(selected)
-        ));
-        assert_eq!(draft.preview_main_category, "账户互转");
-        assert_eq!(draft.preview_sub_category, "电子支付");
-    }
-
-    #[test]
-    fn transfer_protection_requires_match_signal_not_type_only() {
-        let type_only = ImportPreviewDraft {
-            preview_type: "转账".to_string(),
-            ..ImportPreviewDraft::default()
-        };
-        assert!(!is_transfer_protected_preview(&type_only));
-
-        let dedup_matched = ImportPreviewDraft {
-            preview_type: "支出".to_string(),
-            dedup_type: Some("transfer".to_string()),
-            ..ImportPreviewDraft::default()
-        };
-        assert!(is_transfer_protected_preview(&dedup_matched));
-
-        let signal_matched = ImportPreviewDraft {
-            preview_type: "收入".to_string(),
-            preview_matching_feedback: json!({
-                "transfer": {"candidate_type": "transfer"}
-            }),
-            ..ImportPreviewDraft::default()
-        };
-        assert!(is_transfer_protected_preview(&signal_matched));
-    }
-
-    #[test]
-    fn transfer_learning_domain_allows_account_only_rule() {
-        let rule = ImportIntelligenceLearningRule {
-            id: 1,
-            parser_id: String::new(),
-            composite_hash: String::new(),
-            match_features: BTreeMap::new(),
-            learned_type: None,
-            learned_category_id: None,
-            learned_source_account_id: Some(100),
-            learned_destination_account_id: Some(200),
-        };
-        assert!(learning_rule_keeps_transfer_domain(
-            &rule,
-            &BTreeMap::new()
-        ));
-    }
-
-    #[test]
-    fn transfer_learning_does_not_override_source_chain_accounts() {
-        let features = build_composite_match_features(
-            "cmbc",
-            "支付宝（中国）网络技术有限公司客户备付金",
-            "支付宝快捷支付",
-            "网络银行",
-        )
-        .expect("transfer learning features");
-        let composite_hash = composite_hash_from_features(&features);
-        let rule = ImportIntelligenceLearningRule {
-            id: 7103,
-            parser_id: "cmbc".to_string(),
-            composite_hash,
-            match_features: features,
-            learned_type: None,
-            learned_category_id: None,
-            learned_source_account_id: Some(9001),
-            learned_destination_account_id: Some(9002),
-        };
-        let mut draft = ImportPreviewDraft {
-            preview_type: "转账".to_string(),
-            preview_parser_id: "cmbc".to_string(),
-            preview_counterparty: "支付宝（中国）网络技术有限公司客户备付金".to_string(),
-            preview_description: "支付宝快捷支付".to_string(),
-            preview_payment_method: "网络银行".to_string(),
-            preview_source_account_id: Some(1001),
-            preview_destination_account_id: Some(1002),
-            dedup_type: Some("transfer".to_string()),
-            preview_matching_feedback: json!({
-                "transfer": {"candidate_type": "transfer"}
-            }),
-            ..ImportPreviewDraft::default()
-        };
-        let account_values = vec![
-            json!({"id": 1001, "name": "民生银行"}),
-            json!({"id": 1002, "name": "支付宝"}),
-            json!({"id": 9001, "name": "旧来源"}),
-            json!({"id": 9002, "name": "旧目标"}),
-        ];
-
-        assert_eq!(
-            apply_learning_rule_match(
-                &mut draft,
-                &[rule],
-                &BTreeMap::new(),
-                &[],
-                &account_values,
-            ),
-            Some(7103)
-        );
-        assert_eq!(draft.preview_source_account_id, Some(1001));
-        assert_eq!(draft.preview_destination_account_id, Some(1002));
-    }
-
-    #[test]
-    fn transfer_invariants_clear_stale_account_review_annotation() {
-        let mut drafts = vec![ImportPreviewDraft {
-            preview_type: "转账".to_string(),
-            preview_source_account_id: Some(100),
-            preview_destination_account_id: Some(200),
-            preview_matching_feedback: json!({
-                "transfer": {"candidate_type": "transfer"},
-                "annotation": {
-                    "type": "transfer_account_direction",
-                    "reason": "transfer preview is missing source or destination account"
-                }
-            }),
-            ..ImportPreviewDraft::default()
-        }];
-
-        enforce_import_preview_invariants(drafts.as_mut_slice());
-
-        assert!(drafts[0].preview_matching_feedback.get("annotation").is_none());
-    }
-}
+include!("stage_handlers_tests.rs");
+#[cfg(test)]
+include!("stage_learning_transfer_tests.rs");

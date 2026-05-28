@@ -6,7 +6,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{HttpShellConfig, ImportRouteMode};
+use crate::{
+    config::{HttpShellConfig, ImportRouteMode},
+    database_runtime::DatabaseRuntimeBoundary,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HttpShellIdentity {
@@ -51,19 +54,85 @@ pub struct HttpShellHealth {
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
+    http_shell_health_with_weaviate_status(config, config.weaviate.status_without_probe())
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+pub fn http_shell_health_with_weaviate_status(
+    config: &HttpShellConfig,
+    weaviate_status: &str,
+) -> HttpShellHealth {
     let mut details = BTreeMap::new();
     details.insert(
         "owned_routes".to_string(),
-        "/api/health,/api/runtime,import/preview-adjacent runtime routes,bills CRUD runtime routes,bills picture runtime routes,bills export runtime route,bills recurring runtime routes,bills reconciliation runtime route,bills category actions runtime routes,budgets CRUD/execution/forecast/history/import runtime routes,matching/recurring/calendar/networth runtime routes,statistics read/analyzer/exchange runtime routes,taxonomy account CRUD/display-order/sync-balances/transaction-action runtime routes,taxonomy tag CRUD/display-order runtime routes,taxonomy category master-data/statistics/category-rule-list-test/rule-overview/settings-bundle import-export runtime routes,taxonomy templates CRUD/display-order runtime routes,global Learning Center suggestions/rules runtime routes,LLM config/candidates/provider-generation runtime routes,OCR config and receipt recognition runtime routes,auth login/register/token/account-recovery/OAuth2 authorize/profile/cloud/external-auth/system/user-data-statistics-export-clear/2fa-status/2fa-verify/2fa-recovery-verify/2fa-write/step-up runtime routes,backup ops runtime routes".to_string(),
+        "/api/health,/api/runtime,import/preview-adjacent runtime routes,bills CRUD runtime routes,bills picture runtime routes,bills export runtime route,bills recurring runtime routes,bills reconciliation runtime route,bills category actions runtime routes,budgets CRUD/execution/forecast/history/import runtime routes,matching/recurring/calendar/networth runtime routes,statistics read/analyzer/exchange runtime routes,taxonomy account CRUD/display-order/sync-balances/transaction-action/account-rule list-create-update-delete-reorder-migrate-test runtime routes,taxonomy tag CRUD/display-order runtime routes,taxonomy category master-data/statistics/category-rule-list-test/rule-overview/settings-bundle import-export runtime routes,taxonomy templates CRUD/display-order runtime routes,global Learning Center suggestions/rules runtime routes,LLM config/candidates/provider-generation runtime routes,OCR config and receipt recognition runtime routes,auth login/register/token/account-recovery/OAuth2 authorize/profile/cloud/external-auth/system/user-data-statistics-export-clear/2fa-status/2fa-verify/2fa-recovery-verify/2fa-write/step-up runtime routes,backup ops runtime routes".to_string(),
     );
     details.insert(
         "import_route_mode".to_string(),
         config.import_route_mode.as_str().to_string(),
     );
+    details.insert(
+        "database_backend".to_string(),
+        config.database_backend.as_str().to_string(),
+    );
+    let database_boundary = DatabaseRuntimeBoundary::from_config(config);
+    details.insert(
+        "route_repository_backend".to_string(),
+        database_boundary.route_repository_backend_str().to_string(),
+    );
+    let postgres_cutover_status = DatabaseRuntimeBoundary::postgres_cutover_status(config);
+    details.insert(
+        "postgres_cutover_status".to_string(),
+        postgres_cutover_status.to_string(),
+    );
+    details.insert(
+        "postgres_configured".to_string(),
+        config.postgres_configured().to_string(),
+    );
+    details.insert(
+        "postgres_url_redacted".to_string(),
+        config
+            .redacted_postgres_url()
+            .unwrap_or_else(|| "unconfigured".to_string()),
+    );
+    details.insert(
+        "migration_mode".to_string(),
+        config.migration_mode.as_str().to_string(),
+    );
+    details.insert(
+        "migration_status".to_string(),
+        "placeholder:not_started".to_string(),
+    );
+    details.insert("weaviate_status".to_string(), weaviate_status.to_string());
+    details.insert(
+        "weaviate_endpoint_redacted".to_string(),
+        config.weaviate.redacted_endpoint(),
+    );
+    details.insert(
+        "weaviate_api_key_configured".to_string(),
+        config.weaviate.api_key_configured().to_string(),
+    );
+    details.insert(
+        "weaviate_collection_prefix".to_string(),
+        config.weaviate.collection_prefix.clone(),
+    );
+    details.insert("weaviate_required".to_string(), "true".to_string());
+    details.insert(
+        "require_postgres_after_cutover".to_string(),
+        config.require_postgres_after_cutover.to_string(),
+    );
+    details.insert(
+        "legacy_sqlite_runtime_allowed".to_string(),
+        config.legacy_sqlite_runtime_allowed().to_string(),
+    );
     if config.import_route_mode == ImportRouteMode::ImportDbRuntime {
         details.insert(
             "sqlite_db_path_configured".to_string(),
             config.sqlite_db_path.is_some().to_string(),
+        );
+        details.insert(
+            "sqlite_legacy_path_configured".to_string(),
+            config.sqlite_legacy_path.is_some().to_string(),
         );
         details.insert(
             "bills_crud_runtime".to_string(),
@@ -83,7 +152,7 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
         );
         details.insert(
             "taxonomy_accounts_runtime".to_string(),
-            "owned account list/detail/create/update/delete/display-order, balance sync, and transaction move/clear routes with frontend cents to SQLite yuan conversion, bill-derived SQLite yuan balance recalculation, sensitive-operation password fallback, and account audit metadata".to_string(),
+            "owned account list/detail/create/update/delete/display-order, balance sync, and transaction move/clear routes with frontend cents to PostgreSQL balance_cents conversion, bill-derived balance recalculation, sensitive-operation password fallback, and account audit metadata".to_string(),
         );
         details.insert(
             "taxonomy_tags_runtime".to_string(),
@@ -91,7 +160,7 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
         );
         details.insert(
             "taxonomy_categories_runtime".to_string(),
-            "owned category list/tree/flat/detail/create/update/delete/batch/move/import/export/all/statistics routes plus category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, and settings bundle import/preview/export routes with user-scoped DB reads and writes".to_string(),
+            "owned category list/tree/flat/detail/create/update/delete/batch/move/import/export/all/statistics routes plus category-rule list/create/update/delete/reorder/defaults/migrate/test, account-rule list/create/update/delete/reorder/migrate-aliases/test, rule overview, and settings bundle import/preview/export routes with user-scoped DB reads and writes".to_string(),
         );
         details.insert(
             "taxonomy_templates_runtime".to_string(),
@@ -103,13 +172,19 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
         );
         details.insert(
             "backup_ops_runtime".to_string(),
-            "owned backup file list/create/download/delete/restore/verify/cleanup, job list/save, and cloud sync routes backed by Rust zip/Fernet file I/O, SQLite backup_ops schema, backup_records updates, safe restore validation, OSS/S3/COS/Azure/WebDAV upload execution, and backup audit log writes".to_string(),
+            "owned backup file list/create/download/delete/restore/verify/cleanup, job list/save, and cloud sync routes backed by Rust zip/Fernet file I/O plus PostgreSQL backup_records, backup_jobs, and backup_audit_logs metadata; no SQLite backup_ops fallback is used in PostgreSQL authority runtime".to_string(),
         );
     }
     details.insert("business_api".to_string(), "rust-only-http".to_string());
 
     HttpShellHealth {
-        status: "ok".to_string(),
+        status: if DatabaseRuntimeBoundary::route_repository_runtime_is_healthy(config)
+            && weaviate_status == "healthy"
+        {
+            "ok".to_string()
+        } else {
+            "unhealthy".to_string()
+        },
         identity: HttpShellIdentity::for_import_route_mode(config.import_route_mode),
         details,
     }

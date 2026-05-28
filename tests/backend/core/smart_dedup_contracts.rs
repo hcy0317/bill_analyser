@@ -91,12 +91,93 @@ fn platform_bank_duplicate_keeps_platform_but_transfer_intent_pairs_transfer() {
     );
     assert_eq!(transfer_result.kept_bills[0].destination_parser_id, "icbc");
     assert_eq!(transfer_result.kept_bills[0].transfer_pair_sources.len(), 2);
+    assert_eq!(
+        transfer_result.kept_bills[0].transfer_pair_sources[0].description,
+        "转账到银行卡"
+    );
+    assert_eq!(
+        transfer_result.kept_bills[0].transfer_pair_sources[1].description,
+        "银行卡转入"
+    );
+    assert!(transfer_result.kept_bills[0]
+        .counterparty
+        .contains("测试商户"));
+    assert!(transfer_result.kept_bills[0]
+        .payment_method
+        .contains("wechat"));
+    assert!(transfer_result.kept_bills[0]
+        .payment_method
+        .contains("icbc"));
+}
+
+#[test]
+fn same_batch_duplicate_group_merges_three_rows_with_bank_base() {
+    let mut wallet = bill("cash", "2026-01-02 08:00:00", "-18.60");
+    let mut bank = bill("icbc", "2026-01-02 08:00:15", "-18.60");
+    let mut other_bank = bill("abc", "2026-01-02 08:00:25", "-18.60");
+    wallet.counterparty = "早餐店".to_string();
+    bank.counterparty = "早餐店收款".to_string();
+    other_bank.counterparty = "早餐店".to_string();
+    wallet.description = "豆浆".to_string();
+    bank.description = "银行卡消费".to_string();
+    other_bank.description = "豆浆".to_string();
+    wallet.template_id = Some("tpl-wallet".to_string());
+    bank.template_id = Some("tpl-bank".to_string());
+    other_bank.template_id = Some("tpl-other-bank".to_string());
+
+    let result = SmartDeduplicationEngine.process(vec![wallet, bank, other_bank]);
+
+    assert_eq!(result.original_count, 3);
+    assert_eq!(result.removed_count, 2);
+    assert_eq!(result.duplicate_groups.len(), 1);
+    assert_eq!(
+        result.duplicate_groups[0].dedup_type,
+        DeduplicationType::SameBatch
+    );
+    assert_eq!(result.kept_bills[0].parser_id, "icbc");
+    assert_eq!(
+        result.kept_bills[0].dedup_type.as_deref(),
+        Some("same_batch")
+    );
+    assert_eq!(
+        result.kept_bills[0].dedup_source_ids(),
+        vec![
+            "tpl-bank".to_string(),
+            "tpl-other-bank".to_string(),
+            "tpl-wallet".to_string()
+        ]
+    );
+    assert!(result.kept_bills[0].counterparty.contains("早餐店收款"));
+    assert!(result.kept_bills[0].description.contains("银行卡消费"));
+    assert_eq!(result.kept_bills[0].merged_from.len(), 2);
+}
+
+#[test]
+fn same_batch_duplicate_requires_text_evidence_before_merging_amount_time_matches() {
+    let mut alipay = bill("alipay", "2026-01-02 08:00:00", "-18.60");
+    let mut wechat = bill("wechat", "2026-01-02 08:00:15", "-18.60");
+    alipay.counterparty = "早餐店".to_string();
+    alipay.description = "豆浆".to_string();
+    wechat.counterparty = "书店".to_string();
+    wechat.description = "杂志".to_string();
+    alipay.template_id = Some("tpl-alipay".to_string());
+    wechat.template_id = Some("tpl-wechat".to_string());
+
+    let result = SmartDeduplicationEngine.process(vec![alipay, wechat]);
+
+    assert_eq!(result.original_count, 2);
+    assert_eq!(result.removed_count, 0);
+    assert!(result
+        .duplicate_groups
+        .iter()
+        .all(|group| group.dedup_type != DeduplicationType::SameBatch));
+    assert_eq!(result.kept_bills.len(), 2);
 }
 
 #[test]
 fn similar_duplicates_and_split_groups_preserve_python_contract_edges() {
     let mut wechat = bill("wechat", "2026-01-03 10:00:00", "-8.80");
-    let mut alipay = bill("alipay", "2026-01-03 10:00:20", "-8.80");
+    let mut alipay = bill("alipay", "2026-01-03 10:00:20", "-8.81");
     wechat.counterparty = "咖啡店".to_string();
     alipay.counterparty = "咖啡店".to_string();
     wechat.template_id = Some("tpl-wechat".to_string());
@@ -220,6 +301,21 @@ fn database_duplicate_and_cross_batch_transfer_helpers_match_existing_contract()
     assert_eq!(
         imported_for_cross_batch[0].cross_batch_db_id.as_deref(),
         Some("db-1")
+    );
+    assert_eq!(imported_for_cross_batch[0].destination_parser_id, "icbc");
+    assert_eq!(
+        imported_for_cross_batch[0]
+            .destination_account_id
+            .as_deref(),
+        Some("icbc")
+    );
+    assert_eq!(
+        imported_for_cross_batch[0].transfer_pair_sources[0].role,
+        "outgoing"
+    );
+    assert_eq!(
+        imported_for_cross_batch[0].transfer_pair_sources[1].role,
+        "incoming"
     );
 
     let mut imported_duplicate = bill("alipay", "2026-01-04 09:00:00", "-66.00");
@@ -407,5 +503,135 @@ fn reconciliation_candidate_contract_classifies_duplicates_and_transfers() {
     assert_eq!(
         transfer_candidates[0].candidate_type,
         ReconciliationCandidateType::Transfer
+    );
+
+    let mut imported_delayed_transfer = bill("wechat", "2026-01-07 11:00:00", "-42.00");
+    let mut existing_delayed_transfer = bill("history_db", "2026-01-07 11:04:00", "42.00");
+    imported_delayed_transfer.source_account_id = "1001".to_string();
+    imported_delayed_transfer.payment_method = "wechat balance".to_string();
+    existing_delayed_transfer.source_account_id = "2002".to_string();
+    existing_delayed_transfer.source = "icbc".to_string();
+    existing_delayed_transfer.payment_method = "icbc".to_string();
+    existing_delayed_transfer.id = Some("db-delayed-transfer".to_string());
+
+    let delayed_transfer_candidates = find_import_reconciliation_candidates(
+        &[imported_delayed_transfer],
+        &[existing_delayed_transfer],
+    );
+
+    assert_eq!(delayed_transfer_candidates.len(), 1);
+    assert_eq!(
+        delayed_transfer_candidates[0].candidate_type,
+        ReconciliationCandidateType::Transfer
+    );
+    assert_eq!(delayed_transfer_candidates[0].time_diff_seconds, 240);
+
+    let mut imported_late_duplicate = bill("wechat", "2026-01-07 11:06:00", "-42.00");
+    let mut existing_late_duplicate = bill("history_db", "2026-01-07 11:10:00", "-42.00");
+    imported_late_duplicate.counterparty = "同一商户".to_string();
+    existing_late_duplicate.counterparty = "同一商户".to_string();
+    existing_late_duplicate.id = Some("db-late-duplicate".to_string());
+
+    assert!(find_import_reconciliation_candidates(
+        &[imported_late_duplicate],
+        &[existing_late_duplicate],
+    )
+    .is_empty());
+
+    let mut imported_same_source_transfer = bill("wechat", "2026-01-07 11:10:00", "-42.00");
+    let mut existing_same_source_transfer = bill("history_db", "2026-01-07 11:10:20", "42.00");
+    imported_same_source_transfer.source_account_id = "1001".to_string();
+    imported_same_source_transfer.payment_method = "wechat balance".to_string();
+    existing_same_source_transfer.source_account_id = "1001".to_string();
+    existing_same_source_transfer.source = "wechat balance".to_string();
+    existing_same_source_transfer.payment_method = "wechat balance".to_string();
+    existing_same_source_transfer.id = Some("db-same-source-transfer".to_string());
+
+    assert!(find_import_reconciliation_candidates(
+        &[imported_same_source_transfer],
+        &[existing_same_source_transfer],
+    )
+    .is_empty());
+
+    let mut imported_payment_transfer = bill("wechat", "2026-01-07 11:20:00", "-42.00");
+    let mut existing_payment_transfer = bill("history_db", "2026-01-07 11:20:20", "42.00");
+    imported_payment_transfer.source_account_id.clear();
+    imported_payment_transfer.payment_method = "wechat balance".to_string();
+    imported_payment_transfer.source.clear();
+    existing_payment_transfer.source_account_id.clear();
+    existing_payment_transfer.payment_method = "icbc".to_string();
+    existing_payment_transfer.source.clear();
+    existing_payment_transfer.id = Some("db-payment-transfer".to_string());
+
+    assert_eq!(
+        find_import_reconciliation_candidates(
+            &[imported_payment_transfer],
+            &[existing_payment_transfer],
+        )
+        .len(),
+        1
+    );
+
+    let mut imported_parser_transfer = bill("wechat", "2026-01-07 11:30:00", "-42.00");
+    let mut existing_parser_transfer = bill("icbc", "2026-01-07 11:30:20", "42.00");
+    imported_parser_transfer.source_account_id = "0".to_string();
+    imported_parser_transfer.payment_method.clear();
+    imported_parser_transfer.source.clear();
+    existing_parser_transfer.source_account_id.clear();
+    existing_parser_transfer.payment_method.clear();
+    existing_parser_transfer.source.clear();
+    existing_parser_transfer.id = Some("db-parser-transfer".to_string());
+
+    assert_eq!(
+        find_import_reconciliation_candidates(
+            &[imported_parser_transfer],
+            &[existing_parser_transfer],
+        )
+        .len(),
+        1
+    );
+
+    let mut imported_history_parser_only = bill("wechat", "2026-01-07 11:40:00", "-42.00");
+    let mut existing_history_parser_only = bill("history_db", "2026-01-07 11:40:20", "42.00");
+    imported_history_parser_only.source_account_id.clear();
+    imported_history_parser_only.payment_method.clear();
+    imported_history_parser_only.source.clear();
+    existing_history_parser_only.source_account_id.clear();
+    existing_history_parser_only.payment_method.clear();
+    existing_history_parser_only.source.clear();
+    existing_history_parser_only.id = Some("db-history-parser-only".to_string());
+
+    assert!(find_import_reconciliation_candidates(
+        &[imported_history_parser_only],
+        &[existing_history_parser_only],
+    )
+    .is_empty());
+
+    let mut imported_distinct = bill("wechat", "2026-01-07 12:00:00", "-30.00");
+    let mut existing_distinct = bill("icbc", "2026-01-07 12:00:20", "-30.00");
+    imported_distinct.counterparty = "咖啡店".to_string();
+    imported_distinct.description = "拿铁".to_string();
+    existing_distinct.counterparty = "书店".to_string();
+    existing_distinct.description = "杂志".to_string();
+    existing_distinct.id = Some("db-distinct".to_string());
+
+    assert!(
+        find_import_reconciliation_candidates(&[imported_distinct], &[existing_distinct])
+            .is_empty()
+    );
+
+    let mut imported_empty_text = bill("wechat", "2026-01-07 13:00:00", "-30.00");
+    let mut existing_empty_text = bill("icbc", "2026-01-07 13:00:20", "-30.00");
+    imported_empty_text.counterparty.clear();
+    imported_empty_text.payment_method.clear();
+    imported_empty_text.description.clear();
+    existing_empty_text.counterparty.clear();
+    existing_empty_text.payment_method.clear();
+    existing_empty_text.description.clear();
+    existing_empty_text.id = Some("db-empty-text".to_string());
+
+    assert!(
+        find_import_reconciliation_candidates(&[imported_empty_text], &[existing_empty_text])
+            .is_empty()
     );
 }

@@ -12,6 +12,12 @@ export interface ImportLearningSuggestion {
     learnedDestinationAccountId: number | null;
     learnedDestinationAccountName: string;
     summary: string;
+    recommendationKey?: string;
+    recommendation_key?: string;
+    signalState?: string;
+    signal_state?: string;
+    lifecycleStatus?: string;
+    lifecycle_status?: string;
 }
 
 export interface ImportLearningSuggestionsResponse {
@@ -30,6 +36,10 @@ export interface ImportLearningPromoteResponse {
 }
 
 export function getImportLearningSuggestionKey(suggestion: ImportLearningSuggestion): string {
+    const stableKey = suggestion.recommendationKey || suggestion.recommendation_key || '';
+    if (stableKey.trim()) {
+        return stableKey.trim();
+    }
     return [
         suggestion.matchType,
         suggestion.matchValue,

@@ -471,4 +471,60 @@ mod tests {
         }));
         assert_eq!(tag["display_order"], 4);
     }
+
+    #[test]
+    fn settings_bundle_import_persists_account_rules_after_account_refs() {
+        let mut connection = Connection::open_in_memory().expect("open");
+        crate::schema::init_foundational_schema(&connection).expect("schema");
+        crate::recurring::init_recurring_runtime_schema(&connection).expect("templates schema");
+        connection
+            .execute(
+                "INSERT INTO users(id, username, email, password_hash, created_at, updated_at)
+                 VALUES (42, 'settings-user', 'settings@example.test', 'hash', 'now', 'now')",
+                [],
+            )
+            .expect("user");
+
+        let imported = import_settings_bundle(
+            &mut connection,
+            &json!({
+                "schemaVersion": 1,
+                "sections": {
+                    "accounts": [{
+                        "externalRef": "account:cash",
+                        "name": "现金账户",
+                        "type": 1,
+                        "currency": "CNY",
+                        "balance": 0,
+                        "aliases": ["现金"]
+                    }],
+                    "accountRecognitionRules": [{
+                        "accountRef": "account:cash",
+                        "name": "现金账户规则",
+                        "priority": 1,
+                        "ruleExpression": "OR={现金}",
+                        "fieldScope": ["counterparty"],
+                        "accountRoleScope": "source",
+                        "transactionTypeScope": "expense"
+                    }]
+                }
+            }),
+            42,
+            false,
+        )
+        .expect("import bundle");
+
+        assert_eq!(
+            imported["sections"]["accountRecognitionRules"]["created"],
+            1
+        );
+        let count = connection
+            .query_row(
+                "SELECT COUNT(*) FROM account_rules WHERE user_id = 42 AND rule_expression = 'OR={现金}'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("account rule count");
+        assert_eq!(count, 1);
+    }
 }

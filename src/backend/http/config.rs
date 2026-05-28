@@ -8,6 +8,9 @@ use bill_analyser_core::auth::PasswordPolicy;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::config_database::{normalize_postgres_url, redact_postgres_url};
+use crate::config_weaviate::WeaviateRuntimeConfig;
+
 pub const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 pub const DEFAULT_BODY_LIMIT_BYTES: usize = 10 * 1024 * 1024;
 pub const DEFAULT_UPLOADS_DIR: &str = "data/uploads";
@@ -23,6 +26,8 @@ pub const DEFAULT_AUTH_REQUIRE_EMAIL_VERIFICATION: bool = false;
 pub const DEFAULT_AUTH_ENABLE_USER_FORGET_PASSWORD: bool = false;
 pub const DEFAULT_AUTH_ENABLE_OAUTH2: bool = false;
 pub const DEFAULT_AUTH_PASSWORD_MIN_LENGTH: usize = 8;
+pub const DEFAULT_LOCAL_POSTGRES_URL: &str =
+    "postgres://bill_analyser:bill_analyser_dev@127.0.0.1:5432/bill_analyser";
 pub const MAX_AUTH_JWT_EXPIRATION_DAYS: i64 = 365;
 pub const MAX_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS: i64 = 365;
 pub const MAX_AUTH_MAX_LOGIN_ATTEMPTS: i64 = 100;
@@ -39,6 +44,12 @@ pub struct HttpShellConfig {
     pub backup_encryption_key: Option<String>,
     pub import_route_mode: ImportRouteMode,
     pub sqlite_db_path: Option<String>,
+    pub sqlite_legacy_path: Option<String>,
+    pub postgres_url: Option<String>,
+    pub database_backend: DatabaseBackend,
+    pub migration_mode: MigrationMode,
+    pub require_postgres_after_cutover: bool,
+    pub legacy_sqlite_runtime_allowed: bool,
     pub trusted_user_header_secret: Option<String>,
     pub auth_jwt_secret: Option<String>,
     pub auth_jwt_algorithm: String,
@@ -53,6 +64,7 @@ pub struct HttpShellConfig {
     pub auth_oauth2_provider: String,
     pub auth_password_policy: PasswordPolicy,
     pub public_base_url: Option<String>,
+    pub weaviate: WeaviateRuntimeConfig,
 }
 
 impl HttpShellConfig {
@@ -90,6 +102,12 @@ impl HttpShellConfig {
             backup_encryption_key: None,
             import_route_mode,
             sqlite_db_path: None,
+            sqlite_legacy_path: None,
+            postgres_url: normalize_postgres_url(Some(DEFAULT_LOCAL_POSTGRES_URL.to_string()))?,
+            database_backend: DatabaseBackend::Postgres,
+            migration_mode: MigrationMode::Disabled,
+            require_postgres_after_cutover: true,
+            legacy_sqlite_runtime_allowed: false,
             trusted_user_header_secret: None,
             auth_jwt_secret: None,
             auth_jwt_algorithm: DEFAULT_AUTH_JWT_ALGORITHM.to_string(),
@@ -107,6 +125,7 @@ impl HttpShellConfig {
                 ..PasswordPolicy::default()
             },
             public_base_url: None,
+            weaviate: WeaviateRuntimeConfig::disabled(),
         })
     }
 
@@ -114,6 +133,58 @@ impl HttpShellConfig {
     pub fn with_sqlite_db_path(mut self, sqlite_db_path: impl Into<String>) -> Self {
         self.sqlite_db_path = Some(sqlite_db_path.into());
         self
+    }
+
+    #[tracing::instrument(level = "debug", skip_all)]
+    pub fn with_sqlite_legacy_path(mut self, sqlite_legacy_path: impl Into<String>) -> Self {
+        let sqlite_legacy_path = sqlite_legacy_path.into().trim().to_string();
+        self.sqlite_legacy_path = (!sqlite_legacy_path.is_empty()).then_some(sqlite_legacy_path);
+        self
+    }
+
+    #[tracing::instrument(level = "debug", skip_all)]
+    pub fn with_postgres_url(
+        mut self,
+        postgres_url: impl Into<String>,
+    ) -> Result<Self, HttpShellConfigError> {
+        self.postgres_url = normalize_postgres_url(Some(postgres_url.into()))?;
+        Ok(self)
+    }
+
+    #[tracing::instrument(level = "debug", skip_all)]
+    pub fn with_database_backend(mut self, database_backend: DatabaseBackend) -> Self {
+        self.database_backend = database_backend;
+        self
+    }
+
+    #[tracing::instrument(level = "debug", skip_all)]
+    pub fn with_migration_mode(mut self, migration_mode: MigrationMode) -> Self {
+        self.migration_mode = migration_mode;
+        self
+    }
+
+    #[tracing::instrument(level = "debug", skip_all)]
+    pub fn with_require_postgres_after_cutover(mut self, required: bool) -> Self {
+        self.require_postgres_after_cutover = required;
+        self
+    }
+
+    #[tracing::instrument(level = "debug", skip_all)]
+    pub fn with_legacy_sqlite_runtime_for_tests(mut self) -> Self {
+        self.legacy_sqlite_runtime_allowed = true;
+        self
+    }
+
+    pub const fn legacy_sqlite_runtime_allowed(&self) -> bool {
+        self.legacy_sqlite_runtime_allowed
+    }
+
+    pub fn postgres_configured(&self) -> bool {
+        self.postgres_url.is_some()
+    }
+
+    pub fn redacted_postgres_url(&self) -> Option<String> {
+        self.postgres_url.as_deref().map(redact_postgres_url)
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
@@ -248,6 +319,12 @@ impl HttpShellConfig {
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
+    pub fn with_weaviate_config(mut self, weaviate: WeaviateRuntimeConfig) -> Self {
+        self.weaviate = weaviate;
+        self
+    }
+
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn from_env() -> Result<Self, HttpShellConfigError> {
         Self::from_env_with(|name| env::var(name).ok())
     }
@@ -271,6 +348,29 @@ impl HttpShellConfig {
         let sqlite_db_path = lookup("BILL_ANALYSER_SQLITE_DB_PATH")
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
+        let sqlite_legacy_path = lookup("BILL_ANALYSER_SQLITE_LEGACY_PATH")
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .or_else(|| sqlite_db_path.clone());
+        let database_backend =
+            parse_database_backend(lookup("BILL_ANALYSER_DATABASE_BACKEND").as_deref())?;
+        let migration_mode =
+            parse_migration_mode(lookup("BILL_ANALYSER_MIGRATION_MODE").as_deref())?;
+        let require_postgres_after_cutover = parse_env_bool_value(
+            "BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER",
+            lookup("BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER")
+                .filter(|value| !value.trim().is_empty()),
+            true,
+        )?;
+        let postgres_url = normalize_postgres_url(
+            lookup("BILL_ANALYSER_POSTGRES_URL")
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| {
+                    database_backend
+                        .uses_postgres()
+                        .then(|| DEFAULT_LOCAL_POSTGRES_URL.to_string())
+                }),
+        )?;
         let uploads_dir = lookup("BILL_ANALYSER_UPLOADS_DIR")
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
@@ -395,6 +495,7 @@ impl HttpShellConfig {
         let public_base_url = lookup("BILL_ANALYSER_PUBLIC_BASE_URL")
             .map(normalize_upstream)
             .transpose()?;
+        let weaviate = WeaviateRuntimeConfig::from_env_with(&mut lookup)?;
 
         let mut config = Self::new_with_import_route_mode(
             "",
@@ -403,6 +504,12 @@ impl HttpShellConfig {
             import_route_mode,
         )?;
         config.sqlite_db_path = sqlite_db_path;
+        config.sqlite_legacy_path = sqlite_legacy_path;
+        config.postgres_url = postgres_url;
+        config.database_backend = database_backend;
+        config.migration_mode = migration_mode;
+        config.require_postgres_after_cutover = require_postgres_after_cutover;
+        config.legacy_sqlite_runtime_allowed = false;
         config.uploads_dir = uploads_dir;
         config.data_dir = data_dir;
         config.backup_dir = backup_dir;
@@ -421,6 +528,7 @@ impl HttpShellConfig {
         config.auth_oauth2_provider = auth_oauth2_provider;
         config.auth_password_policy = auth_password_policy;
         config.public_base_url = public_base_url;
+        config.weaviate = weaviate;
         Ok(config)
     }
 }
@@ -448,6 +556,16 @@ pub enum HttpShellConfigError {
     InvalidBoolean(&'static str),
     #[error("invalid import route mode")]
     InvalidImportRouteMode,
+    #[error("invalid database backend")]
+    InvalidDatabaseBackend,
+    #[error("invalid migration mode")]
+    InvalidMigrationMode,
+    #[error("invalid PostgreSQL URL")]
+    InvalidPostgresUrl,
+    #[error("invalid Weaviate endpoint")]
+    InvalidWeaviateEndpoint,
+    #[error("invalid Weaviate collection prefix")]
+    InvalidWeaviateCollectionPrefix,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -465,6 +583,44 @@ impl ImportRouteMode {
 
     pub const fn intercepts_import_routes(self) -> bool {
         matches!(self, Self::ImportDbRuntime)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DatabaseBackend {
+    Sqlite,
+    Postgres,
+}
+
+impl DatabaseBackend {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Sqlite => "sqlite",
+            Self::Postgres => "postgres",
+        }
+    }
+
+    pub const fn uses_postgres(self) -> bool {
+        matches!(self, Self::Postgres)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MigrationMode {
+    Disabled,
+    Validate,
+    Apply,
+}
+
+impl MigrationMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::Validate => "validate",
+            Self::Apply => "apply",
+        }
     }
 }
 
@@ -566,5 +722,27 @@ fn parse_import_route_mode(value: Option<&str>) -> Result<ImportRouteMode, HttpS
             Ok(ImportRouteMode::ImportDbRuntime)
         }
         _ => Err(HttpShellConfigError::InvalidImportRouteMode),
+    }
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+fn parse_database_backend(value: Option<&str>) -> Result<DatabaseBackend, HttpShellConfigError> {
+    let normalized = value.unwrap_or("").trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" => Ok(DatabaseBackend::Postgres),
+        "sqlite" | "legacy_sqlite" | "sqlite_legacy" => Ok(DatabaseBackend::Sqlite),
+        "postgres" | "postgresql" => Ok(DatabaseBackend::Postgres),
+        _ => Err(HttpShellConfigError::InvalidDatabaseBackend),
+    }
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+fn parse_migration_mode(value: Option<&str>) -> Result<MigrationMode, HttpShellConfigError> {
+    let normalized = value.unwrap_or("").trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" | "disabled" | "off" | "none" => Ok(MigrationMode::Disabled),
+        "validate" | "check" => Ok(MigrationMode::Validate),
+        "apply" | "migrate" => Ok(MigrationMode::Apply),
+        _ => Err(HttpShellConfigError::InvalidMigrationMode),
     }
 }

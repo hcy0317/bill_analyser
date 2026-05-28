@@ -50,6 +50,28 @@ async fn quick_add_category_keyword_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "bills") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match quick_add_postgres_category_keyword(
+            runtime.pool(),
+            user_id,
+            &main_category,
+            sub_category.as_deref(),
+            &keyword,
+        )
+        .await
+        {
+            Ok(true) => json_response(
+                StatusCode::OK,
+                json!({"success": true, "message": "Keyword added successfully"}),
+            ),
+            Ok(false) => bad_request("Failed to add keyword"),
+            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+        };
+    }
     let mut runtime = match open_runtime(&state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -85,6 +107,33 @@ async fn refresh_bill_categories_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "bills") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match refresh_category_for_bills_postgres(
+            runtime.pool(),
+            user_id,
+            bill_ids.as_deref(),
+        )
+        .await
+        {
+            Ok(result) => json_response(
+                StatusCode::OK,
+                json!({
+                    "success": true,
+                    "result": {
+                        "success": true,
+                        "total": result.total,
+                        "categorized": result.categorized,
+                        "still_uncategorized": result.still_uncategorized,
+                    },
+                }),
+            ),
+            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+        };
+    }
     let mut runtime = match open_runtime(&state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -105,6 +154,44 @@ async fn refresh_bill_categories_handler(
         ),
         Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
+}
+
+async fn quick_add_postgres_category_keyword(
+    pool: &PostgresPool,
+    user_id: UserId,
+    main_category: &str,
+    sub_category: Option<&str>,
+    keyword: &str,
+) -> bill_analyser_db::DbResult<bool> {
+    let db_user_id = user_id.get() as i64;
+    let sub_category = sub_category.unwrap_or("");
+    let Some(category) =
+        get_postgres_category_by_name(pool, main_category, sub_category, db_user_id).await?
+    else {
+        return Ok(false);
+    };
+    let category_id = record_i64(&category, "id").unwrap_or_default();
+    if category_id <= 0 {
+        return Ok(false);
+    }
+    let mut keyword_list = value_string(category.get("keywords"))
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    if keyword_list.iter().any(|value| value == keyword) {
+        return Ok(false);
+    }
+    keyword_list.push(keyword.to_string());
+    update_postgres_category(
+        pool,
+        category_id,
+        &json!({"keywords": keyword_list.join(",")}),
+        db_user_id,
+    )
+    .await
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -151,6 +238,46 @@ fn quick_add_category_keyword(
     Ok(updated > 0)
 }
 
+async fn refresh_category_for_bills_postgres(
+    pool: &PostgresPool,
+    user_id: UserId,
+    bill_ids: Option<&[i64]>,
+) -> bill_analyser_db::DbResult<CategoryRefreshResult> {
+    let rules = load_category_runtime_rules_postgres(pool, user_id).await?;
+    let bills = load_category_refresh_bills_postgres(pool, user_id, bill_ids).await?;
+    let total = bills.len();
+    let mut categorized = 0_usize;
+    let mut still_uncategorized = 0_usize;
+
+    for bill in bills {
+        if let Some((main_category, sub_category)) = match_category_for_bill(&bill, &rules) {
+            let bill_id = record_i64(&bill, "id").unwrap_or_default();
+            let mut fields = Map::new();
+            fields.insert("main_category".to_string(), Value::String(main_category));
+            fields.insert("sub_category".to_string(), Value::String(sub_category));
+            update_postgres_bill(
+                pool,
+                user_id.get() as i64,
+                bill_id,
+                &BillUpdateDraft {
+                    fields,
+                    tag_ids: None,
+                },
+            )
+            .await?;
+            categorized += 1;
+        } else {
+            still_uncategorized += 1;
+        }
+    }
+
+    Ok(CategoryRefreshResult {
+        total,
+        categorized,
+        still_uncategorized,
+    })
+}
+
 #[tracing::instrument(level = "debug", skip_all)]
 fn refresh_category_for_bills(
     connection: &mut Connection,
@@ -189,6 +316,90 @@ fn refresh_category_for_bills(
         categorized,
         still_uncategorized,
     })
+}
+
+async fn load_category_runtime_rules_postgres(
+    pool: &PostgresPool,
+    user_id: UserId,
+) -> bill_analyser_db::DbResult<Vec<CategoryRuleRuntimeRecord>> {
+    let records = list_postgres_category_rules(pool, user_id.get() as i64, None, true).await?;
+    let mut rules = records
+        .iter()
+        .filter_map(category_rule_runtime_record_from_postgres)
+        .collect::<Vec<_>>();
+    rules.sort_by_key(|rule| (rule.category_priority, rule.category_id, rule.id));
+    Ok(rules)
+}
+
+fn category_rule_runtime_record_from_postgres(
+    record: &CategoryRuleRecord,
+) -> Option<CategoryRuleRuntimeRecord> {
+    let rule = CategoryRuleRuntimeRecord {
+        id: record_i64(record, "id")?,
+        category_id: record_i64(record, "category_id")?,
+        main_category: record_text(record, "main_category").trim().to_string(),
+        sub_category: record_text(record, "sub_category").trim().to_string(),
+        category_type: normalize_category_rule_type(
+            record_i64(record, "category_type").and_then(|value| i32::try_from(value).ok()),
+        )
+        .unwrap_or(3),
+        category_priority: record_i64(record, "priority")
+            .and_then(|value| i32::try_from(value).ok())
+            .unwrap_or(100),
+        rule_expression: record_text(record, "rule_expression"),
+        regex_enabled: record_i64(record, "regex_enabled").unwrap_or_default() != 0,
+    };
+    if rule.category_id > 0
+        && !rule.main_category.is_empty()
+        && !rule.sub_category.is_empty()
+        && !rule.rule_expression.is_empty()
+    {
+        Some(rule)
+    } else {
+        None
+    }
+}
+
+async fn load_category_refresh_bills_postgres(
+    pool: &PostgresPool,
+    user_id: UserId,
+    bill_ids: Option<&[i64]>,
+) -> bill_analyser_db::DbResult<Vec<BillRecord>> {
+    if let Some(bill_ids) = bill_ids {
+        let mut bills = Vec::new();
+        for bill_id in bill_ids.iter().copied().filter(|value| *value > 0) {
+            if let Some(bill) =
+                get_postgres_bill_by_id(pool, user_id.get() as i64, bill_id).await?
+            {
+                bills.push(bill);
+            }
+        }
+        return Ok(bills);
+    }
+
+    let mut bills = Vec::new();
+    let mut scanned = 0_usize;
+    let mut page = 1;
+    while scanned < RECONCILIATION_QUERY_LIMIT {
+        let page_size = (RECONCILIATION_QUERY_LIMIT - scanned).min(RECONCILIATION_QUERY_PAGE_SIZE);
+        let bill_page =
+            query_postgres_bills(pool, user_id.get() as i64, page, page_size, &BillFilters::default())
+                .await?;
+        let fetched = bill_page.bills.len();
+        let total = usize::try_from(bill_page.total.max(0)).unwrap_or(usize::MAX);
+        scanned += fetched;
+        bills.extend(
+            bill_page
+                .bills
+                .into_iter()
+                .filter(|bill| record_text(bill, "main_category").trim().is_empty()),
+        );
+        if fetched == 0 || fetched < page_size || scanned >= total {
+            break;
+        }
+        page += 1;
+    }
+    Ok(bills)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

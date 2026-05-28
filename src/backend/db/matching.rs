@@ -31,6 +31,8 @@ use crate::{
     UserScope,
 };
 
+pub mod postgres_reads;
+
 include!("matching/types_schema.rs");
 include!("matching/actions.rs");
 include!("matching/candidate_queries.rs");

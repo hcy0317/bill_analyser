@@ -112,6 +112,395 @@ function Get-NpmCommand {
     return $null
 }
 
+function Read-DotenvSettings {
+    param([string]$Path)
+
+    $settings = @{}
+    if (-not (Test-Path $Path)) {
+        return $settings
+    }
+
+    foreach ($line in Get-Content -Path $Path) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith("#")) {
+            continue
+        }
+
+        $separator = $trimmed.IndexOf("=")
+        if ($separator -le 0) {
+            continue
+        }
+
+        $key = $trimmed.Substring(0, $separator).Trim()
+        $value = $trimmed.Substring($separator + 1).Trim().Trim('"').Trim("'")
+        if ($key) {
+            $settings[$key] = $value
+        }
+    }
+
+    return $settings
+}
+
+function Get-ConfiguredValue {
+    param(
+        [hashtable]$Settings,
+        [string]$Name
+    )
+
+    $value = [Environment]::GetEnvironmentVariable($Name)
+    if (-not [string]::IsNullOrWhiteSpace($value)) {
+        return [string]$value
+    }
+
+    if ($Settings.ContainsKey($Name) -and -not [string]::IsNullOrWhiteSpace([string]$Settings[$Name])) {
+        return [string]$Settings[$Name]
+    }
+
+    return $null
+}
+
+function Set-EnvIfMissing {
+    param(
+        [hashtable]$Settings,
+        [string]$Name
+    )
+
+    $value = Get-ConfiguredValue -Settings $Settings -Name $Name
+    if ($value -and -not [Environment]::GetEnvironmentVariable($Name)) {
+        Set-Item -Path "Env:$Name" -Value $value
+    }
+}
+
+function Get-ConfiguredPort {
+    param(
+        [hashtable]$Settings,
+        [string]$Name,
+        [int]$DefaultPort
+    )
+
+    $value = Get-ConfiguredValue -Settings $Settings -Name $Name
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return $DefaultPort
+    }
+
+    $port = 0
+    if ([int]::TryParse($value, [ref]$port) -and $port -gt 0 -and $port -le 65535) {
+        return $port
+    }
+
+    Write-Warn "无法解析 $Name='$value'，使用默认端口 $DefaultPort"
+    return $DefaultPort
+}
+
+function Test-CanBindLocalPort {
+    param([int]$Port)
+
+    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Any, $Port)
+    try {
+        $listener.Start()
+        return $true
+    } catch {
+        return $false
+    } finally {
+        $listener.Stop()
+    }
+}
+
+function Get-DockerContainerRunningHostPorts {
+    param(
+        [string]$DockerPath,
+        [string]$ContainerName,
+        [int]$ContainerPort
+    )
+
+    $inspect = & $DockerPath container inspect $ContainerName --format "{{json .}}" 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($inspect)) {
+        return @()
+    }
+
+    try {
+        $container = $inspect | ConvertFrom-Json
+    } catch {
+        return @()
+    }
+
+    if (-not $container.State -or -not $container.State.Running) {
+        return @()
+    }
+
+    $ports = $container.NetworkSettings.Ports
+    if ($null -eq $ports) {
+        return @()
+    }
+
+    $hostPorts = New-Object System.Collections.Generic.List[int]
+    $portProperties = if ($ContainerPort -gt 0) {
+        @($ports.PSObject.Properties["$ContainerPort/tcp"])
+    } else {
+        @($ports.PSObject.Properties)
+    }
+
+    foreach ($property in $portProperties) {
+        if ($null -eq $property) {
+            continue
+        }
+        if ($null -eq $property.Value) {
+            continue
+        }
+
+        foreach ($binding in @($property.Value)) {
+            $bindingPort = 0
+            if ($binding.HostPort -and [int]::TryParse([string]$binding.HostPort, [ref]$bindingPort) -and -not $hostPorts.Contains($bindingPort)) {
+                $hostPorts.Add($bindingPort)
+            }
+        }
+    }
+
+    return @($hostPorts)
+}
+
+function Test-DockerContainerRunningWithHostPort {
+    param(
+        [string]$DockerPath,
+        [string]$ContainerName,
+        [int]$ContainerPort,
+        [int]$HostPort
+    )
+
+    $hostPorts = @(Get-DockerContainerRunningHostPorts -DockerPath $DockerPath -ContainerName $ContainerName -ContainerPort $ContainerPort)
+    return $hostPorts -contains $HostPort
+}
+
+function Find-ComposeHostPort {
+    param(
+        [string]$ServiceName,
+        [int]$DefaultPort,
+        [int]$FallbackStartPort,
+        [string]$DockerPath,
+        [string]$ContainerName,
+        [int]$ContainerPort
+    )
+
+    $runningPorts = @(Get-DockerContainerRunningHostPorts -DockerPath $DockerPath -ContainerName $ContainerName -ContainerPort $ContainerPort)
+    if ($runningPorts.Count -gt 0) {
+        $runningPort = $runningPorts[0]
+        return @{
+            Port = $runningPort
+            Reused = $true
+            Fallback = ($runningPort -ne $DefaultPort)
+        }
+    }
+
+    $candidates = New-Object System.Collections.Generic.List[int]
+    $candidates.Add($DefaultPort)
+    for ($port = $FallbackStartPort; $port -lt ($FallbackStartPort + 100); $port++) {
+        if ($port -ne $DefaultPort) {
+            $candidates.Add($port)
+        }
+    }
+
+    foreach ($candidate in $candidates) {
+        if (Test-CanBindLocalPort -Port $candidate) {
+            return @{
+                Port = $candidate
+                Reused = $false
+                Fallback = ($candidate -ne $DefaultPort)
+            }
+        }
+    }
+
+    Write-Err "无法为 $ServiceName 找到可用本地端口（从 $FallbackStartPort 起尝试 100 个端口）"
+    exit 1
+}
+
+function Assert-ComposeHostPortAvailable {
+    param(
+        [string]$ServiceName,
+        [int]$Port,
+        [string]$DockerPath,
+        [string]$ContainerName,
+        [int]$ContainerPort,
+        [string]$EnvName,
+        [string]$UrlEnvName
+    )
+
+    if (Test-DockerContainerRunningWithHostPort -DockerPath $DockerPath -ContainerName $ContainerName -ContainerPort $ContainerPort -HostPort $Port) {
+        return
+    }
+
+    if (Test-CanBindLocalPort -Port $Port) {
+        return
+    }
+
+    Write-Err "  ✗ $ServiceName 指定端口 $Port 已被非本项目进程占用"
+    Write-Warn "  请释放该端口，或修改 $EnvName，或直接配置 $UrlEnvName 指向已有服务。"
+    exit 1
+}
+
+function ConvertTo-UrlPart {
+    param([string]$Value)
+    return [System.Uri]::EscapeDataString($Value)
+}
+
+function Test-TruthyValue {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $false
+    }
+    return @("1", "true", "yes", "on") -contains $Value.Trim().ToLowerInvariant()
+}
+
+function Start-RequiredRuntimeServices {
+    param([string]$Root)
+
+    $composeFile = Join-Path $Root "docker-compose.postgres.yml"
+    if (-not (Test-Path $composeFile)) {
+        Write-Err "找不到 compose 文件: $composeFile"
+        exit 1
+    }
+
+    $dotenvPath = Join-Path $Root ".env"
+    $settings = Read-DotenvSettings -Path $dotenvPath
+    $databaseBackend = Get-ConfiguredValue -Settings $settings -Name "BILL_ANALYSER_DATABASE_BACKEND"
+    if (-not $databaseBackend) {
+        $databaseBackend = "postgres"
+        Set-Item -Path Env:BILL_ANALYSER_DATABASE_BACKEND -Value $databaseBackend
+    } else {
+        Set-EnvIfMissing -Settings $settings -Name "BILL_ANALYSER_DATABASE_BACKEND"
+    }
+    $normalizedDatabaseBackend = $databaseBackend.Trim().ToLowerInvariant()
+    $requireCutoverValue = Get-ConfiguredValue -Settings $settings -Name "BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER"
+    if (-not $requireCutoverValue) {
+        $requireCutoverValue = "true"
+        Set-Item -Path Env:BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER -Value $requireCutoverValue
+    } else {
+        Set-EnvIfMissing -Settings $settings -Name "BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER"
+    }
+    $requirePostgresAfterCutover = Test-TruthyValue -Value $requireCutoverValue
+    $needsPostgres = ($normalizedDatabaseBackend -in @("postgres", "postgresql")) -or $requirePostgresAfterCutover
+
+    if ($normalizedDatabaseBackend -notin @("sqlite", "sqlite_legacy", "legacy_sqlite", "postgres", "postgresql")) {
+        Write-Err "不支持的 BILL_ANALYSER_DATABASE_BACKEND='$databaseBackend'"
+        exit 1
+    }
+    if ($requirePostgresAfterCutover -and ($normalizedDatabaseBackend -notin @("postgres", "postgresql"))) {
+        Write-Err "BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER=true 需要 BILL_ANALYSER_DATABASE_BACKEND=postgres"
+        exit 1
+    }
+    if ($normalizedDatabaseBackend -notin @("postgres", "postgresql")) {
+        Write-Err "HTTP 业务运行态需要 BILL_ANALYSER_DATABASE_BACKEND=postgres；SQLite 仅允许作为迁移/测试输入"
+        exit 1
+    }
+
+    $postgresUrl = Get-ConfiguredValue -Settings $settings -Name "BILL_ANALYSER_POSTGRES_URL"
+    $weaviateEndpoint = Get-ConfiguredValue -Settings $settings -Name "BILL_ANALYSER_WEAVIATE_ENDPOINT"
+    $composeServices = @()
+
+    foreach ($name in @(
+        "BILL_ANALYSER_POSTGRES_DB",
+        "BILL_ANALYSER_POSTGRES_USER",
+        "BILL_ANALYSER_POSTGRES_PASSWORD",
+        "BILL_ANALYSER_POSTGRES_PORT",
+        "BILL_ANALYSER_WEAVIATE_PORT",
+        "BILL_ANALYSER_WEAVIATE_GRPC_PORT"
+    )) {
+        Set-EnvIfMissing -Settings $settings -Name $name
+    }
+
+    $requiresCompose = ($needsPostgres -and -not $postgresUrl) -or (-not $weaviateEndpoint)
+    $dockerCmd = $null
+    if ($requiresCompose) {
+        $dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
+        if (-not $dockerCmd) {
+            Write-Err "未找到 Docker。当前配置需要启动本地运行态服务。"
+            Write-Warn "请先安装 Docker Desktop，或手动提供可达的 BILL_ANALYSER_WEAVIATE_ENDPOINT；严格 Postgres cutover 还需要 BILL_ANALYSER_POSTGRES_URL。"
+            exit 1
+        }
+    }
+
+    if ($postgresUrl) {
+        Set-EnvIfMissing -Settings $settings -Name "BILL_ANALYSER_POSTGRES_URL"
+        Write-Gray "  使用已配置 Postgres URL，跳过本地 Postgres compose 管理"
+    } else {
+        $postgresPortValue = Get-ConfiguredValue -Settings $settings -Name "BILL_ANALYSER_POSTGRES_PORT"
+        $postgresPort = if ($postgresPortValue) {
+            $configuredPort = Get-ConfiguredPort -Settings $settings -Name "BILL_ANALYSER_POSTGRES_PORT" -DefaultPort 5432
+            Assert-ComposeHostPortAvailable -ServiceName "Postgres" -Port $configuredPort -DockerPath $dockerCmd.Source -ContainerName "bill-analyser-postgres" -ContainerPort 5432 -EnvName "BILL_ANALYSER_POSTGRES_PORT" -UrlEnvName "BILL_ANALYSER_POSTGRES_URL"
+            $configuredPort
+        } else {
+            $resolution = Find-ComposeHostPort -ServiceName "Postgres" -DefaultPort 5432 -FallbackStartPort 55432 -DockerPath $dockerCmd.Source -ContainerName "bill-analyser-postgres" -ContainerPort 5432
+            if ($resolution.Fallback) {
+                Write-Warn "  Postgres 默认端口 5432 已被占用，改用本地 compose 端口 $($resolution.Port)"
+            }
+            [int]$resolution.Port
+        }
+
+        $postgresDb = Get-ConfiguredValue -Settings $settings -Name "BILL_ANALYSER_POSTGRES_DB"
+        if (-not $postgresDb) { $postgresDb = "bill_analyser" }
+        $postgresUser = Get-ConfiguredValue -Settings $settings -Name "BILL_ANALYSER_POSTGRES_USER"
+        if (-not $postgresUser) { $postgresUser = "bill_analyser" }
+        $postgresPassword = Get-ConfiguredValue -Settings $settings -Name "BILL_ANALYSER_POSTGRES_PASSWORD"
+        if (-not $postgresPassword) { $postgresPassword = "bill_analyser_dev" }
+
+        Set-Item -Path Env:BILL_ANALYSER_POSTGRES_PORT -Value ([string]$postgresPort)
+        Set-Item -Path Env:BILL_ANALYSER_POSTGRES_DB -Value $postgresDb
+        Set-Item -Path Env:BILL_ANALYSER_POSTGRES_USER -Value $postgresUser
+        Set-Item -Path Env:BILL_ANALYSER_POSTGRES_PASSWORD -Value $postgresPassword
+        $env:BILL_ANALYSER_POSTGRES_URL = "postgres://$(ConvertTo-UrlPart $postgresUser):$(ConvertTo-UrlPart $postgresPassword)@127.0.0.1:$postgresPort/$(ConvertTo-UrlPart $postgresDb)"
+        $composeServices += "postgres"
+    }
+
+    if ($weaviateEndpoint) {
+        Set-EnvIfMissing -Settings $settings -Name "BILL_ANALYSER_WEAVIATE_ENDPOINT"
+        Write-Gray "  使用已配置 Weaviate endpoint，跳过本地 Weaviate compose 管理"
+    } else {
+        $weaviatePortValue = Get-ConfiguredValue -Settings $settings -Name "BILL_ANALYSER_WEAVIATE_PORT"
+        $weaviatePort = if ($weaviatePortValue) {
+            $configuredPort = Get-ConfiguredPort -Settings $settings -Name "BILL_ANALYSER_WEAVIATE_PORT" -DefaultPort 8088
+            Assert-ComposeHostPortAvailable -ServiceName "Weaviate" -Port $configuredPort -DockerPath $dockerCmd.Source -ContainerName "bill-analyser-weaviate" -ContainerPort 8080 -EnvName "BILL_ANALYSER_WEAVIATE_PORT" -UrlEnvName "BILL_ANALYSER_WEAVIATE_ENDPOINT"
+            $configuredPort
+        } else {
+            $resolution = Find-ComposeHostPort -ServiceName "Weaviate" -DefaultPort 8088 -FallbackStartPort 18088 -DockerPath $dockerCmd.Source -ContainerName "bill-analyser-weaviate" -ContainerPort 8080
+            if ($resolution.Fallback) {
+                Write-Warn "  Weaviate 默认端口 8088 已被占用，改用本地 compose 端口 $($resolution.Port)"
+            }
+            [int]$resolution.Port
+        }
+
+        $weaviateGrpcPortValue = Get-ConfiguredValue -Settings $settings -Name "BILL_ANALYSER_WEAVIATE_GRPC_PORT"
+        $weaviateGrpcPort = if ($weaviateGrpcPortValue) {
+            $configuredPort = Get-ConfiguredPort -Settings $settings -Name "BILL_ANALYSER_WEAVIATE_GRPC_PORT" -DefaultPort 50051
+            Assert-ComposeHostPortAvailable -ServiceName "Weaviate gRPC" -Port $configuredPort -DockerPath $dockerCmd.Source -ContainerName "bill-analyser-weaviate" -ContainerPort 50051 -EnvName "BILL_ANALYSER_WEAVIATE_GRPC_PORT" -UrlEnvName "BILL_ANALYSER_WEAVIATE_ENDPOINT"
+            $configuredPort
+        } else {
+            $resolution = Find-ComposeHostPort -ServiceName "Weaviate gRPC" -DefaultPort 50051 -FallbackStartPort 55051 -DockerPath $dockerCmd.Source -ContainerName "bill-analyser-weaviate" -ContainerPort 50051
+            if ($resolution.Fallback) {
+                Write-Warn "  Weaviate gRPC 默认端口 50051 已被占用，改用本地 compose 端口 $($resolution.Port)"
+            }
+            [int]$resolution.Port
+        }
+
+        Set-Item -Path Env:BILL_ANALYSER_WEAVIATE_PORT -Value ([string]$weaviatePort)
+        Set-Item -Path Env:BILL_ANALYSER_WEAVIATE_GRPC_PORT -Value ([string]$weaviateGrpcPort)
+        $env:BILL_ANALYSER_WEAVIATE_ENDPOINT = "http://127.0.0.1:$weaviatePort"
+        $composeServices += "weaviate"
+    }
+
+    if ($composeServices.Count -eq 0) {
+        Write-Success "  ✓ 运行态服务使用已配置端点"
+        return
+    }
+
+    Write-Gray "  正在确保运行态 compose 服务运行..."
+    & $dockerCmd.Source compose -f $composeFile up -d @composeServices
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "  ✗ 运行态 compose 服务启动失败"
+        exit 1
+    }
+    Write-Success "  ✓ 运行态服务已启动或已在运行"
+}
+
 # 获取项目根目录
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ProjectRoot
@@ -248,6 +637,8 @@ $backendStarted = $false
 if (-not $FrontendOnly) {
     Write-Info "[步骤 2/3] 启动后端服务器..."
     Write-Host ""
+
+    Start-RequiredRuntimeServices -Root $ProjectRoot
 
     # 启动后端（在新窗口中）
     $backendScript = Join-Path $ProjectRoot "start_backend.ps1"

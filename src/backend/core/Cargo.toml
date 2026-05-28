@@ -98,5 +98,9 @@ path = "../../../tests/backend/core/statistics_contracts.rs"
 name = "transaction_adapter_contracts"
 path = "../../../tests/backend/core/transaction_adapter_contracts.rs"
 
+[[test]]
+name = "weaviate_derived_contracts"
+path = "../../../tests/backend/core/weaviate_derived_contracts.rs"
+
 [lints]
 workspace = true

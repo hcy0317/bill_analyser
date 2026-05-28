@@ -10,6 +10,16 @@ async fn list_tags_handler(State(state): State<HttpAppState>, headers: HeaderMap
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy tags") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match list_postgres_tags(runtime.pool(), db_user_id(user_id)).await {
+            Ok(tags) => success_result(StatusCode::OK, format_tag_list_response(tags)),
+            Err(_) => tag_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy tags") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -34,6 +44,19 @@ async fn get_tag_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy tags") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match get_postgres_tag(runtime.pool(), tag_id, db_user_id(user_id)).await {
+            Ok(Some(tag)) => {
+                success_result(StatusCode::OK, Value::Object(backend_tag_to_frontend(tag)))
+            }
+            Ok(None) => not_found("Tag not found"),
+            Err(_) => tag_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy tags") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -72,6 +95,25 @@ async fn create_tag_handler(
         Ok(value) => Value::Object(value),
         Err(message) => return bad_request(message),
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy tags") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let user_id = db_user_id(user_id);
+        let tag_id = match create_postgres_tag(runtime.pool(), &payload, user_id).await {
+            Ok(value) => value,
+            Err(_) => return tag_db_error_response(),
+        };
+        return match get_postgres_tag(runtime.pool(), tag_id, user_id).await {
+            Ok(Some(tag)) => success_result(
+                StatusCode::CREATED,
+                Value::Object(backend_tag_to_frontend(tag)),
+            ),
+            Ok(None) => success_result(StatusCode::CREATED, json!({ "id": tag_id.to_string() })),
+            Err(_) => tag_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy tags") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -114,6 +156,24 @@ async fn update_tag_handler(
         Ok(value) => Value::Object(value),
         Err(message) => return bad_request(message),
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy tags") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let user_id = db_user_id(user_id);
+        return match update_postgres_tag(runtime.pool(), tag_id, &payload, user_id).await {
+            Ok(true) => match get_postgres_tag(runtime.pool(), tag_id, user_id).await {
+                Ok(Some(tag)) => {
+                    success_result(StatusCode::OK, Value::Object(backend_tag_to_frontend(tag)))
+                }
+                Ok(None) => success_result(StatusCode::OK, json!({ "id": tag_id.to_string() })),
+                Err(_) => tag_db_error_response(),
+            },
+            Ok(false) => not_found("Tag not found"),
+            Err(_) => tag_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy tags") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -146,6 +206,17 @@ async fn delete_tag_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy tags") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match delete_postgres_tag(runtime.pool(), tag_id, db_user_id(user_id)).await {
+            Ok(true) => success_result(StatusCode::OK, Value::Bool(true)),
+            Ok(false) => not_found("Tag not found"),
+            Err(_) => tag_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy tags") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -203,6 +274,23 @@ async fn update_tag_display_orders_handler(
         });
     }
 
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy tags") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match update_postgres_tag_display_orders(
+            runtime.pool(),
+            &orders,
+            db_user_id(user_id),
+        )
+        .await
+        {
+            Ok(true) => success_result(StatusCode::OK, Value::Bool(true)),
+            Ok(false) => tag_db_error_response(),
+            Err(_) => tag_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy tags") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -240,6 +328,61 @@ async fn batch_create_tags_handler(
     };
     let skip_exists = body.get("skipExists").is_some_and(value_truthy);
 
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy tags") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let user_id = db_user_id(user_id);
+        let mut existing_by_name = match list_postgres_tags(runtime.pool(), user_id).await {
+            Ok(existing_tags) => existing_tags
+                .into_iter()
+                .map(|tag| {
+                    let key = tag.name.trim().to_lowercase();
+                    let value = Value::Object(backend_tag_to_frontend(tag));
+                    (key, value)
+                })
+                .collect::<BTreeMap<_, _>>(),
+            Err(_) => return tag_db_error_response(),
+        };
+        let mut created_tags = Vec::new();
+
+        for item in tags {
+            let Some(normalized_name) = tag_batch_normalized_name(item) else {
+                return bad_request("Each tag item must contain a non-empty name");
+            };
+            if let Some(existing_tag) = existing_by_name.get(&normalized_name) {
+                if skip_exists {
+                    created_tags.push(existing_tag.clone());
+                    continue;
+                }
+                return error_response(
+                    StatusCode::CONFLICT,
+                    format!("Tag already exists: {}", tag_batch_display_name(item)),
+                );
+            }
+
+            let payload = match frontend_tag_to_backend(item) {
+                Ok(value) => Value::Object(value),
+                Err(_) => return bad_request("Each tag item must contain a non-empty name"),
+            };
+            let tag_id = match create_postgres_tag(runtime.pool(), &payload, user_id).await {
+                Ok(value) => value,
+                Err(_) => return tag_db_error_response(),
+            };
+            match get_postgres_tag(runtime.pool(), tag_id, user_id).await {
+                Ok(Some(tag)) => {
+                    let tag_value = Value::Object(backend_tag_to_frontend(tag));
+                    existing_by_name.insert(normalized_name, tag_value.clone());
+                    created_tags.push(tag_value);
+                }
+                Ok(None) => {}
+                Err(_) => return tag_db_error_response(),
+            }
+        }
+
+        return success_result(StatusCode::CREATED, Value::Array(created_tags));
+    }
     let mut runtime = match open_runtime(&state, "taxonomy tags") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -309,6 +452,18 @@ async fn list_templates_handler(
         Err(response) => return *response,
     };
     let template_type = template_type_from_query_body(&query, None, None);
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy templates") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match list_postgres_templates(runtime.pool(), db_user_id(user_id), template_type)
+            .await
+        {
+            Ok(templates) => success_result(StatusCode::OK, format_template_list_response(templates)),
+            Err(_) => template_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy templates") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -335,6 +490,24 @@ async fn get_template_handler(
         Err(response) => return *response,
     };
     let template_type = template_type_from_query_body(&query, None, None);
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy templates") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match get_postgres_template_by_id(
+            runtime.pool(),
+            template_id,
+            db_user_id(user_id),
+            template_type,
+        )
+        .await
+        {
+            Ok(Some(template)) => success_result(StatusCode::OK, Value::Object(template)),
+            Ok(None) => not_found("Template not found"),
+            Err(_) => template_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy templates") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -366,6 +539,27 @@ async fn create_template_handler(
         Err(response) => return *response,
     };
     let template_type = template_type_from_query_body(&query, Some(&body), Some(1));
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy templates") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let user_id = db_user_id(user_id);
+        let template_id = match create_postgres_template(runtime.pool(), &body, user_id).await {
+            Ok(value) => value,
+            Err(_) => return template_db_error_response(),
+        };
+        return match get_postgres_template_by_id(runtime.pool(), template_id, user_id, template_type)
+            .await
+        {
+            Ok(Some(template)) => success_result(StatusCode::CREATED, Value::Object(template)),
+            Ok(None) => success_result(
+                StatusCode::CREATED,
+                json!({ "id": template_id.to_string() }),
+            ),
+            Err(_) => template_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy templates") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -406,6 +600,34 @@ async fn update_template_handler(
         Err(response) => return *response,
     };
     let template_type = template_type_from_query_body(&query, Some(&body), Some(1));
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy templates") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let user_id = db_user_id(user_id);
+        return match update_postgres_template(
+            runtime.pool(),
+            template_id,
+            &body,
+            user_id,
+            template_type,
+        )
+        .await
+        {
+            Ok(true) => {
+                match get_postgres_template_by_id(runtime.pool(), template_id, user_id, template_type)
+                    .await
+                {
+                    Ok(Some(template)) => success_result(StatusCode::OK, Value::Object(template)),
+                    Ok(None) => success_result(StatusCode::OK, Value::Null),
+                    Err(_) => template_db_error_response(),
+                }
+            }
+            Ok(false) => not_found("Template not found"),
+            Err(_) => template_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy templates") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -438,6 +660,24 @@ async fn delete_template_handler(
         Err(response) => return *response,
     };
     let template_type = template_type_from_query_body(&query, None, Some(1));
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy templates") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match delete_postgres_template(
+            runtime.pool(),
+            template_id,
+            db_user_id(user_id),
+            template_type,
+        )
+        .await
+        {
+            Ok(true) => success_result(StatusCode::OK, Value::Bool(true)),
+            Ok(false) => not_found("Template not found"),
+            Err(_) => template_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy templates") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -473,6 +713,24 @@ async fn update_template_display_orders_handler(
         Err(response) => return *response,
     };
     let template_type = template_type_from_query_body(&query, Some(&body), Some(1)).unwrap_or(1);
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy templates") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match update_postgres_template_display_orders(
+            runtime.pool(),
+            &orders,
+            template_type,
+            db_user_id(user_id),
+        )
+        .await
+        {
+            Ok(true) => success_result(StatusCode::OK, Value::Bool(true)),
+            Ok(false) => template_db_error_response(),
+            Err(_) => template_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy templates") {
         Ok(value) => value,
         Err(response) => return *response,

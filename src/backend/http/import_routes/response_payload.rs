@@ -30,6 +30,8 @@ struct ImportParseRuntimeInput {
     session_id: String,
     _parser_id: String,
     standard_bills: Vec<ImportParsedStandardBill>,
+    source_drafts: Vec<ImportSourceDraft>,
+    standard_row_drafts: Vec<ImportStandardRowDraft>,
     file_count: i64,
     files: Vec<Value>,
     unmatched_files: Vec<Value>,
@@ -38,8 +40,11 @@ struct ImportParseRuntimeInput {
 
 #[derive(Debug)]
 struct ImportParsedStandardBill {
+    source_index: i64,
+    source_row_index: i64,
     parser_id: String,
     bill: StandardBill,
+    parser_decision: Value,
 }
 
 #[derive(Debug)]
@@ -56,15 +61,18 @@ struct ImportMultipartFileParseResult {
     original_name: String,
     body: Vec<u8>,
     parsed: Option<ImportMultipartParsedFile>,
+    decision: DedicatedParserDecision,
     _elapsed_ms: u128,
 }
 
 #[derive(Debug)]
 struct ImportMultipartParsedFile {
+    source_index: usize,
     parser_id: String,
     parsed_count: usize,
     delimiter: Option<char>,
     bills: Vec<StandardBill>,
+    decision: DedicatedParserDecision,
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -120,12 +128,34 @@ fn import_parse_json_runtime_response(
     if raw_standard_bills.is_empty() {
         return route_response(import_v2_error_response(400, "No valid bills to parse"));
     }
-    let standard_bills =
-        parsed_standard_bills_from_standard_bills(raw_standard_bills, &parser_id);
+    let parser_decision = provided_parser_decision(&parser_id);
+    let standard_bills = parsed_standard_bills_from_standard_bills(
+        raw_standard_bills,
+        &parser_id,
+        0,
+        parser_decision.clone(),
+    );
     let file_count = first_value(object, &["file_count", "fileCount"])
         .and_then(value_to_i64)
         .filter(|value| *value > 0)
         .unwrap_or_else(|| usize_to_i64(files.len().max(1)));
+    let source_name = files
+        .first()
+        .and_then(|file| file.as_object())
+        .and_then(|file| first_value(file, &["filename", "original_name", "originalName"]))
+        .and_then(value_to_text)
+        .unwrap_or_else(|| "inline-standard-bills".to_string());
+    let source_drafts = vec![import_source_draft(ImportSourceDraftInput {
+        session_id: &session_id,
+        source_index: 0,
+        original_file_name: &source_name,
+        parser_id: &parser_id,
+        parser_signal: "provided",
+        parser_confidence: 1.0,
+        parser_decision,
+        body: &[],
+    })];
+    let standard_row_drafts = import_standard_row_drafts_from_parsed_bills(&standard_bills);
     persist_import_parse_runtime_response(
         state,
         user_id,
@@ -133,6 +163,8 @@ fn import_parse_json_runtime_response(
             session_id,
             _parser_id: parser_id,
             standard_bills,
+            source_drafts,
+            standard_row_drafts,
             file_count,
             files,
             unmatched_files: Vec::new(),
@@ -185,6 +217,7 @@ async fn import_parse_multipart_runtime_response(
     let file_count = file_parts.len();
 
     let mut standard_bills = Vec::new();
+    let mut source_drafts = Vec::new();
     let mut files = Vec::new();
     let mut unmatched_files = Vec::new();
     let mut first_detected_parser_id: Option<String> = None;
@@ -198,6 +231,7 @@ async fn import_parse_multipart_runtime_response(
     for result in parse_results {
         let _file_index = result.index;
         let original_name = result.original_name;
+        let parser_decision = parser_decision_json(&result.decision);
         if let Some(parsed) = result.parsed {
             first_detected_parser_id.get_or_insert_with(|| parsed.parser_id.clone());
             #[cfg(not(coverage))]
@@ -213,18 +247,33 @@ async fn import_parse_multipart_runtime_response(
                 "stage1 dedicated parser matched"
             );
             files.push(json!({
-                "filename": original_name,
-                "parser_id": parsed.parser_id,
+                "filename": original_name.clone(),
+                "parser_id": parsed.parser_id.clone(),
                 "parsed_count": parsed.parsed_count,
                 "delimiter": delimiter_to_response(parsed.delimiter),
+                "parser_decision": parser_decision.clone(),
+            }));
+            source_drafts.push(import_source_draft(ImportSourceDraftInput {
+                session_id: &session_id,
+                source_index: i64::try_from(parsed.source_index).unwrap_or(i64::MAX),
+                original_file_name: &original_name,
+                parser_id: &parsed.parser_id,
+                parser_signal: &parsed.decision.status,
+                parser_confidence: selected_parser_confidence(&parsed.decision),
+                parser_decision: parser_decision.clone(),
+                body: &result.body,
             }));
             standard_bills.extend(
                 parsed
                     .bills
                     .into_iter()
-                    .map(|bill| ImportParsedStandardBill {
+                    .enumerate()
+                    .map(|(source_row_index, bill)| ImportParsedStandardBill {
+                        source_index: i64::try_from(parsed.source_index).unwrap_or(i64::MAX),
+                        source_row_index: i64::try_from(source_row_index).unwrap_or(i64::MAX),
                         parser_id: parsed.parser_id.clone(),
                         bill,
+                        parser_decision: parser_decision.clone(),
                     }),
             );
         } else {
@@ -254,13 +303,24 @@ async fn import_parse_multipart_runtime_response(
                 "stage1 unmatched file persisted"
             );
             unmatched_files.push(json!({
-                "original_name": original_name,
-                "originalName": original_name,
-                "filename": original_name,
-                "temp_path": temp_path,
-                "tempPath": temp_path,
+                "original_name": original_name.clone(),
+                "originalName": original_name.clone(),
+                "filename": original_name.clone(),
+                "temp_path": temp_path.clone(),
+                "tempPath": temp_path.clone(),
                 "parser_id": unmatched_parser_id,
-                "reason": "No dedicated Rust parser matched the uploaded file",
+                "reason": result.decision.reason.clone(),
+                "parser_decision": parser_decision.clone(),
+            }));
+            source_drafts.push(import_source_draft(ImportSourceDraftInput {
+                session_id: &session_id,
+                source_index: i64::try_from(_file_index).unwrap_or(i64::MAX),
+                original_file_name: &original_name,
+                parser_id: unmatched_parser_id,
+                parser_signal: &result.decision.status,
+                parser_confidence: 0.0,
+                parser_decision: parser_decision_json(&result.decision),
+                body: &result.body,
             }));
         }
     }
@@ -276,6 +336,7 @@ async fn import_parse_multipart_runtime_response(
             requested_parser
         }
     });
+    let standard_row_drafts = import_standard_row_drafts_from_parsed_bills(&standard_bills);
     persist_import_parse_runtime_response(
         state,
         user_id,
@@ -283,6 +344,8 @@ async fn import_parse_multipart_runtime_response(
             session_id,
             _parser_id: parser_id,
             standard_bills,
+            source_drafts,
+            standard_row_drafts,
             file_count: usize_to_i64(file_count),
             files,
             unmatched_files,
@@ -330,20 +393,29 @@ fn parse_multipart_import_file(
     input: ImportMultipartFileParseInput,
 ) -> ImportMultipartFileParseResult {
     let started_at = Instant::now();
-    let parsed =
-        parse_dedicated_import_bytes(&input.original_name, &input.body, &input.requested_parser)
-            .filter(|parsed| !parsed.bills.is_empty())
-            .map(|parsed| ImportMultipartParsedFile {
-                parser_id: parsed.parser_id,
-                parsed_count: parsed.bills.len(),
-                delimiter: parsed.delimiter,
-                bills: parsed.bills,
-            });
+    let selected = parse_dedicated_import_bytes_with_decision(
+        &input.original_name,
+        &input.body,
+        &input.requested_parser,
+    );
+    let decision = selected.decision;
+    let parsed = selected
+        .parsed
+        .filter(|parsed| !parsed.bills.is_empty())
+        .map(|parsed| ImportMultipartParsedFile {
+            source_index: input.index,
+            parser_id: parsed.parser_id,
+            parsed_count: parsed.bills.len(),
+            delimiter: parsed.delimiter,
+            bills: parsed.bills,
+            decision: parsed.decision,
+        });
     ImportMultipartFileParseResult {
         index: input.index,
         original_name: input.original_name,
         body: input.body,
         parsed,
+        decision,
         _elapsed_ms: import_stage_elapsed_ms(started_at),
     }
 }
@@ -370,7 +442,7 @@ fn persist_import_parse_runtime_response(
         })
         .collect::<Vec<_>>();
     let _staging_started_at = Instant::now();
-    let staging_result = match stage_import_parser_templates(
+    let staging_result = match stage_import_parser_templates_with_sources(
         runtime.connection_mut(),
         &ImportSessionDraft {
             session_id: input.session_id.clone(),
@@ -378,6 +450,8 @@ fn persist_import_parse_runtime_response(
             file_count: input.file_count.max(1),
         },
         &drafts,
+        &input.source_drafts,
+        &input.standard_row_drafts,
         input.require_existing_session,
     ) {
         Ok(result) => result,
@@ -406,19 +480,6 @@ fn persist_import_parse_runtime_response(
         unmatched_files: input.unmatched_files,
         errors: Vec::new(),
     }))
-}
-
-fn parsed_standard_bills_from_standard_bills(
-    standard_bills: Vec<StandardBill>,
-    parser_id: &str,
-) -> Vec<ImportParsedStandardBill> {
-    standard_bills
-        .into_iter()
-        .map(|bill| ImportParsedStandardBill {
-            parser_id: parser_id.to_string(),
-            bill,
-        })
-        .collect()
 }
 
 fn required_session_id_from_payload(

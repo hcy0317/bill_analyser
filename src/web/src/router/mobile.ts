@@ -10,9 +10,11 @@ import UnlockPage from '@/views/mobile/UnlockPage.vue';
 import TransactionListPage from '@/views/mobile/transactions/ListPage.vue';
 import TransactionEditPage from '@/views/mobile/transactions/EditPage.vue';
 import TransactionAmountFilterPage from '@/views/mobile/transactions/AmountFilterPage.vue';
+import TransactionImportPreviewPage from '@/views/mobile/transactions/ImportPreviewPage.vue';
 
 import AccountListPage from '@/views/mobile/accounts/ListPage.vue';
 import AccountEditPage from '@/views/mobile/accounts/EditPage.vue';
+import AccountRuleListPage from '@/views/mobile/accounts/RuleListPage.vue';
 import AccountReconciliationStatementPage from '@/views/mobile/accounts/ReconciliationStatementPage.vue';
 import AccountMoveAllTransactionsPage from '@/views/mobile/accounts/MoveAllTransactionsPage.vue';
 
@@ -166,6 +168,11 @@ const routes: Router.RouteParameters[] = [
         beforeEnter: [checkLogin]
     },
     {
+        path: '/transaction/import/preview',
+        async: asyncResolve(TransactionImportPreviewPage),
+        beforeEnter: [checkLogin]
+    },
+    {
         path: '/transaction/add',
         async: asyncResolve(TransactionEditPage),
         beforeEnter: [checkLogin]
@@ -193,6 +200,11 @@ const routes: Router.RouteParameters[] = [
     {
         path: '/account/edit',
         async: asyncResolve(AccountEditPage),
+        beforeEnter: [checkLogin]
+    },
+    {
+        path: '/account/rules',
+        async: asyncResolve(AccountRuleListPage),
         beforeEnter: [checkLogin]
     },
     {

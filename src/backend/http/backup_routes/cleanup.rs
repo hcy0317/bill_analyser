@@ -15,7 +15,7 @@ pub(super) fn cleanup_backups_response(
         Ok(payload) => payload,
         Err(message) => {
             write_backup_audit_event(
-                auth_runtime.runtime.connection(),
+                &auth_runtime.runtime,
                 auth_runtime.user_id,
                 headers,
                 "backup_cleanup",
@@ -32,7 +32,7 @@ pub(super) fn cleanup_backups_response(
         Ok(value) => value,
         Err(message) => {
             write_backup_audit_event(
-                auth_runtime.runtime.connection(),
+                &auth_runtime.runtime,
                 auth_runtime.user_id,
                 headers,
                 "backup_cleanup",
@@ -46,7 +46,7 @@ pub(super) fn cleanup_backups_response(
     };
 
     let backup_dir = backup_dir(&state.config)?;
-    let records = list_backup_records(auth_runtime.runtime.connection())
+    let records = list_backup_records_for_runtime(&auth_runtime.runtime)
         .map_err(|_| Box::new(db_error_response()))?;
     let record_contracts = records
         .iter()
@@ -77,14 +77,10 @@ pub(super) fn cleanup_backups_response(
         .map_err(file_error_response)?;
 
     let plan = plan_backup_cleanup(&record_contracts, &stray_files, keep_count);
-    let result = apply_cleanup_plan(
-        auth_runtime.runtime.connection(),
-        &backup_dir,
-        &plan.decisions,
-    );
+    let result = apply_cleanup_plan(&auth_runtime.runtime, &backup_dir, &plan.decisions);
     if let Err(error) = result {
         write_backup_audit_event(
-            auth_runtime.runtime.connection(),
+            &auth_runtime.runtime,
             auth_runtime.user_id,
             headers,
             "backup_cleanup",
@@ -97,7 +93,7 @@ pub(super) fn cleanup_backups_response(
     }
 
     write_backup_audit_event(
-        auth_runtime.runtime.connection(),
+        &auth_runtime.runtime,
         auth_runtime.user_id,
         headers,
         "backup_cleanup",
@@ -137,7 +133,7 @@ pub(super) fn parse_keep_count(payload: &Value) -> Result<usize, String> {
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn apply_cleanup_plan(
-    connection: &rusqlite::Connection,
+    runtime: &BackupOpsRuntime,
     backup_dir: &Path,
     decisions: &[BackupCleanupDecision],
 ) -> FileRouteResult<()> {
@@ -148,8 +144,8 @@ pub(super) fn apply_cleanup_plan(
         }
         match decision.action.as_str() {
             "mark_deleted" => {
-                update_backup_record_by_filename(
-                    connection,
+                update_backup_record_for_runtime(
+                    runtime,
                     &decision.filename,
                     Some("deleted"),
                     json!({"deleted_reason": decision.reason, "deleted_at": now_iso()}),
@@ -162,8 +158,8 @@ pub(super) fn apply_cleanup_plan(
                     fs::remove_file(&path)?;
                 }
                 remove_metadata_file(&path)?;
-                update_backup_record_by_filename(
-                    connection,
+                update_backup_record_for_runtime(
+                    runtime,
                     &decision.filename,
                     Some("deleted"),
                     json!({"deleted_reason": decision.reason, "deleted_at": now_iso()}),
@@ -230,11 +226,21 @@ mod tests {
         let root = tempfile::tempdir().expect("temp dir");
         let backup_dir = root.path().join("backup");
         fs::create_dir_all(&backup_dir).expect("backup dir");
-        let connection = rusqlite::Connection::open_in_memory().expect("connection");
-        init_backup_ops_schema(&connection).expect("schema");
+        let db_path = root.path().join("backup-cleanup.db");
+        let sqlite_path =
+            bill_analyser_db::SqliteDbPath::application_file(&db_path).expect("sqlite path");
+        let runtime = SqliteRuntime::open(bill_analyser_db::SqliteConnectionConfig {
+            path: sqlite_path,
+            create_if_missing: true,
+            busy_timeout: std::time::Duration::from_secs(1),
+        })
+        .expect("runtime");
+        init_backup_ops_schema(runtime.connection()).expect("schema");
 
-        seed_backup_record(&connection, "backup_mark.zip", "created").expect("mark record");
-        seed_backup_record(&connection, "backup_delete.zip", "created").expect("delete record");
+        seed_backup_record(runtime.connection(), "backup_mark.zip", "created")
+            .expect("mark record");
+        seed_backup_record(runtime.connection(), "backup_delete.zip", "created")
+            .expect("delete record");
         fs::write(backup_dir.join("backup_delete.zip"), b"delete").expect("delete file");
         fs::write(backup_dir.join("backup_stray.zip"), b"stray").expect("stray file");
 
@@ -266,8 +272,14 @@ mod tests {
             },
         ];
 
-        apply_cleanup_plan(&connection, &backup_dir, &decisions).expect("cleanup plan applies");
-        let records = list_backup_records(&connection).expect("records");
+        let backup_runtime = BackupOpsRuntime::Sqlite(runtime);
+        apply_cleanup_plan(&backup_runtime, &backup_dir, &decisions).expect("cleanup plan applies");
+        let records = match &backup_runtime {
+            BackupOpsRuntime::Sqlite(runtime) => {
+                list_backup_records(runtime.connection()).expect("records")
+            }
+            BackupOpsRuntime::Postgres(_) => unreachable!(),
+        };
         let statuses = records
             .into_iter()
             .map(|record| (record.backup_name, record.status))

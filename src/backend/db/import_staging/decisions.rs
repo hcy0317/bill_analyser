@@ -342,10 +342,41 @@ pub fn apply_preview_learning_decision(
             && applied_snapshot
                 .as_ref()
                 .is_some_and(|snapshot| learning_preview_matches_snapshot(&preview, snapshot));
+        let user_id_i64 = i64::try_from(user_id.get()).unwrap_or_default();
+        let recommendation_key = learning_recommendation_key_from_feedback(
+            user_id_i64,
+            &preview,
+            &learning_feedback,
+            applied_result,
+        );
 
         let mut patch = ImportPreviewPatch::new(preview_id);
         match decision {
             ImportPreviewDecision::Accept => {
+                let lifecycle = record_import_learning_lifecycle_feedback_on_tx(
+                    tx,
+                    user_id_i64,
+                    &ImportLearningLifecycleRecordInput {
+                        recommendation_key: recommendation_key.clone(),
+                        recommendation_type: "import_preview".to_string(),
+                        feedback: "accept".to_string(),
+                        rule_id: applied_result
+                            .and_then(|value| normalize_rule_id(value.rule_id))
+                            .or_else(|| feedback_rule_id(&learning_feedback)),
+                        suggestion_id: None,
+                        session_id: Some(preview.session_id.clone()),
+                        preview_id: Some(preview_id),
+                        bill_id: None,
+                        candidate_id: Some(format!("preview:{preview_id}:learning")),
+                        payload_json: Some(
+                            serde_json::json!({
+                                "decision": "accept",
+                                "previous_status": current_review_status,
+                            })
+                            .to_string(),
+                        ),
+                    },
+                )?;
                 let previous =
                     previous_snapshot.unwrap_or_else(|| build_learning_previous_snapshot(&preview));
                 let rule_id = applied_result.and_then(|value| normalize_rule_id(value.rule_id));
@@ -353,7 +384,9 @@ pub fn apply_preview_learning_decision(
                     Some(rule_id) => learning_rule_category(tx, user_id, rule_id)?,
                     None => None,
                 };
-                let mut applied = learning_accept_preview_snapshot(applied_result, &preview);
+                let mut applied = applied_snapshot
+                    .clone()
+                    .unwrap_or_else(|| learning_accept_preview_snapshot(applied_result, &preview));
                 if let Some(category) = rule_category.as_ref() {
                     apply_category_to_learning_snapshot(&mut applied, category);
                 } else {
@@ -365,6 +398,13 @@ pub fn apply_preview_learning_decision(
                     "suppressed": false,
                     "previous_preview": previous,
                     "applied_preview": applied,
+                    "recommendation_key": recommendation_key,
+                    "lifecycle_status": lifecycle.status,
+                    "signal_state": lifecycle.signal_state,
+                    "accepted_count": lifecycle.accepted_count,
+                    "rejected_count": lifecycle.rejected_count,
+                    "auto_applied_count": lifecycle.auto_applied_count,
+                    "auto_apply": lifecycle.auto_apply_enabled,
                 });
                 if let Some(rule_id) = rule_id {
                     feedback["learning"]["rule_id"] = serde_json::json!(rule_id);
@@ -374,6 +414,30 @@ pub fn apply_preview_learning_decision(
                 }
             }
             ImportPreviewDecision::Reject => {
+                let lifecycle = record_import_learning_lifecycle_feedback_on_tx(
+                    tx,
+                    user_id_i64,
+                    &ImportLearningLifecycleRecordInput {
+                        recommendation_key: recommendation_key.clone(),
+                        recommendation_type: "import_preview".to_string(),
+                        feedback: "reject".to_string(),
+                        rule_id: applied_result
+                            .and_then(|value| normalize_rule_id(value.rule_id))
+                            .or_else(|| feedback_rule_id(&learning_feedback)),
+                        suggestion_id: None,
+                        session_id: Some(preview.session_id.clone()),
+                        preview_id: Some(preview_id),
+                        bill_id: None,
+                        candidate_id: Some(format!("preview:{preview_id}:learning")),
+                        payload_json: Some(
+                            serde_json::json!({
+                                "decision": "reject",
+                                "previous_status": current_review_status,
+                            })
+                            .to_string(),
+                        ),
+                    },
+                )?;
                 if should_restore {
                     if let Some(snapshot) = previous_snapshot.as_ref() {
                         patch = patch.with_changes(learning_snapshot_restore_changes(snapshot));
@@ -388,6 +452,13 @@ pub fn apply_preview_learning_decision(
                 feedback["learning"] = serde_json::json!({
                     "review_status": "rejected",
                     "suppressed": true,
+                    "recommendation_key": recommendation_key,
+                    "lifecycle_status": lifecycle.status,
+                    "signal_state": lifecycle.signal_state,
+                    "accepted_count": lifecycle.accepted_count,
+                    "rejected_count": lifecycle.rejected_count,
+                    "auto_applied_count": lifecycle.auto_applied_count,
+                    "auto_apply": lifecycle.auto_apply_enabled,
                 });
                 let rule_id = applied_result
                     .and_then(|value| normalize_rule_id(value.rule_id))

@@ -52,6 +52,12 @@ export interface MatchingSessionCandidateItem {
         mode?: string;
         auto_apply?: boolean;
         model_version?: string;
+        recommendation_key?: string;
+        lifecycle_status?: string;
+        signal_state?: string;
+        accepted_count?: number;
+        rejected_count?: number;
+        auto_applied_count?: number;
     };
 }
 

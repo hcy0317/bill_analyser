@@ -17,7 +17,14 @@ use axum::{
 };
 use base64::{engine::general_purpose, Engine as _};
 use bill_analyser_core::{
-    attach_import_preview_matching_payload, build_composite_match_features,
+    account_rules::{
+        match_account_rules, AccountRuleCandidate, AccountRuleMatch, AccountRuleMatchContext,
+        ACCOUNT_ROLE_DESTINATION, ACCOUNT_ROLE_INVESTMENT, ACCOUNT_ROLE_SOURCE,
+        TRANSACTION_SCOPE_EXPENSE, TRANSACTION_SCOPE_INCOME, TRANSACTION_SCOPE_INVESTMENT,
+        TRANSACTION_SCOPE_TRANSFER,
+    },
+    amount_bucket, attach_import_preview_matching_payload, build_composite_match_features,
+    build_import_learning_recommendation_key, build_import_learning_vector_recall_queries,
     build_import_preview_filter_index_item, build_learning_rule_result_summary,
     build_llm_candidate_list_response, build_llm_candidate_reject_response,
     build_llm_classification_prompt, build_llm_config_get_response,
@@ -25,51 +32,66 @@ use bill_analyser_core::{
     build_llm_provider_config, build_llm_rule_expression_synthesis_prompt,
     build_llm_rule_induction_prompt, build_ocr_config_success_response, build_ocr_error_response,
     build_ocr_recognition_success_response_with_context, build_unknown_ocr_provider_response,
-    category_rules::match_rule_expression, coerce_preview_selected_value,
-    composite_hash_from_features, copy_runtime_llm_config, import_preview_index_success,
+    category_rules::match_rule_expression,
+    coerce_preview_selected_value, composite_hash_from_features, copy_runtime_llm_config,
+    find_import_reconciliation_candidates, import_preview_index_success,
     import_preview_page_success, import_session_cancel_missing_response,
     import_session_cancel_success_response, import_session_not_found_response,
     import_session_success, import_stage_confirm_success, import_stage_dedup_success,
     import_stage_parse_success, import_v2_data_response, import_v2_error_response,
     normalize_import_preview_page_query, normalize_provider_auth_config,
-    parse_llm_json_array_response, preview_state_conflict_response, provider_auth_access_token,
+    normalize_weaviate_transaction_type_scope, parse_llm_json_array_response,
+    preview_state_conflict_response, provider_auth_access_token,
     provider_auth_has_refresh_credential, provider_auth_is_expired, provider_auth_refresh_token,
     render_llm_prompt_template, safe_llm_config_payload, score_learning_rule_similarity,
-    AiRouteResponse, ImportPreviewIndexData, ImportPreviewPageData, ImportSessionSummary,
-    ImportStageConfirmData, ImportStageDedupData, ImportStageParseData, ImportV2RouteResponse,
-    LlmProviderConfigContract, OcrConfigContract, OcrProviderTextLine, OcrProviderTextResult,
-    ReceiptDraftAccount, ReceiptDraftCategory, ReceiptDraftCategoryRule, ReceiptDraftContext,
-    ReceiptDraftTag, SmartDeduplicationEngine, UserId, IMPORT_PREVIEW_SORT_KEYS, LLM_SYSTEM_PROMPT,
-    NETWORK_OCR_PROVIDER_NAME, OCR_DISABLED_PROVIDER_NAME,
+    AiRouteResponse, DedupBill, DuplicateGroup, ImportLearningRecommendationKeyInput,
+    ImportPreviewIndexData, ImportPreviewPageData, ImportSessionSummary, ImportStageConfirmData,
+    ImportStageDedupData, ImportStageParseData, ImportV2RouteResponse, LlmProviderConfigContract,
+    OcrConfigContract, OcrProviderTextLine, OcrProviderTextResult, ReceiptDraftAccount,
+    ReceiptDraftCategory, ReceiptDraftCategoryRule, ReceiptDraftContext, ReceiptDraftTag,
+    ReconciliationCandidateType, SmartDeduplicationEngine, TransferPair, UserId,
+    IMPORT_PREVIEW_SORT_KEYS, LLM_SYSTEM_PROMPT, NETWORK_OCR_PROVIDER_NAME,
+    OCR_DISABLED_PROVIDER_NAME, WEAVIATE_RECALL_DEFAULT_LIMIT,
+    WEAVIATE_RULE_STATE_POSTGRES_AUTHORITATIVE,
 };
 use bill_analyser_db::{
     accept_llm_candidate, activate_llm_config, apply_preview_llm_recommendation,
     apply_preview_patches_preserving_selection, apply_preview_transfer_decision,
-    calculate_import_bill_hash, clear_session_data, confirm_preview_to_bills, count_llm_candidates,
+    calculate_import_bill_hash, clear_import_preview_materialization_state, clear_session_data,
+    confirm_preview_to_bills, confirm_preview_to_bills_with_ack, count_llm_candidates,
     create_llm_candidate, create_llm_config, dedup_bills_from_parser_templates, delete_llm_config,
     effective_llm_config_from_saved, get_app_setting, get_import_annotation_samples,
-    get_import_session, get_llm_memory_events, get_preview_bill_by_id, get_preview_by_session,
-    get_preview_filter_index_by_session, get_unprocessed_templates_for_dedup,
-    init_app_settings_schema, init_import_staging_schema, init_llm_runtime_schema,
-    insert_preview_bills_batch, list_llm_candidates, list_llm_configs, load_ocr_config_setting,
+    get_import_history_candidate_bills_for_session, get_import_learning_lifecycle_view,
+    get_import_session, get_import_standard_rows_by_session, get_llm_memory_events,
+    get_preview_bill_by_id, get_preview_by_session, get_preview_filter_index_by_session,
+    get_unprocessed_templates_for_dedup, init_app_settings_schema, init_import_staging_schema,
+    init_llm_runtime_schema, insert_import_decision_groups_batch,
+    insert_import_history_materializations_batch, insert_preview_bills_batch, list_llm_candidates,
+    list_llm_configs, load_ocr_config_setting,
     mark_unprocessed_parser_templates_processed_for_session,
-    parser_template_draft_from_standard_bill, preview_drafts_from_dedup_bills,
-    query_preview_page_by_session, reject_llm_candidate, replace_preview_selection_with_patches,
-    reset_session_preview_selection, review_preview_llm_recommendation,
-    save_import_annotation_samples, set_app_setting, stage_import_parser_templates,
-    store_ocr_config_setting, update_import_session_status, update_llm_config, update_preview_bill,
+    parser_template_draft_from_standard_bill, preview_draft_from_history_duplicate,
+    preview_draft_from_history_transfer, preview_drafts_from_dedup_bills,
+    query_preview_page_by_session, record_import_learning_lifecycle_feedback, reject_llm_candidate,
+    replace_preview_selection_with_patches, reset_session_preview_selection,
+    review_preview_llm_recommendation, save_import_annotation_samples, set_app_setting,
+    stage_import_parser_templates_with_sources, store_ocr_config_setting,
+    update_import_session_status, update_llm_config, update_preview_bill,
     update_preview_bills_batch, update_preview_recurring_match_decision, update_preview_selection,
     update_session_preview_selection_by_query, AppSettingDraft, ImportAnnotationSampleDraft,
-    ImportPreviewDecision, ImportPreviewDecisionResult, ImportPreviewDraft,
-    ImportPreviewExpectedState, ImportPreviewLlmDecisionResult, ImportPreviewLlmReviewRequest,
-    ImportPreviewLlmSuggestion, ImportPreviewPageRequest, ImportPreviewPatch,
-    ImportPreviewPatchField, ImportPreviewPatchValue, ImportPreviewQueryFilters,
-    ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate, ImportPreviewRow,
-    ImportSessionDraft, ImportSessionStatusUpdate, LlmCandidateDraft, LlmConfigDraft,
-    LlmConfigUpdate, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
+    ImportDecisionGroupDraft, ImportDecisionGroupMemberDraft, ImportHistoryBillRow,
+    ImportHistoryDuplicatePreviewInput, ImportHistoryMaterializationDraft,
+    ImportHistoryRewriteAcknowledgement, ImportHistoryTransferPreviewInput,
+    ImportLearningLifecycleRecordInput, ImportPreviewDecision, ImportPreviewDecisionResult,
+    ImportPreviewDraft, ImportPreviewExpectedState, ImportPreviewLlmDecisionResult,
+    ImportPreviewLlmReviewRequest, ImportPreviewLlmSuggestion, ImportPreviewPageRequest,
+    ImportPreviewPatch, ImportPreviewPatchField, ImportPreviewPatchValue,
+    ImportPreviewQueryFilters, ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate,
+    ImportPreviewRow, ImportSessionDraft, ImportSessionStatusUpdate, ImportSourceDraft,
+    ImportStandardRowDraft, LlmCandidateDraft, LlmConfigDraft, LlmConfigUpdate, SqliteRuntime,
 };
 use bill_analyser_parsers::{
-    parse_dedicated_import_bytes, post_process_raw_bills, RawBill, StandardBill,
+    parse_dedicated_import_bytes, parse_dedicated_import_bytes_with_decision, parser_source_label,
+    post_process_raw_bills, DedicatedParserDecision, RawBill, StandardBill,
 };
 use bytes::{Bytes, BytesMut};
 use chrono::{NaiveDate, Utc};
@@ -77,8 +99,9 @@ use encoding_rs::GBK;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
     env, fs, io,
     io::Write,
     path::{Component, Path as FsPath, PathBuf},
@@ -92,7 +115,15 @@ use std::{
 use tokio::time::sleep;
 use url::Url;
 
-use crate::{auth::resolve_user_id_from_headers, config::HttpShellConfig, state::HttpAppState};
+use crate::{
+    auth::resolve_user_id_from_headers,
+    config::HttpShellConfig,
+    state::HttpAppState,
+    weaviate::{
+        recall_import_learning_candidates, WeaviateImportLearningRecallHit,
+        WeaviateImportLearningRecallRequest,
+    },
+};
 
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
 static IMPORT_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -390,10 +421,15 @@ pub fn import_runtime_router() -> Router<HttpAppState> {
 }
 
 include!("legacy_handlers.rs");
+include!("stage_vector_recall.rs");
 include!("stage_handlers.rs");
+include!("stage_account_rule_matchers.rs");
+include!("duplicate_materialization.rs");
+include!("transfer_materialization.rs");
 include!("llm_handlers.rs");
 include!("ocr_learning_handlers.rs");
 include!("response_payload.rs");
+include!("response_payload_ledger.rs");
 include!("multipart_and_ocr.rs");
 include!("parser_mapping.rs");
 include!("legacy_import_helpers.rs");

@@ -5,6 +5,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
+    future::Future,
     io::{self, Read, Seek, Write},
     path::{Component, Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
@@ -28,10 +29,13 @@ use bill_analyser_core::{
     BackupFileInfoInput, BackupRecordContract, SyncConfigContract, UserId,
 };
 use bill_analyser_db::{
-    create_backup_audit_log_best_effort, create_or_update_backup_job, init_backup_ops_schema,
-    list_backup_jobs, list_backup_records, update_backup_record_by_filename, upsert_backup_record,
-    BackupAuditLogDraft, BackupJobDraft, BackupRecordDraft, BackupRecordRow, DbError,
-    SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
+    create_backup_audit_log_best_effort, create_or_update_backup_job,
+    create_or_update_postgres_backup_job, create_postgres_backup_audit_log_best_effort,
+    init_backup_ops_schema, list_backup_jobs, list_backup_records, list_postgres_backup_jobs,
+    list_postgres_backup_records, update_backup_record_by_filename,
+    update_postgres_backup_record_by_filename, upsert_backup_record, upsert_postgres_backup_record,
+    BackupAuditLogDraft, BackupJobDraft, BackupJobRow, BackupRecordDraft, BackupRecordRow, DbError,
+    DbResult, PostgresRepositoryRuntime, SqliteRuntime,
 };
 use chrono::{Local, Utc};
 use fernet::Fernet;
@@ -64,9 +68,14 @@ type RouteResult<T> = Result<T, Box<Response>>;
 type FileRouteResult<T> = Result<T, BackupFileRuntimeError>;
 
 struct AuthenticatedBackupRuntime {
-    runtime: SqliteRuntime,
+    runtime: BackupOpsRuntime,
     user_id: UserId,
     auth_kind: BackupAuthKind,
+}
+
+enum BackupOpsRuntime {
+    Sqlite(SqliteRuntime),
+    Postgres(PostgresRepositoryRuntime),
 }
 
 #[derive(Debug)]
@@ -208,6 +217,89 @@ where
         Err(error) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("backup runtime task failed: {error}"),
+        ),
+    }
+}
+
+fn block_on_backup_db<T, F>(future: F) -> DbResult<T>
+where
+    F: Future<Output = DbResult<T>>,
+{
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| DbError::InvalidOperation(format!("backup PG runtime error: {error}")))?;
+    runtime.block_on(future)
+}
+
+fn list_backup_records_for_runtime(runtime: &BackupOpsRuntime) -> DbResult<Vec<BackupRecordRow>> {
+    match runtime {
+        BackupOpsRuntime::Sqlite(runtime) => list_backup_records(runtime.connection()),
+        BackupOpsRuntime::Postgres(runtime) => {
+            block_on_backup_db(list_postgres_backup_records(runtime.pool()))
+        }
+    }
+}
+
+fn upsert_backup_record_for_runtime(
+    runtime: &BackupOpsRuntime,
+    draft: BackupRecordDraft,
+) -> DbResult<i64> {
+    match runtime {
+        BackupOpsRuntime::Sqlite(runtime) => upsert_backup_record(runtime.connection(), draft),
+        BackupOpsRuntime::Postgres(runtime) => {
+            block_on_backup_db(upsert_postgres_backup_record(runtime.pool(), draft))
+        }
+    }
+}
+
+fn update_backup_record_for_runtime(
+    runtime: &BackupOpsRuntime,
+    filename: &str,
+    status: Option<&str>,
+    metadata_update: Value,
+) -> DbResult<bool> {
+    match runtime {
+        BackupOpsRuntime::Sqlite(runtime) => update_backup_record_by_filename(
+            runtime.connection(),
+            filename,
+            status,
+            metadata_update,
+        ),
+        BackupOpsRuntime::Postgres(runtime) => {
+            block_on_backup_db(update_postgres_backup_record_by_filename(
+                runtime.pool(),
+                filename,
+                status,
+                metadata_update,
+            ))
+        }
+    }
+}
+
+fn list_backup_jobs_for_runtime(
+    runtime: &BackupOpsRuntime,
+    user_id: UserId,
+) -> DbResult<Vec<BackupJobRow>> {
+    match runtime {
+        BackupOpsRuntime::Sqlite(runtime) => list_backup_jobs(runtime.connection(), user_id),
+        BackupOpsRuntime::Postgres(runtime) => {
+            block_on_backup_db(list_postgres_backup_jobs(runtime.pool(), user_id))
+        }
+    }
+}
+
+fn create_or_update_backup_job_for_runtime(
+    runtime: &BackupOpsRuntime,
+    user_id: UserId,
+    draft: BackupJobDraft,
+) -> DbResult<i64> {
+    match runtime {
+        BackupOpsRuntime::Sqlite(runtime) => {
+            create_or_update_backup_job(runtime.connection(), user_id, draft)
+        }
+        BackupOpsRuntime::Postgres(runtime) => block_on_backup_db(
+            create_or_update_postgres_backup_job(runtime.pool(), user_id, draft),
         ),
     }
 }

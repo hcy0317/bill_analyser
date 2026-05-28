@@ -17,8 +17,10 @@ use bill_analyser_core::{
     UserId,
 };
 use bill_analyser_db::{
-    delete_user_custom_exchange_rate, get_statistics_user_default_currency,
-    list_user_custom_exchange_rates, upsert_user_custom_exchange_rate,
+    delete_postgres_user_custom_exchange_rate, delete_user_custom_exchange_rate,
+    get_postgres_statistics_user_default_currency, get_statistics_user_default_currency,
+    list_postgres_user_custom_exchange_rates, list_user_custom_exchange_rates,
+    upsert_postgres_user_custom_exchange_rate, upsert_user_custom_exchange_rate,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -31,7 +33,8 @@ use super::{
     },
     query::{ExchangeRatesQuery, UserCustomExchangeRateRequest},
     response::{
-        db_error_response, json_response, open_runtime, success_result, user_id_from_headers,
+        db_error_response, json_response, open_postgres_runtime, open_runtime, success_result,
+        user_id_from_headers,
     },
 };
 #[tracing::instrument(level = "debug", skip_all)]
@@ -50,10 +53,6 @@ pub(super) async fn exchange_rates_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
-    let runtime = match open_runtime(&state) {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
     let requested_provider = normalize_requested_exchange_rate_provider(query.provider.as_deref());
     if !exchange_rate_provider_options().contains_key(&requested_provider) {
         return json_response(
@@ -65,6 +64,52 @@ pub(super) async fn exchange_rates_handler(
         );
     }
 
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state) {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let base_currency =
+            match normalized_postgres_exchange_base_currency(&query, runtime.pool(), user_id).await
+            {
+                Ok(value) => value,
+                Err(_) => return db_error_response(),
+            };
+        let custom_rates =
+            match list_postgres_user_custom_exchange_rates(runtime.pool(), user_id, &base_currency)
+                .await
+            {
+                Ok(value) => value,
+                Err(_) => return db_error_response(),
+            };
+        let now = chrono::Utc::now().timestamp();
+        if requested_provider == "auto" && !custom_rates.is_empty() {
+            return success_result(
+                StatusCode::OK,
+                json!(build_user_custom_exchange_rates_result(
+                    &base_currency,
+                    &custom_rates,
+                    now,
+                )),
+            );
+        }
+
+        let target_currencies = target_exchange_currencies(&base_currency);
+        let provider_result = fetch_exchange_rates_from_providers(
+            &base_currency,
+            &target_currencies,
+            &requested_provider,
+        )
+        .await;
+        let result =
+            build_exchange_rates_result(&base_currency, &requested_provider, provider_result, now);
+        return success_result(StatusCode::OK, json!(result));
+    }
+
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
     let base_currency =
         match normalized_exchange_base_currency(&query, runtime.connection(), user_id) {
             Ok(value) => value,
@@ -151,6 +196,44 @@ pub(super) async fn update_user_custom_exchange_rate_handler(
         return invalid_request("rate must be greater than 0");
     }
 
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state) {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let base_currency =
+            match get_postgres_statistics_user_default_currency(runtime.pool(), user_id).await {
+                Ok(value) => value,
+                Err(_) => return db_error_response(),
+            };
+        return match upsert_postgres_user_custom_exchange_rate(
+            runtime.pool(),
+            user_id,
+            &base_currency,
+            &currency,
+            rate,
+        )
+        .await
+        {
+            Ok(result) => success_result(
+                StatusCode::OK,
+                json!({
+                    "currency": currency,
+                    "rate": format_route_rate_value(rate),
+                    "updateTime": result.update_time
+                }),
+            ),
+            Err(error) => json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({
+                    "success": false,
+                    "error": "Internal Server Error",
+                    "message": error.to_string()
+                }),
+            ),
+        };
+    }
+
     let runtime = match open_runtime(&state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -213,6 +296,35 @@ pub(super) async fn delete_user_custom_exchange_rate_handler(
     if normalized_currency.is_empty() {
         return invalid_request("currency is required");
     }
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state) {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let base_currency =
+            match get_postgres_statistics_user_default_currency(runtime.pool(), user_id).await {
+                Ok(value) => value,
+                Err(_) => return db_error_response(),
+            };
+        return match delete_postgres_user_custom_exchange_rate(
+            runtime.pool(),
+            user_id,
+            &base_currency,
+            &normalized_currency,
+        )
+        .await
+        {
+            Ok(deleted) => success_result(StatusCode::OK, json!(deleted)),
+            Err(error) => json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({
+                    "success": false,
+                    "error": "Internal Server Error",
+                    "message": error.to_string()
+                }),
+            ),
+        };
+    }
     let runtime = match open_runtime(&state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -256,6 +368,25 @@ fn normalized_exchange_base_currency(
     }
     get_statistics_user_default_currency(connection, user_id)
 }
+
+async fn normalized_postgres_exchange_base_currency(
+    query: &ExchangeRatesQuery,
+    pool: &bill_analyser_db::PostgresPool,
+    user_id: UserId,
+) -> bill_analyser_db::DbResult<String> {
+    let requested = query
+        .base_currency
+        .as_deref()
+        .or(query.base.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_uppercase);
+    if let Some(value) = requested {
+        return Ok(value);
+    }
+    get_postgres_statistics_user_default_currency(pool, user_id).await
+}
+
 fn is_missing_json_value(value: Option<&Value>) -> bool {
     match value {
         None | Some(Value::Null) => true,

@@ -5,16 +5,17 @@
 use axum::http::{header, HeaderMap};
 use base64::{engine::general_purpose, Engine as _};
 use bill_analyser_core::{auth::parse_bearer_authorization_header, UserId};
-use bill_analyser_db::{
-    init_auth_security_schema, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
-};
+use bill_analyser_db::init_auth_security_schema;
 use chrono::{Local, NaiveDateTime};
 use ring::hmac;
 use rusqlite::OptionalExtension;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::config::HttpShellConfig;
+use crate::{
+    config::HttpShellConfig,
+    database_runtime::{open_sqlite_repository_runtime, SqliteRepositoryOpenMode},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthenticatedUser {
@@ -131,6 +132,12 @@ fn resolve_bearer_user(
     let token = parse_bearer_authorization_header(auth_header)
         .map_err(|error| RustRouteAuthError::unauthorized(error.message))?;
     let token_claim_user_id = validate_access_jwt(&token, config)?;
+    if config.database_backend.uses_postgres() {
+        return Ok(AuthenticatedUser {
+            user_id: token_claim_user_id,
+            session_id: None,
+        });
+    }
     let session = resolve_session_user(&token, config)?;
     if session.user_id != token_claim_user_id {
         return Err(RustRouteAuthError::unauthorized(
@@ -269,19 +276,18 @@ fn resolve_session_user(
     token: &str,
     config: &HttpShellConfig,
 ) -> Result<SessionUser, RustRouteAuthError> {
-    let db_path = config.sqlite_db_path.as_deref().ok_or_else(|| {
-        RustRouteAuthError::unavailable(
-            "Rust import DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH",
-        )
+    let runtime = open_sqlite_repository_runtime(
+        config,
+        "auth token",
+        SqliteRepositoryOpenMode::ExistingOnly,
+    )
+    .map_err(|error| {
+        if error.http_status_code() == 503 {
+            RustRouteAuthError::unavailable(error.to_string())
+        } else {
+            RustRouteAuthError::internal("Rust auth DB error")
+        }
     })?;
-    let db_path = SqliteDbPath::application_file(db_path)
-        .map_err(|error| RustRouteAuthError::unavailable(error.to_string()))?;
-    let runtime = SqliteRuntime::open(SqliteConnectionConfig {
-        path: db_path,
-        create_if_missing: false,
-        busy_timeout: config.timeout,
-    })
-    .map_err(|error| RustRouteAuthError::internal(format!("Rust auth DB error: {error}")))?;
     init_auth_security_schema(runtime.connection())
         .map_err(|error| RustRouteAuthError::internal(format!("Rust auth DB error: {error}")))?;
     let token_hash = sha256_hex(token);
@@ -368,8 +374,18 @@ mod tests {
     use serde_json::json;
     use tempfile::NamedTempFile;
 
+    use crate::config::DatabaseBackend;
+
     const TEST_SECRET: &str = "jwt-secret";
     const TRUSTED_SECRET_HEADER: &str = "x-bill-analyser-trusted-secret";
+
+    fn legacy_sqlite_auth_config(sqlite_path: impl Into<String>) -> HttpShellConfig {
+        HttpShellConfig::default()
+            .with_database_backend(DatabaseBackend::Sqlite)
+            .with_require_postgres_after_cutover(false)
+            .with_legacy_sqlite_runtime_for_tests()
+            .with_sqlite_db_path(sqlite_path)
+    }
 
     #[test]
     fn bearer_auth_rejects_missing_jwt_secret() {
@@ -433,10 +449,9 @@ mod tests {
             );
             let db = NamedTempFile::new().expect("temp db");
             seed_user_session(db.path(), 7, &token, true, true, ChronoDuration::hours(1));
-            let config = HttpShellConfig::default()
+            let config = legacy_sqlite_auth_config(db.path().display().to_string())
                 .with_auth_jwt_secret(TEST_SECRET)
-                .with_auth_jwt_algorithm(algorithm)
-                .with_sqlite_db_path(db.path().display().to_string());
+                .with_auth_jwt_algorithm(algorithm);
 
             let user_id = resolve_user_id_from_headers(
                 &bearer_headers(&token),
@@ -450,9 +465,28 @@ mod tests {
     }
 
     #[test]
+    fn bearer_auth_postgres_cutover_does_not_open_sqlite_session_fallback() {
+        let token = signed_token(7, "access", "HS256", TEST_SECRET, ChronoDuration::hours(1));
+        let config = HttpShellConfig::default()
+            .with_database_backend(DatabaseBackend::Postgres)
+            .with_require_postgres_after_cutover(true)
+            .with_auth_jwt_secret(TEST_SECRET);
+
+        let user_id =
+            resolve_user_id_from_headers(&bearer_headers(&token), &config, TRUSTED_SECRET_HEADER)
+                .expect("postgres cutover JWT accepts without sqlite session");
+
+        assert_eq!(user_id, UserId::new(7).expect("positive user id"));
+    }
+
+    #[test]
     fn bearer_auth_rejects_missing_db_path_and_session_user_mismatch() {
         let token = signed_token(7, "access", "HS256", TEST_SECRET, ChronoDuration::hours(1));
-        let config = HttpShellConfig::default().with_auth_jwt_secret(TEST_SECRET);
+        let config = HttpShellConfig::default()
+            .with_database_backend(DatabaseBackend::Sqlite)
+            .with_require_postgres_after_cutover(false)
+            .with_legacy_sqlite_runtime_for_tests()
+            .with_auth_jwt_secret(TEST_SECRET);
         let missing_db_path =
             resolve_user_id_from_headers(&bearer_headers(&token), &config, TRUSTED_SECRET_HEADER)
                 .expect_err("missing sqlite path rejects after token validation");
@@ -490,9 +524,8 @@ mod tests {
             true,
             ChronoDuration::hours(1),
         );
-        let inactive_config = HttpShellConfig::default()
-            .with_auth_jwt_secret(TEST_SECRET)
-            .with_sqlite_db_path(inactive_db.path().display().to_string());
+        let inactive_config = legacy_sqlite_auth_config(inactive_db.path().display().to_string())
+            .with_auth_jwt_secret(TEST_SECRET);
         let inactive = resolve_user_id_from_headers(
             &bearer_headers(&token),
             &inactive_config,
@@ -511,9 +544,8 @@ mod tests {
             true,
             ChronoDuration::hours(-1),
         );
-        let expired_config = HttpShellConfig::default()
-            .with_auth_jwt_secret(TEST_SECRET)
-            .with_sqlite_db_path(expired_db.path().display().to_string());
+        let expired_config = legacy_sqlite_auth_config(expired_db.path().display().to_string())
+            .with_auth_jwt_secret(TEST_SECRET);
         let expired = resolve_user_id_from_headers(
             &bearer_headers(&token),
             &expired_config,

@@ -22,15 +22,38 @@ use bill_analyser_core::{
 use bill_analyser_db::{
     get_app_setting, set_app_setting, sync_all_account_balances,
     taxonomy::{
+        account_rules::{AccountRuleRecord, AccountRulesRepository},
         accounts::{AccountDisplayOrder, AccountRecord, AccountsRepository},
         categories::{CategoriesRepository, CategoryRecord, CategoryStatistic},
         category_rules::{CategoryRuleRecord, CategoryRulesRepository},
+        postgres_reads::{
+            create_postgres_account, create_postgres_account_rule, create_postgres_category,
+            create_postgres_category_rule, create_postgres_tag, create_postgres_template,
+            delete_postgres_account, delete_postgres_account_rule,
+            delete_postgres_categories_by_main_category, delete_postgres_category,
+            delete_postgres_category_rule, delete_postgres_tag, delete_postgres_template,
+            ensure_postgres_category_rule_defaults, get_postgres_account_by_id,
+            get_postgres_account_rule, get_postgres_category_by_id, get_postgres_category_by_name,
+            get_postgres_category_rule, get_postgres_legacy_category_rules_setting,
+            get_postgres_sub_accounts, get_postgres_tag, get_postgres_template_by_id,
+            list_postgres_account_rules, list_postgres_accounts, list_postgres_categories,
+            list_postgres_category_rules, list_postgres_legacy_category_engine_rules,
+            list_postgres_tags, list_postgres_templates, migrate_postgres_account_aliases_to_rules,
+            migrate_postgres_category_keywords_to_rules, query_postgres_category_statistics,
+            query_postgres_rules_overview_payload, reorder_postgres_account_rules,
+            reorder_postgres_category_rules, set_postgres_legacy_category_rules_setting,
+            test_postgres_account_rule_match, update_postgres_account,
+            update_postgres_account_display_orders, update_postgres_account_rule,
+            update_postgres_category, update_postgres_category_display_order,
+            update_postgres_category_rule, update_postgres_main_category_name, update_postgres_tag,
+            update_postgres_tag_display_orders, update_postgres_template,
+            update_postgres_template_display_orders,
+        },
         settings_bundle::{export_taxonomy_sections, import_settings_bundle},
         tags::{TagDisplayOrder, TagRecord, TagsRepository},
         templates::{TemplateDisplayOrder, TemplateRecord, TemplatesRepository},
     },
-    AccountBalanceDiscrepancy, AppSettingDraft, SqliteConnectionConfig, SqliteDbPath,
-    SqliteRuntime, SyncAllAccountBalancesResult,
+    AccountBalanceDiscrepancy, AppSettingDraft, SqliteRuntime, SyncAllAccountBalancesResult,
 };
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -53,6 +76,7 @@ const SETTINGS_BUNDLE_SECTION_KEYS: &[&str] = &[
     "transactionTemplates",
     "scheduledTransactions",
     "categoryRecognitionRules",
+    "accountRecognitionRules",
     "llmConfigs",
     "ocrConfig",
 ];
@@ -128,6 +152,16 @@ pub const TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/category-rules/defaults"),
     ("POST", "/api/category-rules/migrate"),
     ("POST", "/api/category-rules/reorder"),
+];
+
+pub const TAXONOMY_ACCOUNT_RULE_ROUTE_PATTERNS: &[(&str, &str)] = &[
+    ("GET", "/api/account-rules/"),
+    ("POST", "/api/account-rules/"),
+    ("DELETE", "/api/account-rules/{rule_id}"),
+    ("PUT", "/api/account-rules/{rule_id}"),
+    ("POST", "/api/account-rules/{rule_id}/test"),
+    ("POST", "/api/account-rules/migrate-aliases"),
+    ("POST", "/api/account-rules/reorder"),
 ];
 
 pub const TAXONOMY_RULE_CENTER_ROUTE_PATTERNS: &[(&str, &str)] = &[("GET", "/api/rules/overview")];
@@ -310,6 +344,26 @@ pub fn taxonomy_runtime_router() -> Router<HttpAppState> {
             axum::routing::post(test_category_rule_handler),
         )
         .route(
+            "/api/account-rules/",
+            get(list_account_rules_handler).post(create_account_rule_handler),
+        )
+        .route(
+            "/api/account-rules/reorder",
+            axum::routing::post(reorder_account_rules_handler),
+        )
+        .route(
+            "/api/account-rules/migrate-aliases",
+            axum::routing::post(migrate_account_aliases_handler),
+        )
+        .route(
+            "/api/account-rules/:rule_id",
+            put(update_account_rule_handler).delete(delete_account_rule_handler),
+        )
+        .route(
+            "/api/account-rules/:rule_id/test",
+            axum::routing::post(test_account_rule_handler),
+        )
+        .route(
             "/api/categories/:category_id",
             get(get_category_handler)
                 .put(update_category_handler)
@@ -332,10 +386,19 @@ struct CategoryRulesQuery {
     enabled_only: Option<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct AccountRulesQuery {
+    account_id: Option<i64>,
+    enabled_only: Option<String>,
+    account_role_scope: Option<String>,
+    transaction_type_scope: Option<String>,
+}
+
 include!("account_handlers.rs");
 include!("tag_template_handlers.rs");
 include!("category_handlers.rs");
 include!("category_rule_handlers.rs");
+include!("account_rule_handlers.rs");
 include!("settings_bundle_handlers.rs");
 include!("account_category_formatters.rs");
 include!("settings_serialization.rs");

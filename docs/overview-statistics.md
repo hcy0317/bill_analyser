@@ -24,5 +24,6 @@ HTTP route 层在 `statistics_routes/` 下按读取、Analyzer、汇率处理、
 ## 数据边界
 
 - 统计读取按当前用户过滤 bills/accounts/categories。
+- PostgreSQL cutover 下，金额概览、分类统计、分类趋势、资产趋势、分类饼图、商户排行、日历事件、Analyzer/insights 读取和汇率 REST 直接读写 PostgreSQL bills/accounts/categories/settings/transaction_templates，不打开 SQLite runtime fallback。
 - 汇率 custom rate 写入按当前用户隔离。
 - 金额聚合必须保持元/分语义明确，面向前端的字段按既有 contract 输出。

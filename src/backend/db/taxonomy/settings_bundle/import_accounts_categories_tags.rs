@@ -67,6 +67,14 @@ pub fn import_settings_bundle(
         &mut warnings,
         &category_ref_map,
     )?;
+    import_settings_account_rules(
+        &transaction,
+        section_items(&sections, "accountRecognitionRules"),
+        user_id,
+        &mut result_sections,
+        &mut warnings,
+        &account_ref_map,
+    )?;
     import_settings_llm_configs(
         &transaction,
         section_items(&sections, "llmConfigs"),

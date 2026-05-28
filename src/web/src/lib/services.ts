@@ -1252,6 +1252,86 @@ export default {
             });
         });
     },
+    getImportPreviewPage: ({
+        sessionId,
+        page,
+        pageSize,
+        selectedOnly,
+        previewIds,
+        signal
+    }: {
+        sessionId: string,
+        page?: number,
+        pageSize?: number,
+        selectedOnly?: boolean,
+        previewIds?: number[],
+        signal?: string
+    }): ApiResponsePromise<Record<string, unknown>> => {
+        const params: Record<string, string | number | boolean> = {};
+        if (typeof page === 'number') {
+            params['page'] = page;
+        }
+        if (typeof pageSize === 'number') {
+            params['page_size'] = pageSize;
+        }
+        if (typeof selectedOnly === 'boolean') {
+            params['selected_only'] = selectedOnly;
+        }
+        if (previewIds && previewIds.length > 0) {
+            params['preview_ids'] = previewIds.join(',');
+        }
+        if (signal) {
+            params['signal'] = signal;
+        }
+
+        return axios.get<ApiDataResponse<Record<string, unknown>>>(`bills/import/v2/preview/${encodeURIComponent(sessionId)}`, {
+            params
+        }).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    confirmImportPreview: ({
+        sessionId,
+        previewUpdates,
+        preserveUnpatchedSelection,
+        historyRewriteAcknowledgement
+    }: {
+        sessionId: string,
+        previewUpdates?: Record<string, unknown>[],
+        preserveUnpatchedSelection?: boolean,
+        historyRewriteAcknowledgement?: unknown | null
+    }): ApiResponsePromise<Record<string, unknown>> => {
+        const payload: Record<string, unknown> = {
+            session_id: sessionId,
+            preserve_unpatched_selection: !!preserveUnpatchedSelection,
+            preview_updates: previewUpdates || []
+        };
+        if (historyRewriteAcknowledgement) {
+            payload['history_rewrite_acknowledgement'] = historyRewriteAcknowledgement;
+        }
+
+        return axios.post<ApiDataResponse<Record<string, unknown>>>('bills/import/v2/confirm', payload, {
+            timeout: DEFAULT_UPLOAD_API_TIMEOUT
+        } as ApiRequestConfig).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    reviewImportTransferDecision: ({
+        previewId,
+        decision,
+        payload
+    }: {
+        previewId: number,
+        decision: 'accept' | 'reject' | 'clear',
+        payload?: Record<string, unknown>
+    }): ApiResponsePromise<Record<string, unknown>> => {
+        return axios.post<ApiDataResponse<Record<string, unknown>>>(`bills/import/v2/preview-item/${encodeURIComponent(String(previewId))}/transfer-decision`, {
+            decision,
+            ...(payload || {})
+        }).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
     getMatchingSessionCandidates: ({
         sessionId
     }: {
@@ -2044,6 +2124,56 @@ export default {
     },
     testCategoryRule: (id: number, text: string): ApiResponsePromise<any> => {
         return axios.post(`category-rules/${id}/test`, { text }).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
+    // ── Account Rules (账户识别规则) ──────────
+
+    getAccountRules: (accountId?: number): ApiResponsePromise<any> => {
+        const params: any = {};
+        if (accountId) params.account_id = accountId;
+        return axios.get('account-rules/', { params }).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    createAccountRule: (data: {
+        account_id: number;
+        name: string;
+        priority: number;
+        rule_expression: string;
+        regex_enabled?: boolean;
+        enabled?: boolean;
+        account_role_scope?: string;
+        transaction_type_scope?: string;
+        field_scope?: string | string[];
+    }): ApiResponsePromise<any> => {
+        return axios.post('account-rules/', data).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    updateAccountRule: (id: number, data: Record<string, any>): ApiResponsePromise<any> => {
+        return axios.put(`account-rules/${id}`, data).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    deleteAccountRule: (id: number): ApiResponsePromise<any> => {
+        return axios.delete(`account-rules/${id}`).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    reorderAccountRules: (ruleIds: number[]): ApiResponsePromise<any> => {
+        return axios.post('account-rules/reorder', { rule_ids: ruleIds }).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    migrateAccountAliases: (): ApiResponsePromise<any> => {
+        return axios.post('account-rules/migrate-aliases').then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    testAccountRule: (id: number, context: Record<string, any>): ApiResponsePromise<any> => {
+        return axios.post(`account-rules/${id}/test`, context).then(response => {
             return buildApiResponse(response, response.data?.data);
         });
     },

@@ -41,11 +41,16 @@ walkdir.workspace = true
 zip.workspace = true
 
 [dev-dependencies]
+sqlx.workspace = true
 tower.workspace = true
 
 [[bin]]
 name = "bill_http_server"
 path = "bin/bill_http_server.rs"
+
+[[bin]]
+name = "bill_weaviate_derived_index"
+path = "bin/bill_weaviate_derived_index.rs"
 
 [[test]]
 name = "auth_runtime_contract"
@@ -82,6 +87,10 @@ path = "../../../tests/backend/http/statistics_runtime_contract.rs"
 [[test]]
 name = "taxonomy_runtime_contract"
 path = "../../../tests/backend/http/taxonomy_runtime_contract.rs"
+
+[[test]]
+name = "weaviate_runtime_contract"
+path = "../../../tests/backend/http/weaviate_runtime_contract.rs"
 
 [lints]
 workspace = true

@@ -379,6 +379,14 @@
                             v-if="annotationTransactionCount > 0">
                         {{ getNeedsAnnotationText() }} {{ getDisplayCount(annotationTransactionCount) }}
                     </v-chip>
+                    <v-chip class="ms-3"
+                            color="warning"
+                            variant="tonal"
+                            size="small"
+                            :prepend-icon="mdiAlertOutline"
+                            v-if="selectedVisibleHistoryRewriteOperationCount > 0">
+                        {{ tt('History Rewrite') }} {{ getDisplayCount(selectedVisibleHistoryRewriteOperationCount) }}
+                    </v-chip>
                     <v-btn class="ms-2"
                            v-if="aiAnnotationEnabled"
                            density="compact"
@@ -867,8 +875,10 @@ import { ref, computed, useTemplateRef, watch } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
 import {
+    buildImportPreviewHistoryRewriteOperationAcknowledgement,
     buildImportPreviewSignalViewModel,
     type ImportCheckMatchingSourceContext,
+    type ImportPreviewHistoryRewriteAcknowledgementOperation,
     type ImportPreviewSignalStatus,
     type ImportPreviewSignalViewModel,
     type ImportPreviewSignalViewModelOptions
@@ -1627,6 +1637,12 @@ function clearLearningRecommendationState(item: ImportTransaction): void {
         item.matching.learning.mode = '';
         item.matching.learning.auto_apply = false;
         item.matching.learning.model_version = '';
+        item.matching.learning.recommendation_key = '';
+        item.matching.learning.lifecycle_status = '';
+        item.matching.learning.signal_state = '';
+        item.matching.learning.accepted_count = 0;
+        item.matching.learning.rejected_count = 0;
+        item.matching.learning.auto_applied_count = 0;
     }
 
     updateTransactionData(item);
@@ -1668,6 +1684,12 @@ function syncLearningCandidateFromSessionCandidate(item: ImportTransaction, cand
         item.matching.learning.mode = details.mode || '';
         item.matching.learning.auto_apply = !!details.auto_apply;
         item.matching.learning.model_version = details.model_version || '';
+        item.matching.learning.recommendation_key = details.recommendation_key || '';
+        item.matching.learning.lifecycle_status = details.lifecycle_status || '';
+        item.matching.learning.signal_state = details.signal_state || '';
+        item.matching.learning.accepted_count = Number(details.accepted_count || 0);
+        item.matching.learning.rejected_count = Number(details.rejected_count || 0);
+        item.matching.learning.auto_applied_count = Number(details.auto_applied_count || 0);
     }
 
     updateTransactionData(item);
@@ -2748,6 +2770,14 @@ function buildImportPreviewSignalCacheSignature(item: ImportTransaction): string
         item.matching?.reconciliation?.status || '',
         item.matching?.reconciliation?.signal_label || '',
         serializeImportPreviewSignalSourceChain(item.matching?.reconciliation?.source_chain),
+        item.matching?.reconciliation?.planned_operation || '',
+        item.matching?.reconciliation?.history_bill_id || '',
+        item.matching?.reconciliation?.history_bill_version || '',
+        item.matching?.reconciliation?.operation_id || '',
+        item.matching?.reconciliation?.acknowledgement_token || '',
+        String(!!item.matching?.reconciliation?.destructive_ack_required),
+        item.matching?.reconciliation?.notice || '',
+        item.matching?.annotation?.history_rewrite_notice || '',
         String(!!item.isManuallyAnnotated),
         getTransferSignalStatus(item) || '',
         item.transferSuggestionReason || '',
@@ -2758,6 +2788,12 @@ function buildImportPreviewSignalCacheSignature(item: ImportTransaction): string
         item.learningRecommendationSummary || '',
         item.matching?.learning.mode || '',
         String(!!item.matching?.learning.auto_apply),
+        item.matching?.learning.recommendation_key || '',
+        item.matching?.learning.lifecycle_status || '',
+        item.matching?.learning.signal_state || '',
+        Number(item.matching?.learning.accepted_count || 0),
+        Number(item.matching?.learning.rejected_count || 0),
+        Number(item.matching?.learning.auto_applied_count || 0),
         getLLMSignalStatus(item) || '',
         String(llmPayload.suggested_main_category || ''),
         String(llmPayload.suggested_sub_category || ''),
@@ -2794,6 +2830,15 @@ function getImportPreviewSignalViewModel(item: ImportTransaction): ImportPreview
         reconciliationStatus: item.matching?.reconciliation?.status,
         reconciliationTitle: item.matching?.reconciliation?.signal_label,
         reconciliationSourceChain: item.matching?.reconciliation?.source_chain,
+        reconciliationPlannedOperation: item.matching?.reconciliation?.planned_operation,
+        reconciliationHistoryBillId: item.matching?.reconciliation?.history_bill_id,
+        reconciliationHistoryBillVersion: item.matching?.reconciliation?.history_bill_version,
+        reconciliationHistoryRole: item.matching?.reconciliation?.history_role,
+        reconciliationGroupKey: item.matching?.reconciliation?.group_key,
+        reconciliationOperationId: item.matching?.reconciliation?.operation_id,
+        reconciliationAcknowledgementToken: item.matching?.reconciliation?.acknowledgement_token,
+        reconciliationDestructiveAckRequired: !!item.matching?.reconciliation?.destructive_ack_required,
+        reconciliationNotice: item.matching?.reconciliation?.notice || item.matching?.annotation?.history_rewrite_notice,
         isManuallyAnnotated: item.isManuallyAnnotated,
         transferStatus: getTransferSignalStatus(item),
         transferTitle: item.transferSuggestionReason,
@@ -2803,6 +2848,7 @@ function getImportPreviewSignalViewModel(item: ImportTransaction): ImportPreview
         learningTitle: item.learningRecommendationReason,
         learningSummary: item.learningRecommendationSummary,
         learningMode: item.matching?.learning.mode || '',
+        learningSignalState: item.matching?.learning.signal_state || '',
         learningAutoApplied: !!item.matching?.learning.auto_apply,
         llmStatus: getLLMSignalStatus(item),
         llmTitle: String(llmPayload.reason || ''),
@@ -2826,6 +2872,24 @@ function getImportPreviewSignalViewModel(item: ImportTransaction): ImportPreview
         viewModel
     });
     return viewModel;
+}
+
+function getImportPreviewHistoryRewriteOperation(
+    item: ImportTransaction
+): ImportPreviewHistoryRewriteAcknowledgementOperation | null {
+    const previewId = getPreviewId(item);
+    if (previewId === null) {
+        return null;
+    }
+
+    return buildImportPreviewHistoryRewriteOperationAcknowledgement(previewId, {
+        reconciliationPlannedOperation: item.matching?.reconciliation?.planned_operation,
+        reconciliationHistoryBillId: item.matching?.reconciliation?.history_bill_id,
+        reconciliationHistoryBillVersion: item.matching?.reconciliation?.history_bill_version,
+        reconciliationOperationId: item.matching?.reconciliation?.operation_id,
+        reconciliationAcknowledgementToken: item.matching?.reconciliation?.acknowledgement_token,
+        reconciliationDestructiveAckRequired: !!item.matching?.reconciliation?.destructive_ack_required
+    });
 }
 
 function getImportTransactionRowKey(item: ImportTransaction): string {
@@ -4094,8 +4158,12 @@ function getSignalFilterSummary(): string {
             return tt('Platform Duplicate');
         case 'transfer':
             return tt('Transfer Match');
+        case 'history':
+            return tt('History Rewrite');
         case 'learning':
             return tt('Learning Suggestion');
+        case 'llm':
+            return tt('LLM Suggestion');
         default:
             return tt('All');
     }
@@ -4176,9 +4244,19 @@ const filterMenus = computed<ImportTransactionCheckDataMenuGroup[]>(() => [
                 onClick: () => filters.value.signal = 'transfer'
             },
             {
+                title: tt('History Rewrite'),
+                appendIcon: filters.value.signal === 'history' ? mdiCheck : undefined,
+                onClick: () => filters.value.signal = 'history'
+            },
+            {
                 title: tt('Learning Suggestion'),
                 appendIcon: filters.value.signal === 'learning' ? mdiCheck : undefined,
                 onClick: () => filters.value.signal = 'learning'
+            },
+            {
+                title: tt('LLM Suggestion'),
+                appendIcon: filters.value.signal === 'llm' ? mdiCheck : undefined,
+                onClick: () => filters.value.signal = 'llm'
             }
         ]
     },
@@ -4605,6 +4683,9 @@ const annotationTransactionCount = computed<number>(() => {
 const selectedAnnotationTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.selectedAnnotationCount);
 const selectedAnnotationTransactions = computed<ImportTransaction[]>(() => importTransactionSelectionSummary.value.selectedAnnotationTransactions);
 const annotationReasonSummaries = computed<AnnotationReasonSummary[]>(() => importTransactionSelectionSummary.value.annotationReasonSummaries);
+const selectedVisibleHistoryRewriteOperationCount = computed<number>(() => (
+    serverPagedMode.value ? currentPageTransactions.value : getTrackedTransactionsForSelection()
+).filter(transaction => transaction.selected && !!getImportPreviewHistoryRewriteOperation(transaction)).length);
 
 const anyButNotAllTransactionSelected = computed<boolean>(() => currentPageTransactions.value.length > 0
     && currentPageTransactions.value.some(transaction => transaction.selected)
@@ -5737,6 +5818,26 @@ function getSelectedPreviewCount(): number {
     return selectedImportTransactionCount.value;
 }
 
+function getSelectedPreviewIds(): number[] {
+    cacheCurrentPageDrafts();
+    return getTrackedTransactionsForSelection()
+        .filter(transaction => transaction.selected)
+        .map(transaction => getPreviewId(transaction))
+        .filter((previewId): previewId is number => previewId !== null);
+}
+
+function getSelectedHistoryRewriteOperations(): ImportPreviewHistoryRewriteAcknowledgementOperation[] {
+    cacheCurrentPageDrafts();
+    return getTrackedTransactionsForSelection()
+        .filter(transaction => transaction.selected)
+        .map(transaction => getImportPreviewHistoryRewriteOperation(transaction))
+        .filter((operation): operation is ImportPreviewHistoryRewriteAcknowledgementOperation => !!operation);
+}
+
+function getSelectedVisibleHistoryRewriteOperationCount(): number {
+    return selectedVisibleHistoryRewriteOperationCount.value;
+}
+
 function getCurrentPreviewPage(): number {
     return currentPage.value;
 }
@@ -5754,6 +5855,9 @@ defineExpose({
     setCountPerPage,
     getSelectedPreviewUpdates,
     getSelectedPreviewCount,
+    getSelectedPreviewIds,
+    getSelectedHistoryRewriteOperations,
+    getSelectedVisibleHistoryRewriteOperationCount,
     getCurrentPreviewPage,
     getCurrentPreviewPageSize,
     getCurrentServerPagedRequestOptions

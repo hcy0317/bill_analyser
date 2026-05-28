@@ -13,7 +13,11 @@ use bill_analyser_core::{normalize_bill_date_text, Money};
 
 mod dedicated;
 
-pub use dedicated::{parse_dedicated_import_bytes, DedicatedParseResult};
+pub use dedicated::{
+    detect_dedicated_import_bytes, parse_dedicated_import_bytes,
+    parse_dedicated_import_bytes_with_decision, DedicatedParseResult,
+    DedicatedParseSelectionResult, DedicatedParserCandidate, DedicatedParserDecision,
+};
 
 const DESCRIPTION_FIELDS: &[&str] = &[
     "description",

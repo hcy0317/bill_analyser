@@ -3,21 +3,18 @@
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
 fn open_runtime(state: &HttpAppState) -> Result<SqliteRuntime, ImportV2RouteResponse> {
-    let db_path = state.config.sqlite_db_path.as_deref().ok_or_else(|| {
-        import_v2_error_response(
-            503,
-            "Rust import DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH",
-        )
-    })?;
-    let db_path = SqliteDbPath::application_file(db_path)
-        .map_err(|error| import_v2_error_response(503, &error.to_string()))?;
-    SqliteRuntime::open(SqliteConnectionConfig {
-        path: db_path,
-        create_if_missing: true,
-        busy_timeout: state.config.timeout,
-    })
-    .map_err(db_error_response)
+    state
+        .open_sqlite_repository_runtime("import")
+        .map_err(|error| {
+            import_v2_error_response(
+                error.http_status_code(),
+                &error.public_message("Rust import route runtime DB error"),
+            )
+        })
 }
+
+#[cfg(test)]
+use bill_analyser_db::{SqliteConnectionConfig, SqliteDbPath};
 
 fn init_import_runtime_schema(runtime: &SqliteRuntime) -> Result<(), ImportV2RouteResponse> {
     init_import_staging_schema(runtime.connection()).map_err(db_error_response)

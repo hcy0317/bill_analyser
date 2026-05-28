@@ -185,177 +185,7 @@ pub fn dedup_bills_from_parser_templates(templates: &[ImportParserTemplateRow]) 
         .collect()
 }
 
-pub fn preview_draft_from_dedup_bill(bill: &DedupBill) -> ImportPreviewDraft {
-    let amount = money_to_yuan_f64(bill.amount);
-    let preview_payment_method =
-        first_non_empty([bill.payment_method.as_str(), bill.parser_id.as_str()]);
-    let no_income_expenditure = dedup_bill_has_no_income_expenditure_source(bill);
-    let transfer_requires_review = dedup_bill_transfer_requires_review(bill);
-    let preview_matching_feedback = preview_matching_feedback_from_dedup_bill(
-        bill,
-        no_income_expenditure,
-        transfer_requires_review,
-    );
-    ImportPreviewDraft {
-        preview_date: bill.date.clone(),
-        preview_type: bill.transaction_type.clone(),
-        preview_amount: amount.abs(),
-        preview_destination_amount: preview_destination_amount_for_bill(bill, amount),
-        preview_main_category: bill.main_category.clone(),
-        preview_sub_category: bill.sub_category.clone(),
-        preview_source_account_id: parse_positive_i64(&bill.source_account_id),
-        preview_destination_account_id: bill
-            .destination_account_id
-            .as_deref()
-            .and_then(parse_positive_i64),
-        preview_counterparty: bill.counterparty.clone(),
-        preview_payment_method,
-        preview_description: bill.description.clone(),
-        preview_parser_id: bill.parser_id.clone(),
-        preview_parser_tags: dedup_bill_parser_tags_value(bill),
-        preview_selected: false,
-        dedup_type: Some(
-            bill.dedup_type
-                .clone()
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| "remaining".to_string()),
-        ),
-        dedup_source_ids: bill
-            .dedup_source_ids()
-            .iter()
-            .filter_map(|value| parse_positive_i64(value))
-            .collect(),
-        preview_matching_feedback,
-        ..ImportPreviewDraft::default()
-    }
-}
-
-fn preview_matching_feedback_from_dedup_bill(
-    bill: &DedupBill,
-    no_income_expenditure: bool,
-    transfer_requires_review: bool,
-) -> Value {
-    let dedup_type = bill
-        .dedup_type
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or("remaining");
-    let mut feedback = serde_json::Map::new();
-    feedback.insert(
-        "parser".to_string(),
-        serde_json::json!({
-            "parser_id": bill.parser_id,
-            "parser_tags": &bill.parser_tags,
-            "payment_method": bill.payment_method,
-            "counterparty": bill.counterparty,
-        }),
-    );
-    feedback.insert(
-        "dedup".to_string(),
-        serde_json::json!({
-            "type": dedup_type,
-            "source_ids": bill.dedup_source_ids(),
-            "source_count": bill.dedup_source_ids().len(),
-        }),
-    );
-    if dedup_type == "transfer" || dedup_type == "transfer_cross_batch" {
-        feedback.insert(
-            "transfer".to_string(),
-            serde_json::json!({
-                "candidate_type": dedup_type,
-                "score": 1.0,
-                "level": "high",
-                "reason": "smart_dedup transfer pair",
-                "review_status": "pending",
-                "pair_order": bill.transfer_pair_order,
-                "source_chain": &bill.transfer_pair_sources,
-            }),
-        );
-    }
-    if no_income_expenditure {
-        feedback.insert(
-            "annotation".to_string(),
-            serde_json::json!({
-                "status": "needs_review",
-                "type": "no_income_expenditure",
-                "review_status": "suppressed",
-                "suppressed": true,
-                "reason": "original parser type is no-income-expenditure",
-            }),
-        );
-    }
-    if transfer_requires_review {
-        feedback.insert(
-            "annotation".to_string(),
-            serde_json::json!({
-                "status": "needs_review",
-                "type": "transfer_account_direction",
-                "review_status": "requires_account_review",
-                "suppressed": true,
-                "reason": "transfer preview is missing source or destination account",
-            }),
-        );
-    }
-    Value::Object(feedback)
-}
-
-fn dedup_bill_has_no_income_expenditure_source(bill: &DedupBill) -> bool {
-    bill.original_type.trim().contains("不计收支")
-        || bill
-            .transfer_pair_sources
-            .iter()
-            .any(|source| source.original_type.trim().contains("不计收支"))
-}
-
-fn dedup_bill_transfer_requires_review(bill: &DedupBill) -> bool {
-    let is_transfer = bill
-        .dedup_type
-        .as_deref()
-        .is_some_and(|value| value.trim().to_ascii_lowercase().contains("transfer"));
-    if !is_transfer {
-        return false;
-    }
-    let source = parse_positive_i64(&bill.source_account_id);
-    let destination = bill
-        .destination_account_id
-        .as_deref()
-        .and_then(parse_positive_i64);
-    source.is_none() || destination.is_none() || source == destination
-}
-
-pub fn preview_drafts_from_dedup_bills(bills: &[DedupBill]) -> Vec<ImportPreviewDraft> {
-    bills.iter().map(preview_draft_from_dedup_bill).collect()
-}
-
-impl Default for ImportPreviewDraft {
-    fn default() -> Self {
-        Self {
-            preview_date: String::new(),
-            preview_type: String::new(),
-            preview_amount: 0.0,
-            preview_destination_amount: 0.0,
-            preview_main_category: String::new(),
-            preview_sub_category: String::new(),
-            preview_source_account_id: None,
-            preview_destination_account_id: None,
-            preview_counterparty: String::new(),
-            preview_payment_method: String::new(),
-            preview_description: String::new(),
-            preview_parser_id: String::new(),
-            preview_parser_tags: None,
-            preview_recurring_id: None,
-            preview_recurring_name: String::new(),
-            preview_recurring_candidate_count: 0,
-            preview_recurring_match_score: 0.0,
-            preview_recurring_match_reasons: String::new(),
-            preview_recurring_matched_date: String::new(),
-            preview_selected: false,
-            dedup_type: None,
-            dedup_source_ids: Vec::new(),
-            preview_matching_feedback: Value::Object(Default::default()),
-        }
-    }
-}
+include!("preview_drafts.rs");
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ImportPreviewRow {
@@ -656,6 +486,33 @@ pub struct ImportPreviewDecisionResult {
     pub invalid_recurring_id: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportLearningLifecycleView {
+    pub recommendation_key: String,
+    pub recommendation_type: String,
+    pub status: String,
+    pub signal_state: String,
+    pub accepted_count: i64,
+    pub rejected_count: i64,
+    pub auto_applied_count: i64,
+    pub auto_apply_enabled: bool,
+    pub suppressed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportLearningLifecycleRecordInput {
+    pub recommendation_key: String,
+    pub recommendation_type: String,
+    pub feedback: String,
+    pub rule_id: Option<i64>,
+    pub suggestion_id: Option<i64>,
+    pub session_id: Option<String>,
+    pub preview_id: Option<i64>,
+    pub bill_id: Option<i64>,
+    pub candidate_id: Option<String>,
+    pub payload_json: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ImportPreviewLearningApply {
     pub preview_type: Option<String>,
@@ -801,4 +658,32 @@ pub struct ConfirmPreviewResult {
     pub skipped_count: usize,
     pub duplicate_count: usize,
     pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportHistoryRewriteAcknowledgement {
+    #[serde(default)]
+    pub acknowledged: bool,
+    #[serde(default, alias = "selectedPreviewIds")]
+    pub selected_preview_ids: Vec<i64>,
+    #[serde(default)]
+    pub operations: Vec<ImportHistoryRewriteAcknowledgementOperation>,
+    #[serde(default, alias = "selectionScope")]
+    pub selection_scope: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportHistoryRewriteAcknowledgementOperation {
+    #[serde(alias = "previewId")]
+    pub preview_id: i64,
+    #[serde(alias = "operationId")]
+    pub operation_id: String,
+    #[serde(alias = "plannedOperation")]
+    pub planned_operation: String,
+    #[serde(alias = "historyBillId")]
+    pub history_bill_id: i64,
+    #[serde(alias = "historyBillVersion")]
+    pub history_bill_version: i64,
+    #[serde(alias = "acknowledgementToken")]
+    pub acknowledgement_token: String,
 }

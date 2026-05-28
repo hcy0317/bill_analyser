@@ -8,6 +8,7 @@
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
 // 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
 
+pub mod account_rules;
 pub mod adapters;
 pub mod ai_ocr_llm;
 pub mod auth;
@@ -15,7 +16,9 @@ pub mod budgets;
 pub mod category_rules;
 pub mod error;
 pub mod import_learning;
+pub mod import_learning_lifecycle;
 pub mod import_pipeline;
+pub mod import_pipeline_learning;
 pub mod matching;
 pub mod migration_governance;
 pub mod ops;
@@ -24,6 +27,7 @@ pub mod response;
 pub mod runtime;
 pub mod smart_dedup;
 pub mod statistics;
+pub mod weaviate_derived;
 
 pub use adapters::{account, api, category, transaction};
 pub use ai_ocr_llm::{
@@ -71,8 +75,20 @@ pub use import_learning::{
     GREEN_MARGIN_THRESHOLD, HIDDEN_DIMENSION, MIN_TRAINING_SAMPLES, MODEL_FAMILY, MODEL_KEY,
     POLICY_VERSION,
 };
+pub use import_learning_lifecycle::{
+    build_import_learning_recommendation_key, learning_lifecycle_is_auto_eligible,
+    learning_lifecycle_signal_state, normalize_learning_lifecycle_status,
+    transition_import_learning_lifecycle, ImportLearningLifecycleState,
+    ImportLearningLifecycleTransition, ImportLearningRecommendationKeyInput,
+    LEARNING_LIFECYCLE_ACCEPTS_TO_GREEN, LEARNING_LIFECYCLE_GREEN_REJECTS_TO_DOWNGRADE,
+    LEARNING_LIFECYCLE_STATUS_AUTO_APPLIED, LEARNING_LIFECYCLE_STATUS_DOWNGRADED,
+    LEARNING_LIFECYCLE_STATUS_GREEN, LEARNING_LIFECYCLE_STATUS_SUPPRESSED,
+    LEARNING_LIFECYCLE_STATUS_YELLOW, LEARNING_LIFECYCLE_YELLOW_REJECTS_TO_SUPPRESS,
+    RECOMMENDATION_KEY_SCHEMA_VERSION,
+};
 pub use import_pipeline::{
-    attach_import_preview_matching_payload, build_import_preview_filter_index_item,
+    attach_import_preview_matching_payload, build_import_history_rewrite_ack_token,
+    build_import_history_rewrite_operation_id, build_import_preview_filter_index_item,
     build_import_preview_matching_payload, coerce_preview_selected_value,
     expected_preview_state_from_value, expected_preview_state_is_valid,
     import_preview_index_success, import_preview_page_success,
@@ -90,11 +106,12 @@ pub use import_pipeline::{
     ImportPreviewIndexData, ImportPreviewMatchingPayload, ImportPreviewPageData,
     ImportPreviewPageQuery, ImportPreviewSortDirection, ImportSessionSummary,
     ImportStageConfirmData, ImportStageDedupData, ImportStageParseData, ImportV2RouteResponse,
-    InvestmentMatchingPayload, LearningMatchingPayload, LlmRecommendationPayload,
-    ParserMatchingPayload, ReconciliationMatchingPayload, RecurringMatchingPayload,
-    TransferMatchingPayload, BILLS_PREVIEW_CONTRACT_FIELDS, IMPORT_PREVIEW_SELECTION_KEYS,
+    InvestmentMatchingPayload, LlmRecommendationPayload, ParserMatchingPayload,
+    ReconciliationMatchingPayload, RecurringMatchingPayload, TransferMatchingPayload,
+    BILLS_PREVIEW_CONTRACT_FIELDS, HISTORY_REWRITE_NOTICE, IMPORT_PREVIEW_SELECTION_KEYS,
     IMPORT_PREVIEW_SORT_KEYS, IMPORT_STAGING_TABLES, IMPORT_V2_PIPELINE_STEPS,
 };
+pub use import_pipeline_learning::LearningMatchingPayload;
 pub use matching::{
     bill_pair_feedback_payload_is_related, build_bill_pair_feedback_payload,
     build_duplicate_bill_candidate, build_duplicate_bill_candidates,
@@ -161,9 +178,23 @@ pub use runtime::{
     runtime_health, runtime_identity_json, RuntimeHealth, RuntimeIdentity, RuntimeStatus,
 };
 pub use smart_dedup::{
-    find_cross_batch_transfer_pairs, find_database_duplicates,
+    build_transfer_source_snapshot, find_cross_batch_transfer_pairs, find_database_duplicates,
     find_import_reconciliation_candidates, CrossBatchTransferMatch, DedupBill, DeduplicationResult,
     DeduplicationType, DuplicateGroup, ImportReconciliationCandidate, MergedBillSource,
     ReconciliationCandidateType, SmartDeduplicationEngine, SplitGroup, TransferPair,
     TransferSourceSnapshot,
+};
+pub use weaviate_derived::{
+    build_import_learning_vector_recall_filters, build_import_learning_vector_recall_queries,
+    build_weaviate_batch_upsert_payload, build_weaviate_collection_names,
+    build_weaviate_delete_path, build_weaviate_derived_object, build_weaviate_graphql_query,
+    build_weaviate_required_metadata, build_weaviate_schema_classes,
+    derive_weaviate_feature_vector, deterministic_weaviate_object_id,
+    normalize_weaviate_transaction_type_scope, validate_weaviate_collection_prefix,
+    WeaviateCollectionNames, WeaviateDerivedClass, WeaviateDerivedObject, WeaviateFilterValue,
+    WeaviateImportLearningRecallQuery, WeaviateMetadataFilter, WEAVIATE_CLASS_COUNTERPARTY_FEATURE,
+    WEAVIATE_CLASS_DESCRIPTION_FEATURE, WEAVIATE_CLASS_IMPORT_LEARNING_SAMPLE,
+    WEAVIATE_CLASS_IMPORT_LEARNING_SUGGESTION_VECTOR, WEAVIATE_DEFAULT_COLLECTION_PREFIX,
+    WEAVIATE_DEFAULT_VECTOR_DIMENSIONS, WEAVIATE_RECALL_DEFAULT_LIMIT, WEAVIATE_RECALL_MAX_LIMIT,
+    WEAVIATE_RULE_STATE_POSTGRES_AUTHORITATIVE,
 };

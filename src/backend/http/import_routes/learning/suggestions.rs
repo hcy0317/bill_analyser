@@ -20,29 +20,6 @@ struct LearningSuggestionCandidate {
     existing_rule_id: Option<i64>,
 }
 
-#[derive(Debug, Clone)]
-struct LearningSuggestionRow {
-    id: i64,
-    user_id: i64,
-    match_type: String,
-    match_value: String,
-    normalized_match_value: String,
-    composite_match_hash: Option<String>,
-    match_features_json: Option<String>,
-    suggested_type: Option<String>,
-    suggested_category_id: Option<i64>,
-    suggested_source_account_id: Option<i64>,
-    suggested_destination_account_id: Option<i64>,
-    sample_count: i64,
-    source_session_ids_json: Option<String>,
-    source_preview_ids_json: Option<String>,
-    status: String,
-    existing_rule_id: Option<i64>,
-    summary: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
 enum LearningSuggestionDecision {
     Accepted(Value),
     Conflict(Value),
@@ -93,8 +70,51 @@ fn mine_learning_suggestions(
             import_v2_error_response(
                 500,
                 &format!("Unable to serialize source previews: {error}"),
-            )
-        })?;
+                )
+            })?;
+        let recommendation_key = build_import_learning_recommendation_key(
+            &ImportLearningRecommendationKeyInput {
+                user_id: user_id_i64,
+                recommendation_type: "learning_center".to_string(),
+                recommended_type: candidate
+                    .signature
+                    .suggested_type
+                    .clone()
+                    .unwrap_or_default(),
+                recommended_category_id: candidate.signature.suggested_category_id,
+                recommended_source_account_id: candidate.signature.suggested_source_account_id,
+                recommended_destination_account_id: candidate
+                    .signature
+                    .suggested_destination_account_id,
+                transaction_type_scope: candidate
+                    .signature
+                    .suggested_type
+                    .clone()
+                    .unwrap_or_default(),
+                parser_bucket: candidate
+                    .match_features
+                    .get("parser_id")
+                    .cloned()
+                    .unwrap_or_default(),
+                counterparty_bucket: candidate
+                    .match_features
+                    .get("counterparty")
+                    .cloned()
+                    .unwrap_or_default(),
+                payment_bucket: candidate
+                    .match_features
+                    .get("payment_method")
+                    .cloned()
+                    .unwrap_or_default(),
+                description_bucket: candidate
+                    .match_features
+                    .get("description")
+                    .cloned()
+                    .unwrap_or_default(),
+                suppression_scope: "learning_center".to_string(),
+                ..ImportLearningRecommendationKeyInput::default()
+            },
+        );
         connection
             .execute(
                 "
@@ -104,9 +124,9 @@ fn mine_learning_suggestions(
                     suggested_category_id, suggested_source_account_id,
                     suggested_destination_account_id, sample_count,
                     source_session_ids_json, source_preview_ids_json, status,
-                    existing_rule_id, summary, created_at, updated_at
+                    recommendation_key, signal_state, existing_rule_id, summary, created_at, updated_at
                 ) VALUES (?1, 'composite', ?2, ?2, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-                    'pending', NULL, ?11, ?12, ?12)
+                    'pending', ?11, 'yellow', NULL, ?12, ?13, ?13)
                 ON CONFLICT(user_id, match_type, normalized_match_value) DO UPDATE SET
                     suggested_type = excluded.suggested_type,
                     suggested_category_id = excluded.suggested_category_id,
@@ -115,6 +135,8 @@ fn mine_learning_suggestions(
                     sample_count = excluded.sample_count,
                     source_session_ids_json = excluded.source_session_ids_json,
                     source_preview_ids_json = excluded.source_preview_ids_json,
+                    recommendation_key = excluded.recommendation_key,
+                    signal_state = excluded.signal_state,
                     summary = excluded.summary,
                     updated_at = excluded.updated_at
                 ",
@@ -129,6 +151,7 @@ fn mine_learning_suggestions(
                     candidate.sample_count,
                     session_ids_json,
                     preview_ids_json,
+                    recommendation_key,
                     summarize_learning_suggestion(&candidate.match_features),
                     now,
                 ],
@@ -379,151 +402,6 @@ fn learning_suggestion_id_by_key(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn count_learning_suggestions(
-    connection: &Connection,
-    user_id: UserId,
-    status: Option<&str>,
-) -> Result<i64, ImportV2RouteResponse> {
-    let user_id = user_id_i64_value(user_id)?;
-    if let Some(status) = status {
-        connection
-            .query_row(
-                "SELECT COUNT(*) FROM import_learning_suggestions WHERE user_id = ?1 AND status = ?2",
-                params![user_id, status],
-                |row| row.get(0),
-            )
-            .map_err(db_error_response)
-    } else {
-        connection
-            .query_row(
-                "SELECT COUNT(*) FROM import_learning_suggestions WHERE user_id = ?1",
-                params![user_id],
-                |row| row.get(0),
-            )
-            .map_err(db_error_response)
-    }
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn load_learning_suggestions(
-    connection: &Connection,
-    user_id: UserId,
-    status: Option<&str>,
-    limit: usize,
-    offset: usize,
-) -> Result<Vec<Value>, ImportV2RouteResponse> {
-    let user_id = user_id_i64_value(user_id)?;
-    if let Some(status) = status {
-        let mut statement = connection
-            .prepare(
-                "
-            SELECT * FROM import_learning_suggestions
-            WHERE user_id = ?1 AND status = ?2
-            ORDER BY sample_count DESC, updated_at DESC, id DESC
-            LIMIT ?3 OFFSET ?4
-            ",
-            )
-            .map_err(db_error_response)?;
-        let rows = statement
-            .query_map(
-                params![user_id, status, usize_to_i64(limit), usize_to_i64(offset)],
-                learning_suggestion_row_to_value,
-            )
-            .map_err(db_error_response)?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(db_error_response)
-    } else {
-        let mut statement = connection
-            .prepare(
-                "
-            SELECT * FROM import_learning_suggestions
-            WHERE user_id = ?1
-            ORDER BY sample_count DESC, updated_at DESC, id DESC
-            LIMIT ?2 OFFSET ?3
-            ",
-            )
-            .map_err(db_error_response)?;
-        let rows = statement
-            .query_map(
-                params![user_id, usize_to_i64(limit), usize_to_i64(offset)],
-                learning_suggestion_row_to_value,
-            )
-            .map_err(db_error_response)?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(db_error_response)
-    }
-}
-
-fn learning_suggestion_row_to_value(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
-    let row = learning_suggestion_row(row)?;
-    Ok(json!({
-        "id": row.id,
-        "user_id": row.user_id,
-        "match_type": row.match_type,
-        "match_value": row.match_value,
-        "normalized_match_value": row.normalized_match_value,
-        "composite_match_hash": row.composite_match_hash,
-        "match_features_json": row.match_features_json.unwrap_or_default(),
-        "suggested_type": row.suggested_type,
-        "suggested_category_id": row.suggested_category_id,
-        "suggested_source_account_id": row.suggested_source_account_id,
-        "suggested_destination_account_id": row.suggested_destination_account_id,
-        "sample_count": row.sample_count,
-        "source_session_ids_json": row.source_session_ids_json.unwrap_or_default(),
-        "source_preview_ids_json": row.source_preview_ids_json.unwrap_or_default(),
-        "status": row.status,
-        "existing_rule_id": row.existing_rule_id,
-        "summary": row.summary.unwrap_or_default(),
-        "created_at": row.created_at,
-        "updated_at": row.updated_at,
-    }))
-}
-
-fn learning_suggestion_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<LearningSuggestionRow> {
-    Ok(LearningSuggestionRow {
-        id: row.get("id")?,
-        user_id: row.get("user_id")?,
-        match_type: row.get("match_type")?,
-        match_value: row.get("match_value")?,
-        normalized_match_value: row.get("normalized_match_value")?,
-        composite_match_hash: row.get("composite_match_hash")?,
-        match_features_json: row.get("match_features_json")?,
-        suggested_type: row.get("suggested_type")?,
-        suggested_category_id: row.get("suggested_category_id")?,
-        suggested_source_account_id: row.get("suggested_source_account_id")?,
-        suggested_destination_account_id: row.get("suggested_destination_account_id")?,
-        sample_count: row.get("sample_count")?,
-        source_session_ids_json: row.get("source_session_ids_json")?,
-        source_preview_ids_json: row.get("source_preview_ids_json")?,
-        status: row.get("status")?,
-        existing_rule_id: row.get("existing_rule_id")?,
-        summary: row.get("summary")?,
-        created_at: row.get("created_at")?,
-        updated_at: row.get("updated_at")?,
-    })
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn get_learning_suggestion(
-    connection: &Connection,
-    suggestion_id: i64,
-    user_id: UserId,
-) -> Result<Option<LearningSuggestionRow>, ImportV2RouteResponse> {
-    connection
-        .query_row(
-            "
-            SELECT * FROM import_learning_suggestions
-            WHERE id = ?1 AND user_id = ?2
-            LIMIT 1
-            ",
-            params![suggestion_id, user_id_i64_value(user_id)?],
-            learning_suggestion_row,
-        )
-        .optional()
-        .map_err(db_error_response)
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
 fn accept_learning_suggestion(
     connection: &mut Connection,
     suggestion_id: i64,
@@ -625,6 +503,30 @@ fn accept_learning_suggestion(
         Some(suggestion_id),
         Some(json!({"status": "accepted"})),
     )?;
+    if let Some(recommendation_key) = suggestion
+        .recommendation_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        record_import_learning_lifecycle_feedback(
+            connection,
+            user_id_i64,
+            &ImportLearningLifecycleRecordInput {
+                recommendation_key: recommendation_key.to_string(),
+                recommendation_type: "learning_center".to_string(),
+                feedback: "accept".to_string(),
+                rule_id: Some(rule_id),
+                suggestion_id: Some(suggestion_id),
+                session_id: None,
+                preview_id: None,
+                bill_id: None,
+                candidate_id: None,
+                payload_json: Some(json!({"status": "accepted"}).to_string()),
+            },
+        )
+        .map_err(db_error_response)?;
+    }
     Ok(LearningSuggestionDecision::Accepted(json!({
         "suggestion_id": suggestion_id,
         "rule_id": rule_id,
@@ -664,6 +566,30 @@ fn reject_learning_suggestion(
         Some(suggestion_id),
         Some(json!({"status": "rejected"})),
     )?;
+    if let Some(recommendation_key) = suggestion
+        .recommendation_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        record_import_learning_lifecycle_feedback(
+            connection,
+            user_id_i64,
+            &ImportLearningLifecycleRecordInput {
+                recommendation_key: recommendation_key.to_string(),
+                recommendation_type: "learning_center".to_string(),
+                feedback: "reject".to_string(),
+                rule_id: None,
+                suggestion_id: Some(suggestion_id),
+                session_id: None,
+                preview_id: None,
+                bill_id: None,
+                candidate_id: None,
+                payload_json: Some(json!({"status": "rejected"}).to_string()),
+            },
+        )
+        .map_err(db_error_response)?;
+    }
     Ok(true)
 }
 

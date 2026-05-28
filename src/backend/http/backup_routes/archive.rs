@@ -410,11 +410,11 @@ pub(super) fn io_context_error(error: io::Error, context: impl ToString) -> Back
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn upsert_backup_record_from_info(
-    connection: &rusqlite::Connection,
+    runtime: &BackupOpsRuntime,
     backup_info: &BackupFileInfoContract,
 ) -> Result<i64, DbError> {
-    upsert_backup_record(
-        connection,
+    upsert_backup_record_for_runtime(
+        runtime,
         BackupRecordDraft {
             backup_name: backup_info.filename.clone(),
             file_path: backup_info.path.clone(),

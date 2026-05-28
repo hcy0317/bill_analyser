@@ -6,6 +6,7 @@
         <f7-list strong inset dividers>
             <f7-list-item :title="tt('User Profile')" link="/user/profile"></f7-list-item>
             <f7-list-item :title="tt('Transaction Categories')" link="/category/all"></f7-list-item>
+            <f7-list-item :title="tt('Account Recognition Rules')" link="/account/rules"></f7-list-item>
             <f7-list-item :title="tt('Transaction Tags')" link="/tag/list"></f7-list-item>
             <f7-list-item :title="tt('Transaction Templates')" link="/template/list"></f7-list-item>
             <f7-list-item :title="tt('Scheduled Transactions')" link="/schedule/list" v-if="isUserScheduledTransactionEnabled()"></f7-list-item>

@@ -108,3 +108,23 @@ fn create_user_data_audit_log_best_effort(
         ),
     );
 }
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn create_postgres_user_data_audit_log_best_effort(
+    pool: &bill_analyser_db::PostgresPool,
+    draft: UserDataAuditLogDraft<'_>,
+) {
+    let _ = create_postgres_user_data_audit_event(
+        pool,
+        PostgresUserDataAuditEvent {
+            operation_type: draft.operation_type,
+            user_id: draft.user_id,
+            details: draft.details,
+            affected_count: draft.affected_count,
+            ip_address: draft.ip_address,
+            user_agent: draft.user_agent,
+            now: draft.now,
+        },
+    )
+    .await;
+}

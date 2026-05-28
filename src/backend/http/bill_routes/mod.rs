@@ -39,11 +39,19 @@ use bill_analyser_core::adapters::transaction::{
 use bill_analyser_core::category_rules::match_rule_expression;
 use bill_analyser_core::{Money, RuntimeError, UserId, UtcOffsetMinutes};
 use bill_analyser_db::{
-    batch_create_bills, batch_delete_bills, batch_update_bills, bind_bill_to_recurring,
-    create_bill, delete_bill, get_bill_by_id, get_bill_recurring_candidates, get_bill_tags,
-    get_bill_update_snapshot, get_first_account_id, list_bills, query_bills,
-    unbind_bill_from_recurring, update_bill, BillCategoryFilter, BillCreateDraft, BillFilters,
-    BillRecord, BillUpdateDraft, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
+    batch_create_bills, batch_create_postgres_bills, batch_delete_bills,
+    batch_delete_postgres_bills, batch_update_bills, batch_update_postgres_bills,
+    bind_bill_to_recurring, bind_postgres_bill_to_recurring, create_bill, create_postgres_bill,
+    delete_bill, delete_postgres_bill, get_bill_by_id, get_bill_recurring_candidates,
+    get_bill_tags, get_bill_update_snapshot, get_first_account_id, get_first_postgres_account_id,
+    get_postgres_bill_by_id, get_postgres_bill_recurring_candidates, get_postgres_bill_tags,
+    get_postgres_bill_update_snapshot, get_postgres_category_by_name,
+    get_postgres_reconciliation_account, list_bills, list_postgres_category_rules,
+    list_postgres_reconciliation_categories, postgres_category_filters_for_ids, query_bills,
+    query_postgres_bills, resolve_postgres_category_by_id, unbind_bill_from_recurring,
+    unbind_postgres_bill_from_recurring, update_bill, update_postgres_bill,
+    update_postgres_category, BillCategoryFilter, BillCreateDraft, BillFilters, BillRecord,
+    BillUpdateDraft, CategoryRuleRecord, PostgresPool, SqliteRuntime,
 };
 use chrono::{DateTime, Local};
 use ring::rand::{SecureRandom, SystemRandom};

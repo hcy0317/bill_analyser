@@ -93,6 +93,58 @@ fn record_sensitive_auth_failure(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+async fn ensure_postgres_sensitive_auth_failure_limit(
+    pool: &bill_analyser_db::PostgresPool,
+    user_id: UserId,
+    event_type: &str,
+) -> RouteResult<()> {
+    let failure_count = count_postgres_auth_events_since(
+        pool,
+        user_id,
+        event_type,
+        &sensitive_auth_failure_window_start_text(),
+    )
+    .await
+    .map_err(|_| Box::new(db_error_response()))?;
+    if failure_count >= SENSITIVE_AUTH_FAILURE_LIMIT {
+        return Err(Box::new(auth_rest_error_response(AuthRestError::new(
+            429,
+            "Too Many Requests",
+            "Too many failed sensitive-operation authentication attempts, please try again later",
+        ))));
+    }
+    Ok(())
+}
+
+async fn record_postgres_sensitive_auth_failure(
+    pool: &bill_analyser_db::PostgresPool,
+    user: &AuthLoginUserRow,
+    event_type: &str,
+    ip_address: &str,
+    user_agent: &str,
+    error_message: &str,
+    metadata: Option<Value>,
+) -> RouteResult<()> {
+    create_postgres_auth_log(
+        pool,
+        &AuthLogDraft {
+            user_id: Some(user.profile.id),
+            username: user.profile.username.clone(),
+            event_type: event_type.to_string(),
+            ip_address: ip_address.to_string(),
+            user_agent: user_agent.to_string(),
+            success: false,
+            error_message: Some(error_message.to_string()),
+            metadata: metadata.map(|value| value.to_string()),
+            created_at: utc_now_text(),
+        },
+    )
+    .await
+    .map(|_| ())
+    .map_err(|_| Box::new(db_error_response()))
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
 fn persist_login_success(
     connection: &rusqlite::Connection,
     session_draft: &CreateTokenSessionDraft,

@@ -48,8 +48,27 @@ pub fn stage_import_parser_templates(
     drafts: &[ImportParserTemplateDraft],
     require_existing_session: bool,
 ) -> DbResult<ImportParseStagingResult> {
+    stage_import_parser_templates_with_sources(
+        connection,
+        session,
+        drafts,
+        &[],
+        &[],
+        require_existing_session,
+    )
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+pub fn stage_import_parser_templates_with_sources(
+    connection: &mut Connection,
+    session: &ImportSessionDraft,
+    drafts: &[ImportParserTemplateDraft],
+    source_drafts: &[ImportSourceDraft],
+    standard_row_drafts: &[ImportStandardRowDraft],
+    require_existing_session: bool,
+) -> DbResult<ImportParseStagingResult> {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "stage_import_parser_templates", "business operation entered");
+    tracing::info!(domain = "import_parser", operation = "stage_import_parser_templates_with_sources", "business operation entered");
     run_transaction(connection, |tx| {
         let existing_session = get_import_session(tx, &session.session_id, session.user_id)?;
         if require_existing_session && existing_session.is_none() {
@@ -68,6 +87,50 @@ pub fn stage_import_parser_templates(
         }
         let user_id_value = user_id_i64(session.user_id)?;
         let created_at = now_text();
+        let source_index_offset = if existing_session.is_some() && !source_drafts.is_empty() {
+            next_import_source_index(tx, &session.session_id, user_id_value)?
+        } else {
+            0
+        };
+        let mut source_ids_by_index = std::collections::BTreeMap::new();
+        if !source_drafts.is_empty() {
+            let mut source_statement = tx.prepare(INSERT_IMPORT_SOURCE_SQL)?;
+            for source in source_drafts {
+                let mut persisted_source = source.clone();
+                persisted_source.source_index =
+                    source_index_offset.saturating_add(source.source_index.max(0));
+                insert_import_source_with_statement(
+                    &mut source_statement,
+                    &session.session_id,
+                    user_id_value,
+                    &persisted_source,
+                    &created_at,
+                )?;
+                source_ids_by_index.insert(source.source_index, tx.last_insert_rowid());
+            }
+        }
+        if !standard_row_drafts.is_empty() {
+            let mut standard_row_statement = tx.prepare(INSERT_IMPORT_STANDARD_ROW_SQL)?;
+            for row in standard_row_drafts {
+                let source_id = source_ids_by_index
+                    .get(&row.source_index)
+                    .copied()
+                    .ok_or_else(|| {
+                        DbError::InvalidOperation(format!(
+                            "standard row source_index {} has no import source",
+                            row.source_index
+                        ))
+                    })?;
+                insert_import_standard_row_with_statement(
+                    &mut standard_row_statement,
+                    &session.session_id,
+                    source_id,
+                    user_id_value,
+                    row,
+                    &created_at,
+                )?;
+            }
+        }
         let mut statement = tx.prepare(INSERT_PARSER_TEMPLATE_SQL)?;
         let mut inserted_count = 0;
         for draft in drafts {
@@ -100,6 +163,23 @@ pub fn stage_import_parser_templates(
     })
 }
 
+fn next_import_source_index(
+    connection: &Connection,
+    session_id: &str,
+    user_id: i64,
+) -> DbResult<i64> {
+    let max_index = connection.query_row(
+        "
+        SELECT COALESCE(MAX(source_index), -1)
+        FROM import_sources
+        WHERE session_id = ?1 AND user_id = ?2
+        ",
+        params![session_id, user_id],
+        |row| row.get::<_, i64>(0),
+    )?;
+    Ok(max_index.saturating_add(1))
+}
+
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn get_parser_templates_by_session(
     connection: &Connection,
@@ -120,6 +200,57 @@ pub fn get_parser_templates_by_session(
     let rows = statement.query_map(
         params![session_id, user_id_i64(user_id)?],
         parser_template_from_row,
+    )?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+pub fn get_import_sources_by_session(
+    connection: &Connection,
+    session_id: &str,
+    user_id: UserId,
+) -> DbResult<Vec<ImportSourceRow>> {
+    let mut statement = connection.prepare(
+        "
+        SELECT *
+        FROM import_sources
+        WHERE session_id = ?1 AND user_id = ?2
+        ORDER BY source_index ASC, id ASC
+        ",
+    )?;
+    let rows = statement.query_map(
+        params![session_id, user_id_i64(user_id)?],
+        import_source_from_row,
+    )?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+pub fn get_import_standard_rows_by_session(
+    connection: &Connection,
+    session_id: &str,
+    user_id: UserId,
+) -> DbResult<Vec<ImportStandardRow>> {
+    let mut statement = connection.prepare(
+        "
+        SELECT
+            r.id, r.session_id, r.source_id, r.user_id,
+            s.source_index, r.source_row_index, s.parser_id,
+            r.occurred_at, r.amount_cents, r.direction, r.transaction_type,
+            r.merchant, r.payment_method, r.description,
+            r.parser_payload_json, r.standard_payload_json,
+            r.created_at, r.updated_at
+        FROM import_standard_rows r
+        JOIN import_sources s ON s.id = r.source_id
+            AND s.session_id = r.session_id
+            AND s.user_id = r.user_id
+        WHERE r.session_id = ?1 AND r.user_id = ?2
+        ORDER BY s.source_index ASC, r.source_row_index ASC, r.id ASC
+        ",
+    )?;
+    let rows = statement.query_map(
+        params![session_id, user_id_i64(user_id)?],
+        import_standard_row_from_row,
     )?;
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
 }

@@ -229,6 +229,7 @@ fn foundational_schema_initializes_core_tables_indexes_and_runtime_contracts(
         "categories",
         "category_rules",
         "accounts",
+        "account_rules",
         "tags",
         "budgets",
         "budget_history",
