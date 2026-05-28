@@ -59,6 +59,20 @@ jobs:
   backend-ci:
     name: backend-ci
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: bill_analyser_test
+          POSTGRES_USER: bill_analyser
+          POSTGRES_PASSWORD: bill_analyser_dev
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U bill_analyser -d bill_analyser_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout
         uses: https://github.com/actions/checkout@v4
@@ -136,7 +150,21 @@ jobs:
             cargo install cargo-llvm-cov --locked
           fi
 
+      - name: Wait for Postgres test service
+        run: |
+          for attempt in $(seq 1 30); do
+            if (echo > /dev/tcp/postgres/5432) >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Postgres test service did not become reachable on postgres:5432"
+          exit 1
+
       - name: Run Rust coverage
+        env:
+          BILL_ANALYSER_TEST_POSTGRES_URL: postgres://bill_analyser:bill_analyser_dev@postgres:5432/bill_analyser_test
+          RUST_TEST_THREADS: 1
         run: cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90
 
       - name: Trim backend caches before cache save

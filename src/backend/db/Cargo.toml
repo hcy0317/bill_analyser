@@ -35,6 +35,10 @@ path = "bin/bill_taxonomy_bridge.rs"
 name = "bill_sqlite_to_postgres_migrate"
 path = "bin/bill_sqlite_to_postgres_migrate.rs"
 
+[[bin]]
+name = "bill_postgres_account_recovery"
+path = "bin/bill_postgres_account_recovery.rs"
+
 [[test]]
 name = "app_settings"
 path = "../../../tests/backend/db/app_settings.rs"
@@ -70,6 +74,10 @@ path = "../../../tests/backend/db/llm_runtime.rs"
 [[test]]
 name = "sqlite_postgres_migration_cli"
 path = "../../../tests/backend/db/sqlite_postgres_migration_cli.rs"
+
+[[test]]
+name = "postgres_account_recovery_cli"
+path = "../../../tests/backend/db/postgres_account_recovery_cli.rs"
 
 [[test]]
 name = "matching_runtime"

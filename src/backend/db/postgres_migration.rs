@@ -242,10 +242,12 @@ const POSTGRES_TARGET_TABLES: &[&str] = &[
     "categories",
     "tags",
     "bills",
+    "bill_tags",
     "settings",
     "parser_templates",
     "transaction_templates",
     "budgets",
+    "budget_history",
     "category_rules",
     "account_rules",
 ];
@@ -415,7 +417,7 @@ pub async fn import_postgres_bundle_to_postgres_with_name(
     }
 }
 
-async fn import_postgres_bundle_in_transaction(
+pub(crate) async fn import_postgres_bundle_in_transaction(
     transaction: &mut Transaction<'_, Postgres>,
     bundle: &SqliteToPostgresExportBundle,
 ) -> DbResult<SqliteToPostgresImportCheckReport> {
@@ -493,11 +495,20 @@ async fn refresh_postgres_identity_sequence(
         )));
     }
     let table_identifier = quote_postgres_identifier(table_name)?;
+    let sequence_name: Option<String> =
+        sqlx::query_scalar("SELECT pg_get_serial_sequence($1, 'id')")
+            .bind(table_name)
+            .fetch_one(&mut **transaction)
+            .await
+            .map_err(postgres_error)?;
+    let Some(sequence_name) = sequence_name else {
+        return Ok(());
+    };
     let sql = format!(
-        "SELECT setval(pg_get_serial_sequence($1, 'id'), COALESCE((SELECT MAX(id) FROM {table_identifier}), 1), (SELECT MAX(id) FROM {table_identifier}) IS NOT NULL)"
+        "SELECT setval($1, COALESCE((SELECT MAX(id) FROM {table_identifier}), 1), (SELECT MAX(id) FROM {table_identifier}) IS NOT NULL)"
     );
     sqlx::query(&sql)
-        .bind(table_name)
+        .bind(sequence_name)
         .execute(&mut **transaction)
         .await
         .map_err(postgres_error)?;

@@ -22,6 +22,7 @@ pub mod llm;
 pub mod matching;
 pub mod path;
 pub mod postgres;
+pub mod postgres_account_recovery;
 pub mod postgres_migration;
 pub mod recurring;
 pub mod runtime;
@@ -202,6 +203,18 @@ pub use postgres::{
     postgres_initial_schema_path, postgres_migration_manifest, postgres_migrations_dir,
     run_postgres_migrations, PostgresMigrationDescriptor, PostgresPool,
     POSTGRES_INITIAL_SCHEMA_FILE, POSTGRES_MIGRATIONS_RELATIVE_DIR,
+};
+pub use postgres_account_recovery::{
+    apply_postgres_account_recovery, build_postgres_account_recovery_bundle_from_connection,
+    build_postgres_account_recovery_dry_run,
+    build_postgres_account_recovery_dry_run_from_connection,
+    inspect_postgres_account_recovery_source,
+    inspect_postgres_account_recovery_source_from_connection,
+    resolve_postgres_account_recovery_target, AccountRecoveryApplyOptions,
+    AccountRecoveryApplyReport, AccountRecoveryDryRunReport, AccountRecoveryExpectedCounts,
+    AccountRecoveryIdPlan, AccountRecoverySourceCounts, AccountRecoverySourceReport,
+    AccountRecoveryTargetCounts, AccountRecoveryTargetRef, AccountRecoveryTargetTriplet,
+    ACCOUNT_RECOVERY_DEFAULT_SOURCE_USER_ID, ACCOUNT_RECOVERY_ID_BLOCK_SIZE,
 };
 pub use postgres_migration::{
     export_sqlite_to_postgres_bundle, export_sqlite_to_postgres_bundle_from_connection,

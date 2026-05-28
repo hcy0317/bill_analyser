@@ -1506,17 +1506,26 @@ async fn auth_postgres_runtime_serves_login_refresh_register_profile_without_sql
     .execute(&pool)
     .await?;
 
+    let clear_all_password = env::var("BILL_ANALYSER_OPERATION_PASSWORD")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "pg-operation-secret".to_string());
     let clear_all_response = app
         .clone()
         .oneshot(bearer_json_request(
             Method::POST,
             "/api/data/clear/all",
             &access_token,
-            json!({"password": "pg-operation-secret"}),
+            json!({"password": clear_all_password}),
         ))
         .await?;
-    assert_eq!(clear_all_response.status(), StatusCode::OK);
+    let clear_all_status = clear_all_response.status();
     let clear_all_body = read_json(clear_all_response).await;
+    assert_eq!(
+        clear_all_status,
+        StatusCode::OK,
+        "clear all body: {clear_all_body}"
+    );
     assert_eq!(clear_all_body["result"], true);
     assert_eq!(clear_all_body["counts"]["accounts"], 1);
     assert_eq!(clear_all_body["counts"]["categories"], 1);
