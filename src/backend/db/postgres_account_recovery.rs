@@ -1365,7 +1365,7 @@ fn map_budget_row(
     insert_i64(&mut values, "id", remap_id(id_plan, source_id)?);
     insert_i64(&mut values, "legacy_id", source_id);
     insert_i64(&mut values, "user_id", id_plan.target_user_id);
-    insert_string(&mut values, "name", required_string(row, "name")?);
+    insert_string(&mut values, "name", recovered_budget_name(row, source_id));
     insert_optional_string(&mut values, "category", optional_string(row, "category"));
     insert_string(
         &mut values,
@@ -2023,6 +2023,36 @@ fn required_string(row: &BTreeMap<String, Value>, key: &str) -> DbResult<String>
     })
 }
 
+fn recovered_budget_name(row: &BTreeMap<String, Value>, source_id: i64) -> String {
+    if let Some(name) = optional_string(row, "name") {
+        return name;
+    }
+
+    let category = optional_string(row, "category");
+    let sub_category = optional_string(row, "sub_category");
+    let category_path = [category.as_deref(), sub_category.as_deref()]
+        .into_iter()
+        .flatten()
+        .filter(|part| !part.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("/");
+    let period_type = optional_string(row, "period_type");
+    let start_date = optional_string(row, "start_date");
+
+    match (
+        category_path.is_empty(),
+        period_type.as_deref(),
+        start_date.as_deref(),
+    ) {
+        (false, Some(period), Some(start)) => format!("{category_path} {period} {start}"),
+        (false, Some(period), None) => format!("{category_path} {period}"),
+        (false, None, _) => category_path,
+        (true, Some(period), Some(start)) => format!("budget:{source_id} {period} {start}"),
+        (true, Some(period), None) => format!("budget:{source_id} {period}"),
+        (true, None, _) => format!("budget:{source_id}"),
+    }
+}
+
 fn optional_string(row: &BTreeMap<String, Value>, key: &str) -> Option<String> {
     match row.get(key) {
         Some(Value::String(value)) if !value.is_empty() => Some(value.clone()),
@@ -2420,6 +2450,14 @@ mod tests {
         assert_eq!(category_rules.row_count, 1);
         assert_eq!(category_rules.rows[0].values["user_id"], json!(9));
 
+        let budgets = table_export(&bundle, "budgets");
+        assert_eq!(budgets.row_count, 2);
+        assert_eq!(budgets.rows[0].values["name"], json!("Lunch budget"));
+        assert_eq!(
+            budgets.rows[1].values["name"],
+            json!("Food/Dinner monthly 2026-02-01")
+        );
+
         let budget_history = table_export(&bundle, "budget_history");
         assert_eq!(
             budget_history.rows[0].values["spent_amount_cents"],
@@ -2556,6 +2594,28 @@ mod tests {
             parse_aliases(Some(" Cash; cash | 零钱\n")),
             vec!["Cash".to_string(), "零钱".to_string()]
         );
+        assert_eq!(recovered_budget_name(&row, 7), "budget:7".to_string());
+        row.insert("period_type".to_string(), json!("yearly"));
+        row.insert("start_date".to_string(), json!("2026-01-01"));
+        assert_eq!(
+            recovered_budget_name(&row, 7),
+            "budget:7 yearly 2026-01-01".to_string()
+        );
+        row.remove("start_date");
+        assert_eq!(
+            recovered_budget_name(&row, 7),
+            "budget:7 yearly".to_string()
+        );
+        row.insert("category".to_string(), json!("Food"));
+        row.insert("sub_category".to_string(), json!("Dinner"));
+        assert_eq!(
+            recovered_budget_name(&row, 7),
+            "Food/Dinner yearly".to_string()
+        );
+        row.remove("period_type");
+        assert_eq!(recovered_budget_name(&row, 7), "Food/Dinner".to_string());
+        row.insert("name".to_string(), json!("Custom budget"));
+        assert_eq!(recovered_budget_name(&row, 7), "Custom budget".to_string());
         assert!(required_string(&row, "missing")
             .unwrap_err()
             .to_string()
@@ -2708,6 +2768,7 @@ mod tests {
                 INSERT INTO bills VALUES (71, 6, '2026-01-03T12:00:00Z', '支出', 99.99, 'Other', 'Other', 'Other', 'Food', 'Lunch', 'hash71', '2026-01-03T12:01:00Z', '2026-01-03T12:02:00Z', 43, 0);
                 INSERT INTO bill_tags VALUES (70, 60, '2026-01-03T12:03:00Z');
                 INSERT INTO budgets VALUES (80, 5, 'Lunch budget', 'Food', 'Lunch', 'monthly', 250.0, '2026-01-01', '2026-01-31', 80, 1, '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
+                INSERT INTO budgets VALUES (81, 5, '', 'Food', 'Dinner', 'monthly', 350.0, '2026-02-01', '2026-02-28', 80, 1, '2026-02-01T00:00:00Z', '2026-02-02T00:00:00Z');
                 INSERT INTO budget_history VALUES (90, 80, 5, '2026-01-01', '2026-01-31', 250.0, 120.0, 130.0, 48.0, 'within_budget', '2026-02-01T00:00:00Z', 'Food/Lunch');
                 INSERT INTO category_rules VALUES (100, 5, 50, 'Cafe rule', 10, 'Cafe', 0, 1, '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
                 INSERT INTO app_settings VALUES (1, 'default_currency', 'CNY', 0);
