@@ -46,6 +46,7 @@ cargo run -p bill-analyser-db --bin bill_postgres_account_recovery -- --mode app
 - `--output` is allowed only outside the worktree, under `.git`, or at a git-ignored path. Manifest identity hashes and source checksums are for operator confirmation and audit correlation, not anonymous public artifacts.
 - Recovery preserves `users`, auth/session/2FA/external-auth rows, parser templates, transaction templates, operation-password settings, backup/cloud/LLM/OCR credentials, audit history, and all other non-business runtime state.
 - Legacy budgets whose `name` is blank are recovered with a deterministic display name derived from category, sub-category, period, and start date; explicit source names are preserved unchanged.
+- Legacy budget history rows whose `budget_id` no longer exists in the recovered user's budgets are reported as orphaned source rows and skipped, because PostgreSQL budget history requires a live budget foreign key.
 - Settings recovery is default-deny. Only non-sensitive allowlisted preference keys are counted as recoverable; keys containing `auth`, `2fa`, `operation_password`, `cloud`, `backup`, `llm`, `ocr`, `provider`, `api_key`, `token`, `secret`, or `password` are denied.
 - Legacy SQLite account `aliases` are consumed only by this recovery tool and are converted directly into `account_rules` with `source=sqlite_account_recovery`; the tool does not recreate account alias runtime/API compatibility.
 

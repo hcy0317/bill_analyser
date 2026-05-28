@@ -135,6 +135,7 @@ pub struct AccountRecoverySourceCounts {
     pub bill_tags: u64,
     pub budgets: u64,
     pub budget_history: u64,
+    pub budget_history_orphaned: u64,
     pub category_rules: u64,
     pub accounts_with_aliases: u64,
     pub generated_account_rules: u64,
@@ -483,14 +484,18 @@ pub fn build_postgres_account_recovery_bundle_from_connection(
             .map(|row| map_budget_row(row, &id_plan))
             .collect::<DbResult<Vec<_>>>()?,
     )?;
+    let mut mapped_budget_history = Vec::new();
+    for row in &budget_history {
+        let source_budget_id = required_i64(row, "budget_id")?;
+        if budget_ids.contains_key(&source_budget_id) {
+            mapped_budget_history.push(map_budget_history_row(row, &id_plan, &budget_ids)?);
+        }
+    }
     push_table(
         &mut exports,
         "budget_history",
         "budget_history",
-        budget_history
-            .iter()
-            .map(|row| map_budget_history_row(row, &id_plan, &budget_ids))
-            .collect::<DbResult<Vec<_>>>()?,
+        mapped_budget_history,
     )?;
     push_table(
         &mut exports,
@@ -645,6 +650,20 @@ fn source_counts(
     source_user_id: i64,
 ) -> DbResult<AccountRecoverySourceCounts> {
     let accounts = read_user_rows(connection, "accounts", source_user_id)?;
+    let budgets = read_user_rows(connection, "budgets", source_user_id)?;
+    let budget_ids = budgets
+        .iter()
+        .map(|row| required_i64(row, "id"))
+        .collect::<DbResult<BTreeSet<_>>>()?;
+    let budget_history = read_budget_history_rows(connection, source_user_id)?;
+    let budget_history_budget_ids = budget_history
+        .iter()
+        .map(|row| required_i64(row, "budget_id"))
+        .collect::<DbResult<Vec<_>>>()?;
+    let budget_history_orphaned = budget_history_budget_ids
+        .iter()
+        .filter(|budget_id| !budget_ids.contains(budget_id))
+        .count() as u64;
     let generated_account_rules = accounts
         .iter()
         .map(|row| parse_aliases(optional_string(row, "aliases").as_deref()).len() as u64)
@@ -660,8 +679,9 @@ fn source_counts(
         categories: read_user_rows(connection, "categories", source_user_id)?.len() as u64,
         tags: read_user_rows(connection, "tags", source_user_id)?.len() as u64,
         bill_tags: read_bill_tag_rows(connection, source_user_id)?.len() as u64,
-        budgets: read_user_rows(connection, "budgets", source_user_id)?.len() as u64,
-        budget_history: read_budget_history_rows(connection, source_user_id)?.len() as u64,
+        budgets: budgets.len() as u64,
+        budget_history: budget_history.len() as u64,
+        budget_history_orphaned,
         category_rules: read_user_rows(connection, "category_rules", source_user_id)?.len() as u64,
         accounts_with_aliases,
         generated_account_rules,
@@ -2405,6 +2425,8 @@ mod tests {
 
         assert_eq!(first.manifest_id, second.manifest_id);
         assert!(first.manifest_id.starts_with("account-recovery-"));
+        assert_eq!(first.source.counts.budget_history, 2);
+        assert_eq!(first.source.counts.budget_history_orphaned, 1);
         assert_eq!(first.target_pre_counts.accounts, 3);
         assert_eq!(first.id_plan.id_base, 9 * ACCOUNT_RECOVERY_ID_BLOCK_SIZE);
         assert!(first.table_allowlist.contains(&"account_rules".to_string()));
@@ -2459,6 +2481,7 @@ mod tests {
         );
 
         let budget_history = table_export(&bundle, "budget_history");
+        assert_eq!(budget_history.row_count, 1);
         assert_eq!(
             budget_history.rows[0].values["spent_amount_cents"],
             json!(12000)
@@ -2770,6 +2793,7 @@ mod tests {
                 INSERT INTO budgets VALUES (80, 5, 'Lunch budget', 'Food', 'Lunch', 'monthly', 250.0, '2026-01-01', '2026-01-31', 80, 1, '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
                 INSERT INTO budgets VALUES (81, 5, '', 'Food', 'Dinner', 'monthly', 350.0, '2026-02-01', '2026-02-28', 80, 1, '2026-02-01T00:00:00Z', '2026-02-02T00:00:00Z');
                 INSERT INTO budget_history VALUES (90, 80, 5, '2026-01-01', '2026-01-31', 250.0, 120.0, 130.0, 48.0, 'within_budget', '2026-02-01T00:00:00Z', 'Food/Lunch');
+                INSERT INTO budget_history VALUES (91, 999, 5, '2026-01-01', '2026-01-31', 250.0, 10.0, 240.0, 4.0, 'within_budget', '2026-02-01T00:00:00Z', 'orphan');
                 INSERT INTO category_rules VALUES (100, 5, 50, 'Cafe rule', 10, 'Cafe', 0, 1, '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
                 INSERT INTO app_settings VALUES (1, 'default_currency', 'CNY', 0);
                 INSERT INTO app_settings VALUES (2, 'receipt_ocr_config', '{}', 0);
