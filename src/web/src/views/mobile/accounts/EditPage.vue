@@ -251,20 +251,36 @@
                 v-model:value="account.comment"
             ></f7-list-input>
 
-            <f7-list-input
-                type="text"
-                clear-button
-                :label="tt('Account Aliases')"
-                :placeholder="tt('Enter aliases for account matching (optional)')"
-                :value="formatAliasText(account.aliases)"
-                @input="updateAccountAliases(account, $event)"
-            ></f7-list-input>
+            <template v-if="canManageAccountRules(account)">
+                <f7-list-input
+                    type="text"
+                    clear-button
+                    :label="tt('Rule Matching Expression')"
+                    :placeholder="tt('Rule Matching Expression')"
+                    :value="getQuickRuleExpression(account)"
+                    @input="updateQuickRuleExpression(account, $event)"
+                    @keyup.enter="addQuickAccountRule(account)"
+                ></f7-list-input>
 
-            <f7-list-item
-                v-if="editAccountId"
-                :title="tt('Account Recognition Rules')"
-                :link="`/account/rules?accountId=${account.id}`"
-            ></f7-list-item>
+                <f7-list-item class="account-rule-quick-actions">
+                    <template #default>
+                        <div class="account-rule-quick-action-row">
+                            <f7-button
+                                small
+                                fill
+                                :disabled="!canAddQuickAccountRule(account)"
+                                @click="addQuickAccountRule(account)"
+                            >{{ tt('Add Rule') }}</f7-button>
+                            <f7-button
+                                small
+                                outline
+                                :disabled="isAddingQuickRule(account)"
+                                @click="openAccountRules(account)"
+                            >{{ tt('Open Rule Center') }}</f7-button>
+                        </div>
+                    </template>
+                </f7-list-item>
+            </template>
         </f7-list>
 
         <f7-list form strong inset dividers class="margin-vertical" v-else-if="!loading && account.type === AccountType.MultiSubAccounts.type">
@@ -360,20 +376,36 @@
                 v-model:value="account.comment"
             ></f7-list-input>
 
-            <f7-list-input
-                type="text"
-                clear-button
-                :label="tt('Account Aliases')"
-                :placeholder="tt('Enter aliases for account matching (optional)')"
-                :value="formatAliasText(account.aliases)"
-                @input="updateAccountAliases(account, $event)"
-            ></f7-list-input>
+            <template v-if="canManageAccountRules(account)">
+                <f7-list-input
+                    type="text"
+                    clear-button
+                    :label="tt('Rule Matching Expression')"
+                    :placeholder="tt('Rule Matching Expression')"
+                    :value="getQuickRuleExpression(account)"
+                    @input="updateQuickRuleExpression(account, $event)"
+                    @keyup.enter="addQuickAccountRule(account)"
+                ></f7-list-input>
 
-            <f7-list-item
-                v-if="editAccountId"
-                :title="tt('Account Recognition Rules')"
-                :link="`/account/rules?accountId=${account.id}`"
-            ></f7-list-item>
+                <f7-list-item class="account-rule-quick-actions">
+                    <template #default>
+                        <div class="account-rule-quick-action-row">
+                            <f7-button
+                                small
+                                fill
+                                :disabled="!canAddQuickAccountRule(account)"
+                                @click="addQuickAccountRule(account)"
+                            >{{ tt('Add Rule') }}</f7-button>
+                            <f7-button
+                                small
+                                outline
+                                :disabled="isAddingQuickRule(account)"
+                                @click="openAccountRules(account)"
+                            >{{ tt('Open Rule Center') }}</f7-button>
+                        </div>
+                    </template>
+                </f7-list-item>
+            </template>
         </f7-list>
 
         <f7-block class="no-padding no-margin" v-if="!loading && account.type === AccountType.MultiSubAccounts.type">
@@ -523,20 +555,36 @@
                     v-model:value="subAccount.comment"
                 ></f7-list-input>
 
-                <f7-list-input
-                    type="text"
-                    clear-button
-                    :label="tt('Account Aliases')"
-                    :placeholder="tt('Enter aliases for account matching (optional)')"
-                    :value="formatAliasText(subAccount.aliases)"
-                    @input="updateAccountAliases(subAccount, $event)"
-                ></f7-list-input>
+                <template v-if="canManageAccountRules(subAccount)">
+                    <f7-list-input
+                        type="text"
+                        clear-button
+                        :label="tt('Rule Matching Expression')"
+                        :placeholder="tt('Rule Matching Expression')"
+                        :value="getQuickRuleExpression(subAccount)"
+                        @input="updateQuickRuleExpression(subAccount, $event)"
+                        @keyup.enter="addQuickAccountRule(subAccount)"
+                    ></f7-list-input>
 
-                <f7-list-item
-                    v-if="editAccountId && !isNewAccount(subAccount)"
-                    :title="tt('Account Recognition Rules')"
-                    :link="`/account/rules?accountId=${subAccount.id}`"
-                ></f7-list-item>
+                    <f7-list-item class="account-rule-quick-actions">
+                        <template #default>
+                            <div class="account-rule-quick-action-row">
+                                <f7-button
+                                    small
+                                    fill
+                                    :disabled="!canAddQuickAccountRule(subAccount)"
+                                    @click="addQuickAccountRule(subAccount)"
+                                >{{ tt('Add Rule') }}</f7-button>
+                                <f7-button
+                                    small
+                                    outline
+                                    :disabled="isAddingQuickRule(subAccount)"
+                                    @click="openAccountRules(subAccount)"
+                                >{{ tt('Open Rule Center') }}</f7-button>
+                            </div>
+                        </template>
+                    </f7-list-item>
+                </template>
             </f7-list>
         </f7-block>
 
@@ -578,9 +626,14 @@ import { ALL_ACCOUNT_ICONS } from '@/consts/icon.ts';
 import { ALL_ACCOUNT_COLORS } from '@/consts/color.ts';
 import { TRANSACTION_MIN_AMOUNT, TRANSACTION_MAX_AMOUNT } from '@/consts/transaction.ts';
 import type { Account } from '@/models/account.ts';
+import {
+    buildAccountRulePayload,
+    createDefaultAccountRuleForm,
+} from '@/models/account_rule.ts';
 
 import { isDefined, findDisplayNameByType } from '@/lib/common.ts';
 import { generateRandomUUID } from '@/lib/misc.ts';
+import services from '@/lib/services.ts';
 import {
     getTimezoneOffsetMinutes,
     getBrowserTimezoneOffsetMinutes,
@@ -654,6 +707,8 @@ const showAccountCategorySheet = ref<boolean>(false);
 const showAccountTypeSheet = ref<boolean>(false);
 const showMoreActionSheet = ref<boolean>(false);
 const showDeleteActionSheet = ref<boolean>(false);
+const quickRuleExpressions = ref<Record<string, string>>({});
+const addingRuleAccountIds = ref<string[]>([]);
 
 const allCurrencies = computed<LocalizedCurrencyInfo[]>(() => getAllCurrencies());
 
@@ -778,22 +833,91 @@ function removeSubAccount(currentSubAccount: Account | null, confirm: boolean): 
     }
 }
 
-function formatAliasText(aliases?: string[]): string {
-    return aliases?.join(', ') ?? '';
+function getRuleAccountId(targetAccount: Account): number | null {
+    const accountId = Number.parseInt(String(targetAccount.id || ''), 10);
+    return Number.isFinite(accountId) && accountId > 0 ? accountId : null;
 }
 
-function parseAliasText(value: string): string[] {
-    const aliases = value
-        .split(/[,;，；\n]/)
-        .map(alias => alias.trim())
-        .filter(alias => alias.length > 0);
-
-    return Array.from(new Set(aliases));
+function getRuleAccountKey(targetAccount: Account): string {
+    return String(getRuleAccountId(targetAccount) ?? '');
 }
 
-function updateAccountAliases(targetAccount: Account, event: Event): void {
+function canManageAccountRules(targetAccount: Account): boolean {
+    return !!editAccountId.value
+        && !isNewAccount(targetAccount)
+        && getRuleAccountId(targetAccount) !== null;
+}
+
+function getQuickRuleExpression(targetAccount: Account): string {
+    return quickRuleExpressions.value[getRuleAccountKey(targetAccount)] ?? '';
+}
+
+function updateQuickRuleExpression(targetAccount: Account, event: Event): void {
     const input = event.target as HTMLInputElement | null;
-    targetAccount.aliases = parseAliasText(input?.value ?? '');
+    quickRuleExpressions.value = {
+        ...quickRuleExpressions.value,
+        [getRuleAccountKey(targetAccount)]: input?.value ?? '',
+    };
+}
+
+function isAddingQuickRule(targetAccount: Account): boolean {
+    return addingRuleAccountIds.value.includes(getRuleAccountKey(targetAccount));
+}
+
+function setAddingQuickRule(targetAccount: Account, adding: boolean): void {
+    const key = getRuleAccountKey(targetAccount);
+    addingRuleAccountIds.value = adding
+        ? [...new Set([...addingRuleAccountIds.value, key])]
+        : addingRuleAccountIds.value.filter(item => item !== key);
+}
+
+function canAddQuickAccountRule(targetAccount: Account): boolean {
+    return canManageAccountRules(targetAccount)
+        && getQuickRuleExpression(targetAccount).trim().length > 0
+        && !isAddingQuickRule(targetAccount);
+}
+
+async function addQuickAccountRule(targetAccount: Account): Promise<void> {
+    const accountId = getRuleAccountId(targetAccount);
+
+    if (!accountId || !canAddQuickAccountRule(targetAccount)) {
+        return;
+    }
+
+    setAddingQuickRule(targetAccount, true);
+
+    try {
+        const form = createDefaultAccountRuleForm(accountId);
+        form.ruleExpression = getQuickRuleExpression(targetAccount);
+        const fallbackName = targetAccount.name
+            ? `${targetAccount.name} ${tt('Account Recognition')}`
+            : tt('Account Recognition');
+        const response = await services.createAccountRule(buildAccountRulePayload(form, fallbackName));
+
+        if (!response.data.success) {
+            throw new Error(tt('Failed to save rule'));
+        }
+
+        quickRuleExpressions.value = {
+            ...quickRuleExpressions.value,
+            [getRuleAccountKey(targetAccount)]: '',
+        };
+        showToast('Rule created');
+    } catch (error: unknown) {
+        showToast(error instanceof Error ? error.message : String(error));
+    } finally {
+        setAddingQuickRule(targetAccount, false);
+    }
+}
+
+function openAccountRules(targetAccount: Account): void {
+    const accountId = getRuleAccountId(targetAccount);
+
+    if (!accountId) {
+        return;
+    }
+
+    props.f7router.navigate(`/account/rules?accountId=${accountId}`);
 }
 
 function showDateTimeDialog(accountContext: AccountContext, sheetMode: string): void {
@@ -838,5 +962,19 @@ init();
 
 .subaccount-delete-button {
     margin-inline-start: auto;
+}
+
+.account-rule-quick-actions .item-inner {
+    align-items: stretch;
+}
+
+.account-rule-quick-action-row {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+}
+
+.account-rule-quick-action-row .button {
+    flex: 1;
 }
 </style>
