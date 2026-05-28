@@ -1065,12 +1065,6 @@
     },
     {
       "method": "POST",
-      "pattern": "/api/account-rules/migrate-aliases",
-      "domain": "taxonomy-rules-settings",
-      "state": "rust_owned_verified"
-    },
-    {
-      "method": "POST",
       "pattern": "/api/account-rules/reorder",
       "domain": "taxonomy-rules-settings",
       "state": "rust_owned_verified"

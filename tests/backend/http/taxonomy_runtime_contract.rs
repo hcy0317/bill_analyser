@@ -58,8 +58,7 @@ async fn taxonomy_postgres_runtime_serves_master_data_without_sqlite_fallback(
         "category": 7,
         "icon": "mdi-wallet",
         "color": "#336699",
-        "comment": "postgres account",
-        "aliases": ["pg-main"]
+        "comment": "postgres account"
     }))
     .fetch_one(&pool)
     .await?
@@ -875,7 +874,6 @@ async fn taxonomy_postgres_runtime_serves_account_mutations_without_sqlite_fallb
                 "category": 2,
                 "currency": "CNY",
                 "balance": 2500,
-                "aliases": [" 主账户 ", ""],
                 "visible": true,
                 "displayOrder": 5,
                 "subAccounts": [{
@@ -896,7 +894,7 @@ async fn taxonomy_postgres_runtime_serves_account_mutations_without_sqlite_fallb
         format!("pg-api-account-{unique}")
     );
     assert_eq!(create_body["result"]["balance"], 2500);
-    assert_eq!(create_body["result"]["aliases"], json!(["主账户"]));
+    assert!(create_body["result"].get("aliases").is_none());
     assert_eq!(create_body["result"]["subAccounts"][0]["balance"], 125);
     assert_eq!(
         create_body["result"]["subAccounts"][0]["parentId"],
@@ -969,7 +967,6 @@ async fn taxonomy_postgres_runtime_serves_account_mutations_without_sqlite_fallb
                 "category": 2,
                 "currency": "CNY",
                 "balance": 3099,
-                "aliases": "备用, 主账户",
                 "hidden": true,
                 "displayOrder": 2,
                 "subAccounts": [{
@@ -990,7 +987,7 @@ async fn taxonomy_postgres_runtime_serves_account_mutations_without_sqlite_fallb
         format!("pg-api-account-updated-{unique}")
     );
     assert_eq!(update_body["result"]["balance"], 3099);
-    assert_eq!(update_body["result"]["aliases"], json!(["备用", "主账户"]));
+    assert!(update_body["result"].get("aliases").is_none());
     assert_eq!(update_body["result"]["hidden"], true);
     assert_eq!(
         update_body["result"]["subAccounts"][0]["name"],
@@ -1159,7 +1156,7 @@ async fn taxonomy_postgres_runtime_serves_rule_mutations_without_sqlite_fallback
         "#,
     )
     .bind(user_id)
-    .bind(json!({"aliases": ["招商别名", ""]}))
+    .bind(json!({}))
     .fetch_one(&pool)
     .await?
     .try_get("id")?;
@@ -1170,7 +1167,7 @@ async fn taxonomy_postgres_runtime_serves_rule_mutations_without_sqlite_fallback
         "#,
     )
     .bind(user_id)
-    .bind(json!({"aliases": ["隐藏别名"]}))
+    .bind(json!({}))
     .execute(&pool)
     .await?;
     let other_account_id: i64 = sqlx::query(
@@ -1636,30 +1633,6 @@ async fn taxonomy_postgres_runtime_serves_rule_mutations_without_sqlite_fallback
     assert_eq!(account_match.status(), StatusCode::OK);
     assert_eq!(read_json(account_match).await["data"]["matched"], true);
 
-    let migrate_aliases = app
-        .clone()
-        .oneshot(authed_request_for_user(
-            Method::POST,
-            "/api/account-rules/migrate-aliases",
-            Body::empty(),
-            user_id,
-        ))
-        .await?;
-    assert_eq!(migrate_aliases.status(), StatusCode::OK);
-    assert_eq!(
-        read_json(migrate_aliases).await["data"],
-        json!({"migrated": 1, "skipped": 1})
-    );
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM account_rules WHERE user_id = $1 AND source = 'alias_migration'",
-        )
-        .bind(user_id)
-        .fetch_one(&pool)
-        .await?,
-        1
-    );
-
     let delete_category_rule = app
         .clone()
         .oneshot(authed_request_for_user(
@@ -1732,7 +1705,7 @@ async fn taxonomy_accounts_runtime_serves_crud_and_frontend_contract() -> Result
     assert_eq!(accounts[0]["id"], "10");
     assert_eq!(accounts[0]["name"], "工资卡");
     assert_eq!(accounts[0]["balance"], 1234);
-    assert_eq!(accounts[0]["aliases"], json!(["主卡", "工资"]));
+    assert!(accounts[0].get("aliases").is_none());
     assert_eq!(accounts[0]["hidden"], true);
     assert_eq!(accounts[0]["visible"], false);
     assert_eq!(accounts[0]["subAccounts"][0]["parentId"], "10");
@@ -1761,7 +1734,6 @@ async fn taxonomy_accounts_runtime_serves_crud_and_frontend_contract() -> Result
                 "category": 2,
                 "currency": "CNY",
                 "balance": "2500",
-                "aliases": [" 零钱 ", ""],
                 "visible": true,
                 "displayOrder": 5,
                 "subAccounts": [{
@@ -1778,7 +1750,7 @@ async fn taxonomy_accounts_runtime_serves_crud_and_frontend_contract() -> Result
     assert_eq!(create_body["success"], true);
     assert_eq!(create_body["result"]["name"], "现金账户");
     assert_eq!(create_body["result"]["balance"], 2500);
-    assert_eq!(create_body["result"]["aliases"], json!(["零钱"]));
+    assert!(create_body["result"].get("aliases").is_none());
     assert_eq!(create_body["result"]["subAccounts"][0]["balance"], 125);
     assert_eq!(create_body["runtime"], Value::Null);
     let created_id = create_body["result"]["id"]
@@ -1799,7 +1771,6 @@ async fn taxonomy_accounts_runtime_serves_crud_and_frontend_contract() -> Result
                 "category": 2,
                 "currency": "CNY",
                 "balance": 3099,
-                "aliases": "备用, 零钱",
                 "hidden": true,
                 "displayOrder": 2
             }),
@@ -1809,7 +1780,7 @@ async fn taxonomy_accounts_runtime_serves_crud_and_frontend_contract() -> Result
     let update_body = read_json(update_response).await;
     assert_eq!(update_body["result"]["name"], "现金账户更新");
     assert_eq!(update_body["result"]["balance"], 3099);
-    assert_eq!(update_body["result"]["aliases"], json!(["备用", "零钱"]));
+    assert!(update_body["result"].get("aliases").is_none());
     assert_eq!(update_body["result"]["hidden"], true);
     assert_eq!(account_balance(&fixture.db_path, created_id)?, 30.99);
 
@@ -2341,7 +2312,6 @@ async fn taxonomy_account_update_reconciles_direct_subaccounts() -> Result<(), B
                 "icon": 12,
                 "color": "#224466",
                 "balance": 4321,
-                "aliases": [true, false, null, 12, ""],
                 "hidden": "0",
                 "displayOrder": 7,
                 "creditCardStatementDate": 18,
@@ -2368,10 +2338,7 @@ async fn taxonomy_account_update_reconciles_direct_subaccounts() -> Result<(), B
     let body = read_json(response).await;
     assert_eq!(body["result"]["name"], "工资卡更新");
     assert_eq!(body["result"]["icon"], "12");
-    assert_eq!(
-        body["result"]["aliases"],
-        json!(["True", "False", "None", "12"])
-    );
+    assert!(body["result"].get("aliases").is_none());
     assert_eq!(body["result"]["hidden"], false);
     assert_eq!(account_balance(&fixture.db_path, 10)?, 43.21);
     assert_eq!(account_balance(&fixture.db_path, 11)?, 9.99);
@@ -4448,7 +4415,7 @@ async fn taxonomy_account_rules_runtime_manages_rules_without_import_cutover(
     assert!(TAXONOMY_ACCOUNT_RULE_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("GET", "/api/account-rules/")));
-    assert!(TAXONOMY_ACCOUNT_RULE_ROUTE_PATTERNS
+    assert!(!TAXONOMY_ACCOUNT_RULE_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/account-rules/migrate-aliases")));
     assert!(TAXONOMY_ACCOUNT_RULE_ROUTE_PATTERNS
@@ -4631,37 +4598,6 @@ async fn taxonomy_account_rules_runtime_manages_rules_without_import_cutover(
     assert_eq!(miss_response.status(), StatusCode::OK);
     assert_eq!(read_json(miss_response).await["data"]["matched"], false);
 
-    let migrate_response = app
-        .clone()
-        .oneshot(authed_request(
-            Method::POST,
-            "/api/account-rules/migrate-aliases",
-            Body::empty(),
-        ))
-        .await?;
-    assert_eq!(migrate_response.status(), StatusCode::OK);
-    assert_eq!(
-        read_json(migrate_response).await["data"],
-        json!({"migrated": 1, "skipped": 2})
-    );
-    assert_eq!(
-        account_rule_count_by_source(&fixture.db_path, 42, "alias_migration")?,
-        1
-    );
-    let migrate_repeat = app
-        .clone()
-        .oneshot(authed_request(
-            Method::POST,
-            "/api/account-rules/migrate-aliases",
-            Body::empty(),
-        ))
-        .await?;
-    assert_eq!(migrate_repeat.status(), StatusCode::OK);
-    assert_eq!(
-        read_json(migrate_repeat).await["data"],
-        json!({"migrated": 0, "skipped": 3})
-    );
-
     let delete_response = app
         .clone()
         .oneshot(authed_request(
@@ -4815,10 +4751,7 @@ async fn taxonomy_settings_bundle_export_runtime_serves_raw_bundle_and_sensitive
     assert_eq!(bundle["counts"]["accountRecognitionRules"], 1);
     assert_eq!(bundle["counts"]["llmConfigs"], 1);
     assert_eq!(bundle["sections"]["accounts"][0]["name"], "工资卡");
-    assert_eq!(
-        bundle["sections"]["accounts"][0]["aliases"],
-        json!(["主卡", "工资"])
-    );
+    assert!(bundle["sections"]["accounts"][0].get("aliases").is_none());
     assert_eq!(
         bundle["sections"]["transactionTemplates"][0]["categoryRef"],
         "category:31"
@@ -5008,8 +4941,7 @@ async fn taxonomy_settings_bundle_import_runtime_previews_and_upserts_sections(
                 "type": 1,
                 "currency": "CNY",
                 "balance": 10.25,
-                "initialBalance": 10.25,
-                "aliases": ["import-alias"]
+                "initialBalance": 10.25
             }],
             "transactionCategories": [{
                 "externalRef": "category:coffee",
@@ -6604,7 +6536,6 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             hidden BOOLEAN DEFAULT 0,
             display_order INTEGER DEFAULT 0,
             comment TEXT,
-            aliases TEXT,
             parent_id INTEGER DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
@@ -6848,13 +6779,13 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
     connection.execute(
         "INSERT INTO accounts(
             id, user_id, name, type, category, currency, icon, color, balance,
-            initial_balance, hidden, display_order, comment, aliases, parent_id,
+            initial_balance, hidden, display_order, comment, parent_id,
             created_at, updated_at
         )
         VALUES
-            (10, 42, '工资卡', 1, 2, 'CNY', 'card', '#336699', 12.34, 12.34, 1, 1, '主账户', '[\"主卡\",\"工资\"]', 0, 'now', 'now'),
-            (11, 42, '工资子账户', 1, 2, 'CNY', 'wallet', '#336699', 0.50, 0.50, 0, 2, '', '[\"子卡\"]', 10, 'now', 'now'),
-            (99, 77, '其他用户', 1, 2, 'CNY', 'wallet', '#999999', 99.0, 99.0, 0, 0, '', NULL, 0, 'now', 'now')",
+            (10, 42, '工资卡', 1, 2, 'CNY', 'card', '#336699', 12.34, 12.34, 1, 1, '主账户', 0, 'now', 'now'),
+            (11, 42, '工资子账户', 1, 2, 'CNY', 'wallet', '#336699', 0.50, 0.50, 0, 2, '', 10, 'now', 'now'),
+            (99, 77, '其他用户', 1, 2, 'CNY', 'wallet', '#999999', 99.0, 99.0, 0, 0, '', 0, 'now', 'now')",
         [],
     )?;
     connection.execute(
@@ -7213,18 +7144,6 @@ fn account_rule_priority(path: &Path, rule_id: i64) -> Result<i64, Box<dyn Error
     Ok(Connection::open(path)?.query_row(
         "SELECT priority FROM account_rules WHERE id = ?1",
         [rule_id],
-        |row| row.get::<_, i64>(0),
-    )?)
-}
-
-fn account_rule_count_by_source(
-    path: &Path,
-    user_id: i64,
-    source: &str,
-) -> Result<i64, Box<dyn Error>> {
-    Ok(Connection::open(path)?.query_row(
-        "SELECT COUNT(*) FROM account_rules WHERE user_id = ?1 AND source = ?2",
-        rusqlite::params![user_id, source],
         |row| row.get::<_, i64>(0),
     )?)
 }

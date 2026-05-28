@@ -2556,10 +2556,10 @@ async fn import_db_runtime_stage2_uses_transfer_account_rules_over_fuzzy_names(
         [],
     )?;
     runtime.connection().execute(
-        "INSERT INTO accounts(id, user_id, name, aliases, hidden)
+        "INSERT INTO accounts(id, user_id, name, hidden)
          VALUES
-         (42, 42, '民生银行', '[\"网络银行\", \"民生银行\"]', 0),
-         (312, 42, '支付宝', '[\"余额宝\", \"Alipay\", \"alipay\"]', 0)",
+         (42, 42, '民生银行', 0),
+         (312, 42, '支付宝', 0)",
         [],
     )?;
     runtime.connection().execute(
@@ -2571,7 +2571,7 @@ async fn import_db_runtime_stage2_uses_transfer_account_rules_over_fuzzy_names(
              (8202, 42, 312, 'OR={alipay}', 1, 1, 'destination', 'transfer', '[\"parser\"]')",
         [],
     )?;
-    let session_id = "session-stage2-transfer-exact-account-alias";
+    let session_id = "session-stage2-transfer-account-rules";
     create_import_session(
         runtime.connection(),
         &ImportSessionDraft {
@@ -6417,7 +6417,6 @@ fn seed_import_intelligence_tables(runtime: &SqliteRuntime) -> Result<(), Box<dy
             user_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             type INTEGER DEFAULT 1,
-            aliases TEXT,
             display_order INTEGER DEFAULT 0,
             hidden INTEGER DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT '',
@@ -6491,10 +6490,10 @@ fn seed_import_intelligence_tables(runtime: &SqliteRuntime) -> Result<(), Box<dy
         [],
     )?;
     runtime.connection().execute(
-        "INSERT INTO accounts(id, user_id, name, aliases)
+        "INSERT INTO accounts(id, user_id, name)
          VALUES
-         (1001, 42, '支付宝账户', '[\"alipay\",\"支付宝\",\"支付宝余额\"]'),
-         (1002, 42, '微信账户', '[\"wechat\",\"微信\",\"微信支付\"]')",
+         (1001, 42, '支付宝账户'),
+         (1002, 42, '微信账户')",
         [],
     )?;
     runtime.connection().execute(

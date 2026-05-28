@@ -5495,7 +5495,6 @@ fn seed_auth_db(path: &Path, token: &str) -> Result<(), Box<dyn Error>> {
             hidden INTEGER DEFAULT 0,
             display_order INTEGER DEFAULT 0,
             comment TEXT,
-            aliases TEXT,
             parent_id INTEGER DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL

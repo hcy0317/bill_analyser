@@ -38,7 +38,7 @@ use bill_analyser_db::{
             get_postgres_sub_accounts, get_postgres_tag, get_postgres_template_by_id,
             list_postgres_account_rules, list_postgres_accounts, list_postgres_categories,
             list_postgres_category_rules, list_postgres_legacy_category_engine_rules,
-            list_postgres_tags, list_postgres_templates, migrate_postgres_account_aliases_to_rules,
+            list_postgres_tags, list_postgres_templates,
             migrate_postgres_category_keywords_to_rules, query_postgres_category_statistics,
             query_postgres_rules_overview_payload, reorder_postgres_account_rules,
             reorder_postgres_category_rules, set_postgres_legacy_category_rules_setting,
@@ -160,7 +160,6 @@ pub const TAXONOMY_ACCOUNT_RULE_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("DELETE", "/api/account-rules/{rule_id}"),
     ("PUT", "/api/account-rules/{rule_id}"),
     ("POST", "/api/account-rules/{rule_id}/test"),
-    ("POST", "/api/account-rules/migrate-aliases"),
     ("POST", "/api/account-rules/reorder"),
 ];
 
@@ -350,10 +349,6 @@ pub fn taxonomy_runtime_router() -> Router<HttpAppState> {
         .route(
             "/api/account-rules/reorder",
             axum::routing::post(reorder_account_rules_handler),
-        )
-        .route(
-            "/api/account-rules/migrate-aliases",
-            axum::routing::post(migrate_account_aliases_handler),
         )
         .route(
             "/api/account-rules/:rule_id",

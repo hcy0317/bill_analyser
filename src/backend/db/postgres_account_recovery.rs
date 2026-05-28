@@ -73,7 +73,6 @@ const USER_DATA_DELETE_TABLES: &[&str] = &[
     "account_rules",
     "category_rules",
     "tags",
-    "account_aliases_legacy",
     "categories",
     "accounts",
 ];

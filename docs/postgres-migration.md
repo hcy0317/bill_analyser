@@ -29,7 +29,7 @@ Supported source tables in this slice:
 - `bills_parser_template`
 - `category_rules`
 
-The export also generates `account_rules` target rows from legacy account aliases. Amount values from SQLite yuan fields are converted into target `*_cents` integer fields during export.
+Amount values from SQLite yuan fields are converted into target `*_cents` integer fields during export. Legacy account aliases are not exported as target runtime data by the whole-database migration command.
 
 ## Account recovery
 

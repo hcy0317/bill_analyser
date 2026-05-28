@@ -204,7 +204,6 @@ const ZH_DEFAULT_ACCOUNTS: &[DefaultAccountTemplate] = &[
         currency: "CNY",
         icon: "1",
         color: "4caf50",
-        aliases: &["现金", "现金钱包", "cash"],
         display_order: 0,
     },
     DefaultAccountTemplate {
@@ -214,7 +213,6 @@ const ZH_DEFAULT_ACCOUNTS: &[DefaultAccountTemplate] = &[
         currency: "CNY",
         icon: "100",
         color: "2196f3",
-        aliases: &["借记卡", "储蓄卡", "银行卡", "debit card"],
         display_order: 1,
     },
     DefaultAccountTemplate {
@@ -224,7 +222,6 @@ const ZH_DEFAULT_ACCOUNTS: &[DefaultAccountTemplate] = &[
         currency: "CNY",
         icon: "100",
         color: "ff9800",
-        aliases: &["信用卡", "贷记卡", "credit card"],
         display_order: 2,
     },
     DefaultAccountTemplate {
@@ -234,7 +231,6 @@ const ZH_DEFAULT_ACCOUNTS: &[DefaultAccountTemplate] = &[
         currency: "CNY",
         icon: "500",
         color: "1677ff",
-        aliases: &["支付宝", "alipay", "花呗", "余额宝"],
         display_order: 3,
     },
     DefaultAccountTemplate {
@@ -244,7 +240,6 @@ const ZH_DEFAULT_ACCOUNTS: &[DefaultAccountTemplate] = &[
         currency: "CNY",
         icon: "500",
         color: "07c160",
-        aliases: &["微信", "微信支付", "wechat"],
         display_order: 4,
     },
 ];
@@ -257,7 +252,6 @@ const DEFAULT_ACCOUNTS: &[DefaultAccountTemplate] = &[
         currency: "CNY",
         icon: "1",
         color: "4caf50",
-        aliases: &["cash", "wallet"],
         display_order: 0,
     },
     DefaultAccountTemplate {
@@ -267,7 +261,6 @@ const DEFAULT_ACCOUNTS: &[DefaultAccountTemplate] = &[
         currency: "CNY",
         icon: "100",
         color: "2196f3",
-        aliases: &["debit card", "bank card", "checking"],
         display_order: 1,
     },
     DefaultAccountTemplate {
@@ -277,7 +270,6 @@ const DEFAULT_ACCOUNTS: &[DefaultAccountTemplate] = &[
         currency: "CNY",
         icon: "100",
         color: "ff9800",
-        aliases: &["credit card"],
         display_order: 2,
     },
     DefaultAccountTemplate {
@@ -287,7 +279,6 @@ const DEFAULT_ACCOUNTS: &[DefaultAccountTemplate] = &[
         currency: "CNY",
         icon: "500",
         color: "1677ff",
-        aliases: &["alipay"],
         display_order: 3,
     },
     DefaultAccountTemplate {
@@ -297,7 +288,6 @@ const DEFAULT_ACCOUNTS: &[DefaultAccountTemplate] = &[
         currency: "CNY",
         icon: "500",
         color: "07c160",
-        aliases: &["wechat", "wechat pay"],
         display_order: 4,
     },
 ];

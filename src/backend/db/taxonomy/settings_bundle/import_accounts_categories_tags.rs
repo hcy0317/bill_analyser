@@ -251,7 +251,7 @@ fn upsert_settings_account(
             "UPDATE accounts
              SET type = ?, category = ?, currency = ?, icon = ?, color = ?,
                  balance = ?, initial_balance = ?, hidden = ?, display_order = ?,
-                 comment = ?, aliases = ?, updated_at = ?
+                 comment = ?, updated_at = ?
              WHERE id = ? AND user_id = ?",
             params_from_iter(update_values),
         )?;
@@ -262,9 +262,9 @@ fn upsert_settings_account(
     transaction.execute(
         "INSERT INTO accounts (
             user_id, name, type, category, currency, icon, color, balance,
-            initial_balance, hidden, display_order, comment, aliases,
+            initial_balance, hidden, display_order, comment,
             parent_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         params_from_iter(values),
     )?;
     let account_id = transaction.last_insert_rowid();
@@ -300,7 +300,6 @@ fn account_update_sql_values(normalized: &Value) -> DbResult<Vec<SqlValue>> {
         SqlValue::Integer(safe_int(normalized.get("hidden"), 0)),
         SqlValue::Integer(safe_int(normalized.get("display_order"), 0)),
         SqlValue::Text(safe_text(normalized.get("comment"), "")),
-        SqlValue::Text(safe_text(normalized.get("aliases"), "[]")),
     ])
 }
 

@@ -207,44 +207,6 @@ fn status_or_internal(status: u16) -> StatusCode {
     StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
-fn parse_aliases(value: Option<&Value>) -> Vec<String> {
-    match value {
-        None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(values)) => values
-            .iter()
-            .map(python_value_text)
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .collect(),
-        Some(Value::String(text)) => parse_alias_string(text),
-        Some(_) => Vec::new(),
-    }
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn parse_alias_string(text: &str) -> Vec<String> {
-    let text = text.trim();
-    if text.is_empty() {
-        return Vec::new();
-    }
-    if text.starts_with('[') {
-        if let Ok(Value::Array(values)) = serde_json::from_str::<Value>(text) {
-            return values
-                .iter()
-                .map(python_value_text)
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-                .collect();
-        }
-    }
-    text.split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-        .collect()
-}
-
 fn python_value_text(value: &Value) -> String {
     match value {
         Value::Null => "None".to_string(),

@@ -61,17 +61,16 @@ mod stage_vector_recall_tests {
                     id INTEGER PRIMARY KEY,
                     user_id INTEGER NOT NULL,
                     name TEXT NOT NULL,
-                    aliases TEXT,
                     hidden INTEGER DEFAULT 0
                 );
                 INSERT INTO categories(id, user_id, type, main_category, sub_category, priority)
                 VALUES
                     (11, 42, 3, '餐饮', '咖啡', 1),
                     (44, 42, 4, '内部转账', '账户互转', 2);
-                INSERT INTO accounts(id, user_id, name, aliases, hidden)
+                INSERT INTO accounts(id, user_id, name, hidden)
                 VALUES
-                    (100, 42, '支付宝', '["alipay"]', 0),
-                    (200, 42, '微信零钱', '["wallet"]', 0);
+                    (100, 42, '支付宝', 0),
+                    (200, 42, '微信零钱', 0);
                 "#,
             )
             .expect("vector recall taxonomy schema");

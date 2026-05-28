@@ -5,8 +5,7 @@ use bill_analyser_core::account_rules::AccountRuleMatchContext;
 
 use super::helpers::{
     account_rule_candidate_from_record, bool_int_value, field_scope_json, is_constraint_error,
-    normalize_alias, normalize_rule_expression_alias, required_i64, required_rule_expression,
-    sql_text_value, value_as_i64,
+    required_i64, required_rule_expression, sql_text_value, value_as_i64,
 };
 use super::{AccountRuleRecord, AccountRulesRepository};
 
@@ -194,59 +193,6 @@ fn account_rules_repository_crud_reorder_and_match_are_user_scoped() {
 }
 
 #[test]
-fn account_alias_migration_is_idempotent_and_skips_hidden_accounts() {
-    let mut connection = fixture_connection();
-    let mut repository = AccountRulesRepository::new(&mut connection);
-
-    let migrated = repository
-        .migrate_aliases_to_rules(42)
-        .expect("migrate aliases");
-    assert_eq!(migrated.migrated, 1);
-    assert_eq!(migrated.skipped, 2);
-
-    let rules = repository
-        .list_rules(42, Some(11), false, None, None)
-        .expect("visible account rules");
-    assert!(rules.iter().any(|rule| {
-        rule["source"] == "alias_migration" && rule["rule_expression"] == "OR={子卡}"
-    }));
-    assert!(!repository
-        .list_rules(42, Some(10), false, None, None)
-        .expect("hidden account rules")
-        .iter()
-        .any(|rule| rule["source"] == "alias_migration"));
-
-    let repeated = repository
-        .migrate_aliases_to_rules(42)
-        .expect("repeat migration");
-    assert_eq!(repeated.migrated, 0);
-    assert_eq!(repeated.skipped, 3);
-}
-
-#[test]
-fn account_alias_migration_detects_legacy_expression_without_source_key() {
-    let mut connection = fixture_connection();
-    connection
-        .execute(
-            "INSERT INTO account_rules(
-                id, user_id, account_id, name, priority, rule_expression,
-                regex_enabled, enabled, account_role_scope, transaction_type_scope,
-                field_scope, source, source_key, created_at, updated_at
-            ) VALUES (120, 42, 11, 'legacy expression', 1, 'OR={子卡}', 0, 1,
-                      'any', 'all', '[\"counterparty\"]', 'alias_migration', NULL, 'now', 'now')",
-            [],
-        )
-        .expect("legacy expression");
-    let mut repository = AccountRulesRepository::new(&mut connection);
-
-    let migrated = repository
-        .migrate_aliases_to_rules(42)
-        .expect("migrate aliases");
-    assert_eq!(migrated.migrated, 0);
-    assert_eq!(migrated.skipped, 3);
-}
-
-#[test]
 fn account_rules_validate_payload_edges() {
     let mut connection = fixture_connection();
     let mut repository = AccountRulesRepository::new(&mut connection);
@@ -336,8 +282,6 @@ fn account_rule_scalar_helpers_cover_error_edges() {
             .expect("field scope json"),
         "[\"counterparty\",\"description\"]"
     );
-    assert_eq!(normalize_alias("  VISA Card  "), "visa card");
-    assert_eq!(normalize_rule_expression_alias(" OR={\\子卡} "), "子卡");
 }
 
 #[test]
@@ -345,8 +289,8 @@ fn account_rule_row_helpers_cover_sqlite_dynamic_values_and_constraints() {
     let mut connection = fixture_connection();
     connection
         .execute(
-            "INSERT INTO accounts(id, user_id, name, type, aliases, hidden, display_order)
-             VALUES (12, 42, X'E78EB0E98791', 1, '[]', 0, 3)",
+            "INSERT INTO accounts(id, user_id, name, type, hidden, display_order)
+             VALUES (12, 42, X'E78EB0E98791', 1, 0, 3)",
             [],
         )
         .expect("blob account");
@@ -428,7 +372,6 @@ fn fixture_connection() -> Connection {
                     user_id INTEGER NOT NULL,
                     name TEXT NOT NULL,
                     type INTEGER DEFAULT 1,
-                    aliases TEXT,
                     hidden INTEGER DEFAULT 0,
                     display_order INTEGER DEFAULT 0
                 );
@@ -453,11 +396,11 @@ fn fixture_connection() -> Connection {
                     created_at TEXT,
                     updated_at TEXT
                 );
-                INSERT INTO accounts(id, user_id, name, type, aliases, hidden, display_order)
+                INSERT INTO accounts(id, user_id, name, type, hidden, display_order)
                 VALUES
-                    (10, 42, '工资卡', 1, '[\"主卡\", \"工资\"]', 1, 1),
-                    (11, 42, '工资子账户', 1, '[\"子卡\"]', 0, 2),
-                    (99, 77, '其他用户', 1, '[\"其他\"]', 0, 1);
+                    (10, 42, '工资卡', 1, 1, 1),
+                    (11, 42, '工资子账户', 1, 0, 2),
+                    (99, 77, '其他用户', 1, 0, 1);
                 INSERT INTO account_rules(
                     id, user_id, account_id, name, priority, rule_expression,
                     regex_enabled, enabled, applied_count, last_applied_at,

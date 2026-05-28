@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::account_rules::AccountRuleCandidate;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -112,6 +113,7 @@ pub struct ReceiptDraftContext {
     pub categories: Vec<ReceiptDraftCategory>,
     pub category_rules: Vec<ReceiptDraftCategoryRule>,
     pub accounts: Vec<ReceiptDraftAccount>,
+    pub account_rules: Vec<AccountRuleCandidate>,
     pub tags: Vec<ReceiptDraftTag>,
 }
 
@@ -137,7 +139,6 @@ pub struct ReceiptDraftCategoryRule {
 pub struct ReceiptDraftAccount {
     pub id: String,
     pub name: String,
-    pub aliases: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

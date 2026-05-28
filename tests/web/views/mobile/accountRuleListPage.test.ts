@@ -27,7 +27,7 @@ describe('mobile account recognition rule parity', () => {
         expect(source).toContain('`/account/rules?accountId=${subAccount.id}`');
     });
 
-    test('mobile rule page wires CRUD, test, migration, and scope controls', () => {
+    test('mobile rule page wires CRUD, test, and scope controls', () => {
         const source = readSource('src/views/mobile/accounts/RuleListPage.vue');
 
         expect(source).toContain('services.getAccountRules');
@@ -35,7 +35,6 @@ describe('mobile account recognition rule parity', () => {
         expect(source).toContain('services.updateAccountRule');
         expect(source).toContain('services.deleteAccountRule');
         expect(source).toContain('services.testAccountRule');
-        expect(source).toContain('services.migrateAccountAliases');
         expect(source).toContain('ACCOUNT_RULE_ROLE_SCOPE_OPTIONS');
         expect(source).toContain('ACCOUNT_RULE_TRANSACTION_SCOPE_OPTIONS');
         expect(source).toContain('ACCOUNT_RULE_FIELD_SCOPE_OPTIONS');

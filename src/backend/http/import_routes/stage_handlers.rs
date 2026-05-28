@@ -373,7 +373,6 @@ struct ImportIntelligenceRule {
 struct ImportIntelligenceAccount {
     id: i64,
     name: String,
-    aliases: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -758,7 +757,6 @@ fn load_import_intelligence_accounts(
     if !import_intelligence_table_exists(connection, "accounts")? {
         return Ok(Vec::new());
     }
-    let aliases_expr = sql_column_or_default(connection, "accounts", "aliases", "NULL")?;
     let has_hidden = table_has_column(connection, "accounts", "hidden")?;
     let hidden_expr = if has_hidden {
         "hidden".to_string()
@@ -768,7 +766,7 @@ fn load_import_intelligence_accounts(
     let hidden_filter = if has_hidden { "hidden = 0" } else { "1 = 1" };
     let mut statement = connection.prepare(&format!(
         "
-        SELECT id, name, {aliases_expr}, {hidden_expr}
+        SELECT id, name, {hidden_expr}
         FROM accounts
         WHERE user_id = ?1 AND {hidden_filter}
         ORDER BY id ASC
@@ -776,13 +774,9 @@ fn load_import_intelligence_accounts(
     ))?;
     let rows = statement.query_map(params![user_id], |row| {
         let name = row.get::<_, Option<String>>("name")?.unwrap_or_default();
-        let raw_aliases = row.get::<_, Option<String>>("aliases")?;
-        let mut aliases = parse_account_aliases(raw_aliases.as_deref());
-        aliases.push(name.clone());
         Ok(ImportIntelligenceAccount {
             id: row.get("id")?,
             name,
-            aliases,
         })
     })?;
     rows.collect()
@@ -1301,19 +1295,7 @@ fn resolve_transfer_account_from_entry(
         }
     }
 
-    let tokens = transfer_account_tokens_from_entry(entry);
-    if tokens.is_empty() {
-        return None;
-    }
-    accounts
-        .iter()
-        .find(|account| account_exactly_matches_tokens(account, &tokens))
-        .or_else(|| {
-            accounts
-                .iter()
-                .find(|account| account_matches_tokens(account, &tokens))
-        })
-        .map(|account| account.id)
+    None
 }
 
 #[cfg(test)]
@@ -1322,51 +1304,6 @@ fn transfer_account_id_from_value(value: &Value) -> Option<i64> {
         return (number > 0).then_some(number);
     }
     value.as_str().and_then(|text| text.trim().parse::<i64>().ok().filter(|value| *value > 0))
-}
-
-#[cfg(test)]
-fn transfer_account_tokens_from_entry(entry: &Value) -> Vec<String> {
-    let mut tokens = Vec::new();
-    for field in [
-        "account_name",
-        "payment_method",
-        "parser_id",
-        "counterparty",
-        "source_account_id",
-        "account_id",
-        "name",
-        "label",
-        "parser_label",
-    ] {
-        if let Some(text) = transfer_entry_text(entry.get(field)) {
-            tokens.extend(expand_transfer_account_token(&text));
-        }
-    }
-    if let Some(tags) = entry.get("tags").and_then(Value::as_array) {
-        for tag in tags {
-            if let Some(text) = transfer_entry_text(Some(tag)) {
-                tokens.extend(expand_transfer_account_token(&text));
-            }
-        }
-    }
-    tokens
-}
-
-#[cfg(test)]
-fn expand_transfer_account_token(value: &str) -> Vec<String> {
-    let normalized = normalize_account_match_text(value);
-    if normalized.is_empty() {
-        return Vec::new();
-    }
-    let mut tokens = vec![normalized.clone()];
-    for prefix in ["parser:", "channel:", "account:", "source:"] {
-        if let Some(stripped) = normalized.strip_prefix(prefix) {
-            if !stripped.is_empty() {
-                tokens.push(stripped.to_string());
-            }
-        }
-    }
-    tokens
 }
 
 fn transfer_entry_text(value: Option<&Value>) -> Option<String> {
@@ -1874,28 +1811,6 @@ fn increment_applied_learning_rules(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn parse_account_aliases(raw_aliases: Option<&str>) -> Vec<String> {
-    let raw_aliases = raw_aliases.unwrap_or("").trim();
-    if raw_aliases.is_empty() {
-        return Vec::new();
-    }
-    if let Ok(Value::Array(values)) = serde_json::from_str::<Value>(raw_aliases) {
-        return values
-            .iter()
-            .filter_map(value_to_text)
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .collect();
-    }
-    raw_aliases
-        .split([',', ';', '|', '，', '；'])
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
 fn parse_account_rule_field_scope(raw_field_scope: &str) -> Vec<String> {
     bill_analyser_core::account_rules::normalize_account_rule_field_scope(Some(&Value::String(
         raw_field_scope.to_string(),
@@ -2017,25 +1932,6 @@ fn import_preview_account_tokens(draft: &ImportPreviewDraft) -> Vec<String> {
         })
         .filter(|token| !token.is_empty())
         .collect()
-}
-
-#[cfg(test)]
-fn account_matches_tokens(account: &ImportIntelligenceAccount, tokens: &[String]) -> bool {
-    account.aliases.iter().any(|alias| {
-        let alias = normalize_account_match_text(alias);
-        !alias.is_empty()
-            && tokens
-                .iter()
-                .any(|token| token == &alias || token.contains(&alias) || alias.contains(token))
-    })
-}
-
-#[cfg(test)]
-fn account_exactly_matches_tokens(account: &ImportIntelligenceAccount, tokens: &[String]) -> bool {
-    account.aliases.iter().any(|alias| {
-        let alias = normalize_account_match_text(alias);
-        !alias.is_empty() && tokens.iter().any(|token| token == &alias)
-    })
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

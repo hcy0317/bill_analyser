@@ -56,7 +56,7 @@ impl<'conn> AccountsRepository<'conn> {
         );
         let mut statement = self.connection.prepare(
             "SELECT id, user_id, name, type, category, currency, icon, color,
-                    balance, initial_balance, hidden, display_order, comment, aliases,
+                    balance, initial_balance, hidden, display_order, comment,
                     parent_id, created_at, updated_at
              FROM accounts
              WHERE user_id = ?
@@ -75,7 +75,7 @@ impl<'conn> AccountsRepository<'conn> {
         self.connection
             .query_row(
                 "SELECT id, user_id, name, type, category, currency, icon, color,
-                        balance, initial_balance, hidden, display_order, comment, aliases,
+                        balance, initial_balance, hidden, display_order, comment,
                         parent_id, created_at, updated_at
                  FROM accounts
                  WHERE id = ? AND user_id = ?",
@@ -94,7 +94,7 @@ impl<'conn> AccountsRepository<'conn> {
     ) -> DbResult<Vec<AccountRecord>> {
         let mut statement = self.connection.prepare(
             "SELECT id, user_id, name, type, category, currency, icon, color,
-                    balance, initial_balance, hidden, display_order, comment, aliases,
+                    balance, initial_balance, hidden, display_order, comment,
                     parent_id, created_at, updated_at
              FROM accounts
              WHERE parent_id = ? AND user_id = ?",
@@ -113,15 +113,13 @@ impl<'conn> AccountsRepository<'conn> {
         );
         let now = utc_now_iso();
         let parent_id = parent_id_value(payload);
-        let aliases_value = aliases_sql_value(payload.get("aliases"))?;
-
         self.connection.execute(
             "INSERT INTO accounts (
                 name, type, category, currency, icon, color,
                 balance, initial_balance, hidden, display_order,
-                comment, aliases, parent_id, created_at, updated_at, user_id
+                comment, parent_id, created_at, updated_at, user_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 sql_value_or_null(payload.get("name"))?,
                 sql_value_or_default(payload.get("type"), SqlValue::Integer(1))?,
@@ -134,7 +132,6 @@ impl<'conn> AccountsRepository<'conn> {
                 SqlValue::Integer(optional_bool_int(payload, "hidden")?.unwrap_or(0)),
                 sql_value_or_default(payload.get("display_order"), SqlValue::Integer(0))?,
                 sql_value_or_null(payload.get("comment"))?,
-                aliases_value,
                 SqlValue::Integer(parent_id),
                 SqlValue::Text(now.clone()),
                 SqlValue::Text(now),
@@ -211,10 +208,7 @@ impl<'conn> AccountsRepository<'conn> {
                     values.push(SqlValue::Integer(int_value(value, key)?));
                 }
                 "comment" => push_sql_assignment(&mut assignments, &mut values, "comment", value)?,
-                "aliases" => {
-                    assignments.push("aliases = ?");
-                    values.push(aliases_sql_value(Some(value))?);
-                }
+                "aliases" => {}
                 _ => {}
             }
         }
@@ -611,7 +605,6 @@ fn account_from_row(row: &Row<'_>) -> rusqlite::Result<AccountRecord> {
         "hidden",
         "display_order",
         "comment",
-        "aliases",
         "parent_id",
         "created_at",
         "updated_at",
@@ -690,40 +683,6 @@ fn push_sql_assignment(
     });
     values.push(sql_value_or_null(Some(value))?);
     Ok(())
-}
-
-fn aliases_sql_value(value: Option<&Value>) -> DbResult<SqlValue> {
-    match value {
-        None | Some(Value::Null) => Ok(SqlValue::Null),
-        Some(Value::Array(values)) => {
-            let aliases: Vec<String> = values
-                .iter()
-                .map(python_alias_text)
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-                .collect();
-            serde_json::to_string(&aliases)
-                .map(SqlValue::Text)
-                .map_err(|error| DbError::InvalidOperation(error.to_string()))
-        }
-        Some(Value::String(text)) => Ok(SqlValue::Text(text.clone())),
-        Some(value) => Ok(SqlValue::Text(value.to_string())),
-    }
-}
-
-fn python_alias_text(value: &Value) -> String {
-    match value {
-        Value::Null => "None".to_string(),
-        Value::Bool(flag) => {
-            if *flag {
-                "True".to_string()
-            } else {
-                "False".to_string()
-            }
-        }
-        Value::String(text) => text.clone(),
-        Value::Number(_) | Value::Array(_) | Value::Object(_) => value.to_string(),
-    }
 }
 
 fn sql_value_or_default(value: Option<&Value>, default: SqlValue) -> DbResult<SqlValue> {
@@ -817,7 +776,6 @@ mod tests {
                     hidden BOOLEAN DEFAULT 0,
                     display_order INTEGER DEFAULT 0,
                     comment TEXT,
-                    aliases TEXT,
                     parent_id INTEGER DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -839,7 +797,6 @@ mod tests {
                     "type": 2,
                     "category": 1,
                     "balance": 12.5,
-                    "aliases": ["主卡", " "],
                     "subAccounts": [{"name": "子账户", "type": 1, "balance": 3.5}]
                 }),
                 7,
@@ -880,11 +837,6 @@ mod tests {
             vec!["子账户", "排序账户", "父账户"]
         );
         assert_eq!(accounts[2]["hidden"], Value::Number(Number::from(1)));
-        assert_eq!(
-            accounts[2]["aliases"],
-            Value::String("[\"主卡\"]".to_string())
-        );
-
         assert_eq!(
             repository.get_account(first_id, 7).unwrap().unwrap()["parent_id"],
             Value::Number(Number::from(second_id))
@@ -927,7 +879,6 @@ mod tests {
                         hidden BOOLEAN DEFAULT 0,
                         display_order INTEGER DEFAULT 0,
                         comment TEXT,
-                        aliases TEXT,
                         parent_id INTEGER DEFAULT 0,
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL,
@@ -1016,18 +967,5 @@ mod tests {
         assert!(parse_account_display_orders(&serde_json::json!({"bad": true})).is_err());
         assert!(parse_account_display_orders(&serde_json::json!([[1]])).is_err());
         assert!(parse_account_display_orders(&serde_json::json!([{"id": 1}])).is_err());
-    }
-
-    #[test]
-    fn taxonomy_accounts_alias_arrays_match_python_stringification_edges() {
-        let aliases = aliases_sql_value(Some(&serde_json::json!([
-            " 主卡 ", 12, true, false, null, ""
-        ])))
-        .unwrap();
-
-        assert_eq!(
-            aliases,
-            SqlValue::Text("[\"主卡\",\"12\",\"True\",\"False\",\"None\"]".to_string())
-        );
     }
 }

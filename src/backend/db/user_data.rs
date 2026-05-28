@@ -339,7 +339,6 @@ pub async fn clear_postgres_user_data(
         "account_rules",
         "category_rules",
         "tags",
-        "account_aliases_legacy",
         "categories",
         "accounts",
     ] {

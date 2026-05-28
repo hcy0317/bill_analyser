@@ -17,7 +17,6 @@ pub struct PostgresMigrationDescriptor {
 const INITIAL_SCHEMA_TABLES: &[&str] = &[
     "users",
     "accounts",
-    "account_aliases_legacy",
     "categories",
     "tags",
     "bills",

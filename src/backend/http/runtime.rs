@@ -160,7 +160,7 @@ pub fn http_shell_health_with_weaviate_status(
         );
         details.insert(
             "taxonomy_categories_runtime".to_string(),
-            "owned category list/tree/flat/detail/create/update/delete/batch/move/import/export/all/statistics routes plus category-rule list/create/update/delete/reorder/defaults/migrate/test, account-rule list/create/update/delete/reorder/migrate-aliases/test, rule overview, and settings bundle import/preview/export routes with user-scoped DB reads and writes".to_string(),
+            "owned category list/tree/flat/detail/create/update/delete/batch/move/import/export/all/statistics routes plus category-rule list/create/update/delete/reorder/defaults/migrate/test, account-rule list/create/update/delete/reorder/test, rule overview, and settings bundle import/preview/export routes with user-scoped DB reads and writes".to_string(),
         );
         details.insert(
             "taxonomy_templates_runtime".to_string(),

@@ -183,6 +183,8 @@ fn load_receipt_draft_context(
             .map_err(db_error_response)?;
     let accounts = load_import_intelligence_accounts(connection, user_id)
         .map_err(db_error_response)?;
+    let account_rules = load_import_intelligence_account_rules(connection, user_id)
+        .map_err(db_error_response)?;
     let tags = load_receipt_draft_tags(connection, user_id).map_err(db_error_response)?;
     Ok(ReceiptDraftContext {
         categories: categories
@@ -210,9 +212,9 @@ fn load_receipt_draft_context(
             .map(|account| ReceiptDraftAccount {
                 id: account.id.to_string(),
                 name: account.name,
-                aliases: account.aliases,
             })
             .collect(),
+        account_rules,
         tags,
     })
 }

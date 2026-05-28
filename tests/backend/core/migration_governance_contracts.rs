@@ -103,7 +103,7 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("PUT", "/api/account-rules/{rule_id}")));
     assert!(rust_owned.contains(&("DELETE", "/api/account-rules/{rule_id}")));
     assert!(rust_owned.contains(&("POST", "/api/account-rules/{rule_id}/test")));
-    assert!(rust_owned.contains(&("POST", "/api/account-rules/migrate-aliases")));
+    assert!(!rust_owned.contains(&("POST", "/api/account-rules/migrate-aliases")));
     assert!(rust_owned.contains(&("POST", "/api/account-rules/reorder")));
     assert!(!rust_owned.contains(&("GET", "/api/rules/overview")));
     assert!(!rust_owned.contains(&("GET", "/api/settings/encryption/status")));
@@ -648,7 +648,6 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_remainder() {
         "PUT /api/account-rules/{rule_id}",
         "DELETE /api/account-rules/{rule_id}",
         "POST /api/account-rules/{rule_id}/test",
-        "POST /api/account-rules/migrate-aliases",
         "POST /api/account-rules/reorder",
     ] {
         let entry = manifest

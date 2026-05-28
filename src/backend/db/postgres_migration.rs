@@ -109,7 +109,6 @@ const MIGRATION_TABLE_SPECS: &[MigrationTableSpec] = &[
             "name",
             "type",
             "balance",
-            "aliases",
             "created_at",
             "updated_at",
         ],
@@ -789,16 +788,12 @@ fn map_source_row(
             row,
             map_user_row(row)?,
         )?],
-        "accounts" => {
-            let mut rows = vec![target_row(
-                source_table,
-                target_table,
-                row,
-                map_account_row(row)?,
-            )?];
-            rows.extend(map_account_alias_rules(source_table, row)?);
-            rows
-        }
+        "accounts" => vec![target_row(
+            source_table,
+            target_table,
+            row,
+            map_account_row(row)?,
+        )?],
         "categories" => vec![target_row(
             source_table,
             target_table,
@@ -957,6 +952,7 @@ fn map_account_row(row: &BTreeMap<String, Value>) -> DbResult<BTreeMap<String, V
                 "type",
                 "currency",
                 "balance",
+                "aliases",
                 "hidden",
                 "display_order",
                 "created_at",
@@ -976,49 +972,6 @@ fn map_account_row(row: &BTreeMap<String, Value>) -> DbResult<BTreeMap<String, V
     );
     insert_i64(&mut values, "version", 1);
     Ok(values)
-}
-
-fn map_account_alias_rules(
-    source_table: &str,
-    row: &BTreeMap<String, Value>,
-) -> DbResult<Vec<PostgresTargetRow>> {
-    let aliases = parse_aliases(optional_string(row, "aliases").as_deref());
-    let account_id = required_i64(row, "id")?;
-    let user_id = optional_i64(row, "user_id").unwrap_or(1);
-    let created_at = optional_string(row, "created_at").unwrap_or_else(default_timestamp);
-    let updated_at = optional_string(row, "updated_at").unwrap_or_else(default_timestamp);
-
-    aliases
-        .into_iter()
-        .map(|alias| {
-            let mut values = BTreeMap::new();
-            insert_i64(&mut values, "user_id", user_id);
-            insert_i64(&mut values, "account_id", account_id);
-            insert_string(&mut values, "name", format!("legacy alias: {alias}"));
-            insert_string(&mut values, "account_role_scope", "any");
-            insert_string(&mut values, "transaction_type_scope", "all");
-            insert_json(&mut values, "field_scope", json!(["counterparty", "payment_method", "description", "parser"]));
-            insert_json(
-                &mut values,
-                "rule_expression",
-                json!({"operator":"contains_any","values":[alias],"source":"legacy_account_aliases"}),
-            );
-            insert_bool(&mut values, "regex_enabled", false);
-            insert_i64(&mut values, "priority", 1000);
-            insert_bool(&mut values, "enabled", true);
-            insert_string(&mut values, "source", "legacy_account_aliases");
-            insert_string(
-                &mut values,
-                "source_key",
-                format!("legacy_alias:{}", alias.trim().to_ascii_lowercase()),
-            );
-            insert_i64(&mut values, "match_count", 0);
-            insert_string(&mut values, "created_at", created_at.clone());
-            insert_string(&mut values, "updated_at", updated_at.clone());
-            insert_i64(&mut values, "version", 1);
-            target_row(source_table, "account_rules", row, values)
-        })
-        .collect()
 }
 
 fn map_category_row(row: &BTreeMap<String, Value>) -> DbResult<BTreeMap<String, Value>> {
@@ -1804,7 +1757,7 @@ fn truthy(value: Option<&Value>) -> bool {
     }
 }
 
-fn parse_aliases(value: Option<&str>) -> Vec<String> {
+fn parse_delimited_text_list(value: Option<&str>) -> Vec<String> {
     let Some(value) = value else {
         return Vec::new();
     };
@@ -1820,7 +1773,7 @@ fn parse_aliases(value: Option<&str>) -> Vec<String> {
 }
 
 fn parse_template_tag_ids(value: Option<&str>) -> Vec<String> {
-    parse_aliases(value)
+    parse_delimited_text_list(value)
 }
 
 fn dedupe_non_empty(values: Vec<String>) -> Vec<String> {
@@ -1948,37 +1901,28 @@ mod tests {
     }
 
     #[test]
-    fn export_bundle_normalizes_amounts_aliases_rules_and_target_checksums() {
+    fn export_bundle_normalizes_amounts_rules_and_target_checksums_without_account_aliases() {
         let connection = fixture_connection();
 
         let bundle = export_sqlite_to_postgres_bundle_from_connection(&connection).unwrap();
 
         assert_eq!(bundle.schema_version, 1);
-        assert_eq!(bundle.table_count, 11);
-        assert_eq!(bundle.total_rows, 13);
+        assert_eq!(bundle.table_count, 10);
+        assert_eq!(bundle.total_rows, 11);
         let account_position = bundle
             .tables
             .iter()
             .position(|table| table.target_table == "accounts")
             .unwrap();
-        let account_rules_position = bundle
-            .tables
-            .iter()
-            .position(|table| table.target_table == "account_rules")
-            .unwrap();
-        assert!(account_position < account_rules_position);
+        assert!(account_position < bundle.tables.len());
         let accounts = table_export(&bundle, "accounts");
         assert_eq!(accounts.row_count, 1);
         assert_eq!(accounts.rows[0].values["balance_cents"], json!(12345));
-        let account_rules = table_export(&bundle, "account_rules");
-        assert_eq!(account_rules.row_count, 2);
-        assert!(account_rules
-            .rows
+        assert!(accounts.rows[0].values["metadata"].get("aliases").is_none());
+        assert!(bundle
+            .tables
             .iter()
-            .any(|row| row.values["rule_expression"]["values"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("Cash"))));
+            .all(|table| table.target_table != "account_rules"));
         let bills = table_export(&bundle, "bills");
         assert_eq!(bills.rows[0].values["amount_cents"], json!(1999));
         assert_eq!(bills.rows[0].values["direction"], json!("expense"));
@@ -2127,7 +2071,7 @@ mod tests {
         assert_eq!(postgres_count(&pool, "SELECT COUNT(*) FROM users").await, 1);
         assert_eq!(
             postgres_count(&pool, "SELECT COUNT(*) FROM account_rules").await,
-            2
+            0
         );
         assert_eq!(
             postgres_count(

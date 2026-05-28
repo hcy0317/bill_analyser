@@ -2167,11 +2167,6 @@ export default {
             return buildApiResponse(response, response.data?.data);
         });
     },
-    migrateAccountAliases: (): ApiResponsePromise<any> => {
-        return axios.post('account-rules/migrate-aliases').then(response => {
-            return buildApiResponse(response, response.data?.data);
-        });
-    },
     testAccountRule: (id: number, context: Record<string, any>): ApiResponsePromise<any> => {
         return axios.post(`account-rules/${id}/test`, context).then(response => {
             return buildApiResponse(response, response.data?.data);

@@ -44,7 +44,6 @@ fn init_schema(runtime: &SqliteRuntime) -> Result<(), Box<dyn Error>> {
             hidden BOOLEAN DEFAULT 0,
             display_order INTEGER DEFAULT 0,
             comment TEXT,
-            aliases TEXT,
             parent_id INTEGER DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,

@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
     fn register_user_creates_defaults_and_logs_atomically() -> DbResult<()> {
@@ -67,7 +66,6 @@ mod tests {
                 hidden INTEGER DEFAULT 0,
                 display_order INTEGER DEFAULT 0,
                 comment TEXT,
-                aliases TEXT,
                 parent_id INTEGER DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
@@ -174,14 +172,11 @@ mod tests {
         );
         assert_eq!(
             connection.query_row(
-                "SELECT name, aliases FROM accounts WHERE id = 1",
+                "SELECT name FROM accounts WHERE id = 1",
                 [],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                |row| row.get::<_, String>(0),
             )?,
-            (
-                "现金".to_string(),
-                json!(["现金", "现金钱包", "cash"]).to_string()
-            )
+            "现金"
         );
         assert_eq!(
             connection.query_row(

@@ -1483,7 +1483,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy accounts runtime creates accounts and subaccounts with frontend cents to SQLite yuan conversion and legacy aliases formatting; the retired legacy accounts route package has been removed.",
+        notes: "Rust taxonomy accounts runtime creates accounts and subaccounts with frontend cents to SQLite yuan conversion; the retired legacy accounts route package and alias DTO compatibility have been removed.",
     },
     EndpointOwnership {
         method: "DELETE",
@@ -1934,15 +1934,6 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust taxonomy account-rules runtime tests a stored account rule against explicit parser/counterparty/payment-method/description context without mutating rule state.",
-    },
-    EndpointOwnership {
-        method: "POST",
-        pattern: "/api/account-rules/migrate-aliases",
-        domain: "taxonomy-rules-settings",
-        state: MigrationState::RustOwnedVerified,
-        envelope: ResponseEnvelopeFamily::FlaskSuccessData,
-        deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy account-rules runtime idempotently migrates visible account aliases into disabled-compatible account recognition rules while skipping hidden accounts.",
     },
     EndpointOwnership {
         method: "POST",
@@ -3037,7 +3028,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Account CRUD/display-order/balance sync/transaction move-clear, account-rule list/create/update/delete/reorder/migrate-aliases/test, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, and settings bundle import/preview/export routes are Rust-owned; all retired legacy taxonomy route shells have been removed. legacy CategoryEngine matcher cache remains only for later import/learning matching paths.",
+            "Account CRUD/display-order/balance sync/transaction move-clear, account-rule list/create/update/delete/reorder/test, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, and settings bundle import/preview/export routes are Rust-owned; all retired legacy taxonomy route shells have been removed. legacy CategoryEngine matcher cache remains only for later import/learning matching paths.",
         decision_required: DecisionRequired::None,
         decision_owner: "none",
         transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
@@ -3441,7 +3432,7 @@ fn route_contract_details(
             deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
             blocked_status: MigrationBlockedStatus::None,
             unsupported_behavior:
-                "Account CRUD/display-order/balance sync/transaction move-clear, account-rule list/create/update/delete/reorder/migrate-aliases/test, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, settings bundle import/preview/export, and settings encryption status routes are Rust-owned; all retired legacy taxonomy route shells have been removed.",
+                "Account CRUD/display-order/balance sync/transaction move-clear, account-rule list/create/update/delete/reorder/test, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, settings bundle import/preview/export, and settings encryption status routes are Rust-owned; all retired legacy taxonomy route shells have been removed.",
             decision_required: DecisionRequired::None,
             decision_owner: "none",
             transition_evidence: DB_RUNTIME_EVIDENCE,
