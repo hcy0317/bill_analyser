@@ -495,12 +495,12 @@ async fn refresh_postgres_identity_sequence(
         )));
     }
     let table_identifier = quote_postgres_identifier(table_name)?;
-    let sequence_name: Option<String> =
-        sqlx::query_scalar("SELECT pg_get_serial_sequence($1, 'id')")
-            .bind(table_name)
-            .fetch_one(&mut **transaction)
-            .await
-            .map_err(postgres_error)?;
+    let sequence_name: Option<String> = sqlx::query_scalar(postgres_identity_sequence_query_sql())
+        .bind(table_name)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(postgres_error)?
+        .flatten();
     let Some(sequence_name) = sequence_name else {
         return Ok(());
     };
@@ -642,6 +642,14 @@ fn is_safe_postgres_identifier(identifier: &str) -> bool {
         && chars.all(|character| {
             character == '_' || character.is_ascii_lowercase() || character.is_ascii_digit()
         })
+}
+
+fn postgres_identity_sequence_query_sql() -> &'static str {
+    "SELECT pg_get_serial_sequence($1, column_name)
+     FROM information_schema.columns
+     WHERE table_schema = current_schema()
+       AND table_name = $1
+       AND column_name = 'id'"
 }
 
 fn postgres_error(error: sqlx::Error) -> DbError {
@@ -2041,6 +2049,19 @@ mod tests {
         assert!(sql.contains("jsonb_populate_record(NULL::\"users\""));
         assert!(sql.contains("\"username\""));
 
+        let mut bill_tag_values = BTreeMap::new();
+        insert_i64(&mut bill_tag_values, "bill_id", 70);
+        insert_i64(&mut bill_tag_values, "tag_id", 60);
+        insert_i64(&mut bill_tag_values, "user_id", 5);
+        let bill_tag =
+            target_row("bill_tags", "bill_tags", &BTreeMap::new(), bill_tag_values).unwrap();
+        let bill_tag_sql = postgres_insert_sql(&bill_tag).unwrap();
+        assert!(!bill_tag.values.contains_key("id"));
+        assert!(!bill_tag_sql.contains("\"id\""));
+        let sequence_sql = postgres_identity_sequence_query_sql();
+        assert!(sequence_sql.contains("information_schema.columns"));
+        assert!(sequence_sql.contains("column_name = 'id'"));
+
         let mut bad_count = users.clone();
         bad_count.row_count += 1;
         let error = validate_postgres_table_export(&bad_count).unwrap_err();
@@ -2080,6 +2101,11 @@ mod tests {
             .await
             .unwrap();
         crate::run_postgres_migrations(&pool).await.unwrap();
+        let mut sequence_transaction = pool.begin().await.unwrap();
+        refresh_postgres_identity_sequence(&mut sequence_transaction, "bill_tags")
+            .await
+            .unwrap();
+        sequence_transaction.rollback().await.unwrap();
         sqlx::query(
             "TRUNCATE migration_audit_events, account_rules, category_rules, budgets, transaction_templates, parser_templates, settings, bills, tags, categories, accounts, users RESTART IDENTITY CASCADE",
         )
