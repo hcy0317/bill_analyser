@@ -151,6 +151,8 @@ const BUDGET_UPDATE_COLUMNS: &[&str] = &[
     "enabled",
     "updated_at",
 ];
+pub mod postgres_reads;
+
 include!("budgets/crud_import.rs");
 include!("budgets/execution.rs");
 include!("budgets/history.rs");

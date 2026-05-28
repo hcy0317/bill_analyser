@@ -37,6 +37,16 @@ async fn verify_two_factor_recovery_login_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        return verify_postgres_two_factor_recovery_login_response(
+            state,
+            headers,
+            connect_info.map(|ConnectInfo(addr)| addr),
+            recovery_code,
+            user_id,
+        )
+        .await;
+    }
     let runtime = match open_runtime(&state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -124,6 +134,140 @@ async fn verify_two_factor_recovery_login_handler(
         }
         Err(_) => return db_error_response(),
     }
+    let mut user_payload = user_profile_payload(&user.profile);
+    if let Value::Object(ref mut object) = user_payload {
+        object.insert("id".to_string(), Value::from(user.profile.id.get()));
+    }
+
+    success_result(
+        StatusCode::OK,
+        json!({
+            "token": tokens.access_token,
+            "refreshToken": tokens.refresh_token,
+            "need2FA": false,
+            "user": user_payload,
+            "applicationCloudSettings": application_cloud_settings_payload(cloud_settings),
+        }),
+    )
+}
+
+async fn verify_postgres_two_factor_recovery_login_response(
+    state: HttpAppState,
+    headers: HeaderMap,
+    peer_addr: Option<SocketAddr>,
+    recovery_code: &str,
+    user_id: UserId,
+) -> Response {
+    let runtime = match open_postgres_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let user = match get_postgres_login_user_by_id(runtime.pool(), user_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return json_response(
+                StatusCode::NOT_FOUND,
+                json!({
+                    "success": false,
+                    "error": "User not found"
+                }),
+            );
+        }
+        Err(_) => return db_error_response(),
+    };
+    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
+    let ip_address = login_client_ip(&headers, peer_addr);
+    if !user.is_active {
+        let _ = create_postgres_auth_log(
+            runtime.pool(),
+            &AuthLogDraft {
+                user_id: Some(user.profile.id),
+                username: user.profile.username.clone(),
+                event_type: "login_failed".to_string(),
+                ip_address: ip_address.clone(),
+                user_agent: request_user_agent.clone(),
+                success: false,
+                error_message: Some("Account not active".to_string()),
+                metadata: None,
+                created_at: utc_now_text(),
+            },
+        )
+        .await;
+        return auth_rest_error_response(AuthRestError::new(
+            403,
+            "Account not active",
+            "Your account has been deactivated",
+        ));
+    }
+    if !user.two_factor_enabled {
+        return auth_rest_error_response(AuthRestError::new(
+            400,
+            "Bad Request",
+            "Two-factor authentication is not enabled",
+        ));
+    }
+
+    let cloud_settings =
+        match list_postgres_application_cloud_settings(runtime.pool(), user.profile.id).await {
+            Ok(value) => value,
+            Err(_) => return db_error_response(),
+        };
+    let tokens = match issue_session_tokens(user.profile.id, &user.profile.username, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let now = now_text();
+    let consumed = match consume_postgres_two_factor_recovery_code(
+        runtime.pool(),
+        user.profile.id,
+        recovery_code,
+        &now,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(_) => return db_error_response(),
+    };
+    if !consumed {
+        return auth_rest_error_response(AuthRestError::new(
+            401,
+            "Invalid recovery code",
+            "Recovery code is invalid or already used",
+        ));
+    }
+    let session_id = match create_postgres_token_session(
+        runtime.pool(),
+        &CreateTokenSessionDraft {
+            user_id: user.profile.id,
+            token_hash: sha256_hex(&tokens.access_token),
+            refresh_token_hash: Some(sha256_hex(&tokens.refresh_token)),
+            expires_at: tokens.expires_at.clone(),
+            refresh_expires_at: Some(tokens.refresh_expires_at.clone()),
+            user_agent: request_user_agent.clone(),
+            ip_address: ip_address.clone(),
+            created_at: now.clone(),
+        },
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(_) => return db_error_response(),
+    };
+    let _ = create_postgres_auth_log(
+        runtime.pool(),
+        &AuthLogDraft {
+            user_id: Some(user.profile.id),
+            username: user.profile.username.clone(),
+            event_type: "login_2fa_recovery_success".to_string(),
+            ip_address,
+            user_agent: request_user_agent,
+            success: true,
+            error_message: None,
+            metadata: Some(json!({ "session_id": session_id }).to_string()),
+            created_at: now,
+        },
+    )
+    .await;
     let mut user_payload = user_profile_payload(&user.profile);
     if let Value::Object(ref mut object) = user_payload {
         object.insert("id".to_string(), Value::from(user.profile.id.get()));

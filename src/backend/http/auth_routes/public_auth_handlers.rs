@@ -81,12 +81,66 @@ async fn register_handler(
         return auth_rest_error_response(AuthRestError::new(400, "Invalid password", message));
     }
 
+    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
+    let ip_address = login_client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
+
+    let password_hash = match bcrypt::hash(password, bcrypt::DEFAULT_COST) {
+        Ok(value) => value,
+        Err(_) => {
+            return auth_rest_error_response(AuthRestError::new(
+                500,
+                "Internal Server Error",
+                "Rust auth register runtime password hashing error",
+            ))
+        }
+    };
+    let language = body
+        .get("language")
+        .and_then(Value::as_str)
+        .unwrap_or("zh_Hans")
+        .to_string();
+    let default_currency = body
+        .get("defaultCurrency")
+        .and_then(Value::as_str)
+        .unwrap_or("CNY")
+        .to_string();
+    let first_day_of_week = body
+        .get("firstDayOfWeek")
+        .and_then(Value::as_i64)
+        .unwrap_or(1);
+    let nickname = body
+        .get("nickname")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let nickname = if nickname.is_empty() {
+        username.clone()
+    } else {
+        nickname
+    };
+    let created_at = utc_now_text();
+    if state.config.database_backend.uses_postgres() {
+        return register_postgres_response(
+            &state,
+            &body,
+            username,
+            email,
+            password_hash,
+            nickname,
+            language,
+            default_currency,
+            first_day_of_week,
+            request_user_agent,
+            ip_address,
+            created_at,
+        )
+        .await;
+    }
     let runtime = match open_runtime(&state) {
         Ok(value) => value,
         Err(response) => return *response,
     };
-    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
-    let ip_address = login_client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
     let username_exists = match auth_username_exists(runtime.connection(), &username) {
         Ok(value) => value,
         Err(_) => return db_error_response(),
@@ -143,43 +197,6 @@ async fn register_handler(
             "Email already exists",
         ));
     }
-
-    let password_hash = match bcrypt::hash(password, bcrypt::DEFAULT_COST) {
-        Ok(value) => value,
-        Err(_) => {
-            return auth_rest_error_response(AuthRestError::new(
-                500,
-                "Internal Server Error",
-                "Rust auth register runtime password hashing error",
-            ))
-        }
-    };
-    let language = body
-        .get("language")
-        .and_then(Value::as_str)
-        .unwrap_or("zh_Hans")
-        .to_string();
-    let default_currency = body
-        .get("defaultCurrency")
-        .and_then(Value::as_str)
-        .unwrap_or("CNY")
-        .to_string();
-    let first_day_of_week = body
-        .get("firstDayOfWeek")
-        .and_then(Value::as_i64)
-        .unwrap_or(1);
-    let nickname = body
-        .get("nickname")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .trim()
-        .to_string();
-    let nickname = if nickname.is_empty() {
-        username.clone()
-    } else {
-        nickname
-    };
-    let created_at = utc_now_text();
     let register_result = match create_registered_user_with_defaults(
         runtime.connection(),
         &RegisterUserDraft {
@@ -287,12 +304,23 @@ async fn login_handler(
         ));
     }
 
+    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
+    let ip_address = login_client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
+
+    if state.config.database_backend.uses_postgres() {
+        return login_postgres_response(
+            &state,
+            &login_name,
+            password,
+            &request_user_agent,
+            &ip_address,
+        )
+        .await;
+    }
     let runtime = match open_runtime(&state) {
         Ok(value) => value,
         Err(response) => return *response,
     };
-    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
-    let ip_address = login_client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
 
     let user = match get_login_user_by_login_name(runtime.connection(), &login_name) {
         Ok(Some(value)) => value,
@@ -491,6 +519,16 @@ async fn refresh_token_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        return refresh_postgres_response(
+            &state,
+            claims.user_id,
+            refresh_token,
+            &headers,
+            connect_info.map(|ConnectInfo(addr)| addr),
+        )
+        .await;
+    }
     let runtime = match open_runtime(&state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -553,6 +591,433 @@ async fn refresh_token_handler(
         Err(_) => return db_error_response(),
     };
 
+    success_result(
+        StatusCode::OK,
+        json!({
+            "token": tokens.access_token,
+            "refreshToken": tokens.refresh_token,
+            "newToken": tokens.access_token,
+            "user": user_profile_payload(&user),
+            "applicationCloudSettings": application_cloud_settings_payload(cloud_settings),
+        }),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn register_postgres_response(
+    state: &HttpAppState,
+    body: &Map<String, Value>,
+    username: String,
+    email: String,
+    password_hash: String,
+    nickname: String,
+    language: String,
+    default_currency: String,
+    first_day_of_week: i64,
+    request_user_agent: String,
+    ip_address: String,
+    created_at: String,
+) -> Response {
+    let runtime = match open_postgres_runtime(state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    match postgres_auth_username_exists(runtime.pool(), &username).await {
+        Ok(true) => {
+            let _ = create_postgres_auth_log(
+                runtime.pool(),
+                &AuthLogDraft {
+                    user_id: None,
+                    username: username.clone(),
+                    event_type: "register_failed".to_string(),
+                    ip_address,
+                    user_agent: request_user_agent,
+                    success: false,
+                    error_message: Some("Username already exists".to_string()),
+                    metadata: None,
+                    created_at,
+                },
+            )
+            .await;
+            return auth_rest_error_response(AuthRestError::new(
+                409,
+                "Username exists",
+                "Username already exists",
+            ));
+        }
+        Ok(false) => {}
+        Err(_) => return db_error_response(),
+    }
+    match postgres_auth_email_exists(runtime.pool(), &email).await {
+        Ok(true) => {
+            let _ = create_postgres_auth_log(
+                runtime.pool(),
+                &AuthLogDraft {
+                    user_id: None,
+                    username: username.clone(),
+                    event_type: "register_failed".to_string(),
+                    ip_address,
+                    user_agent: request_user_agent,
+                    success: false,
+                    error_message: Some("Email already exists".to_string()),
+                    metadata: None,
+                    created_at,
+                },
+            )
+            .await;
+            return auth_rest_error_response(AuthRestError::new(
+                409,
+                "Email exists",
+                "Email already exists",
+            ));
+        }
+        Ok(false) => {}
+        Err(_) => return db_error_response(),
+    }
+
+    let register_result = match create_postgres_registered_user_with_defaults(
+        runtime.pool(),
+        &RegisterUserDraft {
+            username: username.clone(),
+            email: email.clone(),
+            password_hash,
+            nickname,
+            language,
+            default_currency,
+            first_day_of_week,
+            email_verified: !state.config.auth_require_email_verification,
+            created_at: created_at.clone(),
+        },
+        &register_preset_categories_from_body(body),
+        &AuthLogDraft {
+            user_id: None,
+            username: username.clone(),
+            event_type: "register_success".to_string(),
+            ip_address,
+            user_agent: request_user_agent,
+            success: true,
+            error_message: None,
+            metadata: None,
+            created_at,
+        },
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(_) => return db_error_response(),
+    };
+    success_result(
+        StatusCode::OK,
+        json!({
+            "user_id": register_result.user_id,
+            "username": username,
+            "email": email,
+            "needVerifyEmail": state.config.auth_require_email_verification,
+            "presetCategoriesSaved": register_result.preset_categories_saved,
+            "presetAccountsSaved": register_result.preset_accounts_saved,
+            "message": "Registration successful",
+        }),
+    )
+}
+
+async fn login_postgres_response(
+    state: &HttpAppState,
+    login_name: &str,
+    password: &str,
+    request_user_agent: &str,
+    ip_address: &str,
+) -> Response {
+    let runtime = match open_postgres_runtime(state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let user = match get_postgres_login_user_by_login_name(runtime.pool(), login_name).await {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            let _ = create_postgres_auth_log(
+                runtime.pool(),
+                &AuthLogDraft {
+                    user_id: None,
+                    username: login_name.to_string(),
+                    event_type: "login_failed".to_string(),
+                    ip_address: ip_address.to_string(),
+                    user_agent: request_user_agent.to_string(),
+                    success: false,
+                    error_message: Some("User not found".to_string()),
+                    metadata: None,
+                    created_at: utc_now_text(),
+                },
+            )
+            .await;
+            return invalid_login_credentials_response();
+        }
+        Err(_) => return db_error_response(),
+    };
+
+    if login_lock_is_active(&user.locked_until) {
+        let _ = create_postgres_auth_log(
+            runtime.pool(),
+            &AuthLogDraft {
+                user_id: Some(user.profile.id),
+                username: user.profile.username.clone(),
+                event_type: "login_failed".to_string(),
+                ip_address: ip_address.to_string(),
+                user_agent: request_user_agent.to_string(),
+                success: false,
+                error_message: Some("Account locked".to_string()),
+                metadata: None,
+                created_at: utc_now_text(),
+            },
+        )
+        .await;
+        return auth_rest_error_response(AuthRestError::new(
+            403,
+            "Account locked",
+            "Account is temporarily locked due to multiple failed login attempts",
+        ));
+    }
+    let expired_locked_until = if user.locked_until.trim().is_empty() {
+        None
+    } else {
+        Some(user.locked_until.as_str())
+    };
+
+    if !bcrypt::verify(password, &user.password_hash).unwrap_or(false) {
+        let lockout_until = login_lockout_until_text(state.config.auth_lockout_duration_minutes);
+        if increment_postgres_failed_login(
+            runtime.pool(),
+            user.profile.id,
+            state.config.auth_max_login_attempts,
+            &lockout_until,
+            expired_locked_until,
+        )
+        .await
+        .is_err()
+            || create_postgres_auth_log(
+                runtime.pool(),
+                &AuthLogDraft {
+                    user_id: Some(user.profile.id),
+                    username: user.profile.username.clone(),
+                    event_type: "login_failed".to_string(),
+                    ip_address: ip_address.to_string(),
+                    user_agent: request_user_agent.to_string(),
+                    success: false,
+                    error_message: Some("Invalid password".to_string()),
+                    metadata: None,
+                    created_at: utc_now_text(),
+                },
+            )
+            .await
+            .is_err()
+        {
+            return db_error_response();
+        }
+        return invalid_login_credentials_response();
+    }
+
+    if !user.is_active {
+        let _ = create_postgres_auth_log(
+            runtime.pool(),
+            &AuthLogDraft {
+                user_id: Some(user.profile.id),
+                username: user.profile.username.clone(),
+                event_type: "login_failed".to_string(),
+                ip_address: ip_address.to_string(),
+                user_agent: request_user_agent.to_string(),
+                success: false,
+                error_message: Some("Account not active".to_string()),
+                metadata: None,
+                created_at: utc_now_text(),
+            },
+        )
+        .await;
+        return auth_rest_error_response(AuthRestError::new(
+            403,
+            "Account not active",
+            "Your account has been deactivated",
+        ));
+    }
+
+    if user.two_factor_enabled {
+        let pending_token = match issue_action_token(&user, "pending_2fa", 1, state) {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let _ = create_postgres_auth_log(
+            runtime.pool(),
+            &AuthLogDraft {
+                user_id: Some(user.profile.id),
+                username: user.profile.username.clone(),
+                event_type: "login_2fa_pending".to_string(),
+                ip_address: ip_address.to_string(),
+                user_agent: request_user_agent.to_string(),
+                success: true,
+                error_message: None,
+                metadata: None,
+                created_at: utc_now_text(),
+            },
+        )
+        .await;
+        return success_result(
+            StatusCode::OK,
+            json!({
+                "token": pending_token,
+                "need2FA": true,
+            }),
+        );
+    }
+
+    let cloud_settings =
+        match list_postgres_application_cloud_settings(runtime.pool(), user.profile.id).await {
+            Ok(value) => value,
+            Err(_) => return db_error_response(),
+        };
+    let tokens = match issue_session_tokens(user.profile.id, &user.profile.username, state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let now = utc_now_text();
+    let session_id = match create_postgres_token_session(
+        runtime.pool(),
+        &CreateTokenSessionDraft {
+            user_id: user.profile.id,
+            token_hash: sha256_hex(&tokens.access_token),
+            refresh_token_hash: Some(sha256_hex(&tokens.refresh_token)),
+            expires_at: tokens.expires_at.clone(),
+            refresh_expires_at: Some(tokens.refresh_expires_at.clone()),
+            user_agent: request_user_agent.to_string(),
+            ip_address: ip_address.to_string(),
+            created_at: now.clone(),
+        },
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(_) => return db_error_response(),
+    };
+    if update_postgres_user_last_login(runtime.pool(), user.profile.id, &now, ip_address)
+        .await
+        .is_err()
+        || create_postgres_auth_log(
+            runtime.pool(),
+            &AuthLogDraft {
+                user_id: Some(user.profile.id),
+                username: user.profile.username.clone(),
+                event_type: "login_success".to_string(),
+                ip_address: ip_address.to_string(),
+                user_agent: request_user_agent.to_string(),
+                success: true,
+                error_message: None,
+                metadata: Some(json!({ "session_id": session_id }).to_string()),
+                created_at: now,
+            },
+        )
+        .await
+        .is_err()
+    {
+        return db_error_response();
+    }
+    let mut user_payload = user_profile_payload(&user.profile);
+    if let Value::Object(ref mut object) = user_payload {
+        object.insert("id".to_string(), Value::from(user.profile.id.get()));
+    }
+    success_result(
+        StatusCode::OK,
+        json!({
+            "token": tokens.access_token,
+            "refreshToken": tokens.refresh_token,
+            "need2FA": false,
+            "user": user_payload,
+            "applicationCloudSettings": application_cloud_settings_payload(cloud_settings),
+        }),
+    )
+}
+
+async fn refresh_postgres_response(
+    state: &HttpAppState,
+    user_id: UserId,
+    refresh_token: &str,
+    headers: &HeaderMap,
+    peer_addr: Option<SocketAddr>,
+) -> Response {
+    let runtime = match open_postgres_runtime(state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let refresh_token_hash = sha256_hex(refresh_token);
+    let refresh_session =
+        match get_postgres_active_refresh_session(runtime.pool(), &refresh_token_hash).await {
+            Ok(Some(value)) => value,
+            Ok(None) => return invalid_refresh_token_response(),
+            Err(_) => return db_error_response(),
+        };
+    if refresh_session.user_id != user_id || !refresh_session.user_is_active {
+        return invalid_refresh_token_response();
+    }
+    if refresh_session_is_expired(&refresh_session.refresh_expires_at) {
+        return refresh_token_expired_response();
+    }
+    let user = match get_postgres_auth_user_profile(runtime.pool(), user_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return auth_rest_error_response(AuthRestError::new(
+                404,
+                "User not found",
+                "User does not exist",
+            ));
+        }
+        Err(_) => return db_error_response(),
+    };
+    let tokens = match issue_session_tokens(user.id, &user.username, state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let request_user_agent = header_value(headers, header::USER_AGENT.as_str());
+    let ip_address = client_ip(headers, peer_addr);
+    let session_id = match rotate_postgres_refresh_token_session(
+        runtime.pool(),
+        refresh_session.id,
+        &refresh_token_hash,
+        &CreateTokenSessionDraft {
+            user_id: user.id,
+            token_hash: sha256_hex(&tokens.access_token),
+            refresh_token_hash: Some(sha256_hex(&tokens.refresh_token)),
+            expires_at: tokens.expires_at.clone(),
+            refresh_expires_at: Some(tokens.refresh_expires_at.clone()),
+            user_agent: request_user_agent.clone(),
+            ip_address: ip_address.clone(),
+            created_at: now_text(),
+        },
+    )
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return invalid_refresh_token_response(),
+        Err(_) => return db_error_response(),
+    };
+    if session_id <= 0 {
+        return db_error_response();
+    }
+    let _ = create_postgres_auth_log(
+        runtime.pool(),
+        &AuthLogDraft {
+            user_id: Some(user.id),
+            username: user.username.clone(),
+            event_type: "token_refresh".to_string(),
+            ip_address,
+            user_agent: request_user_agent,
+            success: true,
+            error_message: None,
+            metadata: Some(json!({ "session_id": session_id }).to_string()),
+            created_at: utc_now_text(),
+        },
+    )
+    .await;
+    let cloud_settings = match list_postgres_application_cloud_settings(runtime.pool(), user.id).await
+    {
+        Ok(value) => value,
+        Err(_) => return db_error_response(),
+    };
     success_result(
         StatusCode::OK,
         json!({

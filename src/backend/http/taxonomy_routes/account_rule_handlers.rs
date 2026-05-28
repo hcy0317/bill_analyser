@@ -15,6 +15,26 @@ async fn list_account_rules_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy account rules") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match list_postgres_account_rules(
+            runtime.pool(),
+            db_user_id(user_id),
+            query.account_id,
+            account_rules_enabled_only(&query),
+            query.account_role_scope.as_deref(),
+            query.transaction_type_scope.as_deref(),
+        )
+        .await
+        {
+            Ok(rules) => json_response(StatusCode::OK, format_account_rules_response(rules)),
+            Err(DbError::InvalidOperation(message)) => bad_request(message),
+            Err(_) => account_rule_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy account rules") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -59,6 +79,24 @@ async fn create_account_rule_handler(
         return bad_request("account_id and rule_expression are required");
     }
 
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy account rules") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let user_id = db_user_id(user_id);
+        let rule_id = match create_postgres_account_rule(runtime.pool(), &body, user_id).await {
+            Ok(Some(value)) => value,
+            Ok(None) => return bad_request("Failed to create account rule"),
+            Err(DbError::InvalidOperation(message)) => return bad_request(message),
+            Err(_) => return account_rule_db_error_response(),
+        };
+        return match get_postgres_account_rule(runtime.pool(), rule_id, user_id).await {
+            Ok(Some(rule)) => account_rule_data_response(StatusCode::CREATED, rule),
+            Ok(None) => account_rule_db_error_response(),
+            Err(_) => account_rule_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy account rules") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -101,6 +139,23 @@ async fn update_account_rule_handler(
         return bad_request("rule_expression is required");
     }
 
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy account rules") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let user_id = db_user_id(user_id);
+        return match update_postgres_account_rule(runtime.pool(), rule_id, &body, user_id).await {
+            Ok(true) => match get_postgres_account_rule(runtime.pool(), rule_id, user_id).await {
+                Ok(Some(rule)) => account_rule_data_response(StatusCode::OK, rule),
+                Ok(None) => account_rule_db_error_response(),
+                Err(_) => account_rule_db_error_response(),
+            },
+            Ok(false) => not_found("Account rule not found or no change"),
+            Err(DbError::InvalidOperation(message)) => bad_request(message),
+            Err(_) => account_rule_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy account rules") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -129,6 +184,19 @@ async fn delete_account_rule_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy account rules") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match delete_postgres_account_rule(runtime.pool(), rule_id, db_user_id(user_id))
+            .await
+        {
+            Ok(true) => json_response(StatusCode::OK, json!({"success": true})),
+            Ok(false) => not_found("Account rule not found"),
+            Err(_) => account_rule_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy account rules") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -169,6 +237,23 @@ async fn reorder_account_rules_handler(
         parsed_rule_ids.push(rule_id);
     }
 
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy account rules") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match reorder_postgres_account_rules(
+            runtime.pool(),
+            &parsed_rule_ids,
+            db_user_id(user_id),
+        )
+        .await
+        {
+            Ok(true) => json_response(StatusCode::OK, json!({"success": true})),
+            Ok(false) => bad_request("rule_ids must belong to the current user and be unique"),
+            Err(_) => account_rule_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy account rules") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -190,6 +275,30 @@ async fn migrate_account_aliases_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy account rules") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match migrate_postgres_account_aliases_to_rules(
+            runtime.pool(),
+            db_user_id(user_id),
+        )
+        .await
+        {
+            Ok(summary) => json_response(
+                StatusCode::OK,
+                json!({
+                    "success": true,
+                    "data": {
+                        "migrated": summary.migrated,
+                        "skipped": summary.skipped,
+                    }
+                }),
+            ),
+            Err(_) => account_rule_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy account rules") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -246,6 +355,57 @@ async fn test_account_rule_handler(
         "all",
     );
 
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy account rules") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let db_user_id = db_user_id(user_id);
+        return match test_postgres_account_rule_match(
+            runtime.pool(),
+            rule_id,
+            db_user_id,
+            &context,
+            &requested_role_scope,
+            &transaction_type_scope,
+        )
+        .await
+        {
+            Ok(Some(matched)) => json_response(
+                StatusCode::OK,
+                json!({
+                    "success": true,
+                    "data": {
+                        "matched": true,
+                        "accountId": matched.account_id,
+                        "ruleId": matched.rule_id,
+                        "matchedFields": matched.matched_fields,
+                        "priority": matched.priority,
+                        "fallbackUsed": matched.fallback_used,
+                        "accountRoleScope": matched.account_role_scope,
+                        "transactionTypeScope": matched.transaction_type_scope,
+                    }
+                }),
+            ),
+            Ok(None) => {
+                if get_postgres_account_rule(runtime.pool(), rule_id, db_user_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .is_none()
+                {
+                    not_found("Account rule not found")
+                } else {
+                    json_response(
+                        StatusCode::OK,
+                        json!({"success": true, "data": {"matched": false}}),
+                    )
+                }
+            }
+            Err(DbError::InvalidOperation(message)) => bad_request(message),
+            Err(_) => account_rule_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy account rules") {
         Ok(value) => value,
         Err(response) => return *response,

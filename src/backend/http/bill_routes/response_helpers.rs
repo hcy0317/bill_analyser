@@ -13,6 +13,20 @@ fn open_runtime(state: &HttpAppState) -> RouteResult<SqliteRuntime> {
         })
 }
 
+fn open_postgres_runtime(
+    state: &HttpAppState,
+    runtime_label: &'static str,
+) -> RouteResult<bill_analyser_db::PostgresRepositoryRuntime> {
+    state
+        .open_postgres_repository_runtime(runtime_label)
+        .map_err(|error| {
+            Box::new(error_response(
+                status_or_internal(error.http_status_code()),
+                error.public_message("Rust bills route runtime DB error"),
+            ))
+        })
+}
+
 fn user_id_from_headers(headers: &HeaderMap, config: &HttpShellConfig) -> RouteResult<UserId> {
     resolve_user_id_from_headers(headers, config, TRUSTED_USER_SECRET_HEADER).map_err(|error| {
         Box::new(error_response(

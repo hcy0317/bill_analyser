@@ -18,6 +18,17 @@ async fn export_bills_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "bills") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let bills = match list_postgres_bills_for_export(runtime.pool(), user_id).await {
+            Ok(value) => value,
+            Err(_) => return db_error_response(),
+        };
+        return export_bills_response(export_format, &bills);
+    }
     let runtime = match open_runtime(&state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -26,12 +37,45 @@ async fn export_bills_handler(
         Ok(value) => value,
         Err(_) => return db_error_response(),
     };
+    export_bills_response(export_format, &bills)
+}
+
+async fn list_postgres_bills_for_export(
+    pool: &PostgresPool,
+    user_id: UserId,
+) -> bill_analyser_db::DbResult<Vec<BillRecord>> {
+    let mut page = 1_usize;
+    let page_size = 500_usize;
+    let mut bills = Vec::new();
+    loop {
+        let page_result = query_postgres_bills(
+            pool,
+            user_id.get() as i64,
+            page,
+            page_size,
+            &BillFilters::default(),
+        )
+        .await?;
+        if page_result.bills.is_empty() {
+            break;
+        }
+        let total = page_result.total;
+        bills.extend(page_result.bills);
+        if i64::try_from(bills.len()).unwrap_or(i64::MAX) >= total {
+            break;
+        }
+        page += 1;
+    }
+    Ok(bills)
+}
+
+fn export_bills_response(export_format: BillExportFormat, bills: &[BillRecord]) -> Response {
     if bills.is_empty() {
         return not_found("No bills to export");
     }
 
     match export_format {
-        BillExportFormat::Csv => match render_bills_csv_export(&bills) {
+        BillExportFormat::Csv => match render_bills_csv_export(bills) {
             Ok(body) => {
                 export_file_response("text/csv; charset=utf-8", export_filename("csv"), body)
             }
@@ -40,7 +84,7 @@ async fn export_bills_handler(
         BillExportFormat::Excel => export_file_response(
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             export_filename("xlsx"),
-            render_bills_xlsx_export(&bills),
+            render_bills_xlsx_export(bills),
         ),
     }
 }

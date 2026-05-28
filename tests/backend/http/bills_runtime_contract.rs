@@ -1,4 +1,4 @@
-use std::{error::Error, fs, path::Path, time::Duration};
+use std::{env, error::Error, fs, path::Path, time::Duration};
 
 use axum::{
     body::{to_bytes, Body},
@@ -7,16 +7,580 @@ use axum::{
     Router,
 };
 use base64::Engine as _;
+use bill_analyser_db::run_postgres_migrations;
 use bill_analyser_http::{
-    build_router, HttpAppState, HttpShellConfig, ImportRouteMode, BILL_CRUD_ROUTE_PATTERNS,
+    build_router, config::DatabaseBackend, HttpAppState, HttpShellConfig, ImportRouteMode,
+    BILL_CRUD_ROUTE_PATTERNS,
 };
 use rusqlite::Connection;
 use serde_json::{json, Value};
+use sqlx::{postgres::PgPoolOptions, Row};
 use tempfile::TempDir;
 use tower::ServiceExt;
 
 const TEST_AUTH_SECRET: &str = "bills-route-secret";
 const TEST_USER_ID: &str = "42";
+
+#[tokio::test]
+async fn bills_postgres_runtime_serves_list_month_and_detail_without_sqlite_fallback(
+) -> Result<(), Box<dyn Error>> {
+    let Ok(postgres_url) = env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+        return Ok(());
+    };
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&postgres_url)
+        .await?;
+    run_postgres_migrations(&pool).await?;
+
+    let unique = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
+    let user_id: i64 =
+        sqlx::query("INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id")
+            .bind(format!("bills-pg-{unique}"))
+            .bind(format!("bills-pg-{unique}@example.test"))
+            .fetch_one(&pool)
+            .await?
+            .try_get("id")?;
+    let account_id: i64 = sqlx::query(
+        "INSERT INTO accounts (user_id, name, account_type, balance_cents) VALUES ($1, 'Pg Wallet', '1', 0) RETURNING id",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let category_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO categories (user_id, name, category_type, path, display_order)
+        VALUES ($1, '咖啡', '3', '餐饮/咖啡', 1)
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let tag_id: i64 = sqlx::query(
+        "INSERT INTO tags (user_id, name, color, display_order) VALUES ($1, 'pg-coffee', '#123456', 1) RETURNING id",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let bill_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO bills (
+            user_id, occurred_at, amount_cents, direction, transaction_type,
+            account_id, source_account_id, category_id, merchant, description,
+            payment_method, source_hash, standard_payload
+        )
+        VALUES (
+            $1, '2026-05-08T09:30:00Z', 1999, 'expense', 'expense',
+            $2, $2, $3, 'Pg Cafe', 'coffee beans', '@card', $4,
+            '{"batch_id":"pg-batch","destination_amount":0}'::jsonb
+        )
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(account_id)
+    .bind(category_id)
+    .bind(format!("hash-{unique}"))
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    sqlx::query("INSERT INTO bill_tags (user_id, bill_id, tag_id) VALUES ($1, $2, $3)")
+        .bind(user_id)
+        .bind(bill_id)
+        .bind(tag_id)
+        .execute(&pool)
+        .await?;
+
+    let app = postgres_runtime_router(&postgres_url)?;
+    let list_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            &format!(
+                "/api/bills/?page=1&page_size=20&type=3&keyword=coffee&tagIds={tag_id}&categoryIds={category_id}&accountIds={account_id}&batch_id=pg-batch&amountFilter=between:19:20"
+            ),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let list_status = list_response.status();
+    let list_body = read_json(list_response).await;
+    assert_eq!(list_status, StatusCode::OK, "{list_body}");
+    assert_eq!(list_body["success"], true);
+    assert_eq!(list_body["result"]["total"], 1);
+    assert_eq!(list_body["result"]["items"][0]["id"], bill_id.to_string());
+    assert_eq!(list_body["result"]["items"][0]["amount"], 1999);
+    assert_eq!(list_body["result"]["items"][0]["categoryName"], "餐饮");
+    assert_eq!(list_body["result"]["items"][0]["subCategoryName"], "咖啡");
+    assert_eq!(
+        list_body["result"]["items"][0]["categoryId"],
+        category_id.to_string()
+    );
+    assert_eq!(
+        list_body["result"]["items"][0]["tags"][0]["name"],
+        "pg-coffee"
+    );
+
+    let month_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/bills/by-month?year=2026&month=5",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let month_status = month_response.status();
+    let month_body = read_json(month_response).await;
+    assert_eq!(month_status, StatusCode::OK, "{month_body}");
+    assert_eq!(month_body["result"]["items"][0]["comment"], "coffee beans");
+
+    for path in [
+        format!("/api/bills/get?id={bill_id}"),
+        format!("/api/bills/{bill_id}"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(authed_request_for_user(
+                Method::GET,
+                &path,
+                Body::empty(),
+                user_id,
+            ))
+            .await?;
+        let status = response.status();
+        let body = read_json(response).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["result"]["comment"], "coffee beans");
+    }
+
+    let export_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/bills/export?format=csv",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let export_status = export_response.status();
+    let export_body = read_text(export_response).await;
+    assert_eq!(export_status, StatusCode::OK, "{export_body}");
+    assert!(export_body.contains("Pg Cafe"));
+    assert!(export_body.contains("coffee beans"));
+
+    let reconciliation_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            &format!(
+                "/api/bills/reconciliation_statements?account_id={account_id}&start_time=0&end_time=0&category_ids={category_id}"
+            ),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let reconciliation_status = reconciliation_response.status();
+    let reconciliation_body = read_json(reconciliation_response).await;
+    assert_eq!(
+        reconciliation_status,
+        StatusCode::OK,
+        "{reconciliation_body}"
+    );
+    assert_eq!(reconciliation_body["success"], true);
+    assert_eq!(reconciliation_body["result"]["accountName"], "Pg Wallet");
+    assert_eq!(reconciliation_body["result"]["openingBalance"], 0);
+    assert_eq!(reconciliation_body["result"]["closingBalance"], -1999);
+    assert_eq!(reconciliation_body["result"]["totalOutflows"], 1999);
+    assert_eq!(reconciliation_body["result"]["itemCount"], 1);
+    assert_eq!(
+        reconciliation_body["result"]["transactions"][0]["id"],
+        bill_id.to_string()
+    );
+    assert_eq!(
+        reconciliation_body["result"]["transactions"][0]["accountClosingBalance"],
+        -1999
+    );
+
+    let quick_add_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::POST,
+            "/api/bills/category/quick-add-keyword",
+            Body::from(
+                json!({"main_category": "餐饮", "sub_category": "咖啡", "keyword": "拿铁"})
+                    .to_string(),
+            ),
+            user_id,
+        ))
+        .await?;
+    let quick_add_status = quick_add_response.status();
+    let quick_add_body = read_json(quick_add_response).await;
+    assert_eq!(quick_add_status, StatusCode::OK, "{quick_add_body}");
+    let keywords: Option<String> =
+        sqlx::query_scalar("SELECT metadata->>'keywords' FROM categories WHERE id = $1")
+            .bind(category_id)
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(keywords.as_deref(), Some("拿铁"));
+
+    sqlx::query(
+        r#"
+        INSERT INTO category_rules (user_id, category_id, name, rule_expression, priority, enabled)
+        VALUES ($1, $2, 'pg-coffee-refresh', '{"legacy_expression":"RefreshTarget","regex_enabled":false}'::jsonb, 1, true)
+        "#,
+    )
+    .bind(user_id)
+    .bind(category_id)
+    .execute(&pool)
+    .await?;
+    let refresh_bill_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO bills (
+            user_id, occurred_at, amount_cents, direction, transaction_type,
+            account_id, source_account_id, merchant, description, payment_method,
+            source_hash, standard_payload
+        )
+        VALUES (
+            $1, '2026-05-08T10:30:00Z', 321, 'expense', 'expense',
+            $2, $2, 'RefreshTarget Shop', 'uncategorized coffee', '@card',
+            $3, '{}'::jsonb
+        )
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(account_id)
+    .bind(format!("refresh-hash-{unique}"))
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let refresh_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::POST,
+            "/api/bills/category/refresh",
+            Body::from(json!({"bill_ids": [refresh_bill_id]}).to_string()),
+            user_id,
+        ))
+        .await?;
+    let refresh_status = refresh_response.status();
+    let refresh_body = read_json(refresh_response).await;
+    assert_eq!(refresh_status, StatusCode::OK, "{refresh_body}");
+    assert_eq!(refresh_body["result"]["total"], 1);
+    assert_eq!(refresh_body["result"]["categorized"], 1);
+    let refreshed = sqlx::query(
+        "SELECT category_id, standard_payload->>'main_category' AS main_category, standard_payload->>'sub_category' AS sub_category FROM bills WHERE id = $1",
+    )
+    .bind(refresh_bill_id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(
+        refreshed.try_get::<Option<i64>, _>("category_id")?,
+        Some(category_id)
+    );
+    assert_eq!(
+        refreshed
+            .try_get::<Option<String>, _>("main_category")?
+            .as_deref(),
+        Some("餐饮")
+    );
+    assert_eq!(
+        refreshed
+            .try_get::<Option<String>, _>("sub_category")?
+            .as_deref(),
+        Some("咖啡")
+    );
+
+    let recurring_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO transaction_templates (
+            user_id, template_type, name, transaction_type, source_account_id,
+            source_amount_minor_units, scheduled_frequency_type, scheduled_frequency,
+            scheduled_start_date, scheduled_next_date, enabled
+        )
+        VALUES ($1, 2, 'pg recurring coffee', 'expense', $2, 1999, 2, '8', '2026-05-08', '2026-05-08', true)
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(account_id.to_string())
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let recurring_candidates_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            &format!("/api/bills/{bill_id}/recurring-candidates?toleranceDays=1"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let recurring_candidates_status = recurring_candidates_response.status();
+    let recurring_candidates_body = read_json(recurring_candidates_response).await;
+    assert_eq!(
+        recurring_candidates_status,
+        StatusCode::OK,
+        "{recurring_candidates_body}"
+    );
+    assert_eq!(
+        recurring_candidates_body["result"]["candidates"][0]["id"],
+        recurring_id.to_string()
+    );
+
+    let recurring_bind_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::PUT,
+            &format!("/api/bills/{bill_id}/recurring-match"),
+            Body::from(json!({"recurringId": recurring_id}).to_string()),
+            user_id,
+        ))
+        .await?;
+    let recurring_bind_status = recurring_bind_response.status();
+    let recurring_bind_body = read_json(recurring_bind_response).await;
+    assert_eq!(
+        recurring_bind_status,
+        StatusCode::OK,
+        "{recurring_bind_body}"
+    );
+    assert_eq!(
+        recurring_bind_body["result"]["nextScheduledDate"],
+        "2026-06-08"
+    );
+    let linked_recurring: Option<String> = sqlx::query_scalar(
+        "SELECT standard_payload->>'created_from_recurring' FROM bills WHERE id = $1",
+    )
+    .bind(bill_id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(linked_recurring, Some(recurring_id.to_string()));
+
+    let recurring_unbind_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::DELETE,
+            &format!("/api/bills/{bill_id}/recurring-match"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let recurring_unbind_status = recurring_unbind_response.status();
+    let recurring_unbind_body = read_json(recurring_unbind_response).await;
+    assert_eq!(
+        recurring_unbind_status,
+        StatusCode::OK,
+        "{recurring_unbind_body}"
+    );
+    let recurring_key_present: bool = sqlx::query_scalar(
+        "SELECT standard_payload ? 'created_from_recurring' FROM bills WHERE id = $1",
+    )
+    .bind(bill_id)
+    .fetch_one(&pool)
+    .await?;
+    assert!(!recurring_key_present);
+
+    let create_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::POST,
+            "/api/bills",
+            Body::from(
+                json!({
+                    "date": "2026-05-09 10:00:00",
+                    "type": "支出",
+                    "amount": 12.34,
+                    "counterparty": "Pg Manual",
+                    "description": "manual expense",
+                    "source_account_id": account_id,
+                    "category_id": category_id,
+                    "tag_ids": [tag_id]
+                })
+                .to_string(),
+            ),
+            user_id,
+        ))
+        .await?;
+    let create_status = create_response.status();
+    let create_body = read_json(create_response).await;
+    assert_eq!(create_status, StatusCode::CREATED, "{create_body}");
+    let created_id = create_body["result"]["id"]
+        .as_str()
+        .expect("created bill id")
+        .parse::<i64>()?;
+    assert_eq!(create_body["result"]["amount"], 1234);
+    assert_eq!(create_body["result"]["tags"][0]["name"], "pg-coffee");
+    assert_eq!(
+        postgres_account_balance_cents(&pool, user_id, account_id).await?,
+        -1234
+    );
+
+    let update_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::PUT,
+            &format!("/api/bills/{created_id}"),
+            Body::from(
+                json!({
+                    "amount": 20.0,
+                    "description": "manual updated"
+                })
+                .to_string(),
+            ),
+            user_id,
+        ))
+        .await?;
+    let update_status = update_response.status();
+    let update_body = read_json(update_response).await;
+    assert_eq!(update_status, StatusCode::OK, "{update_body}");
+    assert_eq!(update_body["result"]["amount"], 2000);
+    assert_eq!(
+        postgres_account_balance_cents(&pool, user_id, account_id).await?,
+        -2000
+    );
+
+    let legacy_modify_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::POST,
+            "/api/bills/modify",
+            Body::from(json!({"id": created_id, "remark": "legacy pg remark"}).to_string()),
+            user_id,
+        ))
+        .await?;
+    let legacy_modify_status = legacy_modify_response.status();
+    let legacy_modify_body = read_json(legacy_modify_response).await;
+    assert_eq!(legacy_modify_status, StatusCode::OK, "{legacy_modify_body}");
+
+    let delete_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::DELETE,
+            &format!("/api/bills/{created_id}"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let delete_status = delete_response.status();
+    let delete_body = read_json(delete_response).await;
+    assert_eq!(delete_status, StatusCode::OK, "{delete_body}");
+    assert_eq!(
+        postgres_account_balance_cents(&pool, user_id, account_id).await?,
+        0
+    );
+
+    let batch_create_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::POST,
+            "/api/bills/batch",
+            Body::from(
+                json!({
+                    "transactions": [
+                        {
+                            "date": "2026-05-10 10:00:00",
+                            "type": "支出",
+                            "amount": 5.0,
+                            "counterparty": "Pg Batch One",
+                            "description": "batch one",
+                            "source_account_id": account_id,
+                            "category_id": category_id,
+                            "tag_ids": [tag_id]
+                        },
+                        {
+                            "date": "2026-05-11 10:00:00",
+                            "type": "支出",
+                            "amount": 7.0,
+                            "counterparty": "Pg Batch Two",
+                            "description": "batch two",
+                            "source_account_id": account_id,
+                            "category_id": category_id,
+                            "tag_ids": [tag_id]
+                        }
+                    ]
+                })
+                .to_string(),
+            ),
+            user_id,
+        ))
+        .await?;
+    let batch_create_status = batch_create_response.status();
+    let batch_create_body = read_json(batch_create_response).await;
+    assert_eq!(
+        batch_create_status,
+        StatusCode::CREATED,
+        "{batch_create_body}"
+    );
+    assert_eq!(batch_create_body["result"]["createdCount"], 2);
+    let batch_ids = batch_create_body["result"]["ids"]
+        .as_array()
+        .expect("batch ids");
+    let first_batch_id = batch_ids[0]
+        .as_str()
+        .expect("first batch id")
+        .parse::<i64>()?;
+    let second_batch_id = batch_ids[1]
+        .as_str()
+        .expect("second batch id")
+        .parse::<i64>()?;
+    assert_eq!(
+        postgres_account_balance_cents(&pool, user_id, account_id).await?,
+        -1200
+    );
+
+    let batch_update_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::PUT,
+            "/api/bills/batch/update",
+            Body::from(
+                json!({
+                    "billIds": [first_batch_id, 999999999],
+                    "updates": {
+                        "amount": 8.0,
+                        "description": "batch pg updated"
+                    }
+                })
+                .to_string(),
+            ),
+            user_id,
+        ))
+        .await?;
+    let batch_update_status = batch_update_response.status();
+    let batch_update_body = read_json(batch_update_response).await;
+    assert_eq!(batch_update_status, StatusCode::OK, "{batch_update_body}");
+    assert_eq!(batch_update_body["result"]["updated_count"], 1);
+    assert_eq!(batch_update_body["result"]["failed_count"], 1);
+    assert_eq!(
+        postgres_account_balance_cents(&pool, user_id, account_id).await?,
+        -1500
+    );
+
+    let batch_delete_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::DELETE,
+            "/api/bills/batch/delete",
+            Body::from(json!({"ids": [first_batch_id, second_batch_id]}).to_string()),
+            user_id,
+        ))
+        .await?;
+    let batch_delete_status = batch_delete_response.status();
+    let batch_delete_body = read_json(batch_delete_response).await;
+    assert_eq!(batch_delete_status, StatusCode::OK, "{batch_delete_body}");
+    assert_eq!(batch_delete_body["result"]["deleted_count"], 2);
+    assert_eq!(
+        postgres_account_balance_cents(&pool, user_id, account_id).await?,
+        0
+    );
+
+    Ok(())
+}
 
 #[tokio::test]
 async fn bills_crud_runtime_serves_owned_routes_and_writes_db() -> Result<(), Box<dyn Error>> {
@@ -288,6 +852,9 @@ async fn bills_runtime_covers_batch_month_filters_and_error_edges() -> Result<()
             1024 * 1024,
             ImportRouteMode::ImportDbRuntime,
         )?
+        .with_database_backend(DatabaseBackend::Sqlite)
+        .with_require_postgres_after_cutover(false)
+        .with_legacy_sqlite_runtime_for_tests()
         .with_trusted_user_header_secret(TEST_AUTH_SECRET),
     )?;
     let missing_db_response = build_router(missing_db_state)
@@ -538,6 +1105,9 @@ async fn bills_runtime_covers_split_route_error_edges_and_frontend_mutations(
             1024 * 1024,
             ImportRouteMode::ImportDbRuntime,
         )?
+        .with_database_backend(DatabaseBackend::Sqlite)
+        .with_require_postgres_after_cutover(false)
+        .with_legacy_sqlite_runtime_for_tests()
         .with_trusted_user_header_secret(TEST_AUTH_SECRET),
     )?;
     let missing_db_app = build_router(missing_db_state);
@@ -1582,11 +2152,44 @@ fn runtime_router_with_uploads_dir(fixture: &RuntimeFixture, uploads_dir: &Path)
         ImportRouteMode::ImportDbRuntime,
     )
     .expect("config")
+    .with_database_backend(DatabaseBackend::Sqlite)
+    .with_require_postgres_after_cutover(false)
+    .with_legacy_sqlite_runtime_for_tests()
     .with_sqlite_db_path(fixture.db_path.display().to_string())
     .with_uploads_dir(uploads_dir.display().to_string())
     .with_trusted_user_header_secret(TEST_AUTH_SECRET);
     let state = HttpAppState::new(config).expect("http app state");
     build_router(state)
+}
+
+fn postgres_runtime_router(postgres_url: &str) -> Result<Router, Box<dyn Error>> {
+    let config = HttpShellConfig::new_with_import_route_mode(
+        "http://127.0.0.1:9".to_string(),
+        Duration::from_secs(5),
+        1024 * 1024,
+        ImportRouteMode::ImportDbRuntime,
+    )?
+    .with_database_backend(DatabaseBackend::Postgres)
+    .with_require_postgres_after_cutover(true)
+    .with_postgres_url(postgres_url)?
+    .with_trusted_user_header_secret(TEST_AUTH_SECRET);
+    let state = HttpAppState::new(config).expect("http app state");
+    Ok(build_router(state))
+}
+
+async fn postgres_account_balance_cents(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    account_id: i64,
+) -> Result<i64, Box<dyn Error>> {
+    Ok(
+        sqlx::query("SELECT balance_cents FROM accounts WHERE user_id = $1 AND id = $2")
+            .bind(user_id)
+            .bind(account_id)
+            .fetch_one(pool)
+            .await?
+            .try_get("balance_cents")?,
+    )
 }
 
 fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
@@ -1967,11 +2570,20 @@ fn json_request(method: Method, uri: &str, body: Value) -> Request<Body> {
 }
 
 fn authed_request(method: Method, uri: &str, body: Body) -> Request<Body> {
+    authed_request_for_user(
+        method,
+        uri,
+        body,
+        TEST_USER_ID.parse().expect("test user id"),
+    )
+}
+
+fn authed_request_for_user(method: Method, uri: &str, body: Body, user_id: i64) -> Request<Body> {
     Request::builder()
         .method(method)
         .uri(uri)
         .header("content-type", "application/json")
-        .header("x-user-id", TEST_USER_ID)
+        .header("x-user-id", user_id.to_string())
         .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
         .body(body)
         .expect("request builds")

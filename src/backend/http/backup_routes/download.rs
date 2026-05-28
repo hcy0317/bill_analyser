@@ -17,7 +17,7 @@ pub(super) fn prepare_download_backup_response(
         Ok(path) => path,
         Err(error) => {
             write_backup_audit_event(
-                auth_runtime.runtime.connection(),
+                &auth_runtime.runtime,
                 auth_runtime.user_id,
                 headers,
                 "backup_downloaded",
@@ -32,7 +32,7 @@ pub(super) fn prepare_download_backup_response(
     let safe_filename = backup_filename(&file_path);
     if !file_path.exists() {
         write_backup_audit_event(
-            auth_runtime.runtime.connection(),
+            &auth_runtime.runtime,
             auth_runtime.user_id,
             headers,
             "backup_downloaded",
@@ -48,7 +48,7 @@ pub(super) fn prepare_download_backup_response(
     }
     if !file_path.is_file() {
         write_backup_audit_event(
-            auth_runtime.runtime.connection(),
+            &auth_runtime.runtime,
             auth_runtime.user_id,
             headers,
             "backup_downloaded",
@@ -67,7 +67,7 @@ pub(super) fn prepare_download_backup_response(
         Ok(file) => file,
         Err(error) => {
             write_backup_audit_event(
-                auth_runtime.runtime.connection(),
+                &auth_runtime.runtime,
                 auth_runtime.user_id,
                 headers,
                 "backup_downloaded",
@@ -83,7 +83,7 @@ pub(super) fn prepare_download_backup_response(
         }
     };
     write_backup_audit_event(
-        auth_runtime.runtime.connection(),
+        &auth_runtime.runtime,
         auth_runtime.user_id,
         headers,
         "backup_downloaded",

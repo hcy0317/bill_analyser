@@ -19,6 +19,8 @@ use serde_json::{Map, Number, Value};
 
 use crate::{run_transaction, DbError, DbResult, UserScope};
 
+pub mod postgres_reads;
+
 pub type BillRecord = Map<String, Value>;
 
 #[derive(Debug, Clone, PartialEq, Default)]

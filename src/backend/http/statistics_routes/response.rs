@@ -8,7 +8,7 @@ use axum::{
     Json,
 };
 use bill_analyser_core::{statistics::StatisticsContractError, UserId};
-use bill_analyser_db::SqliteRuntime;
+use bill_analyser_db::{PostgresRepositoryRuntime, SqliteRuntime};
 use serde_json::{json, Value};
 
 use crate::{auth::resolve_user_id_from_headers, config::HttpShellConfig, state::HttpAppState};
@@ -23,6 +23,19 @@ pub(super) fn open_runtime(state: &HttpAppState) -> RouteResult<SqliteRuntime> {
             Box::new(error_response(
                 status_or_internal(error.http_status_code()),
                 error.public_message("Rust statistics route runtime DB error"),
+            ))
+        })
+}
+
+pub(super) fn open_postgres_runtime(
+    state: &HttpAppState,
+) -> RouteResult<PostgresRepositoryRuntime> {
+    state
+        .open_postgres_repository_runtime("statistics")
+        .map_err(|error| {
+            Box::new(error_response(
+                status_or_internal(error.http_status_code()),
+                error.public_message("Rust statistics route PostgreSQL runtime DB error"),
             ))
         })
 }

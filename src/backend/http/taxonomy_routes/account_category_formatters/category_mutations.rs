@@ -317,6 +317,143 @@ fn update_real_category_handler(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
+async fn update_postgres_virtual_category_handler(
+    pool: &bill_analyser_db::PostgresPool,
+    user_id: i64,
+    old_name: &str,
+    body: &Value,
+) -> Response {
+    let new_name = category_name_from_body(body).unwrap_or_else(|| old_name.to_string());
+    if new_name != old_name {
+        match update_postgres_main_category_name(pool, old_name, &new_name, user_id).await {
+            Ok(true) => {}
+            Ok(false) => return error_response(StatusCode::CONFLICT, "Category rename conflict"),
+            Err(_) => {
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to rename category",
+                );
+            }
+        }
+    }
+
+    let updates = Value::Object(virtual_category_update_payload(body, &new_name));
+    let category_id =
+        match get_postgres_category_by_name(pool, &new_name, "", user_id).await {
+            Ok(Some(existing)) => {
+                let Some(category_id) = existing.get("id").and_then(value_as_i64) else {
+                    return category_db_error_response();
+                };
+                match update_postgres_category(pool, category_id, &updates, user_id).await {
+                    Ok(true) | Ok(false) => category_id,
+                    Err(_) => {
+                        return error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to save category",
+                        );
+                    }
+                }
+            }
+            Ok(None) => {
+                let create_payload = Value::Object(virtual_category_create_payload(body, &new_name));
+                match create_postgres_category(pool, &create_payload, user_id).await {
+                    Ok(Some(category_id)) => category_id,
+                    Ok(None) => {
+                        return error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to save category",
+                        );
+                    }
+                    Err(_) => {
+                        return error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to save category",
+                        );
+                    }
+                }
+            }
+            Err(_) => return category_db_error_response(),
+        };
+
+    match get_postgres_category_by_id(pool, category_id, user_id).await {
+        Ok(Some(category)) => success_result(
+            StatusCode::OK,
+            Value::Object(backend_category_to_frontend(&category, "0")),
+        ),
+        Ok(None) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load updated category",
+        ),
+        Err(_) => category_db_error_response(),
+    }
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn update_postgres_real_category_handler(
+    pool: &bill_analyser_db::PostgresPool,
+    user_id: i64,
+    category_id: i64,
+    body: &Value,
+) -> Response {
+    let mut updates = category_update_payload_from_frontend(body);
+
+    if let Some(new_name) = category_name_from_body(body) {
+        let category = match get_postgres_category_by_id(pool, category_id, user_id).await {
+            Ok(Some(value)) => value,
+            Ok(None) => return not_found("Category not found"),
+            Err(_) => return category_db_error_response(),
+        };
+        if category_text(&category, "sub_category").is_empty() {
+            let old_name = category_text(&category, "main_category");
+            if new_name != old_name {
+                match update_postgres_main_category_name(pool, &old_name, &new_name, user_id).await
+                {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        return error_response(StatusCode::CONFLICT, "Category rename conflict");
+                    }
+                    Err(_) => {
+                        return error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to rename category",
+                        );
+                    }
+                }
+            }
+        } else {
+            updates.insert("sub_category".to_string(), Value::String(new_name));
+        }
+    }
+
+    let payload = Value::Object(updates);
+    match update_postgres_category(pool, category_id, &payload, user_id).await {
+        Ok(true) => match get_postgres_category_by_id(pool, category_id, user_id).await {
+            Ok(Some(category)) => success_result(
+                StatusCode::OK,
+                Value::Object(backend_category_to_frontend(&category, "0")),
+            ),
+            Ok(None) => error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load updated category",
+            ),
+            Err(_) => category_db_error_response(),
+        },
+        Ok(false) => not_found("Category not found"),
+        Err(error) => {
+            let text = error.to_string();
+            if text.contains("constraint") || text.contains("duplicate") {
+                error_response(StatusCode::CONFLICT, "Category update conflict")
+            } else {
+                error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update category",
+                )
+            }
+        }
+    }
+}
+
 fn rollback_category_rename(
     repository: &mut CategoriesRepository<'_>,
     renamed: bool,
@@ -355,6 +492,48 @@ fn resolve_parent_category(
                 parent.get("type").and_then(value_as_i64).unwrap_or(1),
             )
         }))
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn resolve_postgres_parent_category(
+    pool: &bill_analyser_db::PostgresPool,
+    parent_id: &str,
+    user_id: i64,
+) -> bill_analyser_db::DbResult<Option<(String, i64)>> {
+    if let Some(parent_name) = virtual_category_name(parent_id) {
+        return Ok(Some((parent_name, 1)));
+    }
+    let Ok(parent_id) = parent_id.parse::<i64>() else {
+        return Ok(None);
+    };
+    Ok(get_postgres_category_by_id(pool, parent_id, user_id)
+        .await?
+        .map(|parent| {
+            (
+                category_text(&parent, "main_category"),
+                parent.get("type").and_then(value_as_i64).unwrap_or(1),
+            )
+        }))
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn category_parent_id_for_postgres_get(
+    pool: &bill_analyser_db::PostgresPool,
+    category: &CategoryRecord,
+    user_id: i64,
+) -> String {
+    let sub_category = category_text(category, "sub_category");
+    if sub_category.is_empty() {
+        return "0".to_string();
+    }
+    let main_category = category_text(category, "main_category");
+    match get_postgres_category_by_name(pool, &main_category, "", user_id).await {
+        Ok(Some(parent)) => parent
+            .get("id")
+            .map(|value| value_string(Some(value), "0"))
+            .unwrap_or_else(|| format!("virtual_{main_category}")),
+        Ok(None) | Err(_) => format!("virtual_{main_category}"),
+    }
 }
 
 fn category_name_from_body(payload: &Value) -> Option<String> {

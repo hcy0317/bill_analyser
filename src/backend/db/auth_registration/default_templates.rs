@@ -2,7 +2,7 @@
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
 // 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
 
-const DEFAULT_DAILY_CATEGORIES: &[DefaultCategory] = &[
+pub(crate) const DEFAULT_DAILY_CATEGORIES: &[DefaultCategory] = &[
     DefaultCategory {
         type_code: EXPENSE,
         name: "餐饮",
@@ -157,7 +157,7 @@ const DEFAULT_DAILY_CATEGORIES: &[DefaultCategory] = &[
     },
 ];
 
-const DEFAULT_DAILY_CATEGORY_RULES: &[DefaultCategoryRule] = &[
+pub(crate) const DEFAULT_DAILY_CATEGORY_RULES: &[DefaultCategoryRule] = &[
     DefaultCategoryRule { name: "default:餐饮/外卖", main_category: "餐饮", sub_category: "外卖", rule_expression: "(OR={美团外卖,饿了么,外卖,饭团}/REGEX={(美团|饿了么).*(外卖|订单)})+NOT={退款,退货,取消,冲正}", priority: 100 },
     DefaultCategoryRule { name: "default:餐饮/咖啡奶茶", main_category: "餐饮", sub_category: "咖啡奶茶", rule_expression: "OR={瑞幸,星巴克,库迪,奈雪,喜茶,蜜雪冰城,霸王茶姬,沪上阿姨,茶百道,咖啡,奶茶}", priority: 110 },
     DefaultCategoryRule { name: "default:餐饮/早餐", main_category: "餐饮", sub_category: "早餐", rule_expression: "REGEX={(早餐|早饭|包子|豆浆|油条|粥店)}", priority: 120 },

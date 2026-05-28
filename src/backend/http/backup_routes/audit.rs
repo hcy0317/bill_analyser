@@ -39,7 +39,7 @@ pub(super) fn validation_audit_details(payload: &Value) -> Value {
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn write_backup_sync_audit(
-    connection: &rusqlite::Connection,
+    runtime: &BackupOpsRuntime,
     user_id: UserId,
     headers: &HeaderMap,
     details: Value,
@@ -48,7 +48,7 @@ pub(super) fn write_backup_sync_audit(
     error_message: Option<String>,
 ) {
     write_backup_audit_event(
-        connection,
+        runtime,
         user_id,
         headers,
         "backup_cloud_synced",
@@ -61,7 +61,7 @@ pub(super) fn write_backup_sync_audit(
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn write_backup_job_audit(
-    connection: &rusqlite::Connection,
+    runtime: &BackupOpsRuntime,
     user_id: UserId,
     headers: &HeaderMap,
     details: Value,
@@ -70,7 +70,7 @@ pub(super) fn write_backup_job_audit(
     error_message: Option<String>,
 ) {
     write_backup_audit_event(
-        connection,
+        runtime,
         user_id,
         headers,
         "backup_job_saved",
@@ -84,7 +84,7 @@ pub(super) fn write_backup_job_audit(
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn write_backup_audit_event(
-    connection: &rusqlite::Connection,
+    runtime: &BackupOpsRuntime,
     user_id: UserId,
     headers: &HeaderMap,
     operation_type: &str,
@@ -94,18 +94,26 @@ pub(super) fn write_backup_audit_event(
     error_message: Option<String>,
 ) {
     let details = with_audit_actor(details, user_id);
-    create_backup_audit_log_best_effort(
-        connection,
-        BackupAuditLogDraft {
-            operation_type: operation_type.to_string(),
-            details,
-            affected_count,
-            ip_address: client_ip(headers),
-            user_agent: header_text(headers, "user-agent"),
-            status: status.to_string(),
-            error_message,
-        },
-    );
+    let draft = BackupAuditLogDraft {
+        operation_type: operation_type.to_string(),
+        details,
+        affected_count,
+        ip_address: client_ip(headers),
+        user_agent: header_text(headers, "user-agent"),
+        status: status.to_string(),
+        error_message,
+    };
+    match runtime {
+        BackupOpsRuntime::Sqlite(runtime) => {
+            create_backup_audit_log_best_effort(runtime.connection(), draft);
+        }
+        BackupOpsRuntime::Postgres(runtime) => {
+            let _ = block_on_backup_db(create_postgres_backup_audit_log_best_effort(
+                runtime.pool(),
+                draft,
+            ));
+        }
+    }
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

@@ -20,7 +20,7 @@ pub(super) fn list_backup_files_response(
         infos.push(info);
     }
 
-    let records = list_backup_records(auth_runtime.runtime.connection())
+    let records = list_backup_records_for_runtime(&auth_runtime.runtime)
         .map_err(|_| Box::new(db_error_response()))?;
     let record_map = records
         .into_iter()
@@ -69,7 +69,7 @@ pub(super) fn create_backup_response(
         Ok(Some(path)) => path,
         Ok(None) => {
             write_backup_audit_event(
-                auth_runtime.runtime.connection(),
+                &auth_runtime.runtime,
                 user_id,
                 headers,
                 "backup_created",
@@ -85,7 +85,7 @@ pub(super) fn create_backup_response(
         }
         Err(error) => {
             write_backup_audit_event(
-                auth_runtime.runtime.connection(),
+                &auth_runtime.runtime,
                 user_id,
                 headers,
                 "backup_created",
@@ -102,7 +102,7 @@ pub(super) fn create_backup_response(
         build_runtime_backup_info(&file_path, state.config.backup_encryption_key.as_deref())
             .map_err(|error| {
                 write_backup_audit_event(
-                    auth_runtime.runtime.connection(),
+                    &auth_runtime.runtime,
                     user_id,
                     headers,
                     "backup_created",
@@ -121,7 +121,7 @@ pub(super) fn create_backup_response(
             backup_info.error.clone()
         };
         write_backup_audit_event(
-            auth_runtime.runtime.connection(),
+            &auth_runtime.runtime,
             user_id,
             headers,
             "backup_created",
@@ -136,10 +136,10 @@ pub(super) fn create_backup_response(
         ));
     }
 
-    upsert_backup_record_from_info(auth_runtime.runtime.connection(), &backup_info)
+    upsert_backup_record_from_info(&auth_runtime.runtime, &backup_info)
         .map_err(|_| Box::new(db_error_response()))?;
     write_backup_audit_event(
-        auth_runtime.runtime.connection(),
+        &auth_runtime.runtime,
         user_id,
         headers,
         "backup_created",

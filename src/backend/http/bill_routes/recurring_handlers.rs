@@ -15,6 +15,33 @@ async fn recurring_candidates_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "bills") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let tolerance_days = query.tolerance_days.unwrap_or(3).clamp(0, 31);
+        return match get_postgres_bill_recurring_candidates(
+            runtime.pool(),
+            user_id,
+            bill_id,
+            tolerance_days,
+        )
+        .await
+        {
+            Ok(Some(result)) => success_result(
+                StatusCode::OK,
+                json!({
+                    "billId": bill_id,
+                    "linkedRecurringId": result.linked_recurring_id,
+                    "linkedRecurringName": result.linked_recurring_name,
+                    "candidates": result.candidates,
+                }),
+            ),
+            Ok(None) => not_found("Bill not found"),
+            Err(_) => db_error_response(),
+        };
+    }
     let runtime = match open_runtime(&state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -51,6 +78,31 @@ async fn bind_recurring_match_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "bills") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match bind_postgres_bill_to_recurring(
+            runtime.pool(),
+            user_id,
+            bill_id,
+            recurring_id,
+        )
+        .await
+        {
+            Ok(Some(result)) => success_result(
+                StatusCode::OK,
+                json!({
+                    "billId": result.bill_id,
+                    "recurringId": result.recurring_id,
+                    "nextScheduledDate": result.next_scheduled_date,
+                }),
+            ),
+            Ok(None) => not_found("Bill or recurring template not found"),
+            Err(_) => db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -81,6 +133,17 @@ async fn unbind_recurring_match_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "bills") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match unbind_postgres_bill_from_recurring(runtime.pool(), user_id, bill_id).await {
+            Ok(Some(true)) => success_result(StatusCode::OK, Value::Bool(true)),
+            Ok(Some(false)) | Ok(None) => not_found("Bill not found"),
+            Err(_) => db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state) {
         Ok(value) => value,
         Err(response) => return *response,

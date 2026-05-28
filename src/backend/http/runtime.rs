@@ -121,6 +121,10 @@ pub fn http_shell_health_with_weaviate_status(
         "require_postgres_after_cutover".to_string(),
         config.require_postgres_after_cutover.to_string(),
     );
+    details.insert(
+        "legacy_sqlite_runtime_allowed".to_string(),
+        config.legacy_sqlite_runtime_allowed().to_string(),
+    );
     if config.import_route_mode == ImportRouteMode::ImportDbRuntime {
         details.insert(
             "sqlite_db_path_configured".to_string(),
@@ -148,7 +152,7 @@ pub fn http_shell_health_with_weaviate_status(
         );
         details.insert(
             "taxonomy_accounts_runtime".to_string(),
-            "owned account list/detail/create/update/delete/display-order, balance sync, and transaction move/clear routes with frontend cents to SQLite yuan conversion, bill-derived SQLite yuan balance recalculation, sensitive-operation password fallback, and account audit metadata".to_string(),
+            "owned account list/detail/create/update/delete/display-order, balance sync, and transaction move/clear routes with frontend cents to PostgreSQL balance_cents conversion, bill-derived balance recalculation, sensitive-operation password fallback, and account audit metadata".to_string(),
         );
         details.insert(
             "taxonomy_tags_runtime".to_string(),
@@ -168,13 +172,13 @@ pub fn http_shell_health_with_weaviate_status(
         );
         details.insert(
             "backup_ops_runtime".to_string(),
-            "owned backup file list/create/download/delete/restore/verify/cleanup, job list/save, and cloud sync routes backed by Rust zip/Fernet file I/O, SQLite backup_ops schema, backup_records updates, safe restore validation, OSS/S3/COS/Azure/WebDAV upload execution, and backup audit log writes".to_string(),
+            "owned backup file list/create/download/delete/restore/verify/cleanup, job list/save, and cloud sync routes backed by Rust zip/Fernet file I/O plus PostgreSQL backup_records, backup_jobs, and backup_audit_logs metadata; no SQLite backup_ops fallback is used in PostgreSQL authority runtime".to_string(),
         );
     }
     details.insert("business_api".to_string(), "rust-only-http".to_string());
 
     HttpShellHealth {
-        status: if DatabaseRuntimeBoundary::postgres_cutover_is_healthy(config)
+        status: if DatabaseRuntimeBoundary::route_repository_runtime_is_healthy(config)
             && weaviate_status == "healthy"
         {
             "ok".to_string()

@@ -173,6 +173,53 @@ const MIGRATION_TABLE_SPECS: &[MigrationTableSpec] = &[
         ],
     },
     MigrationTableSpec {
+        source_table: "bill_templates",
+        target_table: "transaction_templates",
+        expected_columns: &[
+            "id",
+            "user_id",
+            "name",
+            "type",
+            "amount",
+            "account",
+            "counterparty",
+            "created_at",
+            "updated_at",
+        ],
+    },
+    MigrationTableSpec {
+        source_table: "recurring_bills",
+        target_table: "transaction_templates",
+        expected_columns: &[
+            "id",
+            "user_id",
+            "name",
+            "type",
+            "amount",
+            "frequency",
+            "start_date",
+            "next_date",
+            "created_at",
+            "updated_at",
+        ],
+    },
+    MigrationTableSpec {
+        source_table: "budgets",
+        target_table: "budgets",
+        expected_columns: &[
+            "id",
+            "user_id",
+            "name",
+            "category",
+            "sub_category",
+            "period_type",
+            "amount",
+            "start_date",
+            "created_at",
+            "updated_at",
+        ],
+    },
+    MigrationTableSpec {
         source_table: "category_rules",
         target_table: "category_rules",
         expected_columns: &[
@@ -197,6 +244,8 @@ const POSTGRES_TARGET_TABLES: &[&str] = &[
     "bills",
     "settings",
     "parser_templates",
+    "transaction_templates",
+    "budgets",
     "category_rules",
     "account_rules",
 ];
@@ -251,6 +300,7 @@ pub fn export_sqlite_to_postgres_bundle_from_connection(
         }
         exports.extend(export_table(connection, spec)?);
     }
+    let mut exports = merge_table_exports_by_target(exports)?;
     exports.sort_by_key(|table| postgres_target_table_rank(&table.target_table));
 
     let total_rows = exports.iter().map(|table| table.row_count).sum();
@@ -681,6 +731,33 @@ fn export_table(
         .collect()
 }
 
+fn merge_table_exports_by_target(
+    exports: Vec<SqliteToPostgresTableExport>,
+) -> DbResult<Vec<SqliteToPostgresTableExport>> {
+    let mut grouped: BTreeMap<String, (BTreeSet<String>, Vec<PostgresTargetRow>)> = BTreeMap::new();
+    for export in exports {
+        let entry = grouped
+            .entry(export.target_table)
+            .or_insert_with(|| (BTreeSet::new(), Vec::new()));
+        entry.0.insert(export.source_table);
+        entry.1.extend(export.rows);
+    }
+
+    grouped
+        .into_iter()
+        .map(|(target_table, (source_tables, rows))| {
+            let checksum = checksum_json(&rows)?;
+            Ok(SqliteToPostgresTableExport {
+                source_table: source_tables.into_iter().collect::<Vec<_>>().join("+"),
+                target_table,
+                row_count: rows.len(),
+                checksum,
+                rows,
+            })
+        })
+        .collect()
+}
+
 fn map_source_row(
     source_table: &str,
     target_table: &str,
@@ -735,6 +812,24 @@ fn map_source_row(
                 map_parser_template_row(row)?,
             )?]
         }
+        "bill_templates" => vec![target_row(
+            source_table,
+            target_table,
+            row,
+            map_transaction_template_row(row, 1)?,
+        )?],
+        "recurring_bills" => vec![target_row(
+            source_table,
+            target_table,
+            row,
+            map_transaction_template_row(row, 2)?,
+        )?],
+        "budgets" => vec![target_row(
+            source_table,
+            target_table,
+            row,
+            map_budget_row(row)?,
+        )?],
         "category_rules" => vec![target_row(
             source_table,
             target_table,
@@ -1195,6 +1290,279 @@ fn map_parser_template_row(row: &BTreeMap<String, Value>) -> DbResult<BTreeMap<S
     Ok(values)
 }
 
+fn map_transaction_template_row(
+    row: &BTreeMap<String, Value>,
+    template_type: i64,
+) -> DbResult<BTreeMap<String, Value>> {
+    let mut values = BTreeMap::new();
+    let id = required_i64(row, "id")?;
+    insert_i64(
+        &mut values,
+        "id",
+        postgres_transaction_template_id(id, template_type)?,
+    );
+    insert_i64(&mut values, "legacy_id", id);
+    insert_i64(
+        &mut values,
+        "user_id",
+        optional_i64(row, "user_id").unwrap_or(1),
+    );
+    insert_i64(&mut values, "template_type", template_type);
+    insert_string(&mut values, "name", required_string(row, "name")?);
+    insert_optional_string(
+        &mut values,
+        "description",
+        optional_string(row, "description"),
+    );
+    insert_optional_string(
+        &mut values,
+        "transaction_type",
+        optional_string(row, "type"),
+    );
+    insert_optional_string(&mut values, "category_id", optional_string(row, "category"));
+    insert_optional_string(
+        &mut values,
+        "source_account_id",
+        optional_string(row, "account"),
+    );
+    insert_optional_string(
+        &mut values,
+        "destination_account_id",
+        optional_string(row, "counterparty"),
+    );
+    insert_i64(
+        &mut values,
+        "source_amount_minor_units",
+        minor_units_value(row.get("amount")),
+    );
+    insert_i64(
+        &mut values,
+        "destination_amount_minor_units",
+        minor_units_value(row.get("destination_amount")),
+    );
+    insert_bool(&mut values, "hide_amount", truthy(row.get("hide_amount")));
+    insert_json(
+        &mut values,
+        "tag_ids",
+        Value::Array(
+            parse_template_tag_ids(optional_string(row, "tag").as_deref())
+                .into_iter()
+                .map(Value::String)
+                .collect(),
+        ),
+    );
+    insert_optional_string(&mut values, "comment", optional_string(row, "comment"));
+    insert_optional_i64(
+        &mut values,
+        "scheduled_frequency_type",
+        optional_i64(row, "scheduled_frequency_type"),
+    );
+    insert_optional_string(
+        &mut values,
+        "scheduled_frequency",
+        optional_string(row, "frequency"),
+    );
+    insert_optional_string(
+        &mut values,
+        "scheduled_start_date",
+        optional_string(row, "start_date"),
+    );
+    insert_optional_string(
+        &mut values,
+        "scheduled_end_date",
+        optional_string(row, "end_date"),
+    );
+    insert_optional_string(
+        &mut values,
+        "scheduled_next_date",
+        optional_string(row, "next_date"),
+    );
+    insert_bool(
+        &mut values,
+        "enabled",
+        row.get("enabled")
+            .map(|value| truthy(Some(value)))
+            .unwrap_or(true),
+    );
+    insert_bool(&mut values, "auto_create", truthy(row.get("auto_create")));
+    insert_bool(&mut values, "is_favorite", truthy(row.get("is_favorite")));
+    insert_i64(
+        &mut values,
+        "use_count",
+        optional_i64(row, "use_count").unwrap_or_default(),
+    );
+    insert_optional_string(
+        &mut values,
+        "last_used_at",
+        optional_string(row, "last_used_at"),
+    );
+    insert_i64(
+        &mut values,
+        "display_order",
+        optional_i64(row, "display_order").unwrap_or_default(),
+    );
+    insert_bool(&mut values, "hidden", truthy(row.get("hidden")));
+    insert_i64(
+        &mut values,
+        "utc_offset",
+        optional_i64(row, "utc_offset").unwrap_or_default(),
+    );
+    insert_json(
+        &mut values,
+        "metadata",
+        metadata_without(
+            row,
+            &[
+                "id",
+                "user_id",
+                "name",
+                "description",
+                "type",
+                "category",
+                "amount",
+                "account",
+                "counterparty",
+                "destination_amount",
+                "hide_amount",
+                "tag",
+                "comment",
+                "frequency",
+                "scheduled_frequency_type",
+                "start_date",
+                "end_date",
+                "next_date",
+                "enabled",
+                "auto_create",
+                "is_favorite",
+                "use_count",
+                "last_used_at",
+                "display_order",
+                "hidden",
+                "utc_offset",
+                "created_at",
+                "updated_at",
+            ],
+        ),
+    );
+    insert_string(
+        &mut values,
+        "created_at",
+        optional_string(row, "created_at").unwrap_or_else(default_timestamp),
+    );
+    insert_string(
+        &mut values,
+        "updated_at",
+        optional_string(row, "updated_at").unwrap_or_else(default_timestamp),
+    );
+    insert_i64(&mut values, "version", 1);
+    Ok(values)
+}
+
+fn postgres_transaction_template_id(legacy_id: i64, template_type: i64) -> DbResult<i64> {
+    if legacy_id <= 0 {
+        return Err(DbError::InvalidOperation(format!(
+            "legacy transaction template id must be positive, got {legacy_id}"
+        )));
+    }
+    let base = legacy_id.checked_mul(2).ok_or_else(|| {
+        DbError::InvalidOperation(format!(
+            "legacy transaction template id {legacy_id} overflows PostgreSQL id mapping"
+        ))
+    })?;
+    match template_type {
+        1 => base.checked_sub(1).ok_or_else(|| {
+            DbError::InvalidOperation(format!(
+                "legacy transaction template id {legacy_id} overflows normal template id mapping"
+            ))
+        }),
+        2 => Ok(base),
+        _ => Err(DbError::InvalidOperation(format!(
+            "unsupported transaction template type {template_type}"
+        ))),
+    }
+}
+
+fn map_budget_row(row: &BTreeMap<String, Value>) -> DbResult<BTreeMap<String, Value>> {
+    let mut values = BTreeMap::new();
+    let id = required_i64(row, "id")?;
+    insert_i64(&mut values, "id", id);
+    insert_i64(&mut values, "legacy_id", id);
+    insert_i64(
+        &mut values,
+        "user_id",
+        optional_i64(row, "user_id").unwrap_or(1),
+    );
+    insert_string(&mut values, "name", required_string(row, "name")?);
+    insert_optional_string(&mut values, "category", optional_string(row, "category"));
+    insert_string(
+        &mut values,
+        "sub_category",
+        optional_string(row, "sub_category").unwrap_or_default(),
+    );
+    insert_string(
+        &mut values,
+        "period_type",
+        required_string(row, "period_type")?,
+    );
+    insert_i64(
+        &mut values,
+        "amount_cents",
+        yuan_value_to_cents(row.get("amount")),
+    );
+    insert_string(
+        &mut values,
+        "start_date",
+        required_string(row, "start_date")?,
+    );
+    insert_optional_string(&mut values, "end_date", optional_string(row, "end_date"));
+    insert_i64(
+        &mut values,
+        "alert_threshold",
+        optional_i64(row, "alert_threshold").unwrap_or(80),
+    );
+    insert_bool(
+        &mut values,
+        "enabled",
+        row.get("enabled")
+            .map(|value| truthy(Some(value)))
+            .unwrap_or(true),
+    );
+    insert_json(
+        &mut values,
+        "metadata",
+        metadata_without(
+            row,
+            &[
+                "id",
+                "user_id",
+                "name",
+                "category",
+                "sub_category",
+                "period_type",
+                "amount",
+                "start_date",
+                "end_date",
+                "alert_threshold",
+                "enabled",
+                "created_at",
+                "updated_at",
+            ],
+        ),
+    );
+    insert_string(
+        &mut values,
+        "created_at",
+        optional_string(row, "created_at").unwrap_or_else(default_timestamp),
+    );
+    insert_string(
+        &mut values,
+        "updated_at",
+        optional_string(row, "updated_at").unwrap_or_else(default_timestamp),
+    );
+    insert_i64(&mut values, "version", 1);
+    Ok(values)
+}
+
 fn map_category_rule_row(row: &BTreeMap<String, Value>) -> DbResult<BTreeMap<String, Value>> {
     let mut values = BTreeMap::new();
     insert_i64(&mut values, "id", required_i64(row, "id")?);
@@ -1401,6 +1769,10 @@ fn yuan_value_to_cents(value: Option<&Value>) -> i64 {
     (optional_f64(value).unwrap_or_default() * 100.0).round() as i64
 }
 
+fn minor_units_value(value: Option<&Value>) -> i64 {
+    optional_f64(value).unwrap_or_default().round() as i64
+}
+
 fn truthy(value: Option<&Value>) -> bool {
     match value {
         Some(Value::Bool(value)) => *value,
@@ -1426,6 +1798,10 @@ fn parse_aliases(value: Option<&str>) -> Vec<String> {
             .map(ToString::to_string)
             .collect(),
     )
+}
+
+fn parse_template_tag_ids(value: Option<&str>) -> Vec<String> {
+    parse_aliases(value)
 }
 
 fn dedupe_non_empty(values: Vec<String>) -> Vec<String> {
@@ -1537,9 +1913,9 @@ mod tests {
         let report = sqlite_to_postgres_dry_run_from_connection(&connection).unwrap();
 
         assert_eq!(report.schema_version, 1);
-        assert_eq!(report.table_count, 8);
-        assert_eq!(report.ready_table_count, 8);
-        assert_eq!(report.total_rows, 8);
+        assert_eq!(report.table_count, 11);
+        assert_eq!(report.ready_table_count, 11);
+        assert_eq!(report.total_rows, 11);
         assert_eq!(report.checksum.len(), 64);
         let bills = report
             .tables
@@ -1559,8 +1935,8 @@ mod tests {
         let bundle = export_sqlite_to_postgres_bundle_from_connection(&connection).unwrap();
 
         assert_eq!(bundle.schema_version, 1);
-        assert_eq!(bundle.table_count, 9);
-        assert_eq!(bundle.total_rows, 10);
+        assert_eq!(bundle.table_count, 11);
+        assert_eq!(bundle.total_rows, 13);
         let account_position = bundle
             .tables
             .iter()
@@ -1588,6 +1964,30 @@ mod tests {
         assert_eq!(bills.rows[0].values["amount_cents"], json!(1999));
         assert_eq!(bills.rows[0].values["direction"], json!("expense"));
         assert_eq!(bills.rows[0].values["transaction_type"], json!("expense"));
+        let budgets = table_export(&bundle, "budgets");
+        assert_eq!(budgets.row_count, 1);
+        assert_eq!(budgets.rows[0].values["amount_cents"], json!(25000));
+        assert_eq!(budgets.rows[0].values["enabled"], json!(true));
+        let transaction_templates = table_export(&bundle, "transaction_templates");
+        assert_eq!(transaction_templates.row_count, 2);
+        let template_ids = transaction_templates
+            .rows
+            .iter()
+            .map(|row| row.values["id"].as_i64().unwrap())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(template_ids.len(), 2);
+        assert!(transaction_templates
+            .rows
+            .iter()
+            .all(|row| row.values["legacy_id"] == json!(61)));
+        assert!(transaction_templates
+            .rows
+            .iter()
+            .any(|row| row.values["template_type"] == json!(1)));
+        assert!(transaction_templates
+            .rows
+            .iter()
+            .any(|row| row.values["scheduled_frequency"] == json!("monthly")));
         assert_eq!(bundle.checksum.len(), 64);
     }
 
@@ -1670,7 +2070,7 @@ mod tests {
             .unwrap();
         crate::run_postgres_migrations(&pool).await.unwrap();
         sqlx::query(
-            "TRUNCATE migration_audit_events, account_rules, category_rules, parser_templates, settings, bills, tags, categories, accounts, users RESTART IDENTITY CASCADE",
+            "TRUNCATE migration_audit_events, account_rules, category_rules, budgets, transaction_templates, parser_templates, settings, bills, tags, categories, accounts, users RESTART IDENTITY CASCADE",
         )
         .execute(&pool)
         .await
@@ -1702,7 +2102,7 @@ mod tests {
         );
 
         sqlx::query(
-            "TRUNCATE migration_audit_events, account_rules, category_rules, parser_templates, settings, bills, tags, categories, accounts, users RESTART IDENTITY CASCADE",
+            "TRUNCATE migration_audit_events, account_rules, category_rules, budgets, transaction_templates, parser_templates, settings, bills, tags, categories, accounts, users RESTART IDENTITY CASCADE",
         )
         .execute(&pool)
         .await
@@ -1844,6 +2244,72 @@ mod tests {
                     parser_description TEXT,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE bill_templates (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    type TEXT,
+                    category TEXT,
+                    amount REAL,
+                    account TEXT,
+                    counterparty TEXT,
+                    destination_amount REAL,
+                    hide_amount INTEGER,
+                    tag TEXT,
+                    comment TEXT,
+                    is_favorite INTEGER,
+                    use_count INTEGER,
+                    last_used_at TEXT,
+                    display_order INTEGER,
+                    hidden INTEGER,
+                    utc_offset INTEGER,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE recurring_bills (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    template_id INTEGER,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    type TEXT,
+                    category TEXT,
+                    amount REAL,
+                    account TEXT,
+                    counterparty TEXT,
+                    destination_amount REAL,
+                    hide_amount INTEGER,
+                    tag TEXT,
+                    comment TEXT,
+                    frequency TEXT,
+                    scheduled_frequency_type INTEGER,
+                    start_date TEXT,
+                    end_date TEXT,
+                    next_date TEXT,
+                    enabled INTEGER,
+                    auto_create INTEGER,
+                    display_order INTEGER,
+                    hidden INTEGER,
+                    utc_offset INTEGER,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE budgets (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    category TEXT,
+                    sub_category TEXT,
+                    period_type TEXT NOT NULL,
+                    amount REAL NOT NULL,
+                    start_date TEXT NOT NULL,
+                    end_date TEXT,
+                    alert_threshold INTEGER,
+                    enabled INTEGER,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 CREATE TABLE category_rules (
                     id INTEGER PRIMARY KEY,
                     user_id INTEGER NOT NULL,
@@ -1863,6 +2329,9 @@ mod tests {
                 INSERT INTO bills VALUES (40, 1, '2026-01-03T12:00:00Z', '支出', 19.99, 'Cafe', 'Lunch', 'Wallet', '餐饮', '午餐', 'hash40', '2026-01-03T12:01:00Z', '2026-01-03T12:02:00Z', 10, 0);
                 INSERT INTO app_settings VALUES (50, 'receipt_ocr_config', '{\"enabled\":true}', 'json', 0, '2026-01-02T00:00:00Z', '2026-01-01T00:00:00Z');
                 INSERT INTO bills_parser_template VALUES (60, 'session-1', 1, '2026-01-03T12:00:00Z', 19.99, '支出', 'wechat', 'Lunch', '2026-01-03T12:01:00Z');
+                INSERT INTO bill_templates VALUES (61, 1, 'Lunch template', 'daily lunch', '支出', '20', 1999, '10', '0', 0, 0, '30', 'memo', 1, 2, '2026-01-05T00:00:00Z', 3, 0, 480, '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
+                INSERT INTO recurring_bills VALUES (61, 1, 61, 'Monthly rent', 'rent', '支出', '20', 50000, '10', '0', 0, 1, '30', 'scheduled', 'monthly', 2, '2026-01-01', '2026-12-31', '2026-02-01', 1, 0, 4, 0, 480, '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
+                INSERT INTO budgets VALUES (63, 1, 'Lunch budget', '餐饮', '午餐', 'monthly', 250.0, '2026-01-01', '2026-01-31', 80, 1, '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
                 INSERT INTO category_rules VALUES (70, 1, 20, 'Cafe rule', 10, 'Cafe', 0, 1, '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
                 ",
             )

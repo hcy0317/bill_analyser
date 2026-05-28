@@ -1,27 +1,27 @@
 @echo off
+setlocal EnableDelayedExpansion
 chcp 65001 >nul
-title Bill Analyser - 一键启动
+title Bill Analyser - Launcher
 
-echo.
-echo ╔═══════════════════════════════════════════════════════════════╗
-echo ║          Bill Analyser - 账单分析系统一键启动器              ║
-echo ╚═══════════════════════════════════════════════════════════════╝
-echo.
+set "LAUNCHER_PS1=%~dpn0.ps1"
 
 cd /d "%~dp0"
 
-REM 检查PowerShell是否可用
+REM Use ASCII-only output here. cmd.exe can misparse UTF-8 box drawing
+REM characters before PowerShell takes over.
 where pwsh >nul 2>&1
-if %ERRORLEVEL%==0 (
-    echo [启动] 使用 PowerShell Core 启动...
-    pwsh -ExecutionPolicy Bypass -File "%~dp0一键启动.ps1" %*
+if not errorlevel 1 (
+    echo [start] Using PowerShell Core...
+    pwsh -NoProfile -ExecutionPolicy Bypass -File "%LAUNCHER_PS1%" %*
+    exit /b !ERRORLEVEL!
 ) else (
     where powershell >nul 2>&1
-    if %ERRORLEVEL%==0 (
-        echo [启动] 使用 Windows PowerShell 启动...
-        powershell -ExecutionPolicy Bypass -File "%~dp0一键启动.ps1" %*
+    if not errorlevel 1 (
+        echo [start] Using Windows PowerShell...
+        powershell -NoProfile -ExecutionPolicy Bypass -File "%LAUNCHER_PS1%" %*
+        exit /b !ERRORLEVEL!
     ) else (
-        echo [错误] 未找到 PowerShell，请安装 PowerShell
+        echo [error] PowerShell was not found. Please install PowerShell.
         pause
         exit /b 1
     )

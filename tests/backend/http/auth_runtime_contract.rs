@@ -1,4 +1,4 @@
-use std::{error::Error, net::SocketAddr, path::Path, time::Duration};
+use std::{env, error::Error, net::SocketAddr, path::Path, time::Duration};
 
 use axum::{
     body::{to_bytes, Body},
@@ -8,15 +8,17 @@ use axum::{
 };
 use base64::{engine::general_purpose, Engine as _};
 use bcrypt::{hash, verify};
-use bill_analyser_db::hash_two_factor_recovery_code;
+use bill_analyser_db::{hash_two_factor_recovery_code, run_postgres_migrations};
 use bill_analyser_http::{
-    build_router, HttpAppState, HttpShellConfig, ImportRouteMode, AUTH_TOKEN_ROUTE_PATTERNS,
+    build_router, config::DatabaseBackend, HttpAppState, HttpShellConfig, ImportRouteMode,
+    AUTH_TOKEN_ROUTE_PATTERNS,
 };
 use chrono::{Duration as ChronoDuration, Local, Utc};
 use ring::hmac;
 use rusqlite::Connection;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use sqlx::{postgres::PgPoolOptions, types::Json};
 use tempfile::TempDir;
 use tower::ServiceExt;
 
@@ -181,6 +183,1359 @@ async fn auth_logout_runtime_invalidates_session_and_is_idempotent() -> Result<(
         read_json(malformed_header_response).await["message"],
         "Invalid authorization header"
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn auth_logout_postgres_cutover_does_not_open_sqlite_fallback() -> Result<(), Box<dyn Error>>
+{
+    let token = test_access_token(42, TEST_AUTH_SECRET);
+    let app = postgres_cutover_runtime_router();
+
+    let response = app.oneshot(logout_request(&token)).await?;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    assert_eq!(body["success"], true);
+    assert_eq!(body["result"], true);
+    Ok(())
+}
+
+#[tokio::test]
+async fn auth_postgres_runtime_serves_login_refresh_register_profile_without_sqlite_fallback(
+) -> Result<(), Box<dyn Error>> {
+    let Ok(postgres_url) = env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+        eprintln!("skipping auth postgres contract without BILL_ANALYSER_TEST_POSTGRES_URL");
+        return Ok(());
+    };
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&postgres_url)
+        .await?;
+    run_postgres_migrations(&pool).await?;
+    sqlx::query("TRUNCATE business_audit_events, users RESTART IDENTITY CASCADE")
+        .execute(&pool)
+        .await?;
+    let password_hash = hash(TEST_PASSWORD, bcrypt::DEFAULT_COST)?;
+    sqlx::query(
+        r#"
+        INSERT INTO users (
+            id, username, email, display_name, password_hash, metadata
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+        "#,
+    )
+    .bind(42_i64)
+    .bind("pgalice")
+    .bind("pgalice@example.test")
+    .bind("PG Alice")
+    .bind(password_hash)
+    .bind(Json(json!({
+        "is_active": true,
+        "language": "zh_Hans",
+        "default_currency": "CNY",
+        "first_day_of_week": 1,
+        "email_verified": true,
+        "import_learning_enabled": true
+    })))
+    .execute(&pool)
+    .await?;
+    let edge_password_hash = hash(TEST_PASSWORD, bcrypt::DEFAULT_COST)?;
+    let future_lock = (Utc::now().naive_utc() + ChronoDuration::hours(1))
+        .format("%Y-%m-%dT%H:%M:%S%.f")
+        .to_string();
+    let expired_lock = (Utc::now().naive_utc() - ChronoDuration::hours(1))
+        .format("%Y-%m-%dT%H:%M:%S%.f")
+        .to_string();
+    for (id, username, email, metadata) in [
+        (
+            78_i64,
+            "pgtwofa",
+            "pgtwofa@example.test",
+            json!({
+                "is_active": "true",
+                "two_factor_enabled": "yes",
+                "two_factor_secret": "JBSWY3DPEHPK3PXP",
+                "email_verified": true
+            }),
+        ),
+        (
+            79_i64,
+            "pglocked",
+            "pglocked@example.test",
+            json!({
+                "is_active": true,
+                "locked_until": future_lock,
+                "failed_login_attempts": 5,
+                "email_verified": true
+            }),
+        ),
+        (
+            80_i64,
+            "pginactive",
+            "pginactive@example.test",
+            json!({
+                "is_active": false,
+                "email_verified": true
+            }),
+        ),
+        (
+            81_i64,
+            "pgnearlylocked",
+            "pgnearlylocked@example.test",
+            json!({
+                "is_active": true,
+                "failed_login_attempts": 4,
+                "email_verified": true
+            }),
+        ),
+        (
+            82_i64,
+            "pgexpiredwrong",
+            "pgexpiredwrong@example.test",
+            json!({
+                "is_active": true,
+                "locked_until": expired_lock,
+                "failed_login_attempts": 5,
+                "email_verified": true
+            }),
+        ),
+        (
+            83_i64,
+            "pgreset",
+            "pgreset@example.test",
+            json!({
+                "is_active": true,
+                "email_verified": true
+            }),
+        ),
+    ] {
+        sqlx::query(
+            r#"
+            INSERT INTO users (
+                id, username, email, display_name, password_hash, metadata
+            ) VALUES ($1, $2, $3, '', $4, $5)
+            "#,
+        )
+        .bind(id)
+        .bind(username)
+        .bind(email)
+        .bind(&edge_password_hash)
+        .bind(Json(metadata))
+        .execute(&pool)
+        .await?;
+    }
+    sqlx::query(
+        r#"
+        INSERT INTO settings (user_id, key, value)
+        VALUES
+            ($1, 'application_cloud_settings.showAmountInHomePage', $2),
+            ($1, 'application_cloud_settings.dashboardVersion', $3)
+        "#,
+    )
+    .bind(42_i64)
+    .bind(Json(Value::String("true".to_string())))
+    .bind(Json(json!(2)))
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO accounts (id, user_id, name, account_type, currency)
+        VALUES (420, 42, 'PG Cash', '1', 'CNY')
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO categories (id, user_id, name, category_type, path)
+        VALUES (421, 42, 'Cash Transfer', '3', 'Cash Transfer')
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO user_external_auths(
+            user_id, external_auth_category, external_auth_type,
+            external_username, created_at
+        ) VALUES
+            (42, 'oauth2', 'github', 'pgalice-gh', '2026-01-01T00:00:00Z'),
+            (78, 'oauth2', 'github', 'pgtwofa-gh', '2026-01-01T00:00:00Z')
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    let app = postgres_auth_runtime_router(&postgres_url)?;
+    let login_response = app
+        .clone()
+        .oneshot(login_request("pgalice", TEST_PASSWORD))
+        .await?;
+    let login_status = login_response.status();
+    let login_body = read_json(login_response).await;
+    assert_eq!(login_status, StatusCode::OK, "login body: {login_body}");
+    assert_eq!(login_body["success"], true);
+    assert_eq!(login_body["result"]["need2FA"], false);
+    assert_eq!(login_body["result"]["user"]["username"], "pgalice");
+    let login_cloud_settings = login_body["result"]["applicationCloudSettings"]
+        .as_array()
+        .expect("cloud settings array");
+    assert!(login_cloud_settings
+        .iter()
+        .any(|item| { item["settingKey"] == "dashboardVersion" && item["settingValue"] == "2" }));
+    assert!(login_cloud_settings.iter().any(|item| {
+        item["settingKey"] == "showAmountInHomePage" && item["settingValue"] == "true"
+    }));
+    let access_token = login_body["result"]["token"]
+        .as_str()
+        .expect("access token")
+        .to_string();
+    let refresh_token = login_body["result"]["refreshToken"]
+        .as_str()
+        .expect("refresh token")
+        .to_string();
+
+    let profile_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/profile")
+                .header(header::AUTHORIZATION, format!("Bearer {access_token}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(profile_response.status(), StatusCode::OK);
+    let profile_body = read_json(profile_response).await;
+    assert_eq!(profile_body["result"]["username"], "pgalice");
+    assert_eq!(profile_body["result"]["nickname"], "PG Alice");
+
+    let profile_update_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &access_token,
+            json!({
+                "nickname": "PG Alice Updated",
+                "email": "pgalice-updated@example.test",
+                "language": "en",
+                "defaultCurrency": "USD",
+                "firstDayOfWeek": 0,
+                "defaultAccountId": 420,
+                "transactionEditScope": 2,
+                "fiscalYearStart": 4,
+                "calendarDisplayType": 1,
+                "dateDisplayType": 2,
+                "longDateFormat": 3,
+                "shortDateFormat": 4,
+                "longTimeFormat": 5,
+                "shortTimeFormat": 6,
+                "fiscalYearFormat": 7,
+                "currencyDisplayType": 8,
+                "numeralSystem": 9,
+                "decimalSeparator": 10,
+                "digitGroupingSymbol": 11,
+                "digitGrouping": 12,
+                "coordinateDisplayType": 13,
+                "expenseAmountColor": 14,
+                "incomeAmountColor": 15,
+                "cashAccountId": 420,
+                "cashTransferCategoryId": 421,
+                "importLearningEnabled": false,
+                "investmentPlatformKeywords": ["ETF", "Fund"],
+                "investmentProductKeywords": ["Bond"],
+                "investmentExcludeKeywords": ["Ignore"]
+            }),
+        ))
+        .await?;
+    assert_eq!(profile_update_response.status(), StatusCode::OK);
+    let profile_update_body = read_json(profile_update_response).await;
+    assert_eq!(
+        profile_update_body["result"]["user"]["nickname"],
+        "PG Alice Updated"
+    );
+    assert_eq!(
+        profile_update_body["result"]["user"]["email"],
+        "pgalice-updated@example.test"
+    );
+    assert_eq!(
+        profile_update_body["result"]["user"]["emailVerified"],
+        false
+    );
+    assert_eq!(
+        profile_update_body["result"]["user"]["defaultAccountId"],
+        "420"
+    );
+    assert_eq!(
+        profile_update_body["result"]["user"]["transactionEditScope"],
+        2
+    );
+    assert_eq!(
+        profile_update_body["result"]["user"]["cashAccountId"],
+        "420"
+    );
+    assert_eq!(
+        profile_update_body["result"]["user"]["cashTransferCategoryId"],
+        "421"
+    );
+
+    let missing_postgres_config_response = postgres_cutover_runtime_router()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &access_token,
+            json!({"nickname": "Missing PG"}),
+        ))
+        .await?;
+    assert_eq!(
+        missing_postgres_config_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+
+    let missing_profile_user_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &test_access_token(777, TEST_AUTH_SECRET),
+            json!({"nickname": "Ghost"}),
+        ))
+        .await?;
+    assert_eq!(
+        missing_profile_user_response.status(),
+        StatusCode::NOT_FOUND
+    );
+
+    let empty_profile_update_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &access_token,
+            json!({}),
+        ))
+        .await?;
+    assert_eq!(
+        empty_profile_update_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+
+    let same_email_profile_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &access_token,
+            json!({"email": "pgalice-updated@example.test"}),
+        ))
+        .await?;
+    assert_eq!(same_email_profile_response.status(), StatusCode::OK);
+
+    let avatar_in_profile_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &access_token,
+            json!({"avatar": "inline"}),
+        ))
+        .await?;
+    assert_eq!(avatar_in_profile_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(avatar_in_profile_response).await["message"],
+        "Avatar must be updated via /api/profile/avatar"
+    );
+
+    let invalid_profile_email_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &access_token,
+            json!({"email": "not-an-email"}),
+        ))
+        .await?;
+    assert_eq!(
+        invalid_profile_email_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+
+    let duplicate_profile_email_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &access_token,
+            json!({"email": "pginactive@example.test"}),
+        ))
+        .await?;
+    assert_eq!(
+        duplicate_profile_email_response.status(),
+        StatusCode::CONFLICT
+    );
+
+    let invalid_profile_account_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &access_token,
+            json!({"defaultAccountId": 9999}),
+        ))
+        .await?;
+    assert_eq!(
+        invalid_profile_account_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+
+    let invalid_profile_cash_account_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &access_token,
+            json!({"cashAccountId": 9999}),
+        ))
+        .await?;
+    assert_eq!(
+        invalid_profile_cash_account_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+
+    let invalid_profile_transfer_category_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &access_token,
+            json!({"cashTransferCategoryId": 9999}),
+        ))
+        .await?;
+    assert_eq!(
+        invalid_profile_transfer_category_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+
+    let avatar_response = app
+        .clone()
+        .oneshot(multipart_avatar_request(
+            &access_token,
+            b"\x89PNG\r\n\x1A\npostgres-avatar",
+            "image/png",
+        ))
+        .await?;
+    assert_eq!(avatar_response.status(), StatusCode::OK);
+    assert!(read_json(avatar_response).await["result"]["avatar"]
+        .as_str()
+        .unwrap()
+        .starts_with("data:image/png;base64,"));
+
+    let remove_avatar_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::DELETE,
+            "/api/profile/avatar",
+            &access_token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(remove_avatar_response.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(remove_avatar_response).await["result"]["avatar"],
+        ""
+    );
+
+    let cloud_settings_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/profile/cloud-settings",
+            &access_token,
+            Body::empty(),
+        ))
+        .await?;
+    let cloud_settings_status = cloud_settings_response.status();
+    let cloud_settings_body = read_json(cloud_settings_response).await;
+    assert_eq!(
+        cloud_settings_status,
+        StatusCode::OK,
+        "cloud settings body: {cloud_settings_body}"
+    );
+    assert!(cloud_settings_body["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["settingKey"] == "showAmountInHomePage"));
+
+    let update_cloud_settings_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile/cloud-settings",
+            &access_token,
+            json!({
+                "fullUpdate": true,
+                "settings": [
+                    {"settingKey": "autoSaveTransactionDraft", "settingValue": "yes"}
+                ]
+            }),
+        ))
+        .await?;
+    assert_eq!(update_cloud_settings_response.status(), StatusCode::OK);
+    let cloud_settings_after_update = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/profile/cloud-settings",
+            &access_token,
+            Body::empty(),
+        ))
+        .await?;
+    let cloud_settings_after_update_body = read_json(cloud_settings_after_update).await;
+    let updated_settings = cloud_settings_after_update_body["result"]
+        .as_array()
+        .unwrap();
+    assert_eq!(updated_settings.len(), 1);
+    assert_eq!(
+        updated_settings[0]["settingKey"],
+        "autoSaveTransactionDraft"
+    );
+    assert_eq!(updated_settings[0]["settingValue"], "yes");
+
+    let delete_cloud_settings_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::DELETE,
+            "/api/profile/cloud-settings",
+            &access_token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(delete_cloud_settings_response.status(), StatusCode::OK);
+    let cloud_settings_after_delete = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/profile/cloud-settings",
+            &access_token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(
+        read_json(cloud_settings_after_delete).await["result"],
+        Value::Bool(false)
+    );
+
+    let profile_resend_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::POST,
+            "/api/profile/email/resend-verification",
+            &access_token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(profile_resend_response.status(), StatusCode::OK);
+
+    let bad_public_resend_response = app
+        .clone()
+        .oneshot(json_post(
+            "/api/auth/email/resend-verification",
+            json!({"email": "pgalice-updated@example.test", "password": "wrong-password"}),
+        ))
+        .await?;
+    assert_eq!(
+        bad_public_resend_response.status(),
+        StatusCode::UNAUTHORIZED
+    );
+
+    let public_resend_response = app
+        .clone()
+        .oneshot(json_post(
+            "/api/auth/email/resend-verification",
+            json!({"email": "pgalice-updated@example.test", "password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(public_resend_response.status(), StatusCode::OK);
+    let Json(verification_metadata): Json<Value> = sqlx::query_scalar(
+        r#"
+        SELECT metadata
+        FROM business_audit_events
+        WHERE action = 'verification_email_resend_requested'
+        ORDER BY id DESC
+        LIMIT 1
+        "#,
+    )
+    .fetch_one(&pool)
+    .await?;
+    let verification_token = verification_metadata["metadata"]["verification_token"]
+        .as_str()
+        .expect("postgres verification token");
+    sqlx::query(
+        "UPDATE users SET metadata = jsonb_set(metadata, '{email_verified}', 'false'::jsonb, true) WHERE id = 42",
+    )
+    .execute(&pool)
+    .await?;
+    let verify_email_response = app
+        .clone()
+        .oneshot(json_post(
+            "/api/auth/email/verify",
+            json!({"token": verification_token, "requestNewToken": true}),
+        ))
+        .await?;
+    assert_eq!(verify_email_response.status(), StatusCode::OK);
+    let verify_email_body = read_json(verify_email_response).await;
+    let verify_email_new_token = verify_email_body["result"]["newToken"]
+        .as_str()
+        .expect("postgres verify email replacement token")
+        .to_string();
+    assert_eq!(verify_email_body["result"]["user"]["emailVerified"], true);
+    let Json(verified_metadata): Json<Value> =
+        sqlx::query_scalar("SELECT metadata FROM users WHERE id = 42")
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(verified_metadata["email_verified"], true);
+    let verify_email_session_logout_response = app
+        .clone()
+        .oneshot(logout_request(&verify_email_new_token))
+        .await?;
+    assert_eq!(
+        verify_email_session_logout_response.status(),
+        StatusCode::OK
+    );
+
+    let forgot_unknown_response = app
+        .clone()
+        .oneshot(json_post(
+            "/api/auth/password/forgot",
+            json!({"email": "nobody@example.test"}),
+        ))
+        .await?;
+    assert_eq!(forgot_unknown_response.status(), StatusCode::OK);
+    let forgot_response = app
+        .clone()
+        .oneshot(json_post(
+            "/api/auth/password/forgot",
+            json!({"email": "pgreset@example.test"}),
+        ))
+        .await?;
+    assert_eq!(forgot_response.status(), StatusCode::OK);
+    let Json(reset_metadata): Json<Value> = sqlx::query_scalar(
+        r#"
+        SELECT metadata
+        FROM business_audit_events
+        WHERE action = 'password_reset_requested'
+        ORDER BY id DESC
+        LIMIT 1
+        "#,
+    )
+    .fetch_one(&pool)
+    .await?;
+    let reset_token = reset_metadata["metadata"]["reset_token"]
+        .as_str()
+        .expect("postgres reset token");
+    let reset_response = app
+        .clone()
+        .oneshot(json_post(
+            "/api/auth/password/reset",
+            json!({"email": "pgreset@example.test", "password": "pg-new-password", "token": reset_token}),
+        ))
+        .await?;
+    assert_eq!(reset_response.status(), StatusCode::OK);
+    let reset_hash: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE id = 83")
+        .fetch_one(&pool)
+        .await?;
+    assert!(bcrypt::verify("pg-new-password", &reset_hash)?);
+
+    let external_auths_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/profile/external-auths",
+            &access_token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(external_auths_response.status(), StatusCode::OK);
+    let external_auths_body = read_json(external_auths_response).await;
+    let external_auths = external_auths_body["result"]
+        .as_array()
+        .expect("postgres external auth list");
+    assert!(external_auths.iter().any(|auth| {
+        auth["externalAuthType"] == "github"
+            && auth["externalUsername"] == "pgalice-gh"
+            && auth["linked"] == true
+    }));
+    assert!(external_auths
+        .iter()
+        .any(|auth| auth["externalAuthType"] == "google" && auth["linked"] == false));
+    let unlink_external_auth_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/profile/external-auths/unlink",
+            &access_token,
+            json!({"externalAuthType": "github", "password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(unlink_external_auth_response.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(unlink_external_auth_response).await["result"],
+        true
+    );
+    let linked_github_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)::BIGINT FROM user_external_auths WHERE user_id = 42 AND external_auth_type = 'github'",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(linked_github_count, 0);
+    let other_user_github_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)::BIGINT FROM user_external_auths WHERE user_id = 78 AND external_auth_type = 'github'",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(other_user_github_count, 1);
+
+    let refresh_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/tokens/refresh")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "refreshToken": refresh_token }).to_string(),
+                ))?,
+        )
+        .await?;
+    assert_eq!(refresh_response.status(), StatusCode::OK);
+    let refresh_body = read_json(refresh_response).await;
+    assert_eq!(refresh_body["success"], true);
+    let refreshed_access_token = refresh_body["result"]["token"]
+        .as_str()
+        .expect("refreshed token")
+        .to_string();
+    assert!(refreshed_access_token.len() > 16);
+    let active_pg_session_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)::BIGINT FROM token_sessions WHERE user_id = 42 AND is_active = TRUE",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(active_pg_session_count, 1);
+
+    let token_list_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/tokens",
+            &refreshed_access_token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(token_list_response.status(), StatusCode::OK);
+    let token_list_body = read_json(token_list_response).await;
+    let token_list = token_list_body["result"]
+        .as_array()
+        .expect("postgres token list");
+    assert_eq!(token_list.len(), 1);
+    assert_eq!(token_list[0]["isCurrent"], true);
+
+    let api_token_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/tokens/api",
+            &refreshed_access_token,
+            json!({"password": TEST_PASSWORD, "expiresInSeconds": 3600}),
+        ))
+        .await?;
+    assert_eq!(api_token_response.status(), StatusCode::OK);
+    let api_token_body = read_json(api_token_response).await;
+    assert!(api_token_body["result"]["token"].as_str().is_some());
+    assert_eq!(
+        api_token_body["result"]["apiBaseUrl"],
+        "https://api.example.test/api"
+    );
+    let token_list_after_api = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/tokens",
+            &refreshed_access_token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(token_list_after_api.status(), StatusCode::OK);
+    let token_list_after_api_body = read_json(token_list_after_api).await;
+    let token_list_after_api_items = token_list_after_api_body["result"]
+        .as_array()
+        .expect("postgres token list after api token");
+    let api_token_id = token_list_after_api_items
+        .iter()
+        .find(|token| token["tokenType"] == 8)
+        .and_then(|token| token["tokenId"].as_str())
+        .expect("api token id")
+        .to_string();
+    let revoke_pg_token_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::DELETE,
+            &format!("/api/tokens/{api_token_id}"),
+            &refreshed_access_token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(revoke_pg_token_response.status(), StatusCode::OK);
+    assert_eq!(read_json(revoke_pg_token_response).await["result"], true);
+
+    let mcp_token_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/tokens/mcp",
+            &refreshed_access_token,
+            json!({"password": TEST_PASSWORD, "expiresInSeconds": 3600}),
+        ))
+        .await?;
+    assert_eq!(mcp_token_response.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(mcp_token_response).await["result"]["mcpUrl"],
+        "https://api.example.test/mcp"
+    );
+    let revoke_other_pg_tokens_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::DELETE,
+            "/api/tokens",
+            &refreshed_access_token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(revoke_other_pg_tokens_response.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(revoke_other_pg_tokens_response).await["revokedCount"],
+        1
+    );
+
+    let two_factor_status_disabled_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/2fa/status",
+            &refreshed_access_token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(two_factor_status_disabled_response.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(two_factor_status_disabled_response).await["result"]["isEnabled"],
+        false
+    );
+    let two_factor_request_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::POST,
+            "/api/2fa/enable/request",
+            &refreshed_access_token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(two_factor_request_response.status(), StatusCode::OK);
+    let two_factor_request_body = read_json(two_factor_request_response).await;
+    let generated_secret = two_factor_request_body["result"]["secret"]
+        .as_str()
+        .expect("generated secret")
+        .to_string();
+    assert!(two_factor_request_body["result"]["qrcode"]
+        .as_str()
+        .unwrap()
+        .starts_with("data:image/png;base64,"));
+    let enable_passcode = totp_passcode(&generated_secret, Local::now().timestamp());
+    let two_factor_confirm_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/enable/confirm",
+            &refreshed_access_token,
+            json!({"secret": generated_secret.clone(), "passcode": enable_passcode}),
+        ))
+        .await?;
+    assert_eq!(two_factor_confirm_response.status(), StatusCode::OK);
+    let two_factor_confirm_body = read_json(two_factor_confirm_response).await;
+    let two_factor_access_token = two_factor_confirm_body["result"]["token"]
+        .as_str()
+        .expect("2fa session token")
+        .to_string();
+    let recovery_codes = two_factor_confirm_body["result"]["recoveryCodes"]
+        .as_array()
+        .expect("recovery codes");
+    assert_eq!(recovery_codes.len(), 8);
+
+    let step_up_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/security/step-up/verify",
+            &two_factor_access_token,
+            json!({"password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(step_up_response.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(step_up_response).await["result"]["verifiedVia"],
+        "password"
+    );
+
+    let invalid_step_up_password_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/security/step-up/verify",
+            &two_factor_access_token,
+            json!({"password": "wrong-password"}),
+        ))
+        .await?;
+    assert_eq!(
+        invalid_step_up_password_response.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        read_json(invalid_step_up_password_response).await["message"],
+        "Current password is incorrect"
+    );
+
+    let invalid_step_up_passcode_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/security/step-up/verify",
+            &two_factor_access_token,
+            json!({"passcode": "000000"}),
+        ))
+        .await?;
+    assert_eq!(
+        invalid_step_up_passcode_response.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        read_json(invalid_step_up_passcode_response).await["message"],
+        "The current passcode is incorrect"
+    );
+
+    let step_up_passcode_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/security/step-up/verify",
+            &two_factor_access_token,
+            json!({"passcode": totp_passcode(&generated_secret, Local::now().timestamp())}),
+        ))
+        .await?;
+    assert_eq!(step_up_passcode_response.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(step_up_passcode_response).await["result"]["verifiedVia"],
+        "passcode"
+    );
+
+    let regenerate_recovery_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/recovery/regenerate",
+            &two_factor_access_token,
+            json!({"password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(regenerate_recovery_response.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(regenerate_recovery_response).await["result"]["recoveryCodes"]
+            .as_array()
+            .unwrap()
+            .len(),
+        8
+    );
+
+    let disable_two_factor_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/disable",
+            &two_factor_access_token,
+            json!({"password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(disable_two_factor_response.status(), StatusCode::OK);
+    assert_eq!(read_json(disable_two_factor_response).await["result"], true);
+
+    let pg_recovery_code = "PG-RECOVERY-0001";
+    let pg_recovery_hash =
+        hash_two_factor_recovery_code(pg_recovery_code).expect("valid recovery code hash");
+    sqlx::query(
+        r#"
+        INSERT INTO user_two_factor_recovery_codes (user_id, code_hash)
+        VALUES (78, $1)
+        "#,
+    )
+    .bind(pg_recovery_hash)
+    .execute(&pool)
+    .await?;
+    let pending_recovery_token = test_action_token(
+        78,
+        "pgtwofa",
+        "pgtwofa@example.test",
+        "pending_2fa",
+        TEST_AUTH_SECRET,
+        ChronoDuration::hours(1),
+    );
+    let recovery_login_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/recovery/verify",
+            &pending_recovery_token,
+            json!({"recoveryCode": pg_recovery_code}),
+        ))
+        .await?;
+    assert_eq!(recovery_login_response.status(), StatusCode::OK);
+    let recovery_login_body = read_json(recovery_login_response).await;
+    assert_eq!(recovery_login_body["result"]["need2FA"], false);
+    let used_recovery_codes: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)::BIGINT FROM user_two_factor_recovery_codes WHERE user_id = 78 AND used_at IS NOT NULL",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(used_recovery_codes, 1);
+
+    let register_response = app
+        .clone()
+        .oneshot(register_request(json!({
+            "username": "pgnew",
+            "email": "pgnew@example.test",
+            "password": TEST_PASSWORD,
+            "nickname": "PG New",
+            "language": "en",
+            "defaultCurrency": "USD",
+            "categories": [
+                {
+                    "name": "Food",
+                    "type": 3,
+                    "icon": "mdi-food",
+                    "color": "#ff8800",
+                    "subCategories": [
+                        {"name": "Lunch"},
+                        {"name": "Coffee", "icon": "mdi-coffee", "color": "#663300"},
+                        {"name": ""}
+                    ]
+                },
+                {"name": " "}
+            ]
+        })))
+        .await?;
+    let register_status = register_response.status();
+    let register_body = read_json(register_response).await;
+    assert_eq!(
+        register_status,
+        StatusCode::OK,
+        "register body: {register_body}"
+    );
+    assert_eq!(register_body["success"], true);
+    assert_eq!(register_body["result"]["username"], "pgnew");
+    assert_eq!(register_body["result"]["presetAccountsSaved"], true);
+    assert_eq!(register_body["result"]["presetCategoriesSaved"], true);
+    let account_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE user_id = $1")
+        .bind(register_body["result"]["user_id"].as_i64().unwrap())
+        .fetch_one(&pool)
+        .await?;
+    assert!(account_count > 0);
+    let category_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM categories WHERE user_id = $1")
+            .bind(register_body["result"]["user_id"].as_i64().unwrap())
+            .fetch_one(&pool)
+            .await?;
+    assert!(category_count > 0);
+
+    let duplicate_username_response = app
+        .clone()
+        .oneshot(register_request(json!({
+            "username": "pgnew",
+            "email": "pgnew-other@example.test",
+            "password": TEST_PASSWORD
+        })))
+        .await?;
+    assert_eq!(duplicate_username_response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        read_json(duplicate_username_response).await["message"],
+        "Username already exists"
+    );
+
+    let duplicate_email_response = app
+        .clone()
+        .oneshot(register_request(json!({
+            "username": "pgnew2",
+            "email": "pgnew@example.test",
+            "password": TEST_PASSWORD
+        })))
+        .await?;
+    assert_eq!(duplicate_email_response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        read_json(duplicate_email_response).await["message"],
+        "Email already exists"
+    );
+
+    let unknown_response = app
+        .clone()
+        .oneshot(login_request("pgmissing", TEST_PASSWORD))
+        .await?;
+    assert_eq!(unknown_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        read_json(unknown_response).await["message"],
+        "Invalid username or password"
+    );
+
+    let wrong_password_response = app
+        .clone()
+        .oneshot(login_request("pgnearlylocked", "wrong-password"))
+        .await?;
+    assert_eq!(wrong_password_response.status(), StatusCode::UNAUTHORIZED);
+    let attempts: i64 = sqlx::query_scalar(
+        "SELECT (metadata->>'failed_login_attempts')::bigint FROM users WHERE id = 81",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(attempts, 5);
+    let locked_until: String = sqlx::query_scalar(
+        "SELECT COALESCE(metadata->>'locked_until', '') FROM users WHERE id = 81",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert!(!locked_until.trim().is_empty());
+
+    let expired_wrong_response = app
+        .clone()
+        .oneshot(login_request("pgexpiredwrong", "wrong-password"))
+        .await?;
+    assert_eq!(expired_wrong_response.status(), StatusCode::UNAUTHORIZED);
+    let expired_attempts: i64 = sqlx::query_scalar(
+        "SELECT (metadata->>'failed_login_attempts')::bigint FROM users WHERE id = 82",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(expired_attempts, 1);
+
+    let locked_response = app
+        .clone()
+        .oneshot(login_request("pglocked", TEST_PASSWORD))
+        .await?;
+    assert_eq!(locked_response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        read_json(locked_response).await["message"],
+        "Account is temporarily locked due to multiple failed login attempts"
+    );
+
+    let inactive_response = app
+        .clone()
+        .oneshot(login_request("pginactive", TEST_PASSWORD))
+        .await?;
+    assert_eq!(inactive_response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        read_json(inactive_response).await["message"],
+        "Your account has been deactivated"
+    );
+
+    let two_factor_response = app
+        .clone()
+        .oneshot(login_request("pgtwofa", TEST_PASSWORD))
+        .await?;
+    assert_eq!(two_factor_response.status(), StatusCode::OK);
+    let two_factor_body = read_json(two_factor_response).await;
+    assert_eq!(two_factor_body["result"]["need2FA"], true);
+    assert_eq!(
+        jwt_payload(two_factor_body["result"]["token"].as_str().unwrap())["type"],
+        "pending_2fa"
+    );
+
+    let missing_refresh_user_response = app
+        .clone()
+        .oneshot(refresh_token_request(&test_refresh_token(
+            999,
+            "pgmissing",
+            TEST_AUTH_SECRET,
+            ChronoDuration::hours(1),
+        )))
+        .await?;
+    assert_eq!(
+        missing_refresh_user_response.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        read_json(missing_refresh_user_response).await["message"],
+        "Invalid refresh token"
+    );
+
+    sqlx::query(
+        r#"
+        INSERT INTO tags (id, user_id, name, color)
+        VALUES (430, 42, 'PG Tag', '#3399ff')
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO bills (
+            id, user_id, occurred_at, amount_cents, direction, transaction_type,
+            account_id, category_id, merchant, payment_method, description, standard_payload
+        ) VALUES (
+            440, 42, '2026-05-28T08:00:00Z'::timestamptz, -1234, 'expense', 'expense',
+            420, 421, 'PG Merchant', 'PG Cash', 'Postgres export bill', $1
+        )
+        "#,
+    )
+    .bind(Json(json!({
+        "main_category": "Cash Transfer",
+        "sub_category": "",
+        "batch_id": "pg-user-data"
+    })))
+    .execute(&pool)
+    .await?;
+    sqlx::query("INSERT INTO bill_tags (bill_id, tag_id, user_id) VALUES (440, 430, 42)")
+        .execute(&pool)
+        .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO transaction_templates (id, user_id, template_type, name)
+        VALUES (450, 42, 1, 'PG Template')
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    let data_statistics_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/data/statistics",
+            &access_token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(data_statistics_response.status(), StatusCode::OK);
+    let data_statistics_body = read_json(data_statistics_response).await;
+    assert_eq!(data_statistics_body["result"]["billCount"], 1);
+    assert_eq!(data_statistics_body["result"]["accountCount"], 1);
+    assert_eq!(data_statistics_body["result"]["categoryCount"], 1);
+    assert_eq!(data_statistics_body["result"]["tagCount"], 1);
+    assert_eq!(data_statistics_body["result"]["templateCount"], 1);
+
+    let data_export_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/data/export.csv?account_ids=420&tag_ids=430&category_ids=421",
+            &access_token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(data_export_response.status(), StatusCode::OK);
+    let data_export_text = read_text(data_export_response).await;
+    assert!(data_export_text.contains("PG Merchant"));
+    assert!(data_export_text.contains("PG Tag"));
+    assert!(data_export_text.contains("PG Cash"));
+
+    let clear_step_up_token = test_action_token(
+        42,
+        "pgalice",
+        "pgalice-updated@example.test",
+        "step_up",
+        TEST_AUTH_SECRET,
+        ChronoDuration::minutes(5),
+    );
+    let clear_transactions_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/data/clear/transactions",
+            &access_token,
+            json!({"stepUpToken": clear_step_up_token}),
+        ))
+        .await?;
+    assert_eq!(clear_transactions_response.status(), StatusCode::OK);
+    let clear_transactions_body = read_json(clear_transactions_response).await;
+    assert_eq!(clear_transactions_body["result"], true);
+    assert_eq!(clear_transactions_body["deletedCount"], 1);
+    let pg_bill_count_after_clear: i64 =
+        sqlx::query_scalar("SELECT COUNT(*)::BIGINT FROM bills WHERE user_id = 42")
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(pg_bill_count_after_clear, 0);
+
+    sqlx::query(
+        r#"
+        INSERT INTO account_rules (id, user_id, account_id, name)
+        VALUES (460, 42, 420, 'PG account rule')
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO category_rules (id, user_id, category_id, name)
+        VALUES (461, 42, 421, 'PG category rule')
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO budgets (id, user_id, name, period_type, start_date)
+        VALUES (462, 42, 'PG Budget', 'monthly', '2026-05-01')
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO settings (user_id, key, value)
+        VALUES (42, 'operation_password', $1)
+        ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value
+        "#,
+    )
+    .bind(Json(Value::String("pg-operation-secret".to_string())))
+    .execute(&pool)
+    .await?;
+
+    let clear_all_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/data/clear/all",
+            &access_token,
+            json!({"password": "pg-operation-secret"}),
+        ))
+        .await?;
+    assert_eq!(clear_all_response.status(), StatusCode::OK);
+    let clear_all_body = read_json(clear_all_response).await;
+    assert_eq!(clear_all_body["result"], true);
+    assert_eq!(clear_all_body["counts"]["accounts"], 1);
+    assert_eq!(clear_all_body["counts"]["categories"], 1);
+    assert_eq!(clear_all_body["counts"]["tags"], 1);
+    assert_eq!(clear_all_body["counts"]["templates"], 1);
+    assert_eq!(clear_all_body["counts"]["account_rules"], 1);
+    assert_eq!(clear_all_body["counts"]["category_rules"], 1);
+    assert_eq!(clear_all_body["counts"]["budgets"], 1);
+    let pg_account_count_after_clear_all: i64 =
+        sqlx::query_scalar("SELECT COUNT(*)::BIGINT FROM accounts WHERE user_id = 42")
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(pg_account_count_after_clear_all, 0);
+    let pg_user_data_audit_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)::BIGINT FROM business_audit_events WHERE user_id = 42 AND entity_type = 'user_data'",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(pg_user_data_audit_count, 2);
 
     Ok(())
 }
@@ -3876,33 +5231,21 @@ fn runtime_router(fixture: &RuntimeFixture) -> Router {
 }
 
 fn runtime_router_without_sqlite_path() -> Router {
-    let config = HttpShellConfig::new_with_import_route_mode(
-        "http://127.0.0.1:59999",
-        Duration::from_millis(200),
-        1024 * 1024,
-        ImportRouteMode::ImportDbRuntime,
-    )
-    .expect("config")
-    .with_trusted_user_header_secret(TEST_AUTH_SECRET)
-    .with_auth_jwt_secret(TEST_AUTH_SECRET)
-    .with_public_base_url("https://api.example.test");
+    let config = legacy_sqlite_runtime_config()
+        .with_trusted_user_header_secret(TEST_AUTH_SECRET)
+        .with_auth_jwt_secret(TEST_AUTH_SECRET)
+        .with_public_base_url("https://api.example.test");
     let state = HttpAppState::new(config).expect("http app state");
     build_router(state)
 }
 
 fn runtime_router_with_db_path(path: &Path, include_jwt_secret: bool) -> Router {
-    let mut config = HttpShellConfig::new_with_import_route_mode(
-        "http://127.0.0.1:59999",
-        Duration::from_millis(200),
-        1024 * 1024,
-        ImportRouteMode::ImportDbRuntime,
-    )
-    .expect("config")
-    .with_sqlite_db_path(path.display().to_string())
-    .with_trusted_user_header_secret(TEST_AUTH_SECRET)
-    .with_auth_enable_oauth2(true)
-    .with_auth_oauth2_provider("google")
-    .with_public_base_url("https://api.example.test");
+    let mut config = legacy_sqlite_runtime_config()
+        .with_sqlite_db_path(path.display().to_string())
+        .with_trusted_user_header_secret(TEST_AUTH_SECRET)
+        .with_auth_enable_oauth2(true)
+        .with_auth_oauth2_provider("google")
+        .with_public_base_url("https://api.example.test");
     if include_jwt_secret {
         config = config.with_auth_jwt_secret(TEST_AUTH_SECRET);
     }
@@ -3911,6 +5254,17 @@ fn runtime_router_with_db_path(path: &Path, include_jwt_secret: bool) -> Router 
 }
 
 fn runtime_router_with_password_reset(path: &Path, enabled: bool) -> Router {
+    let config = legacy_sqlite_runtime_config()
+        .with_sqlite_db_path(path.display().to_string())
+        .with_trusted_user_header_secret(TEST_AUTH_SECRET)
+        .with_auth_jwt_secret(TEST_AUTH_SECRET)
+        .with_auth_enable_user_forget_password(enabled)
+        .with_public_base_url("https://api.example.test");
+    let state = HttpAppState::new(config).expect("http app state");
+    build_router(state)
+}
+
+fn postgres_cutover_runtime_router() -> Router {
     let config = HttpShellConfig::new_with_import_route_mode(
         "http://127.0.0.1:59999",
         Duration::from_millis(200),
@@ -3918,13 +5272,46 @@ fn runtime_router_with_password_reset(path: &Path, enabled: bool) -> Router {
         ImportRouteMode::ImportDbRuntime,
     )
     .expect("config")
-    .with_sqlite_db_path(path.display().to_string())
+    .with_database_backend(DatabaseBackend::Postgres)
+    .with_require_postgres_after_cutover(true)
     .with_trusted_user_header_secret(TEST_AUTH_SECRET)
     .with_auth_jwt_secret(TEST_AUTH_SECRET)
-    .with_auth_enable_user_forget_password(enabled)
     .with_public_base_url("https://api.example.test");
     let state = HttpAppState::new(config).expect("http app state");
     build_router(state)
+}
+
+fn postgres_auth_runtime_router(postgres_url: &str) -> Result<Router, Box<dyn Error>> {
+    let config = HttpShellConfig::new_with_import_route_mode(
+        "http://127.0.0.1:59999",
+        Duration::from_millis(200),
+        1024 * 1024,
+        ImportRouteMode::ImportDbRuntime,
+    )?
+    .with_database_backend(DatabaseBackend::Postgres)
+    .with_require_postgres_after_cutover(true)
+    .with_postgres_url(postgres_url)?
+    .with_trusted_user_header_secret(TEST_AUTH_SECRET)
+    .with_auth_jwt_secret(TEST_AUTH_SECRET)
+    .with_auth_enable_user_forget_password(true)
+    .with_auth_enable_oauth2(true)
+    .with_auth_oauth2_provider("google")
+    .with_public_base_url("https://api.example.test");
+    let state = HttpAppState::new(config).expect("http app state");
+    Ok(build_router(state))
+}
+
+fn legacy_sqlite_runtime_config() -> HttpShellConfig {
+    HttpShellConfig::new_with_import_route_mode(
+        "http://127.0.0.1:59999",
+        Duration::from_millis(200),
+        1024 * 1024,
+        ImportRouteMode::ImportDbRuntime,
+    )
+    .expect("config")
+    .with_database_backend(DatabaseBackend::Sqlite)
+    .with_require_postgres_after_cutover(false)
+    .with_legacy_sqlite_runtime_for_tests()
 }
 
 fn seed_auth_db(path: &Path, token: &str) -> Result<(), Box<dyn Error>> {

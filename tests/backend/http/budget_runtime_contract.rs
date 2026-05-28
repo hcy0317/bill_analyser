@@ -1,4 +1,4 @@
-use std::{error::Error, path::Path, time::Duration};
+use std::{env, error::Error, path::Path, time::Duration};
 
 use axum::{
     body::{to_bytes, Body},
@@ -6,16 +6,688 @@ use axum::{
     http::{Method, StatusCode},
     Router,
 };
+use bill_analyser_db::run_postgres_migrations;
 use bill_analyser_http::{
-    build_router, HttpAppState, HttpShellConfig, ImportRouteMode, BUDGET_CRUD_ROUTE_PATTERNS,
+    build_router, config::DatabaseBackend, HttpAppState, HttpShellConfig, ImportRouteMode,
+    BUDGET_CRUD_ROUTE_PATTERNS,
 };
 use rusqlite::Connection;
 use serde_json::{json, Value};
+use sqlx::{postgres::PgPoolOptions, Row};
 use tempfile::TempDir;
 use tower::ServiceExt;
 
 const TEST_AUTH_SECRET: &str = "budget-route-secret";
 const TEST_USER_ID: &str = "42";
+
+#[tokio::test]
+async fn budgets_postgres_runtime_serves_list_without_sqlite_fallback() -> Result<(), Box<dyn Error>>
+{
+    let Ok(postgres_url) = env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+        return Ok(());
+    };
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&postgres_url)
+        .await?;
+    run_postgres_migrations(&pool).await?;
+
+    let unique = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
+    let user_id: i64 =
+        sqlx::query("INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id")
+            .bind(format!("budget-pg-{unique}"))
+            .bind(format!("budget-pg-{unique}@example.test"))
+            .fetch_one(&pool)
+            .await?
+            .try_get("id")?;
+    sqlx::query(
+        r#"
+        INSERT INTO categories (user_id, name, category_type, path, icon, color)
+        VALUES ($1, '餐饮', '1', '餐饮', 'folder', '#ffaa00'),
+               ($1, '午餐', '3', '餐饮/午餐', 'tag', '#ffaa00')
+        "#,
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO budgets (
+            user_id, name, category, sub_category, period_type, amount_cents,
+            start_date, end_date, alert_threshold, enabled
+        )
+        VALUES ($1, '午餐预算', '餐饮', '午餐', 'monthly', 10000, '2026-03-01', '2026-03-31', 75, true),
+               ($1, '年度预算', '餐饮', '', 'yearly', 500000, '2026-01-01', '2026-12-31', 80, true)
+        "#,
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await?;
+
+    let app = postgres_runtime_router(&postgres_url)?;
+    let response = app
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/budgets/?budget_type=3&period_type=monthly",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    assert_eq!(body["success"], true);
+    let items = body["result"].as_array().expect("postgres budget list");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["name"], "午餐预算");
+    assert_eq!(items[0]["amount"], 100.0);
+    assert_eq!(items[0]["enabled"], 1);
+    assert_eq!(items[0]["type"], 3);
+    assert!(!items[0]["category_id"]
+        .as_str()
+        .unwrap_or_default()
+        .is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn budgets_postgres_runtime_serves_crud_export_and_import_without_sqlite_fallback(
+) -> Result<(), Box<dyn Error>> {
+    let Ok(postgres_url) = env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+        return Ok(());
+    };
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&postgres_url)
+        .await?;
+    run_postgres_migrations(&pool).await?;
+
+    let unique = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
+    let user_id: i64 =
+        sqlx::query("INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id")
+            .bind(format!("budget-pg-crud-{unique}"))
+            .bind(format!("budget-pg-crud-{unique}@example.test"))
+            .fetch_one(&pool)
+            .await?
+            .try_get("id")?;
+    sqlx::query(
+        r#"
+        INSERT INTO categories (user_id, name, category_type, path, icon, color)
+        VALUES ($1, '餐饮', '1', '餐饮', 'folder', '#ffaa00'),
+               ($1, '午餐', '3', '餐饮/午餐', 'tag', '#ffaa00'),
+               ($1, '交通', '3', '交通', 'bus', '#00aaff')
+        "#,
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO budgets (
+            user_id, name, category, sub_category, period_type, amount_cents,
+            start_date, end_date, alert_threshold, enabled
+        )
+        VALUES ($1, '导入既有预算', '交通', '', 'monthly', 5000, '2026-03-01', '2026-03-31', 80, true)
+        "#,
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await?;
+
+    let app = postgres_runtime_router(&postgres_url)?;
+    let create_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::POST,
+            "/api/budgets/",
+            Body::from(
+                json!({
+                    "name": "午餐预算",
+                    "category": "餐饮",
+                    "sub_category": "午餐",
+                    "period_type": "monthly",
+                    "amount": "123.45",
+                    "start_date": "2026-03-01",
+                    "end_date": "2026-03-31",
+                    "alert_threshold": 75,
+                    "enabled": true
+                })
+                .to_string(),
+            ),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+    let created = read_json(create_response).await;
+    let budget_id = created["result"]["id"].as_i64().expect("created budget id");
+    assert_eq!(created["result"]["amount"], 123.45);
+    assert_eq!(created["result"]["sub_category"], "午餐");
+    assert_eq!(
+        postgres_budget_amount_cents(&pool, user_id, "午餐预算", "午餐").await?,
+        12345
+    );
+    assert_eq!(
+        postgres_budget_amount_cents(&pool, user_id, "午餐预算", "").await?,
+        12345
+    );
+
+    let update_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::PUT,
+            &format!("/api/budgets/{budget_id}"),
+            Body::from(json!({ "amount": "150.25" }).to_string()),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(update_response.status(), StatusCode::OK);
+    assert_eq!(
+        postgres_budget_amount_cents(&pool, user_id, "午餐预算", "午餐").await?,
+        15025
+    );
+    assert_eq!(
+        postgres_budget_amount_cents(&pool, user_id, "午餐预算", "").await?,
+        15025
+    );
+
+    let export_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/budgets/export",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(export_response.status(), StatusCode::OK);
+    let exported = read_json(export_response).await;
+    let exported_rows = exported["result"].as_array().expect("export rows");
+    assert!(exported_rows
+        .iter()
+        .any(|row| row["name"] == "午餐预算" && row["amount"] == 150.25));
+
+    let delete_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::DELETE,
+            &format!("/api/budgets/{budget_id}"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(delete_response.status(), StatusCode::OK);
+    assert_eq!(
+        postgres_budget_row_count(&pool, user_id, "午餐预算").await?,
+        0
+    );
+    assert_eq!(
+        postgres_budget_row_count(&pool, user_id, "导入既有预算").await?,
+        1
+    );
+
+    let import_response = app
+        .oneshot(authed_request_for_user(
+            Method::POST,
+            "/api/budgets/import",
+            Body::from(
+                json!([
+                    {
+                        "name": "导入既有预算",
+                        "category": "交通",
+                        "period_type": "monthly",
+                        "amount": "66.66",
+                        "start_date": "2026-03-01",
+                        "end_date": "2026-03-31",
+                        "alert_threshold": 70,
+                        "enabled": false
+                    },
+                    {
+                        "name": "导入新增预算",
+                        "category": "餐饮",
+                        "sub_category": "午餐",
+                        "period_type": "monthly",
+                        "amount": 88.88,
+                        "start_date": "2026-03-01"
+                    }
+                ])
+                .to_string(),
+            ),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(import_response.status(), StatusCode::OK);
+    let imported = read_json(import_response).await;
+    assert_eq!(imported["result"]["created"], 1);
+    assert_eq!(imported["result"]["updated"], 1);
+    assert_eq!(imported["result"]["errors"], 0);
+    assert_eq!(
+        postgres_budget_amount_cents(&pool, user_id, "导入既有预算", "").await?,
+        6666
+    );
+    assert!(!postgres_budget_enabled(&pool, user_id, "导入既有预算").await?);
+    assert_eq!(
+        postgres_budget_amount_cents(&pool, user_id, "导入新增预算", "午餐").await?,
+        8888
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn budgets_postgres_runtime_serves_execution_forecast_and_history_without_sqlite_fallback(
+) -> Result<(), Box<dyn Error>> {
+    let Ok(postgres_url) = env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+        return Ok(());
+    };
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&postgres_url)
+        .await?;
+    run_postgres_migrations(&pool).await?;
+
+    let unique = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
+    let user_id: i64 =
+        sqlx::query("INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id")
+            .bind(format!("budget-pg-exec-{unique}"))
+            .bind(format!("budget-pg-exec-{unique}@example.test"))
+            .fetch_one(&pool)
+            .await?
+            .try_get("id")?;
+    let account_primary: i64 = sqlx::query(
+        "INSERT INTO accounts (user_id, name, account_type) VALUES ($1, $2, 'cash') RETURNING id",
+    )
+    .bind(user_id)
+    .bind(format!("budget-card-a-{unique}"))
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let account_secondary: i64 = sqlx::query(
+        "INSERT INTO accounts (user_id, name, account_type) VALUES ($1, $2, 'cash') RETURNING id",
+    )
+    .bind(user_id)
+    .bind(format!("budget-card-b-{unique}"))
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let tag_scope: i64 =
+        sqlx::query("INSERT INTO tags (user_id, name) VALUES ($1, $2) RETURNING id")
+            .bind(user_id)
+            .bind(format!("budget-scope-{unique}"))
+            .fetch_one(&pool)
+            .await?
+            .try_get("id")?;
+    let tag_other: i64 =
+        sqlx::query("INSERT INTO tags (user_id, name) VALUES ($1, $2) RETURNING id")
+            .bind(user_id)
+            .bind(format!("budget-other-{unique}"))
+            .fetch_one(&pool)
+            .await?
+            .try_get("id")?;
+    sqlx::query(
+        r#"
+        INSERT INTO categories (user_id, name, category_type, path, icon, color)
+        VALUES ($1, '餐饮', '1', '餐饮', 'folder', '#ffaa00')
+        "#,
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await?;
+    let lunch_category_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO categories (user_id, name, category_type, path, icon, color)
+        VALUES ($1, '午餐', '3', '餐饮/午餐', 'tag', '#ffaa00')
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let transport_category_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO categories (user_id, name, category_type, path, icon, color)
+        VALUES ($1, '交通', '3', '交通', 'bus', '#00aaff')
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let primary_budget_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO budgets (
+            user_id, name, category, sub_category, period_type, amount_cents,
+            start_date, end_date, alert_threshold, enabled
+        )
+        VALUES ($1, '午餐预算', '餐饮', '', 'monthly', 10000, '2026-03-01', '2026-03-31', 75, true)
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let lunch_budget_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO budgets (
+            user_id, name, category, sub_category, period_type, amount_cents,
+            start_date, end_date, alert_threshold, enabled
+        )
+        VALUES ($1, '午餐预算', '餐饮', '午餐', 'monthly', 10000, '2026-03-01', '2026-03-31', 75, true)
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+
+    let lunch_payload = json!({"main_category": "餐饮", "sub_category": "午餐", "type": "支出"});
+    let bill_one = insert_postgres_budget_bill(
+        &pool,
+        user_id,
+        "2026-03-15T12:00:00Z",
+        3550,
+        account_primary,
+        lunch_category_id,
+        &lunch_payload,
+    )
+    .await?;
+    let bill_two = insert_postgres_budget_bill(
+        &pool,
+        user_id,
+        "2026-03-31T23:00:00Z",
+        1500,
+        account_secondary,
+        lunch_category_id,
+        &lunch_payload,
+    )
+    .await?;
+    let bill_outside = insert_postgres_budget_bill(
+        &pool,
+        user_id,
+        "2026-04-01T00:00:00Z",
+        900,
+        account_primary,
+        lunch_category_id,
+        &lunch_payload,
+    )
+    .await?;
+    for (bill_id, tag_id) in [
+        (bill_one, tag_scope),
+        (bill_two, tag_other),
+        (bill_outside, tag_scope),
+    ] {
+        sqlx::query("INSERT INTO bill_tags (bill_id, tag_id, user_id) VALUES ($1, $2, $3)")
+            .bind(bill_id)
+            .bind(tag_id)
+            .bind(user_id)
+            .execute(&pool)
+            .await?;
+    }
+    insert_postgres_budget_bill(
+        &pool,
+        user_id,
+        "2026-01-15T12:00:00Z",
+        1000,
+        account_primary,
+        lunch_category_id,
+        &lunch_payload,
+    )
+    .await?;
+    insert_postgres_budget_bill(
+        &pool,
+        user_id,
+        "2026-02-15T12:00:00Z",
+        2000,
+        account_primary,
+        lunch_category_id,
+        &lunch_payload,
+    )
+    .await?;
+    for occurred_at in [
+        "2026-01-10T08:00:00Z",
+        "2026-02-10T08:00:00Z",
+        "2026-03-10T08:00:00Z",
+    ] {
+        insert_postgres_budget_bill(
+            &pool,
+            user_id,
+            occurred_at,
+            500,
+            account_primary,
+            transport_category_id,
+            &json!({"main_category": "交通", "sub_category": "", "type": "支出"}),
+        )
+        .await?;
+    }
+
+    let app = postgres_runtime_router(&postgres_url)?;
+    let execution_uri = format!(
+        "/api/budgets/execution?period_type=monthly&start_date=2026-03-01&end_date=2026-03-31&account_ids={account_primary}&tag_ids={tag_scope}"
+    );
+    let execution_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            &execution_uri,
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(execution_response.status(), StatusCode::OK);
+    let execution_body = read_json(execution_response).await;
+    assert_eq!(execution_body["success"], true);
+    let execution_items = execution_body["result"]["items"]
+        .as_array()
+        .expect("execution items");
+    let lunch_execution = execution_items
+        .iter()
+        .find(|item| item["id"] == lunch_budget_id)
+        .expect("lunch execution item");
+    assert_eq!(lunch_execution["spent_amount"], 35.5);
+    assert_eq!(lunch_execution["remaining_amount"], 64.5);
+    assert_eq!(
+        lunch_execution["category_id"],
+        lunch_category_id.to_string()
+    );
+    assert!(execution_items
+        .iter()
+        .any(|item| item["id"] == primary_budget_id && item["spent_amount"] == 35.5));
+
+    let category_filtered_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            &format!(
+                "/api/budgets/execution?period_type=monthly&start_date=2026-03-01&end_date=2026-03-31&category_id={lunch_category_id}"
+            ),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(category_filtered_response.status(), StatusCode::OK);
+    let category_filtered_body = read_json(category_filtered_response).await;
+    let category_filtered_items = category_filtered_body["result"]["items"]
+        .as_array()
+        .expect("category-filtered execution items");
+    assert_eq!(category_filtered_items.len(), 1);
+    assert_eq!(category_filtered_items[0]["id"], lunch_budget_id);
+
+    let missing_category_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/budgets/execution?period_type=monthly&start_date=2026-03-01&end_date=2026-03-31&category_id=999999999",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(missing_category_response.status(), StatusCode::OK);
+    let missing_category_body = read_json(missing_category_response).await;
+    assert_eq!(
+        missing_category_body["result"]["items"]
+            .as_array()
+            .expect("missing category items")
+            .len(),
+        0
+    );
+
+    let forecast_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/budgets/forecast?period_type=monthly&start_date=2026-03-01&end_date=2026-03-31&months_history=3&forecast_strategy=historical_average",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(forecast_response.status(), StatusCode::OK);
+    let forecast_body = read_json(forecast_response).await;
+    assert_eq!(forecast_body["result"]["summary"]["history_periods"], 3);
+    let forecast_items = forecast_body["result"]["items"]
+        .as_array()
+        .expect("forecast items");
+    assert_eq!(forecast_items[0]["category"], "餐饮");
+    assert_eq!(forecast_items[0]["budget_amount"], 100.0);
+    assert_eq!(forecast_items[0]["forecast_amount"], 26.83);
+    assert!(forecast_items
+        .iter()
+        .any(|item| item["category"] == "交通" && item["forecast_amount"] == 5.0));
+
+    let on_demand_history_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/budgets/history?period_type=monthly&start_date=2026-02-01&end_date=2026-03-31",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(on_demand_history_response.status(), StatusCode::OK);
+    let on_demand_history_body = read_json(on_demand_history_response).await;
+    let on_demand_items = on_demand_history_body["result"]["items"]
+        .as_array()
+        .expect("on-demand history items");
+    assert!(on_demand_items
+        .iter()
+        .any(|item| item["budget_id"] == lunch_budget_id
+            && item["period_start"] == "2026-03-01"
+            && item["period_end"] == "2026-03-31"));
+
+    let snapshot_payload = json!({
+        "budget_type": 3,
+        "period_type": "monthly",
+        "start_date": "2026-03-01",
+        "end_date": "2026-03-31",
+        "account_ids": [account_primary],
+        "tag_ids": [tag_scope]
+    });
+    let snapshot_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::POST,
+            "/api/budgets/history/snapshot",
+            Body::from(snapshot_payload.to_string()),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(snapshot_response.status(), StatusCode::OK);
+    let snapshot_body = read_json(snapshot_response).await;
+    assert_eq!(snapshot_body["result"]["created_count"], 2);
+
+    let history_uri = format!(
+        "/api/budgets/history?period_type=monthly&start_date=2026-03-01&end_date=2026-03-31&account_ids={account_primary}&tag_ids={tag_scope}"
+    );
+    let history_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            &history_uri,
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(history_response.status(), StatusCode::OK);
+    let history_body = read_json(history_response).await;
+    let history_items = history_body["result"]["items"]
+        .as_array()
+        .expect("history items");
+    let stored_lunch = history_items
+        .iter()
+        .find(|item| item["budget_id"] == lunch_budget_id)
+        .expect("stored lunch history");
+    assert_eq!(stored_lunch["spent_amount"], 35.5);
+    assert_eq!(stored_lunch["status"], "within_budget");
+
+    let budget_filtered_history_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            &format!("{history_uri}&budget_id={lunch_budget_id}"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(budget_filtered_history_response.status(), StatusCode::OK);
+    let budget_filtered_history_body = read_json(budget_filtered_history_response).await;
+    let budget_filtered_items = budget_filtered_history_body["result"]["items"]
+        .as_array()
+        .expect("budget-filtered history items");
+    assert_eq!(budget_filtered_items.len(), 1);
+    assert_eq!(budget_filtered_items[0]["budget_id"], lunch_budget_id);
+
+    let appended_bill = insert_postgres_budget_bill(
+        &pool,
+        user_id,
+        "2026-03-20T12:00:00Z",
+        4000,
+        account_primary,
+        lunch_category_id,
+        &lunch_payload,
+    )
+    .await?;
+    sqlx::query("INSERT INTO bill_tags (bill_id, tag_id, user_id) VALUES ($1, $2, $3)")
+        .bind(appended_bill)
+        .bind(tag_scope)
+        .bind(user_id)
+        .execute(&pool)
+        .await?;
+
+    let resnapshot_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::POST,
+            "/api/budgets/history/snapshot",
+            Body::from(snapshot_payload.to_string()),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(resnapshot_response.status(), StatusCode::OK);
+    let updated_history_response = app
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            &history_uri,
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(updated_history_response.status(), StatusCode::OK);
+    let updated_history_body = read_json(updated_history_response).await;
+    let updated_lunch = updated_history_body["result"]["items"]
+        .as_array()
+        .expect("updated history items")
+        .iter()
+        .find(|item| item["budget_id"] == lunch_budget_id)
+        .expect("updated lunch history");
+    assert_eq!(updated_lunch["spent_amount"], 75.5);
+    assert_eq!(
+        postgres_budget_history_spent_cents(&pool, user_id, lunch_budget_id).await?,
+        7550
+    );
+
+    Ok(())
+}
 
 #[tokio::test]
 async fn budgets_crud_runtime_serves_owned_routes_and_writes_db() -> Result<(), Box<dyn Error>> {
@@ -603,6 +1275,9 @@ async fn budgets_runtime_covers_error_edges_and_auth() -> Result<(), Box<dyn Err
             1024 * 1024,
             ImportRouteMode::ImportDbRuntime,
         )?
+        .with_database_backend(DatabaseBackend::Sqlite)
+        .with_require_postgres_after_cutover(false)
+        .with_legacy_sqlite_runtime_for_tests()
         .with_trusted_user_header_secret(TEST_AUTH_SECRET),
     )?;
     let missing_db_response = build_router(missing_db_state.clone())
@@ -684,6 +1359,9 @@ async fn budgets_runtime_covers_error_edges_and_auth() -> Result<(), Box<dyn Err
             1024 * 1024,
             ImportRouteMode::ImportDbRuntime,
         )?
+        .with_database_backend(DatabaseBackend::Sqlite)
+        .with_require_postgres_after_cutover(false)
+        .with_legacy_sqlite_runtime_for_tests()
         .with_sqlite_db_path(invalid_parent.display().to_string())
         .with_trusted_user_header_secret(TEST_AUTH_SECRET),
     )?;
@@ -705,6 +1383,9 @@ async fn budgets_runtime_covers_error_edges_and_auth() -> Result<(), Box<dyn Err
             1024 * 1024,
             ImportRouteMode::ImportDbRuntime,
         )?
+        .with_database_backend(DatabaseBackend::Sqlite)
+        .with_require_postgres_after_cutover(false)
+        .with_legacy_sqlite_runtime_for_tests()
         .with_sqlite_db_path(empty_schema_path.display().to_string())
         .with_trusted_user_header_secret(TEST_AUTH_SECRET),
     )?;
@@ -788,10 +1469,28 @@ fn runtime_router(fixture: &RuntimeFixture) -> Router {
         ImportRouteMode::ImportDbRuntime,
     )
     .expect("config")
+    .with_database_backend(DatabaseBackend::Sqlite)
+    .with_require_postgres_after_cutover(false)
+    .with_legacy_sqlite_runtime_for_tests()
     .with_sqlite_db_path(fixture.db_path.display().to_string())
     .with_trusted_user_header_secret(TEST_AUTH_SECRET);
     let state = HttpAppState::new(config).expect("http app state");
     build_router(state)
+}
+
+fn postgres_runtime_router(postgres_url: &str) -> Result<Router, Box<dyn Error>> {
+    let config = HttpShellConfig::new_with_import_route_mode(
+        "http://127.0.0.1:9".to_string(),
+        Duration::from_secs(5),
+        1024 * 1024,
+        ImportRouteMode::ImportDbRuntime,
+    )?
+    .with_database_backend(DatabaseBackend::Postgres)
+    .with_require_postgres_after_cutover(true)
+    .with_postgres_url(postgres_url)?
+    .with_trusted_user_header_secret(TEST_AUTH_SECRET);
+    let state = HttpAppState::new(config).expect("http app state");
+    Ok(build_router(state))
 }
 
 fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
@@ -952,6 +1651,118 @@ fn budget_name_count(path: &Path, name: &str) -> Result<i64, Box<dyn Error>> {
     )?)
 }
 
+async fn postgres_budget_amount_cents(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    name: &str,
+    sub_category: &str,
+) -> Result<i64, Box<dyn Error>> {
+    Ok(sqlx::query(
+        "
+        SELECT amount_cents
+        FROM budgets
+        WHERE user_id = $1
+          AND name = $2
+          AND COALESCE(sub_category, '') = $3
+        ORDER BY id DESC
+        LIMIT 1
+        ",
+    )
+    .bind(user_id)
+    .bind(name)
+    .bind(sub_category)
+    .fetch_one(pool)
+    .await?
+    .try_get("amount_cents")?)
+}
+
+async fn postgres_budget_row_count(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    name: &str,
+) -> Result<i64, Box<dyn Error>> {
+    Ok(
+        sqlx::query("SELECT COUNT(*) FROM budgets WHERE user_id = $1 AND name = $2")
+            .bind(user_id)
+            .bind(name)
+            .fetch_one(pool)
+            .await?
+            .try_get("count")?,
+    )
+}
+
+async fn postgres_budget_enabled(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    name: &str,
+) -> Result<bool, Box<dyn Error>> {
+    Ok(sqlx::query(
+        "
+        SELECT enabled
+        FROM budgets
+        WHERE user_id = $1 AND name = $2
+        ORDER BY id DESC
+        LIMIT 1
+        ",
+    )
+    .bind(user_id)
+    .bind(name)
+    .fetch_one(pool)
+    .await?
+    .try_get("enabled")?)
+}
+
+async fn insert_postgres_budget_bill(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    occurred_at: &str,
+    amount_cents: i64,
+    account_id: i64,
+    category_id: i64,
+    payload: &Value,
+) -> Result<i64, Box<dyn Error>> {
+    Ok(sqlx::query(
+        r#"
+        INSERT INTO bills (
+            user_id, occurred_at, amount_cents, direction, transaction_type,
+            account_id, source_account_id, category_id, merchant, description, standard_payload
+        )
+        VALUES ($1, $2::timestamptz, $3, 'expense', 'expense', $4, $4, $5, 'Cafe', 'lunch', $6)
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(occurred_at)
+    .bind(amount_cents)
+    .bind(account_id)
+    .bind(category_id)
+    .bind(payload)
+    .fetch_one(pool)
+    .await?
+    .try_get("id")?)
+}
+
+async fn postgres_budget_history_spent_cents(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    budget_id: i64,
+) -> Result<i64, Box<dyn Error>> {
+    Ok(sqlx::query(
+        r#"
+        SELECT spent_amount_cents
+        FROM budget_history
+        WHERE user_id = $1 AND budget_id = $2
+        ORDER BY calculated_at DESC, id DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(user_id)
+    .bind(budget_id)
+    .fetch_one(pool)
+    .await?
+    .try_get("spent_amount_cents")?)
+}
+
 fn json_request(method: Method, uri: &str, body: Value) -> Request<Body> {
     authed_request(method, uri, Body::from(body.to_string()))
 }
@@ -962,6 +1773,17 @@ fn authed_request(method: Method, uri: &str, body: Body) -> Request<Body> {
         .uri(uri)
         .header("content-type", "application/json")
         .header("x-user-id", TEST_USER_ID)
+        .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+        .body(body)
+        .expect("request builds")
+}
+
+fn authed_request_for_user(method: Method, uri: &str, body: Body, user_id: i64) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("content-type", "application/json")
+        .header("x-user-id", user_id.to_string())
         .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
         .body(body)
         .expect("request builds")

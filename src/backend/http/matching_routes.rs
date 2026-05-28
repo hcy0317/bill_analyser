@@ -20,16 +20,25 @@ use bill_analyser_core::{
     UserId,
 };
 use bill_analyser_db::{
-    accept_recurring_suggestion, apply_matching_candidate_action, count_recurring_suggestions,
-    create_manual_matching_pair, delete_manual_matching_pair,
-    detect_and_save_recurring_suggestions, get_bills_linked_to_recurring,
+    accept_postgres_recurring_suggestion, accept_recurring_suggestion,
+    apply_matching_candidate_action, count_postgres_recurring_suggestions,
+    count_recurring_suggestions, create_manual_matching_pair, create_postgres_manual_matching_pair,
+    delete_manual_matching_pair, delete_postgres_manual_matching_pair,
+    detect_and_save_postgres_recurring_suggestions, detect_and_save_recurring_suggestions,
+    get_bills_linked_to_recurring, get_postgres_bills_linked_to_recurring,
+    list_postgres_recent_bills_for_recurring_detection, list_postgres_recurring_suggestions,
     list_recent_bills_for_recurring_detection, list_reconciliation_candidates_payload,
     list_recurring_suggestions, query_calendar_events_payload,
     query_matching_bill_candidates_payload, query_matching_bill_feedback_payload,
     query_matching_pairs_payload, query_matching_session_candidates_payload,
-    query_net_worth_payload, reject_recurring_suggestion, ImportPreviewExpectedState,
+    query_net_worth_payload, query_postgres_calendar_events_payload,
+    query_postgres_matching_bill_candidates_payload, query_postgres_matching_bill_feedback_payload,
+    query_postgres_matching_pairs_payload, query_postgres_matching_session_candidates_payload,
+    query_postgres_net_worth_payload, query_postgres_reconciliation_candidates_payload,
+    reject_postgres_recurring_suggestion, reject_recurring_suggestion, ImportPreviewExpectedState,
     ImportPreviewLearningApply, ImportPreviewRecurringCandidate, MatchingRuntimeError,
-    PreviewMatchingActionRequest, ReconciliationCandidateFilters, SqliteRuntime,
+    PostgresRepositoryRuntime, PreviewMatchingActionRequest, ReconciliationCandidateFilters,
+    SqliteRuntime,
 };
 use chrono::NaiveDate;
 use serde::Deserialize;
@@ -189,6 +198,23 @@ async fn calendar_events_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "matching calendar") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match query_postgres_calendar_events_payload(
+            runtime.pool(),
+            user_id,
+            start_date,
+            end_date,
+        )
+        .await
+        {
+            Ok(data) => success_data(StatusCode::OK, json!(data)),
+            Err(error) => db_error_response(error),
+        };
+    }
     let runtime = match open_runtime(&state, "matching calendar") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -214,6 +240,16 @@ async fn networth_snapshot_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "networth") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match query_postgres_net_worth_payload(runtime.pool(), user_id).await {
+            Ok(snapshot) => success_data(StatusCode::OK, snapshot),
+            Err(error) => db_error_response(error),
+        };
+    }
     let runtime = match open_runtime(&state, "networth") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -248,15 +284,46 @@ async fn list_suggestions_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
-    let runtime = match open_runtime(&state, "recurring suggestions") {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
     let status = query
         .status
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "recurring suggestions") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let total =
+            match count_postgres_recurring_suggestions(runtime.pool(), user_id, status).await {
+                Ok(value) => value,
+                Err(error) => return db_error_response(error),
+            };
+        return match list_postgres_recurring_suggestions(
+            runtime.pool(),
+            user_id,
+            status,
+            limit,
+            offset,
+        )
+        .await
+        {
+            Ok(items) => success_data(
+                StatusCode::OK,
+                json!({
+                    "total": total,
+                    "items": serialize_recurring_suggestions(&items),
+                    "limit": limit,
+                    "offset": offset,
+                }),
+            ),
+            Err(error) => db_error_response(error),
+        };
+    }
+    let runtime = match open_runtime(&state, "recurring suggestions") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
     let total = match count_recurring_suggestions(runtime.connection(), user_id, status) {
         Ok(value) => value,
         Err(error) => return db_error_response(error),
@@ -290,6 +357,46 @@ async fn detect_suggestions_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "recurring suggestions") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let bills = match list_postgres_recent_bills_for_recurring_detection(
+            runtime.pool(),
+            user_id,
+            10_000,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => return db_error_response(error),
+        };
+        let linked_ids = match get_postgres_bills_linked_to_recurring(runtime.pool(), user_id).await
+        {
+            Ok(value) => value,
+            Err(error) => return db_error_response(error),
+        };
+        let patterns = detect_recurring_patterns(&bills, 3, &linked_ids);
+        return match detect_and_save_postgres_recurring_suggestions(
+            runtime.pool(),
+            user_id,
+            &patterns,
+        )
+        .await
+        {
+            Ok(summary) => success_data(
+                StatusCode::OK,
+                json!({
+                    "detected": patterns.len(),
+                    "created": summary.created,
+                    "updated": summary.updated,
+                    "skipped": summary.skipped,
+                }),
+            ),
+            Err(error) => db_error_response(error),
+        };
+    }
     let runtime = match open_runtime(&state, "recurring suggestions") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -334,6 +441,19 @@ async fn accept_suggestion_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "recurring suggestions") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match accept_postgres_recurring_suggestion(runtime.pool(), user_id, suggestion_id)
+            .await
+        {
+            Ok(Some(value)) => success_data(StatusCode::OK, value),
+            Ok(None) => not_found("Suggestion not found or already processed"),
+            Err(error) => db_error_response(error),
+        };
+    }
     let mut runtime = match open_runtime(&state, "recurring suggestions") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -361,6 +481,19 @@ async fn reject_suggestion_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "recurring suggestions") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match reject_postgres_recurring_suggestion(runtime.pool(), user_id, suggestion_id)
+            .await
+        {
+            Ok(true) => success_data(StatusCode::OK, json!({ "status": "rejected" })),
+            Ok(false) => not_found("Suggestion not found or already processed"),
+            Err(error) => db_error_response(error),
+        };
+    }
     let mut runtime = match open_runtime(&state, "recurring suggestions") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -388,6 +521,23 @@ async fn matching_session_candidates_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "matching") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match query_postgres_matching_session_candidates_payload(
+            runtime.pool(),
+            user_id,
+            &session_id,
+        )
+        .await
+        {
+            Ok(Some(data)) => success_data(StatusCode::OK, data),
+            Ok(None) => error_response(StatusCode::NOT_FOUND, "Import session not found"),
+            Err(error) => matching_error_response(error),
+        };
+    }
     let runtime = match open_runtime(&state, "matching") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -411,7 +561,7 @@ async fn matching_bill_candidates_handler(
         operation = "matching_bill_candidates_handler",
         "business operation entered"
     );
-    matching_bill_candidates_response(&state, &headers, bill_id)
+    matching_bill_candidates_response(&state, &headers, bill_id).await
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -443,13 +593,13 @@ async fn matching_candidates_handler(
         );
     }
     if let Some(session_id) = session_id {
-        return matching_session_candidates_response(&state, &headers, session_id);
+        return matching_session_candidates_response(&state, &headers, session_id).await;
     }
     let bill_id = match raw_bill_id.and_then(|value| value.parse::<i64>().ok()) {
         Some(value) if value > 0 => value,
         _ => return error_response(StatusCode::BAD_REQUEST, "Invalid billId"),
     };
-    matching_bill_candidates_response(&state, &headers, bill_id)
+    matching_bill_candidates_response(&state, &headers, bill_id).await
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -468,6 +618,19 @@ async fn matching_bill_feedback_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "matching") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match query_postgres_matching_bill_feedback_payload(runtime.pool(), user_id, bill_id)
+            .await
+        {
+            Ok(Some(data)) => success_data(StatusCode::OK, data),
+            Ok(None) => error_response(StatusCode::NOT_FOUND, "Bill not found"),
+            Err(error) => matching_error_response(error),
+        };
+    }
     let runtime = match open_runtime(&state, "matching") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -501,6 +664,17 @@ async fn reconciliation_candidates_handler(
         Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
     };
     let filters = reconciliation_filters_from_value(&parsed_query);
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "matching") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match query_postgres_reconciliation_candidates_payload(runtime.pool(), user_id).await
+        {
+            Ok(data) => success_data(StatusCode::OK, data),
+            Err(error) => matching_error_response(error),
+        };
+    }
     let runtime = match open_runtime(&state, "matching") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -523,6 +697,16 @@ async fn matching_pairs_handler(State(state): State<HttpAppState>, headers: Head
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "matching") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match query_postgres_matching_pairs_payload(runtime.pool(), user_id).await {
+            Ok(data) => success_data(StatusCode::OK, data),
+            Err(error) => matching_error_response(error),
+        };
+    }
     let runtime = match open_runtime(&state, "matching") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -556,6 +740,24 @@ async fn create_manual_pair_handler(
         Ok(value) => value,
         Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "matching") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match create_postgres_manual_matching_pair(
+            runtime.pool(),
+            user_id,
+            request.bill_id,
+            request.candidate_bill_id,
+            &request.pair_type,
+        )
+        .await
+        {
+            Ok(data) => success_data(StatusCode::OK, data),
+            Err(error) => matching_error_response(error),
+        };
+    }
     let mut runtime = match open_runtime(&state, "matching") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -589,6 +791,16 @@ async fn delete_manual_pair_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "matching") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match delete_postgres_manual_matching_pair(runtime.pool(), user_id, pair_id).await {
+            Ok(data) => success_data(StatusCode::OK, data),
+            Err(error) => matching_error_response(error),
+        };
+    }
     let mut runtime = match open_runtime(&state, "matching") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -695,6 +907,10 @@ async fn reconcile_history_handler(
     };
     let families = normalize_reconcile_history_families(object.get("families"));
     let allowed_families = families.iter().map(String::as_str).collect::<Vec<_>>();
+    if state.config.database_backend.uses_postgres() {
+        return reconcile_history_postgres_response(&state, user_id, &bill_ids, &allowed_families)
+            .await;
+    }
     let runtime = match open_runtime(&state, "matching") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -767,6 +983,90 @@ fn open_runtime(state: &HttpAppState, label: &'static str) -> RouteResult<Sqlite
         })
 }
 
+async fn reconcile_history_postgres_response(
+    state: &HttpAppState,
+    user_id: UserId,
+    bill_ids: &[i64],
+    allowed_families: &[&str],
+) -> Response {
+    let runtime = match open_postgres_runtime(state, "matching") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut results = Vec::new();
+    let mut candidate_count = 0usize;
+    let mut linked_pair_keys = BTreeSet::new();
+    for bill_id in bill_ids {
+        let payload = match query_postgres_matching_bill_candidates_payload(
+            runtime.pool(),
+            user_id,
+            *bill_id,
+        )
+        .await
+        {
+            Ok(Some(value)) => value,
+            Ok(None) => return error_response(StatusCode::NOT_FOUND, "Bill not found"),
+            Err(error) => return matching_error_response(error),
+        };
+        let linked_pair = payload
+            .get("linkedPair")
+            .filter(|value| value.is_object())
+            .filter(|value| pair_type_in_allowed_families(value, allowed_families))
+            .cloned()
+            .unwrap_or(Value::Null);
+        let candidates = payload
+            .get("candidates")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter(|candidate| {
+                        candidate_kind_in_allowed_families(candidate, allowed_families)
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        candidate_count += candidates.len();
+        if linked_pair.is_object() {
+            if let Some(pair_key) = matching_history_pair_key(&linked_pair) {
+                linked_pair_keys.insert(pair_key);
+            }
+        }
+        results.push(json!({
+            "billId": payload.get("billId").and_then(value_to_i64).unwrap_or(*bill_id),
+            "linkedPair": linked_pair,
+            "candidates": candidates,
+            "reconciliation": payload.get("reconciliation").cloned().unwrap_or(Value::Null),
+        }));
+    }
+    success_data(
+        StatusCode::OK,
+        json!({
+            "summary": {
+                "billCount": results.len(),
+                "candidateCount": candidate_count,
+                "linkedPairCount": linked_pair_keys.len(),
+            },
+            "results": results,
+        }),
+    )
+}
+
+fn open_postgres_runtime(
+    state: &HttpAppState,
+    label: &'static str,
+) -> RouteResult<PostgresRepositoryRuntime> {
+    state
+        .open_postgres_repository_runtime(label)
+        .map_err(|error| {
+            Box::new(error_response(
+                status_or_internal(error.http_status_code()),
+                error.public_message("Rust matching route PostgreSQL runtime DB error"),
+            ))
+        })
+}
+
 fn user_id_from_headers(headers: &HeaderMap, config: &HttpShellConfig) -> RouteResult<UserId> {
     resolve_user_id_from_headers(headers, config, TRUSTED_USER_SECRET_HEADER).map_err(|error| {
         Box::new(message_response(
@@ -818,7 +1118,7 @@ fn parse_offset(value: Option<&str>) -> RouteResult<usize> {
     }
 }
 
-fn matching_session_candidates_response(
+async fn matching_session_candidates_response(
     state: &HttpAppState,
     headers: &HeaderMap,
     session_id: &str,
@@ -827,6 +1127,23 @@ fn matching_session_candidates_response(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(state, "matching") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match query_postgres_matching_session_candidates_payload(
+            runtime.pool(),
+            user_id,
+            session_id,
+        )
+        .await
+        {
+            Ok(Some(data)) => success_data(StatusCode::OK, data),
+            Ok(None) => error_response(StatusCode::NOT_FOUND, "Import session not found"),
+            Err(error) => matching_error_response(error),
+        };
+    }
     let runtime = match open_runtime(state, "matching") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -838,7 +1155,7 @@ fn matching_session_candidates_response(
     }
 }
 
-fn matching_bill_candidates_response(
+async fn matching_bill_candidates_response(
     state: &HttpAppState,
     headers: &HeaderMap,
     bill_id: i64,
@@ -847,6 +1164,23 @@ fn matching_bill_candidates_response(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(state, "matching") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match query_postgres_matching_bill_candidates_payload(
+            runtime.pool(),
+            user_id,
+            bill_id,
+        )
+        .await
+        {
+            Ok(Some(data)) => success_data(StatusCode::OK, data),
+            Ok(None) => error_response(StatusCode::NOT_FOUND, "Bill not found"),
+            Err(error) => matching_error_response(error),
+        };
+    }
     let runtime = match open_runtime(state, "matching") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -879,6 +1213,12 @@ fn matching_candidate_action_response(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        return error_response(
+            StatusCode::CONFLICT,
+            "PostgreSQL matching candidate actions require a materialized candidate",
+        );
+    }
     let mut runtime = match open_runtime(state, "matching") {
         Ok(value) => value,
         Err(response) => return *response,

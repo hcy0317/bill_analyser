@@ -21,8 +21,8 @@ use bill_analyser_db::{
     ImportSessionStatusUpdate, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
 use bill_analyser_http::{
-    build_router, HttpAppState, HttpShellConfig, ImportRouteMode, WeaviateRuntimeConfig,
-    IMPORT_SKELETON_ROUTE_PATTERNS,
+    build_router, config::DatabaseBackend, HttpAppState, HttpShellConfig, ImportRouteMode,
+    WeaviateRuntimeConfig, IMPORT_SKELETON_ROUTE_PATTERNS,
 };
 use chrono::{Duration as ChronoDuration, Local};
 use ring::hmac;
@@ -6294,6 +6294,9 @@ fn runtime_router(fixture: &RuntimeFixture) -> Router {
         ImportRouteMode::ImportDbRuntime,
     )
     .expect("config")
+    .with_database_backend(DatabaseBackend::Sqlite)
+    .with_require_postgres_after_cutover(false)
+    .with_legacy_sqlite_runtime_for_tests()
     .with_sqlite_db_path(fixture.db_path.display().to_string())
     .with_trusted_user_header_secret(TEST_AUTH_SECRET)
     .with_auth_jwt_secret(TEST_AUTH_SECRET);
@@ -6312,6 +6315,9 @@ fn runtime_router_with_weaviate(
         ImportRouteMode::ImportDbRuntime,
     )
     .expect("config")
+    .with_database_backend(DatabaseBackend::Sqlite)
+    .with_require_postgres_after_cutover(false)
+    .with_legacy_sqlite_runtime_for_tests()
     .with_sqlite_db_path(fixture.db_path.display().to_string())
     .with_trusted_user_header_secret(TEST_AUTH_SECRET)
     .with_auth_jwt_secret(TEST_AUTH_SECRET)
@@ -6328,6 +6334,9 @@ fn runtime_router_without_auth_secret(fixture: &RuntimeFixture) -> Router {
         ImportRouteMode::ImportDbRuntime,
     )
     .expect("config")
+    .with_database_backend(DatabaseBackend::Sqlite)
+    .with_require_postgres_after_cutover(false)
+    .with_legacy_sqlite_runtime_for_tests()
     .with_sqlite_db_path(fixture.db_path.display().to_string());
     let state = HttpAppState::new(config).expect("http app state");
     build_router(state)

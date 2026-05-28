@@ -68,6 +68,31 @@ function Test-TruthyEnvValue {
     return @("1", "true", "yes", "on") -contains $normalized
 }
 
+function Resolve-ConfiguredPort {
+    param(
+        [string]$Name,
+        [string]$Value,
+        [int]$DefaultPort
+    )
+
+    if (-not $Value) {
+        return $DefaultPort
+    }
+
+    $port = 0
+    if ([int]::TryParse($Value, [ref]$port) -and $port -gt 0 -and $port -le 65535) {
+        return $port
+    }
+
+    Write-Host "Warning: Invalid $Name='$Value'; using default port $DefaultPort." -ForegroundColor Yellow
+    return $DefaultPort
+}
+
+function ConvertTo-UrlPart {
+    param([string]$Value)
+    return [System.Uri]::EscapeDataString($Value)
+}
+
 function Resolve-RequiredEndpoint {
     param(
         [string]$Name,
@@ -158,10 +183,15 @@ $DotenvSettings = Read-DotenvSettings -Path $DotenvPath
 foreach ($databaseEnvName in @(
     "BILL_ANALYSER_DATABASE_BACKEND",
     "BILL_ANALYSER_POSTGRES_URL",
+    "BILL_ANALYSER_POSTGRES_DB",
+    "BILL_ANALYSER_POSTGRES_USER",
+    "BILL_ANALYSER_POSTGRES_PASSWORD",
+    "BILL_ANALYSER_POSTGRES_PORT",
     "BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER",
     "BILL_ANALYSER_MIGRATION_MODE",
     "BILL_ANALYSER_WEAVIATE_ENABLED",
     "BILL_ANALYSER_WEAVIATE_ENDPOINT",
+    "BILL_ANALYSER_WEAVIATE_PORT",
     "BILL_ANALYSER_WEAVIATE_API_KEY",
     "BILL_ANALYSER_WEAVIATE_COLLECTION_PREFIX",
     "BILL_ANALYSER_WEAVIATE_TIMEOUT_MS",
@@ -179,10 +209,6 @@ if (-not $env:BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER) {
 }
 
 $RequirePostgresAfterCutover = Test-TruthyEnvValue -Value $env:BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER
-if (-not $RequirePostgresAfterCutover) {
-    Write-Host "Error: Rust backend now requires BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER=true." -ForegroundColor Red
-    exit 1
-}
 
 if (-not $env:BILL_ANALYSER_SQLITE_DB_PATH) {
     $env:BILL_ANALYSER_SQLITE_DB_PATH = $DefaultDbPath
@@ -197,14 +223,29 @@ if (-not $env:BILL_ANALYSER_DATABASE_BACKEND) {
 }
 
 $SelectedDatabaseBackend = $env:BILL_ANALYSER_DATABASE_BACKEND.Trim().ToLowerInvariant()
-if ($SelectedDatabaseBackend -notin @("postgres", "postgresql")) {
-    Write-Host "Error: Rust backend now requires BILL_ANALYSER_DATABASE_BACKEND=postgres." -ForegroundColor Red
+$UsePostgresRuntime = $SelectedDatabaseBackend -in @("postgres", "postgresql")
+if ($SelectedDatabaseBackend -notin @("sqlite", "sqlite_legacy", "legacy_sqlite", "postgres", "postgresql")) {
+    Write-Host "Error: Unsupported BILL_ANALYSER_DATABASE_BACKEND='$env:BILL_ANALYSER_DATABASE_BACKEND'." -ForegroundColor Red
     exit 1
 }
 
-if (-not $env:BILL_ANALYSER_POSTGRES_URL) {
-    $env:BILL_ANALYSER_POSTGRES_URL = "postgres://bill_analyser:bill_analyser_dev@127.0.0.1:5432/bill_analyser"
-    Write-Host "Info: BILL_ANALYSER_POSTGRES_URL not set; using local docker-compose default." -ForegroundColor Yellow
+if ($RequirePostgresAfterCutover -and -not $UsePostgresRuntime) {
+    Write-Host "Error: BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER=true requires BILL_ANALYSER_DATABASE_BACKEND=postgres." -ForegroundColor Red
+    exit 1
+}
+
+if (-not $UsePostgresRuntime) {
+    Write-Host "Error: Normal HTTP business runtime requires BILL_ANALYSER_DATABASE_BACKEND=postgres. SQLite is legacy migration/test input only." -ForegroundColor Red
+    exit 1
+}
+
+if ($UsePostgresRuntime -and -not $env:BILL_ANALYSER_POSTGRES_URL) {
+    $postgresPort = Resolve-ConfiguredPort -Name "BILL_ANALYSER_POSTGRES_PORT" -Value $env:BILL_ANALYSER_POSTGRES_PORT -DefaultPort 5432
+    $postgresDb = if ($env:BILL_ANALYSER_POSTGRES_DB) { $env:BILL_ANALYSER_POSTGRES_DB } else { "bill_analyser" }
+    $postgresUser = if ($env:BILL_ANALYSER_POSTGRES_USER) { $env:BILL_ANALYSER_POSTGRES_USER } else { "bill_analyser" }
+    $postgresPassword = if ($env:BILL_ANALYSER_POSTGRES_PASSWORD) { $env:BILL_ANALYSER_POSTGRES_PASSWORD } else { "bill_analyser_dev" }
+    $env:BILL_ANALYSER_POSTGRES_URL = "postgres://$(ConvertTo-UrlPart $postgresUser):$(ConvertTo-UrlPart $postgresPassword)@127.0.0.1:$postgresPort/$(ConvertTo-UrlPart $postgresDb)"
+    Write-Host "Info: BILL_ANALYSER_POSTGRES_URL not set; using local docker-compose port $postgresPort." -ForegroundColor Yellow
 }
 
 if (-not $env:BILL_ANALYSER_WEAVIATE_ENABLED) {
@@ -217,12 +258,13 @@ if (-not (Test-TruthyEnvValue -Value $env:BILL_ANALYSER_WEAVIATE_ENABLED)) {
 }
 
 if (-not $env:BILL_ANALYSER_WEAVIATE_ENDPOINT) {
-    $env:BILL_ANALYSER_WEAVIATE_ENDPOINT = "http://127.0.0.1:8088"
-    Write-Host "Info: BILL_ANALYSER_WEAVIATE_ENDPOINT not set; using local docker-compose default." -ForegroundColor Yellow
+    $weaviatePort = Resolve-ConfiguredPort -Name "BILL_ANALYSER_WEAVIATE_PORT" -Value $env:BILL_ANALYSER_WEAVIATE_PORT -DefaultPort 8088
+    $env:BILL_ANALYSER_WEAVIATE_ENDPOINT = "http://127.0.0.1:$weaviatePort"
+    Write-Host "Info: BILL_ANALYSER_WEAVIATE_ENDPOINT not set; using local docker-compose port $weaviatePort." -ForegroundColor Yellow
 }
 
-$PostgresEndpoint = Resolve-RequiredEndpoint -Name "Postgres" -Url $env:BILL_ANALYSER_POSTGRES_URL -DefaultPort 5432
 $WeaviateEndpoint = Resolve-RequiredEndpoint -Name "Weaviate" -Url $env:BILL_ANALYSER_WEAVIATE_ENDPOINT -DefaultPort 8080
+$PostgresEndpoint = Resolve-RequiredEndpoint -Name "Postgres" -Url $env:BILL_ANALYSER_POSTGRES_URL -DefaultPort 5432
 Assert-RequiredRuntimeService -Endpoint $PostgresEndpoint
 Assert-RequiredRuntimeService -Endpoint $WeaviateEndpoint
 

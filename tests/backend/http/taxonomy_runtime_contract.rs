@@ -1,24 +1,1702 @@
-use std::{error::Error, path::Path, time::Duration};
+use std::{env, error::Error, path::Path, time::Duration};
 
 use axum::{
     body::{to_bytes, Body},
     http::{Method, Request, StatusCode},
     Router,
 };
+use bill_analyser_db::run_postgres_migrations;
 use bill_analyser_http::{
-    build_router, HttpAppState, HttpShellConfig, ImportRouteMode, TAXONOMY_ACCOUNT_ROUTE_PATTERNS,
-    TAXONOMY_ACCOUNT_RULE_ROUTE_PATTERNS, TAXONOMY_CATEGORY_ROUTE_PATTERNS,
-    TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS, TAXONOMY_RULE_CENTER_ROUTE_PATTERNS,
-    TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS, TAXONOMY_TAG_ROUTE_PATTERNS,
-    TAXONOMY_TEMPLATE_ROUTE_PATTERNS,
+    build_router, config::DatabaseBackend, HttpAppState, HttpShellConfig, ImportRouteMode,
+    TAXONOMY_ACCOUNT_ROUTE_PATTERNS, TAXONOMY_ACCOUNT_RULE_ROUTE_PATTERNS,
+    TAXONOMY_CATEGORY_ROUTE_PATTERNS, TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS,
+    TAXONOMY_RULE_CENTER_ROUTE_PATTERNS, TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS,
+    TAXONOMY_TAG_ROUTE_PATTERNS, TAXONOMY_TEMPLATE_ROUTE_PATTERNS,
 };
 use rusqlite::Connection;
 use serde_json::{json, Value};
+use sqlx::{postgres::PgPoolOptions, Row};
 use tempfile::TempDir;
 use tower::ServiceExt;
 
 const TEST_AUTH_SECRET: &str = "taxonomy-route-secret";
 const TEST_USER_ID: &str = "42";
+
+#[tokio::test]
+async fn taxonomy_postgres_runtime_serves_master_data_without_sqlite_fallback(
+) -> Result<(), Box<dyn Error>> {
+    let Ok(postgres_url) = env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+        return Ok(());
+    };
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&postgres_url)
+        .await?;
+    run_postgres_migrations(&pool).await?;
+
+    let unique = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
+    let user_id: i64 =
+        sqlx::query("INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id")
+            .bind(format!("taxonomy-pg-{unique}"))
+            .bind(format!("taxonomy-pg-{unique}@example.test"))
+            .fetch_one(&pool)
+            .await?
+            .try_get("id")?;
+    let account_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO accounts (
+            user_id, name, account_type, currency, balance_cents, is_active, display_order, metadata
+        )
+        VALUES ($1, $2, $3, 'CNY', 12345, false, 2, $4)
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind("Pg Wallet")
+    .bind("1")
+    .bind(json!({
+        "category": 7,
+        "icon": "mdi-wallet",
+        "color": "#336699",
+        "comment": "postgres account",
+        "aliases": ["pg-main"]
+    }))
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    sqlx::query(
+        r#"
+        INSERT INTO accounts (
+            user_id, name, account_type, currency, balance_cents, is_active, display_order, metadata
+        )
+        VALUES ($1, $2, $3, 'CNY', 125, true, 1, $4)
+        "#,
+    )
+    .bind(user_id)
+    .bind("Pg Sub")
+    .bind("1")
+    .bind(json!({"parent_id": account_id}))
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO categories (
+            user_id, name, category_type, path, icon, color, display_order, is_active, metadata
+        )
+        VALUES ($1, '餐饮', '3', '餐饮', 'mdi-food', '#ffcc00', 1, true, $2),
+               ($1, '午餐', '3', '餐饮/午餐', 'mdi-lunch', '#ffaa00', 2, false, $3)
+        "#,
+    )
+    .bind(user_id)
+    .bind(json!({"description": "food", "keywords": "eat"}))
+    .bind(json!({"description": "lunch", "keywords": "meal"}))
+    .execute(&pool)
+    .await?;
+    let tag_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO tags (user_id, name, color, display_order, metadata)
+        VALUES ($1, 'pg-tag', '#123456', 1, $2)
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(json!({"icon": "mdi-tag", "hidden": true}))
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    sqlx::query(
+        r#"
+        INSERT INTO transaction_templates (
+            user_id, template_type, name, transaction_type, category_id, source_account_id,
+            destination_account_id, source_amount_minor_units, destination_amount_minor_units,
+            hide_amount, tag_ids, comment, display_order, hidden, utc_offset
+        )
+        VALUES ($1, 1, 'Pg Template', '支出', '20', $2, '0', 1999, 0, false, $3, 'postgres template', 3, false, 480)
+        "#,
+    )
+    .bind(user_id)
+    .bind(account_id.to_string())
+    .bind(json!([tag_id.to_string()]))
+    .execute(&pool)
+    .await?;
+
+    let direct_accounts =
+        bill_analyser_db::taxonomy::postgres_reads::list_postgres_accounts(&pool, user_id).await;
+    assert!(
+        direct_accounts.is_ok(),
+        "direct postgres account projection failed: {direct_accounts:?}"
+    );
+
+    let app = postgres_runtime_router(&postgres_url)?;
+    let accounts = get_result(
+        app.clone()
+            .oneshot(authed_request_for_user(
+                Method::GET,
+                "/api/accounts?visible_only=false",
+                Body::empty(),
+                user_id,
+            ))
+            .await?,
+    )
+    .await;
+    assert_eq!(accounts[0]["name"], "Pg Wallet");
+    assert_eq!(accounts[0]["balance"], 12345);
+    assert_eq!(accounts[0]["hidden"], true);
+    assert_eq!(accounts[0]["subAccounts"][0]["name"], "Pg Sub");
+
+    let categories = get_result(
+        app.clone()
+            .oneshot(authed_request_for_user(
+                Method::GET,
+                "/api/categories",
+                Body::empty(),
+                user_id,
+            ))
+            .await?,
+    )
+    .await;
+    assert_eq!(categories["3"][0]["name"], "餐饮");
+    assert_eq!(categories["3"][0]["subCategories"][0]["name"], "午餐");
+    assert_eq!(categories["3"][0]["subCategories"][0]["visible"], false);
+
+    let tags = get_result(
+        app.clone()
+            .oneshot(authed_request_for_user(
+                Method::GET,
+                "/api/tags",
+                Body::empty(),
+                user_id,
+            ))
+            .await?,
+    )
+    .await;
+    assert_eq!(tags[0]["name"], "pg-tag");
+    assert_eq!(tags[0]["icon"], "mdi-tag");
+    assert_eq!(tags[0]["visible"], false);
+
+    let templates = get_result(
+        app.oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/templates?templateType=1",
+            Body::empty(),
+            user_id,
+        ))
+        .await?,
+    )
+    .await;
+    assert_eq!(templates[0]["name"], "Pg Template");
+    assert_eq!(templates[0]["sourceAmount"], 1999.0);
+    assert_eq!(templates[0]["tagIds"], json!([tag_id.to_string()]));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn taxonomy_postgres_runtime_serves_category_mutations_without_sqlite_fallback(
+) -> Result<(), Box<dyn Error>> {
+    let Ok(postgres_url) = env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+        return Ok(());
+    };
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&postgres_url)
+        .await?;
+    run_postgres_migrations(&pool).await?;
+
+    let unique = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
+    let user_id: i64 =
+        sqlx::query("INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id")
+            .bind(format!("taxonomy-pg-category-{unique}"))
+            .bind(format!("taxonomy-pg-category-{unique}@example.test"))
+            .fetch_one(&pool)
+            .await?
+            .try_get("id")?;
+    let app = postgres_runtime_router(&postgres_url)?;
+    let main_name = format!("pg-api-category-{unique}");
+    let sub_name = format!("pg-api-sub-{unique}");
+    let updated_sub_name = format!("pg-api-sub-updated-{unique}");
+
+    let create_parent = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/categories",
+            json!({
+                "name": main_name,
+                "type": 3,
+                "comment": "postgres category",
+                "keywords": "coffee",
+                "icon": "mdi-food",
+                "color": "#ffaa00",
+                "visible": true,
+                "displayOrder": 5
+            }),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(create_parent.status(), StatusCode::CREATED);
+    let create_parent_body = read_json(create_parent).await;
+    assert_eq!(create_parent_body["result"]["name"], main_name);
+    assert_eq!(create_parent_body["result"]["comment"], "postgres category");
+    let parent_id = create_parent_body["result"]["id"]
+        .as_str()
+        .expect("parent category id")
+        .parse::<i64>()?;
+    let parent_row = sqlx::query(
+        "SELECT path, display_order, is_active, metadata FROM categories WHERE id = $1",
+    )
+    .bind(parent_id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(parent_row.try_get::<String, _>("path")?, main_name);
+    assert_eq!(parent_row.try_get::<i32, _>("display_order")?, 5);
+    assert!(parent_row.try_get::<bool, _>("is_active")?);
+    let parent_metadata: Value = parent_row.try_get("metadata")?;
+    assert_eq!(parent_metadata["description"], "postgres category");
+    assert_eq!(parent_metadata["keywords"], "coffee");
+
+    let create_child = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/categories",
+            json!({
+                "name": sub_name,
+                "parentId": parent_id.to_string(),
+                "comment": "postgres subcategory",
+                "visible": false,
+                "displayOrder": 6
+            }),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(create_child.status(), StatusCode::OK);
+    let create_child_body = read_json(create_child).await;
+    assert_eq!(
+        create_child_body["result"]["parentId"],
+        parent_id.to_string()
+    );
+    assert_eq!(create_child_body["result"]["visible"], false);
+    let child_id = create_child_body["result"]["id"]
+        .as_str()
+        .expect("child category id")
+        .parse::<i64>()?;
+    let child_row = sqlx::query("SELECT parent_id, path, is_active FROM categories WHERE id = $1")
+        .bind(child_id)
+        .fetch_one(&pool)
+        .await?;
+    assert_eq!(
+        child_row.try_get::<Option<i64>, _>("parent_id")?,
+        Some(parent_id)
+    );
+    assert_eq!(
+        child_row.try_get::<String, _>("path")?,
+        format!("{main_name}/{sub_name}")
+    );
+    assert!(!child_row.try_get::<bool, _>("is_active")?);
+
+    let get_child = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            &format!("/api/categories/{child_id}"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(get_child.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(get_child).await["result"]["parentId"],
+        parent_id.to_string()
+    );
+
+    let virtual_main = format!("pg-virtual-{unique}");
+    let virtual_child_name = format!("pg-virtual-child-{unique}");
+    let create_virtual_child = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/categories",
+            json!({
+                "name": virtual_child_name,
+                "parentId": format!("virtual_{virtual_main}"),
+                "displayOrder": 7
+            }),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(create_virtual_child.status(), StatusCode::OK);
+    let virtual_child_id = read_json(create_virtual_child).await["result"]["id"]
+        .as_str()
+        .expect("virtual child category id")
+        .parse::<i64>()?;
+    let get_virtual_child = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            &format!("/api/categories/{virtual_child_id}"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(get_virtual_child.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(get_virtual_child).await["result"]["parentId"],
+        format!("virtual_{virtual_main}")
+    );
+
+    let renamed_virtual_main = format!("pg-virtual-renamed-{unique}");
+    let update_virtual_parent = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::PUT,
+            &format!("/api/categories/virtual_{virtual_main}"),
+            json!({
+                "name": renamed_virtual_main,
+                "type": 3,
+                "visible": false,
+                "displayOrder": 14
+            }),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(update_virtual_parent.status(), StatusCode::OK);
+    let update_virtual_parent_body = read_json(update_virtual_parent).await;
+    assert_eq!(
+        update_virtual_parent_body["result"]["name"],
+        renamed_virtual_main
+    );
+    assert_eq!(update_virtual_parent_body["result"]["hidden"], true);
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT path FROM categories WHERE id = $1")
+            .bind(virtual_child_id)
+            .fetch_one(&pool)
+            .await?,
+        format!("{renamed_virtual_main}/{virtual_child_name}")
+    );
+
+    let update_child = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::PUT,
+            &format!("/api/categories/{child_id}"),
+            json!({
+                "name": updated_sub_name,
+                "comment": "postgres updated",
+                "keywords": "lunch",
+                "visible": true,
+                "displayOrder": 2
+            }),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(update_child.status(), StatusCode::OK);
+    let update_child_body = read_json(update_child).await;
+    assert_eq!(update_child_body["result"]["name"], updated_sub_name);
+    assert_eq!(update_child_body["result"]["visible"], true);
+    let updated_child_row = sqlx::query(
+        "SELECT path, display_order, is_active, metadata FROM categories WHERE id = $1",
+    )
+    .bind(child_id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(
+        updated_child_row.try_get::<String, _>("path")?,
+        format!("{main_name}/{updated_sub_name}")
+    );
+    assert_eq!(updated_child_row.try_get::<i32, _>("display_order")?, 2);
+    assert!(updated_child_row.try_get::<bool, _>("is_active")?);
+    let updated_metadata: Value = updated_child_row.try_get("metadata")?;
+    assert_eq!(updated_metadata["description"], "postgres updated");
+    assert_eq!(updated_metadata["keywords"], "lunch");
+
+    let move_response = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/categories/move",
+            json!({"newDisplayOrders": [
+                {"id": parent_id, "displayOrder": 9},
+                {"id": child_id, "displayOrder": 1}
+            ]}),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(move_response.status(), StatusCode::OK);
+    assert_eq!(
+        sqlx::query_scalar::<_, i32>("SELECT display_order FROM categories WHERE id = $1")
+            .bind(child_id)
+            .fetch_one(&pool)
+            .await?,
+        1
+    );
+
+    let batch_main = format!("pg-batch-{unique}");
+    let batch_sub = format!("pg-batch-sub-{unique}");
+    let batch_response = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/categories/batch",
+            json!({"categories": [{
+                "name": batch_main,
+                "type": 3,
+                "subCategories": [{"name": batch_sub, "displayOrder": 4}]
+            }]}),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(batch_response.status(), StatusCode::OK);
+    assert!(
+        serde_json::to_string(&read_json(batch_response).await)?.contains(&batch_sub),
+        "batch response should include created subcategory"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM categories WHERE user_id = $1 AND path = $2",
+        )
+        .bind(user_id)
+        .bind(format!("{batch_main}/{batch_sub}"))
+        .fetch_one(&pool)
+        .await?,
+        1
+    );
+
+    let import_main = format!("pg-import-{unique}");
+    let import_response = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/categories/import",
+            json!({"categories": [
+                {"main_category": import_main, "sub_category": "", "description": "import parent", "priority": 10},
+                {"main_category": import_main, "sub_category": "child", "priority": 11},
+                {"sub_category": "missing-main"}
+            ]}),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(import_response.status(), StatusCode::OK);
+    let import_body = read_json(import_response).await;
+    assert_eq!(import_body["result"]["imported"], 2);
+    assert_eq!(import_body["result"]["skipped"], 1);
+
+    let import_update = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/categories/import",
+            json!({"result": [{
+                "main_category": import_main,
+                "sub_category": "child",
+                "priority": 12
+            }]}),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(import_update.status(), StatusCode::OK);
+    assert_eq!(read_json(import_update).await["result"]["updated"], 1);
+
+    let export_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/categories/export",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(export_response.status(), StatusCode::OK);
+    let export_body = read_json(export_response).await;
+    let exported_categories = export_body["result"].as_array().expect("export categories");
+    assert!(exported_categories
+        .iter()
+        .any(|category| category["main_category"] == main_name));
+    assert!(exported_categories
+        .iter()
+        .all(|category| category.get("id").is_none()));
+
+    sqlx::query(
+        r#"
+        INSERT INTO bills (
+            user_id, occurred_at, amount_cents, direction, transaction_type,
+            category_id, merchant, description
+        )
+        VALUES ($1, '2026-01-10T12:00:00Z', 1234, 'expense', 'expense', $2, 'store', 'one'),
+               ($1, '2026-01-11T12:00:00Z', 566, 'expense', 'expense', $2, 'store', 'two')
+        "#,
+    )
+    .bind(user_id)
+    .bind(child_id)
+    .execute(&pool)
+    .await?;
+    let statistics_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/categories/statistics?start_date=2026-01-01&end_date=2026-01-31",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(statistics_response.status(), StatusCode::OK);
+    let statistics_body = read_json(statistics_response).await;
+    assert_eq!(
+        statistics_body["result"][main_name.as_str()]["total_amount"],
+        18.0
+    );
+    assert_eq!(statistics_body["result"][main_name.as_str()]["count"], 2);
+    assert_eq!(
+        statistics_body["result"][main_name.as_str()]["sub_categories"][updated_sub_name.as_str()]
+            ["total_amount"],
+        18.0
+    );
+
+    let renamed_main_name = format!("pg-api-category-renamed-{unique}");
+    let rename_parent = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::PUT,
+            &format!("/api/categories/{parent_id}"),
+            json!({"name": renamed_main_name, "comment": "renamed parent"}),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(rename_parent.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(rename_parent).await["result"]["name"],
+        renamed_main_name
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT path FROM categories WHERE id = $1")
+            .bind(child_id)
+            .fetch_one(&pool)
+            .await?,
+        format!("{renamed_main_name}/{updated_sub_name}")
+    );
+
+    let delete_parent = app
+        .oneshot(authed_request_for_user(
+            Method::DELETE,
+            &format!("/api/categories/{parent_id}"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(delete_parent.status(), StatusCode::OK);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM categories WHERE user_id = $1 AND (path = $2 OR path LIKE $3)",
+        )
+        .bind(user_id)
+        .bind(&renamed_main_name)
+        .bind(format!("{renamed_main_name}/%"))
+        .fetch_one(&pool)
+        .await?,
+        0
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn taxonomy_postgres_runtime_serves_tag_template_mutations_without_sqlite_fallback(
+) -> Result<(), Box<dyn Error>> {
+    let Ok(postgres_url) = env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+        return Ok(());
+    };
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&postgres_url)
+        .await?;
+    run_postgres_migrations(&pool).await?;
+
+    let unique = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
+    let user_id: i64 =
+        sqlx::query("INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id")
+            .bind(format!("taxonomy-pg-write-{unique}"))
+            .bind(format!("taxonomy-pg-write-{unique}@example.test"))
+            .fetch_one(&pool)
+            .await?
+            .try_get("id")?;
+    let app = postgres_runtime_router(&postgres_url)?;
+
+    let create_tag = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/tags",
+            json!({
+                "name": "pg-api-tag",
+                "color": "#456789",
+                "icon": "mdi-api",
+                "hidden": true,
+                "displayOrder": 5
+            }),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(create_tag.status(), StatusCode::CREATED);
+    let create_tag_body = read_json(create_tag).await;
+    assert_eq!(create_tag_body["result"]["name"], "pg-api-tag");
+    assert_eq!(create_tag_body["result"]["visible"], false);
+    let tag_id = create_tag_body["result"]["id"]
+        .as_str()
+        .expect("tag id")
+        .parse::<i64>()?;
+    let tag_metadata: Value = sqlx::query("SELECT metadata FROM tags WHERE id = $1")
+        .bind(tag_id)
+        .fetch_one(&pool)
+        .await?
+        .try_get("metadata")?;
+    assert_eq!(tag_metadata["icon"], "mdi-api");
+    assert_eq!(tag_metadata["hidden"], true);
+
+    let update_tag = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::PUT,
+            &format!("/api/tags/{tag_id}"),
+            json!({
+                "name": "pg-api-tag-updated",
+                "hidden": false,
+                "displayOrder": 8
+            }),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(update_tag.status(), StatusCode::OK);
+    let update_tag_body = read_json(update_tag).await;
+    assert_eq!(update_tag_body["result"]["name"], "pg-api-tag-updated");
+    assert_eq!(update_tag_body["result"]["visible"], true);
+    assert_eq!(update_tag_body["result"]["displayOrder"], 8);
+
+    let second_tag = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/tags",
+            json!({"name": "pg-api-tag-second", "displayOrder": 9}),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(second_tag.status(), StatusCode::CREATED);
+    let second_tag_id = read_json(second_tag).await["result"]["id"]
+        .as_str()
+        .expect("second tag id")
+        .parse::<i64>()?;
+    let order_response = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::PUT,
+            "/api/tags/display-orders",
+            json!({"newDisplayOrders": [
+                {"id": tag_id, "displayOrder": 2},
+                {"id": second_tag_id, "displayOrder": 1}
+            ]}),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(order_response.status(), StatusCode::OK);
+    assert_eq!(
+        sqlx::query("SELECT display_order FROM tags WHERE id = $1")
+            .bind(second_tag_id)
+            .fetch_one(&pool)
+            .await?
+            .try_get::<i32, _>("display_order")?,
+        1
+    );
+
+    let create_template = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/templates",
+            json!({
+                "templateType": 1,
+                "name": "pg-api-template",
+                "type": 3,
+                "categoryId": "31",
+                "sourceAccountId": "10",
+                "destinationAccountId": "0",
+                "sourceAmount": 1850,
+                "destinationAmount": 0,
+                "hideAmount": false,
+                "tagIds": [tag_id.to_string()],
+                "comment": "postgres write",
+                "hidden": false,
+                "utcOffset": 480
+            }),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(create_template.status(), StatusCode::CREATED);
+    let create_template_body = read_json(create_template).await;
+    assert_eq!(create_template_body["result"]["name"], "pg-api-template");
+    assert_eq!(create_template_body["result"]["sourceAmount"], 1850);
+    assert_eq!(
+        create_template_body["result"]["tagIds"],
+        json!([tag_id.to_string()])
+    );
+    let template_id = create_template_body["result"]["id"]
+        .as_str()
+        .expect("template id")
+        .parse::<i64>()?;
+    let template_row = sqlx::query(
+        "SELECT source_amount_minor_units, tag_ids FROM transaction_templates WHERE id = $1",
+    )
+    .bind(template_id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(
+        template_row.try_get::<i64, _>("source_amount_minor_units")?,
+        1850
+    );
+    assert_eq!(
+        template_row.try_get::<Value, _>("tag_ids")?,
+        json!([tag_id.to_string()])
+    );
+
+    let update_template = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::PUT,
+            &format!("/api/templates/{template_id}?templateType=1"),
+            json!({
+                "name": "pg-api-template-updated",
+                "sourceAmount": 2000,
+                "tagIds": [second_tag_id.to_string()],
+                "hidden": true,
+                "displayOrder": 4
+            }),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(update_template.status(), StatusCode::OK);
+    let update_template_body = read_json(update_template).await;
+    assert_eq!(
+        update_template_body["result"]["name"],
+        "pg-api-template-updated"
+    );
+    assert_eq!(update_template_body["result"]["sourceAmount"], 2000);
+    assert_eq!(
+        update_template_body["result"]["tagIds"],
+        json!([second_tag_id.to_string()])
+    );
+    assert_eq!(update_template_body["result"]["hidden"], true);
+
+    let order_templates = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::PUT,
+            "/api/templates/display-orders?templateType=1",
+            json!({"newDisplayOrders": [{"id": template_id, "displayOrder": 1}]}),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(order_templates.status(), StatusCode::OK);
+    assert_eq!(
+        sqlx::query("SELECT display_order FROM transaction_templates WHERE id = $1")
+            .bind(template_id)
+            .fetch_one(&pool)
+            .await?
+            .try_get::<i32, _>("display_order")?,
+        1
+    );
+
+    let delete_template = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::DELETE,
+            &format!("/api/templates/{template_id}?templateType=1"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(delete_template.status(), StatusCode::OK);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM transaction_templates WHERE id = $1")
+            .bind(template_id)
+            .fetch_one(&pool)
+            .await?,
+        0
+    );
+
+    let delete_tag = app
+        .oneshot(authed_request_for_user(
+            Method::DELETE,
+            &format!("/api/tags/{tag_id}"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(delete_tag.status(), StatusCode::OK);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tags WHERE id = $1")
+            .bind(tag_id)
+            .fetch_one(&pool)
+            .await?,
+        0
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn taxonomy_postgres_runtime_serves_account_mutations_without_sqlite_fallback(
+) -> Result<(), Box<dyn Error>> {
+    let Ok(postgres_url) = env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+        return Ok(());
+    };
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&postgres_url)
+        .await?;
+    run_postgres_migrations(&pool).await?;
+
+    let unique = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
+    let user_id: i64 =
+        sqlx::query("INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id")
+            .bind(format!("taxonomy-pg-account-{unique}"))
+            .bind(format!("taxonomy-pg-account-{unique}@example.test"))
+            .fetch_one(&pool)
+            .await?
+            .try_get("id")?;
+    let app = postgres_runtime_router(&postgres_url)?;
+
+    let create_response = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/accounts",
+            json!({
+                "name": format!("pg-api-account-{unique}"),
+                "type": 1,
+                "category": 2,
+                "currency": "CNY",
+                "balance": 2500,
+                "aliases": [" 主账户 ", ""],
+                "visible": true,
+                "displayOrder": 5,
+                "subAccounts": [{
+                    "name": format!("pg-api-child-{unique}"),
+                    "type": 1,
+                    "balance": 125,
+                    "visible": false
+                }]
+            }),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+    let create_body = read_json(create_response).await;
+    assert_eq!(create_body["success"], true);
+    assert_eq!(
+        create_body["result"]["name"],
+        format!("pg-api-account-{unique}")
+    );
+    assert_eq!(create_body["result"]["balance"], 2500);
+    assert_eq!(create_body["result"]["aliases"], json!(["主账户"]));
+    assert_eq!(create_body["result"]["subAccounts"][0]["balance"], 125);
+    assert_eq!(
+        create_body["result"]["subAccounts"][0]["parentId"],
+        create_body["result"]["id"]
+    );
+    let account_id = create_body["result"]["id"]
+        .as_str()
+        .expect("account id")
+        .parse::<i64>()?;
+    let child_id = create_body["result"]["subAccounts"][0]["id"]
+        .as_str()
+        .expect("child account id")
+        .parse::<i64>()?;
+
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT balance_cents FROM accounts WHERE id = $1 AND user_id = $2",
+        )
+        .bind(account_id)
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await?,
+        2500
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT balance_cents FROM accounts WHERE id = $1 AND user_id = $2",
+        )
+        .bind(child_id)
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await?,
+        125
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM accounts WHERE user_id = $1 AND metadata->>'parent_id' = $2",
+        )
+        .bind(user_id)
+        .bind(account_id.to_string())
+        .fetch_one(&pool)
+        .await?,
+        1
+    );
+
+    let get_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            &format!("/api/accounts/{account_id}"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(get_response.status(), StatusCode::OK);
+    let get_body = read_json(get_response).await;
+    assert_eq!(
+        get_body["result"]["subAccounts"][0]["name"],
+        format!("pg-api-child-{unique}")
+    );
+
+    let update_response = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::PUT,
+            &format!("/api/accounts/{account_id}"),
+            json!({
+                "name": format!("pg-api-account-updated-{unique}"),
+                "type": 1,
+                "category": 2,
+                "currency": "CNY",
+                "balance": 3099,
+                "aliases": "备用, 主账户",
+                "hidden": true,
+                "displayOrder": 2,
+                "subAccounts": [{
+                    "id": child_id,
+                    "name": format!("pg-api-child-updated-{unique}"),
+                    "type": 1,
+                    "balance": 333,
+                    "visible": true
+                }]
+            }),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(update_response.status(), StatusCode::OK);
+    let update_body = read_json(update_response).await;
+    assert_eq!(
+        update_body["result"]["name"],
+        format!("pg-api-account-updated-{unique}")
+    );
+    assert_eq!(update_body["result"]["balance"], 3099);
+    assert_eq!(update_body["result"]["aliases"], json!(["备用", "主账户"]));
+    assert_eq!(update_body["result"]["hidden"], true);
+    assert_eq!(
+        update_body["result"]["subAccounts"][0]["name"],
+        format!("pg-api-child-updated-{unique}")
+    );
+    assert_eq!(update_body["result"]["subAccounts"][0]["balance"], 333);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT balance_cents FROM accounts WHERE id = $1 AND user_id = $2",
+        )
+        .bind(account_id)
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await?,
+        3099
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT balance_cents FROM accounts WHERE id = $1 AND user_id = $2",
+        )
+        .bind(child_id)
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await?,
+        333
+    );
+
+    let second_response = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/accounts",
+            json!({
+                "name": format!("pg-api-account-second-{unique}"),
+                "type": 1,
+                "balance": 0,
+                "displayOrder": 9
+            }),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(second_response.status(), StatusCode::CREATED);
+    let second_id = read_json(second_response).await["result"]["id"]
+        .as_str()
+        .expect("second account id")
+        .parse::<i64>()?;
+
+    let order_response = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::PUT,
+            "/api/accounts/display-orders",
+            json!({"newDisplayOrders": [
+                {"id": account_id, "displayOrder": 7},
+                {"id": second_id, "displayOrder": 1}
+            ]}),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(order_response.status(), StatusCode::OK);
+    assert_eq!(
+        sqlx::query_scalar::<_, i32>("SELECT display_order FROM accounts WHERE id = $1")
+            .bind(second_id)
+            .fetch_one(&pool)
+            .await?,
+        1
+    );
+
+    let delete_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::DELETE,
+            &format!("/api/accounts/{account_id}"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(delete_response.status(), StatusCode::OK);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM accounts WHERE user_id = $1 AND id IN ($2, $3)",
+        )
+        .bind(user_id)
+        .bind(account_id)
+        .bind(child_id)
+        .fetch_one(&pool)
+        .await?,
+        0
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn taxonomy_postgres_runtime_serves_rule_mutations_without_sqlite_fallback(
+) -> Result<(), Box<dyn Error>> {
+    let Ok(postgres_url) = env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+        return Ok(());
+    };
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&postgres_url)
+        .await?;
+    run_postgres_migrations(&pool).await?;
+
+    let unique = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
+    let user_id: i64 =
+        sqlx::query("INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id")
+            .bind(format!("taxonomy-pg-rules-{unique}"))
+            .bind(format!("taxonomy-pg-rules-{unique}@example.test"))
+            .fetch_one(&pool)
+            .await?
+            .try_get("id")?;
+    let other_user_id: i64 =
+        sqlx::query("INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id")
+            .bind(format!("taxonomy-pg-rules-other-{unique}"))
+            .bind(format!("taxonomy-pg-rules-other-{unique}@example.test"))
+            .fetch_one(&pool)
+            .await?
+            .try_get("id")?;
+    let main_name = format!("pg-rules-main-{unique}");
+    let sub_name = format!("pg-rules-sub-{unique}");
+    let parent_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO categories (user_id, name, category_type, path, display_order)
+        VALUES ($1, $2, '3', $2, 1)
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(&main_name)
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let category_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO categories (user_id, parent_id, name, category_type, path, display_order)
+        VALUES ($1, $2, $3, '3', $4, 2)
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(parent_id)
+    .bind(&sub_name)
+    .bind(format!("{main_name}/{sub_name}"))
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let other_category_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO categories (user_id, name, category_type, path, display_order)
+        VALUES ($1, 'other-category', '3', 'other-category', 1)
+        RETURNING id
+        "#,
+    )
+    .bind(other_user_id)
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+
+    let account_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO accounts (user_id, name, account_type, balance_cents, metadata)
+        VALUES ($1, 'pg-rules-account', '1', 0, $2)
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(json!({"aliases": ["招商别名", ""]}))
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    sqlx::query(
+        r#"
+        INSERT INTO accounts (user_id, name, account_type, is_active, metadata)
+        VALUES ($1, 'pg-rules-hidden-account', '1', false, $2)
+        "#,
+    )
+    .bind(user_id)
+    .bind(json!({"aliases": ["隐藏别名"]}))
+    .execute(&pool)
+    .await?;
+    let other_account_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO accounts (user_id, name, account_type, balance_cents)
+        VALUES ($1, 'pg-rules-other-account', '1', 0)
+        RETURNING id
+        "#,
+    )
+    .bind(other_user_id)
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+
+    let category_rule_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO category_rules (
+            user_id, category_id, name, rule_expression, priority, enabled
+        )
+        VALUES ($1, $2, 'pg lunch rule', $3, 10, true)
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(category_id)
+    .bind(json!({"legacy_expression": "OR={午餐,饭}", "regex_enabled": false}))
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let disabled_category_rule_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO category_rules (
+            user_id, category_id, name, rule_expression, priority, enabled
+        )
+        VALUES ($1, $2, 'pg disabled rule', $3, 20, false)
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(category_id)
+    .bind(json!({"legacy_expression": "OR={禁用}", "regex_enabled": false}))
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let other_category_rule_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO category_rules (
+            user_id, category_id, name, rule_expression, priority, enabled
+        )
+        VALUES ($1, $2, 'pg other rule', $3, 1, true)
+        RETURNING id
+        "#,
+    )
+    .bind(other_user_id)
+    .bind(other_category_id)
+    .bind(json!({"legacy_expression": "OR={其他}", "regex_enabled": false}))
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let account_rule_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO account_rules (
+            user_id, account_id, name, account_role_scope, transaction_type_scope,
+            field_scope, rule_expression, regex_enabled, priority, enabled
+        )
+        VALUES ($1, $2, 'pg account rule', 'source', 'expense',
+            $3, $4, false, 10, true)
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(account_id)
+    .bind(json!(["payment_method"]))
+    .bind(json!({"legacy_expression": "OR={招商}", "regex_enabled": false}))
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    sqlx::query(
+        r#"
+        INSERT INTO account_rules (
+            user_id, account_id, name, account_role_scope, transaction_type_scope,
+            field_scope, rule_expression, regex_enabled, priority, enabled
+        )
+        VALUES ($1, $2, 'pg other account rule', 'any', 'all',
+            $3, $4, false, 1, true)
+        "#,
+    )
+    .bind(other_user_id)
+    .bind(other_account_id)
+    .bind(json!(["counterparty"]))
+    .bind(json!({"legacy_expression": "OR={其他}", "regex_enabled": false}))
+    .execute(&pool)
+    .await?;
+
+    let app = postgres_runtime_router(&postgres_url)?;
+
+    let category_list = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            &format!("/api/category-rules/?enabled_only=false&category_id={category_id}"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(category_list.status(), StatusCode::OK);
+    let category_list_body = read_json(category_list).await;
+    assert_eq!(category_list_body["total"], 2);
+    assert_eq!(
+        category_list_body["data"][0]["rule_expression"],
+        "OR={午餐,饭}"
+    );
+    assert_eq!(category_list_body["data"][0]["main_category"], main_name);
+    assert_eq!(category_list_body["data"][0]["sub_category"], sub_name);
+    assert!(!serde_json::to_string(&category_list_body)?.contains("pg other rule"));
+
+    let legacy_rules = get_result(
+        app.clone()
+            .oneshot(authed_request_for_user(
+                Method::GET,
+                "/api/categories/rules",
+                Body::empty(),
+                user_id,
+            ))
+            .await?,
+    )
+    .await;
+    assert_eq!(legacy_rules[0]["keywords"], "OR={午餐,饭}");
+    assert_eq!(legacy_rules[0]["main"], main_name);
+
+    let stored_legacy = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::PUT,
+            "/api/categories/rules",
+            json!({"rules": [{"main": "自定义", "sub": "规则", "keywords": "OR={x}"}]}),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(stored_legacy.status(), StatusCode::OK);
+    let stored_legacy_result = get_result(
+        app.clone()
+            .oneshot(authed_request_for_user(
+                Method::GET,
+                "/api/categories/rules",
+                Body::empty(),
+                user_id,
+            ))
+            .await?,
+    )
+    .await;
+    assert_eq!(stored_legacy_result[0]["main"], "自定义");
+
+    let create_category_rule = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/category-rules/",
+            json!({
+                "category_id": category_id,
+                "name": "pg dinner rule",
+                "priority": 5,
+                "rule_expression": "OR={晚餐}",
+                "regex_enabled": true,
+                "enabled": true
+            }),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(create_category_rule.status(), StatusCode::CREATED);
+    let create_category_body = read_json(create_category_rule).await;
+    assert_eq!(create_category_body["data"]["regex_enabled"], 1);
+    let created_category_rule_id = create_category_body["data"]["id"]
+        .as_i64()
+        .expect("created category rule id");
+
+    let update_category_rule = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::PUT,
+            &format!("/api/category-rules/{created_category_rule_id}"),
+            json!({"rule_expression": "OR={夜宵}", "enabled": false}),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(update_category_rule.status(), StatusCode::OK);
+    assert_eq!(read_json(update_category_rule).await["data"]["enabled"], 0);
+    let stored_expression: Value =
+        sqlx::query_scalar("SELECT rule_expression FROM category_rules WHERE id = $1")
+            .bind(created_category_rule_id)
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(stored_expression["legacy_expression"], "OR={夜宵}");
+    assert_eq!(stored_expression["regex_enabled"], true);
+
+    let reorder_category_rules = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/category-rules/reorder",
+            json!({"rule_ids": [
+                created_category_rule_id,
+                category_rule_id,
+                disabled_category_rule_id,
+                other_category_rule_id
+            ]}),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(reorder_category_rules.status(), StatusCode::OK);
+    assert_eq!(
+        sqlx::query_scalar::<_, i32>("SELECT priority FROM category_rules WHERE id = $1")
+            .bind(created_category_rule_id)
+            .fetch_one(&pool)
+            .await?,
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i32>("SELECT priority FROM category_rules WHERE id = $1")
+            .bind(other_category_rule_id)
+            .fetch_one(&pool)
+            .await?,
+        1
+    );
+
+    let category_match = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            &format!("/api/category-rules/{category_rule_id}/test"),
+            json!({"text": "工作日午餐付款"}),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(category_match.status(), StatusCode::OK);
+    assert_eq!(read_json(category_match).await["data"]["matched"], true);
+
+    sqlx::query("UPDATE categories SET metadata = $1 WHERE id = $2")
+        .bind(json!({"keywords": "OR:午饭|套餐"}))
+        .bind(category_id)
+        .execute(&pool)
+        .await?;
+    let migrate_category_keywords = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::POST,
+            "/api/category-rules/migrate",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(migrate_category_keywords.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(migrate_category_keywords).await["data"],
+        json!({"migrated": 1, "skipped": 0})
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM category_rules WHERE user_id = $1 AND name LIKE 'migrated:%'",
+        )
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await?,
+        1
+    );
+
+    let defaults = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::POST,
+            "/api/category-rules/defaults",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(defaults.status(), StatusCode::OK);
+    let defaults_body = read_json(defaults).await;
+    assert_eq!(defaults_body["success"], true);
+    assert!(
+        defaults_body["data"]["categories"]["created"]
+            .as_i64()
+            .unwrap_or_default()
+            > 0
+    );
+    assert!(
+        defaults_body["data"]["rules"]["created"]
+            .as_i64()
+            .unwrap_or_default()
+            > 0
+    );
+
+    sqlx::query(
+        r#"
+        INSERT INTO import_learning_lifecycle (
+            user_id, recommendation_key, recommendation_type, status,
+            accepted_count, auto_applied_count, metadata
+        )
+        VALUES ($1, 'pg-learning-rule', 'classification', 'green', 2, 1, $2)
+        ON CONFLICT (user_id, recommendation_key) DO NOTHING
+        "#,
+    )
+    .bind(user_id)
+    .bind(json!({
+        "match_type": "merchant",
+        "match_value": "Coffee Shop",
+        "learned_type": "expense",
+        "learned_category_id": category_id
+    }))
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO transaction_templates (
+            user_id, template_type, name, transaction_type, category_id,
+            source_amount_minor_units, scheduled_frequency, scheduled_next_date,
+            enabled, display_order
+        )
+        VALUES ($1, 2, 'Pg Recurring Rule', '支出', $2, 1299, 'monthly', '2026-04-01', true, 1)
+        "#,
+    )
+    .bind(user_id)
+    .bind(category_id.to_string())
+    .execute(&pool)
+    .await?;
+    let overview = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/rules/overview",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(overview.status(), StatusCode::OK);
+    let overview_body = read_json(overview).await;
+    assert_eq!(overview_body["data"]["learningRuleCount"], 1);
+    assert_eq!(
+        overview_body["data"]["learningRules"][0]["matchValue"],
+        "Coffee Shop"
+    );
+    assert_eq!(
+        overview_body["data"]["recurringRules"][0]["name"],
+        "Pg Recurring Rule"
+    );
+
+    let account_list = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/account-rules/",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(account_list.status(), StatusCode::OK);
+    let account_list_body = read_json(account_list).await;
+    assert_eq!(account_list_body["total"], 1);
+    assert_eq!(
+        account_list_body["data"][0]["accountName"],
+        "pg-rules-account"
+    );
+    assert_eq!(
+        account_list_body["data"][0]["fieldScope"],
+        json!(["payment_method"])
+    );
+    assert!(!serde_json::to_string(&account_list_body)?.contains("pg other account rule"));
+
+    let invalid_account_scope = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/account-rules/",
+            json!({
+                "account_id": account_id,
+                "rule_expression": "OR={招商}",
+                "account_role_scope": "wallet"
+            }),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(invalid_account_scope.status(), StatusCode::BAD_REQUEST);
+
+    let create_account_rule = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/account-rules/",
+            json!({
+                "account_id": account_id,
+                "name": "pg created account rule",
+                "priority": 3,
+                "rule_expression": "OR={招商}",
+                "account_role_scope": "destination",
+                "transaction_type_scope": "expense",
+                "field_scope": ["parser", "payment_method"]
+            }),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(create_account_rule.status(), StatusCode::CREATED);
+    let create_account_body = read_json(create_account_rule).await;
+    let created_account_rule_id = create_account_body["data"]["id"]
+        .as_i64()
+        .expect("created account rule id");
+
+    let update_account_rule = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::PUT,
+            &format!("/api/account-rules/{created_account_rule_id}"),
+            json!({"priority": 2, "fieldScope": "parser,payment_method"}),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(update_account_rule.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(update_account_rule).await["data"]["fieldScope"],
+        json!(["parser", "payment_method"])
+    );
+
+    let duplicate_account_reorder = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/account-rules/reorder",
+            json!({"rule_ids": [created_account_rule_id, created_account_rule_id]}),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(duplicate_account_reorder.status(), StatusCode::BAD_REQUEST);
+
+    let reorder_account_rules = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/account-rules/reorder",
+            json!({"rule_ids": [created_account_rule_id, account_rule_id]}),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(reorder_account_rules.status(), StatusCode::OK);
+    assert_eq!(
+        sqlx::query_scalar::<_, i32>("SELECT priority FROM account_rules WHERE id = $1")
+            .bind(created_account_rule_id)
+            .fetch_one(&pool)
+            .await?,
+        1
+    );
+
+    let account_match = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            &format!("/api/account-rules/{created_account_rule_id}/test"),
+            json!({
+                "accountRoleScope": "destination",
+                "transactionTypeScope": "expense",
+                "context": {"paymentMethod": "招商银行", "parserId": "bank_csv"}
+            }),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(account_match.status(), StatusCode::OK);
+    assert_eq!(read_json(account_match).await["data"]["matched"], true);
+
+    let migrate_aliases = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::POST,
+            "/api/account-rules/migrate-aliases",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(migrate_aliases.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(migrate_aliases).await["data"],
+        json!({"migrated": 1, "skipped": 1})
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM account_rules WHERE user_id = $1 AND source = 'alias_migration'",
+        )
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await?,
+        1
+    );
+
+    let delete_category_rule = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::DELETE,
+            &format!("/api/category-rules/{created_category_rule_id}"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(delete_category_rule.status(), StatusCode::OK);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM category_rules WHERE id = $1")
+            .bind(created_category_rule_id)
+            .fetch_one(&pool)
+            .await?,
+        0
+    );
+
+    let delete_account_rule = app
+        .oneshot(authed_request_for_user(
+            Method::DELETE,
+            &format!("/api/account-rules/{created_account_rule_id}"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(delete_account_rule.status(), StatusCode::OK);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM account_rules WHERE id = $1")
+            .bind(created_account_rule_id)
+            .fetch_one(&pool)
+            .await?,
+        0
+    );
+
+    Ok(())
+}
 
 #[tokio::test]
 async fn taxonomy_accounts_runtime_serves_crud_and_frontend_contract() -> Result<(), Box<dyn Error>>
@@ -4859,6 +6537,9 @@ fn runtime_router(fixture: &RuntimeFixture) -> Router {
         ImportRouteMode::ImportDbRuntime,
     )
     .expect("config")
+    .with_database_backend(DatabaseBackend::Sqlite)
+    .with_require_postgres_after_cutover(false)
+    .with_legacy_sqlite_runtime_for_tests()
     .with_sqlite_db_path(fixture.db_path.display().to_string())
     .with_trusted_user_header_secret(TEST_AUTH_SECRET);
     let state = HttpAppState::new(config).expect("http app state");
@@ -4874,9 +6555,27 @@ fn runtime_router_without_db(fixture: &RuntimeFixture) -> Router {
         ImportRouteMode::ImportDbRuntime,
     )
     .expect("config")
+    .with_database_backend(DatabaseBackend::Sqlite)
+    .with_require_postgres_after_cutover(false)
+    .with_legacy_sqlite_runtime_for_tests()
     .with_trusted_user_header_secret(TEST_AUTH_SECRET);
     let state = HttpAppState::new(config).expect("http app state");
     build_router(state)
+}
+
+fn postgres_runtime_router(postgres_url: &str) -> Result<Router, Box<dyn Error>> {
+    let config = HttpShellConfig::new_with_import_route_mode(
+        "http://127.0.0.1:9".to_string(),
+        Duration::from_secs(5),
+        1024 * 1024,
+        ImportRouteMode::ImportDbRuntime,
+    )?
+    .with_database_backend(DatabaseBackend::Postgres)
+    .with_require_postgres_after_cutover(true)
+    .with_postgres_url(postgres_url)?
+    .with_trusted_user_header_secret(TEST_AUTH_SECRET);
+    let state = HttpAppState::new(config).expect("http app state");
+    Ok(build_router(state))
 }
 
 fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
@@ -5284,15 +6983,36 @@ fn json_request(method: Method, uri: &str, body: Value) -> Request<Body> {
     authed_request(method, uri, Body::from(body.to_string()))
 }
 
+fn json_request_for_user(method: Method, uri: &str, body: Value, user_id: i64) -> Request<Body> {
+    authed_request_for_user(method, uri, Body::from(body.to_string()), user_id)
+}
+
 fn authed_request(method: Method, uri: &str, body: Body) -> Request<Body> {
+    authed_request_for_user(
+        method,
+        uri,
+        body,
+        TEST_USER_ID.parse().expect("test user id"),
+    )
+}
+
+fn authed_request_for_user(method: Method, uri: &str, body: Body, user_id: i64) -> Request<Body> {
     Request::builder()
         .method(method)
         .uri(uri)
         .header("content-type", "application/json")
-        .header("x-user-id", TEST_USER_ID)
+        .header("x-user-id", user_id.to_string())
         .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
         .body(body)
         .expect("request builds")
+}
+
+async fn get_result(response: axum::response::Response) -> Value {
+    let status = response.status();
+    let body = read_json(response).await;
+    assert_eq!(status, StatusCode::OK, "response body: {body}");
+    assert_eq!(body["success"], true);
+    body["result"].clone()
 }
 
 async fn read_json(response: axum::response::Response) -> Value {

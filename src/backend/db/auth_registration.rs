@@ -55,27 +55,27 @@ pub struct RegisterUserResult {
     pub default_seed: RegisterDefaultSeedSummary,
 }
 
-struct DefaultSubCategory {
-    name: &'static str,
-    icon: &'static str,
-    color: &'static str,
+pub(crate) struct DefaultSubCategory {
+    pub(crate) name: &'static str,
+    pub(crate) icon: &'static str,
+    pub(crate) color: &'static str,
 }
 
-struct DefaultCategory {
-    type_code: i64,
-    name: &'static str,
-    icon: &'static str,
-    color: &'static str,
-    priority: i64,
-    sub_categories: &'static [DefaultSubCategory],
+pub(crate) struct DefaultCategory {
+    pub(crate) type_code: i64,
+    pub(crate) name: &'static str,
+    pub(crate) icon: &'static str,
+    pub(crate) color: &'static str,
+    pub(crate) priority: i64,
+    pub(crate) sub_categories: &'static [DefaultSubCategory],
 }
 
-struct DefaultCategoryRule {
-    name: &'static str,
-    main_category: &'static str,
-    sub_category: &'static str,
-    rule_expression: &'static str,
-    priority: i64,
+pub(crate) struct DefaultCategoryRule {
+    pub(crate) name: &'static str,
+    pub(crate) main_category: &'static str,
+    pub(crate) sub_category: &'static str,
+    pub(crate) rule_expression: &'static str,
+    pub(crate) priority: i64,
 }
 
 struct DefaultAccountTemplate {

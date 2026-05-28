@@ -15,7 +15,7 @@ pub(super) fn verify_backup_restore_response(
         Ok(payload) => payload,
         Err(message) => {
             write_backup_audit_event(
-                auth_runtime.runtime.connection(),
+                &auth_runtime.runtime,
                 auth_runtime.user_id,
                 headers,
                 "backup_restore_verified",
@@ -36,7 +36,7 @@ pub(super) fn verify_backup_restore_response(
         .to_string();
     if filename.is_empty() {
         write_backup_audit_event(
-            auth_runtime.runtime.connection(),
+            &auth_runtime.runtime,
             auth_runtime.user_id,
             headers,
             "backup_restore_verified",
@@ -56,7 +56,7 @@ pub(super) fn verify_backup_restore_response(
         Ok(path) => path,
         Err(error) => {
             write_backup_audit_event(
-                auth_runtime.runtime.connection(),
+                &auth_runtime.runtime,
                 auth_runtime.user_id,
                 headers,
                 "backup_restore_verified",
@@ -71,7 +71,7 @@ pub(super) fn verify_backup_restore_response(
     let safe_filename = backup_filename(&file_path);
     if !file_path.exists() {
         write_backup_audit_event(
-            auth_runtime.runtime.connection(),
+            &auth_runtime.runtime,
             auth_runtime.user_id,
             headers,
             "backup_restore_verified",
@@ -93,7 +93,7 @@ pub(super) fn verify_backup_restore_response(
         backup_info.error.clone()
     };
     write_backup_audit_event(
-        auth_runtime.runtime.connection(),
+        &auth_runtime.runtime,
         auth_runtime.user_id,
         headers,
         "backup_restore_verified",
@@ -133,7 +133,7 @@ pub(super) fn restore_backup_response(
         Ok(path) => path,
         Err(error) => {
             write_backup_audit_event(
-                auth_runtime.runtime.connection(),
+                &auth_runtime.runtime,
                 auth_runtime.user_id,
                 headers,
                 "backup_restored",
@@ -148,7 +148,7 @@ pub(super) fn restore_backup_response(
     let safe_filename = backup_filename(&file_path);
     if !file_path.exists() {
         write_backup_audit_event(
-            auth_runtime.runtime.connection(),
+            &auth_runtime.runtime,
             auth_runtime.user_id,
             headers,
             "backup_restored",
@@ -173,7 +173,7 @@ pub(super) fn restore_backup_response(
 
     if let Err(error) = result {
         write_backup_audit_event(
-            runtime.connection(),
+            &runtime,
             user_id,
             headers,
             "backup_restored",
@@ -184,8 +184,8 @@ pub(super) fn restore_backup_response(
         );
         return Ok(error_response(error.status, error.message));
     }
-    update_backup_record_by_filename(
-        runtime.connection(),
+    update_backup_record_for_runtime(
+        &runtime,
         &safe_filename,
         Some("restored"),
         json!({"restored_at": restored_at}),
@@ -193,7 +193,7 @@ pub(super) fn restore_backup_response(
     .map_err(|error| Box::new(db_write_error_response(error)))?;
 
     write_backup_audit_event(
-        runtime.connection(),
+        &runtime,
         user_id,
         headers,
         "backup_restored",

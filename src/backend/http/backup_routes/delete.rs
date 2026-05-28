@@ -17,7 +17,7 @@ pub(super) fn delete_backup_response(
         Ok(path) => path,
         Err(error) => {
             write_backup_audit_event(
-                auth_runtime.runtime.connection(),
+                &auth_runtime.runtime,
                 auth_runtime.user_id,
                 headers,
                 "backup_deleted",
@@ -32,7 +32,7 @@ pub(super) fn delete_backup_response(
     let safe_filename = backup_filename(&file_path);
     if !file_path.exists() {
         write_backup_audit_event(
-            auth_runtime.runtime.connection(),
+            &auth_runtime.runtime,
             auth_runtime.user_id,
             headers,
             "backup_deleted",
@@ -47,8 +47,8 @@ pub(super) fn delete_backup_response(
     let result = (|| -> FileRouteResult<()> {
         fs::remove_file(&file_path)?;
         remove_metadata_file(&file_path)?;
-        update_backup_record_by_filename(
-            auth_runtime.runtime.connection(),
+        update_backup_record_for_runtime(
+            &auth_runtime.runtime,
             &safe_filename,
             Some("deleted"),
             json!({
@@ -62,7 +62,7 @@ pub(super) fn delete_backup_response(
 
     if let Err(error) = result {
         write_backup_audit_event(
-            auth_runtime.runtime.connection(),
+            &auth_runtime.runtime,
             auth_runtime.user_id,
             headers,
             "backup_deleted",
@@ -75,7 +75,7 @@ pub(super) fn delete_backup_response(
     }
 
     write_backup_audit_event(
-        auth_runtime.runtime.connection(),
+        &auth_runtime.runtime,
         auth_runtime.user_id,
         headers,
         "backup_deleted",

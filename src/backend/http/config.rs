@@ -49,6 +49,7 @@ pub struct HttpShellConfig {
     pub database_backend: DatabaseBackend,
     pub migration_mode: MigrationMode,
     pub require_postgres_after_cutover: bool,
+    pub legacy_sqlite_runtime_allowed: bool,
     pub trusted_user_header_secret: Option<String>,
     pub auth_jwt_secret: Option<String>,
     pub auth_jwt_algorithm: String,
@@ -102,10 +103,11 @@ impl HttpShellConfig {
             import_route_mode,
             sqlite_db_path: None,
             sqlite_legacy_path: None,
-            postgres_url: None,
-            database_backend: DatabaseBackend::Sqlite,
+            postgres_url: normalize_postgres_url(Some(DEFAULT_LOCAL_POSTGRES_URL.to_string()))?,
+            database_backend: DatabaseBackend::Postgres,
             migration_mode: MigrationMode::Disabled,
-            require_postgres_after_cutover: false,
+            require_postgres_after_cutover: true,
+            legacy_sqlite_runtime_allowed: false,
             trusted_user_header_secret: None,
             auth_jwt_secret: None,
             auth_jwt_algorithm: DEFAULT_AUTH_JWT_ALGORITHM.to_string(),
@@ -165,6 +167,16 @@ impl HttpShellConfig {
     pub fn with_require_postgres_after_cutover(mut self, required: bool) -> Self {
         self.require_postgres_after_cutover = required;
         self
+    }
+
+    #[tracing::instrument(level = "debug", skip_all)]
+    pub fn with_legacy_sqlite_runtime_for_tests(mut self) -> Self {
+        self.legacy_sqlite_runtime_allowed = true;
+        self
+    }
+
+    pub const fn legacy_sqlite_runtime_allowed(&self) -> bool {
+        self.legacy_sqlite_runtime_allowed
     }
 
     pub fn postgres_configured(&self) -> bool {
@@ -340,11 +352,6 @@ impl HttpShellConfig {
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .or_else(|| sqlite_db_path.clone());
-        let postgres_url = normalize_postgres_url(
-            lookup("BILL_ANALYSER_POSTGRES_URL")
-                .filter(|value| !value.trim().is_empty())
-                .or_else(|| Some(DEFAULT_LOCAL_POSTGRES_URL.to_string())),
-        )?;
         let database_backend =
             parse_database_backend(lookup("BILL_ANALYSER_DATABASE_BACKEND").as_deref())?;
         let migration_mode =
@@ -354,6 +361,15 @@ impl HttpShellConfig {
             lookup("BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER")
                 .filter(|value| !value.trim().is_empty()),
             true,
+        )?;
+        let postgres_url = normalize_postgres_url(
+            lookup("BILL_ANALYSER_POSTGRES_URL")
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| {
+                    database_backend
+                        .uses_postgres()
+                        .then(|| DEFAULT_LOCAL_POSTGRES_URL.to_string())
+                }),
         )?;
         let uploads_dir = lookup("BILL_ANALYSER_UPLOADS_DIR")
             .map(|value| value.trim().to_string())
@@ -493,6 +509,7 @@ impl HttpShellConfig {
         config.database_backend = database_backend;
         config.migration_mode = migration_mode;
         config.require_postgres_after_cutover = require_postgres_after_cutover;
+        config.legacy_sqlite_runtime_allowed = false;
         config.uploads_dir = uploads_dir;
         config.data_dir = data_dir;
         config.backup_dir = backup_dir;

@@ -1,4 +1,4 @@
-use std::{error::Error, path::Path, time::Duration};
+use std::{env, error::Error, path::Path, time::Duration};
 
 use axum::{
     body::{to_bytes, Body},
@@ -6,18 +6,531 @@ use axum::{
     http::{Method, StatusCode},
     Router,
 };
+use bill_analyser_db::run_postgres_migrations;
 use bill_analyser_http::{
-    build_router, HttpAppState, HttpShellConfig, ImportRouteMode,
+    build_router, config::DatabaseBackend, HttpAppState, HttpShellConfig, ImportRouteMode,
     MATCHING_RECURRING_CALENDAR_NETWORTH_ROUTE_PATTERNS,
 };
 use chrono::{Datelike, Duration as ChronoDuration, Local, NaiveDate};
 use rusqlite::{params, Connection};
 use serde_json::Value;
+use sqlx::{postgres::PgPoolOptions, Row};
 use tempfile::TempDir;
 use tower::ServiceExt;
 
 const TEST_AUTH_SECRET: &str = "matching-route-secret";
 const TEST_USER_ID: &str = "42";
+
+#[tokio::test]
+async fn matching_postgres_runtime_serves_pairs_without_sqlite_fallback(
+) -> Result<(), Box<dyn Error>> {
+    let Ok(postgres_url) = env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+        return Ok(());
+    };
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&postgres_url)
+        .await?;
+    run_postgres_migrations(&pool).await?;
+
+    let unique = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
+    let user_id: i64 =
+        sqlx::query("INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id")
+            .bind(format!("matching-pg-{unique}"))
+            .bind(format!("matching-pg-{unique}@example.test"))
+            .fetch_one(&pool)
+            .await?
+            .try_get("id")?;
+    let source_account_id: i64 = sqlx::query(
+        "INSERT INTO accounts (user_id, name, account_type, balance_cents) VALUES ($1, 'Cash', '1', 0) RETURNING id",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let target_account_id: i64 = sqlx::query(
+        "INSERT INTO accounts (user_id, name, account_type, balance_cents) VALUES ($1, 'Card', '2', 0) RETURNING id",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    sqlx::query("UPDATE accounts SET account_type = 'cash', balance_cents = 120012 WHERE id = $1")
+        .bind(source_account_id)
+        .execute(&pool)
+        .await?;
+    sqlx::query(
+        "UPDATE accounts SET account_type = 'credit_card', balance_cents = -30040 WHERE id = $1",
+    )
+    .bind(target_account_id)
+    .execute(&pool)
+    .await?;
+    let category_id: i64 = sqlx::query(
+        "INSERT INTO categories (user_id, name, category_type, path) VALUES ($1, 'Internal', '3', 'Transfer/Internal') RETURNING id",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let left_bill_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO bills (
+            user_id, occurred_at, amount_cents, direction, transaction_type,
+            account_id, source_account_id, category_id, merchant, payment_method,
+            description, standard_payload
+        )
+        VALUES (
+            $1, '2026-03-05T10:00:00Z', -2650, 'expense', 'expense',
+            $2, $2, $3, 'Wallet', 'cash', 'Manual pair transfer out',
+            '{"main_category":"Transfer","sub_category":"Internal"}'::jsonb
+        )
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(source_account_id)
+    .bind(category_id)
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let right_bill_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO bills (
+            user_id, occurred_at, amount_cents, direction, transaction_type,
+            account_id, source_account_id, target_account_id, transfer_target_account_id,
+            category_id, merchant, payment_method, description, standard_payload
+        )
+        VALUES (
+            $1, '2026-03-05T10:04:00Z', 2650, 'income', 'income',
+            $2, $2, $3, $3, $4, 'Card', 'card', 'Manual pair transfer in',
+            '{}'::jsonb
+        )
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(target_account_id)
+    .bind(source_account_id)
+    .bind(category_id)
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let manual_left_bill_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO bills (
+            user_id, occurred_at, amount_cents, direction, transaction_type,
+            account_id, source_account_id, category_id, merchant, payment_method,
+            description, standard_payload
+        )
+        VALUES (
+            $1, '2026-03-06T10:00:00Z', -1800, 'expense', 'expense',
+            $2, $2, $3, 'Manual A', 'cash', 'Manual pair A', '{}'::jsonb
+        )
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(source_account_id)
+    .bind(category_id)
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let manual_right_bill_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO bills (
+            user_id, occurred_at, amount_cents, direction, transaction_type,
+            account_id, source_account_id, category_id, merchant, payment_method,
+            description, standard_payload
+        )
+        VALUES (
+            $1, '2026-03-06T10:03:00Z', 1800, 'income', 'income',
+            $2, $2, $3, 'Manual B', 'card', 'Manual pair B', '{}'::jsonb
+        )
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(target_account_id)
+    .bind(category_id)
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    sqlx::query(
+        r#"
+        INSERT INTO matching_pairs (
+            user_id, left_bill_id, right_bill_id, pair_type, status, metadata
+        )
+        VALUES ($1, $2, $3, 'transfer', 'active', '{"source":"manual"}'::jsonb)
+        "#,
+    )
+    .bind(user_id)
+    .bind(left_bill_id)
+    .bind(right_bill_id)
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO transaction_templates (
+            user_id, template_type, name, description, transaction_type,
+            source_account_id, source_amount_minor_units, scheduled_frequency,
+            scheduled_start_date, scheduled_next_date, enabled, hidden
+        )
+        VALUES (
+            $1, 2, 'Monthly rent', 'Calendar projection', 'expense',
+            $2, 8800, 'monthly', '2026-03-10', '2026-03-10', true, false
+        )
+        "#,
+    )
+    .bind(user_id)
+    .bind(source_account_id.to_string())
+    .execute(&pool)
+    .await?;
+    let suggestion_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO recurring_suggestions (
+            user_id, pattern_hash, name, description, type, amount_cents,
+            source_account_id, counterparty, frequency, detected_interval_days,
+            confidence_score, sample_count, sample_bill_ids, first_occurrence,
+            last_occurrence, suggested_next_date
+        )
+        VALUES (
+            $1, 'pg-rent', 'Detected rent', 'Rent suggestion', 'expense', 8800,
+            $2, 'Landlord', 'monthly', 30, 0.91, 3, $3,
+            '2026-01-10', '2026-03-10', '2026-04-10'
+        )
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(source_account_id)
+    .bind(serde_json::json!([left_bill_id, right_bill_id]))
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let reject_suggestion_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO recurring_suggestions (
+            user_id, pattern_hash, name, description, type, amount_cents,
+            source_account_id, counterparty, frequency, confidence_score,
+            sample_count, sample_bill_ids
+        )
+        VALUES (
+            $1, 'pg-gym', 'Detected gym', 'Gym suggestion', 'expense', 990,
+            $2, 'Gym', 'monthly', 0.82, 3, $3
+        )
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(source_account_id)
+    .bind(serde_json::json!([left_bill_id]))
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let import_session_id: i64 = sqlx::query(
+        "INSERT INTO import_sessions (user_id, status, import_mode) VALUES ($1, 'preview', 'preview') RETURNING id",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+
+    let app = postgres_runtime_router(&postgres_url)?;
+    let response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/matching/pairs",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let status = response.status();
+    let body = read_json(response).await;
+    assert_eq!(status, StatusCode::OK, "response body: {body}");
+    assert_eq!(body["success"], true);
+    assert_eq!(
+        body["data"]["pairs"]
+            .as_array()
+            .expect("postgres pairs")
+            .len(),
+        1
+    );
+    let pair = &body["data"]["pairs"][0];
+    assert_eq!(pair["pairType"], "transfer");
+    assert_eq!(pair["source"], "manual");
+    assert_eq!(pair["leftBill"]["id"], left_bill_id);
+    assert_eq!(pair["leftBill"]["amount"], -26.5);
+    assert_eq!(pair["leftBill"]["mainCategory"], "Transfer");
+    assert_eq!(pair["rightBill"]["sourceAccountId"], target_account_id);
+    assert_eq!(pair["rightBill"]["destinationAccountId"], source_account_id);
+
+    let networth_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/networth/snapshot",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let networth_status = networth_response.status();
+    let networth_body = read_json(networth_response).await;
+    assert_eq!(networth_status, StatusCode::OK, "{networth_body}");
+    assert_eq!(networth_body["success"], true);
+    assert_eq!(networth_body["data"]["totalAssets"], 1200.12);
+    assert_eq!(networth_body["data"]["totalLiabilities"], 300.4);
+    assert_eq!(networth_body["data"]["netWorth"], 899.72);
+
+    let bill_candidates_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            &format!("/api/matching/candidates?billId={left_bill_id}"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let bill_candidates_status = bill_candidates_response.status();
+    let bill_candidates_body = read_json(bill_candidates_response).await;
+    assert_eq!(
+        bill_candidates_status,
+        StatusCode::OK,
+        "{bill_candidates_body}"
+    );
+    assert_eq!(bill_candidates_body["data"]["billId"], left_bill_id);
+    assert_eq!(
+        bill_candidates_body["data"]["linkedPair"]["otherBillId"],
+        right_bill_id
+    );
+
+    let session_candidates_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            &format!("/api/matching/sessions/{import_session_id}/candidates"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let session_candidates_status = session_candidates_response.status();
+    let session_candidates_body = read_json(session_candidates_response).await;
+    assert_eq!(
+        session_candidates_status,
+        StatusCode::OK,
+        "{session_candidates_body}"
+    );
+    assert_eq!(
+        session_candidates_body["data"]["session_id"],
+        import_session_id.to_string()
+    );
+
+    let feedback_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            &format!("/api/matching/bills/{left_bill_id}/feedback"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let feedback_status = feedback_response.status();
+    let feedback_body = read_json(feedback_response).await;
+    assert_eq!(feedback_status, StatusCode::OK, "{feedback_body}");
+    assert_eq!(feedback_body["data"]["events"].as_array().unwrap().len(), 0);
+
+    let reconciliation_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/matching/reconciliation-candidates?candidateType=transfer&status=pending",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let reconciliation_status = reconciliation_response.status();
+    let reconciliation_body = read_json(reconciliation_response).await;
+    assert_eq!(
+        reconciliation_status,
+        StatusCode::OK,
+        "{reconciliation_body}"
+    );
+    assert_eq!(
+        reconciliation_body["data"]["candidates"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+
+    let reconcile_history_response = app
+        .clone()
+        .oneshot(authed_json_request_for_user(
+            Method::POST,
+            "/api/matching/reconcile-history",
+            serde_json::json!({"billIds": [left_bill_id], "families": ["transfer"]}),
+            user_id,
+        ))
+        .await?;
+    let reconcile_history_status = reconcile_history_response.status();
+    let reconcile_history_body = read_json(reconcile_history_response).await;
+    assert_eq!(
+        reconcile_history_status,
+        StatusCode::OK,
+        "{reconcile_history_body}"
+    );
+    assert_eq!(reconcile_history_body["data"]["summary"]["billCount"], 1);
+
+    let candidate_action_response = app
+        .clone()
+        .oneshot(authed_json_request_for_user(
+            Method::POST,
+            &format!(
+                "/api/matching/candidates/bill%3A{manual_left_bill_id}%3Atransfer%3A{manual_right_bill_id}/reject"
+            ),
+            serde_json::json!({}),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(candidate_action_response.status(), StatusCode::CONFLICT);
+
+    let manual_pair_response = app
+        .clone()
+        .oneshot(authed_json_request_for_user(
+            Method::POST,
+            "/api/matching/manual-pair",
+            serde_json::json!({
+                "billId": manual_left_bill_id,
+                "candidateBillId": manual_right_bill_id,
+                "pairType": "transfer"
+            }),
+            user_id,
+        ))
+        .await?;
+    let manual_pair_status = manual_pair_response.status();
+    let manual_pair_body = read_json(manual_pair_response).await;
+    assert_eq!(manual_pair_status, StatusCode::OK, "{manual_pair_body}");
+    let manual_pair_id = manual_pair_body["data"]["pair"]["id"]
+        .as_i64()
+        .expect("manual pair id");
+    assert_eq!(
+        manual_pair_body["data"]["pair"]["leftBillId"],
+        manual_left_bill_id
+    );
+
+    let delete_pair_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::DELETE,
+            &format!("/api/matching/pairs/{manual_pair_id}"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let delete_pair_status = delete_pair_response.status();
+    let delete_pair_body = read_json(delete_pair_response).await;
+    assert_eq!(delete_pair_status, StatusCode::OK, "{delete_pair_body}");
+    assert_eq!(delete_pair_body["data"]["pair"]["id"], manual_pair_id);
+
+    let calendar_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/calendar/events?start_date=2026-03-01&end_date=2026-03-31",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let calendar_status = calendar_response.status();
+    let calendar_body = read_json(calendar_response).await;
+    assert_eq!(calendar_status, StatusCode::OK, "{calendar_body}");
+    assert_eq!(calendar_body["success"], true);
+    assert!(calendar_body["data"]["events"]
+        .as_array()
+        .expect("calendar events")
+        .iter()
+        .any(|event| event["date"] == "2026-03-05" && event["count"] == 2));
+    assert!(calendar_body["data"]["recurringProjections"]
+        .as_array()
+        .expect("recurring projections")
+        .iter()
+        .any(|event| event["date"] == "2026-03-10"
+            && event["name"] == "Monthly rent"
+            && event["amount"] == 88.0));
+
+    let list_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/recurring/suggestions?status=pending&limit=10&offset=0",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let list_status = list_response.status();
+    let list_body = read_json(list_response).await;
+    assert_eq!(list_status, StatusCode::OK, "{list_body}");
+    assert_eq!(list_body["success"], true);
+    assert_eq!(list_body["data"]["total"], 2);
+    assert!(list_body["data"]["items"]
+        .as_array()
+        .expect("postgres suggestions")
+        .iter()
+        .any(|item| item["patternHash"] == "pg-rent" && item["amount"] == 88.0));
+
+    let detect_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::POST,
+            "/api/recurring/suggestions/detect",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let detect_status = detect_response.status();
+    let detect_body = read_json(detect_response).await;
+    assert_eq!(detect_status, StatusCode::OK, "{detect_body}");
+    assert_eq!(detect_body["success"], true);
+    assert!(detect_body["data"]["detected"].is_number());
+
+    let accept_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::POST,
+            &format!("/api/recurring/suggestions/{suggestion_id}/accept"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let accept_status = accept_response.status();
+    let accept_body = read_json(accept_response).await;
+    assert_eq!(accept_status, StatusCode::OK, "{accept_body}");
+    assert_eq!(accept_body["success"], true);
+    assert_eq!(accept_body["data"]["suggestion_id"], suggestion_id);
+    assert_eq!(accept_body["data"]["status"], "accepted");
+    let accepted_template_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM transaction_templates WHERE user_id = $1 AND name = 'Detected rent' AND template_type = 2",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(accepted_template_count, 1);
+
+    let reject_response = app
+        .oneshot(authed_request_for_user(
+            Method::POST,
+            &format!("/api/recurring/suggestions/{reject_suggestion_id}/reject"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let reject_status = reject_response.status();
+    let reject_body = read_json(reject_response).await;
+    assert_eq!(reject_status, StatusCode::OK, "{reject_body}");
+    assert_eq!(reject_body["success"], true);
+    assert_eq!(reject_body["data"]["status"], "rejected");
+    Ok(())
+}
 
 #[tokio::test]
 async fn matching_recurring_calendar_networth_runtime_serves_owned_routes(
@@ -962,10 +1475,28 @@ fn runtime_router_for_path(db_path: &Path) -> Router {
         ImportRouteMode::ImportDbRuntime,
     )
     .expect("config")
+    .with_database_backend(DatabaseBackend::Sqlite)
+    .with_require_postgres_after_cutover(false)
+    .with_legacy_sqlite_runtime_for_tests()
     .with_sqlite_db_path(db_path.display().to_string())
     .with_trusted_user_header_secret(TEST_AUTH_SECRET);
     let state = HttpAppState::new(config).expect("http app state");
     build_router(state)
+}
+
+fn postgres_runtime_router(postgres_url: &str) -> Result<Router, Box<dyn Error>> {
+    let config = HttpShellConfig::new_with_import_route_mode(
+        "http://127.0.0.1:9".to_string(),
+        Duration::from_secs(5),
+        1024 * 1024,
+        ImportRouteMode::ImportDbRuntime,
+    )?
+    .with_database_backend(DatabaseBackend::Postgres)
+    .with_require_postgres_after_cutover(true)
+    .with_postgres_url(postgres_url)?
+    .with_trusted_user_header_secret(TEST_AUTH_SECRET);
+    let state = HttpAppState::new(config).expect("http app state");
+    Ok(build_router(state))
 }
 
 fn runtime_router_without_db_path() -> Router {
@@ -976,6 +1507,9 @@ fn runtime_router_without_db_path() -> Router {
         ImportRouteMode::ImportDbRuntime,
     )
     .expect("config")
+    .with_database_backend(DatabaseBackend::Sqlite)
+    .with_require_postgres_after_cutover(false)
+    .with_legacy_sqlite_runtime_for_tests()
     .with_trusted_user_header_secret(TEST_AUTH_SECRET);
     let state = HttpAppState::new(config).expect("http app state");
     build_router(state)
@@ -1199,12 +1733,38 @@ fn authed_request(method: Method, uri: &str, body: Body) -> Request<Body> {
         .expect("request")
 }
 
+fn authed_request_for_user(method: Method, uri: &str, body: Body, user_id: i64) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+        .header("x-bill-analyser-user-id", user_id.to_string())
+        .body(body)
+        .expect("request")
+}
+
 fn authed_json_request(method: Method, uri: &str, body: Value) -> Request<Body> {
     Request::builder()
         .method(method)
         .uri(uri)
         .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
         .header("x-bill-analyser-user-id", TEST_USER_ID)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .expect("request")
+}
+
+fn authed_json_request_for_user(
+    method: Method,
+    uri: &str,
+    body: Value,
+    user_id: i64,
+) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+        .header("x-bill-analyser-user-id", user_id.to_string())
         .header("content-type", "application/json")
         .body(Body::from(body.to_string()))
         .expect("request")

@@ -1,4 +1,4 @@
-use std::{error::Error, net::SocketAddr, path::Path, time::Duration};
+use std::{env, error::Error, net::SocketAddr, path::Path, time::Duration};
 
 use axum::{
     body::{to_bytes, Body},
@@ -8,12 +8,15 @@ use axum::{
     routing::any,
     Router,
 };
+use bill_analyser_db::run_postgres_migrations;
 use bill_analyser_http::{
-    build_router, HttpAppState, HttpShellConfig, ImportRouteMode, STATISTICS_ROUTE_PATTERNS,
+    build_router, config::DatabaseBackend, HttpAppState, HttpShellConfig, ImportRouteMode,
+    STATISTICS_ROUTE_PATTERNS,
 };
 use chrono::{Local, TimeZone};
 use rusqlite::Connection;
 use serde_json::{json, Value};
+use sqlx::{postgres::PgPoolOptions, Row};
 use tempfile::TempDir;
 use tokio::net::TcpListener;
 use tower::ServiceExt;
@@ -153,6 +156,342 @@ async fn statistics_read_runtime_serves_owned_routes_and_reads_db() -> Result<()
         1234
     );
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn statistics_postgres_runtime_serves_transaction_amounts_without_sqlite_fallback(
+) -> Result<(), Box<dyn Error>> {
+    let Ok(postgres_url) = env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+        return Ok(());
+    };
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&postgres_url)
+        .await?;
+    run_postgres_migrations(&pool).await?;
+    let unique = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
+    let user_id: i64 =
+        sqlx::query("INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id")
+            .bind(format!("statistics-pg-{unique}"))
+            .bind(format!("statistics-pg-{unique}@example.test"))
+            .fetch_one(&pool)
+            .await?
+            .try_get("id")?;
+    let account_id: i64 = sqlx::query(
+        "INSERT INTO accounts (user_id, name, account_type, balance_cents) VALUES ($1, 'Pg Wallet', '1', 0) RETURNING id",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let category_id: i64 = sqlx::query(
+        r#"
+        INSERT INTO categories (user_id, name, category_type, path, display_order)
+        VALUES ($1, '咖啡', '3', '餐饮/咖啡', 1)
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    sqlx::query(
+        r#"
+        INSERT INTO bills (
+            user_id, occurred_at, amount_cents, direction, transaction_type,
+            account_id, source_account_id, category_id, merchant, description
+        )
+        VALUES ($1, '2026-03-10T12:00:00Z', 10000, 'income', 'income', $2, $2, NULL, 'Employer', 'salary'),
+               ($1, '2026-03-11T12:00:00Z', 1234, 'expense', 'expense', $2, $2, $3, 'Cafe', 'coffee'),
+               ($1, '2026-03-12T12:00:00Z', 8888, 'expense', 'transfer', $2, $2, NULL, 'Self', 'transfer out'),
+               ($1, '2026-03-13T12:00:00Z', 7777, 'income', 'investment', $2, $2, NULL, 'Broker', 'investment cashflow'),
+               ($1, '2026-04-01T12:00:00Z', 9999, 'expense', 'expense', $2, $2, $3, 'Other', 'outside range')
+        "#,
+    )
+    .bind(user_id)
+    .bind(account_id)
+    .bind(category_id)
+    .execute(&pool)
+    .await?;
+    let (start_time, end_time) = march_2026_timestamps();
+    let app = postgres_runtime_router(&postgres_url)?;
+
+    let response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            &format!("/api/statistics/amounts?query=thisMonth_{start_time}_{end_time}"),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    assert_eq!(body["success"], true);
+    assert_eq!(
+        body["result"]["thisMonth"]["amounts"][0]["incomeAmount"],
+        10000
+    );
+    assert_eq!(
+        body["result"]["thisMonth"]["amounts"][0]["expenseAmount"],
+        1234
+    );
+
+    let category_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            &format!(
+                "/api/statistics/category-statistics?startTime={start_time}&endTime={end_time}&keyword=coffee"
+            ),
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let category_status = category_response.status();
+    let category_body = read_json(category_response).await;
+    assert_eq!(category_status, StatusCode::OK, "{category_body}");
+    assert_eq!(
+        category_body["result"]["items"][0]["categoryId"],
+        category_id.to_string()
+    );
+    assert_eq!(
+        category_body["result"]["items"][0]["accountId"],
+        account_id.to_string()
+    );
+
+    let trends_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/statistics/category-statistics/trends?startYearMonth=202603&endYearMonth=202604",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let trends_status = trends_response.status();
+    let trends_body = read_json(trends_response).await;
+    assert_eq!(trends_status, StatusCode::OK, "{trends_body}");
+    assert_eq!(trends_body["success"], true);
+    let march_trend_items = trends_body["result"][0]["items"]
+        .as_array()
+        .expect("march postgres trend items");
+    let category_id_text = category_id.to_string();
+    let account_id_text = account_id.to_string();
+    assert!(
+        march_trend_items
+            .iter()
+            .any(|item| item["categoryId"] == category_id_text
+                && item["accountId"] == account_id_text)
+    );
+    assert_eq!(trends_body["result"][1]["month"], 4);
+
+    let asset_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/statistics/asset-trends?startTime=0&endTime=0",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let asset_status = asset_response.status();
+    let asset_body = read_json(asset_response).await;
+    assert_eq!(asset_status, StatusCode::OK, "{asset_body}");
+    assert_eq!(asset_body["success"], true);
+    assert!(!asset_body["result"]
+        .as_array()
+        .expect("postgres asset days")
+        .is_empty());
+
+    let overview_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/statistics/overview?period=year",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let overview_status = overview_response.status();
+    let overview_body = read_json(overview_response).await;
+    assert_eq!(overview_status, StatusCode::OK, "{overview_body}");
+    assert_eq!(overview_body["success"], true);
+    assert_eq!(overview_body["result"]["total_income"], 100.0);
+    assert_eq!(overview_body["result"]["total_expense"], 112.33);
+
+    let analyzer_trends_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/statistics/trends?period=year&category=%E9%A4%90%E9%A5%AE",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let analyzer_trends_status = analyzer_trends_response.status();
+    let analyzer_trends_body = read_json(analyzer_trends_response).await;
+    assert_eq!(
+        analyzer_trends_status,
+        StatusCode::OK,
+        "{analyzer_trends_body}"
+    );
+    assert_eq!(analyzer_trends_body["success"], true);
+
+    let comparison_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/statistics/comparison?period=year&type=category",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let comparison_status = comparison_response.status();
+    let comparison_body = read_json(comparison_response).await;
+    assert_eq!(comparison_status, StatusCode::OK, "{comparison_body}");
+    assert_eq!(comparison_body["success"], true);
+    assert!(comparison_body["result"]["comparison"]
+        .as_array()
+        .expect("postgres analyzer comparison")
+        .iter()
+        .any(|item| item["name"] == "餐饮"));
+
+    let analyzer_category_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/statistics/category?period=year&main_category=%E9%A4%90%E9%A5%AE",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let analyzer_category_status = analyzer_category_response.status();
+    let analyzer_category_body = read_json(analyzer_category_response).await;
+    assert_eq!(
+        analyzer_category_status,
+        StatusCode::OK,
+        "{analyzer_category_body}"
+    );
+    assert_eq!(analyzer_category_body["success"], true);
+
+    let analyzer_trend_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/statistics/trend?granularity=year",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let analyzer_trend_status = analyzer_trend_response.status();
+    let analyzer_trend_body = read_json(analyzer_trend_response).await;
+    assert_eq!(
+        analyzer_trend_status,
+        StatusCode::OK,
+        "{analyzer_trend_body}"
+    );
+    assert_eq!(analyzer_trend_body["success"], true);
+
+    let anomalies_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/insights/anomalies?months=24",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let anomalies_status = anomalies_response.status();
+    let anomalies_body = read_json(anomalies_response).await;
+    assert_eq!(anomalies_status, StatusCode::OK, "{anomalies_body}");
+    assert_eq!(anomalies_body["success"], true);
+
+    let exchange_upsert_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::PUT,
+            "/api/statistics/exchange-rates/custom",
+            Body::from(json!({"currency": "usd", "rate": "7.2"}).to_string()),
+            user_id,
+        ))
+        .await?;
+    let exchange_upsert_status = exchange_upsert_response.status();
+    let exchange_upsert_body = read_json(exchange_upsert_response).await;
+    assert_eq!(
+        exchange_upsert_status,
+        StatusCode::OK,
+        "{exchange_upsert_body}"
+    );
+    assert_eq!(exchange_upsert_body["result"]["currency"], "USD");
+    assert_eq!(exchange_upsert_body["result"]["rate"], "7.2");
+
+    let exchange_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/statistics/exchange-rates",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let exchange_status = exchange_response.status();
+    let exchange_body = read_json(exchange_response).await;
+    assert_eq!(exchange_status, StatusCode::OK, "{exchange_body}");
+    assert_eq!(exchange_body["result"]["providerKey"], "user_custom");
+    assert!(exchange_body["result"]["exchangeRates"]
+        .as_array()
+        .expect("postgres exchange rates")
+        .iter()
+        .any(|rate| rate["currency"] == "USD" && rate["rate"] == "7.2"));
+
+    let exchange_delete_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::DELETE,
+            "/api/statistics/exchange-rates/custom/USD",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let exchange_delete_status = exchange_delete_response.status();
+    let exchange_delete_body = read_json(exchange_delete_response).await;
+    assert_eq!(
+        exchange_delete_status,
+        StatusCode::OK,
+        "{exchange_delete_body}"
+    );
+    assert_eq!(exchange_delete_body["result"], true);
+
+    let pie_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/statistics/category-pie?type=%E6%94%AF%E5%87%BA&start_date=2026-03-01&end_date=2026-03-31",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let pie_status = pie_response.status();
+    let pie_body = read_json(pie_response).await;
+    assert_eq!(pie_status, StatusCode::OK, "{pie_body}");
+    assert_eq!(pie_body["data"][0]["name"], "餐饮");
+    assert_eq!(pie_body["data"][0]["value"], 12.34);
+
+    let merchants_response = app
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/statistics/top-merchants?limit=1&start_date=2026-03-01&end_date=2026-03-31",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    let merchants_status = merchants_response.status();
+    let merchants_body = read_json(merchants_response).await;
+    assert_eq!(merchants_status, StatusCode::OK, "{merchants_body}");
+    assert_eq!(merchants_body["data"][0]["name"], "Employer");
     Ok(())
 }
 
@@ -352,6 +691,9 @@ async fn statistics_runtime_covers_error_edges_auth_and_runtime_boundaries(
             1024 * 1024,
             ImportRouteMode::ImportDbRuntime,
         )?
+        .with_database_backend(DatabaseBackend::Sqlite)
+        .with_require_postgres_after_cutover(false)
+        .with_legacy_sqlite_runtime_for_tests()
         .with_trusted_user_header_secret(TEST_AUTH_SECRET),
     )?;
     let missing_db_response = build_router(missing_db_state)
@@ -373,6 +715,9 @@ async fn statistics_runtime_covers_error_edges_auth_and_runtime_boundaries(
             1024 * 1024,
             ImportRouteMode::ImportDbRuntime,
         )?
+        .with_database_backend(DatabaseBackend::Sqlite)
+        .with_require_postgres_after_cutover(false)
+        .with_legacy_sqlite_runtime_for_tests()
         .with_sqlite_db_path(
             fixture
                 ._temp_dir
@@ -402,6 +747,9 @@ async fn statistics_runtime_covers_error_edges_auth_and_runtime_boundaries(
             1024 * 1024,
             ImportRouteMode::ImportDbRuntime,
         )?
+        .with_database_backend(DatabaseBackend::Sqlite)
+        .with_require_postgres_after_cutover(false)
+        .with_legacy_sqlite_runtime_for_tests()
         .with_trusted_user_header_secret(TEST_AUTH_SECRET),
     )?;
     let missing_db_app = build_router(missing_db_state);
@@ -838,10 +1186,28 @@ fn runtime_router(fixture: &RuntimeFixture) -> Router {
         ImportRouteMode::ImportDbRuntime,
     )
     .expect("config")
+    .with_database_backend(DatabaseBackend::Sqlite)
+    .with_require_postgres_after_cutover(false)
+    .with_legacy_sqlite_runtime_for_tests()
     .with_sqlite_db_path(fixture.db_path.display().to_string())
     .with_trusted_user_header_secret(TEST_AUTH_SECRET);
     let state = HttpAppState::new(config).expect("http app state");
     build_router(state)
+}
+
+fn postgres_runtime_router(postgres_url: &str) -> Result<Router, Box<dyn Error>> {
+    let config = HttpShellConfig::new_with_import_route_mode(
+        "http://127.0.0.1:9".to_string(),
+        Duration::from_secs(5),
+        1024 * 1024,
+        ImportRouteMode::ImportDbRuntime,
+    )?
+    .with_database_backend(DatabaseBackend::Postgres)
+    .with_require_postgres_after_cutover(true)
+    .with_postgres_url(postgres_url)?
+    .with_trusted_user_header_secret(TEST_AUTH_SECRET);
+    let state = HttpAppState::new(config).expect("http app state");
+    Ok(build_router(state))
 }
 
 fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
@@ -1053,11 +1419,20 @@ fn wide_timestamps() -> (i64, i64) {
 }
 
 fn authed_request(method: Method, uri: &str, body: Body) -> Request<Body> {
+    authed_request_for_user(
+        method,
+        uri,
+        body,
+        TEST_USER_ID.parse().expect("test user id"),
+    )
+}
+
+fn authed_request_for_user(method: Method, uri: &str, body: Body, user_id: i64) -> Request<Body> {
     Request::builder()
         .method(method)
         .uri(uri)
         .header("content-type", "application/json")
-        .header("x-user-id", TEST_USER_ID)
+        .header("x-user-id", user_id.to_string())
         .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
         .body(body)
         .expect("request builds")

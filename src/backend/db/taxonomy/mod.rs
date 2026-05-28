@@ -6,6 +6,7 @@ pub mod account_rules;
 pub mod accounts;
 pub mod categories;
 pub mod category_rules;
+pub mod postgres_reads;
 pub mod settings_bundle;
 pub mod tags;
 pub mod templates;

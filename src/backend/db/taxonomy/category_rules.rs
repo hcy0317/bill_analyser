@@ -707,7 +707,7 @@ fn format_rule_clause(operator: &str, keywords: impl IntoIterator<Item = String>
     }
 }
 
-fn convert_old_keyword_syntax(old_keywords: &str) -> String {
+pub(crate) fn convert_old_keyword_syntax(old_keywords: &str) -> String {
     let old_keywords = old_keywords.trim();
     if old_keywords.is_empty() {
         return String::new();

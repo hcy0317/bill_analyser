@@ -14,6 +14,31 @@ async fn list_bills_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "bills") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let filters = match postgres_filters_from_query(runtime.pool(), user_id, &query).await {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let page = query.page();
+        let page_size = query.page_size();
+        let bill_page =
+            match query_postgres_bills(runtime.pool(), user_id.get() as i64, page, page_size, &filters)
+                .await
+            {
+                Ok(value) => value,
+                Err(_) => return db_error_response(),
+            };
+        return match page_to_frontend_postgres(runtime.pool(), user_id, page, page_size, bill_page)
+            .await
+        {
+            Ok(value) => json_response(StatusCode::OK, value),
+            Err(_) => db_error_response(),
+        };
+    }
     let runtime = match open_runtime(&state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -44,6 +69,43 @@ async fn bills_by_month_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "bills") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let (start_date, end_date) = match bill_analyser_core::adapters::transaction::month_date_range(
+            query.year,
+            query.month,
+        ) {
+            Ok(value) => value,
+            Err(error) => return bad_request(error.to_string()),
+        };
+        let mut filters = match postgres_filters_from_query(runtime.pool(), user_id, &query.common).await
+        {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        filters.date_from = Some(start_date);
+        filters.date_to = Some(end_date);
+        let bill_page = match query_postgres_bills(
+            runtime.pool(),
+            user_id.get() as i64,
+            1,
+            100_000,
+            &filters,
+        )
+            .await
+        {
+            Ok(value) => value,
+            Err(_) => return db_error_response(),
+        };
+        return match page_to_frontend_postgres(runtime.pool(), user_id, 1, 100_000, bill_page).await
+        {
+            Ok(value) => json_response(StatusCode::OK, value),
+            Err(_) => db_error_response(),
+        };
+    }
     let runtime = match open_runtime(&state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -81,6 +143,27 @@ async fn create_bill_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "bills") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let draft = match create_draft_from_payload_postgres(runtime.pool(), user_id, &payload).await
+        {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let bill_id = match create_postgres_bill(runtime.pool(), user_id.get() as i64, &draft).await
+        {
+            Ok(value) => value,
+            Err(_) => return db_error_response(),
+        };
+        return match get_postgres_frontend_bill(runtime.pool(), user_id, bill_id).await {
+            Ok(Some(value)) => success_result(StatusCode::CREATED, value),
+            Ok(None) => db_error_response(),
+            Err(_) => db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -132,6 +215,17 @@ async fn get_bill_response(state: HttpAppState, headers: HeaderMap, bill_id: i64
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "bills") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match get_postgres_frontend_bill(runtime.pool(), user_id, bill_id).await {
+            Ok(Some(value)) => success_result(StatusCode::OK, value),
+            Ok(None) => not_found("Bill not found"),
+            Err(_) => db_error_response(),
+        };
+    }
     let runtime = match open_runtime(&state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -156,6 +250,37 @@ async fn update_bill_path_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "bills") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        if get_postgres_bill_by_id(runtime.pool(), user_id.get() as i64, bill_id)
+            .await
+            .map_err(|_| ())
+            .ok()
+            .flatten()
+            .is_none()
+        {
+            return not_found("Bill not found");
+        }
+        let draft = match update_draft_from_payload_postgres(runtime.pool(), user_id, &payload).await
+        {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match update_postgres_bill(runtime.pool(), user_id.get() as i64, bill_id, &draft)
+            .await
+        {
+            Ok(true) => match get_postgres_frontend_bill(runtime.pool(), user_id, bill_id).await {
+                Ok(Some(value)) => success_result(StatusCode::OK, value),
+                Ok(None) => not_found("Bill not found"),
+                Err(_) => db_error_response(),
+            },
+            Ok(false) => not_found("Bill not found or update failed"),
+            Err(_) => db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -198,6 +323,36 @@ async fn legacy_modify_bill_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "bills") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let Some(old_snapshot) =
+            (match get_postgres_bill_update_snapshot(runtime.pool(), user_id.get() as i64, bill_id)
+                .await
+            {
+                Ok(value) => value,
+                Err(_) => return db_error_response(),
+            })
+        else {
+            return not_found("Bill not found");
+        };
+        let mut draft = match update_draft_from_payload_postgres(runtime.pool(), user_id, &payload)
+            .await
+        {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        apply_legacy_modify_preserved_fields(&mut draft.fields, &payload, &old_snapshot);
+        return match update_postgres_bill(runtime.pool(), user_id.get() as i64, bill_id, &draft)
+            .await
+        {
+            Ok(true) => json_response(StatusCode::OK, legacy_modify_bill_success_payload(bill_id)),
+            Ok(false) => db_error_response(),
+            Err(_) => db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -263,6 +418,17 @@ async fn delete_bill_response(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "bills") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match delete_postgres_bill(runtime.pool(), user_id.get() as i64, bill_id).await {
+            Ok(true) => json_response(StatusCode::OK, success_body),
+            Ok(false) => not_found("Bill not found"),
+            Err(_) => db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state) {
         Ok(value) => value,
         Err(response) => return *response,

@@ -34,6 +34,24 @@ fn open_runtime(state: &HttpAppState) -> RouteResult<SqliteRuntime> {
     Ok(runtime)
 }
 
+fn open_postgres_runtime(state: &HttpAppState) -> RouteResult<PostgresRepositoryRuntime> {
+    state
+        .open_postgres_repository_runtime("auth")
+        .map_err(|error| {
+            let status = error.http_status_code();
+            let title = if status == 503 {
+                "Service Unavailable"
+            } else {
+                "Internal Server Error"
+            };
+            Box::new(auth_rest_error_response(AuthRestError::new(
+                status,
+                title,
+                error.public_message("Rust auth PostgreSQL runtime DB error"),
+            )))
+        })
+}
+
 fn client_ip(headers: &HeaderMap, peer_addr: Option<SocketAddr>) -> String {
     if let Some(addr) = peer_addr {
         return addr.ip().to_string();

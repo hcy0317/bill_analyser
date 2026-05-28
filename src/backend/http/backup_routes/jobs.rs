@@ -10,7 +10,7 @@ pub(super) fn list_backup_jobs_response(
     headers: &HeaderMap,
 ) -> RouteResult<Response> {
     let auth_runtime = authenticated_backup_runtime(state, headers)?;
-    let jobs = list_backup_jobs(auth_runtime.runtime.connection(), auth_runtime.user_id)
+    let jobs = list_backup_jobs_for_runtime(&auth_runtime.runtime, auth_runtime.user_id)
         .map_err(|_| Box::new(db_error_response()))?;
     Ok(json_response(
         StatusCode::OK,
@@ -29,7 +29,7 @@ pub(super) fn save_backup_job_response(
         Ok(payload) => payload,
         Err(message) => {
             write_backup_job_audit(
-                auth_runtime.runtime.connection(),
+                &auth_runtime.runtime,
                 auth_runtime.user_id,
                 headers,
                 json!({}),
@@ -44,7 +44,7 @@ pub(super) fn save_backup_job_response(
         Ok(job) => job,
         Err(error) => {
             write_backup_job_audit(
-                auth_runtime.runtime.connection(),
+                &auth_runtime.runtime,
                 auth_runtime.user_id,
                 headers,
                 validation_audit_details(&payload),
@@ -68,14 +68,14 @@ pub(super) fn save_backup_job_response(
         "last_status": normalized.last_status,
     });
 
-    let job_id = create_or_update_backup_job(
-        auth_runtime.runtime.connection(),
+    let job_id = create_or_update_backup_job_for_runtime(
+        &auth_runtime.runtime,
         auth_runtime.user_id,
         BackupJobDraft::from(normalized.clone()),
     )
     .map_err(|error| {
         write_backup_job_audit(
-            auth_runtime.runtime.connection(),
+            &auth_runtime.runtime,
             auth_runtime.user_id,
             headers,
             validation_audit_details(&payload),
@@ -87,7 +87,7 @@ pub(super) fn save_backup_job_response(
     })?;
 
     write_backup_job_audit(
-        auth_runtime.runtime.connection(),
+        &auth_runtime.runtime,
         auth_runtime.user_id,
         headers,
         json!({

@@ -4,32 +4,33 @@
 
 use std::{
     collections::HashMap,
-    convert::Infallible,
     sync::{Arc, Mutex},
 };
 
 use serde_json::Value;
 
 use crate::{
-    config::HttpShellConfig,
+    config::{DatabaseBackend, HttpShellConfig},
     database_runtime::{
         open_sqlite_repository_runtime, DatabaseRuntimeBoundary, RouteRepositoryRuntimeError,
         SqliteRepositoryOpenMode,
     },
 };
-use bill_analyser_db::SqliteRuntime;
+use bill_analyser_db::{DbError, PostgresRepositoryRuntime, SqliteRuntime};
 
 #[derive(Debug, Clone)]
 pub struct HttpAppState {
     pub config: HttpShellConfig,
     llm_runtime_configs: Arc<Mutex<HashMap<i64, Value>>>,
+    postgres_runtime: Arc<Mutex<Option<PostgresRepositoryRuntime>>>,
 }
 
 impl HttpAppState {
-    pub fn new(config: HttpShellConfig) -> Result<Self, Infallible> {
+    pub fn new(config: HttpShellConfig) -> Result<Self, DbError> {
         Ok(Self {
             config,
             llm_runtime_configs: Arc::new(Mutex::new(HashMap::new())),
+            postgres_runtime: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -76,5 +77,44 @@ impl HttpAppState {
             runtime_label,
             SqliteRepositoryOpenMode::ExistingOnly,
         )
+    }
+
+    pub fn open_postgres_repository_runtime(
+        &self,
+        runtime_label: &'static str,
+    ) -> Result<PostgresRepositoryRuntime, RouteRepositoryRuntimeError> {
+        if self.config.database_backend != DatabaseBackend::Postgres {
+            return Err(RouteRepositoryRuntimeError::PostgresOpen {
+                runtime_label,
+                reason: "PostgreSQL repository runtime is required after cutover".to_string(),
+            });
+        }
+
+        let postgres_url = self.config.postgres_url.as_deref().ok_or_else(|| {
+            RouteRepositoryRuntimeError::PostgresOpen {
+                runtime_label,
+                reason: "PostgreSQL repository runtime requires BILL_ANALYSER_POSTGRES_URL"
+                    .to_string(),
+            }
+        })?;
+
+        let mut cached_runtime = self.postgres_runtime.lock().map_err(|_| {
+            RouteRepositoryRuntimeError::PostgresOpen {
+                runtime_label,
+                reason: "PostgreSQL repository runtime lock poisoned".to_string(),
+            }
+        })?;
+        if let Some(runtime) = cached_runtime.clone() {
+            return Ok(runtime);
+        }
+
+        let runtime = PostgresRepositoryRuntime::lazy(postgres_url, 5).map_err(|source| {
+            RouteRepositoryRuntimeError::PostgresOpen {
+                runtime_label,
+                reason: source.to_string(),
+            }
+        })?;
+        *cached_runtime = Some(runtime.clone());
+        Ok(runtime)
     }
 }

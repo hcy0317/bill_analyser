@@ -26,10 +26,22 @@ pub(super) fn authenticated_backup_runtime(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub(super) fn open_backup_ops_runtime(state: &HttpAppState) -> RouteResult<SqliteRuntime> {
+pub(super) fn open_backup_ops_runtime(state: &HttpAppState) -> RouteResult<BackupOpsRuntime> {
+    if state.config.database_backend.uses_postgres() {
+        let runtime = state
+            .open_postgres_repository_runtime("backup ops")
+            .map_err(|error| {
+                Box::new(error_response(
+                    status_or_internal(error.http_status_code()),
+                    error.public_message("Rust backup ops route runtime DB error"),
+                ))
+            })?;
+        return Ok(BackupOpsRuntime::Postgres(runtime));
+    }
+
     let runtime = open_runtime(state)?;
     init_backup_ops_schema(runtime.connection()).map_err(|_| Box::new(db_error_response()))?;
-    Ok(runtime)
+    Ok(BackupOpsRuntime::Sqlite(runtime))
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
