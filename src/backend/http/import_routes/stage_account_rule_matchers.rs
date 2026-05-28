@@ -1,6 +1,6 @@
 // 中文导读：导入 stage2 的账户规则匹配 pass，负责把 account_rules 应用到转账、投资、收入和支出预览行。
 // 维护重点：本文件只组合导入预览上下文与 core account_rules，不重新实现规则表达式语义。
-// 不变式：导入账户识别不得回退到账户别名直接匹配；别名只作为账户规则迁移输入。
+// 不变式：导入账户识别不得回退到账户别名直接匹配；旧别名只允许恢复工具一次性转换为账户规则。
 
 #[tracing::instrument(level = "debug", skip_all)]
 fn apply_transfer_account_rule_match(

@@ -85,7 +85,6 @@ struct DefaultAccountTemplate {
     currency: &'static str,
     icon: &'static str,
     color: &'static str,
-    aliases: &'static [&'static str],
     display_order: i64,
 }
 

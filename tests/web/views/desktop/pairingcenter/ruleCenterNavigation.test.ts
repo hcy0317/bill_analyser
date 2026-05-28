@@ -169,7 +169,6 @@ describe('rule center UX source guards', () => {
         expect(accountSource).toContain('services.createAccountRule');
         expect(accountSource).toContain('services.reorderAccountRules');
         expect(accountSource).toContain('services.testAccountRule');
-        expect(accountSource).toContain('services.migrateAccountAliases');
         expect(listSource).toContain("value: 'account-recognition'");
         expect(listSource).toContain("legacyRuleTab: 'accounts'");
         expect(listSource).toContain('<AccountRulePanel');

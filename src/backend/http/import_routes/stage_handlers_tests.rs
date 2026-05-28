@@ -54,49 +54,12 @@ mod stage_handler_transfer_account_tests {
             ImportIntelligenceAccount {
                 id: 100,
                 name: "工资卡".to_string(),
-                aliases: vec!["工资卡".to_string(), "农业银行".to_string(), "abc".to_string()],
             },
             ImportIntelligenceAccount {
                 id: 200,
                 name: "零钱".to_string(),
-                aliases: vec!["零钱".to_string(), "微信钱包".to_string(), "wallet".to_string()],
             },
         ]
-    }
-
-    #[test]
-    fn parse_account_aliases_keeps_json_and_delimited_alias_contract() {
-        assert_eq!(
-            parse_account_aliases(Some(r#"[" 微信钱包 ", "", 42, true, "余额宝"]"#)),
-            vec!["微信钱包", "42", "true", "余额宝"]
-        );
-        assert_eq!(
-            parse_account_aliases(Some(" 微信钱包,农业银行； 余额宝|零钱通 ")),
-            vec!["微信钱包", "农业银行", "余额宝", "零钱通"]
-        );
-        assert!(parse_account_aliases(Some("   ")).is_empty());
-        assert!(parse_account_aliases(None).is_empty());
-    }
-
-    #[test]
-    fn account_alias_match_uses_case_insensitive_overlap_tokens() {
-        let account = ImportIntelligenceAccount {
-            id: 10,
-            name: "微信钱包".to_string(),
-            aliases: vec![
-                "WeChat Wallet".to_string(),
-                "abc".to_string(),
-                "零钱".to_string(),
-            ],
-        };
-
-        assert!(account_matches_tokens(&account, &["wechat wallet".to_string()]));
-        assert!(account_matches_tokens(
-            &account,
-            &["parser:abc-bank".to_string()]
-        ));
-        assert!(account_matches_tokens(&account, &["零钱".to_string()]));
-        assert!(!account_matches_tokens(&account, &["支付宝".to_string()]));
     }
 
     #[test]
@@ -276,14 +239,14 @@ mod stage_handler_transfer_account_tests {
                             "parser_id": "abc",
                             "payment_method": "农业银行",
                             "account_name": "工资卡",
-                            "source_account_id": "abc",
+                            "source_account_id": 100,
                             "tags": ["parser:abc"]
                         },
                         {
                             "role": "incoming",
                             "payment_method": "微信钱包",
                             "account_name": "零钱",
-                            "source_account_id": "wallet",
+                            "source_account_id": 200,
                             "tags": ["channel:wallet"]
                         }
                     ]
@@ -328,6 +291,24 @@ mod stage_handler_transfer_account_tests {
         assert!(apply_transfer_pair_account_match(&mut draft, &transfer_accounts()));
         assert_eq!(draft.preview_source_account_id, Some(100));
         assert_eq!(draft.preview_destination_account_id, None);
+    }
+
+    #[test]
+    fn transfer_pair_account_resolution_rejects_missing_or_unknown_ids() {
+        let accounts = transfer_accounts();
+
+        assert_eq!(
+            resolve_transfer_account_from_entry(&json!({"source_account_id": "100"}), &accounts),
+            Some(100)
+        );
+        assert_eq!(
+            resolve_transfer_account_from_entry(&json!({"source_account_id": "abc"}), &accounts),
+            None
+        );
+        assert_eq!(
+            resolve_transfer_account_from_entry(&json!({"source_account_id": 999}), &accounts),
+            None
+        );
     }
 
     fn fallback_categories() -> Vec<ImportIntelligenceCategory> {

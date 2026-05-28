@@ -38,9 +38,6 @@
                 <f7-list-item :title="tt('No account rules')"></f7-list-item>
             </f7-list>
 
-            <f7-block class="display-flex justify-content-center">
-                <f7-button fill :disabled="loading" @click="migrateAliases">{{ tt('Import Rules from Legacy Aliases') }}</f7-button>
-            </f7-block>
         </template>
 
         <f7-sheet
@@ -251,7 +248,6 @@ import {
     createDefaultAccountRuleForm,
     getAccountRuleLabel,
     normalizeAccountRuleItem,
-    type AccountAliasMigrationResult,
     type AccountRuleFieldScope,
     type AccountRuleForm,
     type AccountRuleItem,
@@ -483,26 +479,6 @@ async function deleteRule(): Promise<void> {
     } catch (error: unknown) {
         showToast(getRequestErrorMessage(error, tt('Failed to delete rule')));
     } finally {
-        hideLoading();
-    }
-}
-
-async function migrateAliases(): Promise<void> {
-    loading.value = true;
-    showLoading(() => loading.value);
-    try {
-        const result = requireApiSuccess<AccountAliasMigrationResult>(
-            await services.migrateAccountAliases(),
-            tt('Migration failed')
-        );
-        const migrated = Number(result?.migrated ?? result?.migrated_count ?? 0);
-        const skipped = Number(result?.skipped ?? result?.skipped_count ?? 0);
-        showToast(`Migration completed: migrated ${migrated}, skipped ${skipped}`);
-        await loadAll();
-    } catch (error: unknown) {
-        showToast(getRequestErrorMessage(error, tt('Migration failed')));
-    } finally {
-        loading.value = false;
         hideLoading();
     }
 }

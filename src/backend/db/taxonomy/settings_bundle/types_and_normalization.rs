@@ -205,7 +205,6 @@ pub fn normalize_account_import(payload: &Value) -> Value {
         "hidden": i64::from(safe_bool(item.get("hidden"))),
         "display_order": safe_int(get_any(item, &["displayOrder", "display_order"]), 0),
         "comment": safe_text(item.get("comment"), ""),
-        "aliases": dump_json_list(item.get("aliases")),
         "parent_id": parent_id,
     })
 }

@@ -23,15 +23,13 @@ fn create_register_default_accounts(
     let mut created_account_ids = Vec::new();
     let mut cash_account_id = None;
     for account in templates {
-        let aliases = serde_json::to_string(account.aliases)
-            .map_err(|error| DbError::InvalidOperation(error.to_string()))?;
         connection.execute(
             r#"
             INSERT INTO accounts (
                 user_id, name, type, category, currency, icon, color,
                 balance, initial_balance, hidden, display_order, comment,
-                aliases, parent_id, created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, 0, 0, ?8, NULL, ?9, 0, ?10, ?10)
+                parent_id, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, 0, 0, ?8, NULL, 0, ?9, ?9)
             "#,
             params![
                 user_id,
@@ -42,7 +40,6 @@ fn create_register_default_accounts(
                 account.icon,
                 account.color,
                 account.display_order,
-                aliases,
                 created_at,
             ],
         )?;

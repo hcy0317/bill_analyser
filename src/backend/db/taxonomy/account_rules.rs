@@ -1,17 +1,12 @@
-// 中文导读：SQLite repository 层，负责账户识别规则 schema、CRUD、排序、alias 迁移和 shadow 匹配读模型。
-// 维护重点：SQL、user-scope 校验和 legacy aliases 迁移集中在这里，HTTP/import 层不得复制这些查询。
+// 中文导读：SQLite repository 层，负责账户识别规则 schema、CRUD、排序和 shadow 匹配读模型。
+// 维护重点：SQL 和 user-scope 校验集中在这里，HTTP/import 层不得复制这些查询。
 // 不变式：账户规则先作为可管理、可测试的规则资产存在；导入行为切换必须由后续切片显式完成。
 
 use std::collections::BTreeSet;
 
-use bill_analyser_core::{
-    account::parse_aliases_text,
-    account_rules::{
-        normalize_account_role_scope, normalize_account_rule_field_scope,
-        normalize_transaction_type_scope, AccountRuleCandidate, AccountRuleMatchContext,
-        DEFAULT_FIELD_SCOPES,
-    },
-    category_rules::escape_rule_expression_term,
+use bill_analyser_core::account_rules::{
+    normalize_account_role_scope, normalize_account_rule_field_scope,
+    normalize_transaction_type_scope, AccountRuleCandidate, AccountRuleMatchContext,
 };
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
@@ -25,17 +20,11 @@ mod tests;
 
 use helpers::{
     account_rule_candidate_from_record, account_rule_from_row, bool_int_value, field_scope_json,
-    is_constraint_error, normalize_alias, normalize_rule_expression_alias, required_i64,
-    required_rule_expression, sql_text_value, utc_now_iso, value_as_i64, AccountAliasSource,
+    is_constraint_error, required_i64, required_rule_expression, sql_text_value, utc_now_iso,
+    value_as_i64,
 };
 
 pub type AccountRuleRecord = Map<String, Value>;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AccountRuleMigrationSummary {
-    pub migrated: i64,
-    pub skipped: i64,
-}
 
 pub struct AccountRulesRepository<'conn> {
     connection: &'conn mut Connection,
@@ -348,69 +337,6 @@ impl<'conn> AccountRulesRepository<'conn> {
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
-    pub fn migrate_aliases_to_rules(
-        &mut self,
-        user_id: i64,
-    ) -> DbResult<AccountRuleMigrationSummary> {
-        let accounts = self.accounts_with_aliases(user_id)?;
-        let now = utc_now_iso();
-        let mut summary = AccountRuleMigrationSummary {
-            migrated: 0,
-            skipped: 0,
-        };
-
-        for account in accounts {
-            if account.hidden {
-                summary.skipped += i64::try_from(account.aliases.len()).unwrap_or(i64::MAX);
-                continue;
-            }
-            for alias in account.aliases {
-                let normalized_alias = normalize_alias(&alias);
-                if normalized_alias.is_empty() {
-                    summary.skipped += 1;
-                    continue;
-                }
-                if self.alias_rule_exists(user_id, account.id, &normalized_alias)? {
-                    summary.skipped += 1;
-                    continue;
-                }
-                let expression = format!("OR={{{}}}", escape_rule_expression_term(alias.trim()));
-                let source_key = format!("legacy_alias:{normalized_alias}");
-                let result = self.connection.execute(
-                    "INSERT INTO account_rules (
-                        user_id, account_id, name, priority, rule_expression,
-                        regex_enabled, enabled, account_role_scope, transaction_type_scope,
-                        field_scope, source, source_key, created_at, updated_at
-                     )
-                     VALUES (?, ?, ?, 1000, ?, 0, 1, 'any', 'all', ?, 'alias_migration', ?, ?, ?)",
-                    params![
-                        user_id,
-                        account.id,
-                        format!("migrated:{}/{}", account.name, alias.trim()),
-                        expression,
-                        field_scope_json(
-                            &DEFAULT_FIELD_SCOPES
-                                .iter()
-                                .map(|value| (*value).to_string())
-                                .collect::<Vec<_>>()
-                        )?,
-                        source_key,
-                        now,
-                        now
-                    ],
-                );
-                match result {
-                    Ok(_) => summary.migrated += 1,
-                    Err(error) if is_constraint_error(&error) => summary.skipped += 1,
-                    Err(error) => return Err(DbError::from(error)),
-                }
-            }
-        }
-
-        Ok(summary)
-    }
-
-    #[tracing::instrument(level = "debug", skip_all)]
     pub fn list_match_candidates(&mut self, user_id: i64) -> DbResult<Vec<AccountRuleCandidate>> {
         self.list_rules(user_id, None, true, None, None)?
             .into_iter()
@@ -449,63 +375,6 @@ impl<'conn> AccountRulesRepository<'conn> {
             .optional()
             .map(|value| value.is_some())
             .map_err(DbError::from)
-    }
-
-    fn accounts_with_aliases(&self, user_id: i64) -> DbResult<Vec<AccountAliasSource>> {
-        let mut statement = self.connection.prepare(
-            "SELECT id, name, aliases, hidden
-             FROM accounts
-             WHERE user_id = ?
-             ORDER BY display_order ASC, id ASC",
-        )?;
-        let rows = statement.query_map(params![user_id], |row| {
-            let raw_aliases = row.get::<_, Option<String>>("aliases")?.unwrap_or_default();
-            Ok(AccountAliasSource {
-                id: row.get("id")?,
-                name: row.get::<_, Option<String>>("name")?.unwrap_or_default(),
-                aliases: parse_aliases_text(&raw_aliases),
-                hidden: row.get::<_, Option<i64>>("hidden")?.unwrap_or(0) != 0,
-            })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
-    }
-
-    fn alias_rule_exists(
-        &self,
-        user_id: i64,
-        account_id: i64,
-        normalized_alias: &str,
-    ) -> DbResult<bool> {
-        let source_key = format!("legacy_alias:{normalized_alias}");
-        if self
-            .connection
-            .query_row(
-                "SELECT 1 FROM account_rules
-                 WHERE user_id = ? AND account_id = ?
-                   AND source = 'alias_migration' AND source_key = ?
-                 LIMIT 1",
-                params![user_id, account_id, source_key],
-                |_| Ok(()),
-            )
-            .optional()?
-            .is_some()
-        {
-            return Ok(true);
-        }
-        let mut statement = self.connection.prepare(
-            "SELECT rule_expression FROM account_rules
-             WHERE user_id = ? AND account_id = ? AND source = 'alias_migration'",
-        )?;
-        let rows = statement.query_map(params![user_id, account_id], |row| {
-            row.get::<_, Option<String>>(0)
-        })?;
-        for expression in rows {
-            let expression = expression?.unwrap_or_default();
-            if normalize_rule_expression_alias(&expression) == normalized_alias {
-                return Ok(true);
-            }
-        }
-        Ok(false)
     }
 
     fn count_matching_user_rules(&self, rule_ids: &BTreeSet<i64>, user_id: i64) -> DbResult<i64> {

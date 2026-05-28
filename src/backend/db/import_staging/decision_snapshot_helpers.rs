@@ -103,7 +103,6 @@ fn transfer_snapshot_restore_changes(
 #[derive(Debug, Clone)]
 struct ImportPreviewTransferAccount {
     id: i64,
-    aliases: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -150,11 +149,6 @@ fn load_transfer_resolution_accounts(
         return Ok(Vec::new());
     }
 
-    let aliases_expr = if import_staging_column_exists_tx(tx, "accounts", "aliases")? {
-        "aliases".to_string()
-    } else {
-        "NULL AS aliases".to_string()
-    };
     let hidden_expr = if import_staging_column_exists_tx(tx, "accounts", "hidden")? {
         "hidden".to_string()
     } else {
@@ -168,20 +162,15 @@ fn load_transfer_resolution_accounts(
 
     let mut statement = tx.prepare(&format!(
         "
-        SELECT id, name, {aliases_expr}, {hidden_expr}
+        SELECT id, {hidden_expr}
         FROM accounts
         WHERE user_id = ?1 AND {hidden_filter}
         ORDER BY id ASC
         "
     ))?;
     let rows = statement.query_map(params![user_id_i64(user_id)?], |row| {
-        let name = row.get::<_, Option<String>>("name")?.unwrap_or_default();
-        let raw_aliases = row.get::<_, Option<String>>("aliases")?;
-        let mut aliases = parse_transfer_account_aliases(raw_aliases.as_deref());
-        aliases.push(name.clone());
         Ok(ImportPreviewTransferAccount {
             id: row.get("id")?,
-            aliases,
         })
     })?;
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
@@ -263,14 +252,7 @@ fn resolve_transfer_account_from_entry(
         }
     }
 
-    let tokens = transfer_account_tokens_from_entry(entry);
-    if tokens.is_empty() {
-        return None;
-    }
-    accounts
-        .iter()
-        .find(|account| transfer_account_matches_tokens(account, &tokens))
-        .map(|account| account.id)
+    None
 }
 
 fn transfer_account_id_from_value(value: &Value) -> Option<i64> {
@@ -278,84 +260,6 @@ fn transfer_account_id_from_value(value: &Value) -> Option<i64> {
         return (number > 0).then_some(number);
     }
     value.as_str().and_then(parse_positive_i64)
-}
-
-fn transfer_account_tokens_from_entry(entry: &Value) -> Vec<String> {
-    let mut tokens = Vec::new();
-    for field in [
-        "account_name",
-        "payment_method",
-        "parser_id",
-        "counterparty",
-        "source_account_id",
-        "account_id",
-        "name",
-        "label",
-        "parser_label",
-    ] {
-        if let Some(text) = transfer_account_value_text(entry.get(field)) {
-            tokens.extend(expand_transfer_account_token(&text));
-        }
-    }
-    if let Some(tags) = entry.get("tags").and_then(Value::as_array) {
-        for tag in tags {
-            if let Some(text) = transfer_account_value_text(Some(tag)) {
-                tokens.extend(expand_transfer_account_token(&text));
-            }
-        }
-    }
-    tokens
-}
-
-fn expand_transfer_account_token(value: &str) -> Vec<String> {
-    let normalized = normalize_transfer_account_text(value);
-    if normalized.is_empty() {
-        return Vec::new();
-    }
-    let mut tokens = vec![normalized.clone()];
-    for prefix in ["parser:", "channel:", "account:", "source:"] {
-        if let Some(stripped) = normalized.strip_prefix(prefix) {
-            if !stripped.is_empty() {
-                tokens.push(stripped.to_string());
-            }
-        }
-    }
-    tokens
-}
-
-fn transfer_account_matches_tokens(
-    account: &ImportPreviewTransferAccount,
-    tokens: &[String],
-) -> bool {
-    account.aliases.iter().any(|alias| {
-        let alias = normalize_transfer_account_text(alias);
-        !alias.is_empty()
-            && tokens
-                .iter()
-                .any(|token| token == &alias || token.contains(&alias) || alias.contains(token))
-    })
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn parse_transfer_account_aliases(raw_aliases: Option<&str>) -> Vec<String> {
-    let raw_aliases = raw_aliases.unwrap_or("").trim();
-    if raw_aliases.is_empty() {
-        return Vec::new();
-    }
-    if let Ok(Value::Array(values)) = serde_json::from_str::<Value>(raw_aliases) {
-        return values
-            .iter()
-            .filter_map(|value| transfer_account_value_text(Some(value)))
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .collect();
-    }
-    raw_aliases
-        .split([',', ';', '|', '，', '；'])
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect()
 }
 
 fn transfer_account_value_text(value: Option<&Value>) -> Option<String> {
@@ -370,11 +274,6 @@ fn transfer_account_value_text(value: Option<&Value>) -> Option<String> {
         return Some(number.to_string());
     }
     value.as_f64().map(|number| number.to_string())
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn normalize_transfer_account_text(value: &str) -> String {
-    value.trim().to_ascii_lowercase()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -1007,38 +906,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn transfer_account_aliases_preserve_json_and_delimited_inputs() {
-        assert_eq!(
-            parse_transfer_account_aliases(Some(r#"[" 工资卡 ", "", 100, true, "abc"]"#)),
-            vec!["工资卡", "100", "abc"]
-        );
-        assert_eq!(
-            parse_transfer_account_aliases(Some(" 工资卡,农业银行； abc|微信零钱 ")),
-            vec!["工资卡", "农业银行", "abc", "微信零钱"]
-        );
-        assert!(parse_transfer_account_aliases(Some(" ")).is_empty());
-        assert!(parse_transfer_account_aliases(None).is_empty());
-    }
-
-    #[test]
-    fn transfer_account_match_uses_expanded_parser_channel_and_source_tokens() {
+    fn transfer_account_resolution_uses_explicit_source_chain_ids_only() {
         let account = ImportPreviewTransferAccount {
             id: 100,
-            aliases: vec!["农业银行".to_string(), "abc".to_string(), "工资卡".to_string()],
         };
-        let tokens = [
-            expand_transfer_account_token("parser:abc"),
-            expand_transfer_account_token("channel:农业银行"),
-            expand_transfer_account_token("source:工资卡"),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
-
-        assert!(transfer_account_matches_tokens(&account, &tokens));
-        assert!(!transfer_account_matches_tokens(
-            &account,
-            &expand_transfer_account_token("parser:wechat")
-        ));
+        assert_eq!(
+            resolve_transfer_account_from_entry(&serde_json::json!({"account_id": 100}), &[account]),
+            Some(100)
+        );
+        assert_eq!(
+            resolve_transfer_account_from_entry(
+                &serde_json::json!({"parser_id": "abc", "account_name": "工资卡"}),
+                &[ImportPreviewTransferAccount { id: 100 }]
+            ),
+            None
+        );
     }
 }

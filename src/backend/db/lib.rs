@@ -268,9 +268,7 @@ pub use statistics::{
     upsert_user_custom_exchange_rate, StatisticsAllDateRange, StatisticsBillFilters,
     UserCustomExchangeRateUpsert,
 };
-pub use taxonomy::account_rules::{
-    AccountRuleMigrationSummary, AccountRuleRecord, AccountRulesRepository,
-};
+pub use taxonomy::account_rules::{AccountRuleRecord, AccountRulesRepository};
 pub use taxonomy::category_rules::{CategoryRuleRecord, CategoryRulesRepository};
 pub use taxonomy::postgres_reads::{
     create_postgres_account, create_postgres_category, delete_postgres_account,

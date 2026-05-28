@@ -29,7 +29,7 @@ pub mod smart_dedup;
 pub mod statistics;
 pub mod weaviate_derived;
 
-pub use adapters::{account, api, category, transaction};
+pub use adapters::{api, category, transaction};
 pub use ai_ocr_llm::{
     build_llm_analysis_response, build_llm_candidate_list_response,
     build_llm_candidate_reject_response, build_llm_classification_prompt,

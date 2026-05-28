@@ -196,7 +196,6 @@ export const RUST_ROUTE_OWNERSHIP: readonly RustRouteOwnership[] = [
     {"method":"DELETE","pattern":"/api/account-rules/{rule_id}","domain":"taxonomy-rules-settings","state":"rust_owned_verified"},
     {"method":"PUT","pattern":"/api/account-rules/{rule_id}","domain":"taxonomy-rules-settings","state":"rust_owned_verified"},
     {"method":"POST","pattern":"/api/account-rules/{rule_id}/test","domain":"taxonomy-rules-settings","state":"rust_owned_verified"},
-    {"method":"POST","pattern":"/api/account-rules/migrate-aliases","domain":"taxonomy-rules-settings","state":"rust_owned_verified"},
     {"method":"POST","pattern":"/api/account-rules/reorder","domain":"taxonomy-rules-settings","state":"rust_owned_verified"},
     {"method":"GET","pattern":"/api/rules/overview","domain":"taxonomy-rules-settings","state":"python_deleted"},
     {"method":"GET","pattern":"/api/insights/anomalies","domain":"statistics-analyzer","state":"python_deleted"},

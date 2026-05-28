@@ -143,38 +143,6 @@ fn safe_bool_with_default(value: Option<&Value>, default: bool) -> bool {
     }
 }
 
-fn load_json_list(value: Option<&Value>) -> Vec<Value> {
-    match value {
-        Some(Value::Array(values)) => values
-            .iter()
-            .map(|item| safe_text(Some(item), ""))
-            .filter(|item| !item.is_empty())
-            .map(Value::String)
-            .collect(),
-        Some(value) if !safe_text(Some(value), "").is_empty() => {
-            serde_json::from_str::<Value>(&safe_text(Some(value), ""))
-                .ok()
-                .and_then(|loaded| match loaded {
-                    Value::Array(values) => Some(
-                        values
-                            .iter()
-                            .map(|item| safe_text(Some(item), ""))
-                            .filter(|item| !item.is_empty())
-                            .map(Value::String)
-                            .collect(),
-                    ),
-                    _ => None,
-                })
-                .unwrap_or_default()
-        }
-        _ => Vec::new(),
-    }
-}
-
-fn dump_json_list(value: Option<&Value>) -> String {
-    serde_json::to_string(&load_json_list(value)).unwrap_or_else(|_| "[]".to_string())
-}
-
 fn map_int(map_value: &Value, key: &str) -> i64 {
     map_get_int(map_value, key).unwrap_or(0)
 }
@@ -359,8 +327,7 @@ mod tests {
                 "type": 1,
                 "currency": "CNY",
                 "balance": 12.5,
-                "initial_balance": 2.5,
-                "aliases": "[\"cash\"]"
+                "initial_balance": 2.5
             }],
             "categories": [{
                 "id": 20,
@@ -382,7 +349,6 @@ mod tests {
         .unwrap();
 
         assert_eq!(exported["accounts"][0]["externalRef"], "account:10");
-        assert_eq!(exported["accounts"][0]["aliases"], json!(["cash"]));
         assert_eq!(
             exported["transactionCategories"][0]["externalRef"],
             "category:20"
@@ -451,14 +417,12 @@ mod tests {
             "item": {
                 "name": "Card",
                 "parentRef": "account:root",
-                "aliases": ["visa", ""],
                 "hidden": "yes"
             },
             "ref_map": {"account:root": 7}
         }));
         assert_eq!(account["parent_id"], 7);
         assert_eq!(account["hidden"], 1);
-        assert_eq!(account["aliases"], "[\"visa\"]");
 
         let category = normalize_category_import(&json!({
             "item": {"mainCategory": "Food", "hidden": true}
@@ -495,8 +459,7 @@ mod tests {
                         "name": "现金账户",
                         "type": 1,
                         "currency": "CNY",
-                        "balance": 0,
-                        "aliases": ["现金"]
+                        "balance": 0
                     }],
                     "accountRecognitionRules": [{
                         "accountRef": "account:cash",

@@ -22,7 +22,6 @@ fn export_account(
         "hidden": safe_bool(account.get("hidden")),
         "displayOrder": safe_int(account.get("display_order"), 0),
         "comment": safe_text(account.get("comment"), ""),
-        "aliases": load_json_list(account.get("aliases")),
         "parentRef": account_refs.get(&parent_id).cloned().unwrap_or_default(),
         "parentName": account_names.get(&parent_id).cloned().unwrap_or_default(),
     })

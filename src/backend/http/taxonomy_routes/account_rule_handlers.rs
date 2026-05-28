@@ -267,59 +267,6 @@ async fn reorder_account_rules_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-async fn migrate_account_aliases_handler(
-    State(state): State<HttpAppState>,
-    headers: HeaderMap,
-) -> Response {
-    let user_id = match user_id_from_headers(&headers, &state.config) {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
-    if state.config.database_backend.uses_postgres() {
-        let runtime = match open_postgres_runtime(&state, "taxonomy account rules") {
-            Ok(value) => value,
-            Err(response) => return *response,
-        };
-        return match migrate_postgres_account_aliases_to_rules(
-            runtime.pool(),
-            db_user_id(user_id),
-        )
-        .await
-        {
-            Ok(summary) => json_response(
-                StatusCode::OK,
-                json!({
-                    "success": true,
-                    "data": {
-                        "migrated": summary.migrated,
-                        "skipped": summary.skipped,
-                    }
-                }),
-            ),
-            Err(_) => account_rule_db_error_response(),
-        };
-    }
-    let mut runtime = match open_runtime(&state, "taxonomy account rules") {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
-    let mut repository = AccountRulesRepository::new(runtime.connection_mut());
-    match repository.migrate_aliases_to_rules(db_user_id(user_id)) {
-        Ok(summary) => json_response(
-            StatusCode::OK,
-            json!({
-                "success": true,
-                "data": {
-                    "migrated": summary.migrated,
-                    "skipped": summary.skipped,
-                }
-            }),
-        ),
-        Err(_) => account_rule_db_error_response(),
-    }
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
 async fn test_account_rule_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,

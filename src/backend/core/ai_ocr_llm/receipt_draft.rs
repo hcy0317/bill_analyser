@@ -4,7 +4,13 @@
 
 use serde_json::{json, Value};
 
-use crate::category_rules::match_rule_expression;
+use crate::{
+    account_rules::{
+        match_account_rules, AccountRuleCandidate, AccountRuleMatchContext, ACCOUNT_ROLE_SOURCE,
+        TRANSACTION_SCOPE_ALL, TRANSACTION_SCOPE_EXPENSE, TRANSACTION_SCOPE_INCOME,
+    },
+    category_rules::match_rule_expression,
+};
 
 use super::types::{
     OcrProviderTextResult, PaymentScreenshotParseContract, ReceiptDraftAccount,
@@ -82,7 +88,9 @@ pub fn build_receipt_transaction_draft(
     }
 
     let inferred_type = infer_transaction_type(&text, parsed.payment_platform.as_deref());
-    if let Some((type_value, type_code, confidence, reason, evidence)) = inferred_type.clone() {
+    let transaction_scope = if let Some((type_value, type_code, confidence, reason, evidence)) =
+        inferred_type.clone()
+    {
         insert_field(
             &mut draft,
             "type",
@@ -96,11 +104,20 @@ pub fn build_receipt_transaction_draft(
             },
         );
         apply_category_mapping(&mut draft, &text, type_code, true, context);
+        receipt_account_transaction_scope(type_code)
     } else {
         apply_category_mapping(&mut draft, &text, 0, false, context);
-    }
+        TRANSACTION_SCOPE_ALL
+    };
 
-    apply_account_mapping(&mut draft, &text, &context.accounts);
+    apply_account_mapping(
+        &mut draft,
+        parsed,
+        &text,
+        transaction_scope,
+        &context.accounts,
+        &context.account_rules,
+    );
     apply_tag_mapping(&mut draft, &text, &context.tags);
 
     draft
@@ -311,35 +328,48 @@ fn apply_category_mapping(
 #[tracing::instrument(level = "debug", skip_all)]
 fn apply_account_mapping(
     draft: &mut ReceiptTransactionDraft,
+    parsed: &PaymentScreenshotParseContract,
     text: &str,
+    transaction_scope: &str,
     accounts: &[ReceiptDraftAccount],
+    rules: &[AccountRuleCandidate],
 ) {
-    let matches = accounts
-        .iter()
-        .filter_map(|account| {
-            account_match_evidence(account, text).map(|evidence| {
-                (
-                    account,
-                    ReceiptDraftField {
-                        value: json!(account.id),
-                        confidence: 0.88,
-                        reason: "account_alias".to_string(),
-                        evidence,
-                        label: Some(account.name.clone()),
-                        unit: None,
-                    },
-                )
-            })
-        })
-        .collect::<Vec<_>>();
-    if matches.len() == 1 {
-        insert_field(draft, "source_account_id", matches[0].1.clone());
+    let context = AccountRuleMatchContext {
+        counterparty: parsed.description.clone().unwrap_or_default(),
+        payment_method: parsed.payment_platform.clone().unwrap_or_default(),
+        description: text.to_string(),
+        ..AccountRuleMatchContext::default()
+    };
+    let Some(rule_match) =
+        match_account_rules(rules, &context, ACCOUNT_ROLE_SOURCE, transaction_scope)
+    else {
         return;
-    }
-    for (_, mut field) in matches.into_iter().take(5) {
-        field.confidence = 0.62;
-        field.reason = "account_alias_ambiguous".to_string();
-        push_candidate(draft, "source_account_id", field);
+    };
+    let Some(account) = accounts
+        .iter()
+        .find(|account| account.id == rule_match.account_id.to_string())
+    else {
+        return;
+    };
+    insert_field(
+        draft,
+        "source_account_id",
+        ReceiptDraftField {
+            value: json!(account.id),
+            confidence: 0.88,
+            reason: "account_rule".to_string(),
+            evidence: vec![rule_match.rule_id.to_string()],
+            label: Some(account.name.clone()),
+            unit: None,
+        },
+    );
+}
+
+fn receipt_account_transaction_scope(type_code: i64) -> &'static str {
+    match type_code {
+        2 => TRANSACTION_SCOPE_INCOME,
+        3 => TRANSACTION_SCOPE_EXPENSE,
+        _ => TRANSACTION_SCOPE_ALL,
     }
 }
 
@@ -398,24 +428,6 @@ fn push_candidate(draft: &mut ReceiptTransactionDraft, key: &str, field: Receipt
             .or_default()
             .push(field);
     }
-}
-
-fn account_match_evidence(account: &ReceiptDraftAccount, text: &str) -> Option<Vec<String>> {
-    let normalized_text = normalize_match_text(text);
-    let matched = account
-        .aliases
-        .iter()
-        .map(|alias| alias.trim())
-        .filter(|alias| !alias.is_empty())
-        .filter(|alias| {
-            let normalized_alias = normalize_match_text(alias);
-            !normalized_alias.is_empty()
-                && (normalized_text.contains(&normalized_alias)
-                    || normalized_alias.contains(&normalized_text))
-        })
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    (!matched.is_empty()).then_some(matched)
 }
 
 fn category_label_matches_text(label: &str, text: &str) -> bool {

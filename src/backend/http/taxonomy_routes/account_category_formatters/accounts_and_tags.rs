@@ -262,13 +262,6 @@ fn frontend_account_to_backend(payload: &Value) -> Result<Map<String, Value>, St
         Value::String(string_or_default(object.get("comment"), "")),
     );
     result.insert(
-        "aliases".to_string(),
-        Value::String(
-            serde_json::to_string(&parse_aliases(object.get("aliases")))
-                .unwrap_or_else(|_| "[]".to_string()),
-        ),
-    );
-    result.insert(
         "display_order".to_string(),
         Value::Number(Number::from(
             object
@@ -353,15 +346,6 @@ fn backend_account_to_frontend(mut account: AccountRecord) -> Map<String, Value>
     result.insert(
         "comment".to_string(),
         Value::String(string_or_default(account.get("comment"), "")),
-    );
-    result.insert(
-        "aliases".to_string(),
-        Value::Array(
-            parse_aliases(account.get("aliases"))
-                .into_iter()
-                .map(Value::String)
-                .collect(),
-        ),
     );
     result.insert(
         "creditCardStatementDate".to_string(),

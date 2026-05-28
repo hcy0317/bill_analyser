@@ -122,7 +122,6 @@ fn seed_account(
     id: i64,
     user_id: i64,
     name: &str,
-    aliases: &str,
 ) -> Result<(), Box<dyn Error>> {
     runtime.connection().execute_batch(
         "
@@ -130,17 +129,16 @@ fn seed_account(
             id INTEGER PRIMARY KEY,
             user_id INTEGER NOT NULL,
             name TEXT NOT NULL,
-            aliases TEXT,
             hidden INTEGER DEFAULT 0
         );
         ",
     )?;
     runtime.connection().execute(
         "
-        INSERT OR REPLACE INTO accounts(id, user_id, name, aliases, hidden)
-        VALUES (?1, ?2, ?3, ?4, 0)
+        INSERT OR REPLACE INTO accounts(id, user_id, name, hidden)
+        VALUES (?1, ?2, ?3, 0)
         ",
-        (id, user_id, name, aliases),
+        (id, user_id, name),
     )?;
     Ok(())
 }
@@ -1848,8 +1846,8 @@ fn preview_transfer_decision_restores_snapshot_and_detects_state_conflict(
     init_import_staging_schema(runtime.connection())?;
     seed_category(&runtime, 40, 42, 4, "账户互转", "银行卡互转")?;
     set_cash_transfer_category(&runtime, 42, 40)?;
-    seed_account(&runtime, 100, 42, "工资卡", r#"["农业银行", "abc"]"#)?;
-    seed_account(&runtime, 200, 42, "零钱", r#"["微信钱包", "wallet"]"#)?;
+    seed_account(&runtime, 100, 42, "工资卡")?;
+    seed_account(&runtime, 200, 42, "零钱")?;
 
     let mut draft = preview_draft("2026-05-01", 100.0, "maybe transfer");
     draft.preview_recurring_id = Some(5);
@@ -1872,7 +1870,7 @@ fn preview_transfer_decision_restores_snapshot_and_detects_state_conflict(
                     "parser_id": "abc",
                     "payment_method": "农业银行",
                     "account_name": "工资卡",
-                    "source_account_id": "abc",
+                    "source_account_id": 100,
                     "tags": ["parser:abc", "channel:bank"]
                 },
                 {
@@ -1880,7 +1878,7 @@ fn preview_transfer_decision_restores_snapshot_and_detects_state_conflict(
                     "parser_id": "wechat",
                     "payment_method": "微信钱包",
                     "account_name": "零钱",
-                    "source_account_id": "wallet",
+                    "source_account_id": 200,
                     "tags": ["parser:wechat", "channel:wallet"]
                 }
             ]

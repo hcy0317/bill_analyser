@@ -30,7 +30,6 @@ mod stage_account_rule_matchers_tests {
                 id INTEGER PRIMARY KEY,
                 user_id INTEGER NOT NULL,
                 name TEXT NOT NULL,
-                aliases TEXT,
                 hidden INTEGER DEFAULT 0
             );
             CREATE TABLE account_rules (
@@ -55,10 +54,10 @@ mod stage_account_rule_matchers_tests {
         init_rule_order_schema(&connection)?;
         connection.execute_batch(
             r#"
-            INSERT INTO accounts(id, user_id, name, aliases, hidden)
+            INSERT INTO accounts(id, user_id, name, hidden)
             VALUES
-                (1, 42, '零钱', '[]', 0),
-                (100, 42, '工资卡', '[]', 0);
+                (1, 42, '零钱', 0),
+                (100, 42, '工资卡', 0);
             INSERT INTO account_rules(
                 id, user_id, account_id, rule_expression, enabled, priority,
                 account_role_scope, transaction_type_scope, field_scope
@@ -98,8 +97,8 @@ mod stage_account_rule_matchers_tests {
         init_rule_order_schema(&connection)?;
         connection.execute_batch(
             r#"
-            INSERT INTO accounts(id, user_id, name, aliases, hidden)
-            VALUES (100, 42, '现金', '["现金", "cash"]', 0);
+            INSERT INTO accounts(id, user_id, name, hidden)
+            VALUES (100, 42, '现金', 0);
             "#,
         )?;
         let mut drafts = vec![ImportPreviewDraft {
@@ -138,10 +137,10 @@ mod stage_account_rule_matchers_tests {
             VALUES
                 (400, 42, 40, 'OR={农业银行}', 1, 1),
                 (300, 42, 30, 'OR={wallet transfer}', 1, 0);
-            INSERT INTO accounts(id, user_id, name, aliases, hidden)
+            INSERT INTO accounts(id, user_id, name, hidden)
             VALUES
-                (100, 42, '转出账户', '[]', 0),
-                (200, 42, '转入账户', '[]', 0);
+                (100, 42, '转出账户', 0),
+                (200, 42, '转入账户', 0);
             INSERT INTO account_rules(
                 id, user_id, account_id, rule_expression, enabled, priority,
                 account_role_scope, transaction_type_scope, field_scope
@@ -204,11 +203,11 @@ mod stage_account_rule_matchers_tests {
             VALUES (50, 42, 5, '投资理财', '基金申购', 1);
             INSERT INTO category_rules(id, user_id, category_id, rule_expression, enabled, priority)
             VALUES (500, 42, 50, 'OR={华泰证券,基金申购}', 1, 1);
-            INSERT INTO accounts(id, user_id, name, aliases, hidden)
+            INSERT INTO accounts(id, user_id, name, hidden)
             VALUES
-                (10, 42, '支付宝资金账户', '[]', 0),
-                (20, 42, '华泰证券账户', '[]', 0),
-                (21, 42, '基金描述账户', '[]', 0);
+                (10, 42, '支付宝资金账户', 0),
+                (20, 42, '华泰证券账户', 0),
+                (21, 42, '基金描述账户', 0);
             INSERT INTO account_rules(
                 id, user_id, account_id, rule_expression, enabled, priority,
                 account_role_scope, transaction_type_scope, field_scope
@@ -278,10 +277,10 @@ mod stage_account_rule_matchers_tests {
             VALUES
                 (200, 42, 20, 'OR={共同关键字}', 1, 1),
                 (300, 42, 30, 'OR={共同关键字}', 1, 1);
-            INSERT INTO accounts(id, user_id, name, aliases, hidden)
+            INSERT INTO accounts(id, user_id, name, hidden)
             VALUES
-                (20, 42, '工资卡', '[]', 0),
-                (30, 42, '支付宝', '[]', 0);
+                (20, 42, '工资卡', 0),
+                (30, 42, '支付宝', 0);
             INSERT INTO account_rules(
                 id, user_id, account_id, rule_expression, enabled, priority,
                 account_role_scope, transaction_type_scope, field_scope

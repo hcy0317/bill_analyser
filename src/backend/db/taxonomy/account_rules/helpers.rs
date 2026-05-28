@@ -12,13 +12,6 @@ use serde_json::{Map, Number, Value};
 use crate::{DbError, DbResult};
 
 use super::AccountRuleRecord;
-#[derive(Debug)]
-pub(super) struct AccountAliasSource {
-    pub(super) id: i64,
-    pub(super) name: String,
-    pub(super) aliases: Vec<String>,
-    pub(super) hidden: bool,
-}
 
 pub(super) fn account_rule_from_row(row: &Row<'_>) -> rusqlite::Result<AccountRuleRecord> {
     let mut record = Map::new();
@@ -203,21 +196,6 @@ fn parse_field_scope_json(raw: &str) -> Vec<String> {
             .map(|value| (*value).to_string())
             .collect()
     })
-}
-
-pub(super) fn normalize_alias(value: &str) -> String {
-    value.trim().to_ascii_lowercase()
-}
-
-pub(super) fn normalize_rule_expression_alias(expression: &str) -> String {
-    expression
-        .trim()
-        .strip_prefix("OR={")
-        .and_then(|value| value.strip_suffix('}'))
-        .unwrap_or(expression)
-        .replace('\\', "")
-        .trim()
-        .to_ascii_lowercase()
 }
 
 fn value_truthy(value: &Value) -> bool {
