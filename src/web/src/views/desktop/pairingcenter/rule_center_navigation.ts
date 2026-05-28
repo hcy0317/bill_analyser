@@ -28,7 +28,7 @@ export function normalizeRuleCenterTab(domain: RuleCenterDomain, tab?: string): 
         return tab === 'config' ? 'config' : 'overview';
     }
 
-    if (domain === 'transfer' && tab === 'recurring') {
+    if (domain === 'transfer' && (tab === 'accounts' || tab === 'recurring')) {
         return 'rules';
     }
 

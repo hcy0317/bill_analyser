@@ -16,15 +16,17 @@ describe('mobile account recognition rule parity', () => {
         expect(settings).toContain("tt('Account Recognition Rules')");
     });
 
-    test('mobile account edit keeps aliases and links each persisted account to rules', () => {
+    test('mobile account edit quick-adds account rules without aliases', () => {
         const source = readSource('src/views/mobile/accounts/EditPage.vue');
 
-        expect(source).toContain("tt('Account Aliases')");
-        expect(source).toContain('formatAliasText(account.aliases)');
-        expect(source).toContain('updateAccountAliases(account, $event)');
-        expect(source).toContain('parseAliasText');
-        expect(source).toContain('`/account/rules?accountId=${account.id}`');
-        expect(source).toContain('`/account/rules?accountId=${subAccount.id}`');
+        expect(source).not.toContain("tt('Account Aliases')");
+        expect(source).not.toContain('formatAliasText');
+        expect(source).not.toContain('updateAccountAliases');
+        expect(source).not.toContain('parseAliasText');
+        expect(source).toContain('services.createAccountRule');
+        expect(source).toContain("tt('Rule Matching Expression')");
+        expect(source).toContain('openAccountRules(account)');
+        expect(source).toContain('openAccountRules(subAccount)');
     });
 
     test('mobile rule page wires CRUD, test, and scope controls', () => {

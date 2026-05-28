@@ -158,38 +158,49 @@
                                         v-model="selectedAccount.comment"
                                     />
                                 </v-col>
-                                <v-col cols="12" md="12">
-                                    <v-combobox
-                                        color="primary"
-                                        multiple
-                                        chips
-                                        closable-chips
-                                        persistent-placeholder
-                                        persistent-hint
-                                        :disabled="loading || submitting"
-                                        :label="tt('Account Aliases')"
-                                        :placeholder="tt('Enter aliases for account matching (optional)')"
-                                        :hint="tt('Press Enter to add alias, used for automatic account matching during import')"
-                                        v-model="selectedAccount.aliases"
-                                    >
-                                        <template #chip="{ props, item }">
-                                            <v-chip v-bind="props" :text="item.title" closable color="primary" />
-                                        </template>
-                                    </v-combobox>
-                                </v-col>
                                 <v-col
                                     v-if="canManageSelectedAccountRules"
                                     cols="12"
                                     md="12"
-                                    class="account-rule-section"
+                                    class="account-rule-quick-add"
                                 >
-                                    <AccountRulePanel
-                                        :account-id="selectedAccountRuleAccountId"
-                                        :title="tt('Account Recognition Rules')"
-                                        :show-settings-bundle-controls="false"
-                                        hide-header
-                                        embedded
-                                    />
+                                    <v-divider class="mb-4" />
+                                    <div class="d-flex align-center flex-wrap ga-2 mb-3">
+                                        <v-icon :icon="mdiBookAccountOutline" />
+                                        <span class="text-subtitle-2 font-weight-medium">{{ tt('Account Recognition Rules') }}</span>
+                                        <v-spacer />
+                                        <v-btn
+                                            variant="text"
+                                            density="compact"
+                                            :disabled="loading || submitting || addingAccountRule"
+                                            @click="openAccountRecognitionRules"
+                                        >
+                                            <v-icon start :icon="mdiOpenInNew" />
+                                            {{ tt('Open Rule Center') }}
+                                        </v-btn>
+                                    </div>
+                                    <div class="d-flex flex-column flex-sm-row align-sm-start ga-2">
+                                        <v-text-field
+                                            class="account-rule-quick-input"
+                                            density="comfortable"
+                                            persistent-placeholder
+                                            :disabled="loading || submitting || addingAccountRule"
+                                            :label="tt('Rule Matching Expression')"
+                                            :placeholder="tt('Rule Matching Expression')"
+                                            v-model="quickRuleExpression"
+                                            @keydown.enter.prevent="addQuickAccountRule"
+                                        />
+                                        <v-btn
+                                            class="account-rule-quick-button"
+                                            color="primary"
+                                            :loading="addingAccountRule"
+                                            :disabled="loading || submitting || !canAddQuickAccountRule"
+                                            @click="addQuickAccountRule"
+                                        >
+                                            <v-icon start :icon="mdiPlus" />
+                                            {{ tt('Add Rule') }}
+                                        </v-btn>
+                                    </div>
                                 </v-col>
                                 <v-col class="py-0" cols="12" md="12" v-if="editAccountId && !isNewAccount(selectedAccount)">
                                     <v-switch :disabled="loading || submitting"
@@ -226,9 +237,9 @@
 <script setup lang="ts">
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
-import AccountRulePanel from '@/views/desktop/pairingcenter/components/AccountRulePanel.vue';
 
 import { ref, computed, useTemplateRef, watch, onMounted, onUnmounted } from 'vue';
+import { useRouter } from 'vue-router';
 
 import { useI18n } from '@/locales/helpers.ts';
 import { useAccountEditPageBase } from '@/views/base/accounts/AccountEditPageBase.ts';
@@ -241,15 +252,23 @@ import { AccountType } from '@/core/account.ts';
 import { ALL_ACCOUNT_ICONS } from '@/consts/icon.ts';
 import { ALL_ACCOUNT_COLORS } from '@/consts/color.ts';
 import { Account } from '@/models/account.ts';
+import {
+    buildAccountRulePayload,
+    createDefaultAccountRuleForm,
+} from '@/models/account_rule.ts';
 
 import { isNumber } from '@/lib/common.ts';
 import { getCurrentUnixTime } from '@/lib/datetime.ts';
 import { generateRandomUUID } from '@/lib/misc.ts';
+import services from '@/lib/services.ts';
 
 import {
+    mdiBookAccountOutline,
     mdiDotsVertical,
     mdiCreditCardPlusOutline,
-    mdiDeleteOutline
+    mdiDeleteOutline,
+    mdiOpenInNew,
+    mdiPlus
 } from '@mdi/js';
 
 interface AccountEditResponse {
@@ -262,6 +281,7 @@ type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
 type SnackBarType = InstanceType<typeof SnackBar>;
 
 const { tt } = useI18n();
+const router = useRouter();
 const {
     editAccountId,
     clientSessionId,
@@ -291,6 +311,8 @@ const snackbar = useTemplateRef<SnackBarType>('snackbar');
 const showState = ref<boolean>(false);
 const activeTab = ref<string>('account');
 const currentAccountIndex = ref<number>(-1);
+const quickRuleExpression = ref<string>('');
+const addingAccountRule = ref<boolean>(false);
 
 const selectedAccount = computed<Account>(() => {
     if (currentAccountIndex.value < 0) {
@@ -308,6 +330,11 @@ const canManageSelectedAccountRules = computed<boolean>(() => (
     !!editAccountId.value
     && !isNewAccount(selectedAccount.value)
     && selectedAccountRuleAccountId.value !== null
+));
+const canAddQuickAccountRule = computed<boolean>(() => (
+    canManageSelectedAccountRules.value
+    && quickRuleExpression.value.trim().length > 0
+    && !addingAccountRule.value
 ));
 
 const accountAmountTitle = computed<string>(() => {
@@ -412,6 +439,47 @@ function save(): void {
     });
 }
 
+async function addQuickAccountRule(): Promise<void> {
+    const accountId = selectedAccountRuleAccountId.value;
+
+    if (!accountId || !canAddQuickAccountRule.value) {
+        return;
+    }
+
+    addingAccountRule.value = true;
+
+    try {
+        const form = createDefaultAccountRuleForm(accountId);
+        form.ruleExpression = quickRuleExpression.value;
+        const fallbackName = selectedAccount.value.name
+            ? `${selectedAccount.value.name} ${tt('Account Recognition')}`
+            : tt('Account Recognition');
+        const response = await services.createAccountRule(buildAccountRulePayload(form, fallbackName));
+
+        if (!response.data.success) {
+            throw new Error(tt('Failed to save rule'));
+        }
+
+        quickRuleExpression.value = '';
+        snackbar.value?.showMessage('Rule created');
+    } catch (error: unknown) {
+        snackbar.value?.showError(error instanceof Error ? { message: error.message } : String(error));
+    } finally {
+        addingAccountRule.value = false;
+    }
+}
+
+function openAccountRecognitionRules(): void {
+    showState.value = false;
+    void router.push({
+        path: '/pairing/list',
+        query: {
+            domain: 'transfer',
+            tab: 'accounts',
+        },
+    });
+}
+
 function removeSubAccount(currentSubAccount: Account): void {
     confirmDialog.value?.open('Are you sure you want to remove this sub-account?').then(() => {
         for (const [subAccount, index] of itemAndIndex(subAccounts.value)) {
@@ -439,6 +507,10 @@ watch(() => account.value.type, () => {
     if (subAccounts.value.length < 1) {
         addSubAccount();
     }
+});
+
+watch(selectedAccountRuleAccountId, () => {
+    quickRuleExpression.value = '';
 });
 
 function onKeydown(e: KeyboardEvent): void {
@@ -473,7 +545,15 @@ defineExpose({
 </script>
 
 <style scoped>
-.account-rule-section {
+.account-rule-quick-add {
     min-width: 0;
+}
+
+.account-rule-quick-input {
+    min-width: min(100%, 320px);
+}
+
+.account-rule-quick-button {
+    min-height: 40px;
 }
 </style>

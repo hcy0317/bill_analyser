@@ -27,6 +27,13 @@ describe('rule center navigation mapping', () => {
             tab: 'config',
             shouldRewriteQuery: false,
         });
+
+        expect(normalizeRuleCenterSelection({ domain: 'transfer', tab: 'accounts' })).toEqual({
+            domain: 'transfer',
+            tab: 'rules',
+            legacyRuleTab: 'accounts',
+            shouldRewriteQuery: false,
+        });
     });
 
     test('maps legacy view and pairType params to canonical Rule Center params', () => {
@@ -157,6 +164,7 @@ describe('rule center UX source guards', () => {
     test('category and account recognition tabs own separate rule-builder surfaces', () => {
         const source = readSource('src/views/desktop/pairingcenter/components/RuleCenterPanel.vue');
         const accountSource = readSource('src/views/desktop/pairingcenter/components/AccountRulePanel.vue');
+        const accountEditSource = readSource('src/views/desktop/accounts/list/dialogs/EditDialog.vue');
         const listSource = readSource('src/views/desktop/pairingcenter/ListPage.vue');
 
         expect(source).toContain("type RuleCenterPanelTab = 'rules' | 'learning' | 'recurring';");
@@ -172,6 +180,10 @@ describe('rule center UX source guards', () => {
         expect(listSource).toContain("value: 'account-recognition'");
         expect(listSource).toContain("legacyRuleTab: 'accounts'");
         expect(listSource).toContain('<AccountRulePanel');
+        expect(accountEditSource).not.toContain('<AccountRulePanel');
+        expect(accountEditSource).not.toContain("tt('Account Aliases')");
+        expect(accountEditSource).toContain('services.createAccountRule');
+        expect(accountEditSource).toContain("tab: 'accounts'");
     });
 
     test('investment recognition settings page is removed from rule configuration', () => {
