@@ -40,7 +40,7 @@ Weaviate 派生索引通过 `BILL_ANALYSER_WEAVIATE_ENABLED`、`BILL_ANALYSER_WE
 
 ### 分类与账户规则
 
-分类识别使用 canonical `category_rules` 规则表达式；账户识别使用 `account_rules` 表和与分类规则一致的规则表达式匹配器。PostgreSQL cutover 下，分类规则列表、创建、更新、删除、重排、测试和 legacy `/api/categories/rules` 配置缓存直接读写 PostgreSQL `category_rules` / `settings`；账户规则列表、创建、更新、删除、重排和测试直接读写 PostgreSQL `account_rules`。账户规则按当前用户绑定到账户，支持账户角色范围、交易类型范围、字段范围、优先级、启停、正则开关和匹配计数；账户别名迁移 API 与账户 DTO/settings aliases 兼容已移除。REST API 覆盖 `GET|POST /api/account-rules/`、`PUT|DELETE /api/account-rules/{rule_id}`、`POST /api/account-rules/{rule_id}/test` 和 `POST /api/account-rules/reorder`；设置包导入导出包含 `accountRecognitionRules` 分区。
+分类识别使用 canonical `category_rules` 规则表达式；账户识别使用 `account_rules` 表和与分类规则一致的规则表达式匹配器。PostgreSQL cutover 下，分类规则列表、创建、更新、删除、重排、测试和 legacy `/api/categories/rules` 配置缓存直接读写 PostgreSQL `category_rules` / `settings`；账户规则列表、创建、更新、删除、重排和测试直接读写 PostgreSQL `account_rules`。账户规则按当前用户绑定到账户，支持账户角色范围、交易类型范围、字段范围、优先级、启停、正则开关和匹配计数；账户别名迁移 API 与账户 DTO/settings aliases 兼容已移除，账户写入和 settings bundle import 遇到 `aliases` 会显式拒绝，旧 Postgres metadata aliases 与可验证旧 alias 表行由追加迁移转成 `account_rules` 后清理旧存储。REST API 覆盖 `GET|POST /api/account-rules/`、`PUT|DELETE /api/account-rules/{rule_id}`、`POST /api/account-rules/{rule_id}/test` 和 `POST /api/account-rules/reorder`；设置包导入导出包含 `accountRecognitionRules` 分区。
 
 桌面规则中心的“规则配置”包含分类识别、账户识别和周期识别三个二级页；账户识别页复用分类规则表达式展示密度，提供账户、角色范围、交易类型范围、字段范围、优先级、启停、正则、测试、重排和删除控件。账户 DTO 与 settings 导入导出不再读写 aliases 字段；账户匹配权威是 `account_rules`，完整账户识别规则列表保留在规则中心。
 

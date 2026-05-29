@@ -57,6 +57,7 @@ const INITIAL_SCHEMA_INDEXES: &[&str] = &[
     "idx_tags_user_lookup",
     "idx_category_rules_user_enabled_type_priority",
     "idx_account_rules_user_enabled_type_priority",
+    "idx_account_rules_alias_source_unique",
     "idx_import_preview_rows_session_page_sort_key",
     "idx_import_decision_groups_session_group_type",
     "idx_import_decision_group_members_group",
@@ -115,6 +116,9 @@ const BACKUP_OPS_INDEXES: &[&str] = &[
     "idx_backup_audit_logs_created",
     "idx_backup_audit_logs_status",
 ];
+
+const ACCOUNT_ALIAS_LEGACY_REMOVAL_TABLES: &[&str] = &[];
+const ACCOUNT_ALIAS_LEGACY_REMOVAL_INDEXES: &[&str] = &["idx_account_rules_recovery_source_unique"];
 
 const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
     PostgresMigrationDescriptor {
@@ -180,6 +184,13 @@ const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
         required_tables: BACKUP_OPS_TABLES,
         required_indexes: BACKUP_OPS_INDEXES,
     },
+    PostgresMigrationDescriptor {
+        version: 10,
+        file_name: "0010_remove_account_alias_legacy.sql",
+        description: "remove legacy account alias storage and preserve aliases as account recognition rules",
+        required_tables: ACCOUNT_ALIAS_LEGACY_REMOVAL_TABLES,
+        required_indexes: ACCOUNT_ALIAS_LEGACY_REMOVAL_INDEXES,
+    },
 ];
 
 pub fn postgres_migrations_dir() -> PathBuf {
@@ -211,7 +222,7 @@ mod tests {
     #[test]
     fn postgres_manifest_points_to_existing_initial_schema() {
         let manifest = postgres_migration_manifest();
-        assert_eq!(manifest.len(), 9);
+        assert_eq!(manifest.len(), 10);
         assert_eq!(manifest[0].version, 1);
         assert_eq!(manifest[0].file_name, POSTGRES_INITIAL_SCHEMA_FILE);
         assert_eq!(manifest[1].version, 2);
@@ -222,6 +233,7 @@ mod tests {
         assert_eq!(manifest[6].version, 7);
         assert_eq!(manifest[7].version, 8);
         assert_eq!(manifest[8].version, 9);
+        assert_eq!(manifest[9].version, 10);
         assert!(postgres_initial_schema_path().exists());
         for descriptor in manifest.iter().skip(1) {
             assert!(postgres_migrations_dir()
@@ -386,6 +398,22 @@ mod tests {
         }
         assert!(schema.contains("UNIQUE (user_id, job_type)"));
         assert!(schema.contains("metadata JSONB"));
+    }
+
+    #[test]
+    fn account_alias_legacy_removal_migration_converts_and_drops_alias_storage() {
+        let schema = fs::read_to_string(
+            postgres_migrations_dir().join("0010_remove_account_alias_legacy.sql"),
+        )
+        .unwrap();
+
+        assert!(schema.contains("account_metadata_alias_migration"));
+        assert!(schema.contains("metadata = metadata - 'aliases'"));
+        assert!(schema.contains("account_alias_legacy_table_migration"));
+        assert!(schema.contains("RAISE EXCEPTION"));
+        assert!(schema.contains("DROP TABLE IF EXISTS account_aliases_legacy"));
+        assert!(schema.contains("DROP INDEX IF EXISTS idx_account_rules_alias_source_unique"));
+        assert!(schema.contains("idx_account_rules_recovery_source_unique"));
     }
 
     #[tokio::test]

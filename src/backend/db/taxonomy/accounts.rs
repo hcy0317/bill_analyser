@@ -111,6 +111,7 @@ impl<'conn> AccountsRepository<'conn> {
             operation = "create_account",
             "business operation entered"
         );
+        reject_account_alias_payload(payload)?;
         let now = utc_now_iso();
         let parent_id = parent_id_value(payload);
         self.connection.execute(
@@ -168,6 +169,7 @@ impl<'conn> AccountsRepository<'conn> {
             operation = "update_account",
             "business operation entered"
         );
+        reject_account_alias_payload(payload)?;
         let object = payload.as_object().ok_or_else(|| {
             DbError::InvalidOperation("account update payload must be an object".to_string())
         })?;
@@ -208,7 +210,12 @@ impl<'conn> AccountsRepository<'conn> {
                     values.push(SqlValue::Integer(int_value(value, key)?));
                 }
                 "comment" => push_sql_assignment(&mut assignments, &mut values, "comment", value)?,
-                "aliases" => {}
+                "aliases" => {
+                    return Err(DbError::InvalidOperation(
+                        "account aliases are no longer supported; create account recognition rules instead"
+                            .to_string(),
+                    ))
+                }
                 _ => {}
             }
         }
@@ -517,6 +524,24 @@ fn delete_bill_tags(transaction: &Transaction<'_>, bill_ids: &[i64]) -> DbResult
         &format!("DELETE FROM bill_tags WHERE bill_id IN ({placeholders})"),
         params_from_iter(sql_params),
     )?;
+    Ok(())
+}
+
+fn reject_account_alias_payload(payload: &Value) -> DbResult<()> {
+    let Some(object) = payload.as_object() else {
+        return Ok(());
+    };
+    if object.contains_key("aliases") {
+        return Err(DbError::InvalidOperation(
+            "account aliases are no longer supported; create account recognition rules instead"
+                .to_string(),
+        ));
+    }
+    if let Some(sub_accounts) = object.get("subAccounts").and_then(Value::as_array) {
+        for sub_account in sub_accounts {
+            reject_account_alias_payload(sub_account)?;
+        }
+    }
     Ok(())
 }
 
@@ -967,5 +992,44 @@ mod tests {
         assert!(parse_account_display_orders(&serde_json::json!({"bad": true})).is_err());
         assert!(parse_account_display_orders(&serde_json::json!([[1]])).is_err());
         assert!(parse_account_display_orders(&serde_json::json!([{"id": 1}])).is_err());
+    }
+
+    #[test]
+    fn taxonomy_accounts_reject_legacy_alias_payloads() {
+        let mut connection = create_connection();
+        let mut repository = AccountsRepository::new(&mut connection);
+
+        let create_error = repository
+            .create_account(
+                &serde_json::json!({"name": "Card", "aliases": ["legacy"]}),
+                7,
+            )
+            .expect_err("create aliases should be rejected");
+        assert!(create_error
+            .to_string()
+            .contains("aliases are no longer supported"));
+
+        let account_id = repository
+            .create_account(&serde_json::json!({"name": "Card"}), 7)
+            .unwrap();
+        let update_error = repository
+            .update_account(account_id, &serde_json::json!({"aliases": ["legacy"]}), 7)
+            .expect_err("update aliases should be rejected");
+        assert!(update_error
+            .to_string()
+            .contains("aliases are no longer supported"));
+
+        let nested_update_error = repository
+            .update_account(
+                account_id,
+                &serde_json::json!({
+                    "subAccounts": [{"name": "Child", "aliases": ["legacy-child"]}]
+                }),
+                7,
+            )
+            .expect_err("nested update aliases should be rejected");
+        assert!(nested_update_error
+            .to_string()
+            .contains("aliases are no longer supported"));
     }
 }

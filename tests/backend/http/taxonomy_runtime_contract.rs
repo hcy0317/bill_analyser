@@ -909,6 +909,25 @@ async fn taxonomy_postgres_runtime_serves_account_mutations_without_sqlite_fallb
         .expect("child account id")
         .parse::<i64>()?;
 
+    let alias_create_response = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/accounts",
+            json!({
+                "name": format!("pg-api-alias-rejected-{unique}"),
+                "aliases": ["legacy-card"]
+            }),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(alias_create_response.status(), StatusCode::BAD_REQUEST);
+    let alias_create_body = read_json(alias_create_response).await;
+    assert!(alias_create_body["error"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("aliases are no longer supported"));
+
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
             "SELECT balance_cents FROM accounts WHERE id = $1 AND user_id = $2",

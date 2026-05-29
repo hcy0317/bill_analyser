@@ -206,6 +206,12 @@ fn frontend_account_to_backend(payload: &Value) -> Result<Map<String, Value>, St
     let Some(object) = payload.as_object() else {
         return Err("Account payload must be an object".to_string());
     };
+    if object.contains_key("aliases") {
+        return Err(
+            "Account aliases are no longer supported; create account recognition rules instead"
+                .to_string(),
+        );
+    }
     let balance_cents = object
         .get("balance")
         .or_else(|| object.get("initial_balance"))

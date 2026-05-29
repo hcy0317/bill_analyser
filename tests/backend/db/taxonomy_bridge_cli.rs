@@ -130,6 +130,27 @@ fn taxonomy_bridge_cli_dispatches_repository_and_settings_commands() -> Result<(
         );
     }
 
+    let legacy_alias_update = run_taxonomy_bridge(
+        "update-account",
+        &with_fields(
+            &base,
+            json!({
+                "account_id": 1,
+                "payload": {
+                    "subAccounts": [{
+                        "name": "Child",
+                        "aliases": ["legacy-child"]
+                    }]
+                }
+            }),
+        ),
+    )?;
+    assert_eq!(legacy_alias_update["success"], false);
+    assert!(legacy_alias_update["error"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("aliases are no longer supported"));
+
     let unknown = run_taxonomy_bridge_error("missing-command", &json!({}))?;
     assert!(unknown.contains("unknown taxonomy bridge command"));
     Ok(())

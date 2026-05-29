@@ -129,9 +129,37 @@ pub fn normalize_settings_bundle_sections(bundle: &Value) -> DbResult<Value> {
                 )))
             }
         };
+        if key == "accounts" {
+            reject_legacy_account_aliases(&items)?;
+        }
         normalized.insert(key.to_string(), Value::Array(items));
     }
     Ok(Value::Object(normalized))
+}
+
+fn reject_legacy_account_aliases(accounts: &[Value]) -> DbResult<()> {
+    for account in accounts {
+        reject_legacy_account_alias_payload(account)?;
+    }
+    Ok(())
+}
+
+fn reject_legacy_account_alias_payload(account: &Value) -> DbResult<()> {
+    let Some(object) = account.as_object() else {
+        return Ok(());
+    };
+    if object.contains_key("aliases") {
+        return Err(DbError::InvalidOperation(
+            "Settings bundle account aliases are no longer supported; use accountRecognitionRules"
+                .to_string(),
+        ));
+    }
+    if let Some(sub_accounts) = object.get("subAccounts").and_then(Value::as_array) {
+        for sub_account in sub_accounts {
+            reject_legacy_account_alias_payload(sub_account)?;
+        }
+    }
+    Ok(())
 }
 
 pub fn export_taxonomy_sections(payload: &Value) -> DbResult<Value> {

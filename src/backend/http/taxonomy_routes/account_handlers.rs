@@ -118,6 +118,7 @@ async fn create_account_handler(
         let user_id = db_user_id(user_id);
         let account_id = match create_postgres_account(runtime.pool(), &payload, user_id).await {
             Ok(value) => value,
+            Err(bill_analyser_db::DbError::InvalidOperation(message)) => return bad_request(message),
             Err(_) => return db_error_response(),
         };
         return match load_postgres_account_with_sub_accounts(runtime.pool(), account_id, user_id)
@@ -139,6 +140,7 @@ async fn create_account_handler(
 
     let account_id = match repository.create_account(&payload, db_user_id(user_id)) {
         Ok(value) => value,
+        Err(bill_analyser_db::DbError::InvalidOperation(message)) => return bad_request(message),
         Err(_) => return db_error_response(),
     };
     match load_account_with_sub_accounts(&mut repository, account_id, db_user_id(user_id)) {
@@ -215,6 +217,7 @@ async fn update_account_handler(
                 }
             }
             Ok(false) => not_found("Account not found"),
+            Err(bill_analyser_db::DbError::InvalidOperation(message)) => bad_request(message),
             Err(_) => db_error_response(),
         };
     }
@@ -247,6 +250,7 @@ async fn update_account_handler(
             Err(_) => db_error_response(),
         },
         Ok(false) => not_found("Account not found"),
+        Err(bill_analyser_db::DbError::InvalidOperation(message)) => bad_request(message),
         Err(_) => db_error_response(),
     }
 }

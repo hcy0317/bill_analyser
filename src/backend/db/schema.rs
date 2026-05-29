@@ -646,7 +646,7 @@ fn create_core_indexes(connection: &Connection) -> DbResult<()> {
             ON account_rules(user_id, enabled, transaction_type_scope, account_role_scope, priority, id);
         CREATE INDEX IF NOT EXISTS idx_account_rules_user_account
             ON account_rules(user_id, account_id);
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_account_rules_alias_source_unique
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_account_rules_recovery_source_unique
             ON account_rules(user_id, account_id, source, source_key)
             WHERE source_key IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_account_types_user ON account_types(user_id);
