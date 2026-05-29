@@ -31,6 +31,8 @@ Supported source tables in this slice:
 
 Amount values from SQLite yuan fields are converted into target `*_cents` integer fields during export. Legacy account aliases are not exported as target runtime data by the whole-database migration command.
 
+PostgreSQL schema migration `0010_remove_account_alias_legacy` removes stale account alias storage from Postgres authority databases. If an older Postgres `accounts.metadata.aliases` value exists, the migration preserves it as an `account_rules` row with `source=account_metadata_alias_migration`, then removes the metadata key. If a non-empty legacy `account_aliases_legacy` table is present, rows with verifiable `user_id`, `account_id`, and alias/value columns are converted to `account_rules`; unknown or unverifiable shapes raise an error instead of dropping data. The stale alias-named rule index is replaced by the recovery-source unique index.
+
 ## Account recovery
 
 ```powershell
@@ -49,6 +51,7 @@ cargo run -p bill-analyser-db --bin bill_postgres_account_recovery -- --mode app
 - Legacy budget history rows whose `budget_id` no longer exists in the recovered user's budgets are reported as orphaned source rows and skipped, because PostgreSQL budget history requires a live budget foreign key.
 - Settings recovery is default-deny. Only non-sensitive allowlisted preference keys are counted as recoverable; keys containing `auth`, `2fa`, `operation_password`, `cloud`, `backup`, `llm`, `ocr`, `provider`, `api_key`, `token`, `secret`, or `password` are denied.
 - Legacy SQLite account `aliases` are consumed only by this recovery tool and are converted directly into `account_rules` with `source=sqlite_account_recovery`; the tool does not recreate account alias runtime/API compatibility.
+- Settings bundle imports reject account-level `aliases`; import/export account recognition state through `accountRecognitionRules`.
 
 ## Retry
 

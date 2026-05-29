@@ -91,6 +91,7 @@ pub async fn create_postgres_account(
     payload: &Value,
     user_id: i64,
 ) -> DbResult<i64> {
+    reject_account_alias_payload(payload)?;
     let mut transaction = pool.begin().await?;
     let account_id = insert_postgres_account(&mut transaction, payload, user_id, None).await?;
     transaction.commit().await?;
@@ -103,6 +104,7 @@ pub async fn update_postgres_account(
     payload: &Value,
     user_id: i64,
 ) -> DbResult<bool> {
+    reject_account_alias_payload(payload)?;
     let existing = sqlx::query(
         r#"
         SELECT metadata
@@ -2469,6 +2471,7 @@ async fn insert_postgres_account(
     user_id: i64,
     parent_id: Option<i64>,
 ) -> DbResult<i64> {
+    reject_account_alias_payload(payload)?;
     let metadata = account_metadata_from_payload(None, payload);
     let row = sqlx::query(
         r#"
@@ -2683,7 +2686,6 @@ fn account_metadata_from_payload(existing: Option<&Value>, payload: &Value) -> V
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    metadata.remove("aliases");
     for key in [
         "category",
         "icon",
@@ -2698,6 +2700,24 @@ fn account_metadata_from_payload(existing: Option<&Value>, payload: &Value) -> V
         }
     }
     Value::Object(metadata)
+}
+
+fn reject_account_alias_payload(payload: &Value) -> DbResult<()> {
+    let Some(object) = payload.as_object() else {
+        return Ok(());
+    };
+    if object.contains_key("aliases") {
+        return Err(DbError::InvalidOperation(
+            "account aliases are no longer supported; create account recognition rules instead"
+                .to_string(),
+        ));
+    }
+    if let Some(sub_accounts) = object.get("subAccounts").and_then(Value::as_array) {
+        for sub_account in sub_accounts {
+            reject_account_alias_payload(sub_account)?;
+        }
+    }
+    Ok(())
 }
 
 fn metadata_with_parent_id(metadata: Value, parent_id: Option<i64>) -> Value {
@@ -3183,6 +3203,34 @@ mod tests {
             metadata_bool(&serde_json::json!({"hidden": "false"}), "hidden"),
             Some(false)
         );
+    }
+
+    #[test]
+    fn account_payload_rejects_aliases_and_preserves_existing_metadata_until_migration() {
+        let error = reject_account_alias_payload(&serde_json::json!({
+            "name": "Card",
+            "aliases": ["legacy"]
+        }))
+        .expect_err("aliases should be rejected");
+        assert!(error
+            .to_string()
+            .contains("aliases are no longer supported"));
+
+        let nested_error = reject_account_alias_payload(&serde_json::json!({
+            "name": "Root",
+            "subAccounts": [{"name": "Child", "aliases": ["legacy-child"]}]
+        }))
+        .expect_err("nested aliases should be rejected");
+        assert!(nested_error
+            .to_string()
+            .contains("aliases are no longer supported"));
+
+        let metadata = account_metadata_from_payload(
+            Some(&serde_json::json!({"aliases": ["legacy"], "comment": "old"})),
+            &serde_json::json!({"comment": "new"}),
+        );
+        assert_eq!(metadata["aliases"], serde_json::json!(["legacy"]));
+        assert_eq!(metadata["comment"], "new");
     }
 
     #[test]

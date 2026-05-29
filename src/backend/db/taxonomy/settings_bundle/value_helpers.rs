@@ -437,6 +437,42 @@ mod tests {
     }
 
     #[test]
+    fn settings_bundle_rejects_legacy_account_aliases() {
+        let error = normalize_settings_bundle_sections(&json!({
+            "schemaVersion": 1,
+            "sections": {
+                "accounts": [{
+                    "name": "Card",
+                    "aliases": ["legacy-card"]
+                }]
+            }
+        }))
+        .expect_err("legacy account aliases should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("Settings bundle account aliases are no longer supported"));
+
+        let nested_error = normalize_settings_bundle_sections(&json!({
+            "schemaVersion": 1,
+            "sections": {
+                "accounts": [{
+                    "name": "Root",
+                    "subAccounts": [{
+                        "name": "Child",
+                        "aliases": ["legacy-child"]
+                    }]
+                }]
+            }
+        }))
+        .expect_err("nested legacy account aliases should be rejected");
+
+        assert!(nested_error
+            .to_string()
+            .contains("Settings bundle account aliases are no longer supported"));
+    }
+
+    #[test]
     fn settings_bundle_import_persists_account_rules_after_account_refs() {
         let mut connection = Connection::open_in_memory().expect("open");
         crate::schema::init_foundational_schema(&connection).expect("schema");
