@@ -2542,6 +2542,22 @@ async fn insert_postgres_account(
     user_id: i64,
     parent_id: Option<i64>,
 ) -> DbResult<i64> {
+    let name = value_text(payload.get("name"))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| DbError::InvalidOperation("account name is required".to_string()))?;
+    let exists = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM accounts WHERE user_id = $1 AND name = $2)",
+    )
+    .bind(user_id)
+    .bind(&name)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if exists {
+        return Err(DbError::InvalidOperation(format!(
+            "account name already exists: {name}"
+        )));
+    }
     let metadata = account_metadata_from_payload(None, payload);
     let row = sqlx::query(
         r#"
@@ -2551,10 +2567,10 @@ async fn insert_postgres_account(
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING id
-        "#,
+    "#,
     )
     .bind(user_id)
-    .bind(value_text(payload.get("name")).unwrap_or_default())
+    .bind(name)
     .bind(value_text(payload.get("type")))
     .bind(value_text(payload.get("currency")).unwrap_or_else(|| "CNY".to_string()))
     .bind(yuan_value_to_cents(payload.get("balance")).unwrap_or_default())

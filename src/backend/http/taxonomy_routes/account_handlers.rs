@@ -118,6 +118,9 @@ async fn create_account_handler(
         let user_id = db_user_id(user_id);
         let account_id = match create_postgres_account(runtime.pool(), &payload, user_id).await {
             Ok(value) => value,
+            Err(bill_analyser_db::DbError::InvalidOperation(message)) => {
+                return bad_request(message)
+            }
             Err(_) => return db_error_response(),
         };
         return match load_postgres_account_with_sub_accounts(runtime.pool(), account_id, user_id)

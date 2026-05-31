@@ -942,6 +942,25 @@ async fn taxonomy_postgres_runtime_serves_account_mutations_without_sqlite_fallb
         1
     );
 
+    let duplicate_response = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/accounts",
+            json!({
+                "name": format!("pg-api-account-{unique}"),
+                "type": 1,
+                "balance": 0
+            }),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(duplicate_response.status(), StatusCode::BAD_REQUEST);
+    assert!(read_json(duplicate_response).await["error"]
+        .as_str()
+        .expect("duplicate account error")
+        .contains("account name already exists"));
+
     let get_response = app
         .clone()
         .oneshot(authed_request_for_user(
@@ -1079,6 +1098,334 @@ async fn taxonomy_postgres_runtime_serves_account_mutations_without_sqlite_fallb
         .fetch_one(&pool)
         .await?,
         0
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn taxonomy_postgres_settings_bundle_import_runtime_uses_postgres_authority(
+) -> Result<(), Box<dyn Error>> {
+    let Ok(postgres_url) = env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+        return Ok(());
+    };
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&postgres_url)
+        .await?;
+    run_postgres_migrations(&pool).await?;
+
+    let unique = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
+    let user_id: i64 =
+        sqlx::query("INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id")
+            .bind(format!("taxonomy-pg-settings-{unique}"))
+            .bind(format!("taxonomy-pg-settings-{unique}@example.test"))
+            .fetch_one(&pool)
+            .await?
+            .try_get("id")?;
+    let export_password = "correct horse battery staple";
+    let password_hash = bcrypt::hash(export_password, 4)?;
+    sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
+        .bind(&password_hash)
+        .bind(user_id)
+        .execute(&pool)
+        .await?;
+    let app = postgres_runtime_router(&postgres_url)?;
+    let category_main = format!("pg-settings-main-{unique}");
+    let category_sub = format!("pg-settings-sub-{unique}");
+    let tag_name = format!("pg-settings-tag-{unique}");
+    let parent_account_name = format!("pg-settings-parent-{unique}");
+    let child_account_name = format!("pg-settings-child-{unique}");
+
+    let section_bundle = json!({
+        "schemaVersion": 1,
+        "sections": {
+            "accounts": [{"name": "section-ignored-account", "type": 1}],
+            "transactionCategories": [{
+                "externalRef": "category:preview",
+                "type": 3,
+                "mainCategory": category_main,
+                "subCategory": category_sub,
+                "priority": 9
+            }]
+        }
+    });
+    let preview_response = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/settings/bundle/sections/transactionCategories/import/preview",
+            section_bundle,
+            user_id,
+        ))
+        .await?;
+    assert_eq!(preview_response.status(), StatusCode::OK);
+    let preview = read_json(preview_response).await;
+    assert_eq!(preview["success"], true);
+    assert_eq!(preview["result"]["dryRun"], true);
+    assert_eq!(
+        preview["result"]["sections"]["transactionCategories"]["created"],
+        1
+    );
+    assert_eq!(preview["result"]["sections"]["accounts"]["created"], 0);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM categories WHERE user_id = $1 AND path = $2"
+        )
+        .bind(user_id)
+        .bind(format!("{category_main}/{category_sub}"))
+        .fetch_one(&pool)
+        .await?,
+        0
+    );
+
+    let bundle = json!({
+        "schemaVersion": 1,
+        "sections": {
+            "accounts": [{
+                "externalRef": "account:parent",
+                "name": parent_account_name,
+                "type": 1,
+                "currency": "CNY",
+                "balance": 10.25,
+                "initialBalance": 10.25,
+                "aliases": ["父账户"]
+            }, {
+                "externalRef": "account:child",
+                "name": child_account_name,
+                "type": 1,
+                "parentRef": "account:parent",
+                "balance": 1.50,
+                "aliases": ["子账户"]
+            }],
+            "transactionCategories": [{
+                "externalRef": "category:coffee",
+                "type": 3,
+                "mainCategory": category_main,
+                "subCategory": category_sub,
+                "priority": 3
+            }],
+            "transactionTags": [{
+                "externalRef": "tag:work",
+                "name": tag_name,
+                "color": "#224466",
+                "icon": "tag"
+            }],
+            "categoryRecognitionRules": [{
+                "categoryRef": "category:coffee",
+                "name": "pg-settings-category-rule",
+                "priority": 2,
+                "ruleExpression": "OR={settings-bundle-import}",
+                "regexEnabled": false,
+                "enabled": true
+            }],
+            "accountRecognitionRules": [{
+                "accountRef": "account:child",
+                "name": "pg-settings-account-rule",
+                "priority": 3,
+                "ruleExpression": "OR={子账户}",
+                "regexEnabled": false,
+                "enabled": true,
+                "accountRoleScope": "source",
+                "transactionTypeScope": "expense",
+                "fieldScope": ["payment_method"],
+                "source": "settings_bundle"
+            }]
+        }
+    });
+
+    let import_response = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/settings/bundle/import",
+            bundle.clone(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(import_response.status(), StatusCode::OK);
+    let imported = read_json(import_response).await;
+    assert_eq!(imported["result"]["dryRun"], false);
+    assert_eq!(imported["result"]["sections"]["accounts"]["created"], 2);
+    assert_eq!(
+        imported["result"]["sections"]["categoryRecognitionRules"]["created"],
+        1
+    );
+    assert_eq!(
+        imported["result"]["sections"]["accountRecognitionRules"]["created"],
+        1
+    );
+
+    let parent_id: i64 =
+        sqlx::query_scalar("SELECT id FROM accounts WHERE user_id = $1 AND name = $2")
+            .bind(user_id)
+            .bind(&parent_account_name)
+            .fetch_one(&pool)
+            .await?;
+    let child_parent_ref: Option<String> = sqlx::query_scalar(
+        "SELECT metadata->>'parent_id' FROM accounts WHERE user_id = $1 AND name = $2",
+    )
+    .bind(user_id)
+    .bind(&child_account_name)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(child_parent_ref, Some(parent_id.to_string()));
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT balance_cents FROM accounts WHERE user_id = $1 AND name = $2",
+        )
+        .bind(user_id)
+        .bind(&parent_account_name)
+        .fetch_one(&pool)
+        .await?,
+        1025
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tags WHERE user_id = $1 AND name = $2")
+            .bind(user_id)
+            .bind(&tag_name)
+            .fetch_one(&pool)
+            .await?,
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM category_rules WHERE user_id = $1 AND name = 'pg-settings-category-rule'",
+        )
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await?,
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM account_rules WHERE user_id = $1 AND name = 'pg-settings-account-rule'",
+        )
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await?,
+        1
+    );
+
+    let second_import = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/settings/bundle/import",
+            bundle,
+            user_id,
+        ))
+        .await?;
+    assert_eq!(second_import.status(), StatusCode::OK);
+    let second = read_json(second_import).await;
+    assert_eq!(second["result"]["sections"]["accounts"]["updated"], 2);
+    assert_eq!(second["result"]["sections"]["accounts"]["created"], 0);
+    assert_eq!(
+        second["result"]["sections"]["accountRecognitionRules"]["updated"],
+        1
+    );
+
+    let export_response = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/settings/bundle/export",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(export_response.status(), StatusCode::OK);
+    let exported = read_json(export_response).await;
+    assert_eq!(exported["schemaVersion"], 1);
+    assert_eq!(exported["counts"]["accounts"], 2);
+    assert_eq!(exported["counts"]["transactionTags"], 1);
+    assert_eq!(exported["counts"]["categoryRecognitionRules"], 1);
+    assert_eq!(exported["counts"]["accountRecognitionRules"], 1);
+    assert_eq!(exported["sections"]["llmConfigs"], json!([]));
+    assert_eq!(exported["sections"]["ocrConfig"], json!([]));
+    let exported_accounts = exported["sections"]["accounts"]
+        .as_array()
+        .expect("exported accounts");
+    assert!(exported_accounts
+        .iter()
+        .any(|account| account["name"] == parent_account_name));
+    let exported_child = exported_accounts
+        .iter()
+        .find(|account| account["name"] == child_account_name)
+        .expect("exported child account");
+    assert_eq!(exported_child["parentRef"], format!("account:{parent_id}"));
+    assert_eq!(
+        exported["sections"]["accountRecognitionRules"][0]["accountRef"],
+        exported_child["externalRef"]
+    );
+
+    let account_rule_section = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/settings/bundle/sections/accountRecognitionRules/export",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(account_rule_section.status(), StatusCode::OK);
+    let account_rule_section = read_json(account_rule_section).await;
+    assert_eq!(
+        account_rule_section["sections"]
+            .as_object()
+            .expect("section object")
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["accountRecognitionRules"]
+    );
+    assert_eq!(account_rule_section["counts"]["accountRecognitionRules"], 1);
+
+    let category_section_post = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/settings/bundle/sections/categoryRecognitionRules/export",
+            json!({}),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(category_section_post.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(category_section_post).await["counts"]["categoryRecognitionRules"],
+        1
+    );
+
+    let sensitive_get = app
+        .clone()
+        .oneshot(authed_request_for_user(
+            Method::GET,
+            "/api/settings/bundle/sections/llmConfigs/export",
+            Body::empty(),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(sensitive_get.status(), StatusCode::BAD_REQUEST);
+
+    let sensitive_section = app
+        .clone()
+        .oneshot(json_request_for_user(
+            Method::POST,
+            "/api/settings/bundle/sections/llmConfigs/export",
+            json!({"password": export_password}),
+            user_id,
+        ))
+        .await?;
+    assert_eq!(sensitive_section.status(), StatusCode::OK);
+    let sensitive_section = read_json(sensitive_section).await;
+    assert_eq!(sensitive_section["secretsPolicy"]["llmApiKeys"], "included");
+    assert_eq!(sensitive_section["counts"]["llmConfigs"], 0);
+    assert_eq!(
+        sensitive_section["sections"]
+            .as_object()
+            .expect("sensitive section object")
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["llmConfigs"]
     );
 
     Ok(())

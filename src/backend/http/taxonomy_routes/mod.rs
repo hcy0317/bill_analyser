@@ -20,7 +20,7 @@ use bill_analyser_core::{
     UserId,
 };
 use bill_analyser_db::{
-    get_app_setting, set_app_setting, sync_all_account_balances,
+    get_app_setting, get_postgres_login_user_by_id, set_app_setting, sync_all_account_balances,
     taxonomy::{
         account_rules::{AccountRuleRecord, AccountRulesRepository},
         accounts::{AccountDisplayOrder, AccountRecord, AccountsRepository},
@@ -49,11 +49,14 @@ use bill_analyser_db::{
             update_postgres_tag_display_orders, update_postgres_template,
             update_postgres_template_display_orders,
         },
-        settings_bundle::{export_taxonomy_sections, import_settings_bundle},
+        settings_bundle::{
+            export_taxonomy_sections, import_postgres_settings_bundle, import_settings_bundle,
+        },
         tags::{TagDisplayOrder, TagRecord, TagsRepository},
         templates::{TemplateDisplayOrder, TemplateRecord, TemplatesRepository},
     },
-    AccountBalanceDiscrepancy, AppSettingDraft, SqliteRuntime, SyncAllAccountBalancesResult,
+    AccountBalanceDiscrepancy, AppSettingDraft, PostgresPool, SqliteRuntime,
+    SyncAllAccountBalancesResult,
 };
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};

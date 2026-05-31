@@ -13,6 +13,18 @@ async fn export_settings_bundle_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy settings bundle export") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match build_postgres_settings_bundle(runtime.pool(), db_user_id(user_id), false)
+            .await
+        {
+            Ok(bundle) => settings_bundle_download_response(bundle, "bill-analyser-settings.json"),
+            Err(_) => settings_bundle_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy settings bundle export") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -38,7 +50,7 @@ async fn export_settings_bundle_section_get_handler(
     if is_sensitive_settings_export_section(&section_key) {
         return bad_request("password is required");
     }
-    export_settings_bundle_section(&state, &headers, &section_key)
+    export_settings_bundle_section(&state, &headers, &section_key).await
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -58,11 +70,56 @@ async fn export_settings_bundle_section_post_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    let auth_user_id = user_id;
+    let user_id = db_user_id(user_id);
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(&state, "taxonomy settings bundle export") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+
+        if is_sensitive_settings_export_section(&section_key) {
+            let payload = optional_json_body(body);
+            let password = payload
+                .as_ref()
+                .and_then(|value| value.get("password"))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if password.is_empty() {
+                return bad_request("password is required");
+            }
+            match verify_postgres_sensitive_export_password(runtime.pool(), auth_user_id, password)
+                .await
+            {
+                Ok(true) => {}
+                Ok(false) => {
+                    return json_response(
+                        StatusCode::UNAUTHORIZED,
+                        json!({"success": false, "error": "Invalid password"}),
+                    )
+                }
+                Err(_) => return settings_bundle_db_error_response(),
+            }
+        }
+
+        return match build_postgres_settings_bundle(
+            runtime.pool(),
+            user_id,
+            is_sensitive_settings_export_section(&section_key),
+        )
+        .await
+        {
+            Ok(bundle) => settings_bundle_download_response(
+                filter_settings_bundle_section(&bundle, &section_key),
+                &format!("bill-analyser-settings-{section_key}.json"),
+            ),
+            Err(_) => settings_bundle_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(&state, "taxonomy settings bundle export") {
         Ok(value) => value,
         Err(response) => return *response,
     };
-    let user_id = db_user_id(user_id);
 
     if is_sensitive_settings_export_section(&section_key) {
         let payload = optional_json_body(body);
@@ -100,7 +157,7 @@ async fn export_settings_bundle_section_post_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn export_settings_bundle_section(
+async fn export_settings_bundle_section(
     state: &HttpAppState,
     headers: &HeaderMap,
     section_key: &str,
@@ -109,6 +166,21 @@ fn export_settings_bundle_section(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(state, "taxonomy settings bundle export") {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match build_postgres_settings_bundle(runtime.pool(), db_user_id(user_id), false)
+            .await
+        {
+            Ok(bundle) => settings_bundle_download_response(
+                filter_settings_bundle_section(&bundle, section_key),
+                &format!("bill-analyser-settings-{section_key}.json"),
+            ),
+            Err(_) => settings_bundle_db_error_response(),
+        };
+    }
     let mut runtime = match open_runtime(state, "taxonomy settings bundle export") {
         Ok(value) => value,
         Err(response) => return *response,
@@ -139,6 +211,7 @@ async fn preview_import_settings_bundle_handler(
         "taxonomy settings bundle import",
         "Failed to preview settings bundle",
     )
+    .await
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -157,6 +230,7 @@ async fn import_settings_bundle_handler(
         "taxonomy settings bundle import",
         "Failed to import settings bundle",
     )
+    .await
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -179,6 +253,7 @@ async fn preview_import_settings_bundle_section_handler(
         true,
         "Failed to preview settings section",
     )
+    .await
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -201,10 +276,11 @@ async fn import_settings_bundle_section_handler(
         false,
         "Failed to import settings section",
     )
+    .await
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn import_settings_bundle_section_response(
+async fn import_settings_bundle_section_response(
     state: &HttpAppState,
     headers: &HeaderMap,
     section_key: &str,
@@ -225,10 +301,11 @@ fn import_settings_bundle_section_response(
         "taxonomy settings bundle import",
         internal_error_message,
     )
+    .await
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn import_settings_bundle_response(
+async fn import_settings_bundle_response(
     state: &HttpAppState,
     headers: &HeaderMap,
     body: Bytes,
@@ -248,10 +325,11 @@ fn import_settings_bundle_response(
         runtime_label,
         internal_error_message,
     )
+    .await
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn import_settings_bundle_value_response(
+async fn import_settings_bundle_value_response(
     state: &HttpAppState,
     headers: &HeaderMap,
     bundle: &Value,
@@ -263,6 +341,24 @@ fn import_settings_bundle_value_response(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if state.config.database_backend.uses_postgres() {
+        let runtime = match open_postgres_runtime(state, runtime_label) {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        return match import_postgres_settings_bundle(
+            runtime.pool(),
+            bundle,
+            db_user_id(user_id),
+            dry_run,
+        )
+        .await
+        {
+            Ok(result) => success_result(StatusCode::OK, result),
+            Err(bill_analyser_db::DbError::InvalidOperation(message)) => bad_request(message),
+            Err(_) => error_response(StatusCode::INTERNAL_SERVER_ERROR, internal_error_message),
+        };
+    }
     let mut runtime = match open_runtime(state, runtime_label) {
         Ok(value) => value,
         Err(response) => return *response,
@@ -278,6 +374,19 @@ fn import_settings_bundle_value_response(
         Err(bill_analyser_db::DbError::InvalidOperation(message)) => bad_request(message),
         Err(_) => error_response(StatusCode::INTERNAL_SERVER_ERROR, internal_error_message),
     }
+}
+
+async fn verify_postgres_sensitive_export_password(
+    pool: &PostgresPool,
+    user_id: UserId,
+    password: &str,
+) -> Result<bool, String> {
+    let password_hash = get_postgres_login_user_by_id(pool, user_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .map(|user| user.password_hash)
+        .unwrap_or_default();
+    Ok(!password_hash.is_empty() && bcrypt::verify(password, &password_hash).unwrap_or(false))
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
