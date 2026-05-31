@@ -61,4 +61,17 @@ describe('settings JSON per-page import/export controls', () => {
         expect(services).toContain('settings/bundle/sections/${sectionKey}/import/preview');
         expect(services).toContain('settings/bundle/sections/${sectionKey}/import');
     });
+
+    test('keeps import preview details literal and uses svg-path icons', () => {
+        const confirmDialog = readSource('src/components/desktop/ConfirmDialog.vue');
+        const importButton = readSource('src/components/desktop/SettingsJsonImportExportButton.vue');
+
+        expect(confirmDialog).toContain("import { mdiCircleSmall } from '@mdi/js';");
+        expect(confirmDialog).toContain(':icon="mdiCircleSmall"');
+        expect(confirmDialog).toContain('map(d => tm(d, actualOptions))');
+        expect(confirmDialog).toContain('map(d => tm(d, options))');
+        expect(confirmDialog).not.toContain('map(d => tt(d, actualOptions))');
+        expect(confirmDialog).not.toContain('map(d => tt(d, options))');
+        expect(importButton).toContain('getApiErrorMessageOrDefault(error,');
+    });
 });

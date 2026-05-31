@@ -22,6 +22,7 @@ import { isNumber, isEquals } from '@/lib/common.ts';
 import { getCategorizedAccountsMap, getAllFilteredAccountsBalance } from '@/lib/account.ts';
 import services from '@/lib/services.ts';
 import logger from '@/lib/logger.ts';
+import { getApiErrorMessage } from '@/lib/api_error.ts';
 
 export const useAccountsStore = defineStore('accounts', () => {
     const settingsStore = useSettingsStore();
@@ -895,8 +896,9 @@ export const useAccountsStore = defineStore('accounts', () => {
             }).catch(error => {
                 logger.error('failed to save account', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
-                    reject({ error: error.response.data });
+                const message = getApiErrorMessage(error);
+                if (message) {
+                    reject({ message });
                 } else if (!error.processed) {
                     if (!isEdit) {
                         reject({ message: 'Unable to add account' });

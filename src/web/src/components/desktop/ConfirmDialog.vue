@@ -24,7 +24,7 @@
                 <v-list v-if="detailsContent && detailsContent.length > 0" dense class="mt-3">
                     <v-list-item v-for="(detail, index) in detailsContent" :key="index" class="px-0">
                         <template #prepend>
-                            <v-icon size="small">mdi-circle-small</v-icon>
+                            <v-icon size="small" :icon="mdiCircleSmall" />
                         </template>
                         <v-list-item-title class="text-body-2">{{ detail }}</v-list-item-title>
                     </v-list-item>
@@ -43,6 +43,7 @@
 import { ref, watch } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
+import { mdiCircleSmall } from '@mdi/js';
 
 import { isString, isObject } from '@/lib/common.ts';
 
@@ -57,7 +58,7 @@ const emit = defineEmits<{
     (e: 'update:show', value: boolean): void;
 }>();
 
-const { tt } = useI18n();
+const { tt, tm } = useI18n();
 
 const showState = ref<boolean>(false);
 const titleContent = ref<string>(props.title || tt('global.app.title'));
@@ -84,10 +85,10 @@ function open(titleOrText: string, textOrOptions?: string | Record<string, unkno
 
             // 提取警告和详情
             if (isString(actualOptions['warning'])) {
-                warningContent.value = tt(actualOptions['warning'] as string, actualOptions);
+                warningContent.value = tm(actualOptions['warning'] as string, actualOptions);
             }
             if (Array.isArray(actualOptions['details'])) {
-                detailsContent.value = (actualOptions['details'] as string[]).map(d => tt(d, actualOptions));
+                detailsContent.value = (actualOptions['details'] as string[]).map(d => tm(d, actualOptions));
             }
         }
     } else if (isString(textOrOptions)) { // second parameter is text
@@ -100,10 +101,10 @@ function open(titleOrText: string, textOrOptions?: string | Record<string, unkno
 
             // 提取警告和详情
             if (isString(options['warning'])) {
-                warningContent.value = tt(options['warning'] as string, options);
+                warningContent.value = tm(options['warning'] as string, options);
             }
             if (Array.isArray(options['details'])) {
-                detailsContent.value = (options['details'] as string[]).map(d => tt(d, options));
+                detailsContent.value = (options['details'] as string[]).map(d => tm(d, options));
             }
         }
     }

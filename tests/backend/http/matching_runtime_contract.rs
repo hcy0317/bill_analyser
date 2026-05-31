@@ -576,10 +576,27 @@ async fn matching_recurring_calendar_networth_runtime_serves_owned_routes(
     assert_eq!(calendar_response.status(), StatusCode::OK);
     let calendar_body = read_json(calendar_response).await;
     assert_eq!(calendar_body["success"], true);
-    assert_eq!(calendar_body["data"]["events"][0]["date"], "2026-03-01");
-    assert_eq!(calendar_body["data"]["events"][0]["expense"], 25.5);
-    assert_eq!(calendar_body["data"]["events"][1]["income"], 100.0);
-    assert_eq!(calendar_body["data"]["events"][2]["transferOut"], 10.0);
+    let march_1 = calendar_event(&calendar_body, "2026-03-01");
+    assert!(
+        march_1["bills"]
+            .as_array()
+            .expect("march 1 bills")
+            .iter()
+            .any(|bill| bill["id"] == 1 && bill["amount"] == -25.5),
+        "{march_1}"
+    );
+    assert!(
+        march_1["expense"].as_f64().expect("march 1 expense") >= 25.5,
+        "{march_1}"
+    );
+    assert_eq!(
+        calendar_event(&calendar_body, "2026-03-02")["income"],
+        100.0
+    );
+    assert_eq!(
+        calendar_event(&calendar_body, "2026-03-03")["transferOut"],
+        10.0
+    );
     assert!(calendar_body["data"]["events"]
         .as_array()
         .expect("calendar events")
@@ -1784,4 +1801,13 @@ async fn read_json(response: axum::response::Response) -> Value {
         .await
         .expect("body bytes");
     serde_json::from_slice(&bytes).expect("json")
+}
+
+fn calendar_event<'a>(body: &'a Value, date: &str) -> &'a Value {
+    body["data"]["events"]
+        .as_array()
+        .expect("calendar events")
+        .iter()
+        .find(|event| event["date"] == date)
+        .unwrap_or_else(|| panic!("calendar event for {date} in {body}"))
 }

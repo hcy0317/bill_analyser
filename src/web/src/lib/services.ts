@@ -210,6 +210,7 @@ import { getTimezoneOffsetMinutes } from './datetime.ts';
 import { generateRandomUUID } from './misc.ts';
 import { getBasePath } from './web.ts';
 import logger from './logger.ts';
+import { getApiErrorMessage } from './api_error.ts';
 import {
     buildBudgetExecutionQuery,
     buildBudgetForecastQuery,
@@ -641,7 +642,8 @@ axios.interceptors.response.use((response: any) => {
 
         logger.error(`[Response Error] ${error.response.status} ${url} - Config had Authorization: ${authInConfig ? 'YES' : 'NO'}`, {
             authValue: authInConfig ? `${String(authInConfig).substring(0, 30)}...` : 'NONE',
-            allConfigHeaders: error.response.config?.headers ? Object.keys(error.response.config.headers).join(', ') : 'N/A'
+            allConfigHeaders: error.response.config?.headers ? Object.keys(error.response.config.headers).join(', ') : 'N/A',
+            responseMessage: getApiErrorMessage(error) || 'N/A'
         });
     }
 

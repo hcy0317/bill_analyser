@@ -39,6 +39,7 @@ import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import PasswordDialog from '@/components/desktop/PasswordDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 import { useI18n } from '@/locales/helpers.ts';
+import { getApiErrorMessageOrDefault } from '@/lib/api_error.ts';
 import { openTextFileContent, startDownloadFile } from '@/lib/ui/common.ts';
 import type {
     SettingsBundleImportResult,
@@ -188,9 +189,11 @@ async function importSection(): Promise<void> {
     } catch (error: unknown) {
         importing.value = false;
 
-        const payload = error as { message?: string; processed?: boolean };
+        const payload = error as { processed?: boolean };
         if (!payload.processed) {
-            snackbar.value?.showError({ message: payload.message || 'Unable to import settings bundle' });
+            snackbar.value?.showError({
+                message: getApiErrorMessageOrDefault(error, 'Unable to import settings bundle')
+            });
         }
     }
 }
