@@ -6,8 +6,9 @@ use std::{
 
 use bill_analyser_db::{
     apply_postgres_account_recovery, build_postgres_account_recovery_dry_run,
-    inspect_postgres_account_recovery_source, AccountRecoveryApplyOptions,
-    AccountRecoveryTargetRef, DbError, DbResult, ACCOUNT_RECOVERY_DEFAULT_SOURCE_USER_ID,
+    inspect_postgres_account_recovery_source, sync_postgres_account_recovery_auth,
+    AccountRecoveryApplyOptions, AccountRecoveryAuthSyncOptions, AccountRecoveryTargetRef, DbError,
+    DbResult, ACCOUNT_RECOVERY_DEFAULT_SOURCE_USER_ID,
 };
 use sqlx::postgres::PgPoolOptions;
 
@@ -16,6 +17,7 @@ enum CommandMode {
     Preflight,
     DryRun,
     Apply,
+    SyncAuth,
     Help,
 }
 
@@ -116,6 +118,27 @@ async fn execute(args: impl IntoIterator<Item = String>) -> DbResult<CommandOutp
             let report = apply_postgres_account_recovery(sqlite_path, &pool, options).await?;
             command_output(args.output_path, &report)
         }
+        CommandMode::SyncAuth => {
+            let sqlite_path = args
+                .sqlite_path
+                .ok_or_else(|| invalid("sync-auth requires --sqlite"))?;
+            let target_user_ref = target_ref(args.target_user_ref, "sync-auth")?;
+            let postgres_url = postgres_url_arg(args.postgres_url, "sync-auth")?;
+            let options = AccountRecoveryAuthSyncOptions {
+                source_user_id,
+                target_user_ref,
+                confirm_target_user_id: args
+                    .confirm_target_user_id
+                    .ok_or_else(|| invalid("sync-auth requires --confirm-target-user-id"))?,
+                confirm_target_username: args
+                    .confirm_target_username
+                    .ok_or_else(|| invalid("sync-auth requires --confirm-target-username"))?,
+                confirm_target_email: args.confirm_target_email.unwrap_or_default(),
+            };
+            let pool = connect_postgres(&postgres_url).await?;
+            let report = sync_postgres_account_recovery_auth(sqlite_path, &pool, options).await?;
+            command_output(args.output_path, &report)
+        }
         CommandMode::Help => Ok(CommandOutput {
             output_path: None,
             json: help_text().to_string(),
@@ -136,9 +159,10 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> DbResult<CliArgs> {
                     "preflight" => CommandMode::Preflight,
                     "dry-run" => CommandMode::DryRun,
                     "apply" => CommandMode::Apply,
+                    "sync-auth" => CommandMode::SyncAuth,
                     _ => {
                         return Err(invalid(
-                            "unsupported --mode; use preflight, dry-run, or apply",
+                            "unsupported --mode; use preflight, dry-run, apply, or sync-auth",
                         ))
                     }
                 });
@@ -333,7 +357,7 @@ fn canonical_or_absolutize(path: &Path) -> DbResult<PathBuf> {
 }
 
 fn help_text() -> &'static str {
-    "Usage:\n  bill_postgres_account_recovery --mode preflight --sqlite <db> [--source-user-id 5] [--output <ignored-or-outside-worktree>.json]\n  bill_postgres_account_recovery --mode dry-run --sqlite <db> --target-user <id|username|email> [--postgres-url <url>|BILL_ANALYSER_POSTGRES_URL] [--source-user-id 5] [--output <ignored-or-outside-worktree>.json]\n  bill_postgres_account_recovery --mode apply --sqlite <db> --target-user <id|username|email> [--postgres-url <url>|BILL_ANALYSER_POSTGRES_URL] --manifest-id <manifest> --confirm-target-user-id <id> --confirm-target-username <username> [--confirm-target-email <email>] [--snapshot-dir .git/ai/recovery-snapshots/<manifest>] [--workspace-root <repo>] [--allow-unexpected-source-shape] [--output <ignored-or-outside-worktree>.json]"
+    "Usage:\n  bill_postgres_account_recovery --mode preflight --sqlite <db> [--source-user-id 5] [--output <ignored-or-outside-worktree>.json]\n  bill_postgres_account_recovery --mode dry-run --sqlite <db> --target-user <id|username|email> [--postgres-url <url>|BILL_ANALYSER_POSTGRES_URL] [--source-user-id 5] [--output <ignored-or-outside-worktree>.json]\n  bill_postgres_account_recovery --mode apply --sqlite <db> --target-user <id|username|email> [--postgres-url <url>|BILL_ANALYSER_POSTGRES_URL] --manifest-id <manifest> --confirm-target-user-id <id> --confirm-target-username <username> [--confirm-target-email <email>] [--snapshot-dir .git/ai/recovery-snapshots/<manifest>] [--workspace-root <repo>] [--allow-unexpected-source-shape] [--output <ignored-or-outside-worktree>.json]\n  bill_postgres_account_recovery --mode sync-auth --sqlite <db> --target-user <id|username|email> [--postgres-url <url>|BILL_ANALYSER_POSTGRES_URL] [--source-user-id 5] --confirm-target-user-id <id> --confirm-target-username <username> [--confirm-target-email <email>] [--output <ignored-or-outside-worktree>.json]"
 }
 
 #[cfg(test)]
@@ -398,6 +422,17 @@ mod tests {
         .unwrap_err()
         .to_string()
         .contains("apply requires --manifest-id"));
+
+        assert!(execute([
+            "--mode".to_string(),
+            "sync-auth".to_string(),
+            "--sqlite".to_string(),
+            sqlite_path.display().to_string(),
+        ])
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("sync-auth requires --target-user"));
 
         assert!(
             parse_args(["--source-user-id".to_string(), "nope".to_string()])

@@ -8,8 +8,9 @@ use bill_analyser_db::{
     run_postgres_migrations, AccountRecoveryApplyOptions, AccountRecoveryTargetRef,
 };
 use rusqlite::Connection;
-use serde_json::Value;
+use serde_json::{json, Value};
 use sqlx::postgres::PgPoolOptions;
+use sqlx::types::Json;
 
 #[test]
 fn postgres_account_recovery_cli_runs_help_and_preflight() -> Result<(), Box<dyn Error>> {
@@ -28,14 +29,19 @@ fn postgres_account_recovery_cli_runs_help_and_preflight() -> Result<(), Box<dyn
     let connection = Connection::open(&sqlite_path)?;
     connection.execute_batch(
         r#"
-        CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL, email TEXT);
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY,
+            username TEXT NOT NULL,
+            email TEXT,
+            password_hash TEXT
+        );
         CREATE TABLE accounts (
             id INTEGER PRIMARY KEY,
             user_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             aliases TEXT
         );
-        INSERT INTO users VALUES (5, 'source', 'source@example.test');
+        INSERT INTO users VALUES (5, 'source', 'source@example.test', 'source-hash');
         INSERT INTO accounts VALUES (42, 5, 'Wallet', '["Cash", "零钱"]');
         "#,
     )?;
@@ -110,6 +116,7 @@ async fn postgres_account_recovery_apply_runs_in_target_user_scope_when_test_url
         .connect(&postgres_url)
         .await?;
     run_postgres_migrations(&pool).await?;
+    refresh_users_identity_sequence_for_test(&pool).await?;
 
     let suffix = format!(
         "{}",
@@ -122,10 +129,15 @@ async fn postgres_account_recovery_apply_runs_in_target_user_scope_when_test_url
     let other_username = format!("recovery-other-{suffix}");
     let other_email = format!("recovery-other-{suffix}@example.test");
     let target_user_id = sqlx::query_scalar::<_, i64>(
-        "INSERT INTO users (username, email, password_hash) VALUES ($1, $2, 'hash') RETURNING id",
+        "INSERT INTO users (username, email, password_hash, metadata) VALUES ($1, $2, 'target-hash', $3) RETURNING id",
     )
     .bind(&target_username)
     .bind(&target_email)
+    .bind(Json(json!({
+        "is_active": true,
+        "failed_login_attempts": 5,
+        "locked_until": "2026-06-02T15:40:26.917016700"
+    })))
     .fetch_one(&pool)
     .await?;
     let other_user_id = sqlx::query_scalar::<_, i64>(
@@ -173,6 +185,42 @@ async fn postgres_account_recovery_apply_runs_in_target_user_scope_when_test_url
         .join("recovery-snapshots")
         .join(&dry_run.manifest_id);
 
+    let sync_output = Command::new(env!("CARGO_BIN_EXE_bill_postgres_account_recovery"))
+        .env("BILL_ANALYSER_POSTGRES_URL", &postgres_url)
+        .arg("--mode")
+        .arg("sync-auth")
+        .arg("--sqlite")
+        .arg(&sqlite_path)
+        .arg("--target-user")
+        .arg(target_user_id.to_string())
+        .arg("--confirm-target-user-id")
+        .arg(target_user_id.to_string())
+        .arg("--confirm-target-username")
+        .arg(&target_username)
+        .arg("--confirm-target-email")
+        .arg(&target_email)
+        .output()?;
+    assert!(
+        sync_output.status.success(),
+        "sync-auth failed: {}",
+        String::from_utf8_lossy(&sync_output.stderr)
+    );
+    let sync_report: Value = serde_json::from_slice(&sync_output.stdout)?;
+    assert_eq!(sync_report["source_user_id"], 5);
+    assert_eq!(sync_report["source_password_hash_present"], true);
+    assert_eq!(sync_report["target_password_hash_replaced"], true);
+    assert_eq!(sync_report["target_lockout_metadata_cleared"], true);
+    let (synced_hash, synced_attempts, synced_locked_until): (String, i64, String) =
+        sqlx::query_as(
+            "SELECT password_hash, COALESCE((metadata->>'failed_login_attempts')::BIGINT, -1), COALESCE(metadata->>'locked_until', '') FROM users WHERE id = $1",
+        )
+        .bind(target_user_id)
+        .fetch_one(&pool)
+        .await?;
+    assert_eq!(synced_hash, "source-hash");
+    assert_eq!(synced_attempts, 0);
+    assert_eq!(synced_locked_until, "");
+
     let report = apply_postgres_account_recovery(
         &sqlite_path,
         &pool,
@@ -196,6 +244,12 @@ async fn postgres_account_recovery_apply_runs_in_target_user_scope_when_test_url
     assert_eq!(report.target_post_counts.bills, 1);
     assert_eq!(report.target_post_counts.account_rules, 1);
     assert!(snapshot_dir.join("manifest.redacted.json").exists());
+    let post_apply_hash =
+        sqlx::query_scalar::<_, String>("SELECT password_hash FROM users WHERE id = $1")
+            .bind(target_user_id)
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(post_apply_hash, "source-hash");
     let target_old_accounts = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM accounts WHERE user_id = $1 AND name = 'old target account'",
     )
@@ -231,11 +285,118 @@ async fn postgres_account_recovery_apply_runs_in_target_user_scope_when_test_url
     Ok(())
 }
 
+#[tokio::test]
+async fn postgres_account_recovery_sync_auth_creates_missing_target_user(
+) -> Result<(), Box<dyn Error>> {
+    let Ok(postgres_url) = std::env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+        return Ok(());
+    };
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&postgres_url)
+        .await?;
+    run_postgres_migrations(&pool).await?;
+    refresh_users_identity_sequence_for_test(&pool).await?;
+
+    let suffix = format!(
+        "{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+    );
+    let target_user_id = 1_000_000 + suffix[suffix.len().saturating_sub(6)..].parse::<i64>()?;
+    let target_username = format!("recovery-missing-target-{suffix}");
+    let target_email = format!("recovery-missing-target-{suffix}@example.test");
+    sqlx::query("DELETE FROM users WHERE id = $1 OR username = $2 OR email = $3")
+        .bind(target_user_id)
+        .bind(&target_username)
+        .bind(&target_email)
+        .execute(&pool)
+        .await?;
+
+    let temp_dir = tempfile::tempdir()?;
+    let sqlite_path = temp_dir.path().join("source.db");
+    create_apply_fixture(&sqlite_path)?;
+    let sync_output = Command::new(env!("CARGO_BIN_EXE_bill_postgres_account_recovery"))
+        .env("BILL_ANALYSER_POSTGRES_URL", &postgres_url)
+        .arg("--mode")
+        .arg("sync-auth")
+        .arg("--sqlite")
+        .arg(&sqlite_path)
+        .arg("--target-user")
+        .arg(&target_username)
+        .arg("--confirm-target-user-id")
+        .arg(target_user_id.to_string())
+        .arg("--confirm-target-username")
+        .arg(&target_username)
+        .arg("--confirm-target-email")
+        .arg(&target_email)
+        .output()?;
+    assert!(
+        sync_output.status.success(),
+        "sync-auth failed: {}",
+        String::from_utf8_lossy(&sync_output.stderr)
+    );
+    let sync_report: Value = serde_json::from_slice(&sync_output.stdout)?;
+    assert_eq!(sync_report["target"]["user_id"], target_user_id);
+    assert_eq!(sync_report["source_password_hash_present"], true);
+    assert_eq!(sync_report["target_password_hash_replaced"], true);
+
+    let (username, email, password_hash, is_active, failed_attempts, locked_until): (
+        String,
+        Option<String>,
+        String,
+        bool,
+        i64,
+        String,
+    ) = sqlx::query_as(
+        "SELECT username, email, password_hash, COALESCE((metadata->>'is_active')::boolean, FALSE), COALESCE((metadata->>'failed_login_attempts')::BIGINT, -1), COALESCE(metadata->>'locked_until', '') FROM users WHERE id = $1",
+    )
+    .bind(target_user_id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(username, target_username);
+    assert_eq!(email.as_deref(), Some(target_email.as_str()));
+    assert_eq!(password_hash, "source-hash");
+    assert!(is_active);
+    assert_eq!(failed_attempts, 0);
+    assert_eq!(locked_until, "");
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(target_user_id)
+        .execute(&pool)
+        .await?;
+    Ok(())
+}
+
+async fn refresh_users_identity_sequence_for_test(
+    pool: &sqlx::PgPool,
+) -> Result<(), Box<dyn Error>> {
+    let sequence_name: Option<String> =
+        sqlx::query_scalar("SELECT pg_get_serial_sequence('users', 'id')")
+            .fetch_one(pool)
+            .await?;
+    if let Some(sequence_name) = sequence_name {
+        sqlx::query(
+            "SELECT setval($1, COALESCE((SELECT MAX(id) FROM users), 1), (SELECT MAX(id) FROM users) IS NOT NULL)",
+        )
+        .bind(sequence_name)
+        .execute(pool)
+        .await?;
+    }
+    Ok(())
+}
+
 fn create_apply_fixture(path: &std::path::Path) -> Result<(), Box<dyn Error>> {
     let connection = Connection::open(path)?;
     connection.execute_batch(
         r#"
-        CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL, email TEXT);
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY,
+            username TEXT NOT NULL,
+            email TEXT,
+            password_hash TEXT
+        );
         CREATE TABLE accounts (
             id INTEGER PRIMARY KEY,
             user_id INTEGER NOT NULL,
@@ -276,7 +437,7 @@ fn create_apply_fixture(path: &std::path::Path) -> Result<(), Box<dyn Error>> {
             source_account_id INTEGER,
             destination_account_id INTEGER
         );
-        INSERT INTO users VALUES (5, 'source', 'source@example.test');
+        INSERT INTO users VALUES (5, 'source', 'source@example.test', 'source-hash');
         INSERT INTO accounts VALUES (42, 5, 'Wallet', 1, 'CNY', 123.45, '["Cash"]', 0, 1, '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
         INSERT INTO categories VALUES (50, 5, 1, 'Food', 'Lunch', 1, 0, '2026-01-01T00:00:00Z');
         INSERT INTO bills VALUES (70, 5, '2026-01-03T12:00:00Z', '支出', 19.99, 'Cafe', 'Lunch', 'Wallet', 'Food', 'Lunch', 'hash70', '2026-01-03T12:01:00Z', '2026-01-03T12:02:00Z', 42, 0);

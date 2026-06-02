@@ -27,6 +27,32 @@ describe('rule center navigation mapping', () => {
             tab: 'config',
             shouldRewriteQuery: false,
         });
+
+        expect(normalizeRuleCenterSelection({ domain: 'llm', tab: 'ocr-config' })).toMatchObject({
+            domain: 'llm',
+            tab: 'ocr-config',
+            shouldRewriteQuery: false,
+        });
+
+        expect(normalizeRuleCenterSelection({ domain: 'learning', tab: 'rules' })).toMatchObject({
+            domain: 'learning',
+            tab: 'rules',
+            shouldRewriteQuery: false,
+        });
+
+        expect(normalizeRuleCenterSelection({ domain: 'transfer', tab: 'accounts' })).toEqual({
+            domain: 'transfer',
+            tab: 'rules',
+            legacyRuleTab: 'accounts',
+            shouldRewriteQuery: false,
+        });
+
+        expect(normalizeRuleCenterSelection({})).toEqual({
+            domain: 'transfer',
+            tab: 'overview',
+            legacyRuleTab: 'rules',
+            shouldRewriteQuery: false,
+        });
     });
 
     test('maps legacy view and pairType params to canonical Rule Center params', () => {
@@ -60,6 +86,20 @@ describe('rule center navigation mapping', () => {
             shouldRewriteQuery: true,
         });
 
+        expect(normalizeRuleCenterSelection({ view: 'learning', tab: 'ocr-config' })).toMatchObject({
+            domain: 'llm',
+            tab: 'ocr-config',
+            legacyRuleTab: 'learning',
+            shouldRewriteQuery: true,
+        });
+
+        expect(normalizeRuleCenterSelection({ view: 'learning' })).toMatchObject({
+            domain: 'learning',
+            tab: 'overview',
+            legacyRuleTab: 'learning',
+            shouldRewriteQuery: true,
+        });
+
         expect(normalizeRuleCenterSelection({ view: 'rules', tab: 'recurring' })).toMatchObject({
             domain: 'transfer',
             tab: 'rules',
@@ -85,6 +125,13 @@ describe('rule center navigation mapping', () => {
             domain: 'transfer',
             tab: 'rules',
             legacyRuleTab: 'rules',
+            shouldRewriteQuery: true,
+        });
+
+        expect(normalizeRuleCenterSelection({ view: 'rule-center', tab: 'learning' })).toMatchObject({
+            domain: 'learning',
+            tab: 'rules',
+            legacyRuleTab: 'learning',
             shouldRewriteQuery: true,
         });
     });

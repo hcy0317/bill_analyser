@@ -239,6 +239,26 @@ pub struct AccountRecoveryApplyOptions {
     pub allow_unexpected_source_shape: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountRecoveryAuthSyncOptions {
+    pub source_user_id: i64,
+    pub target_user_ref: AccountRecoveryTargetRef,
+    pub confirm_target_user_id: i64,
+    pub confirm_target_username: String,
+    pub confirm_target_email: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountRecoveryAuthSyncReport {
+    pub schema_version: u16,
+    pub source_user_id: i64,
+    pub source_identity_hash: String,
+    pub target: AccountRecoveryTargetTriplet,
+    pub source_password_hash_present: bool,
+    pub target_password_hash_replaced: bool,
+    pub target_lockout_metadata_cleared: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountRecoveryApplyReport {
     pub schema_version: u16,
@@ -631,6 +651,68 @@ pub async fn apply_postgres_account_recovery(
     })
 }
 
+pub async fn sync_postgres_account_recovery_auth(
+    sqlite_path: impl AsRef<Path>,
+    pool: &PostgresPool,
+    options: AccountRecoveryAuthSyncOptions,
+) -> DbResult<AccountRecoveryAuthSyncReport> {
+    validate_auth_sync_options(&options)?;
+    let sqlite_path = sqlite_path.as_ref();
+    let source_sqlite_sha256 = file_sha256(sqlite_path)?;
+    let connection = Connection::open(sqlite_path)?;
+    let source_identity_hash = source_user_identity_hash(&connection, options.source_user_id)?;
+    let source_password_hash = source_user_password_hash(&connection, options.source_user_id)?
+        .ok_or_else(|| {
+            DbError::InvalidOperation(
+                "account recovery auth sync source user has no password_hash".to_string(),
+            )
+        })?;
+    let resolved = match resolve_target_raw_optional(pool, &options.target_user_ref).await? {
+        Some(resolved) => {
+            validate_auth_sync_target_confirmation(&resolved, &options)?;
+            resolved
+        }
+        None => confirmed_auth_sync_target(&options)?,
+    };
+
+    let mut transaction = pool.begin().await?;
+    acquire_recovery_lock(&mut transaction, resolved.user_id).await?;
+    sync_target_user_auth(&mut transaction, &resolved, &source_password_hash).await?;
+    refresh_users_identity_sequence(&mut transaction).await?;
+    insert_migration_audit_event(
+        &mut transaction,
+        "auth_synced",
+        json!({
+            "source_user_id": options.source_user_id,
+            "source_identity_hash": source_identity_hash.clone(),
+            "source_sqlite_sha256": source_sqlite_sha256,
+            "target_user_id": resolved.user_id,
+            "target_triplet_hash": resolved.triplet().triplet_hash,
+            "source_password_hash_present": true,
+            "target_password_hash_replaced": true,
+            "target_lockout_metadata_cleared": true,
+            "redacted": true,
+        }),
+    )
+    .await?;
+    transaction.commit().await?;
+
+    let target = ResolvedTarget {
+        password_hash_present: true,
+        ..resolved
+    }
+    .triplet();
+    Ok(AccountRecoveryAuthSyncReport {
+        schema_version: ACCOUNT_RECOVERY_SCHEMA_VERSION,
+        source_user_id: options.source_user_id,
+        source_identity_hash,
+        target,
+        source_password_hash_present: true,
+        target_password_hash_replaced: true,
+        target_lockout_metadata_cleared: true,
+    })
+}
+
 pub fn account_recovery_setting_allowed(key: &str, is_encrypted: bool) -> bool {
     if is_encrypted {
         return false;
@@ -765,10 +847,49 @@ fn source_user_identity_hash(connection: &Connection, source_user_id: i64) -> Db
     ]))
 }
 
+fn source_user_password_hash(
+    connection: &Connection,
+    source_user_id: i64,
+) -> DbResult<Option<String>> {
+    if !sqlite_table_exists(connection, "users")? {
+        return Err(DbError::InvalidOperation(
+            "account recovery source users table is missing".to_string(),
+        ));
+    }
+    if !sqlite_table_has_column(connection, "users", "password_hash")? {
+        return Err(DbError::InvalidOperation(
+            "account recovery source users table has no password_hash column".to_string(),
+        ));
+    }
+    Ok(connection
+        .query_row(
+            "SELECT password_hash FROM users WHERE id = ?1",
+            params![source_user_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty()))
+}
+
 async fn resolve_target_raw(
     pool: &PostgresPool,
     target_ref: &AccountRecoveryTargetRef,
 ) -> DbResult<ResolvedTarget> {
+    resolve_target_raw_optional(pool, target_ref)
+        .await?
+        .ok_or_else(|| {
+            DbError::InvalidOperation(
+                "account recovery target user ref did not match a PostgreSQL users row".to_string(),
+            )
+        })
+}
+
+async fn resolve_target_raw_optional(
+    pool: &PostgresPool,
+    target_ref: &AccountRecoveryTargetRef,
+) -> DbResult<Option<ResolvedTarget>> {
     let rows = sqlx::query(
         "SELECT id, username, email, password_hash IS NOT NULL AS password_hash_present FROM users WHERE id::text = $1 OR username = $1 OR email = $1 ORDER BY id ASC",
     )
@@ -776,9 +897,7 @@ async fn resolve_target_raw(
     .fetch_all(pool)
     .await?;
     if rows.is_empty() {
-        return Err(DbError::InvalidOperation(
-            "account recovery target user ref did not match a PostgreSQL users row".to_string(),
-        ));
+        return Ok(None);
     }
     if rows.len() > 1 {
         return Err(DbError::InvalidOperation(
@@ -786,12 +905,12 @@ async fn resolve_target_raw(
         ));
     }
     let row = &rows[0];
-    Ok(ResolvedTarget {
+    Ok(Some(ResolvedTarget {
         user_id: row.try_get("id")?,
         username: row.try_get("username")?,
         email: row.try_get("email")?,
         password_hash_present: row.try_get("password_hash_present")?,
-    })
+    }))
 }
 
 impl ResolvedTarget {
@@ -1116,7 +1235,6 @@ fn map_account_row(
                 "category",
                 "currency",
                 "balance",
-                "aliases",
                 "hidden",
                 "display_order",
                 "created_at",
@@ -1766,6 +1884,75 @@ async fn lock_target_user_row(
     Ok(())
 }
 
+async fn sync_target_user_auth(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target: &ResolvedTarget,
+    source_password_hash: &str,
+) -> DbResult<()> {
+    let email = target.email.as_deref().filter(|value| !value.is_empty());
+    let rows_affected = sqlx::query(
+        r#"
+        INSERT INTO users (id, username, email, password_hash, metadata, updated_at)
+        VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            '{"is_active": true, "failed_login_attempts": 0, "locked_until": ""}'::jsonb,
+            now()
+        )
+        ON CONFLICT (id) DO UPDATE
+        SET username = EXCLUDED.username,
+            email = EXCLUDED.email,
+            password_hash = EXCLUDED.password_hash,
+            metadata = jsonb_set(
+                jsonb_set(
+                    COALESCE(users.metadata, '{}'::jsonb),
+                    '{failed_login_attempts}',
+                    '0'::jsonb,
+                    true
+                ),
+                '{locked_until}',
+                '""'::jsonb,
+                true
+            ),
+            updated_at = now()
+        "#,
+    )
+    .bind(target.user_id)
+    .bind(&target.username)
+    .bind(email)
+    .bind(source_password_hash)
+    .execute(&mut **transaction)
+    .await?
+    .rows_affected();
+    if rows_affected == 0 {
+        return Err(DbError::InvalidOperation(
+            "account recovery auth sync target user was not inserted or updated".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+async fn refresh_users_identity_sequence(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> DbResult<()> {
+    let sequence_name: Option<String> =
+        sqlx::query_scalar("SELECT pg_get_serial_sequence('users', 'id')")
+            .fetch_one(&mut **transaction)
+            .await?;
+    let Some(sequence_name) = sequence_name else {
+        return Ok(());
+    };
+    sqlx::query(
+        "SELECT setval($1, COALESCE((SELECT MAX(id) FROM users), 1), (SELECT MAX(id) FROM users) IS NOT NULL)",
+    )
+    .bind(sequence_name)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
 async fn validate_no_remapped_id_collisions(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     bundle: &SqliteToPostgresExportBundle,
@@ -1913,6 +2100,51 @@ fn validate_apply_options(options: &AccountRecoveryApplyOptions) -> DbResult<()>
     Ok(())
 }
 
+fn validate_auth_sync_options(options: &AccountRecoveryAuthSyncOptions) -> DbResult<()> {
+    validate_positive_id(options.source_user_id, "source_user_id")?;
+    validate_positive_id(options.confirm_target_user_id, "confirm_target_user_id")?;
+    if options.confirm_target_username.trim().is_empty() {
+        return Err(DbError::InvalidOperation(
+            "account recovery auth sync requires --confirm-target-username".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn confirmed_auth_sync_target(
+    options: &AccountRecoveryAuthSyncOptions,
+) -> DbResult<ResolvedTarget> {
+    validate_auth_sync_target_ref_matches_confirmation(options)?;
+    Ok(ResolvedTarget {
+        user_id: options.confirm_target_user_id,
+        username: options.confirm_target_username.clone(),
+        email: if options.confirm_target_email.trim().is_empty() {
+            None
+        } else {
+            Some(options.confirm_target_email.clone())
+        },
+        password_hash_present: false,
+    })
+}
+
+fn validate_auth_sync_target_ref_matches_confirmation(
+    options: &AccountRecoveryAuthSyncOptions,
+) -> DbResult<()> {
+    let target_ref = options.target_user_ref.as_str();
+    let target_email = options.confirm_target_email.as_str();
+    if target_ref == options.confirm_target_user_id.to_string()
+        || target_ref == options.confirm_target_username
+        || (!target_email.is_empty() && target_ref == target_email)
+    {
+        return Ok(());
+    }
+
+    Err(DbError::InvalidOperation(
+        "account recovery auth sync target ref must match confirmed target id, username, or email when creating a missing PostgreSQL users row"
+            .to_string(),
+    ))
+}
+
 fn validate_target_confirmation(
     resolved: &ResolvedTarget,
     options: &AccountRecoveryApplyOptions,
@@ -1924,6 +2156,23 @@ fn validate_target_confirmation(
     {
         return Err(DbError::InvalidOperation(
             "account recovery target confirmation does not match the live PostgreSQL users row"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_auth_sync_target_confirmation(
+    resolved: &ResolvedTarget,
+    options: &AccountRecoveryAuthSyncOptions,
+) -> DbResult<()> {
+    let resolved_email = resolved.email.clone().unwrap_or_default();
+    if resolved.user_id != options.confirm_target_user_id
+        || resolved.username != options.confirm_target_username
+        || resolved_email != options.confirm_target_email
+    {
+        return Err(DbError::InvalidOperation(
+            "account recovery auth sync target confirmation does not match the live PostgreSQL users row"
                 .to_string(),
         ));
     }
@@ -2448,6 +2697,10 @@ mod tests {
         );
         assert_eq!(accounts.rows[0].values["user_id"], json!(9));
         assert_eq!(accounts.rows[0].values["balance_cents"], json!(12345));
+        assert_eq!(
+            accounts.rows[0].values["metadata"]["aliases"],
+            json!("[\"Cash\", \"零钱\"]")
+        );
 
         let bills = table_export(&bundle, "bills");
         assert_eq!(bills.row_count, 1);
@@ -2500,6 +2753,47 @@ mod tests {
     }
 
     #[test]
+    fn auth_sync_source_password_hash_reader_requires_hash_column() {
+        let connection = fixture_connection();
+        assert_eq!(
+            source_user_password_hash(&connection, 5)
+                .unwrap()
+                .as_deref(),
+            Some("source-hash")
+        );
+
+        let no_hash = Connection::open_in_memory().unwrap();
+        no_hash
+            .execute_batch(
+                r#"
+                CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL, email TEXT);
+                INSERT INTO users VALUES (5, 'source', NULL);
+                "#,
+            )
+            .unwrap();
+        assert!(source_user_password_hash(&no_hash, 5)
+            .unwrap_err()
+            .to_string()
+            .contains("has no password_hash column"));
+
+        let blank_hash = Connection::open_in_memory().unwrap();
+        blank_hash
+            .execute_batch(
+                r#"
+                CREATE TABLE users (
+                    id INTEGER PRIMARY KEY,
+                    username TEXT NOT NULL,
+                    email TEXT,
+                    password_hash TEXT
+                );
+                INSERT INTO users VALUES (5, 'source', NULL, '   ');
+                "#,
+            )
+            .unwrap();
+        assert_eq!(source_user_password_hash(&blank_hash, 5).unwrap(), None);
+    }
+
+    #[test]
     fn guard_edges_reject_missing_users_bad_ids_and_unignored_snapshots() {
         assert!(AccountRecoveryTargetRef::new("   ")
             .unwrap_err()
@@ -2548,6 +2842,46 @@ mod tests {
                 .to_string()
                 .contains("not git-ignored")
         );
+    }
+
+    #[test]
+    fn auth_sync_confirmed_target_covers_missing_target_confirmation_edges() {
+        let email_options = AccountRecoveryAuthSyncOptions {
+            source_user_id: 5,
+            target_user_ref: AccountRecoveryTargetRef::new("target@example.test").unwrap(),
+            confirm_target_user_id: 17,
+            confirm_target_username: "target".to_string(),
+            confirm_target_email: "target@example.test".to_string(),
+        };
+        let email_target = confirmed_auth_sync_target(&email_options).unwrap();
+        assert_eq!(email_target.user_id, 17);
+        assert_eq!(email_target.email.as_deref(), Some("target@example.test"));
+
+        let id_options = AccountRecoveryAuthSyncOptions {
+            target_user_ref: AccountRecoveryTargetRef::new("17").unwrap(),
+            confirm_target_email: String::new(),
+            ..email_options.clone()
+        };
+        let id_target = confirmed_auth_sync_target(&id_options).unwrap();
+        assert_eq!(id_target.email, None);
+
+        let blank_username_options = AccountRecoveryAuthSyncOptions {
+            confirm_target_username: " ".to_string(),
+            ..email_options.clone()
+        };
+        assert!(validate_auth_sync_options(&blank_username_options)
+            .unwrap_err()
+            .to_string()
+            .contains("requires --confirm-target-username"));
+
+        let mismatch_options = AccountRecoveryAuthSyncOptions {
+            target_user_ref: AccountRecoveryTargetRef::new("someone-else").unwrap(),
+            ..email_options
+        };
+        assert!(confirmed_auth_sync_target(&mismatch_options)
+            .unwrap_err()
+            .to_string()
+            .contains("target ref must match confirmed target"));
     }
 
     #[test]
@@ -2674,7 +3008,8 @@ mod tests {
                 CREATE TABLE users (
                     id INTEGER PRIMARY KEY,
                     username TEXT NOT NULL,
-                    email TEXT
+                    email TEXT,
+                    password_hash TEXT
                 );
                 CREATE TABLE accounts (
                     id INTEGER PRIMARY KEY,
@@ -2781,8 +3116,8 @@ mod tests {
                     is_encrypted INTEGER
                 );
 
-                INSERT INTO users VALUES (5, 'Cyansl0t', 'hcy84872684@example.test');
-                INSERT INTO users VALUES (6, 'other', 'other@example.test');
+                INSERT INTO users VALUES (5, 'Cyansl0t', 'hcy84872684@example.test', 'source-hash');
+                INSERT INTO users VALUES (6, 'other', 'other@example.test', 'other-hash');
                 INSERT INTO accounts VALUES (42, 5, 'Wallet', 1, 'cash', 'CNY', 123.45, '["Cash", "零钱"]', 0, 7, '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
                 INSERT INTO accounts VALUES (43, 6, 'Other Wallet', 1, 'cash', 'CNY', 999.99, '["Other"]', 0, 1, '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
                 INSERT INTO categories VALUES (50, 5, 1, 'Food', 'Lunch', 1, 0, 'utensils', '#fff', '2026-01-01T00:00:00Z');
