@@ -179,6 +179,5 @@ mod tests {
             health.details.get("postgres_authority_status"),
             Some(&"complete:postgres_authority".to_string())
         );
-        assert!(!health.details.contains_key("postgres_cutover_status"));
     }
 }

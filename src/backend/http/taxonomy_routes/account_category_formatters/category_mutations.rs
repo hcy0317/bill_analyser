@@ -233,10 +233,6 @@ fn frontend_category_to_backend(
                 .unwrap_or(0),
         )),
     );
-    result.insert(
-        "keywords".to_string(),
-        Value::String(string_or_default(payload.get("keywords"), "")),
-    );
     let hidden = match mode {
         CategoryPayloadMode::FrontendDefaults => payload
             .get("visible")
@@ -286,12 +282,6 @@ fn category_update_payload_from_frontend(payload: &Value) -> Map<String, Value> 
         result.insert(
             "priority".to_string(),
             Value::Number(Number::from(display_order)),
-        );
-    }
-    if let Some(keywords) = payload.get("keywords") {
-        result.insert(
-            "keywords".to_string(),
-            Value::String(string_or_default(Some(keywords), "")),
         );
     }
     if let Some(category_type) = payload.get("type").and_then(value_as_i64) {

@@ -1,5 +1,3 @@
-#![cfg(not(coverage))]
-
 //! Rust HTTP ingress for Bill Analyser.
 //!
 //! This crate owns the backend HTTP runtime directly. All routable `/api/...`
@@ -54,7 +52,6 @@ pub use database_runtime::{
     DatabaseRuntimeBoundary, RouteRepositoryBackend, RouteRepositoryRuntimeError,
 };
 pub use import_routes::IMPORT_SKELETON_ROUTE_PATTERNS;
-#[cfg(not(coverage))]
 pub use logging::init_runtime_tracing;
 pub use logging::runtime_log_filter_from_directives;
 pub use matching_routes::{

@@ -102,14 +102,14 @@ Across Copilot-, Claude-, and Codex-adjacent reviewer assets, treat review scope
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90
+cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35
 # 前端检查
 Set-Location src\web
 npm run lint
 npm run test:coverage
 ```
 
-提交前最低检查：受影响的 Rust/前端用例通过；只要交付的是代码改动，就必须补一条真实 coverage 命令并满足覆盖率 > 90%；如果改动了业务源码，被改业务代码自身也必须单独达到 90% 覆盖率（优先按 diff 改动的可执行行核算，缺少行级数据时按被改文件核算）；Rust 改动至少通过相关 `cargo test`，风险较高或工作区共享改动补 `cargo clippy --workspace --all-targets -- -D warnings`；前端改动至少通过 `npm run lint` 或最小构建验证；接口或金额字段变更时人工复核一次元/分转换。
+提交前最低检查：受影响的 Rust/前端用例通过；只要交付的是 Rust 代码改动，就必须补一条覆盖完整 Rust 工作区的真实 coverage 命令并满足当前 full-runtime baseline；如果改动了业务源码，被改业务代码自身还必须单独达到 90% 覆盖率（优先按 diff 改动的可执行行核算，缺少行级数据时按被改文件核算）；Rust 改动至少通过相关 `cargo test`，风险较高或工作区共享改动补 `cargo clippy --workspace --all-targets -- -D warnings`；前端改动至少通过 `npm run lint` 或最小构建验证；接口或金额字段变更时人工复核一次元/分转换。
 
 ## Default AI workflow
 
@@ -118,17 +118,18 @@ npm run test:coverage
 - `prompts` 是快捷入口，`agents` 是专项能力；不要把它们当成第二套仓库级规则来源。
 - 普通任务优先保持单 agent、小步修改、就地验证；只有在架构设计、显式代码评审、安全审查、构建故障、关键 E2E 等场景才升级为专项 agent。
 - 按改动路径选择验证动作：
-	- `crates/**`、`Cargo.toml`、`Cargo.lock`：先跑受影响 `cargo test`；共享 runtime/业务代码交付前必须运行 `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings` 与 `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90`
+	- `src/backend/**`、`Cargo.toml`、`Cargo.lock`：先跑受影响 `cargo test`；共享 runtime/业务代码交付前必须运行 `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings` 与 `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35`
 	- `src/web/**`：至少运行 `npm run lint`；若交付前端代码，还必须运行 `npm run test:coverage`，并满足总覆盖率 > 90% 以及被改业务代码自身覆盖率 > 90%
 	- `.gitea/**`：先读 `.agents/skills/gitea-ci-cache-discipline/SKILL.md`，运行 YAML 解析、Rust-only source tree gate 与受影响 CI 本地等价命令
 	- `.github/**`、`.agents/**`、`.claude/**`、`.codex/**`、`scripts/**`：运行 Rust-only source tree gate 与相关静态检查；对 hook/agent adapter 改动至少校验 JSON，并确认活跃配置没有引用已删除的 `scripts/hooks/**` 或旧 agent-stack-health runner；不要重新引入已删除的 sidecar/tooling 路径
 
 ## Audit gate for business-code changes
 
-- 任何业务代码变更（包括 `crates/**` Rust 运行时代码，以及会影响业务行为、导入链路、预算/统计结果、API 契约的相关实现）在准备验收前，必须至少执行一次 Rust 完整覆盖率门禁：`cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90`
+- 任何业务代码变更（包括 `src/backend/**` Rust 运行时代码，以及会影响业务行为、导入链路、预算/统计结果、API 契约的相关实现）在准备验收前，必须至少执行一次 Rust 完整覆盖率门禁：`cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35`
+- Rust full-runtime baseline 是对完整 Rust 工作区的真实覆盖率门禁，不允许通过 `cfg(coverage)` 隐藏 runtime 模块来制造 90% 假绿。
 - 业务源码改动还必须单独核算被改代码覆盖率：优先用 `coverage.json` / `lcov.info` 按 diff 新增/修改的可执行行计算，改动行覆盖率必须 > 90%；缺少行级数据时，被改文件的文件级覆盖率必须 > 90%。
 - 开发过程中可以先跑受影响用例做快速反馈，但这不能替代最终的全量测试验收。
-- 只有在全量测试 / coverage gate 执行完成、全部通过、总覆盖率 > 90%，且被改业务代码覆盖率 > 90% 时，才可以视为通过审计验收。
+- 只有在全量测试 / coverage gate 执行完成、全部通过、Rust full-runtime baseline 达标，且被改业务代码覆盖率 > 90% 时，才可以视为通过审计验收。
 - 如果没有执行全量测试，或全量测试 / coverage gate 存在任何失败，则该改动必须打回重做，不得以“局部测试通过”代替。
 
 ## Interrupted-session recovery

@@ -12,7 +12,7 @@ Tool-specific entries should stay thin and point back here.
 
 Use this skill when you are:
 
-- modifying Rust HTTP, Rust DB primitives, backend services, or SQLite access
+- modifying Rust HTTP, Rust DB primitives, backend services, or PostgreSQL access
 - changing Vue/TypeScript screens or stores
 - working on bill import, categories, budgets, statistics, accounts, tags, matching, learning, OCR, or LLM behavior
 - validating API contracts, money-unit conversions, Rust route ownership, DB write semantics, or frontend import flow
@@ -21,7 +21,7 @@ Use this skill when you are:
 
 - Follow `AGENTS.md` first, then use tool-specific adapter files only for platform-native deltas.
 - Read `docs/PROJECT_OVERVIEW.md` before changing import, budgeting, statistics, accounts, categories, tags, or other cross-module flows.
-- Rust is the only HTTP runtime service; do not reintroduce Python/Flask sidecars or proxy fallback.
+- Rust is the only HTTP runtime service; do not reintroduce sidecars or proxy fallback.
 - Treat REST `/api/...` as the runtime API chain; do not revive `/api/v1/*`.
 - Keep yuan and cents conversions explicit.
 - Backend Rust source lives under `src/backend/*`; Rust integration and contract tests live under `tests/backend/*` and are wired through crate manifests.
@@ -38,7 +38,7 @@ Use this skill when you are:
 
 ## Verification Baseline
 
-- `src/backend/**`: run focused `cargo test`, then `cargo clippy --workspace --all-targets -- -D warnings`; business Rust changes require `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90`.
+- `src/backend/**`: run focused `cargo test`, then `cargo clippy --workspace --all-targets -- -D warnings`; business Rust changes require a truthful full-runtime coverage gate with `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35`. Changed executable business lines still need 90% coverage review.
 - `src/web/**`: at least run `npm run lint` in `src/web`; frontend delivery also requires `npm run test:coverage` and coverage above 90%.
 - `.gitea/**`: load `.agents/skills/gitea-ci-cache-discipline/SKILL.md`, then run YAML parsing for `.gitea/workflows/ci.yml` and the closest CI-equivalent command for the touched runtime area.
 - `.github/**`, `.agents/**`, `.claude/**`, `.codex/**`, and hook adapter changes: validate touched JSON files and confirm active hook configs do not reference deleted `scripts/hooks/**` or `scripts/agent_stack_health.py` entrypoints.
@@ -67,6 +67,6 @@ Use this skill when you are:
 
 - `cargo test --workspace`
 - `cargo clippy --workspace --all-targets -- -D warnings`
-- `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90`
+- `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35`
 - `./start_backend.ps1`
 - `./start_frontend.ps1`

@@ -217,8 +217,7 @@ async fn get_category_handler(
                 "color": "",
                 "comment": "",
                 "displayOrder": 0,
-                "visible": true,
-                "keywords": ""
+                "visible": true
             }),
         );
     }

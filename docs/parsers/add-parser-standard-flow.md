@@ -7,7 +7,7 @@
 - `src/backend/parsers/`
 - `tests/backend/parsers/fixtures/`
 - `src/backend/http/import_routes/mod.rs`
-- `tests/backend/http/import_runtime_contract.rs`
+- `tests/backend/core/import_pipeline_contracts.rs`
 
 ## 工作流
 
@@ -21,7 +21,7 @@
 
 ```powershell
 cargo test -p bill-analyser-parsers
-cargo test -p bill-analyser-http --test import_runtime_contract
+cargo test -p bill-analyser-core --test import_pipeline_contracts
 cd src\web
 npm run test:coverage
 ```
@@ -30,5 +30,5 @@ npm run test:coverage
 
 ```powershell
 cargo test --workspace
-cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90
+cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35
 ```

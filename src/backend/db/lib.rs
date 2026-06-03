@@ -1,5 +1,3 @@
-#![cfg(not(coverage))]
-
 //! PostgreSQL-only repository foundations for the Bill Analyser Rust runtime.
 //!
 //! HTTP business routes use PostgreSQL as the sole authority and Weaviate for
@@ -193,8 +191,8 @@ pub use statistics::{
 pub use taxonomy::account_rules::AccountRuleRecord;
 pub use taxonomy::category_rules::CategoryRuleRecord;
 pub use taxonomy::postgres_reads::{
-    create_postgres_account, create_postgres_category, delete_postgres_account,
-    delete_postgres_categories_by_main_category, delete_postgres_category,
+    create_postgres_account, create_postgres_category, create_postgres_category_rule,
+    delete_postgres_account, delete_postgres_categories_by_main_category, delete_postgres_category,
     get_postgres_account_by_id, get_postgres_category_by_id, get_postgres_category_by_name,
     get_postgres_sub_accounts, list_postgres_category_rules, update_postgres_account,
     update_postgres_account_display_orders, update_postgres_category,

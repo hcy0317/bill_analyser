@@ -35,7 +35,6 @@ fn export_category(category: &Value, category_refs: &BTreeMap<i64, String>) -> V
         "mainCategory": safe_text(category.get("main_category"), ""),
         "subCategory": safe_text(category.get("sub_category"), ""),
         "priority": safe_int(category.get("priority"), 0),
-        "keywords": safe_text(category.get("keywords"), ""),
         "description": safe_text(category.get("description"), ""),
         "icon": safe_text(category.get("icon"), ""),
         "color": safe_text(category.get("color"), ""),

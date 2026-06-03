@@ -35,7 +35,7 @@ Before editing anything, read these files:
 - `src/backend/parsers/lib.rs`
 - `tests/backend/parsers/parser_contracts.rs`
 - `src/backend/http/import_routes/`
-- `tests/backend/http/import_runtime_contract.rs`
+- `tests/backend/core/import_pipeline_contracts.rs`
 - the closest existing parser module and its dedicated Rust regression coverage
 
 ## Pre-flight Scope
@@ -100,7 +100,7 @@ Use controlled prefixes only in docs or tests:
 At minimum, update or add the most relevant tests from this repository set:
 
 - `tests/backend/parsers/parser_contracts.rs`
-- `tests/backend/http/import_runtime_contract.rs`
+- `tests/backend/core/import_pipeline_contracts.rs`
 - optional fixture support in `tests/fixtures/import_samples/`
 
 Do not stop at "parser can parse one file".
@@ -118,9 +118,9 @@ Update `docs/PROJECT_OVERVIEW.md` only when a stable runtime fact changes, such 
 Minimum parser-focused verification:
 
 - `cargo test -p bill-analyser-parsers`
-- `cargo test -p bill-analyser-http --test import_runtime_contract`
+- `cargo test -p bill-analyser-core --test import_pipeline_contracts`
 - `cargo clippy --workspace --all-targets -- -D warnings`
-- `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90`
+- `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35`
 
 ## Anti-patterns
 

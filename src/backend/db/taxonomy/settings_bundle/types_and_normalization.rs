@@ -208,7 +208,6 @@ pub fn normalize_category_import(payload: &Value) -> Value {
         "sub_category": safe_text(get_any(item, &["subCategory", "sub_category"]), ""),
         "description": safe_text(item.get("description"), ""),
         "priority": safe_int(item.get("priority"), 0),
-        "keywords": safe_text(item.get("keywords"), ""),
         "hidden": i64::from(safe_bool(item.get("hidden"))),
         "icon": safe_text(item.get("icon"), ""),
         "color": safe_text(item.get("color"), ""),

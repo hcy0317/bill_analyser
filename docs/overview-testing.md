@@ -8,7 +8,8 @@
 - Rust 集成/契约测试源码集中在 `tests/backend/core`、`tests/backend/db`、`tests/backend/http`、`tests/backend/parsers`，并通过各 crate `Cargo.toml` 的 `[[test]]` 目标纳入 workspace。
 - 导入全链路验收场景见 [导入全链路验收场景](import-full-chain-scenarios.md)。
 - `cargo clippy --workspace --all-targets -- -D warnings` 是共享 runtime 改动的静态门禁。
-- `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90` 是业务代码最终覆盖率门禁。
+- `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 是 Rust full-runtime baseline 门禁；它必须覆盖完整 Rust 工作区，不能通过 coverage cfg 隐藏运行时代码。
+- 业务源码改动仍需单独核算被改可执行行覆盖率，目标保持 90% 以上。
 - `node scripts/check-backend-doc-map.mjs` 校验 `docs/backend-map.md` 与静态 HTML 入口的关键路径索引。
 
 ## 前端

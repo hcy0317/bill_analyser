@@ -430,7 +430,6 @@ async fn upsert_postgres_settings_category(
     let path = category_name(&main, &sub);
     let metadata = json!({
         "description": safe_text(normalized.get("description"), ""),
-        "keywords": safe_text(normalized.get("keywords"), ""),
     });
 
     if let Some(category_id) = existing.by_key.get(&(main.clone(), sub.clone())).copied() {

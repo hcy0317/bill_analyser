@@ -48,8 +48,8 @@ argument-hint: '描述汇率或依赖汇率的统计展示问题，例如"统计
 
 ## 最少检查项
 
-- `src/bill_analyser/api/routes/statistics.py`
-- `src/bill_analyser/core/exchange_rate_providers.py`
+- `src/backend/http/statistics_routes/mod.rs`
+- `src/backend/core/statistics.rs`
 - `src/web/src/lib/services.ts`
 - `src/web/src/stores/statistics.ts`
 - `src/web/src/views/desktop/statistics/TransactionPage.vue`

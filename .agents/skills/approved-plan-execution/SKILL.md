@@ -24,10 +24,10 @@ Use this skill when continuing work from an approved `.tmp/plan.md`, OMX plan, o
 
 ## Gates
 
-- Business runtime changes require full pytest coverage with `--cov-fail-under=90`.
+- Business runtime changes require the current Rust coverage gate and focused regression tests.
 - Rust runtime changes require the relevant `cargo test`, `cargo clippy`, and coverage gate.
 - Frontend changes require lint and coverage for the touched surface.
-- Do not delete Python fallback code until Rust route runtime, DB write semantics, frontend flow, full coverage, and residual-reference gates all pass together.
+- Do not mark historical compatibility-path deletion complete until Rust route runtime, DB write semantics, frontend flow, full coverage, and residual-reference gates all pass together.
 
 ## `/start-work` Behavior
 

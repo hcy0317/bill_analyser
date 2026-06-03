@@ -9,6 +9,56 @@ use sqlx::{Postgres, QueryBuilder, Row};
 
 use crate::{bills, DbResult, PostgresPool, UserScope};
 
+const POSTGRES_CLEAR_ALL_DELETE_TABLES: &[&str] = &[
+    "llm_memory_events",
+    "llm_candidates",
+    "llm_configs",
+    "import_annotation_samples",
+    "vector_outbox_events",
+    "import_learning_feedback_events",
+    "import_learning_features",
+    "import_learning_suggestions",
+    "import_learning_lifecycle",
+    "import_learning_suppressions",
+    "import_learning_samples",
+    "matching_feedback_events",
+    "matching_pairs",
+    "matching_suppressions",
+    "preview_matching_feedback",
+    "recurring_suggestions",
+    "import_confirm_operations",
+    "import_history_materializations",
+    "import_decision_groups",
+    "import_sessions",
+    "parser_templates",
+    "transaction_templates",
+    "budget_history",
+    "budgets",
+    "bill_tags",
+    "bills",
+    "account_rules",
+    "category_rules",
+    "tags",
+    "categories",
+    "accounts",
+];
+
+const POSTGRES_CLEAR_ALL_COUNT_TABLES: &[(&str, &str)] = &[
+    ("bills", "bills"),
+    ("accounts", "accounts"),
+    ("categories", "categories"),
+    ("tags", "tags"),
+    ("account_rules", "account_rules"),
+    ("category_rules", "category_rules"),
+    ("llm_configs", "llm_configs"),
+    ("llm_candidates", "llm_candidates"),
+    ("llm_memory_events", "llm_memory_events"),
+    ("import_annotation_samples", "import_annotation_samples"),
+    ("templates", "transaction_templates"),
+    ("recurring_bills", "recurring_suggestions"),
+    ("budgets", "budgets"),
+];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserDataExportCategory {
     pub id: i64,
@@ -166,35 +216,7 @@ pub async fn clear_postgres_user_data(
     let user_id = UserScope::new(user_id).bind_value()?;
     let mut transaction = pool.begin().await?;
     let counts = postgres_clear_all_counts(&mut transaction, user_id).await?;
-    for table_name in [
-        "vector_outbox_events",
-        "import_learning_feedback_events",
-        "import_learning_features",
-        "import_learning_suggestions",
-        "import_learning_lifecycle",
-        "import_learning_suppressions",
-        "import_learning_samples",
-        "matching_feedback_events",
-        "matching_pairs",
-        "matching_suppressions",
-        "preview_matching_feedback",
-        "recurring_suggestions",
-        "import_confirm_operations",
-        "import_history_materializations",
-        "import_decision_groups",
-        "import_sessions",
-        "parser_templates",
-        "transaction_templates",
-        "budget_history",
-        "budgets",
-        "bill_tags",
-        "bills",
-        "account_rules",
-        "category_rules",
-        "tags",
-        "categories",
-        "accounts",
-    ] {
+    for &table_name in POSTGRES_CLEAR_ALL_DELETE_TABLES {
         delete_postgres_user_rows(&mut transaction, table_name, user_id).await?;
     }
     transaction.commit().await?;
@@ -286,17 +308,7 @@ async fn postgres_clear_all_counts(
     user_id: i64,
 ) -> DbResult<BTreeMap<String, i64>> {
     let mut counts = BTreeMap::new();
-    for (key, table_name) in [
-        ("bills", "bills"),
-        ("accounts", "accounts"),
-        ("categories", "categories"),
-        ("tags", "tags"),
-        ("account_rules", "account_rules"),
-        ("category_rules", "category_rules"),
-        ("templates", "transaction_templates"),
-        ("recurring_bills", "recurring_suggestions"),
-        ("budgets", "budgets"),
-    ] {
+    for &(key, table_name) in POSTGRES_CLEAR_ALL_COUNT_TABLES {
         let sql = format!("SELECT COUNT(*)::BIGINT FROM {table_name} WHERE user_id = $1");
         let count = sqlx::query_scalar(&sql)
             .bind(user_id)
@@ -343,4 +355,46 @@ fn normalize_ids(values: &[i64]) -> Vec<i64> {
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{POSTGRES_CLEAR_ALL_COUNT_TABLES, POSTGRES_CLEAR_ALL_DELETE_TABLES};
+
+    #[test]
+    fn clear_all_includes_llm_and_import_annotation_tables() {
+        for table in [
+            "llm_memory_events",
+            "llm_candidates",
+            "llm_configs",
+            "import_annotation_samples",
+        ] {
+            assert!(
+                POSTGRES_CLEAR_ALL_DELETE_TABLES.contains(&table),
+                "clear/all delete table list must include {table}"
+            );
+            assert!(
+                POSTGRES_CLEAR_ALL_COUNT_TABLES
+                    .iter()
+                    .any(|(_, table_name)| *table_name == table),
+                "clear/all count table list must include {table}"
+            );
+        }
+    }
+
+    #[test]
+    fn clear_all_deletes_child_tables_before_parent_tables() {
+        let position = |table: &str| {
+            POSTGRES_CLEAR_ALL_DELETE_TABLES
+                .iter()
+                .position(|candidate| *candidate == table)
+                .unwrap_or_else(|| panic!("missing clear/all table {table}"))
+        };
+
+        assert!(position("llm_memory_events") < position("llm_candidates"));
+        assert!(position("llm_candidates") < position("llm_configs"));
+        assert!(position("import_annotation_samples") < position("import_sessions"));
+        assert!(position("vector_outbox_events") < position("bills"));
+        assert!(position("bill_tags") < position("bills"));
+    }
 }

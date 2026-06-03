@@ -28,22 +28,22 @@ pub(crate) struct CategoryRecategorizeResult {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-async fn quick_add_category_keyword_handler(
+async fn quick_add_category_rule_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "bills", operation = "quick_add_category_keyword_handler", "business operation entered");
+    tracing::info!(domain = "bills", operation = "quick_add_category_rule_handler", "business operation entered");
     let payload = match required_json_object_from_body(&body, "Request body is required") {
         Ok(value) => value,
         Err(response) => return *response,
     };
     let Some(main_category) = value_string(payload.get("main_category")) else {
-        return bad_request("main_category and keyword are required");
+        return bad_request("main_category and rule_term are required");
     };
-    let Some(keyword) = value_string(payload.get("keyword")) else {
-        return bad_request("main_category and keyword are required");
+    let Some(rule_term) = value_string(payload.get("rule_term")) else {
+        return bad_request("main_category and rule_term are required");
     };
     let sub_category = value_string(payload.get("sub_category"));
     let user_id = match user_id_from_headers(&headers, &state.config) {
@@ -55,20 +55,20 @@ async fn quick_add_category_keyword_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
-    match quick_add_postgres_category_keyword(
+    match quick_add_postgres_category_rule(
         runtime.pool(),
         user_id,
         &main_category,
         sub_category.as_deref(),
-        &keyword,
+        &rule_term,
     )
     .await
     {
         Ok(true) => json_response(
             StatusCode::OK,
-            json!({"success": true, "message": "Keyword added successfully"}),
+            json!({"success": true, "message": "Rule added successfully"}),
         ),
-        Ok(false) => bad_request("Failed to add keyword"),
+        Ok(false) => bad_request("Failed to add rule"),
         Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
 }
@@ -115,12 +115,12 @@ async fn refresh_bill_categories_handler(
         };
 }
 
-async fn quick_add_postgres_category_keyword(
+async fn quick_add_postgres_category_rule(
     pool: &PostgresPool,
     user_id: UserId,
     main_category: &str,
     sub_category: Option<&str>,
-    keyword: &str,
+    rule_term: &str,
 ) -> bill_analyser_db::DbResult<bool> {
     let db_user_id = user_id.get() as i64;
     let sub_category = sub_category.unwrap_or("");
@@ -133,24 +133,25 @@ async fn quick_add_postgres_category_keyword(
     if category_id <= 0 {
         return Ok(false);
     }
-    let mut keyword_list = value_string(category.get("keywords"))
-        .unwrap_or_default()
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-        .collect::<Vec<_>>();
-    if keyword_list.iter().any(|value| value == keyword) {
+    let rule_expression = format!("OR={{{}}}", escape_rule_expression_term(rule_term));
+    let existing_rules = list_postgres_category_rules(pool, db_user_id, Some(category_id), true).await?;
+    if existing_rules.iter().any(|rule| record_text(rule, "rule_expression").trim() == rule_expression) {
         return Ok(false);
     }
-    keyword_list.push(keyword.to_string());
-    update_postgres_category(
+    let created = create_postgres_category_rule(
         pool,
-        category_id,
-        &json!({"keywords": keyword_list.join(",")}),
+        &json!({
+            "category_id": category_id,
+            "name": format!("Quick add: {rule_term}"),
+            "priority": 100,
+            "rule_expression": rule_expression,
+            "regex_enabled": false,
+            "enabled": true
+        }),
         db_user_id,
     )
-    .await
+    .await?;
+    Ok(created.is_some())
 }
 
 async fn refresh_category_for_bills_postgres(

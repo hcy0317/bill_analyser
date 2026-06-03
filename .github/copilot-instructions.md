@@ -44,7 +44,7 @@ This file is the Copilot / VS Code discovery adapter for this repository and sho
 
 ## Hook baseline
 
-- Rust-only cutover removed the repo-local Python hook implementations under `scripts/hooks/**` and the old `scripts/agent_stack_health.py` runner.
+- Rust-only source-tree rules exclude repo-local Python hook implementations under `scripts/hooks/**` and the old `scripts/agent_stack_health.py` runner.
 - `.github/hooks/*.json`, `.claude/settings.json`, and `.codex/hooks.json` should stay thin and must not wire commands unless the referenced entrypoint exists in the current checkout.
 - User-level Codex hooks remain owned by `~/.codex/hooks.json` and the user-level harness; do not mirror that whole runtime back into this repository.
 - Commit / upload candidate discovery must stay git-aware: respect `.gitignore`, `.git/info/exclude`, and `core.excludesFile`; use `git check-ignore -v -- <path>` when auditing a disputed path, and `git ls-files -- <path>` when you need to confirm it is already tracked.

@@ -9,7 +9,7 @@ use bill_analyser_core::{
     ImportDeletionGate, ResponseEnvelopeFamily, RouteHandlerId, RuntimeBlockedStatus, RuntimeState,
 };
 use serde::Deserialize;
-use std::{fs, path::Path};
+use std::{collections::HashSet, fs, path::Path};
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -45,235 +45,88 @@ fn gitea_ci_path_filters_cover_backend_contract_tests() {
 }
 
 #[test]
-fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_import_runtime() {
+fn governance_tests_verified_paths_exist() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+
+    for policy in domain_governance_policies() {
+        let mut seen = HashSet::new();
+        for &path in policy.tests_verified {
+            assert!(
+                path.starts_with("tests/"),
+                "domain {} references non-test tests_verified path {}",
+                policy.domain,
+                path
+            );
+            assert!(
+                seen.insert(path),
+                "domain {} duplicates tests_verified path {}",
+                policy.domain,
+                path
+            );
+            assert!(
+                repo_root.join(path).exists(),
+                "domain {} references missing tests_verified path {}",
+                policy.domain,
+                path
+            );
+        }
+    }
+}
+
+#[test]
+fn rust_owned_verified_runtime_routes_include_current_rest_runtime() {
     let rust_owned: Vec<_> = endpoints_by_owner(RuntimeState::RustOwnedVerified)
         .into_iter()
         .filter(|endpoint| endpoint.pattern.starts_with("/api/"))
         .map(|endpoint| (endpoint.method, endpoint.pattern))
         .collect();
 
-    assert!(rust_owned.contains(&("GET", "/api/health")));
-    assert!(rust_owned.contains(&("GET", "/api/runtime")));
-    assert!(!rust_owned.contains(&("POST", "/api/bills/import/v2/parse")));
-    assert!(!rust_owned.contains(&("GET", "/api/bills")));
-    assert!(!rust_owned.contains(&("POST", "/api/bills/batch")));
-    assert!(!rust_owned.contains(&("GET", "/api/budgets/")));
-    assert!(!rust_owned.contains(&("POST", "/api/budgets/import")));
-    assert!(!rust_owned.contains(&("GET", "/api/statistics/category-statistics")));
-    assert!(!rust_owned.contains(&("GET", "/api/statistics/category-statistics/trends")));
-    assert!(!rust_owned.contains(&("GET", "/api/statistics/asset-trends")));
-    assert!(!rust_owned.contains(&("GET", "/api/statistics/category-pie")));
-    assert!(!rust_owned.contains(&("GET", "/api/statistics/top-merchants")));
-    assert!(!rust_owned.contains(&("GET", "/api/statistics/amounts")));
-    assert!(!rust_owned.contains(&("GET", "/api/statistics/exchange-rates")));
-    assert!(!rust_owned.contains(&("PUT", "/api/statistics/exchange-rates/custom")));
-    assert!(!rust_owned.contains(&("DELETE", "/api/statistics/exchange-rates/custom/{currency}")));
-    assert!(rust_owned.contains(&("GET", "/api/tokens")));
-    assert!(rust_owned.contains(&("DELETE", "/api/tokens")));
-    assert!(rust_owned.contains(&("DELETE", "/api/tokens/{token_id}")));
-    assert!(rust_owned.contains(&("POST", "/api/tokens/api")));
-    assert!(rust_owned.contains(&("POST", "/api/tokens/mcp")));
-    assert!(rust_owned.contains(&("POST", "/api/auth/login")));
-    assert!(rust_owned.contains(&("POST", "/api/auth/register")));
-    assert!(rust_owned.contains(&("POST", "/api/auth/logout")));
-    assert!(rust_owned.contains(&("POST", "/api/auth/email/verify")));
-    assert!(rust_owned.contains(&("POST", "/api/auth/email/resend-verification")));
-    assert!(rust_owned.contains(&("POST", "/api/auth/password/forgot")));
-    assert!(rust_owned.contains(&("POST", "/api/auth/password/reset")));
-    assert!(rust_owned.contains(&("POST", "/api/auth/oauth2/authorize")));
-    assert!(rust_owned.contains(&("POST", "/api/security/step-up/verify")));
-    assert!(rust_owned.contains(&("GET", "/api/data/export.{file_type}")));
-    assert!(rust_owned.contains(&("POST", "/api/data/clear/transactions")));
-    assert!(rust_owned.contains(&("POST", "/api/data/clear/all")));
-    assert!(!rust_owned.contains(&("GET", "/api/templates/")));
-    assert!(!rust_owned.contains(&("PUT", "/api/templates/display-orders")));
-    assert!(!rust_owned.contains(&("POST", "/api/accounts/sync-balances")));
-    assert!(!rust_owned.contains(&("POST", "/api/accounts/{account_id}/transactions/move")));
-    assert!(!rust_owned.contains(&("POST", "/api/accounts/{account_id}/transactions/clear")));
-    assert!(!rust_owned.contains(&("GET", "/api/categories/rules")));
-    assert!(!rust_owned.contains(&("PUT", "/api/categories/rules")));
-    assert!(!rust_owned.contains(&("GET", "/api/category-rules/")));
-    assert!(!rust_owned.contains(&("POST", "/api/category-rules/")));
-    assert!(!rust_owned.contains(&("PUT", "/api/category-rules/{rule_id}")));
-    assert!(!rust_owned.contains(&("DELETE", "/api/category-rules/{rule_id}")));
-    assert!(!rust_owned.contains(&("POST", "/api/category-rules/{rule_id}/test")));
-    assert!(!rust_owned.contains(&("POST", "/api/category-rules/reorder")));
-    assert!(rust_owned.contains(&("GET", "/api/account-rules/")));
-    assert!(rust_owned.contains(&("POST", "/api/account-rules/")));
-    assert!(rust_owned.contains(&("PUT", "/api/account-rules/{rule_id}")));
-    assert!(rust_owned.contains(&("DELETE", "/api/account-rules/{rule_id}")));
-    assert!(rust_owned.contains(&("POST", "/api/account-rules/{rule_id}/test")));
-    assert!(rust_owned.contains(&("POST", "/api/account-rules/reorder")));
-    assert!(!rust_owned.contains(&("GET", "/api/rules/overview")));
+    for (method, pattern) in [
+        ("GET", "/api/health"),
+        ("GET", "/api/runtime"),
+        ("GET", "/api/bills"),
+        ("POST", "/api/bills/batch"),
+        ("POST", "/api/bills/import/v2/parse"),
+        ("GET", "/api/budgets/"),
+        ("POST", "/api/budgets/import"),
+        ("GET", "/api/statistics/category-statistics"),
+        ("GET", "/api/statistics/exchange-rates"),
+        ("POST", "/api/auth/login"),
+        ("POST", "/api/data/clear/all"),
+        ("GET", "/api/accounts/"),
+        ("POST", "/api/accounts/sync-balances"),
+        ("GET", "/api/categories/rules"),
+        ("GET", "/api/category-rules/"),
+        ("POST", "/api/category-rules/reorder"),
+        ("GET", "/api/account-rules/"),
+        ("GET", "/api/settings/bundle/export"),
+        ("GET", "/api/tags/"),
+        ("GET", "/api/templates/"),
+        ("GET", "/api/matching/candidates"),
+        ("GET", "/api/recurring/suggestions"),
+        ("GET", "/api/calendar/events"),
+        ("GET", "/api/networth/snapshot"),
+        ("POST", "/api/llm/preview-recommend"),
+        ("POST", "/api/ml/receipt-recognition"),
+        ("GET", "/api/learning/rules"),
+    ] {
+        assert!(
+            rust_owned.contains(&(method, pattern)),
+            "current runtime route must be RustOwnedVerified: {method} {pattern}"
+        );
+    }
+
     let retired_routes: Vec<_> = endpoints_by_owner(RuntimeState::Retired)
         .into_iter()
         .map(|endpoint| (endpoint.method, endpoint.pattern))
         .collect();
-    assert!(retired_routes.contains(&("GET", "/api/accounts/")));
-    assert!(retired_routes.contains(&("POST", "/api/accounts/")));
-    assert!(retired_routes.contains(&("GET", "/api/accounts/{account_id}")));
-    assert!(retired_routes.contains(&("PUT", "/api/accounts/{account_id}")));
-    assert!(retired_routes.contains(&("DELETE", "/api/accounts/{account_id}")));
-    assert!(retired_routes.contains(&("PUT", "/api/accounts/display-orders")));
-    assert!(retired_routes.contains(&("POST", "/api/accounts/sync-balances")));
-    assert!(retired_routes.contains(&("POST", "/api/accounts/{account_id}/transactions/clear")));
-    assert!(retired_routes.contains(&("POST", "/api/accounts/{account_id}/transactions/move")));
-    assert!(retired_routes.contains(&("GET", "/api/categories/rules")));
-    assert!(retired_routes.contains(&("PUT", "/api/categories/rules")));
-    assert!(retired_routes.contains(&("GET", "/api/category-rules/")));
-    assert!(retired_routes.contains(&("POST", "/api/category-rules/")));
-    assert!(retired_routes.contains(&("PUT", "/api/category-rules/{rule_id}")));
-    assert!(retired_routes.contains(&("DELETE", "/api/category-rules/{rule_id}")));
-    assert!(retired_routes.contains(&("POST", "/api/category-rules/{rule_id}/test")));
-    assert!(retired_routes.contains(&("POST", "/api/category-rules/defaults")));
-    assert!(retired_routes.contains(&("POST", "/api/category-rules/reorder")));
-    assert!(retired_routes.contains(&("GET", "/api/rules/overview")));
-    assert!(retired_routes.contains(&("GET", "/api/settings/bundle/export")));
-    assert!(retired_routes.contains(&("POST", "/api/settings/bundle/import")));
-    assert!(retired_routes.contains(&("POST", "/api/settings/bundle/import/preview")));
-    assert!(retired_routes.contains(&("GET", "/api/settings/bundle/sections/{section_key}/export")));
-    assert!(
-        retired_routes.contains(&("POST", "/api/settings/bundle/sections/{section_key}/export"))
+    assert_eq!(
+        retired_routes,
+        vec![
+            ("GET", "/api/matching/investment-settings"),
+            ("PUT", "/api/matching/investment-settings"),
+        ]
     );
-    assert!(
-        retired_routes.contains(&("POST", "/api/settings/bundle/sections/{section_key}/import"))
-    );
-    assert!(retired_routes.contains(&(
-        "POST",
-        "/api/settings/bundle/sections/{section_key}/import/preview"
-    )));
-    assert!(retired_routes.contains(&("GET", "/api/tags/")));
-    assert!(retired_routes.contains(&("POST", "/api/tags/")));
-    assert!(retired_routes.contains(&("GET", "/api/tags/{tag_id}")));
-    assert!(retired_routes.contains(&("PUT", "/api/tags/{tag_id}")));
-    assert!(retired_routes.contains(&("DELETE", "/api/tags/{tag_id}")));
-    assert!(retired_routes.contains(&("POST", "/api/tags/batch")));
-    assert!(retired_routes.contains(&("PUT", "/api/tags/display-orders")));
-    assert!(retired_routes.contains(&("GET", "/api/templates/")));
-    assert!(retired_routes.contains(&("POST", "/api/templates/")));
-    assert!(retired_routes.contains(&("GET", "/api/templates/{template_id}")));
-    assert!(retired_routes.contains(&("PUT", "/api/templates/{template_id}")));
-    assert!(retired_routes.contains(&("DELETE", "/api/templates/{template_id}")));
-    assert!(retired_routes.contains(&("PUT", "/api/templates/display-orders")));
-    for (method, pattern) in [
-        ("POST", "/api/bills/import/v2/parse"),
-        ("POST", "/api/bills/import/v2/parse_generic"),
-        ("POST", "/api/bills/import/v2/dedup"),
-        ("POST", "/api/bills/import/v2/confirm"),
-        ("GET", "/api/bills/import/v2/session/{session_id}"),
-        ("DELETE", "/api/bills/import/v2/session/{session_id}"),
-        ("GET", "/api/bills/import/v2/preview/{session_id}"),
-        ("GET", "/api/bills/import/v2/preview/{session_id}/index"),
-        ("PUT", "/api/bills/import/v2/preview/{session_id}/selection"),
-        ("PUT", "/api/bills/import/v2/preview/{session_id}/update"),
-        ("POST", "/api/bills/import/v2/reclassify/{session_id}"),
-        (
-            "GET",
-            "/api/bills/import/v2/preview-item/{preview_id}/recurring-candidates",
-        ),
-        (
-            "PUT",
-            "/api/bills/import/v2/preview-item/{preview_id}/recurring-match",
-        ),
-        (
-            "DELETE",
-            "/api/bills/import/v2/preview-item/{preview_id}/recurring-match",
-        ),
-        (
-            "POST",
-            "/api/bills/import/v2/preview-item/{preview_id}/transfer-decision",
-        ),
-        (
-            "POST",
-            "/api/bills/import/v2/learning/{session_id}/suggestions",
-        ),
-        (
-            "GET",
-            "/api/bills/import/v2/learning/{session_id}/suggestions",
-        ),
-        ("POST", "/api/bills/import/v2/learning/{session_id}/promote"),
-        ("POST", "/api/bills/import/preview"),
-        ("POST", "/api/bills/import/confirm"),
-        ("POST", "/api/bills/import/batch"),
-        ("POST", "/api/bills/parse_import"),
-        ("POST", "/api/bills/import/upload"),
-        ("GET", "/api/bills/import/parsers"),
-        ("POST", "/api/bills/import/reclassify"),
-        ("GET", "/api/bills/import/configs"),
-        ("POST", "/api/bills/import/configs"),
-        ("POST", "/api/bills/import/configs/match"),
-        ("POST", "/api/bills/import/configs/suggest"),
-        ("DELETE", "/api/bills/import/configs/{config_id}"),
-        ("GET", "/api/bills/import/learning-rules"),
-        ("PUT", "/api/bills/import/learning-rules/{rule_id}"),
-        ("DELETE", "/api/bills/import/learning-rules/{rule_id}"),
-    ] {
-        assert!(retired_routes.contains(&(method, pattern)));
-    }
-    for (method, pattern) in [
-        ("GET", "/api/bills"),
-        ("GET", "/api/bills/"),
-        ("POST", "/api/bills"),
-        ("POST", "/api/bills/"),
-        ("GET", "/api/bills/by-month"),
-        ("GET", "/api/bills/get"),
-        ("GET", "/api/bills/{bill_id}"),
-        ("PUT", "/api/bills/{bill_id}"),
-        ("DELETE", "/api/bills/{bill_id}"),
-        ("POST", "/api/bills/batch"),
-        ("GET", "/api/bills/export"),
-        ("POST", "/api/bills/pictures"),
-        ("POST", "/api/bills/pictures/unused"),
-        ("GET", "/api/bills/{bill_id}/recurring-candidates"),
-        ("PUT", "/api/bills/{bill_id}/recurring-match"),
-        ("DELETE", "/api/bills/{bill_id}/recurring-match"),
-    ] {
-        assert!(retired_routes.contains(&(method, pattern)));
-    }
-    for (method, pattern) in [
-        ("GET", "/api/budgets"),
-        ("GET", "/api/budgets/"),
-        ("POST", "/api/budgets"),
-        ("POST", "/api/budgets/"),
-        ("GET", "/api/budgets/{budget_id}"),
-        ("PUT", "/api/budgets/{budget_id}"),
-        ("DELETE", "/api/budgets/{budget_id}"),
-        ("GET", "/api/budgets/export"),
-        ("GET", "/api/budgets/execution"),
-        ("GET", "/api/budgets/forecast"),
-        ("GET", "/api/budgets/history"),
-        ("POST", "/api/budgets/history/snapshot"),
-        ("POST", "/api/budgets/import"),
-    ] {
-        assert!(retired_routes.contains(&(method, pattern)));
-    }
-    for (method, pattern) in [
-        ("GET", "/api/statistics/category-statistics"),
-        ("GET", "/api/statistics/category-statistics/trends"),
-        ("GET", "/api/statistics/asset-trends"),
-        ("GET", "/api/statistics/category-pie"),
-        ("GET", "/api/statistics/top-merchants"),
-        ("GET", "/api/statistics/amounts"),
-        ("GET", "/api/statistics/overview"),
-        ("GET", "/api/statistics/trends"),
-        ("GET", "/api/statistics/comparison"),
-        ("GET", "/api/statistics/category"),
-        ("GET", "/api/statistics/trend"),
-        ("GET", "/api/insights/anomalies"),
-        ("GET", "/api/statistics/exchange-rates"),
-        ("PUT", "/api/statistics/exchange-rates/custom"),
-        ("DELETE", "/api/statistics/exchange-rates/custom/{currency}"),
-    ] {
-        assert!(retired_routes.contains(&(method, pattern)));
-    }
-    assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
-    assert!(rust_owned.contains(&("POST", "/api/ml/receipt-recognition")));
-    assert!(rust_owned.contains(&("GET", "/api/ml/receipt-recognition/config")));
-    assert!(rust_owned.contains(&("GET", "/api/learning/rules")));
-    assert!(rust_owned.contains(&("GET", "/api/learning/suggestions")));
-    assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend")));
-    assert!(rust_owned.contains(&("POST", "/api/llm/analyze-transactions")));
-    assert!(rust_owned.contains(&("POST", "/api/llm/rule-synthesis")));
 
     let matrix = rust_http_shell_ownership_matrix();
     assert!(matrix
@@ -297,9 +150,8 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
             && endpoint.envelope == ResponseEnvelopeFamily::CurrentSuccessResult
     ));
 }
-
 #[test]
-fn bills_import_routes_are_retired_and_provider_routes_are_rust_owned() {
+fn bills_import_and_provider_routes_are_rust_owned() {
     let blocked_routes = import_deletion_blocked_endpoints();
     assert!(blocked_routes.is_empty());
 
@@ -314,7 +166,7 @@ fn bills_import_routes_are_retired_and_provider_routes_are_rust_owned() {
     ] {
         let endpoint = find_endpoint_ownership(method, pattern)
             .unwrap_or_else(|| panic!("missing endpoint ownership for {method} {pattern}"));
-        assert_eq!(endpoint.state, RuntimeState::Retired);
+        assert_eq!(endpoint.state, RuntimeState::RustOwnedVerified);
         assert!(!endpoint.has_external_runtime_owner());
         assert!(!endpoint.is_import_deletion_blocked());
     }
@@ -351,13 +203,13 @@ fn bills_import_routes_are_retired_and_provider_routes_are_rust_owned() {
         ("GET", "/api/bills/{bill_id}/recurring-candidates"),
         ("PUT", "/api/bills/{bill_id}/recurring-match"),
         ("DELETE", "/api/bills/{bill_id}/recurring-match"),
-        ("POST", "/api/bills/category/quick-add-keyword"),
+        ("POST", "/api/bills/category/quick-add-rule"),
         ("POST", "/api/bills/category/refresh"),
         ("GET", "/api/bills/reconciliation_statements"),
     ] {
         let endpoint = find_endpoint_ownership(method, pattern)
-            .unwrap_or_else(|| panic!("missing retired bills endpoint {method} {pattern}"));
-        assert_eq!(endpoint.state, RuntimeState::Retired);
+            .unwrap_or_else(|| panic!("missing Rust-owned bills endpoint {method} {pattern}"));
+        assert_eq!(endpoint.state, RuntimeState::RustOwnedVerified);
         assert!(!endpoint.has_external_runtime_owner());
         assert!(!endpoint.is_import_deletion_blocked());
         assert!(endpoint.notes.contains(".py route shell"));
@@ -423,7 +275,7 @@ fn bills_import_routes_are_retired_and_provider_routes_are_rust_owned() {
     ] {
         let endpoint = find_endpoint_ownership(method, pattern)
             .unwrap_or_else(|| panic!("missing Rust-owned exchange endpoint {method} {pattern}"));
-        assert_eq!(endpoint.state, RuntimeState::Retired);
+        assert_eq!(endpoint.state, RuntimeState::RustOwnedVerified);
         assert!(!endpoint.has_external_runtime_owner());
         assert!(!endpoint.is_import_deletion_blocked());
         assert!(endpoint.notes.contains("route shell is deleted"));
@@ -481,7 +333,7 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_remainder() {
             .iter()
             .find(|entry| entry.endpoint == endpoint)
             .unwrap_or_else(|| panic!("taxonomy account route is present: {endpoint}"));
-        assert_eq!(entry.state, RuntimeState::Retired);
+        assert_eq!(entry.state, RuntimeState::RustOwnedVerified);
         assert_eq!(entry.handler, RouteHandlerId::TaxonomyRuntime);
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::CurrentSuccessResult);
         assert!(entry.deletion_blockers.is_empty());
@@ -501,7 +353,7 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_remainder() {
             .iter()
             .find(|entry| entry.endpoint == endpoint)
             .unwrap_or_else(|| panic!("taxonomy tag route is present: {endpoint}"));
-        assert_eq!(entry.state, RuntimeState::Retired);
+        assert_eq!(entry.state, RuntimeState::RustOwnedVerified);
         assert_eq!(entry.handler, RouteHandlerId::TaxonomyRuntime);
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::CurrentSuccessResult);
         assert!(entry.deletion_blockers.is_empty());
@@ -533,7 +385,7 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_remainder() {
             .iter()
             .find(|entry| entry.endpoint == endpoint)
             .unwrap_or_else(|| panic!("taxonomy category route is present: {endpoint}"));
-        assert_eq!(entry.state, RuntimeState::Retired);
+        assert_eq!(entry.state, RuntimeState::RustOwnedVerified);
         assert_eq!(entry.handler, RouteHandlerId::TaxonomyRuntime);
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::CurrentSuccessResult);
         assert!(entry.deletion_blockers.is_empty());
@@ -552,7 +404,7 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_remainder() {
             .iter()
             .find(|entry| entry.endpoint == endpoint)
             .unwrap_or_else(|| panic!("taxonomy template route is present: {endpoint}"));
-        assert_eq!(entry.state, RuntimeState::Retired);
+        assert_eq!(entry.state, RuntimeState::RustOwnedVerified);
         assert_eq!(entry.handler, RouteHandlerId::TaxonomyRuntime);
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::CurrentSuccessResult);
         assert!(entry.deletion_blockers.is_empty());
@@ -572,7 +424,7 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_remainder() {
             .iter()
             .find(|entry| entry.endpoint == endpoint)
             .unwrap_or_else(|| panic!("taxonomy settings route is present: {endpoint}"));
-        assert_eq!(entry.state, RuntimeState::Retired);
+        assert_eq!(entry.state, RuntimeState::RustOwnedVerified);
         assert_eq!(entry.handler, RouteHandlerId::TaxonomyRuntime);
         assert!(matches!(
             entry.envelope,
@@ -588,7 +440,7 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_remainder() {
         .iter()
         .find(|entry| entry.endpoint == "GET /api/rules/overview")
         .expect("taxonomy rules overview route is present");
-    assert_eq!(rules_overview.state, RuntimeState::Retired);
+    assert_eq!(rules_overview.state, RuntimeState::RustOwnedVerified);
     assert_eq!(rules_overview.handler, RouteHandlerId::TaxonomyRuntime);
     assert_eq!(
         rules_overview.envelope,
@@ -610,7 +462,7 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_remainder() {
             .iter()
             .find(|entry| entry.endpoint == endpoint)
             .unwrap_or_else(|| panic!("taxonomy category-rules route is present: {endpoint}"));
-        assert_eq!(entry.state, RuntimeState::Retired);
+        assert_eq!(entry.state, RuntimeState::RustOwnedVerified);
         assert_eq!(entry.handler, RouteHandlerId::TaxonomyRuntime);
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::CurrentSuccessData);
         assert!(entry.deletion_blockers.is_empty());
@@ -661,187 +513,8 @@ fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
     assert_eq!(
         retired,
         vec![
-            ("GET", "/api/bills"),
-            ("GET", "/api/bills/"),
-            ("POST", "/api/bills"),
-            ("POST", "/api/bills/"),
-            ("GET", "/api/bills/by-month"),
-            ("GET", "/api/bills/get"),
-            ("GET", "/api/bills/{bill_id}"),
-            ("PUT", "/api/bills/{bill_id}"),
-            ("DELETE", "/api/bills/{bill_id}"),
-            ("POST", "/api/bills/modify"),
-            ("POST", "/api/bills/delete"),
-            ("POST", "/api/bills/batch"),
-            ("PUT", "/api/bills/batch/update"),
-            ("DELETE", "/api/bills/batch/delete"),
-            ("GET", "/api/bills/export"),
-            ("POST", "/api/bills/pictures"),
-            ("POST", "/api/bills/pictures/unused"),
-            ("GET", "/api/bills/reconciliation_statements"),
-            ("GET", "/api/bills/{bill_id}/recurring-candidates"),
-            ("PUT", "/api/bills/{bill_id}/recurring-match"),
-            ("DELETE", "/api/bills/{bill_id}/recurring-match"),
-            ("POST", "/api/bills/category/quick-add-keyword"),
-            ("POST", "/api/bills/category/refresh"),
-            ("GET", "/api/budgets"),
-            ("GET", "/api/budgets/"),
-            ("POST", "/api/budgets"),
-            ("POST", "/api/budgets/"),
-            ("GET", "/api/budgets/{budget_id}"),
-            ("PUT", "/api/budgets/{budget_id}"),
-            ("DELETE", "/api/budgets/{budget_id}"),
-            ("GET", "/api/budgets/export"),
-            ("GET", "/api/budgets/execution"),
-            ("GET", "/api/budgets/forecast"),
-            ("GET", "/api/budgets/history"),
-            ("POST", "/api/budgets/history/snapshot"),
-            ("POST", "/api/budgets/import"),
-            ("GET", "/api/statistics/category-statistics"),
-            ("GET", "/api/statistics/category-statistics/trends"),
-            ("GET", "/api/statistics/asset-trends"),
-            ("GET", "/api/statistics/category-pie"),
-            ("GET", "/api/statistics/top-merchants"),
-            ("GET", "/api/statistics/amounts"),
-            ("GET", "/api/statistics/overview"),
-            ("GET", "/api/statistics/trends"),
-            ("GET", "/api/statistics/comparison"),
-            ("GET", "/api/statistics/category"),
-            ("GET", "/api/statistics/trend"),
-            ("GET", "/api/statistics/exchange-rates"),
-            ("PUT", "/api/statistics/exchange-rates/custom"),
-            ("DELETE", "/api/statistics/exchange-rates/custom/{currency}"),
-            ("POST", "/api/bills/import/v2/parse"),
-            ("POST", "/api/bills/import/v2/parse_generic"),
-            ("POST", "/api/bills/import/v2/dedup"),
-            ("POST", "/api/bills/import/v2/confirm"),
-            ("GET", "/api/bills/import/v2/session/{session_id}"),
-            ("DELETE", "/api/bills/import/v2/session/{session_id}"),
-            ("GET", "/api/bills/import/v2/preview/{session_id}"),
-            ("GET", "/api/bills/import/v2/preview/{session_id}/index"),
-            ("PUT", "/api/bills/import/v2/preview/{session_id}/selection"),
-            ("PUT", "/api/bills/import/v2/preview/{session_id}/update"),
-            ("POST", "/api/bills/import/v2/reclassify/{session_id}"),
-            (
-                "GET",
-                "/api/bills/import/v2/preview-item/{preview_id}/recurring-candidates",
-            ),
-            (
-                "PUT",
-                "/api/bills/import/v2/preview-item/{preview_id}/recurring-match",
-            ),
-            (
-                "DELETE",
-                "/api/bills/import/v2/preview-item/{preview_id}/recurring-match",
-            ),
-            (
-                "POST",
-                "/api/bills/import/v2/preview-item/{preview_id}/transfer-decision",
-            ),
-            (
-                "POST",
-                "/api/bills/import/v2/learning/{session_id}/suggestions",
-            ),
-            (
-                "GET",
-                "/api/bills/import/v2/learning/{session_id}/suggestions",
-            ),
-            ("POST", "/api/bills/import/v2/learning/{session_id}/promote",),
-            ("POST", "/api/bills/import/preview"),
-            ("POST", "/api/bills/import/confirm"),
-            ("POST", "/api/bills/import/batch"),
-            ("POST", "/api/bills/parse_import"),
-            ("POST", "/api/bills/import/upload"),
-            ("GET", "/api/bills/import/parsers"),
-            ("POST", "/api/bills/import/reclassify"),
-            ("GET", "/api/bills/import/configs"),
-            ("POST", "/api/bills/import/configs"),
-            ("POST", "/api/bills/import/configs/match"),
-            ("POST", "/api/bills/import/configs/suggest"),
-            ("DELETE", "/api/bills/import/configs/{config_id}"),
-            ("GET", "/api/bills/import/learning-rules"),
-            ("PUT", "/api/bills/import/learning-rules/{rule_id}"),
-            ("DELETE", "/api/bills/import/learning-rules/{rule_id}"),
-            ("GET", "/api/accounts/"),
-            ("POST", "/api/accounts/"),
-            ("DELETE", "/api/accounts/{account_id}"),
-            ("GET", "/api/accounts/{account_id}"),
-            ("PUT", "/api/accounts/{account_id}"),
-            ("POST", "/api/accounts/{account_id}/transactions/clear"),
-            ("POST", "/api/accounts/{account_id}/transactions/move"),
-            ("PUT", "/api/accounts/display-orders"),
-            ("POST", "/api/accounts/sync-balances"),
-            ("GET", "/api/calendar/events"),
-            ("GET", "/api/categories"),
-            ("POST", "/api/categories"),
-            ("GET", "/api/categories/"),
-            ("POST", "/api/categories/"),
-            ("DELETE", "/api/categories/{category_id}"),
-            ("GET", "/api/categories/{category_id}"),
-            ("PUT", "/api/categories/{category_id}"),
-            ("GET", "/api/categories/all"),
-            ("PUT", "/api/categories/all"),
-            ("POST", "/api/categories/batch"),
-            ("GET", "/api/categories/export"),
-            ("GET", "/api/categories/flat"),
-            ("POST", "/api/categories/import"),
-            ("POST", "/api/categories/move"),
-            ("GET", "/api/categories/rules"),
-            ("PUT", "/api/categories/rules"),
-            ("GET", "/api/categories/statistics"),
-            ("GET", "/api/categories/tree"),
-            ("POST", "/api/categories/update-all"),
-            ("GET", "/api/category-rules/"),
-            ("POST", "/api/category-rules/"),
-            ("DELETE", "/api/category-rules/{rule_id}"),
-            ("PUT", "/api/category-rules/{rule_id}"),
-            ("POST", "/api/category-rules/{rule_id}/test"),
-            ("POST", "/api/category-rules/defaults"),
-            ("POST", "/api/category-rules/reorder"),
-            ("GET", "/api/rules/overview"),
-            ("GET", "/api/insights/anomalies"),
-            ("GET", "/api/matching/bills/{bill_id}/candidates"),
-            ("GET", "/api/matching/bills/{bill_id}/feedback"),
-            ("GET", "/api/matching/candidates"),
-            ("POST", "/api/matching/candidates/{*candidate_id}/accept"),
-            ("POST", "/api/matching/candidates/{*candidate_id}/clear"),
-            ("POST", "/api/matching/candidates/{*candidate_id}/reject"),
             ("GET", "/api/matching/investment-settings"),
             ("PUT", "/api/matching/investment-settings"),
-            ("POST", "/api/matching/manual-pair"),
-            ("GET", "/api/matching/pairs"),
-            ("DELETE", "/api/matching/pairs/{pair_id}"),
-            ("POST", "/api/matching/reconcile-history"),
-            ("GET", "/api/matching/reconciliation-candidates"),
-            ("GET", "/api/matching/sessions/{session_id}/candidates"),
-            ("GET", "/api/networth/snapshot"),
-            ("GET", "/api/recurring/suggestions"),
-            ("POST", "/api/recurring/suggestions/{suggestion_id}/accept"),
-            ("POST", "/api/recurring/suggestions/{suggestion_id}/reject"),
-            ("POST", "/api/recurring/suggestions/detect"),
-            ("GET", "/api/settings/bundle/export"),
-            ("POST", "/api/settings/bundle/import"),
-            ("POST", "/api/settings/bundle/import/preview"),
-            ("GET", "/api/settings/bundle/sections/{section_key}/export"),
-            ("POST", "/api/settings/bundle/sections/{section_key}/export"),
-            ("POST", "/api/settings/bundle/sections/{section_key}/import"),
-            (
-                "POST",
-                "/api/settings/bundle/sections/{section_key}/import/preview",
-            ),
-            ("GET", "/api/tags/"),
-            ("POST", "/api/tags/"),
-            ("DELETE", "/api/tags/{tag_id}"),
-            ("GET", "/api/tags/{tag_id}"),
-            ("PUT", "/api/tags/{tag_id}"),
-            ("POST", "/api/tags/batch"),
-            ("PUT", "/api/tags/display-orders"),
-            ("GET", "/api/templates/"),
-            ("POST", "/api/templates/"),
-            ("DELETE", "/api/templates/{template_id}"),
-            ("GET", "/api/templates/{template_id}"),
-            ("PUT", "/api/templates/{template_id}"),
-            ("PUT", "/api/templates/display-orders")
         ]
     );
     assert!(endpoints_by_owner(RuntimeState::Planned).is_empty());
@@ -1026,7 +699,7 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         .iter()
         .find(|entry| entry.endpoint == "POST /api/bills/import/v2/parse")
         .expect("expanded manifest keeps import route");
-    assert_eq!(import_runtime.state, RuntimeState::Retired);
+    assert_eq!(import_runtime.state, RuntimeState::RustOwnedVerified);
     assert_eq!(import_runtime.domain_policy_ref, "bills-import");
     assert_eq!(import_runtime.handler, RouteHandlerId::ImportDbRuntime);
     assert!(import_runtime
@@ -1065,7 +738,7 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         settings_export.envelope,
         ResponseEnvelopeFamily::RawPassthrough
     );
-    assert_eq!(settings_export.state, RuntimeState::Retired);
+    assert_eq!(settings_export.state, RuntimeState::RustOwnedVerified);
     assert_eq!(settings_export.handler, RouteHandlerId::TaxonomyRuntime);
     assert!(settings_export.deletion_blockers.is_empty());
 
@@ -1073,7 +746,7 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         .iter()
         .find(|entry| entry.endpoint == "POST /api/settings/bundle/import")
         .expect("settings bundle import route is present");
-    assert_eq!(settings_import.state, RuntimeState::Retired);
+    assert_eq!(settings_import.state, RuntimeState::RustOwnedVerified);
     assert_eq!(
         settings_import.envelope,
         ResponseEnvelopeFamily::CurrentSuccessResult
@@ -1089,7 +762,7 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         bills_export.envelope,
         ResponseEnvelopeFamily::RawPassthrough
     );
-    assert_eq!(bills_export.state, RuntimeState::Retired);
+    assert_eq!(bills_export.state, RuntimeState::RustOwnedVerified);
     assert_eq!(bills_export.handler, RouteHandlerId::BillsCrudRuntime);
     assert!(bills_export.deletion_blockers.is_empty());
 
@@ -1117,7 +790,7 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
             .iter()
             .find(|entry| entry.endpoint == endpoint)
             .unwrap_or_else(|| panic!("removed bills route is present: {endpoint}"));
-        assert_eq!(entry.state, RuntimeState::Retired);
+        assert_eq!(entry.state, RuntimeState::RustOwnedVerified);
         assert_eq!(entry.handler, RouteHandlerId::BillsCrudRuntime);
         assert!(entry.deletion_blockers.is_empty());
         assert_eq!(entry.decision_required, DecisionRequired::None);
@@ -1142,7 +815,7 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
             .iter()
             .find(|entry| entry.endpoint == endpoint)
             .unwrap_or_else(|| panic!("budget route is present: {endpoint}"));
-        assert_eq!(entry.state, RuntimeState::Retired);
+        assert_eq!(entry.state, RuntimeState::RustOwnedVerified);
         assert!(matches!(
             entry.handler,
             RouteHandlerId::BudgetsCrudRuntime
@@ -1158,7 +831,7 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         .iter()
         .find(|entry| entry.endpoint == "DELETE /api/bills/{bill_id}/recurring-match")
         .expect("recurring match delete route is present");
-    assert_eq!(recurring_match.state, RuntimeState::Retired);
+    assert_eq!(recurring_match.state, RuntimeState::RustOwnedVerified);
     assert_eq!(recurring_match.handler, RouteHandlerId::BillsCrudRuntime);
     assert_eq!(recurring_match.decision_required, DecisionRequired::None);
     assert!(recurring_match.deletion_blockers.is_empty());

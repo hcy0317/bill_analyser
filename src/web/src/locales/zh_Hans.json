@@ -2820,7 +2820,7 @@
     "No selected transactions require annotation": "当前没有已选中的待标注交易",
     "No selected transactions require AI annotation": "当前没有已选中的待AI标注交易",
     "No description": "无描述",
-    "Edit category keywords": "编辑分类关键词",
+    "Edit category rule": "编辑分类规则",
     "Batch Set Account": "批量设置账户",
     "Set account for selected transactions": "为选中的交易设置账户",
     "Manage Accounts": "管理账户",

@@ -170,7 +170,7 @@ npm run dev
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90
+cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35
 ```
 
 ### 前端检查

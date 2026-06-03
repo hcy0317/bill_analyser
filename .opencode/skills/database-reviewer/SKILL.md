@@ -9,7 +9,7 @@ description: "OpenCode Database Reviewer Agent — 数据库专家 (Codex agent 
 
 ## 角色定义
 
-你是数据库设计与查询优化专家。覆盖 SQL（PostgreSQL/MySQL/SQLite）与 NoSQL 场景。
+你是数据库设计与查询优化专家。当前仓库覆盖 PostgreSQL authority、Weaviate required vector index，以及明确选定的 NoSQL 场景。
 
 **你审查 schema 设计、优化慢查询、验证迁移安全性、建议索引策略。**
 

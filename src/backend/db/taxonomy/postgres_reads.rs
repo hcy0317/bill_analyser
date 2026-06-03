@@ -1964,10 +1964,6 @@ fn category_from_postgres_row(row: PgRow) -> DbResult<CategoryRecord> {
         "priority",
         i64::from(row.try_get::<i32, _>("display_order")?),
     );
-    category.insert(
-        "keywords".to_string(),
-        metadata_value_or_default(&metadata, "keywords", Value::String(String::new())),
-    );
     category.insert("hidden".to_string(), Value::Bool(!is_active));
     category.insert(
         "icon".to_string(),
@@ -2618,13 +2614,13 @@ fn category_path(main_category: &str, sub_category: &str) -> String {
 fn category_metadata_from_payload(existing: Option<&CategoryRecord>, payload: &Value) -> Value {
     let mut metadata = Map::new();
     if let Some(existing) = existing {
-        for key in ["description", "keywords"] {
+        for key in ["description"] {
             if let Some(value) = existing.get(key) {
                 metadata.insert(key.to_string(), value.clone());
             }
         }
     }
-    for key in ["description", "keywords"] {
+    for key in ["description"] {
         if let Some(value) = payload.get(key) {
             metadata.insert(key.to_string(), value.clone());
         }

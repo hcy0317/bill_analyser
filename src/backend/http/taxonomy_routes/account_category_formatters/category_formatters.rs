@@ -25,7 +25,6 @@ fn format_category_tree_response(categories: Vec<CategoryRecord>) -> Value {
             node.insert("comment".to_string(), Value::String(String::new()));
             node.insert("hidden".to_string(), Value::Bool(false));
             node.insert("visible".to_string(), Value::Bool(true));
-            node.insert("keywords".to_string(), Value::String(String::new()));
             node.insert("subCategories".to_string(), Value::Array(Vec::new()));
             let bucket = grouped.entry(category_type).or_default();
             let index = bucket.len();

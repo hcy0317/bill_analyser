@@ -124,7 +124,7 @@ function frontendPathToRegex(frontendPath: string): RegExp {
 }
 
 const runtimeRoutes = RUST_ROUTE_OWNERSHIP
-    .filter(route => route.state === 'rust_owned_verified' || route.state === 'retired')
+    .filter(route => route.state === 'rust_owned_verified')
     .map(route => ({
         ...route,
         patternMatcher: routePatternToRegex(route.pattern),

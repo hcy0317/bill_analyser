@@ -1,5 +1,3 @@
-#![cfg(not(coverage))]
-
 use std::{
     collections::BTreeMap,
     env,
@@ -31,16 +29,20 @@ use tokio::{
     time::sleep,
 };
 
-#[tokio::test]
-async fn weaviate_health_probe_is_disabled_by_default() {
-    let status = probe_weaviate_health(&HttpShellConfig::default()).await;
+#[test]
+fn weaviate_is_required_by_default_config() {
+    let config = HttpShellConfig::default();
 
-    assert_eq!(status.status, "disabled");
-    assert_eq!(status.health_detail_value(), "disabled");
+    assert!(config.weaviate.enabled);
+    assert_eq!(
+        config.weaviate.endpoint.as_deref(),
+        Some("http://127.0.0.1:8088")
+    );
+    assert_eq!(config.weaviate.status_without_probe(), "configured");
 }
 
 #[test]
-fn weaviate_cli_health_is_safe_when_disabled() {
+fn weaviate_cli_health_rejects_disabled_env() {
     let bin = env!("CARGO_BIN_EXE_bill_weaviate_derived_index");
     let output = Command::new(bin)
         .args(["--mode", "health"])
@@ -50,13 +52,13 @@ fn weaviate_cli_health_is_safe_when_disabled() {
         .output()
         .expect("run weaviate cli health");
 
-    assert!(output.status.success());
-    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
-    assert!(stdout.contains("\"status\": \"disabled\""));
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Weaviate is required"));
 }
 
 #[test]
-fn weaviate_cli_covers_help_disabled_bootstrap_and_config_errors() {
+fn weaviate_cli_covers_help_required_bootstrap_and_config_errors() {
     let bin = env!("CARGO_BIN_EXE_bill_weaviate_derived_index");
 
     let help = Command::new(bin)
@@ -68,16 +70,14 @@ fn weaviate_cli_covers_help_disabled_bootstrap_and_config_errors() {
         .expect("utf8 help")
         .contains("process-outbox"));
 
-    let bootstrap = Command::new(bin)
+    let bootstrap_disabled = Command::new(bin)
         .arg("--mode=bootstrap")
         .env("BILL_ANALYSER_WEAVIATE_ENABLED", "false")
         .env_remove("BILL_ANALYSER_WEAVIATE_ENDPOINT")
         .output()
-        .expect("run weaviate cli bootstrap");
-    assert!(bootstrap.status.success());
-    assert!(String::from_utf8(bootstrap.stdout)
-        .expect("utf8 bootstrap")
-        .contains("\"enabled\": false"));
+        .expect("run weaviate cli bootstrap disabled");
+    assert!(!bootstrap_disabled.status.success());
+    assert!(String::from_utf8_lossy(&bootstrap_disabled.stderr).contains("Weaviate is required"));
 
     let invalid_postgres = Command::new(bin)
         .args(["--mode", "process-outbox"])
@@ -248,7 +248,7 @@ async fn readiness_probe_reports_healthy_for_ready_endpoint() -> Result<(), Box<
 #[tokio::test]
 async fn weaviate_client_covers_disabled_empty_and_existing_schema_edges(
 ) -> Result<(), Box<dyn Error>> {
-    let disabled = WeaviateRuntimeConfig::disabled();
+    let disabled = WeaviateRuntimeConfig::disabled_for_test();
     assert!(matches!(
         WeaviateHttpClient::new(&disabled),
         Err(WeaviateRuntimeError::Disabled)
@@ -449,8 +449,9 @@ async fn weaviate_http_client_processes_outbox_and_rebuilds_from_postgres_when_a
             ..config.clone()
         },
     )
-    .await?;
-    assert!(!disabled_report.enabled);
+    .await
+    .unwrap_err();
+    assert!(matches!(disabled_report, WeaviateRuntimeError::Disabled));
 
     let sources = load_import_learning_feature_vector_sources(&pool, Some(user_id), 10).await?;
     let object = build_object_from_feature_source(&config, &sources[0])?;
@@ -483,8 +484,9 @@ async fn weaviate_http_client_processes_outbox_and_rebuilds_from_postgres_when_a
         },
         Some(user_id),
     )
-    .await?;
-    assert!(!disabled_rebuild.enabled);
+    .await
+    .unwrap_err();
+    assert!(matches!(disabled_rebuild, WeaviateRuntimeError::Disabled));
 
     let client = WeaviateHttpClient::new(&config)?;
     let search = client
@@ -522,10 +524,8 @@ async fn weaviate_http_client_processes_outbox_and_rebuilds_from_postgres_when_a
         .env("BILL_ANALYSER_WEAVIATE_ENABLED", "false")
         .output()
         .expect("run process-outbox cli disabled");
-    assert!(cli_process.status.success());
-    assert!(String::from_utf8(cli_process.stdout)
-        .expect("utf8 process-outbox")
-        .contains("\"enabled\": false"));
+    assert!(!cli_process.status.success());
+    assert!(String::from_utf8_lossy(&cli_process.stderr).contains("Weaviate is required"));
 
     let cli_rebuild = Command::new(bin)
         .args(["--mode", "rebuild", "--user-id", &user_id.to_string()])
@@ -533,10 +533,8 @@ async fn weaviate_http_client_processes_outbox_and_rebuilds_from_postgres_when_a
         .env("BILL_ANALYSER_WEAVIATE_ENABLED", "false")
         .output()
         .expect("run rebuild cli disabled");
-    assert!(cli_rebuild.status.success());
-    assert!(String::from_utf8(cli_rebuild.stdout)
-        .expect("utf8 rebuild")
-        .contains("\"enabled\": false"));
+    assert!(!cli_rebuild.status.success());
+    assert!(String::from_utf8_lossy(&cli_rebuild.stderr).contains("Weaviate is required"));
 
     let (cli_endpoint, cli_requests) = spawn_weaviate_mock(8).await?;
     let cli_bootstrap = Command::new(bin)

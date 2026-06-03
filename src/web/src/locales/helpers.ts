@@ -1406,7 +1406,6 @@ export function useI18n() {
                     type: categoryType,
                     icon: category.categoryIconId,
                     color: category.color,
-                    keywords: category.keywords || '',
                     subCategories: []
                 };
 
@@ -1415,8 +1414,7 @@ export function useI18n() {
                         name: t('category.' + subCategory.name, {}, { locale: locale }),
                         type: categoryType,
                         icon: subCategory.categoryIconId,
-                        color: subCategory.color,
-                        keywords: subCategory.keywords || ''
+                        color: subCategory.color
                     };
 
                     submitCategory.subCategories.push(submitSubCategory);

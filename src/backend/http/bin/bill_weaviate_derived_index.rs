@@ -1,20 +1,12 @@
-#[cfg(coverage)]
-fn main() {}
-
-#[cfg(not(coverage))]
 use std::{env, error::Error, process};
 
-#[cfg(not(coverage))]
 use bill_analyser_db::{DatabaseRuntimeConfig, DatabaseRuntimeProvider, DbError, PostgresPool};
-#[cfg(not(coverage))]
 use bill_analyser_http::{
     probe_weaviate_health, process_weaviate_outbox_once, rebuild_weaviate_from_postgres,
     HttpShellConfig, WeaviateHttpClient,
 };
-#[cfg(not(coverage))]
 use serde_json::json;
 
-#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() {
     if let Err(error) = run().await {
@@ -23,7 +15,6 @@ async fn main() {
     }
 }
 
-#[cfg(not(coverage))]
 async fn run() -> Result<(), Box<dyn Error>> {
     let args = env::args().skip(1).collect::<Vec<_>>();
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
@@ -41,17 +32,9 @@ async fn run() -> Result<(), Box<dyn Error>> {
             println!("{}", serde_json::to_string_pretty(&status)?);
         }
         "bootstrap" => {
-            let report = if config.weaviate.enabled {
-                WeaviateHttpClient::new(&config.weaviate)?
-                    .bootstrap_schema()
-                    .await?
-            } else {
-                bill_analyser_http::WeaviateBootstrapReport {
-                    enabled: false,
-                    status: "disabled".to_string(),
-                    collections: Vec::new(),
-                }
-            };
+            let report = WeaviateHttpClient::new(&config.weaviate)?
+                .bootstrap_schema()
+                .await?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         "process-outbox" => {
@@ -75,7 +58,6 @@ async fn run() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-#[cfg(not(coverage))]
 fn postgres_pool(config: &HttpShellConfig) -> Result<PostgresPool, DbError> {
     let postgres_url = config.postgres_url.as_deref().ok_or_else(|| {
         DbError::InvalidOperation(
@@ -89,7 +71,6 @@ fn postgres_pool(config: &HttpShellConfig) -> Result<PostgresPool, DbError> {
     Ok(provider.postgres_runtime()?.pool().clone())
 }
 
-#[cfg(not(coverage))]
 fn option_value(args: &[String], name: &str) -> Option<String> {
     args.windows(2)
         .find_map(|pair| (pair[0] == name).then(|| pair[1].clone()))
@@ -99,7 +80,6 @@ fn option_value(args: &[String], name: &str) -> Option<String> {
         })
 }
 
-#[cfg(not(coverage))]
 fn print_help() {
     println!(
         "{}",

@@ -40,7 +40,7 @@ cargo test --workspace
 If the diff touches business runtime code under `src/backend/**`, audit acceptance still requires:
 
 ```powershell
-cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90
+cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35
 ```
 
 ### Phase 2: Frontend Verification

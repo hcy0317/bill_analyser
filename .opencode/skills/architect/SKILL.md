@@ -38,7 +38,7 @@ task(subagent_type="oracle", load_skills=["research-analysis", "api-design"], pr
 ### Phase 2: 架构模式评估
 - 单体 vs 微服务 vs 模块化单体
 - API 设计模式（REST / GraphQL / gRPC）
-- 数据库选型（PostgreSQL / MongoDB / Redis / ClickHouse / SQLite）
+- 数据库边界（PostgreSQL authority / Weaviate required vector index / Redis cache only when explicitly scoped）
 
 ### Phase 3: 架构决策记录（ADR）
 每个关键决策使用 ADR 格式：状态、上下文、决策、理由、权衡、备选方案、影响。

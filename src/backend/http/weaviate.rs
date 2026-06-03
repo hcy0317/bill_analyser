@@ -304,7 +304,7 @@ impl WeaviateHttpClient {
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn probe_weaviate_health(config: &HttpShellConfig) -> WeaviateHealthStatus {
     if !config.weaviate.enabled {
-        return WeaviateHealthStatus::disabled();
+        return WeaviateHealthStatus::degraded("disabled");
     }
     let client = match WeaviateHttpClient::new(&config.weaviate) {
         Ok(client) => client,
@@ -326,12 +326,7 @@ pub async fn process_weaviate_outbox_once(
     config: &WeaviateRuntimeConfig,
 ) -> Result<WeaviateOutboxProcessReport, WeaviateRuntimeError> {
     if !config.enabled {
-        return Ok(WeaviateOutboxProcessReport {
-            enabled: false,
-            claimed: 0,
-            succeeded: 0,
-            failed: 0,
-        });
+        return Err(WeaviateRuntimeError::Disabled);
     }
     let client = WeaviateHttpClient::new(config)?;
     let events = claim_pending_vector_outbox_events(pool, config.batch_size)
@@ -387,13 +382,7 @@ pub async fn rebuild_weaviate_from_postgres(
     user_id: Option<i64>,
 ) -> Result<WeaviateRebuildReport, WeaviateRuntimeError> {
     if !config.enabled {
-        return Ok(WeaviateRebuildReport {
-            enabled: false,
-            user_id,
-            source_count: 0,
-            deleted_classes: 0,
-            upserted: 0,
-        });
+        return Err(WeaviateRuntimeError::Disabled);
     }
     let client = WeaviateHttpClient::new(config)?;
     client.bootstrap_schema().await?;

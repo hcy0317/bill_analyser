@@ -115,7 +115,7 @@ impl HttpShellConfig {
                 ..PasswordPolicy::default()
             },
             public_base_url: None,
-            weaviate: WeaviateRuntimeConfig::disabled(),
+            weaviate: WeaviateRuntimeConfig::required_default()?,
         })
     }
 
@@ -495,6 +495,8 @@ pub enum HttpShellConfigError {
     InvalidWeaviateEndpoint,
     #[error("invalid Weaviate collection prefix")]
     InvalidWeaviateCollectionPrefix,
+    #[error("Weaviate is required; BILL_ANALYSER_WEAVIATE_ENABLED cannot be false")]
+    WeaviateDisabled,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

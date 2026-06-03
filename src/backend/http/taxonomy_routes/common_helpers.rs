@@ -9,7 +9,6 @@ fn category_export_record(category: &CategoryRecord) -> Map<String, Value> {
         ("main_category", Value::String(String::new())),
         ("sub_category", Value::String(String::new())),
         ("priority", Value::Number(Number::from(0))),
-        ("keywords", Value::String(String::new())),
         ("description", Value::String(String::new())),
         ("icon", Value::String(String::new())),
         ("color", Value::String(String::new())),
@@ -66,10 +65,6 @@ fn backend_category_to_frontend(category: &CategoryRecord, parent_id: &str) -> M
     );
     result.insert("hidden".to_string(), Value::Bool(hidden));
     result.insert("visible".to_string(), Value::Bool(!hidden));
-    result.insert(
-        "keywords".to_string(),
-        Value::String(string_or_default(category.get("keywords"), "")),
-    );
     result
 }
 

@@ -10,7 +10,7 @@ description: Codex bridge for the canonical Bill Analyser repository workflow sk
 - Bill import workflow changes
 - Budget or statistics logic changes
 - Category, account, tag, or API contract updates
-- Full-stack fixes spanning Flask and Vue/TypeScript
+- Full-stack fixes spanning the Rust HTTP backend and Vue/TypeScript
 
 ## Canonical source
 

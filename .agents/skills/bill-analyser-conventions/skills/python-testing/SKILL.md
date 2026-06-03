@@ -292,15 +292,13 @@ def test_email_validation(input, expected):
 ### Parametrized Fixtures
 
 ```python
-@pytest.fixture(params=["sqlite", "postgresql", "mysql"])
+@pytest.fixture(params=["primary", "read_replica"])
 def db(request):
-    """Test against multiple database backends."""
-    if request.param == "sqlite":
-        return Database(":memory:")
-    elif request.param == "postgresql":
-        return Database("postgresql://localhost/test")
-    elif request.param == "mysql":
-        return Database("mysql://localhost/test")
+    """Test against primary and replica DSNs."""
+    if request.param == "primary":
+        return Database("postgresql://localhost/primary_test")
+    elif request.param == "read_replica":
+        return Database("postgresql://localhost/replica_test")
 
 def test_database_operations(db):
     """Test runs 3 times, once for each database."""
@@ -354,7 +352,7 @@ markers =
     slow: marks tests as slow
     integration: marks tests as integration tests
     unit: marks tests as unit tests
-    django: marks tests as requiring Django
+    framework: marks tests as requiring an optional framework runtime
 ```
 
 ## Mocking and Patching
@@ -660,7 +658,7 @@ class TestUserService:
 
 ## Common Patterns
 
-### Testing API Endpoints (FastAPI/Flask)
+### Testing API Endpoints
 
 ```python
 @pytest.fixture

@@ -34,18 +34,18 @@ use bill_analyser_core::adapters::transaction::{
     ReconciliationBill, ReconciliationOpeningBalanceSnapshot, ReconciliationQueryParams,
     RouteResponseContract, EXPORT_COLUMNS,
 };
-use bill_analyser_core::category_rules::match_rule_expression;
+use bill_analyser_core::category_rules::{escape_rule_expression_term, match_rule_expression};
 use bill_analyser_core::{Money, RuntimeError, UserId, UtcOffsetMinutes};
 use bill_analyser_db::{
     batch_create_postgres_bills, batch_delete_postgres_bills, batch_update_postgres_bills,
-    bind_postgres_bill_to_recurring, create_postgres_bill, delete_postgres_bill,
-    get_first_postgres_account_id, get_postgres_bill_by_id, get_postgres_bill_recurring_candidates,
-    get_postgres_bill_tags, get_postgres_category_by_name, get_postgres_reconciliation_account,
-    list_postgres_category_rules, list_postgres_reconciliation_categories,
-    postgres_category_filters_for_ids, query_postgres_bills, resolve_postgres_category_by_id,
-    unbind_postgres_bill_from_recurring, update_postgres_bill, update_postgres_category,
-    BillCategoryFilter, BillCreateDraft, BillFilters, BillRecord, BillUpdateDraft,
-    CategoryRuleRecord, PostgresPool,
+    bind_postgres_bill_to_recurring, create_postgres_bill, create_postgres_category_rule,
+    delete_postgres_bill, get_first_postgres_account_id, get_postgres_bill_by_id,
+    get_postgres_bill_recurring_candidates, get_postgres_bill_tags, get_postgres_category_by_name,
+    get_postgres_reconciliation_account, list_postgres_category_rules,
+    list_postgres_reconciliation_categories, postgres_category_filters_for_ids,
+    query_postgres_bills, resolve_postgres_category_by_id, unbind_postgres_bill_from_recurring,
+    update_postgres_bill, BillCategoryFilter, BillCreateDraft, BillFilters, BillRecord,
+    BillUpdateDraft, CategoryRuleRecord, PostgresPool,
 };
 use chrono::{DateTime, Local};
 use ring::rand::{SecureRandom, SystemRandom};
@@ -74,7 +74,7 @@ pub const BILL_CRUD_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("DELETE", "/api/bills/batch/delete"),
     ("GET", "/api/bills/export"),
     ("GET", "/api/bills/reconciliation_statements"),
-    ("POST", "/api/bills/category/quick-add-keyword"),
+    ("POST", "/api/bills/category/quick-add-rule"),
     ("POST", "/api/bills/category/refresh"),
     ("GET", "/api/bills/{bill_id}/recurring-candidates"),
     ("PUT", "/api/bills/{bill_id}/recurring-match"),
@@ -100,8 +100,8 @@ pub fn bill_runtime_router() -> Router<HttpAppState> {
             get(reconciliation_statements_handler),
         )
         .route(
-            "/api/bills/category/quick-add-keyword",
-            post(quick_add_category_keyword_handler),
+            "/api/bills/category/quick-add-rule",
+            post(quick_add_category_rule_handler),
         )
         .route(
             "/api/bills/category/refresh",

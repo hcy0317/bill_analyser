@@ -34,7 +34,20 @@ pub struct WeaviateRuntimeConfig {
 }
 
 impl WeaviateRuntimeConfig {
-    pub fn disabled() -> Self {
+    pub fn required_default() -> Result<Self, HttpShellConfigError> {
+        Ok(Self {
+            enabled: true,
+            endpoint: normalize_weaviate_endpoint(Some(DEFAULT_WEAVIATE_ENDPOINT.to_string()))?,
+            api_key: None,
+            collection_prefix: WEAVIATE_DEFAULT_COLLECTION_PREFIX.to_string(),
+            timeout: Duration::from_millis(DEFAULT_WEAVIATE_TIMEOUT_MS),
+            retry_attempts: DEFAULT_WEAVIATE_RETRY_ATTEMPTS,
+            batch_size: DEFAULT_WEAVIATE_BATCH_SIZE,
+            vector_dimensions: WEAVIATE_DEFAULT_VECTOR_DIMENSIONS,
+        })
+    }
+
+    pub fn disabled_for_test() -> Self {
         Self {
             enabled: false,
             endpoint: None,
@@ -55,6 +68,9 @@ impl WeaviateRuntimeConfig {
             lookup("BILL_ANALYSER_WEAVIATE_ENABLED").filter(|value| !value.trim().is_empty()),
             true,
         )?;
+        if !enabled {
+            return Err(HttpShellConfigError::WeaviateDisabled);
+        }
         let endpoint = normalize_weaviate_endpoint(
             lookup("BILL_ANALYSER_WEAVIATE_ENDPOINT")
                 .filter(|value| !value.trim().is_empty())
@@ -124,7 +140,7 @@ impl WeaviateRuntimeConfig {
 
     pub fn status_without_probe(&self) -> &'static str {
         if !self.enabled {
-            "disabled"
+            "degraded:disabled"
         } else if self.endpoint.is_none() {
             "degraded:missing_endpoint"
         } else {

@@ -22,7 +22,7 @@ Execute verification in this exact order:
 
 2. **Rust Runtime Checks**
    - For `src/backend/**` or `tests/backend/**`, run affected `cargo test` first when useful
-   - If business runtime code changed, require `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90` before reporting PASS
+   - If business runtime code changed, require `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` before reporting PASS
 
 3. **Frontend Checks**
    - For `src/web/**`, run `npm run lint` inside `src/web`

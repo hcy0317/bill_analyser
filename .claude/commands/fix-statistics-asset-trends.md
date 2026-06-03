@@ -41,11 +41,11 @@ argument-hint: '描述资产趋势问题，例如"资产趋势接口有数据但
 
 ## 最少检查项
 
-- `src/bill_analyser/api/routes/statistics.py`
+- `src/backend/http/statistics_routes/mod.rs`
 - `src/web/src/lib/services.ts`
 - `src/web/src/stores/statistics.ts`
 - `src/web/src/views/desktop/statistics/TransactionPage.vue`
-- 如有必要，检查 `src/bill_analyser/core/db.py` 或相关汇率/账户模型
+- 如有必要，检查 `src/backend/db/statistics.rs` 或相关汇率/账户模型
 
 ## 完成标准
 

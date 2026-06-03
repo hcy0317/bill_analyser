@@ -70,7 +70,7 @@
   - `cargo fmt --all -- --check`
   - `cargo clippy --workspace --all-targets -- -D warnings`
 - 最终业务验收跑：
-  - `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90`
+  - `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35`
 
 ### `src/web/**`
 

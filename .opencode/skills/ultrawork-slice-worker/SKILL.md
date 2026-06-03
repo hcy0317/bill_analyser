@@ -17,7 +17,7 @@ description: "OpenCode Ultrawork Slice Worker Agent — 单切片执行器 (Code
 task(
   category="deep",
   load_skills=["ultrawork", "plan-driven-slicing", "zh-conventional-commit-from-diff"],
-  prompt="[SLICE WORKER TASK]\nplan_path: .sisyphus/plans/xxx.md\nslice_id: S1\ndomain: auth\nowned_paths: ['src/bill_analyser/api/routes/auth.py']\nwrite_set: ['src/bill_analyser/api/routes/auth.py']\n..."
+  prompt="[SLICE WORKER TASK]\nplan_path: .sisyphus/plans/xxx.md\nslice_id: S1\ndomain: auth\nowned_paths: ['src/backend/http/auth_routes/mod.rs']\nwrite_set: ['src/backend/http/auth_routes/mod.rs']\n..."
 )
 ```
 
