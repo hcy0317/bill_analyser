@@ -1,9 +1,9 @@
-// 中文导读：PostgreSQL bills 读仓储，负责 cutover 后交易列表与详情的兼容投影。
-// 维护重点：金额从 PostgreSQL 分转换成 legacy record 的元字段，handler 不复制 SQL。
-// 不变式：所有查询必须按 user_id 过滤且忽略 is_deleted，不允许回退 SQLite。
+// 中文导读：PostgreSQL bills 读仓储，负责 当前交易列表与详情投影。
+// 维护重点：金额从 PostgreSQL 分转换成 current record 的元字段，handler 不复制 SQL。
+// 不变式：所有查询必须按 user_id 过滤且忽略 is_deleted，不允许回退 non-Postgres。
 
 use bill_analyser_core::adapters::transaction::{
-    validate_batch_route_update_fields, BackendBillUpdateSnapshot, ReconciliationCategoryRecord,
+    validate_batch_route_update_fields, ReconciliationCategoryRecord,
 };
 use bill_analyser_core::{parse_bill_datetime, Money};
 use chrono::{DateTime, Utc};
@@ -557,46 +557,6 @@ pub async fn batch_delete_postgres_bills(
     apply_postgres_balance_deltas(&mut tx, user_id, &balance_deltas).await?;
     tx.commit().await?;
     Ok(deleted_count)
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-pub async fn get_postgres_bill_update_snapshot(
-    pool: &PostgresPool,
-    user_id: i64,
-    bill_id: i64,
-) -> DbResult<Option<BackendBillUpdateSnapshot>> {
-    let row = sqlx::query(
-        r#"
-        SELECT transaction_type, source_account_id, target_account_id, transfer_target_account_id,
-            standard_payload
-        FROM bills
-        WHERE user_id = $1 AND id = $2 AND is_deleted = false
-        "#,
-    )
-    .bind(user_id)
-    .bind(bill_id)
-    .fetch_optional(pool)
-    .await?;
-    row.map(|row| {
-        let standard_payload: Value = row.try_get("standard_payload")?;
-        let destination_amount = destination_amount_yuan(&standard_payload)
-            .map(|value| Money::from_yuan_str(&value.to_string()))
-            .transpose()
-            .map_err(|error| DbError::InvalidOperation(error.to_string()))?;
-        Ok(BackendBillUpdateSnapshot {
-            transaction_type: row.try_get("transaction_type")?,
-            source_account_id: first_positive([
-                row.try_get::<Option<i64>, _>("source_account_id")?,
-                None,
-            ]),
-            destination_account_id: first_positive([
-                row.try_get::<Option<i64>, _>("target_account_id")?,
-                row.try_get::<Option<i64>, _>("transfer_target_account_id")?,
-            ]),
-            destination_amount,
-        })
-    })
-    .transpose()
 }
 
 #[derive(Debug, Clone)]

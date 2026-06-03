@@ -1088,7 +1088,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
                     }
                 }
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve transaction list' });
@@ -1172,7 +1172,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
                     updateTransactionListInvalidState(true);
                 }
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve transaction list' });
@@ -1213,7 +1213,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
                     updateTransactionReconciliationStatementInvalidState(true);
                 }
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve reconciliation statements' });
@@ -1247,7 +1247,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
             }).catch(error => {
                 logger.error('failed to load transaction info', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve transaction' });
@@ -1325,7 +1325,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
             }).catch(error => {
                 logger.error('failed to save transaction', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     if (!isEdit) {
@@ -1406,7 +1406,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
             }).catch(error => {
                 logger.error('failed to save transactions', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to add transaction' });
@@ -1451,7 +1451,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
             }).catch(error => {
                 logger.error('failed to move transactions', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to move transactions' });
@@ -1511,7 +1511,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
             }).catch(error => {
                 logger.error('failed to delete transaction', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to delete this transaction' });
@@ -1573,8 +1573,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
                 const status: number = (error && error.response && typeof error.response.status === 'number') ? error.response.status : 0;
                 const rawErrorCode: string | undefined = responseData && typeof responseData.errorCode === 'string' ? responseData.errorCode : undefined;
                 const errorCode: ReceiptImageErrorCode = mapReceiptImageErrorCode(rawErrorCode, status);
-                const message: string = (responseData && typeof responseData.errorMessage === 'string' && responseData.errorMessage)
-                    || (responseData && typeof responseData.message === 'string' && responseData.message)
+                const message: string = (responseData && typeof responseData.message === 'string' && responseData.message)
                     || 'Unable to recognize image';
 
                 reject(buildRecognizeReceiptImageError(errorCode, message, status, error));
@@ -1600,7 +1599,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
             }).catch(error => {
                 logger.error('Unable to parse import file', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to parse import file' });
@@ -1625,7 +1624,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
             }).catch(error => {
                 logger.error('Unable to upload transaction picture', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to upload transaction picture' });
@@ -1650,7 +1649,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
             }).catch(error => {
                 logger.error('failed to remove transaction picture', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to remove transaction picture' });

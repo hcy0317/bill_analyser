@@ -99,7 +99,7 @@
             <v-chip class="ms-1" variant="flat" color="grey" size="x-small"
                     v-if="item.utcOffset !== currentTimezoneOffsetMinutes">{{ getDisplayTimezone(item) }}</v-chip>
         </template>
-        <template #item.parserSource="{ item }">
+        <template #item.parserId="{ item }">
             <import-preview-signal-cell
                 :view-model="getImportPreviewSignalViewModel(item)"
                 :disabled="!!disabled"
@@ -1293,7 +1293,7 @@ const transactionTypeOptions = computed<{ text: string; value: number }[]>(() =>
  * @param item 被编辑的交易
  */
 function onTransactionTypeChange(item: ImportTransaction): void {
-    logger.info(`[类型变更] 交易类型从旧值变更为 ${item.type}，重置分类选择`);
+    logger.info(`[类型变更] 交易类型变更为 ${item.type}，重置分类选择`);
     // 清空分类ID，因为不同交易类型对应不同的分类列表
     item.categoryId = '';
     if (item.hasRecurringMatch()) {
@@ -1363,20 +1363,20 @@ async function updatePreviewRecurringMatch(
         });
 
         if (!response.ok) {
-            let errorMessage = response.status >= 500
+            let actionErrorText = response.status >= 500
                 ? 'Internal Server Error'
                 : `Recurring match request failed (${response.status})`;
 
             try {
                 const errorPayload = await response.json() as { error?: string };
                 if (typeof errorPayload?.error === 'string' && errorPayload.error.trim()) {
-                    errorMessage = errorPayload.error.trim();
+                    actionErrorText = errorPayload.error.trim();
                 }
             } catch {
                 // ignore non-JSON error bodies and keep the safe fallback message
             }
 
-            throw new Error(errorMessage);
+            throw new Error(actionErrorText);
         }
 
         const result = await response.json();
@@ -1813,7 +1813,7 @@ function syncTransactionFromLLMPreviewPayload(
         item.comment = previewData.preview_description || item.comment;
         item.counterparty = previewData.preview_counterparty || item.counterparty;
         item.paymentMethod = previewData.preview_payment_method || item.paymentMethod;
-        item.parserSource = previewData.preview_parser_id || item.parserSource;
+        item.parserId = previewData.preview_parser_id || item.parserId;
         item.parserTags = Array.isArray(previewData.preview_parser_tags)
             ? previewData.preview_parser_tags
             : item.parserTags;
@@ -2222,7 +2222,7 @@ function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData
     item.learningRecommendationSummary = previewData.learning_recommendation_summary || '';
     item.investmentPlatform = previewData.investment_platform || '';
     item.investmentProduct = previewData.investment_product || '';
-    item.parserSource = previewData.preview_parser_id || '';
+    item.parserId = previewData.preview_parser_id || '';
     item.parserTags = Array.isArray(previewData.preview_parser_tags) ? previewData.preview_parser_tags : [];
     item.dedupType = previewData.dedup_type || '';
     item.dedupSourceIds = Array.isArray(previewData.dedup_source_ids)
@@ -2439,9 +2439,9 @@ async function reviewLearningSuggestion(
         syncTransactionFromPreviewDecision(item, refreshedPreview);
         snackbar.value?.showMessage(tt(getLearningDecisionMessageKey(decision)));
     } catch (error) {
-        const errorMessage = getActionErrorMessage(error, 'Learning decision failed');
-        logger.error(`[学习建议决策] 失败: ${errorMessage}`, error);
-        snackbar.value?.showMessage(errorMessage);
+        const actionErrorText = getActionErrorMessage(error, 'Learning decision failed');
+        logger.error(`[学习建议决策] 失败: ${actionErrorText}`, error);
+        snackbar.value?.showMessage(actionErrorText);
     } finally {
         removeDecisionLoadingId(learningDecisionLoadingIds, previewId);
     }
@@ -2493,9 +2493,9 @@ async function reviewLLMRecommendation(
         await refreshLLMSessionSignalMemory(true);
         snackbar.value?.showMessage(tt(decision === 'accept' ? 'LLM Suggestion Accepted' : 'LLM Suggestion Rejected'));
     } catch (error) {
-        const errorMessage = getActionErrorMessage(error, 'LLM recommendation decision failed');
-        logger.error(`[LLM 建议决策] 失败: ${errorMessage}`, error);
-        snackbar.value?.showMessage(errorMessage);
+        const actionErrorText = getActionErrorMessage(error, 'LLM recommendation decision failed');
+        logger.error(`[LLM 建议决策] 失败: ${actionErrorText}`, error);
+        snackbar.value?.showMessage(actionErrorText);
     } finally {
         removeDecisionLoadingId(llmDecisionLoadingIds, previewId);
     }
@@ -2566,9 +2566,9 @@ async function syncLearningDecisionDraftToPreview(item: ImportTransaction, candi
         syncLearningCandidateFromSessionCandidate(item, refreshedCandidate);
         return true;
     } catch (error) {
-        const errorMessage = getActionErrorMessage(error, 'Failed to sync preview text edits before reviewing learning suggestions');
-        logger.error(`[学习建议预览同步] 失败: ${errorMessage}`, error);
-        snackbar.value?.showMessage(errorMessage);
+        const actionErrorText = getActionErrorMessage(error, 'Failed to sync preview text edits before reviewing learning suggestions');
+        logger.error(`[学习建议预览同步] 失败: ${actionErrorText}`, error);
+        snackbar.value?.showMessage(actionErrorText);
         return false;
     }
 }
@@ -2641,15 +2641,15 @@ const importPreviewSignalSourceContext = computed<{
     const versionParts: string[] = [];
 
     for (const item of importTransactions.value) {
-        const parserSource = (item.parserSource || '').trim();
+        const parserId = (item.parserId || '').trim();
         const parserTags = Array.isArray(item.parserTags) ? item.parserTags : [];
-        if (!parserSource && parserTags.length < 1) {
+        if (!parserId && parserTags.length < 1) {
             continue;
         }
 
         const previewId = getPreviewId(item);
         const sourceContext = {
-            parserSource,
+            parserId,
             parserTags
         };
 
@@ -2661,7 +2661,7 @@ const importPreviewSignalSourceContext = computed<{
         versionParts.push([
             item.index,
             previewId ?? '',
-            parserSource,
+            parserId,
             parserTags.join('|')
         ].join('::'));
     }
@@ -2673,7 +2673,7 @@ const importPreviewSignalSourceContext = computed<{
 });
 
 const importPreviewSignalSharedContext = computed<{
-    options: Omit<ImportPreviewSignalViewModelOptions, 'currentParserSource' | 'sourceRowLookup'>;
+    options: Omit<ImportPreviewSignalViewModelOptions, 'currentParserId' | 'sourceRowLookup'>;
     version: string;
 }>(() => {
     const options = {
@@ -2700,7 +2700,7 @@ const importPreviewSignalSharedContext = computed<{
             recommendedCategoryLabel: tt('Recommended Category'),
             accountRouteLabel: tt('Account Route')
         }
-    } satisfies Omit<ImportPreviewSignalViewModelOptions, 'currentParserSource' | 'sourceRowLookup'>;
+    } satisfies Omit<ImportPreviewSignalViewModelOptions, 'currentParserId' | 'sourceRowLookup'>;
 
     return {
         options,
@@ -2758,7 +2758,7 @@ function buildImportPreviewSignalCacheSignature(item: ImportTransaction): string
         importPreviewSignalSharedContext.value.version,
         item.index,
         getPreviewId(item) ?? '',
-        (item.parserSource || '').trim(),
+        (item.parserId || '').trim(),
         parserTags.join('|'),
         item.dedupType || '',
         dedupSourceIds.join('|'),
@@ -2818,14 +2818,14 @@ function getImportPreviewSignalViewModel(item: ImportTransaction): ImportPreview
 
     const llmPayload = getLLMMatchingPayload(item);
     const viewModel = buildImportPreviewSignalViewModel({
-        parserSource: item.parserSource,
+        parserId: item.parserId,
         parserTags: item.parserTags,
         dedupType: item.dedupType,
         dedupSourceIds: item.dedupSourceIds,
         dedupSourceCount: item.matching?.dedup.source_count,
         dedupSourceLabels: item.matching?.dedup.source_labels,
         dedupSources: item.matching?.dedup.sources,
-        parserSourceChain: item.matching?.parser.source_chain,
+        parserIdChain: item.matching?.parser.source_chain,
         reconciliationType: item.matching?.reconciliation?.candidate_type,
         reconciliationStatus: item.matching?.reconciliation?.status,
         reconciliationTitle: item.matching?.reconciliation?.signal_label,
@@ -2863,7 +2863,7 @@ function getImportPreviewSignalViewModel(item: ImportTransaction): ImportPreview
         recurringPrimaryReason: getPrimaryRecurringReason(item)
     }, {
         ...importPreviewSignalSharedContext.value.options,
-        currentParserSource: item.parserSource,
+        currentParserId: item.parserId,
         sourceRowLookup: importPreviewSignalSourceContext.value.sourceRowLookup
     });
 
@@ -3290,9 +3290,9 @@ async function applyLLMPreviewRecommendations(): Promise<void> {
 
         snackbar.value?.showMessage(tt('LLM preview recommendation completed, but no suggestions were generated'));
     } catch (error) {
-        const errorMessage = getActionErrorMessage(error, 'LLM preview recommendation failed');
-        logger.error(`[LLM 黄色建议] 失败: ${errorMessage}`, error);
-        snackbar.value?.showMessage(errorMessage);
+        const actionErrorText = getActionErrorMessage(error, 'LLM preview recommendation failed');
+        logger.error(`[LLM 黄色建议] 失败: ${actionErrorText}`, error);
+        snackbar.value?.showMessage(actionErrorText);
     } finally {
         llmPreviewRecommending.value = false;
     }
@@ -4597,7 +4597,7 @@ const importTransactionHeaders = computed<object[]>(() => {
     return [
         { value: 'valid', sortable: isImportTransactionColumnSortable('valid'), nowrap: true, width: 35 },
         { value: 'time', title: tt('Transaction Time'), sortable: isImportTransactionColumnSortable('time'), nowrap: true, maxWidth: 280 },
-        { value: 'parserSource', title: tt('Signals'), sortable: isImportTransactionColumnSortable('parserSource'), nowrap: true, maxWidth: 260 },
+        { value: 'parserId', title: tt('Signals'), sortable: isImportTransactionColumnSortable('parserId'), nowrap: true, maxWidth: 260 },
         { value: 'type', title: tt('Type'), sortable: isImportTransactionColumnSortable('type'), nowrap: true, maxWidth: 140 },
         { value: 'actualCategoryName', title: tt('Category'), sortable: isImportTransactionColumnSortable('actualCategoryName'), nowrap: true },
         { value: 'sourceAmount', title: tt('Amount'), sortable: isImportTransactionColumnSortable('sourceAmount'), nowrap: true },

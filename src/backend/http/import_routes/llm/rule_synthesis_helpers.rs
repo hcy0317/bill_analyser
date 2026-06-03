@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -55,12 +55,27 @@ fn rule_induction_groups(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn load_persisted_bill_prompt_values(
-    connection: &Connection,
+async fn load_postgres_persisted_bill_prompt_values(
+    pool: &bill_analyser_db::PostgresPool,
     user_id: i64,
     bill_ids: Option<&[i64]>,
     limit: usize,
 ) -> Result<Vec<Value>, ImportV2RouteResponse> {
+    let mut builder = QueryBuilder::<Postgres>::new(
+        "
+        SELECT b.id,
+               b.occurred_at,
+               b.amount_cents,
+               b.merchant,
+               b.description,
+               b.payment_method
+        FROM bills b
+        LEFT JOIN categories c ON c.user_id = b.user_id AND c.id = b.category_id
+        WHERE b.user_id = ",
+    );
+    builder.push_bind(user_id);
+    builder.push(" AND b.is_deleted = false");
+
     if let Some(bill_ids) = bill_ids {
         let mut seen_ids = BTreeSet::new();
         let bill_ids = bill_ids
@@ -73,60 +88,43 @@ fn load_persisted_bill_prompt_values(
         if bill_ids.is_empty() {
             return Ok(Vec::new());
         }
-        let placeholders = std::iter::repeat_n("?", bill_ids.len())
-            .collect::<Vec<_>>()
-            .join(",");
-        let mut values = vec![rusqlite::types::Value::Integer(user_id)];
-        values.extend(
-            bill_ids
-                .iter()
-                .copied()
-                .map(rusqlite::types::Value::Integer),
+        builder.push(" AND b.id IN (");
+        let mut separated = builder.separated(", ");
+        for bill_id in bill_ids {
+            separated.push_bind(bill_id);
+        }
+        separated.push_unseparated(")");
+    } else {
+        builder.push(
+            " AND (
+                b.category_id IS NULL
+                OR COALESCE(NULLIF(c.path, ''), c.name, '') = ''
+                OR COALESCE(c.path, c.name, '') = '未分类'
+            )",
         );
-        let sql = format!(
-            "SELECT id, date, amount, counterparty, description, payment_method FROM bills \
-             WHERE user_id = ? AND id IN ({placeholders}) ORDER BY date DESC, id DESC"
-        );
-        return query_bill_prompt_values(connection, &sql, values, limit);
     }
-    query_bill_prompt_values(
-        connection,
-        "SELECT id, date, amount, counterparty, description, payment_method FROM bills \
-         WHERE user_id = ?1 AND (main_category IS NULL OR TRIM(main_category) = '' OR main_category = '未分类') \
-         ORDER BY date DESC, id DESC LIMIT ?2",
-        vec![
-            rusqlite::types::Value::Integer(user_id),
-            rusqlite::types::Value::Integer(usize_to_i64(limit)),
-        ],
-        limit,
-    )
-}
 
-#[tracing::instrument(level = "debug", skip_all)]
-fn query_bill_prompt_values(
-    connection: &Connection,
-    sql: &str,
-    values: Vec<rusqlite::types::Value>,
-    limit: usize,
-) -> Result<Vec<Value>, ImportV2RouteResponse> {
-    let mut statement = connection.prepare(sql).map_err(db_error_response)?;
-    let rows = statement
-        .query_map(rusqlite::params_from_iter(values), |row| {
-            Ok(json!({
-                "id": row.get::<_, i64>(0)?,
-                "date": row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                "amount": row.get::<_, Option<f64>>(2)?.unwrap_or_default(),
-                "counterparty": row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                "description": row.get::<_, Option<String>>(4)?.unwrap_or_default(),
-                "payment_method": row.get::<_, Option<String>>(5)?.unwrap_or_default(),
-            }))
+    builder.push(" ORDER BY b.occurred_at DESC, b.id DESC LIMIT ");
+    builder.push_bind(i64::try_from(limit).unwrap_or(i64::MAX));
+    let rows = builder.build().fetch_all(pool).await.map_err(db_error_response)?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let occurred_at = row
+                .try_get::<chrono::DateTime<Utc>, _>("occurred_at")
+                .map(|value| value.to_rfc3339())
+                .unwrap_or_default();
+            let amount_cents = row.try_get::<i64, _>("amount_cents").unwrap_or_default();
+            json!({
+                "id": row.try_get::<i64, _>("id").unwrap_or_default(),
+                "date": occurred_at,
+                "amount": amount_cents as f64 / 100.0,
+                "counterparty": row.try_get::<Option<String>, _>("merchant").ok().flatten().unwrap_or_default(),
+                "description": row.try_get::<Option<String>, _>("description").ok().flatten().unwrap_or_default(),
+                "payment_method": row.try_get::<Option<String>, _>("payment_method").ok().flatten().unwrap_or_default(),
+            })
         })
-        .map_err(db_error_response)?;
-    let mut items = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(db_error_response)?;
-    items.truncate(limit);
-    Ok(items)
+        .collect())
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -244,7 +242,7 @@ fn build_rule_synthesis_knowledge_pack(
         .take(LLM_RULE_SYNTHESIS_MAX_GROUPS)
         .map(RuleSynthesisCategoryBundle::into_value)
         .collect::<Vec<_>>();
-    let recent_feedback = get_llm_memory_events(connection, user_id, None, Some("feedback"), 20, 0)
+    let recent_feedback = get_llm_memory_events(connection, user_id, None, 20)
         .map_err(db_error_response)?
         .into_iter()
         .map(|event| {
@@ -386,86 +384,18 @@ fn json_object_from_text_field(value: &Value, key: &str) -> Value {
 
 #[tracing::instrument(level = "debug", skip_all)]
 fn load_rule_synthesis_active_model(
-    connection: &Connection,
-    user_id: i64,
+    _connection: &Connection,
+    _user_id: i64,
 ) -> Result<Value, ImportV2RouteResponse> {
-    if !table_exists(connection, "import_learning_model_registry")? {
-        return Ok(Value::Null);
-    }
-    connection
-        .query_row(
-            "
-            SELECT model_version, dataset_snapshot_id, metrics_json, updated_at
-            FROM import_learning_model_registry
-            WHERE user_id = ?1 AND model_key = ?2 AND status = 'active'
-            ORDER BY updated_at DESC, id DESC
-            LIMIT 1
-            ",
-            params![user_id, IMPORT_LEARNING_MODEL_KEY],
-            |row| {
-                let metrics_text = row.get::<_, Option<String>>(2)?.unwrap_or_default();
-                let metrics = serde_json::from_str::<Value>(&metrics_text)
-                    .ok()
-                    .and_then(|value| value.as_object().cloned().map(Value::Object))
-                    .unwrap_or_else(|| json!({}));
-                Ok(json!({
-                    "model_version": row.get::<_, Option<String>>(0)?.unwrap_or_default(),
-                    "dataset_snapshot_id": row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
-                    "feature_schema_version": metrics.get("feature_schema_version").and_then(Value::as_str).unwrap_or_default(),
-                    "policy_version": metrics.get("policy_version").and_then(Value::as_str).unwrap_or_default(),
-                    "sample_count": metrics.get("sample_count").and_then(value_to_i64).unwrap_or_default(),
-                    "updated_at": row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                }))
-            },
-        )
-        .optional()
-        .map(|value| value.unwrap_or(Value::Null))
-        .map_err(db_error_response)
+    Ok(Value::Null)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
 fn load_learning_concept_stats(
-    connection: &Connection,
-    user_id: i64,
+    _connection: &Connection,
+    _user_id: i64,
 ) -> Result<Vec<Value>, ImportV2RouteResponse> {
-    if !table_exists(connection, "import_learning_concept_stats")? {
-        return Ok(Vec::new());
-    }
-    let mut statement = connection
-        .prepare(
-            "SELECT concept_key, concept_type, sample_count, accepted_count, rejected_count, \
-                    auto_applied_count, rollback_count, updated_at \
-             FROM import_learning_concept_stats WHERE user_id = ?1 ORDER BY updated_at DESC LIMIT 50",
-        )
-        .map_err(db_error_response)?;
-    let rows = statement
-        .query_map(params![user_id], |row| {
-            Ok(json!({
-                "concept_key": row.get::<_, Option<String>>(0)?.unwrap_or_default(),
-                "concept_type": row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                "sample_count": row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
-                "accepted_count": row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
-                "rejected_count": row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
-                "auto_applied_count": row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
-                "rollback_count": row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
-                "updated_at": row.get::<_, Option<String>>(7)?.unwrap_or_default(),
-            }))
-        })
-        .map_err(db_error_response)?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(db_error_response)
-}
-
-fn table_exists(connection: &Connection, table_name: &str) -> Result<bool, ImportV2RouteResponse> {
-    connection
-        .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1",
-            params![table_name],
-            |_| Ok(true),
-        )
-        .optional()
-        .map(|value| value.unwrap_or(false))
-        .map_err(db_error_response)
+    Ok(Vec::new())
 }
 
 fn llm_advanced_prompt_template(config: &Value, key: &str) -> String {
@@ -571,52 +501,66 @@ fn valid_rule_expression(expression: &str) -> bool {
     !bill_analyser_core::category_rules::compile_rule_expression(expression.trim(), false).is_empty
 }
 
-fn rule_candidate_duplicate(
-    connection: &Connection,
+#[tracing::instrument(level = "debug", skip_all)]
+async fn postgres_rule_candidate_duplicate(
+    pool: &bill_analyser_db::PostgresPool,
     user_id: i64,
     main_category: &str,
     sub_category: &str,
     expression: &str,
 ) -> Result<bool, ImportV2RouteResponse> {
     let expression = expression.trim();
-    let category_rule_duplicate =
-        if table_exists(connection, "category_rules")? && table_exists(connection, "categories")? {
-            connection
-                .query_row(
-                    "
-                SELECT 1 FROM category_rules cr
-                JOIN categories c ON c.id = cr.category_id AND c.user_id = cr.user_id
-                WHERE cr.user_id = ?1 AND c.main_category = ?2 AND c.sub_category = ?3
-                  AND cr.rule_expression = ?4
-                LIMIT 1
-                ",
-                    params![user_id, main_category, sub_category, expression],
-                    |_| Ok(true),
-                )
-                .optional()
-                .map_err(db_error_response)?
-                .unwrap_or(false)
-        } else {
-            false
-        };
+    let path = category_path(main_category, sub_category);
+    let category_rule_duplicate = sqlx::query(
+        "
+        SELECT 1
+        FROM category_rules cr
+        JOIN categories c ON c.id = cr.category_id AND c.user_id = cr.user_id
+        WHERE cr.user_id = $1
+          AND (
+              c.path = $2
+              OR (split_part(COALESCE(c.path, ''), '/', 1) = $3
+                  AND COALESCE(NULLIF(substring(COALESCE(c.path, '') from position('/' in COALESCE(c.path, '')) + 1), ''), '') = $4)
+              OR (c.path IS NULL AND c.name = $3 AND $4 = '')
+          )
+          AND COALESCE(cr.rule_expression->>'expression', cr.rule_expression->>'rule_expression', '') = $5
+        LIMIT 1
+        ",
+    )
+    .bind(user_id)
+    .bind(path)
+    .bind(main_category.trim())
+    .bind(sub_category.trim())
+    .bind(expression)
+    .fetch_optional(pool)
+    .await
+    .map_err(db_error_response)?
+    .is_some();
     if category_rule_duplicate {
         return Ok(true);
     }
-    connection
-        .query_row(
-            "
-            SELECT 1 FROM llm_candidates
-            WHERE user_id = ?1 AND status = 'pending' AND type IN ('rule_synthesis', 'rule_induction')
-              AND suggested_main_category = ?2 AND suggested_sub_category = ?3
-              AND suggested_rule_expression = ?4
-            LIMIT 1
-            ",
-            params![user_id, main_category, sub_category, expression],
-            |_| Ok(true),
-        )
-        .optional()
-        .map(|value| value.unwrap_or(false))
-        .map_err(db_error_response)
+
+    sqlx::query(
+        "
+        SELECT 1
+        FROM llm_candidates
+        WHERE user_id = $1
+          AND status = 'pending'
+          AND type IN ('rule_synthesis', 'rule_induction')
+          AND suggested_main_category = $2
+          AND suggested_sub_category = $3
+          AND suggested_rule_expression = $4
+        LIMIT 1
+        ",
+    )
+    .bind(user_id)
+    .bind(main_category.trim())
+    .bind(sub_category.trim())
+    .bind(expression)
+    .fetch_optional(pool)
+    .await
+    .map(|row| row.is_some())
+    .map_err(db_error_response)
 }
 
 fn category_path(main_category: &str, sub_category: &str) -> String {
@@ -630,4 +574,3 @@ fn category_path(main_category: &str, sub_category: &str) -> String {
         format!("{main_category}/{sub_category}")
     }
 }
-

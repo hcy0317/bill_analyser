@@ -1578,6 +1578,20 @@ function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: num
     // 时区
     const currentTimezone = settingsStore.appSettings.timeZone;
     const defaultUtcOffset = getTimezoneOffsetMinutes(currentTimezone);
+    const parserId = item.preview_parser_id || item.matching?.parser?.id || '';
+    const parserTags = Array.isArray(item.preview_parser_tags)
+        ? item.preview_parser_tags
+        : (item.matching?.parser?.tags || []);
+    const matchingPayload = item.matching || parserId || parserTags.length > 0
+        ? {
+            ...(item.matching || {}),
+            parser: {
+                ...(item.matching?.parser || {}),
+                id: parserId,
+                tags: parserTags
+            }
+        } as ImportTransactionResponse['matching']
+        : undefined;
 
     const responseItem: ImportTransactionResponse = {
         type: type,
@@ -1619,9 +1633,7 @@ function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: num
         recurringMatchedDate: item.preview_recurring_matched_date || '',
         dedupType: item.dedup_type || '',
         dedupSourceIds: item.dedup_source_ids || [],
-        parserSource: item.preview_parser_id || '',
-        parserTags: item.preview_parser_tags || [],
-        matching: item.matching,
+        matching: matchingPayload,
         isManuallyAnnotated: !!item.preview_is_manually_annotated,
         selected: !!(item.preview_selected ?? item.selected)
     };
@@ -1631,9 +1643,6 @@ function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: num
     const transaction = ImportTransaction.of(responseItem, previewIndex);
     const previewTransaction = transaction as ImportTransactionWithPreviewId;
     previewTransaction._previewId = item.id;  // 保存预览表记录ID
-    transaction.parserSource = item.preview_parser_id || transaction.parserSource || '';
-    transaction.parserTags = item.preview_parser_tags || transaction.parserTags || [];
-    transaction.matching = item.matching || transaction.matching;
 
     return transaction;
 }

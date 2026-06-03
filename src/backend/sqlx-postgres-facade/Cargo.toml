@@ -1,0 +1,18 @@
+[package]
+name = "sqlx"
+version = "0.8.6"
+edition.workspace = true
+license.workspace = true
+description = "Postgres-only SQLx facade for Bill Analyser."
+publish = false
+
+[lib]
+name = "sqlx"
+path = "lib.rs"
+
+[dependencies]
+sqlx-core = { version = "=0.8.6", default-features = false, features = ["_rt-tokio", "_tls-rustls-ring-webpki", "chrono", "uuid", "json", "migrate"] }
+sqlx-postgres = { version = "=0.8.6", default-features = false, features = ["chrono", "uuid", "json", "migrate"] }
+
+[lints]
+workspace = true

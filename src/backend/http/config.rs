@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -43,13 +43,8 @@ pub struct HttpShellConfig {
     pub backup_dir: String,
     pub backup_encryption_key: Option<String>,
     pub import_route_mode: ImportRouteMode,
-    pub sqlite_db_path: Option<String>,
-    pub sqlite_legacy_path: Option<String>,
     pub postgres_url: Option<String>,
     pub database_backend: DatabaseBackend,
-    pub migration_mode: MigrationMode,
-    pub require_postgres_after_cutover: bool,
-    pub legacy_sqlite_runtime_allowed: bool,
     pub trusted_user_header_secret: Option<String>,
     pub auth_jwt_secret: Option<String>,
     pub auth_jwt_algorithm: String,
@@ -70,7 +65,7 @@ pub struct HttpShellConfig {
 impl HttpShellConfig {
     #[tracing::instrument(level = "debug", skip_all)]
     pub fn new(
-        _legacy_upstream: impl Into<String>,
+        _unused_upstream: impl Into<String>,
         timeout: Duration,
         body_limit_bytes: usize,
     ) -> Result<Self, HttpShellConfigError> {
@@ -84,7 +79,7 @@ impl HttpShellConfig {
 
     #[tracing::instrument(level = "debug", skip_all)]
     pub fn new_with_import_route_mode(
-        _legacy_upstream: impl Into<String>,
+        _unused_upstream: impl Into<String>,
         timeout: Duration,
         body_limit_bytes: usize,
         import_route_mode: ImportRouteMode,
@@ -101,13 +96,8 @@ impl HttpShellConfig {
             backup_dir: DEFAULT_BACKUP_DIR.to_string(),
             backup_encryption_key: None,
             import_route_mode,
-            sqlite_db_path: None,
-            sqlite_legacy_path: None,
             postgres_url: normalize_postgres_url(Some(DEFAULT_LOCAL_POSTGRES_URL.to_string()))?,
             database_backend: DatabaseBackend::Postgres,
-            migration_mode: MigrationMode::Disabled,
-            require_postgres_after_cutover: true,
-            legacy_sqlite_runtime_allowed: false,
             trusted_user_header_secret: None,
             auth_jwt_secret: None,
             auth_jwt_algorithm: DEFAULT_AUTH_JWT_ALGORITHM.to_string(),
@@ -130,19 +120,6 @@ impl HttpShellConfig {
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
-    pub fn with_sqlite_db_path(mut self, sqlite_db_path: impl Into<String>) -> Self {
-        self.sqlite_db_path = Some(sqlite_db_path.into());
-        self
-    }
-
-    #[tracing::instrument(level = "debug", skip_all)]
-    pub fn with_sqlite_legacy_path(mut self, sqlite_legacy_path: impl Into<String>) -> Self {
-        let sqlite_legacy_path = sqlite_legacy_path.into().trim().to_string();
-        self.sqlite_legacy_path = (!sqlite_legacy_path.is_empty()).then_some(sqlite_legacy_path);
-        self
-    }
-
-    #[tracing::instrument(level = "debug", skip_all)]
     pub fn with_postgres_url(
         mut self,
         postgres_url: impl Into<String>,
@@ -155,28 +132,6 @@ impl HttpShellConfig {
     pub fn with_database_backend(mut self, database_backend: DatabaseBackend) -> Self {
         self.database_backend = database_backend;
         self
-    }
-
-    #[tracing::instrument(level = "debug", skip_all)]
-    pub fn with_migration_mode(mut self, migration_mode: MigrationMode) -> Self {
-        self.migration_mode = migration_mode;
-        self
-    }
-
-    #[tracing::instrument(level = "debug", skip_all)]
-    pub fn with_require_postgres_after_cutover(mut self, required: bool) -> Self {
-        self.require_postgres_after_cutover = required;
-        self
-    }
-
-    #[tracing::instrument(level = "debug", skip_all)]
-    pub fn with_legacy_sqlite_runtime_for_tests(mut self) -> Self {
-        self.legacy_sqlite_runtime_allowed = true;
-        self
-    }
-
-    pub const fn legacy_sqlite_runtime_allowed(&self) -> bool {
-        self.legacy_sqlite_runtime_allowed
     }
 
     pub fn postgres_configured(&self) -> bool {
@@ -345,31 +300,12 @@ impl HttpShellConfig {
         )?;
         let import_route_mode =
             parse_import_route_mode(lookup("BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE").as_deref())?;
-        let sqlite_db_path = lookup("BILL_ANALYSER_SQLITE_DB_PATH")
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
-        let sqlite_legacy_path = lookup("BILL_ANALYSER_SQLITE_LEGACY_PATH")
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .or_else(|| sqlite_db_path.clone());
         let database_backend =
             parse_database_backend(lookup("BILL_ANALYSER_DATABASE_BACKEND").as_deref())?;
-        let migration_mode =
-            parse_migration_mode(lookup("BILL_ANALYSER_MIGRATION_MODE").as_deref())?;
-        let require_postgres_after_cutover = parse_env_bool_value(
-            "BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER",
-            lookup("BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER")
-                .filter(|value| !value.trim().is_empty()),
-            true,
-        )?;
         let postgres_url = normalize_postgres_url(
             lookup("BILL_ANALYSER_POSTGRES_URL")
                 .filter(|value| !value.trim().is_empty())
-                .or_else(|| {
-                    database_backend
-                        .uses_postgres()
-                        .then(|| DEFAULT_LOCAL_POSTGRES_URL.to_string())
-                }),
+                .or_else(|| Some(DEFAULT_LOCAL_POSTGRES_URL.to_string())),
         )?;
         let uploads_dir = lookup("BILL_ANALYSER_UPLOADS_DIR")
             .map(|value| value.trim().to_string())
@@ -503,13 +439,8 @@ impl HttpShellConfig {
             body_limit_bytes,
             import_route_mode,
         )?;
-        config.sqlite_db_path = sqlite_db_path;
-        config.sqlite_legacy_path = sqlite_legacy_path;
         config.postgres_url = postgres_url;
         config.database_backend = database_backend;
-        config.migration_mode = migration_mode;
-        config.require_postgres_after_cutover = require_postgres_after_cutover;
-        config.legacy_sqlite_runtime_allowed = false;
         config.uploads_dir = uploads_dir;
         config.data_dir = data_dir;
         config.backup_dir = backup_dir;
@@ -558,8 +489,6 @@ pub enum HttpShellConfigError {
     InvalidImportRouteMode,
     #[error("invalid database backend")]
     InvalidDatabaseBackend,
-    #[error("invalid migration mode")]
-    InvalidMigrationMode,
     #[error("invalid PostgreSQL URL")]
     InvalidPostgresUrl,
     #[error("invalid Weaviate endpoint")]
@@ -589,37 +518,13 @@ impl ImportRouteMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DatabaseBackend {
-    Sqlite,
     Postgres,
 }
 
 impl DatabaseBackend {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Sqlite => "sqlite",
             Self::Postgres => "postgres",
-        }
-    }
-
-    pub const fn uses_postgres(self) -> bool {
-        matches!(self, Self::Postgres)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MigrationMode {
-    Disabled,
-    Validate,
-    Apply,
-}
-
-impl MigrationMode {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Disabled => "disabled",
-            Self::Validate => "validate",
-            Self::Apply => "apply",
         }
     }
 }
@@ -730,19 +635,7 @@ fn parse_database_backend(value: Option<&str>) -> Result<DatabaseBackend, HttpSh
     let normalized = value.unwrap_or("").trim().to_ascii_lowercase();
     match normalized.as_str() {
         "" => Ok(DatabaseBackend::Postgres),
-        "sqlite" | "legacy_sqlite" | "sqlite_legacy" => Ok(DatabaseBackend::Sqlite),
         "postgres" | "postgresql" => Ok(DatabaseBackend::Postgres),
         _ => Err(HttpShellConfigError::InvalidDatabaseBackend),
-    }
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn parse_migration_mode(value: Option<&str>) -> Result<MigrationMode, HttpShellConfigError> {
-    let normalized = value.unwrap_or("").trim().to_ascii_lowercase();
-    match normalized.as_str() {
-        "" | "disabled" | "off" | "none" => Ok(MigrationMode::Disabled),
-        "validate" | "check" => Ok(MigrationMode::Validate),
-        "apply" | "migrate" => Ok(MigrationMode::Apply),
-        _ => Err(HttpShellConfigError::InvalidMigrationMode),
     }
 }

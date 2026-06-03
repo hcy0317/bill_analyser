@@ -1,7 +1,7 @@
 import type { ImportMatchingSourcePayload } from '@/models/import_matching.ts';
 
 export interface ImportCheckMatchingContextState {
-    parserSource?: string;
+    parserId?: string;
     parserTags?: string[];
     dedupType?: string;
     dedupSourceIds?: Array<number | string>;
@@ -18,18 +18,18 @@ export interface ImportCheckMatchingContextSummary {
 
 export interface ImportCheckMatchingSourceRow {
     id: number | string;
-    parserSource?: string;
+    parserId?: string;
     parserTags?: string[];
 }
 
 export interface ImportCheckMatchingSourceContext {
-    parserSource?: string;
+    parserId?: string;
     parserTags?: string[];
 }
 
 export interface ImportCheckMatchingDedupTitleOptions {
     matchLabel?: string;
-    currentParserSource?: string;
+    currentParserId?: string;
     parserLabels?: Record<string, string>;
     sourceRows?: ImportCheckMatchingSourceRow[];
     sourceRowLookup?: ReadonlyMap<string, string | ImportCheckMatchingSourceContext>;
@@ -144,7 +144,7 @@ export interface ImportPreviewSignalState extends ImportCheckMatchingContextStat
     dedupSourceCount?: number;
     dedupSourceLabels?: string[];
     dedupSources?: ImportMatchingSourcePayload[];
-    parserSourceChain?: ImportMatchingSourcePayload[];
+    parserIdChain?: ImportMatchingSourcePayload[];
     reconciliationType?: string;
     reconciliationStatus?: string;
     reconciliationTitle?: string;
@@ -256,7 +256,7 @@ export function getImportCheckMatchingContextSummary(
     state: ImportCheckMatchingContextState
 ): ImportCheckMatchingContextSummary {
     return {
-        parserId: state.parserSource || '',
+        parserId: state.parserId || '',
         parserTags: state.parserTags || [],
         dedupType: state.dedupType || '',
         dedupSourceIds: state.dedupSourceIds || [],
@@ -292,7 +292,7 @@ function getParserDisplayLabel(parserId: string, parserLabels?: Record<string, s
     return parserLabels?.[parserId] || parserId;
 }
 
-function getParserSourceFromTag(tag: string): string {
+function getParserIdFromTag(tag: string): string {
     const normalizedTag = (tag || '').trim();
     const parserTagPrefix = 'parser:';
     if (!normalizedTag.toLowerCase().startsWith(parserTagPrefix)) {
@@ -306,7 +306,7 @@ function getSourceContextFromLookupValue(
     value: string | ImportCheckMatchingSourceContext | undefined
 ): ImportCheckMatchingSourceContext {
     if (typeof value === 'string') {
-        return { parserSource: value };
+        return { parserId: value };
     }
 
     return value || {};
@@ -331,11 +331,11 @@ function buildSourceRowLookup(
                 .map(sourceRow => [
                     String(sourceRow.id),
                     {
-                        parserSource: (sourceRow.parserSource || '').trim(),
+                        parserId: (sourceRow.parserId || '').trim(),
                         parserTags: sourceRow.parserTags || []
                     }
                 ] as const)
-                .filter(([, sourceContext]) => !!sourceContext.parserSource || sourceContext.parserTags.length > 0)
+                .filter(([, sourceContext]) => !!sourceContext.parserId || sourceContext.parserTags.length > 0)
         )
         : null);
 }
@@ -470,9 +470,9 @@ function getParserContextDisplayLabels(
     options: ImportCheckMatchingDedupTitleOptions
 ): string[] {
     return dedupeTextItems([
-        context.parserSource || '',
-        ...(context.parserTags || []).map(tag => getParserSourceFromTag(tag))
-    ].map(parserSource => getParserDisplayLabel(parserSource, options.parserLabels)));
+        context.parserId || '',
+        ...(context.parserTags || []).map(tag => getParserIdFromTag(tag))
+    ].map(parserId => getParserDisplayLabel(parserId, options.parserLabels)));
 }
 
 function buildParserDetailLines(
@@ -481,18 +481,18 @@ function buildParserDetailLines(
     options: ImportCheckMatchingDedupTitleOptions
 ): string[] {
     const infoLabels = getSignalInfoLabels(options);
-    const structuredLabels = getSourceChainDisplayLabels(state.parserSourceChain, options);
+    const structuredLabels = getSourceChainDisplayLabels(state.parserIdChain, options);
     if (structuredLabels.length > 0) {
         return [formatInfoLine(infoLabels.sourceLabel, structuredLabels.join(' · '))];
     }
 
-    const parserSources = dedupeTextItems([
+    const parserIds = dedupeTextItems([
         summary.parserId,
-        ...summary.parserTags.map(tag => getParserSourceFromTag(tag))
-    ]).map(parserSource => getParserDisplayLabel(parserSource, options.parserLabels));
+        ...summary.parserTags.map(tag => getParserIdFromTag(tag))
+    ]).map(parserId => getParserDisplayLabel(parserId, options.parserLabels));
 
-    if (parserSources.length > 0) {
-        return [formatInfoLine(infoLabels.sourceLabel, parserSources.join(' · '))];
+    if (parserIds.length > 0) {
+        return [formatInfoLine(infoLabels.sourceLabel, parserIds.join(' · '))];
     }
 
     return [];
@@ -531,8 +531,8 @@ function buildDedupDetailLines(
         const infoLabels = getSignalInfoLabels(options);
         const sourceRowLookup = buildSourceRowLookup(options);
         const sourceLabels = dedupeTextItems([
-            ...getSourceChainDisplayLabels(state.parserSourceChain, options),
-            ...getParserContextDisplayLabels({ parserSource: summary.parserId, parserTags: summary.parserTags }, options),
+            ...getSourceChainDisplayLabels(state.parserIdChain, options),
+            ...getParserContextDisplayLabels({ parserId: summary.parserId, parserTags: summary.parserTags }, options),
             ...(state.dedupSourceLabels || []),
             ...getSourceChainDisplayLabels(state.dedupSources, options),
             ...summary.dedupSourceIds.flatMap(sourceId => getParserContextDisplayLabels(
@@ -746,7 +746,7 @@ function buildDedupLabel(
     return dedupLabel;
 }
 
-export function resolveImportCheckMatchingTransferParserSources(
+export function resolveImportCheckMatchingTransferParserIds(
     summary: ImportCheckMatchingContextSummary,
     options: ImportCheckMatchingDedupTitleOptions = {}
 ): string[] {
@@ -755,40 +755,40 @@ export function resolveImportCheckMatchingTransferParserSources(
         return [];
     }
 
-    const parserSources: string[] = [];
-    const addParserSource = (parserSource: string | undefined): void => {
-        const normalizedParserSource = (parserSource || '').trim();
-        if (normalizedParserSource && !parserSources.includes(normalizedParserSource)) {
-            parserSources.push(normalizedParserSource);
+    const parserIds: string[] = [];
+    const addParserId = (parserId: string | undefined): void => {
+        const normalizedParserId = (parserId || '').trim();
+        if (normalizedParserId && !parserIds.includes(normalizedParserId)) {
+            parserIds.push(normalizedParserId);
         }
     };
-    const addParserSourcesFromTags = (parserTags: string[] | undefined): void => {
+    const addParserIdsFromTags = (parserTags: string[] | undefined): void => {
         for (const tag of parserTags || []) {
-            addParserSource(getParserSourceFromTag(tag));
+            addParserId(getParserIdFromTag(tag));
         }
     };
 
-    addParserSource(options.currentParserSource || summary.parserId);
-    addParserSourcesFromTags(summary.parserTags);
+    addParserId(options.currentParserId || summary.parserId);
+    addParserIdsFromTags(summary.parserTags);
 
     for (const sourceId of summary.dedupSourceIds) {
         const sourceContext = getSourceContextFromLookupValue(sourceRowLookup?.get(String(sourceId)));
-        addParserSource(sourceContext.parserSource);
-        addParserSourcesFromTags(sourceContext.parserTags);
+        addParserId(sourceContext.parserId);
+        addParserIdsFromTags(sourceContext.parserTags);
     }
 
-    return parserSources;
+    return parserIds;
 }
 
 export function getImportCheckMatchingDedupTitle(
     summary: ImportCheckMatchingContextSummary,
     options: ImportCheckMatchingDedupTitleOptions = {}
 ): string {
-    const parserSources = resolveImportCheckMatchingTransferParserSources(summary, options);
-    if (parserSources.length > 0) {
+    const parserIds = resolveImportCheckMatchingTransferParserIds(summary, options);
+    if (parserIds.length > 0) {
         return [
             options.matchLabel || 'Matching',
-            ...parserSources.map(parserSource => getParserDisplayLabel(parserSource, options.parserLabels))
+            ...parserIds.map(parserId => getParserDisplayLabel(parserId, options.parserLabels))
         ].filter(text => !!text).join(' | ');
     }
 

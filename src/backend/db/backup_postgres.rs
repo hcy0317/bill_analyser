@@ -1,4 +1,4 @@
-// 中文导读：PostgreSQL backup ops 仓储，负责 strict cutover 后的备份记录、任务和审计元数据。
+// 中文导读：PostgreSQL backup ops 仓储，负责当前备份记录、任务和审计元数据。
 // 维护重点：文件备份 I/O 留在 HTTP 层；这里仅集中 user-scoped PG 元数据读写。
 // 不变式：backup_jobs 必须按 user_id 隔离；backup_audit_logs 是 best-effort 调用方可忽略失败。
 

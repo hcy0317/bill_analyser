@@ -1,6 +1,6 @@
 // 中文导读：核心业务合同层，负责把金额、时间、分类、导入、匹配、预算、统计等规则从 HTTP/DB 细节中隔离。
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
-// 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
+// 不变式：金额单位、用户可见类型和API payload 在进入或离开本层时必须显式转换。
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -12,7 +12,7 @@ use crate::TransactionType;
 
 pub const BUDGET_TYPE_EXPENSE: i32 = 3;
 pub const BUDGET_TYPE_INVESTMENT: i32 = 5;
-pub const LEGACY_EXPENSE_CATEGORY_TYPE: i32 = 1;
+pub const CURRENT_EXPENSE_CATEGORY_TYPE: i32 = 1;
 pub const VALID_BUDGET_PERIOD_TYPES: [&str; 5] =
     ["daily", "weekly", "monthly", "quarterly", "yearly"];
 

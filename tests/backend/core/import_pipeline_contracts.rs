@@ -21,7 +21,7 @@ use bill_analyser_core::{
 use serde_json::{json, Map};
 
 #[test]
-fn preview_page_query_normalization_matches_python_v2_contract() {
+fn preview_page_query_normalization_matches_current_v2_contract() {
     let query = normalize_import_preview_page_query(
         Some(0),
         Some(999),
@@ -48,7 +48,7 @@ fn preview_page_query_normalization_matches_python_v2_contract() {
 }
 
 #[test]
-fn preview_sort_is_stabilized_by_id_and_uses_python_field_mapping() {
+fn preview_sort_is_stabilized_by_id_and_uses_current_field_mapping() {
     let items = vec![
         json!({"id": 3, "preview_amount": "8.5", "preview_counterparty": "beta"}),
         json!({"id": 1, "preview_amount": "bad", "preview_counterparty": "alpha"}),

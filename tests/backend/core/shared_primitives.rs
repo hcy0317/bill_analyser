@@ -1,5 +1,4 @@
 use bill_analyser_core::adapters::{
-    account::parse_aliases_text,
     api::PageResponse,
     category::virtual_parent_id,
     transaction::{
@@ -44,7 +43,7 @@ fn money_keeps_cents_exact_and_rounds_yuan_half_up() {
 }
 
 #[test]
-fn bill_dates_match_existing_python_normalization_formats() {
+fn bill_dates_match_current_normalization_formats() {
     let cases = [
         ("2025-01-02", "2025-01-02 00:00:00"),
         ("2025-01-02 03:04", "2025-01-02 03:04:00"),
@@ -124,17 +123,7 @@ fn currency_ids_pagination_sorting_and_auth_context_use_explicit_types() {
 }
 
 #[test]
-fn adapter_helpers_mirror_existing_python_contract_edges() {
-    assert_eq!(
-        parse_aliases_text(r#"[" 主卡 ", "", "备用卡"]"#),
-        vec!["主卡", "备用卡"]
-    );
-    assert_eq!(
-        parse_aliases_text("主卡, 备用卡, , 工资卡"),
-        vec!["主卡", "备用卡", "工资卡"]
-    );
-    assert_eq!(parse_aliases_text("[broken-json"), vec!["[broken-json"]);
-
+fn adapter_helpers_match_current_contract_edges() {
     assert_eq!(virtual_parent_id("餐饮"), "virtual_餐饮");
     assert_eq!(
         backend_transaction_type_name(TransactionType::Expense),

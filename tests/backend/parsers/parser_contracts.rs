@@ -28,7 +28,7 @@ struct ParserGoldenCase {
 }
 
 #[test]
-fn parser_registry_preserves_python_detection_order_and_metadata() {
+fn parser_registry_preserves_current_detection_order_and_metadata() {
     let registry = parser_registry();
     let ids: Vec<&str> = registry.iter().map(|item| item.id).collect();
 
@@ -69,7 +69,7 @@ fn dedicated_parser_sources_are_split_by_source_family() {
 }
 
 #[test]
-fn parser_tags_match_python_contract_defaults_and_dedupe() {
+fn parser_tags_match_current_contract_defaults_and_dedupe() {
     assert_eq!(
         normalize_parser_tags(["parser:WeChat", "channel:wallet", "parser:wechat"]),
         ["parser:wechat", "channel:wallet"]
@@ -127,7 +127,7 @@ fn standard_bill_json_round_trip_matches_existing_keys() {
 }
 
 #[test]
-fn base_normalization_matches_python_parser_helpers() {
+fn base_normalization_matches_current_parser_helpers() {
     let mut raw = RawBill {
         date: "2026/01/02".to_string(),
         amount: "¥1,234.50".to_string(),
@@ -170,7 +170,7 @@ fn base_normalization_matches_python_parser_helpers() {
 }
 
 #[test]
-fn parser_golden_cases_cover_each_python_parser_source_label_and_tags() {
+fn parser_golden_cases_cover_each_parser_source_label_and_tags() {
     let cases: Vec<ParserGoldenCase> =
         serde_json::from_str(include_str!("fixtures/parser_golden_contracts.json")).unwrap();
     let registry = parser_registry();

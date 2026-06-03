@@ -342,15 +342,6 @@ function ConvertTo-UrlPart {
     return [System.Uri]::EscapeDataString($Value)
 }
 
-function Test-TruthyValue {
-    param([string]$Value)
-
-    if ([string]::IsNullOrWhiteSpace($Value)) {
-        return $false
-    }
-    return @("1", "true", "yes", "on") -contains $Value.Trim().ToLowerInvariant()
-}
-
 function Start-RequiredRuntimeServices {
     param([string]$Root)
 
@@ -370,29 +361,11 @@ function Start-RequiredRuntimeServices {
         Set-EnvIfMissing -Settings $settings -Name "BILL_ANALYSER_DATABASE_BACKEND"
     }
     $normalizedDatabaseBackend = $databaseBackend.Trim().ToLowerInvariant()
-    $requireCutoverValue = Get-ConfiguredValue -Settings $settings -Name "BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER"
-    if (-not $requireCutoverValue) {
-        $requireCutoverValue = "true"
-        Set-Item -Path Env:BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER -Value $requireCutoverValue
-    } else {
-        Set-EnvIfMissing -Settings $settings -Name "BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER"
-    }
-    $requirePostgresAfterCutover = Test-TruthyValue -Value $requireCutoverValue
-    $needsPostgres = ($normalizedDatabaseBackend -in @("postgres", "postgresql")) -or $requirePostgresAfterCutover
 
-    if ($normalizedDatabaseBackend -notin @("sqlite", "sqlite_legacy", "legacy_sqlite", "postgres", "postgresql")) {
+    if ($normalizedDatabaseBackend -notin @("postgres", "postgresql")) {
         Write-Err "不支持的 BILL_ANALYSER_DATABASE_BACKEND='$databaseBackend'"
         exit 1
     }
-    if ($requirePostgresAfterCutover -and ($normalizedDatabaseBackend -notin @("postgres", "postgresql"))) {
-        Write-Err "BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER=true 需要 BILL_ANALYSER_DATABASE_BACKEND=postgres"
-        exit 1
-    }
-    if ($normalizedDatabaseBackend -notin @("postgres", "postgresql")) {
-        Write-Err "HTTP 业务运行态需要 BILL_ANALYSER_DATABASE_BACKEND=postgres；SQLite 仅允许作为迁移/测试输入"
-        exit 1
-    }
-
     $postgresUrl = Get-ConfiguredValue -Settings $settings -Name "BILL_ANALYSER_POSTGRES_URL"
     $weaviateEndpoint = Get-ConfiguredValue -Settings $settings -Name "BILL_ANALYSER_WEAVIATE_ENDPOINT"
     $composeServices = @()
@@ -408,13 +381,13 @@ function Start-RequiredRuntimeServices {
         Set-EnvIfMissing -Settings $settings -Name $name
     }
 
-    $requiresCompose = ($needsPostgres -and -not $postgresUrl) -or (-not $weaviateEndpoint)
+    $requiresCompose = (-not $postgresUrl) -or (-not $weaviateEndpoint)
     $dockerCmd = $null
     if ($requiresCompose) {
         $dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
         if (-not $dockerCmd) {
             Write-Err "未找到 Docker。当前配置需要启动本地运行态服务。"
-            Write-Warn "请先安装 Docker Desktop，或手动提供可达的 BILL_ANALYSER_WEAVIATE_ENDPOINT；严格 Postgres cutover 还需要 BILL_ANALYSER_POSTGRES_URL。"
+            Write-Warn "请先安装 Docker Desktop，或手动提供可达的 BILL_ANALYSER_POSTGRES_URL 与 BILL_ANALYSER_WEAVIATE_ENDPOINT。"
             exit 1
         }
     }

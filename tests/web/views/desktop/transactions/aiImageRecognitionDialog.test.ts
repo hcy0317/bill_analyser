@@ -62,7 +62,7 @@ describe('AIImageRecognitionDialog OCR contract wiring', () => {
         expect(source).not.toContain("formData.append('cancelled'");
     });
 
-    test('legacy untyped error catch (.canceled / .processed) is fully removed', () => {
+    test('untyped error catch (.canceled / .processed) is fully removed', () => {
         const source = readSource(DIALOG_PATH);
         expect(source).not.toContain('error.canceled');
         expect(source).not.toContain('error.processed');

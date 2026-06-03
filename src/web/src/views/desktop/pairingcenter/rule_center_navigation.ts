@@ -1,11 +1,11 @@
 export type RuleCenterDomain = 'transfer' | 'duplicate' | 'investment' | 'learning' | 'llm';
 export type RuleCenterTab = 'overview' | 'rules' | 'config' | 'ocr-config';
-export type LegacyRuleTab = 'rules' | 'accounts' | 'learning' | 'recurring';
+export type RuleConfigTab = 'rules' | 'accounts' | 'learning' | 'recurring';
 
 export interface RuleCenterSelection {
     domain: RuleCenterDomain;
     tab: RuleCenterTab;
-    legacyRuleTab: LegacyRuleTab;
+    ruleConfigTab: RuleConfigTab;
     shouldRewriteQuery: boolean;
 }
 
@@ -39,7 +39,7 @@ export function normalizeRuleCenterTab(domain: RuleCenterDomain, tab?: string): 
     return tab === 'rules' ? 'rules' : 'overview';
 }
 
-function normalizeLegacyRuleTab(tab?: string): LegacyRuleTab {
+function normalizeRuleConfigTab(tab?: string): RuleConfigTab {
     if (tab === 'accounts' || tab === 'learning' || tab === 'recurring') {
         return tab;
     }
@@ -50,126 +50,30 @@ function normalizeLegacyRuleTab(tab?: string): LegacyRuleTab {
 export function normalizeRuleCenterSelection(input: {
     domain?: unknown;
     tab?: unknown;
-    view?: unknown;
-    pairType?: unknown;
 }): RuleCenterSelection {
     const domain = firstString(input.domain);
     const tab = firstString(input.tab);
-    const view = firstString(input.view);
-    const pairType = firstString(input.pairType);
 
     if (domain === 'investment') {
-        return {
-            domain: 'transfer',
-            tab: 'rules',
-            legacyRuleTab: 'rules',
-            shouldRewriteQuery: true,
-        };
+        return defaultRuleCenterSelection();
     }
 
     if (isRuleCenterDomain(domain)) {
         return {
             domain,
             tab: normalizeRuleCenterTab(domain, tab),
-            legacyRuleTab: normalizeLegacyRuleTab(tab),
+            ruleConfigTab: normalizeRuleConfigTab(tab),
             shouldRewriteQuery: false,
         };
     }
+    return defaultRuleCenterSelection();
+}
 
-    if (pairType === 'investment') {
-        return {
-            domain: 'transfer',
-            tab: 'rules',
-            legacyRuleTab: 'rules',
-            shouldRewriteQuery: true,
-        };
-    }
-
-    if (pairType === 'duplicate') {
-        return {
-            domain: 'duplicate',
-            tab: 'overview',
-            legacyRuleTab: 'rules',
-            shouldRewriteQuery: true,
-        };
-    }
-
-    if (pairType === 'transfer') {
-        return {
-            domain: 'transfer',
-            tab: 'overview',
-            legacyRuleTab: 'rules',
-            shouldRewriteQuery: true,
-        };
-    }
-
-    if (view === 'investment-settings') {
-        return {
-            domain: 'transfer',
-            tab: 'rules',
-            legacyRuleTab: 'rules',
-            shouldRewriteQuery: true,
-        };
-    }
-
-    if (view === 'learning' || view === 'learning-center') {
-        if (tab === 'llm') {
-            return {
-                domain: 'llm',
-                tab: 'overview',
-                legacyRuleTab: 'learning',
-                shouldRewriteQuery: true,
-            };
-        }
-
-        if (tab === 'ocr-config') {
-            return {
-                domain: 'llm',
-                tab: 'ocr-config',
-                legacyRuleTab: 'learning',
-                shouldRewriteQuery: true,
-            };
-        }
-
-        return {
-            domain: 'learning',
-            tab: tab === 'rules' ? 'rules' : 'overview',
-            legacyRuleTab: 'learning',
-            shouldRewriteQuery: true,
-        };
-    }
-
-    if (view === 'rules' || view === 'rule-center') {
-        if (tab === 'investment') {
-            return {
-                domain: 'transfer',
-                tab: 'rules',
-                legacyRuleTab: 'rules',
-                shouldRewriteQuery: true,
-            };
-        }
-
-        if (tab === 'learning') {
-            return {
-                domain: 'learning',
-                tab: 'rules',
-                legacyRuleTab: 'learning',
-                shouldRewriteQuery: true,
-            };
-        }
-
-        return {
-            domain: 'transfer',
-            tab: 'rules',
-            legacyRuleTab: normalizeLegacyRuleTab(tab),
-            shouldRewriteQuery: true,
-        };
-    }
-
+function defaultRuleCenterSelection(): RuleCenterSelection {
     return {
         domain: 'transfer',
         tab: 'overview',
-        legacyRuleTab: 'rules',
+        ruleConfigTab: 'rules',
         shouldRewriteQuery: false,
     };
 }
@@ -178,12 +82,12 @@ export function buildRuleCenterQuery(
     currentQuery: Record<string, unknown>,
     domain: RuleCenterDomain,
     tab: RuleCenterTab,
-    legacyRuleTab: LegacyRuleTab = 'rules'
+    ruleConfigTab: RuleConfigTab = 'rules'
 ): Record<string, string> {
     const nextQuery: Record<string, string> = {};
 
     for (const [key, value] of Object.entries(currentQuery)) {
-        if (key === 'domain' || key === 'tab' || key === 'view' || key === 'pairType') {
+        if (key === 'domain' || key === 'tab') {
             continue;
         }
 
@@ -193,8 +97,8 @@ export function buildRuleCenterQuery(
     }
 
     nextQuery['domain'] = domain;
-    nextQuery['tab'] = domain === 'transfer' && tab === 'rules' && (legacyRuleTab === 'recurring' || legacyRuleTab === 'accounts')
-        ? legacyRuleTab
+    nextQuery['tab'] = domain === 'transfer' && tab === 'rules' && (ruleConfigTab === 'recurring' || ruleConfigTab === 'accounts')
+        ? ruleConfigTab
         : normalizeRuleCenterTab(domain, tab);
     return nextQuery;
 }

@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -55,17 +55,7 @@ fn record_f64(record: &Map<String, Value>, key: &str) -> bill_analyser_db::DbRes
 
 fn money_from_record(record: &Map<String, Value>, key: &str) -> bill_analyser_db::DbResult<Money> {
     let value = record_f64(record, key)?;
-    Money::from_yuan_str(&python_float_text(value)).map_err(runtime_error)
-}
-
-fn optional_money_from_record(
-    record: &Map<String, Value>,
-    key: &str,
-) -> bill_analyser_db::DbResult<Option<Money>> {
-    match record.get(key) {
-        Some(Value::Null) | None => Ok(None),
-        Some(_) => money_from_record(record, key).map(Some),
-    }
+    Money::from_yuan_str(&finite_float_text(value)).map_err(runtime_error)
 }
 
 fn frontend_tag_from_value(value: &Value) -> Option<FrontendTransactionTag> {
@@ -98,7 +88,7 @@ fn is_non_empty_value(value: &Value) -> bool {
     }
 }
 
-fn python_float_text(value: f64) -> String {
+fn finite_float_text(value: f64) -> String {
     let text = value.to_string();
     if value.is_finite() && !text.contains('.') && !text.contains('e') && !text.contains('E') {
         format!("{text}.0")
@@ -125,11 +115,6 @@ mod value_helper_tests {
         invalid_record.insert("amount".to_string(), Value::String("not-a-number".to_string()));
         assert!(record_f64(&invalid_record, "amount").is_err());
         assert!(record_f64(&Map::new(), "amount").is_err());
-        assert!(optional_money_from_record(&invalid_record, "amount").is_err());
-
-        let mut null_record = Map::new();
-        null_record.insert("amount".to_string(), Value::Null);
-        assert_eq!(optional_money_from_record(&null_record, "amount").unwrap(), None);
 
         assert_eq!(
             frontend_tag_from_value(&json!({"id": true, "name": false}))

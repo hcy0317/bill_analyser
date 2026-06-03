@@ -108,7 +108,7 @@
                                                           @delete="confirmDeletePair" />
                                 </template>
 
-                                <template v-else-if="activeDomain === 'transfer' && activeTab === 'rules' && activeLegacyRuleTab === 'rules'">
+                                <template v-else-if="activeDomain === 'transfer' && activeTab === 'rules' && activeRuleConfigTab === 'rules'">
                                     <div class="embedded-rule-panel">
                                         <rule-center-panel init-tab="rules"
                                                            ref="categoryRulePanel"
@@ -119,7 +119,7 @@
                                     </div>
                                 </template>
 
-                                <template v-else-if="activeDomain === 'transfer' && activeTab === 'rules' && activeLegacyRuleTab === 'accounts'">
+                                <template v-else-if="activeDomain === 'transfer' && activeTab === 'rules' && activeRuleConfigTab === 'accounts'">
                                     <div class="embedded-rule-panel">
                                         <AccountRulePanel
                                             ref="accountRulePanel"
@@ -129,7 +129,7 @@
                                     </div>
                                 </template>
 
-                                <template v-else-if="activeDomain === 'transfer' && activeTab === 'rules' && activeLegacyRuleTab === 'recurring'">
+                                <template v-else-if="activeDomain === 'transfer' && activeTab === 'rules' && activeRuleConfigTab === 'recurring'">
                                     <div class="embedded-rule-panel">
                                         <rule-center-panel init-tab="recurring"
                                                            ref="recurringRulePanel"
@@ -224,7 +224,7 @@ import {
     buildRuleCenterQuery,
     normalizeRuleCenterSelection,
     normalizeRuleCenterTab,
-    type LegacyRuleTab,
+    type RuleConfigTab,
     type RuleCenterDomain,
     type RuleCenterSelection,
     type RuleCenterTab,
@@ -251,13 +251,11 @@ type PrimaryNavOption = {
 type SecondaryTabOption = {
     value: SecondaryNavValue;
     label: string;
-    selection: Pick<RuleCenterSelection, 'domain' | 'tab' | 'legacyRuleTab'>;
+    selection: Pick<RuleCenterSelection, 'domain' | 'tab' | 'ruleConfigTab'>;
 };
 
 const props = defineProps<{
     initDomain?: unknown;
-    initPairType?: unknown;
-    initView?: unknown;
     initTab?: unknown;
 }>();
 
@@ -270,13 +268,11 @@ const matchingStore = useMatchingStore();
 const initialSelection = normalizeRuleCenterSelection({
     domain: props.initDomain,
     tab: props.initTab,
-    view: props.initView,
-    pairType: props.initPairType,
 });
 
 const activeDomain = ref<RuleCenterDomain>(initialSelection.domain);
 const activeTab = ref<RuleCenterTab>(initialSelection.tab);
-const activeLegacyRuleTab = ref<LegacyRuleTab>(initialSelection.legacyRuleTab);
+const activeRuleConfigTab = ref<RuleConfigTab>(initialSelection.ruleConfigTab);
 const alwaysShowNav = ref<boolean>(display.mdAndUp.value);
 const showNav = ref<boolean>(display.mdAndUp.value);
 const showDeleteDialog = ref(false);
@@ -342,11 +338,11 @@ const activeSecondary = computed<SecondaryNavValue>(() => {
         return 'duplicate-overview';
     }
 
-    if (activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeLegacyRuleTab.value === 'recurring') {
+    if (activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeRuleConfigTab.value === 'recurring') {
         return 'recurring-recognition';
     }
 
-    if (activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeLegacyRuleTab.value === 'accounts') {
+    if (activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeRuleConfigTab.value === 'accounts') {
         return 'account-recognition';
     }
 
@@ -386,7 +382,7 @@ function secondaryTabsForPrimary(primary: PrimaryNavValue): SecondaryTabOption[]
                 selection: {
                     domain: 'transfer',
                     tab: 'overview',
-                    legacyRuleTab: 'rules',
+                    ruleConfigTab: 'rules',
                 },
             },
             {
@@ -395,7 +391,7 @@ function secondaryTabsForPrimary(primary: PrimaryNavValue): SecondaryTabOption[]
                 selection: {
                     domain: 'duplicate',
                     tab: 'overview',
-                    legacyRuleTab: 'rules',
+                    ruleConfigTab: 'rules',
                 },
             },
         ];
@@ -409,7 +405,7 @@ function secondaryTabsForPrimary(primary: PrimaryNavValue): SecondaryTabOption[]
                 selection: {
                     domain: 'transfer',
                     tab: 'rules',
-                    legacyRuleTab: 'rules',
+                    ruleConfigTab: 'rules',
                 },
             },
             {
@@ -418,7 +414,7 @@ function secondaryTabsForPrimary(primary: PrimaryNavValue): SecondaryTabOption[]
                 selection: {
                     domain: 'transfer',
                     tab: 'rules',
-                    legacyRuleTab: 'accounts',
+                    ruleConfigTab: 'accounts',
                 },
             },
             {
@@ -427,7 +423,7 @@ function secondaryTabsForPrimary(primary: PrimaryNavValue): SecondaryTabOption[]
                 selection: {
                     domain: 'transfer',
                     tab: 'rules',
-                    legacyRuleTab: 'recurring',
+                    ruleConfigTab: 'recurring',
                 },
             },
         ];
@@ -441,7 +437,7 @@ function secondaryTabsForPrimary(primary: PrimaryNavValue): SecondaryTabOption[]
                 selection: {
                     domain: 'learning',
                     tab: 'overview',
-                    legacyRuleTab: 'learning',
+                    ruleConfigTab: 'learning',
                 },
             },
             {
@@ -450,7 +446,7 @@ function secondaryTabsForPrimary(primary: PrimaryNavValue): SecondaryTabOption[]
                 selection: {
                     domain: 'learning',
                     tab: 'rules',
-                    legacyRuleTab: 'learning',
+                    ruleConfigTab: 'learning',
                 },
             },
         ];
@@ -463,7 +459,7 @@ function secondaryTabsForPrimary(primary: PrimaryNavValue): SecondaryTabOption[]
             selection: {
                 domain: 'llm',
                 tab: 'overview',
-                legacyRuleTab: 'learning',
+                ruleConfigTab: 'learning',
             },
         },
         {
@@ -472,7 +468,7 @@ function secondaryTabsForPrimary(primary: PrimaryNavValue): SecondaryTabOption[]
             selection: {
                 domain: 'llm',
                 tab: 'config',
-                legacyRuleTab: 'learning',
+                ruleConfigTab: 'learning',
             },
         },
         {
@@ -481,7 +477,7 @@ function secondaryTabsForPrimary(primary: PrimaryNavValue): SecondaryTabOption[]
             selection: {
                 domain: 'llm',
                 tab: 'ocr-config',
-                legacyRuleTab: 'learning',
+                ruleConfigTab: 'learning',
             },
         },
     ];
@@ -497,13 +493,13 @@ const isPairingOverview = computed(() =>
     (activeDomain.value === 'transfer' || activeDomain.value === 'duplicate') && activeTab.value === 'overview'
 );
 const isCategoryRecognition = computed(() =>
-    activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeLegacyRuleTab.value === 'rules'
+    activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeRuleConfigTab.value === 'rules'
 );
 const isRecurringRecognition = computed(() =>
-    activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeLegacyRuleTab.value === 'recurring'
+    activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeRuleConfigTab.value === 'recurring'
 );
 const isAccountRecognition = computed(() =>
-    activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeLegacyRuleTab.value === 'accounts'
+    activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeRuleConfigTab.value === 'accounts'
 );
 const showLearningHeaderActions = computed(() =>
     activeDomain.value === 'learning' || activeDomain.value === 'llm'
@@ -542,29 +538,29 @@ function collapseNavOnMobile(): void {
     }
 }
 
-function syncQuery(domain: RuleCenterDomain, tab: RuleCenterTab, legacyRuleTab: LegacyRuleTab): void {
+function syncQuery(domain: RuleCenterDomain, tab: RuleCenterTab, ruleConfigTab: RuleConfigTab): void {
     void router.replace({
         path: '/pairing/list',
-        query: buildRuleCenterQuery(route.query, domain, tab, legacyRuleTab),
+        query: buildRuleCenterQuery(route.query, domain, tab, ruleConfigTab),
     });
 }
 
-function applySelection(selection: Pick<RuleCenterSelection, 'domain' | 'tab' | 'legacyRuleTab'>): void {
+function applySelection(selection: Pick<RuleCenterSelection, 'domain' | 'tab' | 'ruleConfigTab'>): void {
     const nextTab = normalizeRuleCenterTab(selection.domain, selection.tab);
     const unchanged = activeDomain.value === selection.domain
         && activeTab.value === nextTab
-        && activeLegacyRuleTab.value === selection.legacyRuleTab;
+        && activeRuleConfigTab.value === selection.ruleConfigTab;
 
     activeDomain.value = selection.domain;
     activeTab.value = nextTab;
-    activeLegacyRuleTab.value = selection.legacyRuleTab;
+    activeRuleConfigTab.value = selection.ruleConfigTab;
     collapseNavOnMobile();
 
     if (unchanged) {
         return;
     }
 
-    syncQuery(activeDomain.value, activeTab.value, activeLegacyRuleTab.value);
+    syncQuery(activeDomain.value, activeTab.value, activeRuleConfigTab.value);
     void refreshActiveView();
 }
 
@@ -638,21 +634,19 @@ watch(() => display.mdAndUp.value, (newValue) => {
 });
 
 watch(
-    () => [props.initDomain, props.initView, props.initPairType, props.initTab] as const,
-    ([initDomain, initView, initPairType, initTab]) => {
+    () => [props.initDomain, props.initTab] as const,
+    ([initDomain, initTab]) => {
         const selection = normalizeRuleCenterSelection({
             domain: initDomain,
             tab: initTab,
-            view: initView,
-            pairType: initPairType,
         });
 
         activeDomain.value = selection.domain;
         activeTab.value = selection.tab;
-        activeLegacyRuleTab.value = selection.legacyRuleTab;
+        activeRuleConfigTab.value = selection.ruleConfigTab;
 
         if (selection.shouldRewriteQuery) {
-            syncQuery(selection.domain, selection.tab, selection.legacyRuleTab);
+            syncQuery(selection.domain, selection.tab, selection.ruleConfigTab);
         }
     },
     { immediate: true }

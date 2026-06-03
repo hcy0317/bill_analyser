@@ -251,15 +251,6 @@
                 v-model:value="account.comment"
             ></f7-list-input>
 
-            <f7-list-input
-                type="text"
-                clear-button
-                :label="tt('Account Aliases')"
-                :placeholder="tt('Enter aliases for account matching (optional)')"
-                :value="formatAliasText(account.aliases)"
-                @input="updateAccountAliases(account, $event)"
-            ></f7-list-input>
-
             <f7-list-item
                 v-if="editAccountId"
                 :title="tt('Account Recognition Rules')"
@@ -358,15 +349,6 @@
                 :placeholder="tt('Your account description (optional)')"
                 v-textarea-auto-size
                 v-model:value="account.comment"
-            ></f7-list-input>
-
-            <f7-list-input
-                type="text"
-                clear-button
-                :label="tt('Account Aliases')"
-                :placeholder="tt('Enter aliases for account matching (optional)')"
-                :value="formatAliasText(account.aliases)"
-                @input="updateAccountAliases(account, $event)"
             ></f7-list-input>
 
             <f7-list-item
@@ -521,15 +503,6 @@
                     :placeholder="tt('Your sub-account description (optional)')"
                     v-textarea-auto-size
                     v-model:value="subAccount.comment"
-                ></f7-list-input>
-
-                <f7-list-input
-                    type="text"
-                    clear-button
-                    :label="tt('Account Aliases')"
-                    :placeholder="tt('Enter aliases for account matching (optional)')"
-                    :value="formatAliasText(subAccount.aliases)"
-                    @input="updateAccountAliases(subAccount, $event)"
                 ></f7-list-input>
 
                 <f7-list-item
@@ -776,24 +749,6 @@ function removeSubAccount(currentSubAccount: Account | null, confirm: boolean): 
             subAccountContexts.value.splice(index, 1);
         }
     }
-}
-
-function formatAliasText(aliases?: string[]): string {
-    return aliases?.join(', ') ?? '';
-}
-
-function parseAliasText(value: string): string[] {
-    const aliases = value
-        .split(/[,;，；\n]/)
-        .map(alias => alias.trim())
-        .filter(alias => alias.length > 0);
-
-    return Array.from(new Set(aliases));
-}
-
-function updateAccountAliases(targetAccount: Account, event: Event): void {
-    const input = event.target as HTMLInputElement | null;
-    targetAccount.aliases = parseAliasText(input?.value ?? '');
 }
 
 function showDateTimeDialog(accountContext: AccountContext, sheetMode: string): void {

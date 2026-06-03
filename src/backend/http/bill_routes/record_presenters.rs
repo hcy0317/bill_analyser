@@ -1,33 +1,6 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
-
-fn page_to_frontend(
-    connection: &Connection,
-    user_id: UserId,
-    page: usize,
-    page_size: usize,
-    bill_page: bill_analyser_db::BillPage,
-) -> bill_analyser_db::DbResult<Value> {
-    let mut items = Vec::with_capacity(bill_page.bills.len());
-    for bill in bill_page.bills {
-        items.push(record_to_frontend_value(connection, user_id, bill)?);
-    }
-    let total = usize::try_from(bill_page.total.max(0)).unwrap_or(usize::MAX);
-    Ok(json!({
-        "success": true,
-        "result": {
-            "items": items,
-            "totalCount": bill_page.total,
-            "page": page,
-            "pageSize": page_size,
-            "total": bill_page.total,
-            "page_size": page_size,
-            "total_pages": total.div_ceil(page_size),
-        }
-    }))
-}
-
 async fn page_to_frontend_postgres(
     pool: &PostgresPool,
     user_id: UserId,
@@ -56,17 +29,6 @@ async fn page_to_frontend_postgres(
         }
     }))
 }
-
-fn get_frontend_bill(
-    connection: &Connection,
-    user_id: UserId,
-    bill_id: i64,
-) -> bill_analyser_db::DbResult<Option<Value>> {
-    get_bill_by_id(connection, user_id, bill_id)?
-        .map(|record| record_to_frontend_value(connection, user_id, record))
-        .transpose()
-}
-
 async fn get_postgres_frontend_bill(
     pool: &PostgresPool,
     user_id: UserId,
@@ -79,18 +41,6 @@ async fn get_postgres_frontend_bill(
     let category_id = value_string(record.get("category_id"));
     record_to_frontend_value_with_related(record, tags, category_id).map(Some)
 }
-
-fn record_to_frontend_value(
-    connection: &Connection,
-    user_id: UserId,
-    record: BillRecord,
-) -> bill_analyser_db::DbResult<Value> {
-    let bill_id = record_i64(&record, "id").unwrap_or(0);
-    let tags = get_bill_tags(connection, user_id, bill_id)?;
-    let category_id = category_id_for_record(connection, user_id, &record)?;
-    record_to_frontend_value_with_related(record, tags, category_id)
-}
-
 fn record_to_frontend_value_with_related(
     record: BillRecord,
     tags: Vec<Value>,
@@ -126,117 +76,4 @@ fn record_to_frontend_value_with_related(
     };
     serde_json::to_value(frontend_transaction_from_backend(&bill))
         .map_err(|error| bill_analyser_db::DbError::InvalidOperation(error.to_string()))
-}
-
-fn category_filters_for_ids(
-    connection: &Connection,
-    user_id: UserId,
-    category_ids: &[i64],
-) -> rusqlite::Result<Vec<BillCategoryFilter>> {
-    if !table_exists(connection, "categories")? {
-        return Ok(Vec::new());
-    }
-    let category_ids = category_ids
-        .iter()
-        .copied()
-        .filter(|value| *value > 0)
-        .collect::<Vec<_>>();
-    if category_ids.is_empty() {
-        return Ok(Vec::new());
-    }
-    let placeholders = std::iter::repeat_n("?", category_ids.len())
-        .collect::<Vec<_>>()
-        .join(",");
-    let mut params = category_ids
-        .iter()
-        .copied()
-        .map(SqlValue::Integer)
-        .collect::<Vec<_>>();
-    params.push(SqlValue::Integer(user_id.get() as i64));
-    let mut statement = connection.prepare(&format!(
-        "SELECT main_category, sub_category FROM categories WHERE id IN ({placeholders}) AND user_id = ?"
-    ))?;
-    let rows = statement.query_map(params_from_iter(params), |row| {
-        Ok(BillCategoryFilter {
-            main: row.get::<_, String>(0)?,
-            sub: row
-                .get::<_, Option<String>>(1)?
-                .filter(|value| !value.is_empty()),
-        })
-    })?;
-    let mut filters = Vec::new();
-    for row in rows {
-        filters.push(row?);
-    }
-    Ok(filters)
-}
-
-fn category_id_for_record(
-    connection: &Connection,
-    user_id: UserId,
-    record: &BillRecord,
-) -> bill_analyser_db::DbResult<Option<String>> {
-    if !table_exists(connection, "categories").map_err(bill_analyser_db::DbError::from)? {
-        return Ok(None);
-    }
-    let main = record_text(record, "main_category");
-    if main.trim().is_empty() {
-        return Ok(None);
-    }
-    let sub = record_text(record, "sub_category");
-    let id = connection
-        .query_row(
-            "SELECT id FROM categories WHERE user_id = ?1 AND main_category = ?2 AND sub_category = ?3 LIMIT 1",
-            params![user_id.get() as i64, main, sub],
-            |row| row.get::<_, i64>(0),
-        )
-        .optional()
-        .map_err(bill_analyser_db::DbError::from)?;
-    Ok(id.map(|value| value.to_string()))
-}
-
-fn apply_category_id(
-    connection: &Connection,
-    user_id: UserId,
-    fields: &mut Map<String, Value>,
-    category_id: &str,
-) -> RouteResult<()> {
-    let Some(category_id) = parse_positive_i64(category_id) else {
-        return Ok(());
-    };
-    let category = resolve_category_by_id(connection, user_id, category_id)
-        .map_err(|_| Box::new(db_error_response()))?;
-    if let Some((main, sub)) = category {
-        fields.insert("main_category".to_string(), Value::String(main));
-        fields.insert("sub_category".to_string(), Value::String(sub));
-    }
-    Ok(())
-}
-
-fn resolve_category_by_id(
-    connection: &Connection,
-    user_id: UserId,
-    category_id: i64,
-) -> rusqlite::Result<Option<(String, String)>> {
-    if !table_exists(connection, "categories")? {
-        return Ok(None);
-    }
-    connection
-        .query_row(
-            "SELECT main_category, sub_category FROM categories WHERE id = ?1 AND user_id = ?2",
-            params![category_id, user_id.get() as i64],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        )
-        .optional()
-}
-
-fn table_exists(connection: &Connection, table_name: &str) -> rusqlite::Result<bool> {
-    connection
-        .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
-            params![table_name],
-            |row| row.get::<_, i64>(0),
-        )
-        .optional()
-        .map(|value| value.is_some())
 }

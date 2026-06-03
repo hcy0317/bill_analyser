@@ -248,8 +248,8 @@ describe('historyGrouping helpers', () => {
             type: BudgetType.Investment,
             category: '基金'
         });
-        const legacyUnknown = createHistoryItem({
-            id: 'legacy',
+        const uncategorizedUnknown = createHistoryItem({
+            id: 'unknown',
             type: undefined,
             category: '交通'
         });
@@ -257,7 +257,7 @@ describe('historyGrouping helpers', () => {
         expect(filterHistoricalBudgetItemsByType([
             expense,
             investment,
-            legacyUnknown
-        ], BudgetType.Expense).map(item => item.id)).toStrictEqual(['expense', 'legacy']);
+            uncategorizedUnknown
+        ], BudgetType.Expense).map(item => item.id)).toStrictEqual(['expense', 'unknown']);
     });
 });

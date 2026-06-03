@@ -40,7 +40,7 @@ export function getFiscalYearStartUnixTime(unixTime: number, fiscalYearStartValu
     const date = moment.unix(unixTime);
 
     // 若财年从 1 月 1 日开始，则财年起点总是输入公历年的 1 月 1 日
-    // 注意：这里使用宽松相等，以兼容潜在的类型不匹配（string vs number）
+    // 注意：这里使用宽松相等，以处理潜在的类型不匹配（string vs number）
 
     if (fiscalYearStartValue == FiscalYearStart.JanuaryFirstDay.value) {
         return moment().year(date.year()).month(0).date(1).hour(0).minute(0).second(0).millisecond(0).unix();

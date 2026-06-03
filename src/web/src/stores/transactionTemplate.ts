@@ -190,7 +190,7 @@ export const useTransactionTemplatesStore = defineStore('transactionTemplates', 
                     logger.error('failed to load template list', error);
                 }
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve template list' });
@@ -230,7 +230,7 @@ export const useTransactionTemplatesStore = defineStore('transactionTemplates', 
             }).catch(error => {
                 logger.error('failed to load template info', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve template' });
@@ -282,7 +282,7 @@ export const useTransactionTemplatesStore = defineStore('transactionTemplates', 
             }).catch(error => {
                 logger.error('failed to save template', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     if (!isEdit) {
@@ -360,7 +360,7 @@ export const useTransactionTemplatesStore = defineStore('transactionTemplates', 
             }).catch(error => {
                 logger.error('failed to save templates display order', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to move template' });
@@ -399,7 +399,7 @@ export const useTransactionTemplatesStore = defineStore('transactionTemplates', 
             }).catch(error => {
                 logger.error('failed to change template visibility', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     if (hidden) {
@@ -439,7 +439,7 @@ export const useTransactionTemplatesStore = defineStore('transactionTemplates', 
             }).catch(error => {
                 logger.error('failed to delete template', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to delete this template' });

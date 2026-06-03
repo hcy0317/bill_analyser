@@ -34,7 +34,7 @@ export const useTokensStore = defineStore('tokens', () => {
             }).catch(error => {
                 logger.error('failed to load token list', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve session list' });
@@ -79,7 +79,7 @@ export const useTokensStore = defineStore('tokens', () => {
                     userStore.storeUserBasicInfo(data.result.user);
                 }
 
-                // 异步撤销旧 Token（不影响主流程）
+                // 异步撤销被轮换的 Token（不影响主流程）
                 if (data.result.oldTokenId) {
                     revokeToken({
                         tokenId: data.result.oldTokenId,
@@ -123,7 +123,7 @@ export const useTokensStore = defineStore('tokens', () => {
             }).catch(error => {
                 logger.error('failed to generate token', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to generate token' });
@@ -148,7 +148,7 @@ export const useTokensStore = defineStore('tokens', () => {
             }).catch(error => {
                 logger.error('failed to revoke token', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to logout from this session' });
@@ -173,7 +173,7 @@ export const useTokensStore = defineStore('tokens', () => {
             }).catch(error => {
                 logger.error('failed to revoke all tokens', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to logout all other sessions' });

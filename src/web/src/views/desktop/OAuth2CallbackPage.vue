@@ -24,10 +24,10 @@
                     <v-card variant="flat" class="w-100 mt-0 px-4 pt-12" max-width="500">
                         <v-card-text>
                             <h4 class="text-h4 mb-2">{{ oauth2LoginDisplayName }}</h4>
-                            <p class="mb-0" v-if="!error && !errorMessage && platform && token && !userName">{{ tt('Logging in...') }}</p>
-                            <p class="mb-0" v-else-if="!error && !errorMessage && userName">{{ tt('format.misc.oauth2bindTip', { providerName: oauth2ProviderDisplayName, userName: userName }) }}</p>
+                            <p class="mb-0" v-if="!error && !message && platform && token && !userName">{{ tt('Logging in...') }}</p>
+                            <p class="mb-0" v-else-if="!error && !message && userName">{{ tt('format.misc.oauth2bindTip', { providerName: oauth2ProviderDisplayName, userName: userName }) }}</p>
                             <p class="mb-0" v-else-if="error">{{ te({ error }) }}</p>
-                            <p class="mb-0" v-else-if="errorMessage">{{ errorMessage }}</p>
+                            <p class="mb-0" v-else-if="message">{{ message }}</p>
                             <p class="mb-0" v-else>{{ tt('An error occurred') }}</p>
                         </v-card-text>
 
@@ -142,7 +142,7 @@ const props = defineProps<{
     platform?: string;
     userName?: string;
     errorCode?: string;
-    errorMessage?: string;
+    message?: string;
 }>();
 
 const router = useRouter();
@@ -174,8 +174,8 @@ const oauth2ProviderDisplayName = computed<string>(() => getLocalizedOAuth2Provi
 const oauth2LoginDisplayName = computed<string>(() => getLocalizedOAuth2LoginText(props.provider ?? '', getOIDCCustomDisplayNames()));
 
 const error = computed<ErrorResponse | undefined>(() => {
-    if (props.errorCode && props.errorMessage) {
-        return buildErrorResponse(parseInt(props.errorCode), props.errorMessage);
+    if (props.errorCode && props.message) {
+        return buildErrorResponse(parseInt(props.errorCode), props.message);
     } else {
         return undefined;
     }

@@ -60,7 +60,7 @@ BEGIN {
     SOLAR_TERMS_INDEX["Winter Solstice"] = 24;
 
     # variables
-    errorMessage = "";
+    awkErrorText = "";
     chineseYear = GREGORIAN_CALENDAR_1999_1_1_CHINESE_YEAR;
     chineseMonth = GREGORIAN_CALENDAR_1999_1_1_CHINESE_MONTH;
     chineseDay = 0;
@@ -79,8 +79,8 @@ BEGIN {
 }
 {
     # check whether the provided data is invalid
-    if (index($0, "Error: ") == 1 || errorMessage != "") {
-        errorMessage = $0;
+    if (index($0, "Error: ") == 1 || awkErrorText != "") {
+        awkErrorText = $0;
         next;
     }
 
@@ -159,8 +159,8 @@ BEGIN {
     chineseDay = nextChineseDay;
 }
 END {
-    if (errorMessage != "") {
-        print errorMessage;
+    if (awkErrorText != "") {
+        print awkErrorText;
         exit;
     }
 

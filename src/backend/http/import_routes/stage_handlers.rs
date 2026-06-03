@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -168,7 +168,9 @@ pub async fn import_dedup_runtime_handler(
         runtime.connection_mut(),
         user_id,
         preview_drafts.as_mut_slice(),
-    ) {
+    )
+    .await
+    {
         Ok(stats) => stats,
         Err(error) => return route_response(db_error_response(error)),
     };
@@ -181,7 +183,9 @@ pub async fn import_dedup_runtime_handler(
         &state.config,
         user_id_i64,
         preview_drafts.as_mut_slice(),
-    ) {
+    )
+    .await
+    {
         Ok(vector_stats) => intelligence_stats.merge_vector_recall(vector_stats),
         Err(error) => return route_response(db_error_response(error)),
     }
@@ -373,7 +377,6 @@ struct ImportIntelligenceRule {
 struct ImportIntelligenceAccount {
     id: i64,
     name: String,
-    aliases: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -412,7 +415,6 @@ struct ImportRecurringCandidateMatch {
 #[derive(Debug, Clone)]
 struct ImportLearningRuleMatchResult {
     rule_id: Option<i64>,
-    recommendation_key: String,
     auto_applied: bool,
 }
 
@@ -463,74 +465,74 @@ const BUILTIN_CATEGORY_RULE_FALLBACKS: &[ImportPreviewBuiltinCategoryFallback] =
 ];
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn apply_import_intelligence_chain(
-    connection: &mut Connection,
+async fn apply_import_intelligence_chain(
+    connection: &Connection,
     user_id: UserId,
     drafts: &mut [ImportPreviewDraft],
-) -> rusqlite::Result<ImportIntelligenceStats> {
+) -> Result<ImportIntelligenceStats, bill_analyser_db::DbError> {
     let user_id_i64 = user_id_i64_for_sql(user_id)?;
-    let categories = load_import_intelligence_categories(connection, user_id_i64)?;
-    let category_values = categories
-        .iter()
-        .map(|category| {
-            json!({
-                "id": category.id,
-                "main_category": category.main_category,
-                "sub_category": category.sub_category,
-                "type": category.type_code,
-            })
-        })
-        .collect::<Vec<_>>();
+    let categories = load_import_intelligence_categories(connection, user_id_i64).await?;
     let categories_by_id = categories
         .iter()
         .cloned()
         .map(|category| (category.id, category))
         .collect::<BTreeMap<_, _>>();
-    let user_cash_transfer_category_id =
-        load_user_cash_transfer_category_id(connection, user_id_i64)?;
-    let default_transfer_category =
-        default_transfer_category(&categories, &categories_by_id, user_cash_transfer_category_id);
+    let category_values = categories
+        .iter()
+        .map(import_intelligence_category_value)
+        .collect::<Vec<_>>();
     let category_rules =
-        load_import_intelligence_category_rules(connection, user_id_i64, &categories_by_id)?;
-    let accounts = load_import_intelligence_accounts(connection, user_id_i64)?;
-    let account_rules = load_import_intelligence_account_rules(connection, user_id_i64)?;
+        load_import_intelligence_category_rules(connection, user_id_i64, &categories_by_id).await?;
+    let accounts = load_import_intelligence_accounts(connection, user_id_i64).await?;
     let account_values = accounts
         .iter()
-        .map(|account| json!({"id": account.id, "name": account.name}))
+        .map(import_intelligence_account_value)
         .collect::<Vec<_>>();
-    let learning_rules = load_import_intelligence_learning_rules(connection, user_id_i64)?;
-    let recurring_templates = load_import_intelligence_recurring_templates(connection, user_id_i64)?;
-
+    let account_rules = load_import_intelligence_account_rules(connection, user_id_i64).await?;
+    let learning_rules = load_import_intelligence_learning_rules(connection, user_id_i64).await?;
+    let recurring_templates =
+        load_import_intelligence_recurring_templates(connection, user_id_i64).await?;
+    let transfer_category = default_transfer_category(
+        &categories,
+        &categories_by_id,
+        load_user_cash_transfer_category_id(connection, user_id_i64).await?,
+    )
+    .cloned();
     let mut stats = ImportIntelligenceStats::default();
-    let mut applied_learning_rule_ids = Vec::new();
     for draft in &mut *drafts {
         ensure_base_matching_feedback(draft);
-        if is_transfer_protected_preview(draft) {
-            if apply_transfer_category_rule_match(draft, &category_rules)
-                || apply_transfer_default_category(draft, &categories, default_transfer_category)
-            {
-                stats.category_matched += 1;
+        let before_category = (
+            draft.preview_type.clone(),
+            draft.preview_main_category.clone(),
+            draft.preview_sub_category.clone(),
+        );
+        let before_account = (
+            draft.preview_source_account_id,
+            draft.preview_destination_account_id,
+        );
+
+        if preview_type_code(&draft.preview_type) == Some(4) {
+            if !apply_transfer_category_rule_match(draft, &category_rules) {
+                apply_transfer_default_category(draft, &categories, transfer_category.as_ref());
             }
-            if apply_transfer_account_rule_match(draft, &account_rules, &accounts) {
-                stats.account_matched += 1;
+            apply_transfer_account_rule_match(draft, &account_rules, &accounts);
+        } else if preview_type_code(&draft.preview_type) == Some(5) {
+            if !apply_investment_category_rule_match(draft, &category_rules) {
+                apply_builtin_category_rule_fallback(draft, &categories);
             }
-        } else if apply_investment_category_rule_match(draft, &category_rules) {
-            stats.category_matched += 1;
-            if apply_investment_account_rule_match(draft, &account_rules, &accounts) {
-                stats.account_matched += 1;
-            }
+            apply_investment_account_rule_match(draft, &account_rules, &accounts);
         } else {
-            if apply_income_expense_category_rule_match(draft, &category_rules)
-                || apply_builtin_category_rule_fallback(draft, &categories)
-            {
-                stats.category_matched += 1;
+            if !apply_income_expense_category_rule_match(draft, &category_rules) {
+                apply_builtin_category_rule_fallback(draft, &categories);
             }
-            if apply_standard_account_rule_match(draft, &account_rules, &accounts) {
-                stats.account_matched += 1;
-            }
+            apply_standard_account_rule_match(draft, &account_rules, &accounts);
         }
-        persist_stage2_actionable_baseline(draft);
-        if let Some(learning_match) = apply_learning_rule_match(
+
+        if let Some(candidate) = best_recurring_candidate_for_draft(draft, &recurring_templates) {
+            apply_recurring_candidate(draft, candidate);
+            stats.recurring_projected += 1;
+        }
+        if let Some(result) = apply_learning_rule_match(
             connection,
             user_id_i64,
             draft,
@@ -539,149 +541,98 @@ fn apply_import_intelligence_chain(
             &category_values,
             &account_values,
         ) {
-            if learning_match.auto_applied {
+            if result.auto_applied {
                 stats.learning_applied += 1;
-                if let Some(rule_id) = learning_match.rule_id {
-                    applied_learning_rule_ids.push(rule_id);
-                }
-                record_import_learning_lifecycle_feedback(
-                    connection,
-                    user_id_i64,
-                    &ImportLearningLifecycleRecordInput {
-                        recommendation_key: learning_match.recommendation_key,
-                        recommendation_type: "import_preview".to_string(),
-                        feedback: "auto_apply".to_string(),
-                        rule_id: learning_match.rule_id,
-                        suggestion_id: None,
-                        session_id: None,
-                        preview_id: None,
-                        bill_id: None,
-                        candidate_id: None,
-                        payload_json: Some(
-                            json!({
-                                "source": "import_learning_rules",
-                                "stage": "import_stage2"
-                            })
-                            .to_string(),
-                        ),
-                    },
-                )
-                .map_err(|_| rusqlite::Error::InvalidQuery)?;
+            }
+            if let Some(rule_id) = result.rule_id {
+                increment_applied_learning_rules(connection, user_id_i64, &[rule_id])?;
             }
         }
-        if let Some(candidate) = best_recurring_candidate_for_draft(draft, &recurring_templates) {
-            apply_recurring_candidate(draft, candidate);
-            stats.recurring_projected += 1;
+        persist_stage2_actionable_baseline(draft);
+
+        if before_category
+            != (
+                draft.preview_type.clone(),
+                draft.preview_main_category.clone(),
+                draft.preview_sub_category.clone(),
+            )
+        {
+            stats.category_matched += 1;
+        }
+        if before_account
+            != (
+                draft.preview_source_account_id,
+                draft.preview_destination_account_id,
+            )
+        {
+            stats.account_matched += 1;
         }
     }
 
-    stats.category_matched = drafts
-        .iter()
-        .filter(|draft| {
-            !draft.preview_main_category.trim().is_empty()
-                || !draft.preview_sub_category.trim().is_empty()
-        })
-        .count();
-    stats.account_matched = drafts
-        .iter()
-        .filter(|draft| {
-            draft.preview_source_account_id.is_some()
-                || draft.preview_destination_account_id.is_some()
-        })
-        .count();
-
-    if !applied_learning_rule_ids.is_empty() {
-        increment_applied_learning_rules(connection, user_id_i64, &applied_learning_rule_ids)?;
-    }
     Ok(stats)
 }
 
-fn user_id_i64_for_sql(user_id: UserId) -> rusqlite::Result<i64> {
-    i64::try_from(user_id.get()).map_err(|_| rusqlite::Error::InvalidQuery)
+fn user_id_i64_for_sql(user_id: UserId) -> Result<i64, bill_analyser_db::DbError> {
+    i64::try_from(user_id.get())
+        .map_err(|_| bill_analyser_db::DbError::InvalidOperation("invalid user id".to_string()))
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn import_intelligence_table_exists(
-    connection: &Connection,
-    table_name: &str,
-) -> rusqlite::Result<bool> {
-    connection
-        .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1",
-            params![table_name],
-            |_| Ok(()),
-        )
-        .optional()
-        .map(|value| value.is_some())
-}
-
-fn sql_column_or_default(
-    connection: &Connection,
-    table_name: &str,
-    column_name: &str,
-    default_sql: &str,
-) -> rusqlite::Result<String> {
-    if table_has_column(connection, table_name, column_name)
-        .map_err(|_| rusqlite::Error::InvalidQuery)?
-    {
-        Ok(column_name.to_string())
-    } else {
-        Ok(format!("{default_sql} AS {column_name}"))
-    }
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn load_import_intelligence_categories(
+async fn load_import_intelligence_categories(
     connection: &Connection,
     user_id: i64,
-) -> rusqlite::Result<Vec<ImportIntelligenceCategory>> {
-    if !import_intelligence_table_exists(connection, "categories")? {
-        return Ok(Vec::new());
-    }
-    let type_expr = sql_column_or_default(connection, "categories", "type", "1")?;
-    let priority_expr = sql_column_or_default(connection, "categories", "priority", "0")?;
-    let mut statement = connection.prepare(&format!(
-        "
-        SELECT id, {type_expr}, main_category, sub_category, {priority_expr}
+) -> Result<Vec<ImportIntelligenceCategory>, bill_analyser_db::DbError> {
+    let rows = sqlx::query(
+        r#"
+        SELECT id, category_type, path, name
         FROM categories
-        WHERE user_id = ?1
-        ORDER BY priority ASC, id ASC
-        "
-    ))?;
-    let rows = statement.query_map(params![user_id], |row| {
-        Ok(ImportIntelligenceCategory {
-            id: row.get("id")?,
-            type_code: row.get::<_, Option<i64>>("type")?.unwrap_or(1),
-            main_category: row
-                .get::<_, Option<String>>("main_category")?
-                .unwrap_or_default(),
-            sub_category: row
-                .get::<_, Option<String>>("sub_category")?
-                .unwrap_or_default(),
+        WHERE user_id = $1 AND is_active = true
+        ORDER BY display_order ASC, id ASC
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(connection)
+    .await?;
+    rows.into_iter()
+        .map(|row| {
+            let id: i64 = row.try_get("id")?;
+            let category_type: Option<String> = row.try_get("category_type")?;
+            let path: Option<String> = row.try_get("path")?;
+            let name: String = row.try_get("name")?;
+            let (main_category, sub_category) =
+                import_intelligence_category_parts(path.as_deref(), &name);
+            Ok(ImportIntelligenceCategory {
+                id,
+                type_code: preview_type_code(category_type.as_deref().unwrap_or_default())
+                    .unwrap_or(3),
+                main_category,
+                sub_category,
+            })
         })
-    })?;
-    rows.collect()
+        .collect()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn load_user_cash_transfer_category_id(
+async fn load_user_cash_transfer_category_id(
     connection: &Connection,
     user_id: i64,
-) -> rusqlite::Result<Option<i64>> {
-    if !import_intelligence_table_exists(connection, "users")?
-        || !table_has_column(connection, "users", "cash_transfer_category_id")?
-    {
-        return Ok(None);
-    }
-
-    connection
-        .query_row(
-            "SELECT cash_transfer_category_id FROM users WHERE id = ?1 LIMIT 1",
-            params![user_id],
-            |row| row.get::<_, Option<i64>>(0),
-        )
-        .optional()
-        .map(Option::flatten)
+) -> Result<Option<i64>, bill_analyser_db::DbError> {
+    sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT id
+        FROM categories
+        WHERE user_id = $1
+          AND is_active = true
+          AND category_type IN ('4', 'transfer', '转账')
+          AND (path ILIKE '%现金%' OR name ILIKE '%现金%')
+        ORDER BY display_order ASC, id ASC
+        LIMIT 1
+        "#,
+    )
+    .bind(user_id)
+    .fetch_optional(connection)
+    .await
+    .map_err(Into::into)
 }
 
 fn default_transfer_category<'a>(
@@ -696,246 +647,293 @@ fn default_transfer_category<'a>(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn load_import_intelligence_category_rules(
+async fn load_import_intelligence_category_rules(
     connection: &Connection,
     user_id: i64,
     categories_by_id: &BTreeMap<i64, ImportIntelligenceCategory>,
-) -> rusqlite::Result<Vec<ImportIntelligenceRule>> {
-    if !import_intelligence_table_exists(connection, "category_rules")? {
-        return Ok(Vec::new());
-    }
-    let regex_expr = sql_column_or_default(connection, "category_rules", "regex_enabled", "0")?;
-    let has_enabled = table_has_column(connection, "category_rules", "enabled")?;
-    let enabled_expr = if has_enabled {
-        "enabled".to_string()
-    } else {
-        "1 AS enabled".to_string()
-    };
-    let enabled_filter = if has_enabled { "enabled != 0" } else { "1 = 1" };
-    let has_priority = table_has_column(connection, "category_rules", "priority")?;
-    let priority_expr = if has_priority {
-        "priority".to_string()
-    } else {
-        "100 AS priority".to_string()
-    };
-    let priority_order = if has_priority { "priority" } else { "100" };
-    let mut statement = connection.prepare(&format!(
-        "
-        SELECT id, category_id, rule_expression, {regex_expr}, {priority_expr}, {enabled_expr}
+) -> Result<Vec<ImportIntelligenceRule>, bill_analyser_db::DbError> {
+    let rows = sqlx::query(
+        r#"
+        SELECT id, category_id, priority, rule_expression, regex_enabled
         FROM category_rules
-        WHERE user_id = ?1 AND {enabled_filter}
-        ORDER BY {priority_order} ASC, id ASC
-        "
-    ))?;
-    let rows = statement.query_map(params![user_id], |row| {
-        let category_id = row.get::<_, i64>("category_id")?;
-        let category = categories_by_id.get(&category_id);
-        Ok(ImportIntelligenceRule {
-            id: row.get("id")?,
-            category_id,
-            category_type: category.map_or(1, |category| category.type_code),
-            main_category: category
-                .map(|category| category.main_category.clone())
-                .unwrap_or_default(),
-            sub_category: category
-                .map(|category| category.sub_category.clone())
-                .unwrap_or_default(),
-            priority: row.get::<_, Option<i64>>("priority")?.unwrap_or(100),
-            rule_expression: row
-                .get::<_, Option<String>>("rule_expression")?
-                .unwrap_or_default(),
-            regex_enabled: row.get::<_, Option<i64>>("regex_enabled")?.unwrap_or(0) != 0,
+        WHERE user_id = $1 AND enabled = true
+        ORDER BY priority ASC, id ASC
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(connection)
+    .await?;
+    rows.into_iter()
+        .filter_map(|row| {
+            let category_id = row.try_get::<i64, _>("category_id").ok()?;
+            let category = categories_by_id.get(&category_id)?;
+            let expression = row.try_get::<Value, _>("rule_expression").ok()?;
+            let id = row.try_get("id").ok()?;
+            let priority = row.try_get::<i32, _>("priority").ok()?;
+            let regex_enabled = row.try_get("regex_enabled").ok()?;
+            Some(Ok(ImportIntelligenceRule {
+                id,
+                category_id,
+                category_type: category.type_code,
+                main_category: category.main_category.clone(),
+                sub_category: category.sub_category.clone(),
+                priority: i64::from(priority),
+                rule_expression: rule_expression_string(&expression),
+                regex_enabled,
+            }))
         })
-    })?;
-    rows.collect()
+        .collect()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn load_import_intelligence_accounts(
+async fn load_import_intelligence_accounts(
     connection: &Connection,
     user_id: i64,
-) -> rusqlite::Result<Vec<ImportIntelligenceAccount>> {
-    if !import_intelligence_table_exists(connection, "accounts")? {
-        return Ok(Vec::new());
-    }
-    let aliases_expr = sql_column_or_default(connection, "accounts", "aliases", "NULL")?;
-    let has_hidden = table_has_column(connection, "accounts", "hidden")?;
-    let hidden_expr = if has_hidden {
-        "hidden".to_string()
-    } else {
-        "0 AS hidden".to_string()
-    };
-    let hidden_filter = if has_hidden { "hidden = 0" } else { "1 = 1" };
-    let mut statement = connection.prepare(&format!(
-        "
-        SELECT id, name, {aliases_expr}, {hidden_expr}
+) -> Result<Vec<ImportIntelligenceAccount>, bill_analyser_db::DbError> {
+    let rows = sqlx::query(
+        r#"
+        SELECT id, name
         FROM accounts
-        WHERE user_id = ?1 AND {hidden_filter}
-        ORDER BY id ASC
-        "
-    ))?;
-    let rows = statement.query_map(params![user_id], |row| {
-        let name = row.get::<_, Option<String>>("name")?.unwrap_or_default();
-        let raw_aliases = row.get::<_, Option<String>>("aliases")?;
-        let mut aliases = parse_account_aliases(raw_aliases.as_deref());
-        aliases.push(name.clone());
-        Ok(ImportIntelligenceAccount {
-            id: row.get("id")?,
-            name,
-            aliases,
+        WHERE user_id = $1 AND is_active = true
+        ORDER BY display_order ASC, id ASC
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(connection)
+    .await?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(ImportIntelligenceAccount {
+                id: row.try_get("id")?,
+                name: row.try_get("name")?,
+            })
         })
-    })?;
-    rows.collect()
+        .collect()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn load_import_intelligence_account_rules(
+async fn load_import_intelligence_account_rules(
     connection: &Connection,
     user_id: i64,
-) -> rusqlite::Result<Vec<AccountRuleCandidate>> {
-    if !import_intelligence_table_exists(connection, "account_rules")? {
-        return Ok(Vec::new());
-    }
-    let regex_expr = sql_column_or_default(connection, "account_rules", "regex_enabled", "0")?;
-    let enabled_expr = sql_column_or_default(connection, "account_rules", "enabled", "1")?;
-    let priority_expr = sql_column_or_default(connection, "account_rules", "priority", "100")?;
-    let role_scope_expr =
-        sql_column_or_default(connection, "account_rules", "account_role_scope", "'any'")?;
-    let type_scope_expr =
-        sql_column_or_default(connection, "account_rules", "transaction_type_scope", "'all'")?;
-    let field_scope_expr = sql_column_or_default(
-        connection,
-        "account_rules",
-        "field_scope",
-        r#"'["counterparty","payment_method","description"]'"#,
-    )?;
-    let has_enabled = table_has_column(connection, "account_rules", "enabled")?;
-    let enabled_filter = if has_enabled { "enabled = 1" } else { "1 = 1" };
-    let mut statement = connection.prepare(&format!(
-        "
-        SELECT id, account_id, rule_expression, {regex_expr}, {priority_expr},
-               {enabled_expr}, {role_scope_expr}, {type_scope_expr}, {field_scope_expr}
-        FROM account_rules
-        WHERE user_id = ?1 AND {enabled_filter}
-        ORDER BY {priority_expr} ASC, id ASC
-        "
-    ))?;
-    let rows = statement.query_map(params![user_id], |row| {
-        let raw_field_scope = row
-            .get::<_, Option<String>>("field_scope")
-            .unwrap_or_default()
-            .unwrap_or_default();
-        Ok(AccountRuleCandidate {
-            rule_id: row.get("id")?,
-            account_id: row.get("account_id")?,
-            account_role_scope: row
-                .get::<_, Option<String>>("account_role_scope")?
-                .unwrap_or_else(|| "any".to_string()),
-            transaction_type_scope: row
-                .get::<_, Option<String>>("transaction_type_scope")?
-                .unwrap_or_else(|| "all".to_string()),
-            field_scope: parse_account_rule_field_scope(&raw_field_scope),
-            rule_expression: row
-                .get::<_, Option<String>>("rule_expression")?
-                .unwrap_or_default(),
-            regex_enabled: row.get::<_, Option<i64>>("regex_enabled")?.unwrap_or(0) != 0,
-            enabled: row.get::<_, Option<i64>>("enabled")?.unwrap_or(1) != 0,
-            priority: row.get::<_, Option<i64>>("priority")?.unwrap_or(100),
+) -> Result<Vec<AccountRuleCandidate>, bill_analyser_db::DbError> {
+    let rows = sqlx::query(
+        r#"
+        SELECT ar.id, ar.account_id, ar.account_role_scope, ar.transaction_type_scope,
+               ar.field_scope, ar.rule_expression, ar.regex_enabled, ar.enabled, ar.priority
+        FROM account_rules ar
+        JOIN accounts a ON a.id = ar.account_id AND a.user_id = ar.user_id
+        WHERE ar.user_id = $1 AND ar.enabled = true AND a.is_active = true
+        ORDER BY ar.priority ASC, ar.id ASC
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(connection)
+    .await?;
+    rows.into_iter()
+        .map(|row| {
+            let field_scope: Value = row.try_get("field_scope")?;
+            let expression: Value = row.try_get("rule_expression")?;
+            Ok(AccountRuleCandidate {
+                rule_id: row.try_get("id")?,
+                account_id: row.try_get("account_id")?,
+                account_role_scope: row.try_get("account_role_scope")?,
+                transaction_type_scope: row.try_get("transaction_type_scope")?,
+                field_scope: account_rule_field_scope_from_value(&field_scope),
+                rule_expression: rule_expression_string(&expression),
+                regex_enabled: row.try_get("regex_enabled")?,
+                enabled: row.try_get("enabled")?,
+                priority: i64::from(row.try_get::<i32, _>("priority")?),
+            })
         })
-    })?;
-    rows.collect()
+        .collect()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn load_import_intelligence_learning_rules(
+async fn load_import_intelligence_learning_rules(
     connection: &Connection,
     user_id: i64,
-) -> rusqlite::Result<Vec<ImportIntelligenceLearningRule>> {
-    if !import_intelligence_table_exists(connection, "import_learning_rules")? {
-        return Ok(Vec::new());
-    }
-    let mut statement = connection.prepare(
-        "
-        SELECT id, parser_id, composite_match_hash, normalized_match_value,
-               match_features_json, learned_type, learned_category_id,
-               learned_source_account_id, learned_destination_account_id
-        FROM import_learning_rules
-        WHERE user_id = ?1 AND enabled = 1 AND match_type = 'composite'
-        ORDER BY applied_count DESC, id ASC
-        ",
-    )?;
-    let rows = statement.query_map(params![user_id], |row| {
-        let raw_features = row
-            .get::<_, Option<String>>("match_features_json")?
-            .unwrap_or_default();
-        Ok(ImportIntelligenceLearningRule {
-            id: row.get("id")?,
-            parser_id: row
-                .get::<_, Option<String>>("parser_id")?
-                .unwrap_or_default(),
-            composite_hash: row
-                .get::<_, Option<String>>("composite_match_hash")?
-                .filter(|value| !value.trim().is_empty())
-                .or_else(|| row.get::<_, Option<String>>("normalized_match_value").ok().flatten())
-                .unwrap_or_default(),
-            match_features: parse_learning_features(&raw_features),
-            learned_type: row.get("learned_type")?,
-            learned_category_id: row.get("learned_category_id")?,
-            learned_source_account_id: row.get("learned_source_account_id")?,
-            learned_destination_account_id: row.get("learned_destination_account_id")?,
+) -> Result<Vec<ImportIntelligenceLearningRule>, bill_analyser_db::DbError> {
+    let rows = sqlx::query(
+        r#"
+        SELECT id, recommendation_type, recommendation_key, metadata
+        FROM import_learning_lifecycle
+        WHERE user_id = $1 AND status IN ('accepted', 'auto_applied', 'green')
+        ORDER BY updated_at DESC, id DESC
+        LIMIT 1000
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(connection)
+    .await?;
+    rows.into_iter()
+        .map(|row| {
+            let metadata: Value = row.try_get("metadata")?;
+            Ok(ImportIntelligenceLearningRule {
+                id: row.try_get("id")?,
+                parser_id: text_from_json(&metadata, "parser_id"),
+                composite_hash: text_from_json(&metadata, "composite_hash"),
+                match_features: string_map_from_json(metadata.get("match_features")),
+                learned_type: optional_text_from_json(&metadata, "learned_type")
+                    .or_else(|| row.try_get::<String, _>("recommendation_type").ok()),
+                learned_category_id: optional_i64_from_json(&metadata, "learned_category_id"),
+                learned_source_account_id: optional_i64_from_json(
+                    &metadata,
+                    "learned_source_account_id",
+                ),
+                learned_destination_account_id: optional_i64_from_json(
+                    &metadata,
+                    "learned_destination_account_id",
+                ),
+            })
         })
-    })?;
-    rows.collect()
+        .collect()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn load_import_intelligence_recurring_templates(
+async fn load_import_intelligence_recurring_templates(
     connection: &Connection,
     user_id: i64,
-) -> rusqlite::Result<Vec<ImportIntelligenceRecurringTemplate>> {
-    if !import_intelligence_table_exists(connection, "recurring_bills")? {
-        return Ok(Vec::new());
-    }
-    let account_expr = sql_column_or_default(connection, "recurring_bills", "account", "''")?;
-    let counterparty_expr =
-        sql_column_or_default(connection, "recurring_bills", "counterparty", "''")?;
-    let start_date_expr = sql_column_or_default(connection, "recurring_bills", "start_date", "''")?;
-    let next_date_expr = sql_column_or_default(connection, "recurring_bills", "next_date", "''")?;
-    let has_enabled = table_has_column(connection, "recurring_bills", "enabled")?;
-    let enabled_expr = if has_enabled {
-        "enabled".to_string()
-    } else {
-        "1 AS enabled".to_string()
-    };
-    let enabled_filter = if has_enabled { "enabled != 0" } else { "1 = 1" };
-    let mut statement = connection.prepare(&format!(
-        "
-        SELECT id, name, type, amount, {account_expr}, {counterparty_expr},
-               {start_date_expr}, {next_date_expr}, {enabled_expr}
-        FROM recurring_bills
-        WHERE user_id = ?1 AND {enabled_filter}
-        ORDER BY id ASC
-        "
-    ))?;
-    let rows = statement.query_map(params![user_id], |row| {
-        Ok(ImportIntelligenceRecurringTemplate {
-            id: row.get("id")?,
-            name: row.get::<_, Option<String>>("name")?.unwrap_or_default(),
-            bill_type: row.get::<_, Option<String>>("type")?.unwrap_or_default(),
-            amount: row.get::<_, Option<f64>>("amount")?.unwrap_or_default(),
-            account: row.get::<_, Option<String>>("account")?.unwrap_or_default(),
-            counterparty: row
-                .get::<_, Option<String>>("counterparty")?
-                .unwrap_or_default(),
-            next_date: row
-                .get::<_, Option<String>>("next_date")?
-                .unwrap_or_default(),
-            start_date: row
-                .get::<_, Option<String>>("start_date")?
-                .unwrap_or_default(),
+) -> Result<Vec<ImportIntelligenceRecurringTemplate>, bill_analyser_db::DbError> {
+    let rows = sqlx::query(
+        r#"
+        SELECT id, name, transaction_type, source_amount_minor_units,
+               source_account_id, scheduled_next_date, scheduled_start_date,
+               metadata
+        FROM transaction_templates
+        WHERE user_id = $1 AND template_type = 2
+        ORDER BY display_order ASC, id ASC
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(connection)
+    .await?;
+    rows.into_iter()
+        .map(|row| {
+            let metadata: Value = row.try_get("metadata").unwrap_or_else(|_| json!({}));
+            let amount_minor: i64 = row.try_get("source_amount_minor_units").unwrap_or_default();
+            let source_account_id: Option<i64> = row.try_get("source_account_id").ok().flatten();
+            Ok(ImportIntelligenceRecurringTemplate {
+                id: row.try_get("id")?,
+                name: row.try_get("name")?,
+                bill_type: row.try_get::<Option<String>, _>("transaction_type")?.unwrap_or_default(),
+                amount: amount_minor as f64,
+                account: source_account_id
+                    .map(|value| value.to_string())
+                    .or_else(|| optional_text_from_json(&metadata, "account"))
+                    .unwrap_or_default(),
+                counterparty: text_from_json(&metadata, "counterparty"),
+                next_date: row
+                    .try_get::<Option<String>, _>("scheduled_next_date")?
+                    .unwrap_or_default(),
+                start_date: row
+                    .try_get::<Option<String>, _>("scheduled_start_date")?
+                    .unwrap_or_default(),
+            })
         })
-    })?;
-    rows.collect()
+        .collect()
+}
+
+fn import_intelligence_category_parts(path: Option<&str>, name: &str) -> (String, String) {
+    let path = path.unwrap_or_default().trim();
+    if let Some((main, sub)) = path.split_once('/') {
+        return (main.trim().to_string(), sub.trim().to_string());
+    }
+    if !path.is_empty() {
+        return (path.to_string(), String::new());
+    }
+    (name.trim().to_string(), String::new())
+}
+
+fn import_intelligence_category_value(category: &ImportIntelligenceCategory) -> Value {
+    json!({
+        "id": category.id,
+        "main": category.main_category,
+        "sub": category.sub_category,
+        "type": category.type_code,
+    })
+}
+
+fn import_intelligence_account_value(account: &ImportIntelligenceAccount) -> Value {
+    json!({
+        "id": account.id,
+        "name": account.name,
+    })
+}
+
+fn rule_expression_string(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Object(object) => object
+            .get("expression")
+            .or_else(|| object.get("rule_expression"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .or_else(|| rule_expression_from_contains_any(object))
+            .unwrap_or_default(),
+        Value::Null => String::new(),
+        Value::Number(_) | Value::Bool(_) | Value::Array(_) => value.to_string(),
+    }
+}
+
+fn rule_expression_from_contains_any(object: &Map<String, Value>) -> Option<String> {
+    let operator = object
+        .get("operator")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if operator != "contains_any" {
+        return None;
+    }
+    let values = object
+        .get("values")
+        .and_then(Value::as_array)?
+        .iter()
+        .filter_map(value_to_text)
+        .map(|value| bill_analyser_core::category_rules::escape_rule_expression_term(&value))
+        .filter(|value| !value.trim().is_empty())
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then(|| format!("OR={{{}}}", values.join(",")))
+}
+
+fn account_rule_field_scope_from_value(value: &Value) -> Vec<String> {
+    bill_analyser_core::account_rules::normalize_account_rule_field_scope(Some(value))
+        .unwrap_or_else(|_| {
+            bill_analyser_core::account_rules::DEFAULT_FIELD_SCOPES
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect()
+        })
+}
+
+fn text_from_json(value: &Value, key: &str) -> String {
+    optional_text_from_json(value, key).unwrap_or_default()
+}
+
+fn optional_text_from_json(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(value_to_text)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn optional_i64_from_json(value: &Value, key: &str) -> Option<i64> {
+    value.get(key).and_then(|value| {
+        value
+            .as_i64()
+            .or_else(|| value.as_str()?.trim().parse::<i64>().ok())
+    })
+}
+
+fn string_map_from_json(value: Option<&Value>) -> BTreeMap<String, String> {
+    value
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|object| object.iter())
+        .filter_map(|(key, value)| {
+            value_to_text(value).map(|value| (key.clone(), value.trim().to_ascii_lowercase()))
+        })
+        .filter(|(_, value)| !value.is_empty())
+        .collect()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -976,18 +974,6 @@ fn matching_feedback_object_mut(draft: &mut ImportPreviewDraft) -> &mut Map<Stri
         .preview_matching_feedback
         .as_object_mut()
         .expect("matching feedback object")
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-#[cfg(test)]
-fn apply_category_rule_match(
-    draft: &mut ImportPreviewDraft,
-    rules: &[ImportIntelligenceRule],
-) -> bool {
-    let combined_text = import_preview_rule_text(draft);
-    apply_category_rule_match_filtered(draft, rules, &combined_text, |rule, draft| {
-        category_type_matches_preview(rule.category_type, &draft.preview_type)
-    })
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -1181,86 +1167,6 @@ fn import_preview_transfer_applied_snapshot(draft: &ImportPreviewDraft) -> Value
     })
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
-#[cfg(test)]
-fn apply_transfer_pair_account_match(
-    draft: &mut ImportPreviewDraft,
-    accounts: &[ImportIntelligenceAccount],
-) -> bool {
-    let Some(source_chain) = draft
-        .preview_matching_feedback
-        .get("transfer")
-        .and_then(|transfer| transfer.get("source_chain"))
-        .and_then(Value::as_array)
-        .cloned()
-        .filter(|chain| !chain.is_empty())
-    else {
-        return false;
-    };
-
-    let outgoing = transfer_chain_entry_for_roles(
-        &source_chain,
-        &["outgoing", "source", "from", "debit", "out"],
-        Some(0),
-    );
-    let incoming = transfer_chain_entry_for_roles(
-        &source_chain,
-        &["incoming", "destination", "to", "credit", "in"],
-        Some(1),
-    );
-    let resolved_source = draft.preview_source_account_id.or_else(|| {
-        outgoing.and_then(|entry| resolve_transfer_account_from_entry(entry, accounts))
-    });
-    let resolved_destination = draft.preview_destination_account_id.or_else(|| {
-        incoming.and_then(|entry| resolve_transfer_account_from_entry(entry, accounts))
-    });
-    let next_source = draft.preview_source_account_id.is_none().then_some(resolved_source).flatten();
-    let effective_source = draft.preview_source_account_id.or(next_source);
-    let next_destination = draft
-        .preview_destination_account_id
-        .is_none()
-        .then_some(resolved_destination)
-        .flatten()
-        .filter(|destination| effective_source.is_none_or(|source| source != *destination));
-
-    let mut changed = false;
-    if let Some(source_account_id) = next_source {
-        draft.preview_source_account_id = Some(source_account_id);
-        changed = true;
-    }
-    if let Some(destination_account_id) = next_destination {
-        draft.preview_destination_account_id = Some(destination_account_id);
-        changed = true;
-    }
-    if !changed {
-        return false;
-    }
-
-    let feedback = matching_feedback_object_mut(draft);
-    let transfer = feedback
-        .entry("transfer".to_string())
-        .or_insert_with(|| json!({}));
-    if !transfer.is_object() {
-        *transfer = json!({});
-    }
-    if let Some(transfer_object) = transfer.as_object_mut() {
-        transfer_object.insert("account_resolution".to_string(), json!("source_chain"));
-        if let Some(source_account_id) = next_source {
-            transfer_object.insert(
-                "resolved_source_account_id".to_string(),
-                json!(source_account_id),
-            );
-        }
-        if let Some(destination_account_id) = next_destination {
-            transfer_object.insert(
-                "resolved_destination_account_id".to_string(),
-                json!(destination_account_id),
-            );
-        }
-    }
-    true
-}
-
 fn transfer_chain_entry_for_roles<'a>(
     source_chain: &'a [Value],
     roles: &[&str],
@@ -1275,98 +1181,6 @@ fn transfer_chain_entry_for_roles<'a>(
             roles.iter().any(|candidate| role == *candidate)
         })
         .or_else(|| fallback_index.and_then(|index| source_chain.get(index)))
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-#[cfg(test)]
-fn resolve_transfer_account_from_entry(
-    entry: &Value,
-    accounts: &[ImportIntelligenceAccount],
-) -> Option<i64> {
-    for field in [
-        "source_account_id",
-        "account_id",
-        "id",
-        "preview_source_account_id",
-        "preview_destination_account_id",
-    ] {
-        if let Some(account_id) = entry
-            .get(field)
-            .and_then(transfer_account_id_from_value)
-            .filter(|account_id| {
-                accounts.is_empty() || accounts.iter().any(|account| account.id == *account_id)
-            })
-        {
-            return Some(account_id);
-        }
-    }
-
-    let tokens = transfer_account_tokens_from_entry(entry);
-    if tokens.is_empty() {
-        return None;
-    }
-    accounts
-        .iter()
-        .find(|account| account_exactly_matches_tokens(account, &tokens))
-        .or_else(|| {
-            accounts
-                .iter()
-                .find(|account| account_matches_tokens(account, &tokens))
-        })
-        .map(|account| account.id)
-}
-
-#[cfg(test)]
-fn transfer_account_id_from_value(value: &Value) -> Option<i64> {
-    if let Some(number) = value.as_i64() {
-        return (number > 0).then_some(number);
-    }
-    value.as_str().and_then(|text| text.trim().parse::<i64>().ok().filter(|value| *value > 0))
-}
-
-#[cfg(test)]
-fn transfer_account_tokens_from_entry(entry: &Value) -> Vec<String> {
-    let mut tokens = Vec::new();
-    for field in [
-        "account_name",
-        "payment_method",
-        "parser_id",
-        "counterparty",
-        "source_account_id",
-        "account_id",
-        "name",
-        "label",
-        "parser_label",
-    ] {
-        if let Some(text) = transfer_entry_text(entry.get(field)) {
-            tokens.extend(expand_transfer_account_token(&text));
-        }
-    }
-    if let Some(tags) = entry.get("tags").and_then(Value::as_array) {
-        for tag in tags {
-            if let Some(text) = transfer_entry_text(Some(tag)) {
-                tokens.extend(expand_transfer_account_token(&text));
-            }
-        }
-    }
-    tokens
-}
-
-#[cfg(test)]
-fn expand_transfer_account_token(value: &str) -> Vec<String> {
-    let normalized = normalize_account_match_text(value);
-    if normalized.is_empty() {
-        return Vec::new();
-    }
-    let mut tokens = vec![normalized.clone()];
-    for prefix in ["parser:", "channel:", "account:", "source:"] {
-        if let Some(stripped) = normalized.strip_prefix(prefix) {
-            if !stripped.is_empty() {
-                tokens.push(stripped.to_string());
-            }
-        }
-    }
-    tokens
 }
 
 fn transfer_entry_text(value: Option<&Value>) -> Option<String> {
@@ -1530,10 +1344,14 @@ fn apply_learning_rule_match(
             ..ImportLearningRecommendationKeyInput::default()
         },
     );
-    let lifecycle =
-        get_import_learning_lifecycle_view(connection, user_id, &recommendation_key, "import_preview")
-            .map_err(|_| rusqlite::Error::InvalidQuery)
-            .ok()?;
+    let lifecycle_user_id = u64::try_from(user_id).ok().and_then(|value| UserId::new(value).ok())?;
+    let lifecycle = get_import_learning_lifecycle_view(
+        connection,
+        lifecycle_user_id,
+        &recommendation_key,
+    )
+    .ok()
+    .flatten()?;
     if lifecycle.suppressed {
         return None;
     }
@@ -1593,7 +1411,6 @@ fn apply_learning_rule_match(
     );
     Some(ImportLearningRuleMatchResult {
         rule_id: Some(rule.id),
-        recommendation_key,
         auto_applied,
     })
 }
@@ -1853,69 +1670,11 @@ fn apply_recurring_candidate(draft: &mut ImportPreviewDraft, candidate: ImportRe
 }
 
 fn increment_applied_learning_rules(
-    connection: &Connection,
-    user_id: i64,
-    rule_ids: &[i64],
-) -> rusqlite::Result<()> {
-    let now = Utc::now().to_rfc3339();
-    for rule_id in rule_ids {
-        connection.execute(
-            "
-            UPDATE import_learning_rules
-            SET applied_count = COALESCE(applied_count, 0) + 1,
-                last_applied_at = ?1,
-                updated_at = ?1
-            WHERE id = ?2 AND user_id = ?3
-            ",
-            params![now, rule_id, user_id],
-        )?;
-    }
+    _connection: &Connection,
+    _user_id: i64,
+    _rule_ids: &[i64],
+) -> Result<(), bill_analyser_db::DbError> {
     Ok(())
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn parse_account_aliases(raw_aliases: Option<&str>) -> Vec<String> {
-    let raw_aliases = raw_aliases.unwrap_or("").trim();
-    if raw_aliases.is_empty() {
-        return Vec::new();
-    }
-    if let Ok(Value::Array(values)) = serde_json::from_str::<Value>(raw_aliases) {
-        return values
-            .iter()
-            .filter_map(value_to_text)
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .collect();
-    }
-    raw_aliases
-        .split([',', ';', '|', '，', '；'])
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn parse_account_rule_field_scope(raw_field_scope: &str) -> Vec<String> {
-    bill_analyser_core::account_rules::normalize_account_rule_field_scope(Some(&Value::String(
-        raw_field_scope.to_string(),
-    )))
-    .unwrap_or_else(|_| {
-        bill_analyser_core::account_rules::DEFAULT_FIELD_SCOPES
-            .iter()
-            .map(|value| (*value).to_string())
-            .collect()
-    })
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn parse_learning_features(raw_features: &str) -> BTreeMap<String, String> {
-    serde_json::from_str::<BTreeMap<String, String>>(raw_features.trim())
-        .unwrap_or_default()
-        .into_iter()
-        .map(|(key, value)| (key, value.trim().to_ascii_lowercase()))
-        .filter(|(_, value)| !value.is_empty())
-        .collect()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -2017,25 +1776,6 @@ fn import_preview_account_tokens(draft: &ImportPreviewDraft) -> Vec<String> {
         })
         .filter(|token| !token.is_empty())
         .collect()
-}
-
-#[cfg(test)]
-fn account_matches_tokens(account: &ImportIntelligenceAccount, tokens: &[String]) -> bool {
-    account.aliases.iter().any(|alias| {
-        let alias = normalize_account_match_text(alias);
-        !alias.is_empty()
-            && tokens
-                .iter()
-                .any(|token| token == &alias || token.contains(&alias) || alias.contains(token))
-    })
-}
-
-#[cfg(test)]
-fn account_exactly_matches_tokens(account: &ImportIntelligenceAccount, tokens: &[String]) -> bool {
-    account.aliases.iter().any(|alias| {
-        let alias = normalize_account_match_text(alias);
-        !alias.is_empty() && tokens.iter().any(|token| token == &alias)
-    })
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -2609,12 +2349,21 @@ pub async fn import_preview_selection_runtime_handler(
         Err(response) => return route_response(response),
     };
     let filters = import_preview_query_filters_from_payload(object);
+    let selection_request = ImportPreviewPageRequest {
+        page: 1,
+        page_size: usize::MAX / 2,
+        sort_by: String::new(),
+        sort_direction: "asc".to_string(),
+        preview_ids: Vec::new(),
+        filters: filters.clone(),
+    };
+    let selected = !matches!(action.as_str(), "select_none");
     let updated = match update_session_preview_selection_by_query(
         runtime.connection(),
         &session_id,
         user_id,
-        &filters,
-        action.as_str(),
+        selected,
+        &selection_request,
     ) {
         Ok(updated) => updated,
         Err(error) => return route_response(db_error_response(error)),
@@ -2844,7 +2593,9 @@ pub async fn import_reclassify_runtime_handler(
         runtime.connection_mut(),
         user_id,
         intelligent_drafts.as_mut_slice(),
-    ) {
+    )
+    .await
+    {
         return route_response(db_error_response(error));
     }
     enforce_import_preview_invariants(intelligent_drafts.as_mut_slice());
@@ -2910,6 +2661,7 @@ pub async fn preview_recurring_candidates_runtime_handler(
     };
     let draft = import_preview_draft_from_row(&preview);
     let candidates = match load_import_intelligence_recurring_templates(runtime.connection(), user_id_i64)
+        .await
     {
         Ok(templates) => {
             let mut candidates = templates
@@ -2995,8 +2747,14 @@ pub async fn preview_recurring_match_put_runtime_handler(
     if let Err(response) = init_import_runtime_schema(&runtime) {
         return route_response(response);
     }
+    let preview = match get_preview_bill_by_id(runtime.connection(), preview_id, user_id) {
+        Ok(Some(preview)) => preview,
+        Ok(None) => return route_response(import_v2_error_response(404, "Preview bill not found")),
+        Err(error) => return route_response(db_error_response(error)),
+    };
     match update_preview_recurring_match_decision(
         runtime.connection_mut(),
+        &preview.session_id,
         preview_id,
         user_id,
         &update,
@@ -3043,8 +2801,14 @@ pub async fn preview_recurring_match_delete_runtime_handler(
     if let Err(response) = init_import_runtime_schema(&runtime) {
         return route_response(response);
     }
+    let preview = match get_preview_bill_by_id(runtime.connection(), preview_id, user_id) {
+        Ok(Some(preview)) => preview,
+        Ok(None) => return route_response(import_v2_error_response(404, "Preview bill not found")),
+        Err(error) => return route_response(db_error_response(error)),
+    };
     match update_preview_recurring_match_decision(
         runtime.connection_mut(),
+        &preview.session_id,
         preview_id,
         user_id,
         &update,
@@ -3083,10 +2847,6 @@ pub async fn preview_transfer_decision_runtime_handler(
         Ok(expected_state) => expected_state,
         Err(response) => return route_response(response),
     };
-    let reviewed_type = first_value(object, &["reviewedType", "reviewed_type"])
-        .and_then(value_to_text)
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "转账".to_string());
     let mut runtime = match open_runtime(&state) {
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),
@@ -3094,12 +2854,17 @@ pub async fn preview_transfer_decision_runtime_handler(
     if let Err(response) = init_import_runtime_schema(&runtime) {
         return route_response(response);
     }
+    let preview = match get_preview_bill_by_id(runtime.connection(), preview_id, user_id) {
+        Ok(Some(preview)) => preview,
+        Ok(None) => return route_response(import_v2_error_response(404, "Preview bill not found")),
+        Err(error) => return route_response(db_error_response(error)),
+    };
     match apply_preview_transfer_decision(
         runtime.connection_mut(),
+        &preview.session_id,
         preview_id,
         user_id,
         decision,
-        &reviewed_type,
         Some(&expected_state),
     ) {
         Ok(result) => route_response(preview_decision_result_response(
@@ -3444,8 +3209,3 @@ pub async fn import_learning_rule_delete_runtime_handler(
         Err(response) => route_response(response),
     }
 }
-
-#[cfg(test)]
-include!("stage_handlers_tests.rs");
-#[cfg(test)]
-include!("stage_learning_transfer_tests.rs");

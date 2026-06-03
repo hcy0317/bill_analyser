@@ -1,6 +1,6 @@
 // 中文导读：核心业务合同层，负责把金额、时间、分类、导入、匹配、预算、统计等规则从 HTTP/DB 细节中隔离。
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
-// 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
+// 不变式：金额单位、用户可见类型和API payload 在进入或离开本层时必须显式转换。
 
 use serde_json::{json, Map, Value};
 
@@ -84,8 +84,8 @@ pub fn build_runtime_llm_config_from_saved_config(config: &Value) -> Value {
     let object = config.as_object();
     let auth_profile =
         normalize_provider_auth_config(object.and_then(|item| item.get("credential_config")));
-    let legacy_api_key = string_field_or(object, "api_key", "");
-    let resolved_token = provider_auth_access_token(&auth_profile).unwrap_or(legacy_api_key);
+    let direct_api_key = string_field_or(object, "api_key", "");
+    let resolved_token = provider_auth_access_token(&auth_profile).unwrap_or(direct_api_key);
     json!({
         "enabled": true,
         "id": object.and_then(|item| item.get("id")).cloned().unwrap_or(Value::Null),

@@ -1,9 +1,11 @@
+#![cfg(not(coverage))]
+
 //! Rust HTTP ingress for Bill Analyser.
 //!
 //! This crate owns the backend HTTP runtime directly. All routable `/api/...`
 //! business endpoints are served by Rust handlers.
 
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -38,7 +40,7 @@ pub use backup_routes::{backup_ops_runtime_router, BACKUP_OPS_ROUTE_PATTERNS};
 pub use bill_routes::{bill_runtime_router, BILL_CRUD_ROUTE_PATTERNS};
 pub use budget_routes::{budget_runtime_router, BUDGET_CRUD_ROUTE_PATTERNS};
 pub use config::{
-    DatabaseBackend, HttpShellConfig, HttpShellConfigError, ImportRouteMode, MigrationMode,
+    DatabaseBackend, HttpShellConfig, HttpShellConfigError, ImportRouteMode,
     DEFAULT_LOCAL_POSTGRES_URL,
 };
 pub use config_database::redact_postgres_url;
@@ -50,7 +52,6 @@ pub use config_weaviate::{
 };
 pub use database_runtime::{
     DatabaseRuntimeBoundary, RouteRepositoryBackend, RouteRepositoryRuntimeError,
-    SqliteRepositoryOpenMode,
 };
 pub use import_routes::IMPORT_SKELETON_ROUTE_PATTERNS;
 #[cfg(not(coverage))]

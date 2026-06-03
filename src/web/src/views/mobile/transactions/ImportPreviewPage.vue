@@ -210,14 +210,14 @@ function buildSignal(record: ImportPreviewRecord): ImportPreviewSignalViewModel 
     const matching = record.matching;
     const llm = matching?.llm || {};
     return buildImportPreviewSignalViewModel({
-        parserSource: record.preview_parser_id || matching?.parser?.id,
+        parserId: record.preview_parser_id || matching?.parser?.id,
         parserTags: record.preview_parser_tags || matching?.parser?.tags,
         dedupType: record.dedup_type || matching?.dedup?.type,
         dedupSourceIds: Array.isArray(record.dedup_source_ids) ? record.dedup_source_ids : matching?.dedup?.source_ids,
         dedupSourceCount: matching?.dedup?.source_count,
         dedupSourceLabels: matching?.dedup?.source_labels,
         dedupSources: matching?.dedup?.sources,
-        parserSourceChain: matching?.parser?.source_chain,
+        parserIdChain: matching?.parser?.source_chain,
         reconciliationType: matching?.reconciliation?.candidate_type,
         reconciliationStatus: matching?.reconciliation?.status,
         reconciliationTitle: matching?.reconciliation?.signal_label,

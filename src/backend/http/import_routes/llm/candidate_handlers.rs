@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -18,32 +18,33 @@ pub async fn llm_candidates_list_runtime_handler(
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
     };
-    let runtime = match open_runtime(&state) {
+    let runtime = match open_postgres_runtime(&state) {
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),
     };
-    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
-        return route_response(response);
-    }
     let limit = query.limit.unwrap_or(50).clamp(1, 100);
     let offset = query.offset.unwrap_or(0).max(0);
-    let candidates = match list_llm_candidates(
-        runtime.connection(),
+    let candidates = match list_postgres_llm_candidates(
+        runtime.pool(),
         user_id_value,
         query.status.as_deref(),
         query.r#type.as_deref(),
         limit,
         offset,
-    ) {
+    )
+    .await
+    {
         Ok(candidates) => candidates,
         Err(error) => return route_response(db_error_response(error)),
     };
-    match count_llm_candidates(
-        runtime.connection(),
+    match count_postgres_llm_candidates(
+        runtime.pool(),
         user_id_value,
         query.status.as_deref(),
         query.r#type.as_deref(),
-    ) {
+    )
+    .await
+    {
         Ok(total) => route_response(ImportV2RouteResponse {
             status_code: 200,
             body: build_llm_candidate_list_response(candidates, total),
@@ -68,18 +69,17 @@ pub async fn llm_candidate_get_runtime_handler(
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
     };
-    let runtime = match open_runtime(&state) {
+    let runtime = match open_postgres_runtime(&state) {
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),
     };
-    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
-        return route_response(response);
-    }
-    match bill_analyser_db::get_llm_candidate_by_id(
-        runtime.connection(),
+    match get_postgres_llm_candidate_by_id(
+        runtime.pool(),
         candidate_id,
         user_id_value,
-    ) {
+    )
+    .await
+    {
         Ok(Some(candidate)) => route_response(ImportV2RouteResponse {
             status_code: 200,
             body: json!({"success": true, "data": candidate}),
@@ -107,14 +107,11 @@ pub async fn llm_candidate_accept_runtime_handler(
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
     };
-    let runtime = match open_runtime(&state) {
+    let runtime = match open_postgres_runtime(&state) {
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),
     };
-    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
-        return route_response(response);
-    }
-    match accept_llm_candidate(runtime.connection(), candidate_id, user_id_value) {
+    match accept_postgres_llm_candidate(runtime.pool(), candidate_id, user_id_value).await {
         Ok(Some(result)) => route_response(ImportV2RouteResponse {
             status_code: 200,
             body: json!({"success": true, "data": result}),
@@ -142,14 +139,11 @@ pub async fn llm_candidate_reject_runtime_handler(
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
     };
-    let runtime = match open_runtime(&state) {
+    let runtime = match open_postgres_runtime(&state) {
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),
     };
-    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
-        return route_response(response);
-    }
-    match reject_llm_candidate(runtime.connection(), candidate_id, user_id_value) {
+    match reject_postgres_llm_candidate(runtime.pool(), candidate_id, user_id_value).await {
         Ok(Some(rejected)) => route_response(ImportV2RouteResponse {
             status_code: 200,
             body: build_llm_candidate_reject_response(rejected),
@@ -160,4 +154,3 @@ pub async fn llm_candidate_reject_runtime_handler(
         Err(error) => route_response(db_error_response(error)),
     }
 }
-

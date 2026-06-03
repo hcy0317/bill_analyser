@@ -30,7 +30,7 @@ export const useTwoFactorAuthStore = defineStore('twoFactorAuth', () => {
             }).catch(error => {
                 logger.error('failed to retrieve 2fa status', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve current two-factor authentication status' });
@@ -55,7 +55,7 @@ export const useTwoFactorAuthStore = defineStore('twoFactorAuth', () => {
             }).catch(error => {
                 logger.error('failed to request to enable 2fa', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to enable two-factor authentication' });
@@ -88,7 +88,7 @@ export const useTwoFactorAuthStore = defineStore('twoFactorAuth', () => {
             }).catch(error => {
                 logger.error('failed to confirm to enable 2fa', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to enable two-factor authentication' });
@@ -113,7 +113,7 @@ export const useTwoFactorAuthStore = defineStore('twoFactorAuth', () => {
             }).catch(error => {
                 logger.error('failed to disable 2fa', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to disable two-factor authentication' });
@@ -138,7 +138,7 @@ export const useTwoFactorAuthStore = defineStore('twoFactorAuth', () => {
             }).catch(error => {
                 logger.error('failed to regenerate 2fa recovery code', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to regenerate two-factor authentication backup codes' });

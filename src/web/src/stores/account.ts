@@ -813,7 +813,7 @@ export const useAccountsStore = defineStore('accounts', () => {
                     logger.error('failed to load account list', error);
                 }
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve account list' });
@@ -846,7 +846,7 @@ export const useAccountsStore = defineStore('accounts', () => {
             }).catch(error => {
                 logger.error('failed to load account info', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve account' });
@@ -965,7 +965,7 @@ export const useAccountsStore = defineStore('accounts', () => {
             }).catch(error => {
                 logger.error('failed to save accounts display order', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to move account' });
@@ -1000,7 +1000,7 @@ export const useAccountsStore = defineStore('accounts', () => {
             }).catch(error => {
                 logger.error('failed to change account visibility', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     if (hidden) {
@@ -1039,7 +1039,7 @@ export const useAccountsStore = defineStore('accounts', () => {
             }).catch(error => {
                 logger.error('failed to delete account', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to delete this account' });
@@ -1074,7 +1074,7 @@ export const useAccountsStore = defineStore('accounts', () => {
             }).catch(error => {
                 logger.error('failed to delete sub-account', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to delete this sub-account' });
@@ -1144,7 +1144,7 @@ export const useAccountsStore = defineStore('accounts', () => {
             }).catch(error => {
                 logger.error('failed to sync account balances', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to sync account balances' });

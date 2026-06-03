@@ -15,7 +15,6 @@ $CargoToml = Join-Path $ProjectRoot "Cargo.toml"
 $HttpServerName = "bill_http_server.exe"
 $HttpServerDebugPath = Join-Path $ProjectRoot "target\debug\$HttpServerName"
 $HttpServerReleasePath = Join-Path $ProjectRoot "target\release\$HttpServerName"
-$DefaultDbPath = Join-Path $ProjectRoot "data\bills.db"
 $DotenvPath = Join-Path $ProjectRoot ".env"
 $ServerConfigCandidates = @(
     (Join-Path $ProjectRoot "data\config\server_config.json"),
@@ -187,8 +186,6 @@ foreach ($databaseEnvName in @(
     "BILL_ANALYSER_POSTGRES_USER",
     "BILL_ANALYSER_POSTGRES_PASSWORD",
     "BILL_ANALYSER_POSTGRES_PORT",
-    "BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER",
-    "BILL_ANALYSER_MIGRATION_MODE",
     "BILL_ANALYSER_WEAVIATE_ENABLED",
     "BILL_ANALYSER_WEAVIATE_ENDPOINT",
     "BILL_ANALYSER_WEAVIATE_PORT",
@@ -204,42 +201,17 @@ foreach ($databaseEnvName in @(
     }
 }
 
-if (-not $env:BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER) {
-    $env:BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER = "true"
-}
-
-$RequirePostgresAfterCutover = Test-TruthyEnvValue -Value $env:BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER
-
-if (-not $env:BILL_ANALYSER_SQLITE_DB_PATH) {
-    $env:BILL_ANALYSER_SQLITE_DB_PATH = $DefaultDbPath
-}
-
-if (-not $env:BILL_ANALYSER_SQLITE_LEGACY_PATH) {
-    $env:BILL_ANALYSER_SQLITE_LEGACY_PATH = $env:BILL_ANALYSER_SQLITE_DB_PATH
-}
-
 if (-not $env:BILL_ANALYSER_DATABASE_BACKEND) {
     $env:BILL_ANALYSER_DATABASE_BACKEND = "postgres"
 }
 
 $SelectedDatabaseBackend = $env:BILL_ANALYSER_DATABASE_BACKEND.Trim().ToLowerInvariant()
-$UsePostgresRuntime = $SelectedDatabaseBackend -in @("postgres", "postgresql")
-if ($SelectedDatabaseBackend -notin @("sqlite", "sqlite_legacy", "legacy_sqlite", "postgres", "postgresql")) {
-    Write-Host "Error: Unsupported BILL_ANALYSER_DATABASE_BACKEND='$env:BILL_ANALYSER_DATABASE_BACKEND'." -ForegroundColor Red
+if ($SelectedDatabaseBackend -notin @("postgres", "postgresql")) {
+    Write-Host "Error: BILL_ANALYSER_DATABASE_BACKEND only supports postgres." -ForegroundColor Red
     exit 1
 }
 
-if ($RequirePostgresAfterCutover -and -not $UsePostgresRuntime) {
-    Write-Host "Error: BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER=true requires BILL_ANALYSER_DATABASE_BACKEND=postgres." -ForegroundColor Red
-    exit 1
-}
-
-if (-not $UsePostgresRuntime) {
-    Write-Host "Error: Normal HTTP business runtime requires BILL_ANALYSER_DATABASE_BACKEND=postgres. SQLite is legacy migration/test input only." -ForegroundColor Red
-    exit 1
-}
-
-if ($UsePostgresRuntime -and -not $env:BILL_ANALYSER_POSTGRES_URL) {
+if (-not $env:BILL_ANALYSER_POSTGRES_URL) {
     $postgresPort = Resolve-ConfiguredPort -Name "BILL_ANALYSER_POSTGRES_PORT" -Value $env:BILL_ANALYSER_POSTGRES_PORT -DefaultPort 5432
     $postgresDb = if ($env:BILL_ANALYSER_POSTGRES_DB) { $env:BILL_ANALYSER_POSTGRES_DB } else { "bill_analyser" }
     $postgresUser = if ($env:BILL_ANALYSER_POSTGRES_USER) { $env:BILL_ANALYSER_POSTGRES_USER } else { "bill_analyser" }
@@ -267,10 +239,6 @@ $WeaviateEndpoint = Resolve-RequiredEndpoint -Name "Weaviate" -Url $env:BILL_ANA
 $PostgresEndpoint = Resolve-RequiredEndpoint -Name "Postgres" -Url $env:BILL_ANALYSER_POSTGRES_URL -DefaultPort 5432
 Assert-RequiredRuntimeService -Endpoint $PostgresEndpoint
 Assert-RequiredRuntimeService -Endpoint $WeaviateEndpoint
-
-if (-not $env:BILL_ANALYSER_MIGRATION_MODE) {
-    $env:BILL_ANALYSER_MIGRATION_MODE = "disabled"
-}
 
 if (-not $env:BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE) {
     $env:BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE = "import_db_runtime"
@@ -359,9 +327,7 @@ if ($ConfiguredServer) {
 
 Write-Host "Rust HTTP server: $env:BILL_ANALYSER_RUST_HTTP_SERVER" -ForegroundColor Gray
 Write-Host "Rust import mode: $env:BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE" -ForegroundColor Gray
-Write-Host "SQLite DB: $env:BILL_ANALYSER_SQLITE_DB_PATH" -ForegroundColor Gray
 Write-Host "Database backend: $env:BILL_ANALYSER_DATABASE_BACKEND" -ForegroundColor Gray
-Write-Host "Migration mode: $env:BILL_ANALYSER_MIGRATION_MODE" -ForegroundColor Gray
 Write-Host "Postgres configured: $([bool]$env:BILL_ANALYSER_POSTGRES_URL)" -ForegroundColor Gray
 Write-Host "Weaviate endpoint: $env:BILL_ANALYSER_WEAVIATE_ENDPOINT" -ForegroundColor Gray
 Write-Host "Listening on: http://$env:BILL_ANALYSER_HTTP_BIND" -ForegroundColor Cyan

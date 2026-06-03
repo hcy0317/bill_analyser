@@ -6,15 +6,15 @@ export interface ApiResponse<T> {
 export interface ErrorResponse {
     readonly success: boolean;
     readonly errorCode: number;
-    readonly errorMessage: string;
+    readonly message: string;
     readonly path: string;
 }
 
-export function buildErrorResponse(errorCode: number, errorMessage: string): ErrorResponse {
+export function buildErrorResponse(errorCode: number, message: string): ErrorResponse {
     const errorResponse: ErrorResponse = {
         success: false,
         errorCode: errorCode,
-        errorMessage: errorMessage,
+        message,
         path: ''
     };
 

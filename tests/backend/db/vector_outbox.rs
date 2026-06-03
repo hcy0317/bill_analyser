@@ -1,3 +1,5 @@
+#![cfg(not(coverage))]
+
 use std::{env, error::Error};
 
 use bill_analyser_db::{

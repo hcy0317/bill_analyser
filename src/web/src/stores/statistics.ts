@@ -1940,7 +1940,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
             }).catch(error => {
                 logger.error('failed to retrieve transaction statistics', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve transaction statistics' });
@@ -1985,7 +1985,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
             }).catch(error => {
                 logger.error('failed to retrieve transaction statistics', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve transaction statistics' });
@@ -2024,7 +2024,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
             }).catch(error => {
                 logger.error('failed to retrieve transaction statistics', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve transaction statistics' });

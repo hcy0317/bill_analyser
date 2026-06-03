@@ -31,8 +31,8 @@ name = "bill_category_rule_bridge"
 path = "bin/bill_category_rule_bridge.rs"
 
 [[bin]]
-name = "bill_migration_manifest"
-path = "bin/bill_migration_manifest.rs"
+name = "bill_runtime_manifest"
+path = "bin/bill_runtime_manifest.rs"
 
 [[test]]
 name = "ai_ocr_llm_contracts"
@@ -63,8 +63,8 @@ name = "matching_contracts"
 path = "../../../tests/backend/core/matching_contracts.rs"
 
 [[test]]
-name = "migration_governance_contracts"
-path = "../../../tests/backend/core/migration_governance_contracts.rs"
+name = "runtime_governance_contracts"
+path = "../../../tests/backend/core/runtime_governance_contracts.rs"
 
 [[test]]
 name = "ops_contracts"

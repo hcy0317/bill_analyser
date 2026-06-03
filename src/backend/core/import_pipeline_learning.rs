@@ -1,6 +1,6 @@
 // 中文导读：导入预览 learning matching payload。
 // 维护重点：生命周期字段会随推荐策略演进，保持独立避免 import_pipeline 主合同继续膨胀。
-// 不变式：该结构仍通过 ImportPreviewMatchingPayload.learning 对外序列化，字段默认值需保持前端兼容。
+// 不变式：该结构仍通过 ImportPreviewMatchingPayload.learning 对外序列化，字段默认值需保持前端契约稳定。
 
 use serde::{Deserialize, Serialize};
 

@@ -1,6 +1,6 @@
 // 中文导读：核心业务合同层，负责把金额、时间、分类、导入、匹配、预算、统计等规则从 HTTP/DB 细节中隔离。
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
-// 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
+// 不变式：金额单位、用户可见类型和API payload 在进入或离开本层时必须显式转换。
 
 use serde_json::Value;
 
@@ -165,7 +165,7 @@ pub fn build_llm_rule_expression_synthesis_prompt(
     let summary_json =
         serde_json::to_string_pretty(knowledge_summary_pack).unwrap_or_else(|_| "{}".to_string());
     format!(
-        "以下是 Bill Analyser 的长期学习知识摘要（KnowledgeSummaryPack）。\n请基于这些长期学习证据，为规则中心归纳出可人工审核的分类规则候选。\n\n约束：\n- 只能输出“候选规则”，不要假设会自动写入正式规则系统。\n- 候选必须兼容现有规则表达式语法：\n  - OR={{关键词1,关键词2}}\n  - AND={{关键词1,关键词2}}\n  - NOT={{关键词1}}\n  - REGEX={{模式1,模式2}}\n  - 可以使用 +、/、|、× 和括号组合\n- 不要输出无效语法、空表达式或与知识摘要明显冲突的规则。\n- 优先覆盖证据稳定、反馈正向、可复用的模式。\n- 推荐分类必须严格来自 knowledge_summary_pack.existing_categories 中已有的分类路径。\n- 如果证据不足，请少提，不要为了凑数量强行生成。\n- 最多输出 {max_candidates} 条候选。\n\nKnowledgeSummaryPack:\n{summary_json}\n\n请以如下 JSON 格式返回：\n[\n  {{\n    \"rule_name\": \"<候选名称>\",\n    \"suggested_main_category\": \"<主分类>\",\n    \"suggested_sub_category\": \"<子分类，可为空>\",\n    \"rule_expression\": \"<规则表达式>\",\n    \"confidence\": <0.0-1.0之间的置信度>,\n    \"reason\": \"<简短说明归纳依据>\"\n  }}\n]\n\n只返回 JSON，不要有其他文字。"
+        "以下是 Bill Analyser 的长期学习知识摘要（KnowledgeSummaryPack）。\n请基于这些长期学习证据，为规则中心归纳出可人工审核的分类规则候选。\n\n约束：\n- 只能输出“候选规则”，不要假设会自动写入正式规则系统。\n- 候选必须符合现有规则表达式语法：\n  - OR={{关键词1,关键词2}}\n  - AND={{关键词1,关键词2}}\n  - NOT={{关键词1}}\n  - REGEX={{模式1,模式2}}\n  - 可以使用 +、/、|、× 和括号组合\n- 不要输出无效语法、空表达式或与知识摘要明显冲突的规则。\n- 优先覆盖证据稳定、反馈正向、可复用的模式。\n- 推荐分类必须严格来自 knowledge_summary_pack.existing_categories 中已有的分类路径。\n- 如果证据不足，请少提，不要为了凑数量强行生成。\n- 最多输出 {max_candidates} 条候选。\n\nKnowledgeSummaryPack:\n{summary_json}\n\n请以如下 JSON 格式返回：\n[\n  {{\n    \"rule_name\": \"<候选名称>\",\n    \"suggested_main_category\": \"<主分类>\",\n    \"suggested_sub_category\": \"<子分类，可为空>\",\n    \"rule_expression\": \"<规则表达式>\",\n    \"confidence\": <0.0-1.0之间的置信度>,\n    \"reason\": \"<简短说明归纳依据>\"\n  }}\n]\n\n只返回 JSON，不要有其他文字。"
     )
 }
 

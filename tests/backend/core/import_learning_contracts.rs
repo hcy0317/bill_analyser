@@ -8,12 +8,12 @@ use bill_analyser_core::{
     build_semantic_label, build_semantic_label_counts, evaluate_learning_policy,
     import_learning_model_version, iter_feature_tokens, learning_batch_accept_response,
     learning_center_page_response, learning_lifecycle_is_auto_eligible,
-    learning_lifecycle_signal_state, legacy_learning_rules_page_response, llm_error_response,
+    learning_lifecycle_signal_state, learning_rules_page_response, llm_error_response,
     llm_memory_events_success, normalize_import_learning_suggestion_id,
     normalize_import_learning_text, normalize_learning_text, normalize_llm_preview_review_decision,
     parse_composite_match_value, parse_learning_suggestion_ids, parse_preview_ids,
     parse_route_label, parse_semantic_label, prepare_training_samples,
-    should_restore_llm_previous_preview, transition_import_learning_lifecycle,
+    should_revert_llm_preview_application, transition_import_learning_lifecycle,
     ImportLearningLifecycleState, ImportLearningPrediction, ImportLearningRecommendationKeyInput,
     LlmMemoryEventContract, LlmPreviewSnapshot, LlmPreviewSuggestion,
     BLUE_ACCEPT_CONFIRMATION_THRESHOLD, BLUE_CONFIDENCE_THRESHOLD, BLUE_MARGIN_THRESHOLD,
@@ -112,13 +112,13 @@ fn recommendation_key_is_stable_for_similar_features_and_invalidates_on_schema_o
         build_import_learning_recommendation_key(&changed_tuple)
     );
 
-    let migrated_schema = ImportLearningRecommendationKeyInput {
+    let current_schema = ImportLearningRecommendationKeyInput {
         feature_schema_version: "import-learning-recommendation-key-v2".to_string(),
         ..base.clone()
     };
     assert_ne!(
         build_import_learning_recommendation_key(&base),
-        build_import_learning_recommendation_key(&migrated_schema)
+        build_import_learning_recommendation_key(&current_schema)
     );
 }
 
@@ -293,7 +293,7 @@ fn feature_labels_samples_and_tokens_match_dual_head_training_contract() {
 }
 
 #[test]
-fn green_blue_policy_thresholds_and_model_metadata_match_python_contract() {
+fn green_blue_policy_thresholds_and_model_metadata_match_current_contract() {
     assert_eq!(POLICY_VERSION, "learning-green-blue-policy-v1");
     assert_eq!(GREEN_CONFIDENCE_THRESHOLD, 0.52);
     assert_eq!(GREEN_MARGIN_THRESHOLD, 0.02);
@@ -386,7 +386,7 @@ fn green_blue_policy_thresholds_and_model_metadata_match_python_contract() {
 }
 
 #[test]
-fn llm_preview_memory_only_fills_blank_fields_and_reject_restore_is_guarded() {
+fn llm_preview_memory_only_fills_blank_fields_and_reject_revert_is_guarded() {
     let current = LlmPreviewSnapshot {
         preview_main_category: "   ".to_string(),
         preview_sub_category: " ".to_string(),
@@ -430,13 +430,13 @@ fn llm_preview_memory_only_fills_blank_fields_and_reject_restore_is_guarded() {
         Some("reject")
     );
     assert_eq!(normalize_llm_preview_review_decision("other"), None);
-    assert!(should_restore_llm_previous_preview(
+    assert!(should_revert_llm_preview_application(
         "reject",
         Some(&plan.previous_preview_snapshot),
         Some(&plan.applied_preview_snapshot),
         &plan.applied_preview_snapshot,
     ));
-    assert!(!should_restore_llm_previous_preview(
+    assert!(!should_revert_llm_preview_application(
         "reject",
         Some(&plan.previous_preview_snapshot),
         Some(&plan.applied_preview_snapshot),
@@ -539,17 +539,17 @@ fn learning_and_llm_route_envelopes_preserve_error_and_paging_shapes() {
     assert_eq!(batch.body["data"]["acceptedCount"], 1);
     assert_eq!(batch.body["data"]["failedCount"], 1);
 
-    let rules = legacy_learning_rules_page_response(vec![json!({"id": 2})], 11, 2, 5);
+    let rules = learning_rules_page_response(vec![json!({"id": 2})], 11, 2, 5);
     assert_eq!(rules.body["result"][0]["id"], 2);
     assert_eq!(rules.body["totalCount"], 11);
     assert_eq!(rules.body["page"], 2);
     assert_eq!(rules.body["pageSize"], 5);
     assert_eq!(rules.body["totalPages"], 3);
-    let empty_rules = legacy_learning_rules_page_response(Vec::new(), 0, 5, 0);
+    let empty_rules = learning_rules_page_response(Vec::new(), 0, 5, 0);
     assert_eq!(empty_rules.body["page"], 1);
     assert_eq!(empty_rules.body["pageSize"], 100);
     assert_eq!(empty_rules.body["totalPages"], 1);
-    let all_rules = legacy_learning_rules_page_response(Vec::new(), 0, 1, -1);
+    let all_rules = learning_rules_page_response(Vec::new(), 0, 1, -1);
     assert_eq!(all_rules.body["pageSize"], -1);
     assert_eq!(all_rules.body["totalPages"], 1);
 

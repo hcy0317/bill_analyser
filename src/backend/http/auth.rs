@@ -1,21 +1,14 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
 use axum::http::{header, HeaderMap};
 use base64::{engine::general_purpose, Engine as _};
 use bill_analyser_core::{auth::parse_bearer_authorization_header, UserId};
-use bill_analyser_db::init_auth_security_schema;
-use chrono::{Local, NaiveDateTime};
 use ring::hmac;
-use rusqlite::OptionalExtension;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
-use crate::{
-    config::HttpShellConfig,
-    database_runtime::{open_sqlite_repository_runtime, SqliteRepositoryOpenMode},
-};
+use crate::config::HttpShellConfig;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthenticatedUser {
@@ -40,13 +33,6 @@ impl RustRouteAuthError {
     fn unavailable(message: impl Into<String>) -> Self {
         Self {
             status: 503,
-            message: message.into(),
-        }
-    }
-
-    fn internal(message: impl Into<String>) -> Self {
-        Self {
-            status: 500,
             message: message.into(),
         }
     }
@@ -131,22 +117,9 @@ fn resolve_bearer_user(
         .unwrap_or("");
     let token = parse_bearer_authorization_header(auth_header)
         .map_err(|error| RustRouteAuthError::unauthorized(error.message))?;
-    let token_claim_user_id = validate_access_jwt(&token, config)?;
-    if config.database_backend.uses_postgres() {
-        return Ok(AuthenticatedUser {
-            user_id: token_claim_user_id,
-            session_id: None,
-        });
-    }
-    let session = resolve_session_user(&token, config)?;
-    if session.user_id != token_claim_user_id {
-        return Err(RustRouteAuthError::unauthorized(
-            "Invalid or expired session",
-        ));
-    }
     Ok(AuthenticatedUser {
-        user_id: session.user_id,
-        session_id: Some(session.id),
+        user_id: validate_access_jwt(&token, config)?,
+        session_id: None,
     })
 }
 
@@ -256,108 +229,6 @@ fn verify_hmac_signature(
         .map_err(|_| RustRouteAuthError::unauthorized("Invalid token"))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct SessionUser {
-    id: i64,
-    user_id: UserId,
-    expires_at: String,
-    user_is_active: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RawSessionUser {
-    id: i64,
-    user_id: i64,
-    expires_at: String,
-    user_is_active: bool,
-}
-
-fn resolve_session_user(
-    token: &str,
-    config: &HttpShellConfig,
-) -> Result<SessionUser, RustRouteAuthError> {
-    let runtime = open_sqlite_repository_runtime(
-        config,
-        "auth token",
-        SqliteRepositoryOpenMode::ExistingOnly,
-    )
-    .map_err(|error| {
-        if error.http_status_code() == 503 {
-            RustRouteAuthError::unavailable(error.to_string())
-        } else {
-            RustRouteAuthError::internal("Rust auth DB error")
-        }
-    })?;
-    init_auth_security_schema(runtime.connection())
-        .map_err(|error| RustRouteAuthError::internal(format!("Rust auth DB error: {error}")))?;
-    let token_hash = sha256_hex(token);
-    let raw_session = runtime
-        .connection()
-        .query_row(
-            r#"
-            SELECT s.id, s.user_id, s.expires_at, u.is_active as user_is_active
-            FROM sessions s
-            JOIN users u ON s.user_id = u.id
-            WHERE s.token_hash = ?1 AND s.is_active = 1
-            "#,
-            [&token_hash],
-            |row| {
-                Ok(RawSessionUser {
-                    id: row.get(0)?,
-                    user_id: row.get(1)?,
-                    expires_at: row.get(2)?,
-                    user_is_active: row.get::<_, i64>(3)? == 1,
-                })
-            },
-        )
-        .optional()
-        .map_err(|error| RustRouteAuthError::internal(format!("Rust auth DB error: {error}")))?
-        .ok_or_else(|| RustRouteAuthError::unauthorized("Invalid or expired session"))?;
-    let session = SessionUser {
-        id: raw_session.id,
-        user_id: UserId::new(u64::try_from(raw_session.user_id).unwrap_or(0))
-            .map_err(|_| RustRouteAuthError::unauthorized("Invalid or expired session"))?,
-        expires_at: raw_session.expires_at,
-        user_is_active: raw_session.user_is_active,
-    };
-
-    if !session.user_is_active {
-        return Err(RustRouteAuthError::unauthorized(
-            "User account is not active",
-        ));
-    }
-    if session_is_expired(&session.expires_at)? {
-        return Err(RustRouteAuthError::unauthorized("Session expired"));
-    }
-    runtime
-        .connection()
-        .execute(
-            "UPDATE sessions SET last_activity_at = ?1 WHERE id = ?2",
-            (
-                Local::now()
-                    .naive_local()
-                    .format("%Y-%m-%dT%H:%M:%S%.f")
-                    .to_string(),
-                session.id,
-            ),
-        )
-        .map_err(|error| RustRouteAuthError::internal(format!("Rust auth DB error: {error}")))?;
-
-    Ok(session)
-}
-
-fn session_is_expired(expires_at: &str) -> Result<bool, RustRouteAuthError> {
-    let normalized = expires_at.trim();
-    let parsed = NaiveDateTime::parse_from_str(normalized, "%Y-%m-%dT%H:%M:%S%.f")
-        .or_else(|_| NaiveDateTime::parse_from_str(normalized, "%Y-%m-%d %H:%M:%S%.f"))
-        .map_err(|_| RustRouteAuthError::unauthorized("Invalid or expired session"))?;
-    Ok(Local::now().naive_local() > parsed)
-}
-
-fn sha256_hex(value: &str) -> String {
-    format!("{:x}", Sha256::digest(value.as_bytes()))
-}
-
 fn parse_user_id(raw: &str, invalid_message: &'static str) -> Result<UserId, RustRouteAuthError> {
     let parsed = raw
         .parse::<u64>()
@@ -372,20 +243,8 @@ mod tests {
     use axum::http::HeaderValue;
     use chrono::Duration as ChronoDuration;
     use serde_json::json;
-    use tempfile::NamedTempFile;
-
-    use crate::config::DatabaseBackend;
-
     const TEST_SECRET: &str = "jwt-secret";
     const TRUSTED_SECRET_HEADER: &str = "x-bill-analyser-trusted-secret";
-
-    fn legacy_sqlite_auth_config(sqlite_path: impl Into<String>) -> HttpShellConfig {
-        HttpShellConfig::default()
-            .with_database_backend(DatabaseBackend::Sqlite)
-            .with_require_postgres_after_cutover(false)
-            .with_legacy_sqlite_runtime_for_tests()
-            .with_sqlite_db_path(sqlite_path)
-    }
 
     #[test]
     fn bearer_auth_rejects_missing_jwt_secret() {
@@ -447,9 +306,7 @@ mod tests {
                 TEST_SECRET,
                 ChronoDuration::hours(1),
             );
-            let db = NamedTempFile::new().expect("temp db");
-            seed_user_session(db.path(), 7, &token, true, true, ChronoDuration::hours(1));
-            let config = legacy_sqlite_auth_config(db.path().display().to_string())
+            let config = HttpShellConfig::default()
                 .with_auth_jwt_secret(TEST_SECRET)
                 .with_auth_jwt_algorithm(algorithm);
 
@@ -462,98 +319,6 @@ mod tests {
 
             assert_eq!(user_id, UserId::new(7).expect("positive user id"));
         }
-    }
-
-    #[test]
-    fn bearer_auth_postgres_cutover_does_not_open_sqlite_session_fallback() {
-        let token = signed_token(7, "access", "HS256", TEST_SECRET, ChronoDuration::hours(1));
-        let config = HttpShellConfig::default()
-            .with_database_backend(DatabaseBackend::Postgres)
-            .with_require_postgres_after_cutover(true)
-            .with_auth_jwt_secret(TEST_SECRET);
-
-        let user_id =
-            resolve_user_id_from_headers(&bearer_headers(&token), &config, TRUSTED_SECRET_HEADER)
-                .expect("postgres cutover JWT accepts without sqlite session");
-
-        assert_eq!(user_id, UserId::new(7).expect("positive user id"));
-    }
-
-    #[test]
-    fn bearer_auth_rejects_missing_db_path_and_session_user_mismatch() {
-        let token = signed_token(7, "access", "HS256", TEST_SECRET, ChronoDuration::hours(1));
-        let config = HttpShellConfig::default()
-            .with_database_backend(DatabaseBackend::Sqlite)
-            .with_require_postgres_after_cutover(false)
-            .with_legacy_sqlite_runtime_for_tests()
-            .with_auth_jwt_secret(TEST_SECRET);
-        let missing_db_path =
-            resolve_user_id_from_headers(&bearer_headers(&token), &config, TRUSTED_SECRET_HEADER)
-                .expect_err("missing sqlite path rejects after token validation");
-        assert_eq!(missing_db_path.status, 503);
-        assert!(missing_db_path
-            .message
-            .contains("BILL_ANALYSER_SQLITE_DB_PATH"));
-
-        let db_file = NamedTempFile::new().expect("temp db");
-        seed_user_session(
-            db_file.path(),
-            8,
-            &token,
-            true,
-            true,
-            ChronoDuration::hours(1),
-        );
-        let config = config.with_sqlite_db_path(db_file.path().display().to_string());
-        let mismatch =
-            resolve_user_id_from_headers(&bearer_headers(&token), &config, TRUSTED_SECRET_HEADER)
-                .expect_err("token claim must match persisted session user");
-        assert_eq!(mismatch.status, 401);
-        assert_eq!(mismatch.message, "Invalid or expired session");
-    }
-
-    #[test]
-    fn bearer_auth_rejects_inactive_user_and_expired_session() {
-        let token = signed_token(7, "access", "HS256", TEST_SECRET, ChronoDuration::hours(1));
-        let inactive_db = NamedTempFile::new().expect("inactive temp db");
-        seed_user_session(
-            inactive_db.path(),
-            7,
-            &token,
-            false,
-            true,
-            ChronoDuration::hours(1),
-        );
-        let inactive_config = legacy_sqlite_auth_config(inactive_db.path().display().to_string())
-            .with_auth_jwt_secret(TEST_SECRET);
-        let inactive = resolve_user_id_from_headers(
-            &bearer_headers(&token),
-            &inactive_config,
-            TRUSTED_SECRET_HEADER,
-        )
-        .expect_err("inactive user rejects");
-        assert_eq!(inactive.status, 401);
-        assert_eq!(inactive.message, "User account is not active");
-
-        let expired_db = NamedTempFile::new().expect("expired temp db");
-        seed_user_session(
-            expired_db.path(),
-            7,
-            &token,
-            true,
-            true,
-            ChronoDuration::hours(-1),
-        );
-        let expired_config = legacy_sqlite_auth_config(expired_db.path().display().to_string())
-            .with_auth_jwt_secret(TEST_SECRET);
-        let expired = resolve_user_id_from_headers(
-            &bearer_headers(&token),
-            &expired_config,
-            TRUSTED_SECRET_HEADER,
-        )
-        .expect_err("expired session rejects");
-        assert_eq!(expired.status, 401);
-        assert_eq!(expired.message, "Session expired");
     }
 
     fn bearer_headers(token: &str) -> HeaderMap {
@@ -592,75 +357,5 @@ mod tests {
         let signature = hmac::sign(&key, signing_input.as_bytes());
         let encoded_signature = general_purpose::URL_SAFE_NO_PAD.encode(signature.as_ref());
         format!("{signing_input}.{encoded_signature}")
-    }
-
-    fn seed_user_session(
-        path: &std::path::Path,
-        user_id: i64,
-        token: &str,
-        active_user: bool,
-        active_session: bool,
-        session_exp_offset: ChronoDuration,
-    ) {
-        let connection = rusqlite::Connection::open(path).expect("db opens");
-        connection
-            .execute_batch(
-                "
-                CREATE TABLE users (
-                    id INTEGER PRIMARY KEY,
-                    username TEXT NOT NULL,
-                    email TEXT,
-                    is_active INTEGER NOT NULL DEFAULT 1
-                );
-                CREATE TABLE sessions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    token_hash TEXT NOT NULL,
-                    refresh_token_hash TEXT,
-                    expires_at TEXT NOT NULL,
-                    refresh_expires_at TEXT,
-                    user_agent TEXT,
-                    ip_address TEXT,
-                    is_active INTEGER NOT NULL DEFAULT 1,
-                    last_activity_at TEXT,
-                    created_at TEXT
-                );
-                CREATE INDEX idx_sessions_token_hash ON sessions(token_hash);
-                ",
-            )
-            .expect("auth schema");
-        let now = Local::now().naive_local();
-        let expires_at = (now + session_exp_offset)
-            .format("%Y-%m-%dT%H:%M:%S%.f")
-            .to_string();
-        let now_text = now.format("%Y-%m-%dT%H:%M:%S%.f").to_string();
-        connection
-            .execute(
-                "INSERT INTO users(id, username, email, is_active) VALUES (?1, ?2, ?3, ?4)",
-                (
-                    user_id,
-                    format!("user-{user_id}"),
-                    format!("user-{user_id}@example.test"),
-                    if active_user { 1 } else { 0 },
-                ),
-            )
-            .expect("user inserted");
-        connection
-            .execute(
-                "
-                INSERT INTO sessions (
-                    user_id, token_hash, refresh_token_hash, expires_at, refresh_expires_at,
-                    user_agent, ip_address, is_active, last_activity_at, created_at
-                ) VALUES (?1, ?2, '', ?3, ?3, 'test', '127.0.0.1', ?4, ?5, ?5)
-                ",
-                (
-                    user_id,
-                    sha256_hex(token),
-                    expires_at,
-                    if active_session { 1 } else { 0 },
-                    now_text,
-                ),
-            )
-            .expect("session inserted");
     }
 }

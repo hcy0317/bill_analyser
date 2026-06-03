@@ -1,5 +1,5 @@
 // 中文导读：PostgreSQL authority 设置包导入路径，复用设置包 schema/ref 解析并用 Postgres 事务承载 preview rollback。
-// 维护重点：保持 user-scope、幂等 upsert 和引用重映射；不要回退到 SQLite runtime。
+// 维护重点：保持 user-scope、幂等 upsert 和引用重映射；不要回退到 non-Postgres runtime。
 // 不变式：dry_run 必须 rollback；真实导入必须按用户事务提交，金额从设置包元单位写入 Postgres 分单位。
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -45,14 +45,14 @@ pub async fn import_postgres_settings_bundle(
         section_items(&sections, "transactionTemplates"),
         &mut result_sections,
         &mut warnings,
-        "PostgreSQL settings bundle template import is not supported in this recovery path",
+        "PostgreSQL settings bundle template import is not supported for this section",
     );
     skip_postgres_settings_section(
         "scheduledTransactions",
         section_items(&sections, "scheduledTransactions"),
         &mut result_sections,
         &mut warnings,
-        "PostgreSQL settings bundle scheduled template import is not supported in this recovery path",
+        "PostgreSQL settings bundle scheduled template import is not supported for this section",
     );
     import_postgres_settings_category_rules(
         &mut transaction,
@@ -77,14 +77,14 @@ pub async fn import_postgres_settings_bundle(
         section_items(&sections, "llmConfigs"),
         &mut result_sections,
         &mut warnings,
-        "PostgreSQL settings bundle LLM config import is not supported in this recovery path",
+        "PostgreSQL settings bundle LLM config import is not supported for this section",
     );
     skip_postgres_settings_section(
         "ocrConfig",
         section_items(&sections, "ocrConfig"),
         &mut result_sections,
         &mut warnings,
-        "PostgreSQL settings bundle OCR config import is not supported in this recovery path",
+        "PostgreSQL settings bundle OCR config import is not supported for this section",
     );
 
     if dry_run {
@@ -324,10 +324,6 @@ fn postgres_account_metadata(normalized: &Value, parent_id: i64) -> Value {
             normalized.get(key).cloned().unwrap_or(Value::Null),
         );
     }
-    metadata.insert(
-        "aliases".to_string(),
-        Value::Array(load_json_list(normalized.get("aliases"))),
-    );
     metadata.insert(
         "initial_balance".to_string(),
         json!(safe_float(normalized.get("initial_balance"), 0.0)),
@@ -688,7 +684,7 @@ async fn import_postgres_settings_category_rules(
         let regex_enabled = safe_bool(get_any(item, &["regexEnabled", "regex_enabled"]));
         let enabled = safe_bool_with_default(item.get("enabled"), true);
         let key = (category_id, rule_expression.clone(), name.clone());
-        let rule_expression_json = postgres_legacy_rule_expression_json(&rule_expression, regex_enabled);
+        let rule_expression_json = postgres_rule_expression_json(&rule_expression, regex_enabled);
 
         if let Some(rule_id) = existing.get(&key).copied() {
             sqlx::query(
@@ -832,7 +828,7 @@ async fn import_postgres_settings_account_rules(
             account_role_scope.clone(),
             transaction_type_scope.clone(),
         );
-        let rule_expression_json = postgres_legacy_rule_expression_json(&rule_expression, regex_enabled);
+        let rule_expression_json = postgres_rule_expression_json(&rule_expression, regex_enabled);
         let source_key = (!source_key.is_empty()).then_some(source_key);
 
         if let Some(rule_id) = existing.get(&key).copied() {
@@ -960,9 +956,9 @@ fn postgres_category_parts(path: Option<&str>, name: &str) -> (String, String) {
     (name.trim().to_string(), String::new())
 }
 
-fn postgres_legacy_rule_expression_json(expression: &str, regex_enabled: bool) -> Value {
+fn postgres_rule_expression_json(expression: &str, regex_enabled: bool) -> Value {
     json!({
-        "legacy_expression": expression,
+        "expression": expression,
         "regex_enabled": regex_enabled,
     })
 }
@@ -971,7 +967,7 @@ fn postgres_rule_expression_string(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
         Value::Object(object) => object
-            .get("legacy_expression")
+            .get("expression")
             .or_else(|| object.get("rule_expression"))
             .and_then(Value::as_str)
             .map(ToOwned::to_owned)

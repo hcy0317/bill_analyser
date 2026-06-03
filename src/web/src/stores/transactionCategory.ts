@@ -252,7 +252,7 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
                     logger.error('failed to load category list', error);
                 }
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve category list' });
@@ -299,7 +299,7 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
             }).catch(error => {
                 logger.error('failed to load category info', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve category' });
@@ -348,7 +348,7 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
             }).catch(error => {
                 logger.error('failed to save category', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     if (!isEdit) {
@@ -383,7 +383,7 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
             }).catch(error => {
                 logger.error('failed to add categories', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to add category' });
@@ -414,7 +414,7 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
             }).catch(error => {
                 logger.error('failed to add preset categories', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to add preset categories' });
@@ -498,7 +498,7 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
             }).catch(error => {
                 logger.error('failed to save categories display order', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to move category' });
@@ -533,7 +533,7 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
             }).catch(error => {
                 logger.error('failed to change category visibility', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     if (hidden) {
@@ -572,7 +572,7 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
             }).catch(error => {
                 logger.error('failed to delete category', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to delete this category' });

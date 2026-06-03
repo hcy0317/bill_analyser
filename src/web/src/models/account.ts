@@ -17,7 +17,6 @@ export class Account implements AccountInfoResponse {
     public balance: number;
     public balanceTime?: number;
     public comment: string;
-    public aliases?: string[];
     public creditCardStatementDate?: number;
     public displayOrder: number;
     public visible: boolean;
@@ -133,8 +132,6 @@ export class Account implements AccountInfoResponse {
         this.comment = other.comment;
         this.creditCardStatementDate = other.creditCardStatementDate;
         this.visible = other.visible;
-        // v6.52: 修复 - 确保复制 aliases 字段
-        this.aliases = other.aliases ? [...other.aliases] : [];
     }
 
     public setSuitableIcon(oldCategory: number, newCategory: number): void {
@@ -184,7 +181,6 @@ export class Account implements AccountInfoResponse {
             balance: parentAccount || this.type === AccountType.SingleAccount.type ? this.balance : 0,
             balanceTime: (parentAccount || this.type === AccountType.SingleAccount.type) && this.balanceTime ? this.balanceTime : 0,
             comment: this.comment,
-            aliases: this.aliases,
             creditCardStatementDate: !parentAccount && this.category === AccountCategory.CreditCard.type ? this.creditCardStatementDate : undefined,
             subAccounts: !parentAccount ? subAccountCreateRequests : undefined,
             clientSessionId: !parentAccount ? clientSessionId : undefined
@@ -218,7 +214,6 @@ export class Account implements AccountInfoResponse {
             balance: parentAccount && (!this.id || this.id === '0') ? this.balance : undefined,
             balanceTime: parentAccount && (!this.id || this.id === '0') ? this.balanceTime : undefined,
             comment: this.comment,
-            aliases: this.aliases,
             creditCardStatementDate: !parentAccount && this.category === AccountCategory.CreditCard.type ? this.creditCardStatementDate : undefined,
             hidden: !this.visible,
             subAccounts: !parentAccount ? subAccountModifyRequests : undefined,
@@ -373,7 +368,6 @@ export class Account implements AccountInfoResponse {
             this.isAsset,
             this.isLiability,
             typeof(this.subAccounts) !== 'undefined' ? Account.cloneAccounts(this.subAccounts) : undefined);
-        cloned.aliases = this.aliases ? [...this.aliases] : undefined;
         return cloned;
     }
 
@@ -435,8 +429,6 @@ export class Account implements AccountInfoResponse {
             accountResponse.isLiability,
             accountResponse.subAccounts ? Account.ofMulti(accountResponse.subAccounts) : undefined
         );
-        // 设置aliases（API返回的别名数组）
-        account.aliases = accountResponse.aliases;
         return account;
     }
 
@@ -571,7 +563,6 @@ export interface AccountCreateRequest {
     readonly balance: number;
     readonly balanceTime: number;
     readonly comment: string;
-    readonly aliases?: string[];
     readonly creditCardStatementDate?: number;
     readonly subAccounts?: AccountCreateRequest[];
     readonly clientSessionId?: string;
@@ -587,7 +578,6 @@ export interface AccountModifyRequest {
     readonly balance?: number;
     readonly balanceTime?: number;
     readonly comment: string;
-    readonly aliases?: string[];
     readonly creditCardStatementDate?: number;
     readonly hidden: boolean;
     readonly subAccounts?: AccountModifyRequest[];
@@ -605,7 +595,6 @@ export interface AccountInfoResponse {
     readonly currency: string;
     readonly balance: number;
     readonly comment: string;
-    readonly aliases?: string[];
     readonly creditCardStatementDate?: number;
     readonly displayOrder: number;
     readonly isAsset?: boolean;

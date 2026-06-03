@@ -1,30 +1,15 @@
 # 总体架构
 
-Bill Analyser 当前是 Rust-only 后端 + Vue 前端 + SQLite 本地数据的单体应用。
+Bill Analyser 当前主链是 Vue 3 前端、Rust Axum HTTP 后端、PostgreSQL 权威数据层和必需 Weaviate 派生向量索引。
 
-## 运行入口
+请求链路：前端服务层调用 `/api/...`，Axum route 校验认证和 DTO，调用 core/db 层读写 PostgreSQL；导入 learning recall 在确定性规则链之后调用 Weaviate。
 
-- 后端：`src/backend/http/bin/bill_http_server.rs`
-- 默认监听：`BILL_ANALYSER_HTTP_BIND=127.0.0.1:5000`
-- 前端：`src/web`，开发态默认 `http://127.0.0.1:8081`
-- API 主链：`REST /api/...`
+运行态边界：
 
-未知 `/api/...` 请求由 Rust router 返回结构化 404，不再透传到外部后端。
+- `bill_http_server` 是唯一 HTTP 服务入口。
+- PostgreSQL 是唯一业务数据库。
+- Weaviate 是必需服务，不是可选降级路径。
+- 前端只依赖当前 REST DTO 与当前 route ownership fixture。
+- 业务金额字段在进入或离开 DTO 边界时显式处理元/分转换。
 
-## Rust workspace
-
-- `bill-analyser-http`：Axum router、认证上下文、multipart 上传、响应 envelope、domain route modules。
-- `bill-analyser-db`：SQLite 连接 guard、schema 初始化、事务 helper、repository 与 user-scope 数据访问。
-- `bill-analyser-core`：共享业务合同、迁移治理、金额/时间/分类/统计等领域规则。
-- `bill-analyser-parsers`：账单解析器 registry、`RawBill` / `StandardBill`、parser tags 与银行/平台 parser。
-
-## 数据流
-
-前端通过统一服务层访问 `/api/...`；HTTP route 解析鉴权和请求 DTO 后调用 Rust domain runtime；domain runtime 通过 repository 层读写 SQLite；响应保持前端既有 `success/data` 或 `success/result` envelope 兼容。
-
-## 关键约束
-
-- REST 主链不重新引入 `/api/v1/*`。
-- 金额字段必须显式复核元/分边界。
-- 数据库写入保持事务原子性和当前用户作用域。
-- 启动脚本只启动 Rust HTTP server 和前端 dev server。
+开发时优先保持 route facade 薄、domain contract 明确、repository user-scoped、前端服务层与后端 DTO 同步。

@@ -234,7 +234,6 @@ const selectedCategoryDisplay = computed<string>(() => {
 });
 
 // `canSave` mirrors the desktop EditDialog invariants: a category is required
-// (we accept either categoryId, or a primary category name on a legacy budget)
 // and amount must be positive.
 const canSave = computed<boolean>(() => {
     if (form.value.amount <= 0) {

@@ -13,17 +13,6 @@ describe('api error message extraction', () => {
         })).toBe('Invalid JSON bundle');
     });
 
-    test('supports legacy errorMessage bodies', () => {
-        expect(getApiErrorMessage({
-            response: {
-                data: {
-                    success: false,
-                    errorMessage: 'account name already exists: 现金',
-                },
-            },
-        })).toBe('account name already exists: 现金');
-    });
-
     test('falls back to direct messages and caller defaults', () => {
         expect(getApiErrorMessage({ message: 'Network Error' })).toBe('Network Error');
         expect(getApiErrorMessageOrDefault({}, 'Unable to import settings bundle')).toBe('Unable to import settings bundle');

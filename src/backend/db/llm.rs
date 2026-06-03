@@ -1,17 +1,15 @@
-// 中文导读：SQLite repository 层，负责 schema、事务、user-scope 查询、row helper 和跨表写入边界。
-// 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
-// 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
+// 中文导读：PostgreSQL repository 层，负责 LLM 配置、候选项与规则落库。
+// 维护重点：运行态只读写 Postgres llm_* 表；category rule 物化使用当前 JSONB 规则合同。
+// 不变式：所有查询必须按 user_id 过滤，不能回退 non-Postgres。
 
 use bill_analyser_core::{
     build_runtime_llm_config_from_saved_config, normalize_llm_advanced_settings,
     normalize_provider_auth_config,
 };
-use chrono::Utc;
-use rusqlite::types::{Value as SqlValue, ValueRef};
-use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row};
 use serde_json::{json, Map, Value};
+use sqlx::{Postgres, QueryBuilder, Row};
 
-use crate::{DbError, DbResult};
+use crate::{DbError, DbResult, PostgresPool};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LlmConfigDraft {
@@ -52,136 +50,99 @@ pub struct LlmCandidateDraft {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn init_llm_runtime_schema(connection: &Connection) -> DbResult<()> {
-    connection.execute_batch(
-        "
-        CREATE TABLE IF NOT EXISTS llm_candidates (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            type TEXT NOT NULL DEFAULT 'classification',
-            source_bill_ids TEXT,
-            suggested_main_category TEXT,
-            suggested_sub_category TEXT,
-            suggested_rule_expression TEXT,
-            confidence REAL DEFAULT 0.0,
-            llm_provider TEXT,
-            llm_model TEXT,
-            llm_response_raw TEXT,
-            status TEXT DEFAULT 'pending',
-            created_at TEXT DEFAULT (datetime('now','localtime')),
-            reviewed_at TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_llm_candidates_user_status
-            ON llm_candidates(user_id, status);
-
-        CREATE TABLE IF NOT EXISTS llm_configs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL DEFAULT 1,
-            name TEXT NOT NULL,
-            provider TEXT NOT NULL DEFAULT 'openai',
-            model TEXT NOT NULL DEFAULT '',
-            api_key TEXT DEFAULT '',
-            base_url TEXT DEFAULT '',
-            credential_config TEXT NOT NULL DEFAULT '{}',
-            advanced_settings TEXT NOT NULL DEFAULT '{}',
-            is_active INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-            UNIQUE(user_id, name)
-        );
-        CREATE INDEX IF NOT EXISTS idx_llm_configs_user_active
-            ON llm_configs(user_id, is_active);
-        ",
-    )?;
-    if !table_has_column(connection, "llm_configs", "advanced_settings")? {
-        connection.execute(
-            "ALTER TABLE llm_configs ADD COLUMN advanced_settings TEXT NOT NULL DEFAULT '{}'",
-            [],
-        )?;
-    }
-    if !table_has_column(connection, "llm_configs", "credential_config")? {
-        connection.execute(
-            "ALTER TABLE llm_configs ADD COLUMN credential_config TEXT NOT NULL DEFAULT '{}'",
-            [],
-        )?;
-    }
-    Ok(())
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-pub fn list_llm_configs(connection: &Connection, user_id: i64) -> DbResult<Vec<Value>> {
+pub async fn list_postgres_llm_configs(pool: &PostgresPool, user_id: i64) -> DbResult<Vec<Value>> {
     #[cfg(not(coverage))]
     tracing::info!(
         domain = "ai",
-        operation = "list_llm_configs",
+        operation = "list_postgres_llm_configs",
         "business operation entered"
     );
-    let mut statement = connection.prepare(
-        "SELECT * FROM llm_configs WHERE user_id = ?1 ORDER BY is_active DESC, updated_at DESC",
-    )?;
-    let rows = statement.query_map(params![user_id], llm_config_from_row)?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    let rows = sqlx::query(
+        "
+        SELECT id, user_id, name, provider, model, api_key, base_url,
+               credential_config, advanced_settings, is_active, created_at, updated_at
+        FROM llm_configs
+        WHERE user_id = $1
+        ORDER BY is_active DESC, updated_at DESC
+        ",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter().map(llm_config_from_row).collect()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn get_active_llm_config(connection: &Connection, user_id: i64) -> DbResult<Option<Value>> {
-    connection
-        .query_row(
-            "SELECT * FROM llm_configs WHERE user_id = ?1 AND is_active = 1 LIMIT 1",
-            params![user_id],
-            llm_config_from_row,
-        )
-        .optional()
-        .map_err(Into::into)
+pub async fn get_postgres_active_llm_config(
+    pool: &PostgresPool,
+    user_id: i64,
+) -> DbResult<Option<Value>> {
+    let row = sqlx::query(
+        "
+        SELECT id, user_id, name, provider, model, api_key, base_url,
+               credential_config, advanced_settings, is_active, created_at, updated_at
+        FROM llm_configs
+        WHERE user_id = $1 AND is_active = true
+        ORDER BY updated_at DESC
+        LIMIT 1
+        ",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+    row.map(llm_config_from_row).transpose()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn create_llm_config(
-    connection: &Connection,
+pub async fn create_postgres_llm_config(
+    pool: &PostgresPool,
     user_id: i64,
     draft: &LlmConfigDraft,
 ) -> DbResult<Value> {
     #[cfg(not(coverage))]
     tracing::info!(
         domain = "ai",
-        operation = "create_llm_config",
+        operation = "create_postgres_llm_config",
         "business operation entered"
     );
-    let now = now_text();
     if draft.is_active {
-        connection.execute(
-            "UPDATE llm_configs SET is_active = 0, updated_at = ?1 WHERE user_id = ?2 AND is_active = 1",
-            params![now, user_id],
-        )?;
+        deactivate_postgres_llm_configs(pool, user_id, None).await?;
     }
-    connection.execute(
-        "INSERT INTO llm_configs (
+    let row = sqlx::query(
+        "
+        INSERT INTO llm_configs (
             user_id, name, provider, model, api_key, base_url,
             credential_config, advanced_settings, is_active, created_at, updated_at
-         )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
-        params![
-            user_id,
-            draft.name,
-            draft.provider,
-            draft.model,
-            draft.api_key,
-            draft.base_url,
-            serialize_credential_config(&draft.credential_config, &draft.api_key),
-            serialize_advanced_settings(&draft.advanced_settings),
-            i64::from(draft.is_active),
-            now,
-        ],
-    )?;
-    let config_id = connection.last_insert_rowid();
-    get_llm_config_by_id(connection, config_id, user_id)?.ok_or_else(|| {
-        DbError::InvalidOperation("created llm config could not be reloaded".to_string())
-    })
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())
+        RETURNING id
+        ",
+    )
+    .bind(user_id)
+    .bind(draft.name.trim())
+    .bind(draft.provider.trim())
+    .bind(draft.model.trim())
+    .bind(draft.api_key.trim())
+    .bind(draft.base_url.trim())
+    .bind(serialize_credential_config(
+        &draft.credential_config,
+        &draft.api_key,
+    ))
+    .bind(serialize_advanced_settings(&draft.advanced_settings))
+    .bind(draft.is_active)
+    .fetch_one(pool)
+    .await?;
+    let config_id: i64 = row.try_get("id")?;
+    get_postgres_llm_config_by_id(pool, config_id, user_id)
+        .await?
+        .ok_or_else(|| {
+            DbError::InvalidOperation("created llm config could not be reloaded".to_string())
+        })
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn update_llm_config(
-    connection: &Connection,
+pub async fn update_postgres_llm_config(
+    pool: &PostgresPool,
     config_id: i64,
     user_id: i64,
     update: &LlmConfigUpdate,
@@ -189,121 +150,150 @@ pub fn update_llm_config(
     #[cfg(not(coverage))]
     tracing::info!(
         domain = "ai",
-        operation = "update_llm_config",
+        operation = "update_postgres_llm_config",
         "business operation entered"
     );
-    if get_llm_config_by_id(connection, config_id, user_id)?.is_none() {
+    let Some(existing) = get_postgres_llm_config_by_id(pool, config_id, user_id).await? else {
         return Ok(None);
-    }
-
-    let now = now_text();
+    };
     if update.is_active == Some(true) {
-        connection.execute(
-            "UPDATE llm_configs SET is_active = 0, updated_at = ?1 WHERE user_id = ?2 AND id != ?3",
-            params![now, user_id, config_id],
-        )?;
+        deactivate_postgres_llm_configs(pool, user_id, Some(config_id)).await?;
     }
 
-    let mut assignments = vec!["updated_at = ?".to_string()];
-    let mut values = vec![SqlValue::Text(now)];
-    if let Some(name) = update.name.as_ref() {
-        assignments.push("name = ?".to_string());
-        values.push(SqlValue::Text(name.clone()));
-    }
-    if let Some(provider) = update.provider.as_ref() {
-        assignments.push("provider = ?".to_string());
-        values.push(SqlValue::Text(provider.clone()));
-    }
-    if let Some(model) = update.model.as_ref() {
-        assignments.push("model = ?".to_string());
-        values.push(SqlValue::Text(model.clone()));
-    }
-    if let Some(api_key) = update.api_key.as_ref() {
-        assignments.push("api_key = ?".to_string());
-        values.push(SqlValue::Text(api_key.clone()));
-    }
-    if let Some(base_url) = update.base_url.as_ref() {
-        assignments.push("base_url = ?".to_string());
-        values.push(SqlValue::Text(base_url.clone()));
-    }
-    if let Some(credential_config) = update.credential_config.as_ref() {
-        assignments.push("credential_config = ?".to_string());
-        values.push(SqlValue::Text(serialize_credential_config(
-            credential_config,
-            update.api_key.as_deref().unwrap_or_default(),
-        )));
-    }
-    if let Some(advanced_settings) = update.advanced_settings.as_ref() {
-        assignments.push("advanced_settings = ?".to_string());
-        values.push(SqlValue::Text(serialize_advanced_settings(
-            advanced_settings,
-        )));
-    }
-    if let Some(is_active) = update.is_active {
-        assignments.push("is_active = ?".to_string());
-        values.push(SqlValue::Integer(i64::from(is_active)));
-    }
-    values.push(SqlValue::Integer(config_id));
-    values.push(SqlValue::Integer(user_id));
-    connection.execute(
-        &format!(
-            "UPDATE llm_configs SET {} WHERE id = ? AND user_id = ?",
-            assignments.join(", ")
-        ),
-        params_from_iter(values),
-    )?;
-    get_llm_config_by_id(connection, config_id, user_id)
+    let name = update
+        .name
+        .clone()
+        .unwrap_or_else(|| text_field(&existing, "name"));
+    let provider = update
+        .provider
+        .clone()
+        .unwrap_or_else(|| text_field(&existing, "provider"));
+    let model = update
+        .model
+        .clone()
+        .unwrap_or_else(|| text_field(&existing, "model"));
+    let api_key = update
+        .api_key
+        .clone()
+        .unwrap_or_else(|| text_field(&existing, "api_key"));
+    let base_url = update
+        .base_url
+        .clone()
+        .unwrap_or_else(|| text_field(&existing, "base_url"));
+    let credential_config = update
+        .credential_config
+        .as_ref()
+        .map(|value| serialize_credential_config(value, &api_key))
+        .unwrap_or_else(|| existing["credential_config"].clone());
+    let advanced_settings = update
+        .advanced_settings
+        .as_ref()
+        .map(serialize_advanced_settings)
+        .unwrap_or_else(|| existing["advanced_settings"].clone());
+    let is_active = update.is_active.unwrap_or_else(|| {
+        existing
+            .get("is_active")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    });
+
+    sqlx::query(
+        "
+        UPDATE llm_configs
+        SET name = $1,
+            provider = $2,
+            model = $3,
+            api_key = $4,
+            base_url = $5,
+            credential_config = $6,
+            advanced_settings = $7,
+            is_active = $8,
+            updated_at = now(),
+            version = version + 1
+        WHERE id = $9 AND user_id = $10
+        ",
+    )
+    .bind(name.trim())
+    .bind(provider.trim())
+    .bind(model.trim())
+    .bind(api_key.trim())
+    .bind(base_url.trim())
+    .bind(credential_config)
+    .bind(advanced_settings)
+    .bind(is_active)
+    .bind(config_id)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+
+    get_postgres_llm_config_by_id(pool, config_id, user_id).await
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn delete_llm_config(connection: &Connection, config_id: i64, user_id: i64) -> DbResult<bool> {
-    #[cfg(not(coverage))]
-    tracing::info!(
-        domain = "ai",
-        operation = "delete_llm_config",
-        "business operation entered"
-    );
-    let deleted = connection.execute(
-        "DELETE FROM llm_configs WHERE id = ?1 AND user_id = ?2",
-        params![config_id, user_id],
-    )?;
-    Ok(deleted > 0)
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-pub fn activate_llm_config(
-    connection: &Connection,
+pub async fn delete_postgres_llm_config(
+    pool: &PostgresPool,
     config_id: i64,
     user_id: i64,
 ) -> DbResult<bool> {
-    if get_llm_config_by_id(connection, config_id, user_id)?.is_none() {
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "ai",
+        operation = "delete_postgres_llm_config",
+        "business operation entered"
+    );
+    let deleted = sqlx::query("DELETE FROM llm_configs WHERE id = $1 AND user_id = $2")
+        .bind(config_id)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(deleted.rows_affected() > 0)
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+pub async fn activate_postgres_llm_config(
+    pool: &PostgresPool,
+    config_id: i64,
+    user_id: i64,
+) -> DbResult<bool> {
+    if get_postgres_llm_config_by_id(pool, config_id, user_id)
+        .await?
+        .is_none()
+    {
         return Ok(false);
     }
-    let now = now_text();
-    connection.execute(
-        "UPDATE llm_configs SET is_active = 0, updated_at = ?1 WHERE user_id = ?2",
-        params![now, user_id],
-    )?;
-    connection.execute(
-        "UPDATE llm_configs SET is_active = 1, updated_at = ?1 WHERE id = ?2 AND user_id = ?3",
-        params![now, config_id, user_id],
-    )?;
+    deactivate_postgres_llm_configs(pool, user_id, Some(config_id)).await?;
+    sqlx::query(
+        "
+        UPDATE llm_configs
+        SET is_active = true, updated_at = now(), version = version + 1
+        WHERE id = $1 AND user_id = $2
+        ",
+    )
+    .bind(config_id)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
     Ok(true)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn effective_llm_config_from_saved(connection: &Connection, user_id: i64) -> DbResult<Value> {
-    get_active_llm_config(connection, user_id).map(|active| {
-        active
-            .as_ref()
-            .map(build_runtime_llm_config_from_saved_config)
-            .unwrap_or_else(default_llm_runtime_config)
-    })
+pub async fn effective_postgres_llm_config_from_saved(
+    pool: &PostgresPool,
+    user_id: i64,
+) -> DbResult<Value> {
+    get_postgres_active_llm_config(pool, user_id)
+        .await
+        .map(|active| {
+            active
+                .as_ref()
+                .map(build_runtime_llm_config_from_saved_config)
+                .unwrap_or_else(default_llm_runtime_config)
+        })
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn list_llm_candidates(
-    connection: &Connection,
+pub async fn list_postgres_llm_candidates(
+    pool: &PostgresPool,
     user_id: i64,
     status: Option<&str>,
     candidate_type: Option<&str>,
@@ -313,72 +303,92 @@ pub fn list_llm_candidates(
     #[cfg(not(coverage))]
     tracing::info!(
         domain = "ai",
-        operation = "list_llm_candidates",
+        operation = "list_postgres_llm_candidates",
         "business operation entered"
     );
-    let mut sql = String::from("SELECT * FROM llm_candidates WHERE user_id = ?");
-    let mut values = vec![SqlValue::Integer(user_id)];
+    let mut builder = QueryBuilder::<Postgres>::new(
+        "
+        SELECT id, user_id, type, source_bill_ids, suggested_main_category,
+               suggested_sub_category, suggested_rule_expression, confidence,
+               llm_provider, llm_model, llm_response_raw, status, created_at, reviewed_at
+        FROM llm_candidates
+        WHERE user_id = ",
+    );
+    builder.push_bind(user_id);
     if let Some(status) = status {
-        sql.push_str(" AND status = ?");
-        values.push(SqlValue::Text(status.to_string()));
+        builder.push(" AND status = ");
+        builder.push_bind(status.trim());
     }
     if let Some(candidate_type) = candidate_type {
-        sql.push_str(" AND type = ?");
-        values.push(SqlValue::Text(candidate_type.to_string()));
+        builder.push(" AND type = ");
+        builder.push_bind(candidate_type.trim());
     }
-    sql.push_str(" ORDER BY created_at DESC LIMIT ? OFFSET ?");
-    values.push(SqlValue::Integer(limit.max(0)));
-    values.push(SqlValue::Integer(offset.max(0)));
-
-    let mut statement = connection.prepare(&sql)?;
-    let rows = statement.query_map(params_from_iter(values), llm_candidate_from_row)?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    builder.push(" ORDER BY created_at DESC LIMIT ");
+    builder.push_bind(limit.max(0));
+    builder.push(" OFFSET ");
+    builder.push_bind(offset.max(0));
+    let rows = builder.build().fetch_all(pool).await?;
+    rows.into_iter().map(llm_candidate_from_row).collect()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn count_llm_candidates(
-    connection: &Connection,
+pub async fn count_postgres_llm_candidates(
+    pool: &PostgresPool,
     user_id: i64,
     status: Option<&str>,
     candidate_type: Option<&str>,
 ) -> DbResult<i64> {
-    let mut sql = String::from("SELECT COUNT(*) FROM llm_candidates WHERE user_id = ?");
-    let mut values = vec![SqlValue::Integer(user_id)];
+    let mut builder = QueryBuilder::<Postgres>::new(
+        "SELECT COUNT(*)::BIGINT AS total FROM llm_candidates WHERE user_id = ",
+    );
+    builder.push_bind(user_id);
     if let Some(status) = status {
-        sql.push_str(" AND status = ?");
-        values.push(SqlValue::Text(status.to_string()));
+        builder.push(" AND status = ");
+        builder.push_bind(status.trim());
     }
     if let Some(candidate_type) = candidate_type {
-        sql.push_str(" AND type = ?");
-        values.push(SqlValue::Text(candidate_type.to_string()));
+        builder.push(" AND type = ");
+        builder.push_bind(candidate_type.trim());
     }
-    connection
-        .query_row(&sql, params_from_iter(values), |row| row.get::<_, i64>(0))
+    builder
+        .build()
+        .fetch_one(pool)
+        .await?
+        .try_get("total")
         .map_err(Into::into)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn get_llm_candidate_by_id(
-    connection: &Connection,
+pub async fn get_postgres_llm_candidate_by_id(
+    pool: &PostgresPool,
     candidate_id: i64,
     user_id: i64,
 ) -> DbResult<Option<Value>> {
-    connection
-        .query_row(
-            "SELECT * FROM llm_candidates WHERE id = ?1 AND user_id = ?2",
-            params![candidate_id, user_id],
-            llm_candidate_from_row,
-        )
-        .optional()
-        .map_err(Into::into)
+    let row = sqlx::query(
+        "
+        SELECT id, user_id, type, source_bill_ids, suggested_main_category,
+               suggested_sub_category, suggested_rule_expression, confidence,
+               llm_provider, llm_model, llm_response_raw, status, created_at, reviewed_at
+        FROM llm_candidates
+        WHERE id = $1 AND user_id = $2
+        ",
+    )
+    .bind(candidate_id)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+    row.map(llm_candidate_from_row).transpose()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn create_llm_candidate(connection: &Connection, draft: &LlmCandidateDraft) -> DbResult<Value> {
+pub async fn create_postgres_llm_candidate(
+    pool: &PostgresPool,
+    draft: &LlmCandidateDraft,
+) -> DbResult<Value> {
     #[cfg(not(coverage))]
     tracing::info!(
         domain = "ai",
-        operation = "create_llm_candidate",
+        operation = "create_postgres_llm_candidate",
         "business operation entered"
     );
     let source_bill_ids = Value::Array(
@@ -388,38 +398,41 @@ pub fn create_llm_candidate(connection: &Connection, draft: &LlmCandidateDraft) 
             .copied()
             .map(Value::from)
             .collect(),
-    )
-    .to_string();
-    connection.execute(
-        "INSERT INTO llm_candidates (
+    );
+    let row = sqlx::query(
+        "
+        INSERT INTO llm_candidates (
             user_id, type, source_bill_ids, suggested_main_category,
             suggested_sub_category, suggested_rule_expression, confidence,
             llm_provider, llm_model, llm_response_raw, status, created_at
-         )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending', ?11)",
-        params![
-            draft.user_id,
-            draft.candidate_type,
-            source_bill_ids,
-            draft.suggested_main_category,
-            draft.suggested_sub_category,
-            draft.suggested_rule_expression,
-            draft.confidence,
-            draft.llm_provider,
-            draft.llm_model,
-            draft.llm_response_raw,
-            now_text(),
-        ],
-    )?;
-    let candidate_id = connection.last_insert_rowid();
-    get_llm_candidate_by_id(connection, candidate_id, draft.user_id)?.ok_or_else(|| {
-        DbError::InvalidOperation("created llm candidate could not be reloaded".to_string())
-    })
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', now())
+        RETURNING id
+        ",
+    )
+    .bind(draft.user_id)
+    .bind(draft.candidate_type.trim())
+    .bind(source_bill_ids)
+    .bind(draft.suggested_main_category.trim())
+    .bind(draft.suggested_sub_category.trim())
+    .bind(draft.suggested_rule_expression.trim())
+    .bind(draft.confidence)
+    .bind(draft.llm_provider.trim())
+    .bind(draft.llm_model.trim())
+    .bind(&draft.llm_response_raw)
+    .fetch_one(pool)
+    .await?;
+    let candidate_id: i64 = row.try_get("id")?;
+    get_postgres_llm_candidate_by_id(pool, candidate_id, draft.user_id)
+        .await?
+        .ok_or_else(|| {
+            DbError::InvalidOperation("created llm candidate could not be reloaded".to_string())
+        })
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn update_llm_candidate_status(
-    connection: &Connection,
+pub async fn update_postgres_llm_candidate_status(
+    pool: &PostgresPool,
     candidate_id: i64,
     status: &str,
     user_id: i64,
@@ -427,38 +440,49 @@ pub fn update_llm_candidate_status(
     #[cfg(not(coverage))]
     tracing::info!(
         domain = "ai",
-        operation = "update_llm_candidate_status",
+        operation = "update_postgres_llm_candidate_status",
         "business operation entered"
     );
-    let updated = connection.execute(
-        "UPDATE llm_candidates SET status = ?1, reviewed_at = ?2 WHERE id = ?3 AND user_id = ?4",
-        params![status, now_text(), candidate_id, user_id],
-    )?;
-    Ok(updated > 0)
+    let updated = sqlx::query(
+        "
+        UPDATE llm_candidates
+        SET status = $1, reviewed_at = now(), version = version + 1
+        WHERE id = $2 AND user_id = $3
+        ",
+    )
+    .bind(status.trim())
+    .bind(candidate_id)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+    Ok(updated.rows_affected() > 0)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn accept_llm_candidate(
-    connection: &Connection,
+pub async fn accept_postgres_llm_candidate(
+    pool: &PostgresPool,
     candidate_id: i64,
     user_id: i64,
 ) -> DbResult<Option<Value>> {
     #[cfg(not(coverage))]
     tracing::info!(
         domain = "ai",
-        operation = "accept_llm_candidate",
+        operation = "accept_postgres_llm_candidate",
         "business operation entered"
     );
-    let Some(candidate) = get_llm_candidate_by_id(connection, candidate_id, user_id)? else {
+    let Some(candidate) = get_postgres_llm_candidate_by_id(pool, candidate_id, user_id).await?
+    else {
         return Ok(None);
     };
-    update_llm_candidate_status(connection, candidate_id, "accepted", user_id)?;
+    update_postgres_llm_candidate_status(pool, candidate_id, "accepted", user_id).await?;
 
     let mut result = Map::new();
     result.insert("candidate_id".to_string(), json!(candidate_id));
     result.insert("status".to_string(), json!("accepted"));
     if should_materialize_rule_candidate(&candidate) {
-        if let Some(rule_id) = create_rule_for_llm_candidate(connection, &candidate, user_id)? {
+        if let Some(rule_id) =
+            create_postgres_rule_for_llm_candidate(pool, &candidate, user_id).await?
+        {
             result.insert("created_rule_id".to_string(), json!(rule_id));
         }
     }
@@ -466,21 +490,26 @@ pub fn accept_llm_candidate(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn reject_llm_candidate(
-    connection: &Connection,
+pub async fn reject_postgres_llm_candidate(
+    pool: &PostgresPool,
     candidate_id: i64,
     user_id: i64,
 ) -> DbResult<Option<bool>> {
     #[cfg(not(coverage))]
     tracing::info!(
         domain = "ai",
-        operation = "reject_llm_candidate",
+        operation = "reject_postgres_llm_candidate",
         "business operation entered"
     );
-    if get_llm_candidate_by_id(connection, candidate_id, user_id)?.is_none() {
+    if get_postgres_llm_candidate_by_id(pool, candidate_id, user_id)
+        .await?
+        .is_none()
+    {
         return Ok(None);
     }
-    update_llm_candidate_status(connection, candidate_id, "rejected", user_id).map(Some)
+    update_postgres_llm_candidate_status(pool, candidate_id, "rejected", user_id)
+        .await
+        .map(Some)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -494,69 +523,113 @@ pub fn default_llm_runtime_config() -> Value {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn get_llm_config_by_id(
-    connection: &Connection,
+async fn get_postgres_llm_config_by_id(
+    pool: &PostgresPool,
     config_id: i64,
     user_id: i64,
 ) -> DbResult<Option<Value>> {
-    connection
-        .query_row(
-            "SELECT * FROM llm_configs WHERE id = ?1 AND user_id = ?2",
-            params![config_id, user_id],
-            llm_config_from_row,
-        )
-        .optional()
-        .map_err(Into::into)
+    let row = sqlx::query(
+        "
+        SELECT id, user_id, name, provider, model, api_key, base_url,
+               credential_config, advanced_settings, is_active, created_at, updated_at
+        FROM llm_configs
+        WHERE id = $1 AND user_id = $2
+        ",
+    )
+    .bind(config_id)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+    row.map(llm_config_from_row).transpose()
 }
 
-fn llm_config_from_row(row: &Row<'_>) -> rusqlite::Result<Value> {
-    let advanced_settings = row_text(row, "advanced_settings")?;
-    let credential_config = row_text(row, "credential_config")?;
+async fn deactivate_postgres_llm_configs(
+    pool: &PostgresPool,
+    user_id: i64,
+    excluded_config_id: Option<i64>,
+) -> DbResult<()> {
+    match excluded_config_id {
+        Some(config_id) => {
+            sqlx::query(
+                "
+                UPDATE llm_configs
+                SET is_active = false, updated_at = now(), version = version + 1
+                WHERE user_id = $1 AND id != $2 AND is_active = true
+                ",
+            )
+            .bind(user_id)
+            .bind(config_id)
+            .execute(pool)
+            .await?;
+        }
+        None => {
+            sqlx::query(
+                "
+                UPDATE llm_configs
+                SET is_active = false, updated_at = now(), version = version + 1
+                WHERE user_id = $1 AND is_active = true
+                ",
+            )
+            .bind(user_id)
+            .execute(pool)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+fn llm_config_from_row(row: sqlx::postgres::PgRow) -> DbResult<Value> {
+    let advanced_settings: Value = row.try_get("advanced_settings")?;
+    let credential_config: Value = row.try_get("credential_config")?;
     Ok(json!({
-        "id": row.get::<_, i64>("id")?,
-        "user_id": row.get::<_, i64>("user_id")?,
-        "name": row_text(row, "name")?,
-        "provider": row_text(row, "provider")?,
-        "model": row_text(row, "model")?,
-        "api_key": row_text(row, "api_key")?,
-        "base_url": row_text(row, "base_url")?,
-        "credential_config": normalized_credential_value(&Value::String(credential_config)),
-        "advanced_settings": normalized_settings_value(&Value::String(advanced_settings)),
-        "is_active": row.get::<_, i64>("is_active")?,
-        "created_at": row_text(row, "created_at")?,
-        "updated_at": row_text(row, "updated_at")?,
+        "id": row.try_get::<i64, _>("id")?,
+        "user_id": row.try_get::<i64, _>("user_id")?,
+        "name": row_text(&row, "name")?,
+        "provider": row_text(&row, "provider")?,
+        "model": row_text(&row, "model")?,
+        "api_key": row_text(&row, "api_key")?,
+        "base_url": row_text(&row, "base_url")?,
+        "credential_config": normalized_credential_value(&credential_config),
+        "advanced_settings": normalized_settings_value(&advanced_settings),
+        "is_active": row.try_get::<bool, _>("is_active")?,
+        "created_at": timestamp_text(&row, "created_at")?,
+        "updated_at": timestamp_text(&row, "updated_at")?,
     }))
 }
 
-fn llm_candidate_from_row(row: &Row<'_>) -> rusqlite::Result<Value> {
+fn llm_candidate_from_row(row: sqlx::postgres::PgRow) -> DbResult<Value> {
+    let source_bill_ids: Value = row.try_get("source_bill_ids")?;
     Ok(json!({
-        "id": row.get::<_, i64>("id")?,
-        "user_id": row.get::<_, i64>("user_id")?,
-        "type": row_text(row, "type")?,
-        "source_bill_ids": row_text(row, "source_bill_ids")?,
-        "suggested_main_category": row_text(row, "suggested_main_category")?,
-        "suggested_sub_category": row_text(row, "suggested_sub_category")?,
-        "suggested_rule_expression": row_text(row, "suggested_rule_expression")?,
-        "confidence": row.get::<_, Option<f64>>("confidence")?.unwrap_or(0.0),
-        "llm_provider": row_text(row, "llm_provider")?,
-        "llm_model": row_text(row, "llm_model")?,
-        "llm_response_raw": row_text(row, "llm_response_raw")?,
-        "status": row_text(row, "status")?,
-        "created_at": row_text(row, "created_at")?,
-        "reviewed_at": row_text(row, "reviewed_at")?,
+        "id": row.try_get::<i64, _>("id")?,
+        "user_id": row.try_get::<i64, _>("user_id")?,
+        "type": row_text(&row, "type")?,
+        "source_bill_ids": source_bill_ids,
+        "suggested_main_category": row_text(&row, "suggested_main_category")?,
+        "suggested_sub_category": row_text(&row, "suggested_sub_category")?,
+        "suggested_rule_expression": row_text(&row, "suggested_rule_expression")?,
+        "confidence": row.try_get::<Option<f64>, _>("confidence")?.unwrap_or(0.0),
+        "llm_provider": row_text(&row, "llm_provider")?,
+        "llm_model": row_text(&row, "llm_model")?,
+        "llm_response_raw": row_text(&row, "llm_response_raw")?,
+        "status": row_text(&row, "status")?,
+        "created_at": timestamp_text(&row, "created_at")?,
+        "reviewed_at": row
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("reviewed_at")?
+            .map(|value| value.to_rfc3339())
+            .unwrap_or_default(),
     }))
 }
 
-fn row_text(row: &Row<'_>, column: &str) -> rusqlite::Result<String> {
-    row.get::<_, Option<String>>(column)
+fn row_text(row: &sqlx::postgres::PgRow, column: &str) -> sqlx::Result<String> {
+    row.try_get::<Option<String>, _>(column)
         .map(|value| value.unwrap_or_default())
 }
 
-fn serialize_advanced_settings(value: &Value) -> String {
-    normalized_settings_value(value).to_string()
+fn serialize_advanced_settings(value: &Value) -> Value {
+    normalized_settings_value(value)
 }
 
-fn serialize_credential_config(value: &Value, legacy_api_key: &str) -> String {
+fn serialize_credential_config(value: &Value, api_key: &str) -> Value {
     let mut normalized = normalized_credential_value(value);
     if normalized
         .get("access_token")
@@ -564,14 +637,14 @@ fn serialize_credential_config(value: &Value, legacy_api_key: &str) -> String {
         .unwrap_or_default()
         .trim()
         .is_empty()
-        && !legacy_api_key.trim().is_empty()
+        && !api_key.trim().is_empty()
     {
         if let Some(object) = normalized.as_object_mut() {
-            object.insert("access_token".to_string(), json!(legacy_api_key.trim()));
+            object.insert("access_token".to_string(), json!(api_key.trim()));
             object.insert("credential_mode".to_string(), json!("api_key"));
         }
     }
-    normalized.to_string()
+    normalized
 }
 
 fn normalized_credential_value(value: &Value) -> Value {
@@ -601,8 +674,8 @@ fn should_materialize_rule_candidate(candidate: &Value) -> bool {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn create_rule_for_llm_candidate(
-    connection: &Connection,
+async fn create_postgres_rule_for_llm_candidate(
+    pool: &PostgresPool,
     candidate: &Value,
     user_id: i64,
 ) -> DbResult<Option<i64>> {
@@ -614,48 +687,79 @@ fn create_rule_for_llm_candidate(
     {
         return Ok(None);
     }
-    let category_id = connection
-        .query_row(
-            "SELECT id FROM categories WHERE user_id = ?1 AND main_category = ?2 AND sub_category = ?3",
-            params![user_id, main_category, sub_category],
-            |row| row.get::<_, i64>(0),
-        )
-        .optional()?;
+    let category_id = sqlx::query(
+        "
+        SELECT id
+        FROM categories
+        WHERE user_id = $1
+          AND (
+              path = $2
+              OR (path IS NULL AND name = $3)
+              OR (split_part(path, '/', 1) = $3 AND COALESCE(NULLIF(substring(path from position('/' in path) + 1), ''), '') = $4)
+          )
+        ORDER BY display_order ASC, id ASC
+        LIMIT 1
+        ",
+    )
+    .bind(user_id)
+    .bind(category_path(&main_category, &sub_category))
+    .bind(&main_category)
+    .bind(&sub_category)
+    .fetch_optional(pool)
+    .await?
+    .map(|row| row.try_get::<i64, _>("id"))
+    .transpose()?;
     let Some(category_id) = category_id else {
         return Ok(None);
     };
-    let rule_duplicate = connection
-        .query_row(
-            "SELECT 1 FROM category_rules WHERE user_id = ?1 AND category_id = ?2 AND rule_expression = ?3 LIMIT 1",
-            params![user_id, category_id, rule_expression.trim()],
-            |_| Ok(true),
-        )
-        .optional()?
-        .unwrap_or(false);
-    if rule_duplicate {
+
+    let rule_expression_json = rule_expression_json(rule_expression.trim(), false);
+    let duplicate = sqlx::query(
+        "
+        SELECT 1
+        FROM category_rules
+        WHERE user_id = $1
+          AND category_id = $2
+          AND rule_expression = $3
+        LIMIT 1
+        ",
+    )
+    .bind(user_id)
+    .bind(category_id)
+    .bind(&rule_expression_json)
+    .fetch_optional(pool)
+    .await?
+    .is_some();
+    if duplicate {
         return Ok(None);
     }
+
     let candidate_type = text_field(candidate, "type");
     let name_prefix = if candidate_type == "rule_synthesis" {
         "LLM synthesized"
     } else {
         "LLM induced"
     };
-    connection.execute(
-        "INSERT INTO category_rules (
+    let row = sqlx::query(
+        "
+        INSERT INTO category_rules (
             user_id, category_id, name, priority, rule_expression,
-            regex_enabled, enabled, created_at, updated_at
-         )
-         VALUES (?1, ?2, ?3, 50, ?4, 0, 1, ?5, ?5)",
-        params![
-            user_id,
-            category_id,
-            format!("{name_prefix}: {main_category}/{sub_category}"),
-            rule_expression.trim(),
-            now_text(),
-        ],
-    )?;
-    Ok(Some(connection.last_insert_rowid()))
+            enabled, created_at, updated_at
+        )
+        VALUES ($1, $2, $3, 50, $4, true, now(), now())
+        RETURNING id
+        ",
+    )
+    .bind(user_id)
+    .bind(category_id)
+    .bind(format!(
+        "{name_prefix}: {}",
+        category_path(&main_category, &sub_category)
+    ))
+    .bind(rule_expression_json)
+    .fetch_one(pool)
+    .await?;
+    row.try_get("id").map(Some).map_err(Into::into)
 }
 
 fn text_field(value: &Value, key: &str) -> String {
@@ -666,24 +770,23 @@ fn text_field(value: &Value, key: &str) -> String {
         .to_string()
 }
 
-fn table_has_column(connection: &Connection, table: &str, column: &str) -> DbResult<bool> {
-    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
-    let mut rows = statement.query([])?;
-    while let Some(row) = rows.next()? {
-        let name = match row.get_ref(1)? {
-            ValueRef::Text(value) => String::from_utf8_lossy(value).to_string(),
-            _ => String::new(),
-        };
-        if name == column {
-            return Ok(true);
-        }
+fn category_path(main: &str, sub: &str) -> String {
+    match (main.trim(), sub.trim()) {
+        ("", "") => String::new(),
+        (main, "") => main.to_string(),
+        ("", sub) => sub.to_string(),
+        (main, sub) => format!("{main}/{sub}"),
     }
-    Ok(false)
 }
 
-fn now_text() -> String {
-    Utc::now()
-        .naive_utc()
-        .format("%Y-%m-%dT%H:%M:%S%.f")
-        .to_string()
+fn rule_expression_json(expression: &str, regex_enabled: bool) -> Value {
+    json!({
+        "expression": expression,
+        "regex_enabled": regex_enabled,
+    })
+}
+
+fn timestamp_text(row: &sqlx::postgres::PgRow, column: &str) -> sqlx::Result<String> {
+    row.try_get::<chrono::DateTime<chrono::Utc>, _>(column)
+        .map(|value| value.to_rfc3339())
 }

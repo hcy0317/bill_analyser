@@ -3334,7 +3334,7 @@ onMounted(() => {
         activeBudgetType.value = parseInt(props.initType) as BudgetType;
     }
     if (props.initPeriodType) {
-        // 映射旧的周期类型到新的筛选器
+        // 映射周期类型到筛选器
         const periodMap: Record<string, string> = {
             [BudgetPeriodType.Monthly]: 'thisMonth',
             [BudgetPeriodType.Quarterly]: 'thisQuarter',

@@ -8,7 +8,6 @@ import {
 
 describe('import dialog api helpers', () => {
     test('extractApiErrorMessage prefers structured api error fields', () => {
-        expect(extractApiErrorMessage({ errorMessage: '详细错误', error: '错误', message: '消息' }, 'fallback')).toBe('详细错误');
         expect(extractApiErrorMessage({ error: '错误', message: '消息' }, 'fallback')).toBe('错误');
         expect(extractApiErrorMessage({ message: '消息' }, 'fallback')).toBe('消息');
         expect(extractApiErrorMessage(null, 'fallback')).toBe('fallback');

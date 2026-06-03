@@ -348,13 +348,13 @@ export function toLLMCandidates(result: unknown): LLMCandidateItem[] {
 }
 
 export function getLLMProviderLabel(provider: string, options: LLMProviderOption[]): string {
-    const legacyLabels: Record<string, string> = {
+    const providerLabels: Record<string, string> = {
         anthropic: 'Claude (Anthropic)',
         'openai-compatible': 'OpenAI-compatible',
         azure_openai: 'Azure OpenAI',
     };
 
     return options.find(option => option.value === provider)?.title
-        ?? legacyLabels[provider]
+        ?? providerLabels[provider]
         ?? provider;
 }

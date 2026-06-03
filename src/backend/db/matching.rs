@@ -1,41 +1,78 @@
-// 中文导读：SQLite repository 层，负责 schema、事务、user-scope 查询、row helper 和跨表写入边界。
-// 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
-// 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
+// 中文导读：Postgres-only matching facade，导出当前 HTTP 层需要的查询/写入入口和请求 DTO。
+// 维护重点：不再包含 non-Postgres schema/actions/reconciliation projection；所有运行态读写都走 Postgres。
+// 不变式：未物化候选 action 入口不在 DB 层保留，未物化候选由 HTTP 返回明确冲突。
 
-use std::collections::{BTreeMap, BTreeSet};
-
-use bill_analyser_core::{
-    matching::{
-        bill_pair_feedback_payload_is_related, build_bill_pair_feedback_payload,
-        build_duplicate_bill_candidate, build_duplicate_bill_candidates,
-        build_investment_pair_candidates, build_learning_candidates_for_bill,
-        build_learning_rule_revision, build_matching_session_candidates,
-        build_transfer_pair_candidate, build_transfer_pair_candidates,
-        build_user_investment_keyword_settings, normalize_learning_rule_revision,
-        normalize_transfer_pair_bill_ids, parse_matching_candidate_id, score_investment_candidate,
-        DUPLICATE_CANDIDATE_KIND, INVESTMENT_PAIR_TYPE, MANUAL_PAIR_SOURCE,
-        TRANSFER_AMOUNT_TOLERANCE, TRANSFER_PAIR_TYPE,
-    },
-    UserId,
-};
-use chrono::{SecondsFormat, Utc};
-use rusqlite::types::{Value as SqlValue, ValueRef};
-use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transaction};
-use serde_json::{json, Map, Value};
+use bill_analyser_core::UserId;
 
 use crate::{
-    apply_preview_learning_decision, apply_preview_transfer_decision, get_import_session,
-    get_preview_by_session, run_transaction, update_preview_recurring_match_decision, DbError,
-    DbResult, ImportPreviewDecision, ImportPreviewExpectedState, ImportPreviewLearningApply,
-    ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate, ImportPreviewRow,
-    UserScope,
+    DbError, ImportPreviewExpectedState, ImportPreviewLearningApply,
+    ImportPreviewRecurringCandidate,
 };
 
 pub mod postgres_reads;
 
-include!("matching/types_schema.rs");
-include!("matching/actions.rs");
-include!("matching/candidate_queries.rs");
-include!("matching/reconciliation_projection.rs");
-include!("matching/serialization.rs");
-include!("matching/repositories_and_helpers.rs");
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum MatchingRuntimeError {
+    #[error("{0}")]
+    BadRequest(String),
+    #[error("{0}")]
+    NotFound(String),
+    #[error("{0}")]
+    Conflict(String),
+    #[error("{0}")]
+    Db(String),
+}
+
+impl MatchingRuntimeError {
+    #[tracing::instrument(level = "debug", skip_all)]
+    pub fn status_code(&self) -> u16 {
+        match self {
+            Self::BadRequest(_) => 400,
+            Self::NotFound(_) => 404,
+            Self::Conflict(_) => 409,
+            Self::Db(_) => 500,
+        }
+    }
+
+    #[tracing::instrument(level = "debug", skip_all)]
+    pub fn message(&self) -> &str {
+        match self {
+            Self::BadRequest(message)
+            | Self::NotFound(message)
+            | Self::Conflict(message)
+            | Self::Db(message) => message,
+        }
+    }
+}
+
+impl From<DbError> for MatchingRuntimeError {
+    fn from(error: DbError) -> Self {
+        Self::Db(error.to_string())
+    }
+}
+
+pub type MatchingResult<T> = Result<T, MatchingRuntimeError>;
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ReconciliationCandidateFilters {
+    pub session_id: Option<String>,
+    pub preview_id: Option<i64>,
+    pub existing_bill_id: Option<i64>,
+    pub candidate_type: Option<String>,
+    pub status: Option<String>,
+    pub limit: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PreviewMatchingActionRequest {
+    pub expected_state: Option<ImportPreviewExpectedState>,
+    pub response_mode_preview_item: bool,
+    pub reviewed_type: Option<String>,
+    pub recurring_id: Option<i64>,
+    pub recurring_candidate_count: i64,
+    pub recurring_candidate: Option<ImportPreviewRecurringCandidate>,
+    pub learning_apply: Option<ImportPreviewLearningApply>,
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+pub fn _matching_user_id_marker(_user_id: UserId) {}

@@ -60,7 +60,7 @@ describe('AIImageRecognitionSheet OCR contract wiring', () => {
         expect(catchBody).not.toContain("emit('update:show', false)");
     });
 
-    test('legacy untyped error catch (.processed / "error.message || error" toast) is fully removed', () => {
+    test('untyped error catch (.processed / "error.message || error" toast) is fully removed', () => {
         const source = readSource(SHEET_PATH);
         expect(source).not.toContain('error.processed');
         expect(source).not.toContain('error.message || error');

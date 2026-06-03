@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -13,7 +13,7 @@ async fn export_settings_bundle_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
-    if state.config.database_backend.uses_postgres() {
+
         let runtime = match open_postgres_runtime(&state, "taxonomy settings bundle export") {
             Ok(value) => value,
             Err(response) => return *response,
@@ -24,16 +24,6 @@ async fn export_settings_bundle_handler(
             Ok(bundle) => settings_bundle_download_response(bundle, "bill-analyser-settings.json"),
             Err(_) => settings_bundle_db_error_response(),
         };
-    }
-    let mut runtime = match open_runtime(&state, "taxonomy settings bundle export") {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
-
-    match build_settings_bundle(runtime.connection_mut(), db_user_id(user_id), false) {
-        Ok(bundle) => settings_bundle_download_response(bundle, "bill-analyser-settings.json"),
-        Err(_) => settings_bundle_db_error_response(),
-    }
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -72,7 +62,7 @@ async fn export_settings_bundle_section_post_handler(
     };
     let auth_user_id = user_id;
     let user_id = db_user_id(user_id);
-    if state.config.database_backend.uses_postgres() {
+
         let runtime = match open_postgres_runtime(&state, "taxonomy settings bundle export") {
             Ok(value) => value,
             Err(response) => return *response,
@@ -115,45 +105,6 @@ async fn export_settings_bundle_section_post_handler(
             ),
             Err(_) => settings_bundle_db_error_response(),
         };
-    }
-    let mut runtime = match open_runtime(&state, "taxonomy settings bundle export") {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
-
-    if is_sensitive_settings_export_section(&section_key) {
-        let payload = optional_json_body(body);
-        let password = payload
-            .as_ref()
-            .and_then(|value| value.get("password"))
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        if password.is_empty() {
-            return bad_request("password is required");
-        }
-        match verify_sensitive_export_password(runtime.connection_mut(), user_id, password) {
-            Ok(true) => {}
-            Ok(false) => {
-                return json_response(
-                    StatusCode::UNAUTHORIZED,
-                    json!({"success": false, "error": "Invalid password"}),
-                )
-            }
-            Err(_) => return settings_bundle_db_error_response(),
-        }
-    }
-
-    match build_settings_bundle(
-        runtime.connection_mut(),
-        user_id,
-        is_sensitive_settings_export_section(&section_key),
-    ) {
-        Ok(bundle) => settings_bundle_download_response(
-            filter_settings_bundle_section(&bundle, &section_key),
-            &format!("bill-analyser-settings-{section_key}.json"),
-        ),
-        Err(_) => settings_bundle_db_error_response(),
-    }
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -166,7 +117,7 @@ async fn export_settings_bundle_section(
         Ok(value) => value,
         Err(response) => return *response,
     };
-    if state.config.database_backend.uses_postgres() {
+
         let runtime = match open_postgres_runtime(state, "taxonomy settings bundle export") {
             Ok(value) => value,
             Err(response) => return *response,
@@ -180,19 +131,6 @@ async fn export_settings_bundle_section(
             ),
             Err(_) => settings_bundle_db_error_response(),
         };
-    }
-    let mut runtime = match open_runtime(state, "taxonomy settings bundle export") {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
-
-    match build_settings_bundle(runtime.connection_mut(), db_user_id(user_id), false) {
-        Ok(bundle) => settings_bundle_download_response(
-            filter_settings_bundle_section(&bundle, section_key),
-            &format!("bill-analyser-settings-{section_key}.json"),
-        ),
-        Err(_) => settings_bundle_db_error_response(),
-    }
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -341,7 +279,7 @@ async fn import_settings_bundle_value_response(
         Ok(value) => value,
         Err(response) => return *response,
     };
-    if state.config.database_backend.uses_postgres() {
+
         let runtime = match open_postgres_runtime(state, runtime_label) {
             Ok(value) => value,
             Err(response) => return *response,
@@ -358,22 +296,6 @@ async fn import_settings_bundle_value_response(
             Err(bill_analyser_db::DbError::InvalidOperation(message)) => bad_request(message),
             Err(_) => error_response(StatusCode::INTERNAL_SERVER_ERROR, internal_error_message),
         };
-    }
-    let mut runtime = match open_runtime(state, runtime_label) {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
-
-    match import_settings_bundle(
-        runtime.connection_mut(),
-        bundle,
-        db_user_id(user_id),
-        dry_run,
-    ) {
-        Ok(result) => success_result(StatusCode::OK, result),
-        Err(bill_analyser_db::DbError::InvalidOperation(message)) => bad_request(message),
-        Err(_) => error_response(StatusCode::INTERNAL_SERVER_ERROR, internal_error_message),
-    }
 }
 
 async fn verify_postgres_sensitive_export_password(
@@ -453,7 +375,7 @@ async fn import_categories_handler(
         return bad_request("Invalid format, expected list of categories");
     };
 
-    if state.config.database_backend.uses_postgres() {
+
         let runtime = match open_postgres_runtime(&state, "taxonomy categories") {
             Ok(value) => value,
             Err(response) => return *response,
@@ -511,55 +433,4 @@ async fn import_categories_handler(
             StatusCode::OK,
             json!({ "imported": imported, "updated": updated, "skipped": skipped }),
         );
-    }
-
-    let mut runtime = match open_runtime(&state, "taxonomy categories") {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
-    let mut repository = CategoriesRepository::new(runtime.connection_mut());
-    let user_id = db_user_id(user_id);
-    let mut imported = 0;
-    let mut updated = 0;
-    let mut skipped = 0;
-
-    for category in categories {
-        let main_category = string_or_default(category.get("main_category"), "");
-        if main_category.trim().is_empty() {
-            skipped += 1;
-            continue;
-        }
-        let sub_category = string_or_default(category.get("sub_category"), "");
-        let payload = Value::Object(import_category_payload(
-            category,
-            &main_category,
-            &sub_category,
-        ));
-        match repository.get_category_by_name(&main_category, &sub_category, user_id) {
-            Ok(Some(existing)) => {
-                if let Some(category_id) = existing.get("id").and_then(value_as_i64) {
-                    if repository
-                        .update_category(category_id, &payload, user_id)
-                        .is_err()
-                    {
-                        return category_db_error_response();
-                    }
-                }
-                updated += 1;
-            }
-            Ok(None) => {
-                if repository.create_category(&payload, user_id).is_err() {
-                    return category_db_error_response();
-                }
-                imported += 1;
-            }
-            Err(_) => return category_db_error_response(),
-        }
-    }
-
-    success_result(
-        StatusCode::OK,
-        json!({ "imported": imported, "updated": updated, "skipped": skipped }),
-    )
 }
-

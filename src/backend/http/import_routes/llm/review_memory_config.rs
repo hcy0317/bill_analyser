@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -127,7 +127,7 @@ async fn llm_preview_recommend_review_response(
         .and_then(|value| llm_suggestion_from_value(&value));
     match review_preview_llm_recommendation(
         runtime.connection_mut(),
-        ImportPreviewLlmReviewRequest {
+        &ImportPreviewLlmReviewRequest {
             session_id: &session_id,
             preview_id,
             user_id,
@@ -167,14 +167,11 @@ pub async fn llm_memory_runtime_handler(
         return route_response(response);
     }
     let limit = query.limit.unwrap_or(100).clamp(1, 500);
-    let offset = query.offset.unwrap_or(0);
     match get_llm_memory_events(
         runtime.connection(),
         user_id,
         query.session_id.as_deref(),
-        query.event_type.as_deref(),
         limit,
-        offset,
     ) {
         Ok(events) => {
             let total = events.len();
@@ -202,20 +199,17 @@ pub async fn llm_config_get_runtime_handler(
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
     };
-    let runtime = match open_runtime(&state) {
+    let runtime = match open_postgres_runtime(&state) {
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),
     };
-    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
-        return route_response(response);
-    }
-    let config = match state
-        .get_llm_runtime_config(user_id_value)
-        .map(Ok)
-        .unwrap_or_else(|| effective_llm_config_from_saved(runtime.connection(), user_id_value))
-    {
-        Ok(config) => config,
-        Err(error) => return route_response(db_error_response(error)),
+    let config = if let Some(config) = state.get_llm_runtime_config(user_id_value) {
+        config
+    } else {
+        match effective_postgres_llm_config_from_saved(runtime.pool(), user_id_value).await {
+            Ok(config) => config,
+            Err(error) => return route_response(db_error_response(error)),
+        }
     };
     ai_route_response(build_llm_config_get_response(&config))
 }
@@ -246,20 +240,17 @@ pub async fn llm_config_post_runtime_handler(
             body: json!({"success": false, "error": "No data provided"}),
         });
     };
-    let runtime = match open_runtime(&state) {
+    let runtime = match open_postgres_runtime(&state) {
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),
     };
-    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
-        return route_response(response);
-    }
-    let base_config = match state
-        .get_llm_runtime_config(user_id_value)
-        .map(Ok)
-        .unwrap_or_else(|| effective_llm_config_from_saved(runtime.connection(), user_id_value))
-    {
-        Ok(config) => config,
-        Err(error) => return route_response(db_error_response(error)),
+    let base_config = if let Some(config) = state.get_llm_runtime_config(user_id_value) {
+        config
+    } else {
+        match effective_postgres_llm_config_from_saved(runtime.pool(), user_id_value).await {
+            Ok(config) => config,
+            Err(error) => return route_response(db_error_response(error)),
+        }
     };
     let updated = update_runtime_llm_config_payload(&base_config, object);
     state.set_llm_runtime_config(user_id_value, updated.clone());
@@ -284,14 +275,11 @@ pub async fn llm_configs_list_runtime_handler(
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
     };
-    let runtime = match open_runtime(&state) {
+    let runtime = match open_postgres_runtime(&state) {
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),
     };
-    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
-        return route_response(response);
-    }
-    match list_llm_configs(runtime.connection(), user_id_value) {
+    match list_postgres_llm_configs(runtime.pool(), user_id_value).await {
         Ok(configs) => route_response(ImportV2RouteResponse {
             status_code: 200,
             body: json!({
@@ -331,13 +319,10 @@ pub async fn llm_configs_create_runtime_handler(
             body: json!({"success": false, "error": "name is required"}),
         });
     }
-    let runtime = match open_runtime(&state) {
+    let runtime = match open_postgres_runtime(&state) {
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),
     };
-    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
-        return route_response(response);
-    }
     let draft = LlmConfigDraft {
         name,
         provider: text_from_map_or(&object, "provider", "openai"),
@@ -359,9 +344,13 @@ pub async fn llm_configs_create_runtime_handler(
             .and_then(Value::as_bool)
             .unwrap_or(false),
     };
-    match create_llm_config(runtime.connection(), user_id_value, &draft) {
+    match create_postgres_llm_config(runtime.pool(), user_id_value, &draft).await {
         Ok(config) => {
-            if config.get("is_active").and_then(Value::as_i64).unwrap_or(0) != 0 {
+            if config
+                .get("is_active")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
                 state.clear_llm_runtime_config(user_id_value);
             }
             route_response(ImportV2RouteResponse {
@@ -395,21 +384,24 @@ pub async fn llm_config_update_runtime_handler(
         Err(response) => return route_response(response),
     };
     let object = payload.as_object().cloned().unwrap_or_default();
-    let runtime = match open_runtime(&state) {
+    let runtime = match open_postgres_runtime(&state) {
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),
     };
-    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
-        return route_response(response);
-    }
-    match update_llm_config(
-        runtime.connection(),
+    match update_postgres_llm_config(
+        runtime.pool(),
         config_id,
         user_id_value,
         &llm_config_update_from_map(&object),
-    ) {
+    )
+    .await
+    {
         Ok(Some(config)) => {
-            if config.get("is_active").and_then(Value::as_i64).unwrap_or(0) != 0 {
+            if config
+                .get("is_active")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
                 state.clear_llm_runtime_config(user_id_value);
             }
             route_response(ImportV2RouteResponse {
@@ -438,14 +430,11 @@ pub async fn llm_config_delete_runtime_handler(
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
     };
-    let runtime = match open_runtime(&state) {
+    let runtime = match open_postgres_runtime(&state) {
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),
     };
-    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
-        return route_response(response);
-    }
-    match delete_llm_config(runtime.connection(), config_id, user_id_value) {
+    match delete_postgres_llm_config(runtime.pool(), config_id, user_id_value).await {
         Ok(true) => route_response(ImportV2RouteResponse {
             status_code: 200,
             body: json!({"success": true}),
@@ -471,14 +460,11 @@ pub async fn llm_config_activate_runtime_handler(
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
     };
-    let runtime = match open_runtime(&state) {
+    let runtime = match open_postgres_runtime(&state) {
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),
     };
-    if let Err(response) = init_llm_config_runtime_schema(&runtime) {
-        return route_response(response);
-    }
-    match activate_llm_config(runtime.connection(), config_id, user_id_value) {
+    match activate_postgres_llm_config(runtime.pool(), config_id, user_id_value).await {
         Ok(true) => {
             state.clear_llm_runtime_config(user_id_value);
             route_response(ImportV2RouteResponse {
@@ -490,4 +476,3 @@ pub async fn llm_config_activate_runtime_handler(
         Err(error) => route_response(db_error_response(error)),
     }
 }
-

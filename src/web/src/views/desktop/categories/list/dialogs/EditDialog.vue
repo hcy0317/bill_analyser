@@ -285,7 +285,7 @@ function extractPayloadMessage(payload: unknown, depth = 0): string | null {
     };
 
     return extractPayloadMessage(
-        typedPayload.errorMessage ?? typedPayload.error ?? typedPayload.message,
+        typedPayload.error ?? typedPayload.message,
         depth + 1
     );
 }
@@ -377,15 +377,6 @@ async function loadPrimaryCategoryRule(
             regexEnabled: primaryRule.regex_enabled,
             enabled: primaryRule.enabled
         }) : createEmptyCategoryRuleDraft();
-        // Migrate-only / legacy keywords: runtime matching uses category_rules only. If rows are missing but
-        // keywords still exist on the category row (e.g. not migrated yet), seed the editor so save + sync persist canonical rules.
-        const legacyKeywords = (category.value.ruleExpression ?? '').trim();
-        if (!primaryRule && legacyKeywords.length > 0) {
-            categoryRuleDraft.value = normalizeCategoryRuleDraft({
-                ...categoryRuleDraft.value,
-                ruleExpression: legacyKeywords
-            });
-        }
         category.value.categoryRules = rules.map(rule => ({
             id: rule.id,
             name: rule.name,
@@ -557,18 +548,10 @@ async function save(): Promise<void> {
     submitting.value = true;
 
     const wasEdit = !!editCategoryId.value;
-    const syncedRuleExpression = getPrimaryRuleExpressionFromEditorState();
     const canSyncSecondaryRule = isSecondaryCategory.value && !ruleLoadFailed.value;
     let savedCategory: TransactionCategory | null = null;
 
     try {
-        // Secondary categories: always persist the matching expression from the rule builder into keywords
-        // on the category row before modify, then sync canonical category_rules. Do not gate on whether a
-        // rule row existed at open time — otherwise legacy-only edits never reach the PUT or category_rules APIs.
-        if (canSyncSecondaryRule) {
-            category.value.ruleExpression = syncedRuleExpression;
-        }
-
         savedCategory = await transactionCategoriesStore.saveCategory({
             category: category.value,
             isEdit: wasEdit,
@@ -585,19 +568,9 @@ async function save(): Promise<void> {
                 showError: false
             });
 
-            const persistedLegacyMirror = (savedCategory.ruleExpression || '').trim();
             const currentPrimaryRuleExpression = getPrimaryRuleExpressionFromEditorState();
-
             savedCategory.ruleExpression = currentPrimaryRuleExpression;
             category.value.ruleExpression = currentPrimaryRuleExpression;
-
-            if (persistedLegacyMirror !== currentPrimaryRuleExpression) {
-                await transactionCategoriesStore.saveCategory({
-                    category: savedCategory,
-                    isEdit: true,
-                    clientSessionId: clientSessionId.value
-                });
-            }
         }
 
         const message = wasEdit

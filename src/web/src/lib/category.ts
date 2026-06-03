@@ -53,7 +53,6 @@ export function localizedPresetCategoryToTransactionCategoryCreateWithSubCategor
             color: subPresetCategory.color,
             comment: '',
             displayOrder: 0,
-            keywords: subPresetCategory.keywords || '',
             clientSessionId: ''
         };
 

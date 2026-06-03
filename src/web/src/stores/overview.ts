@@ -335,7 +335,7 @@ export const useOverviewStore = defineStore('overview', () => {
                     logger.error('failed to load transaction overview', error);
                 }
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve transaction overview' });

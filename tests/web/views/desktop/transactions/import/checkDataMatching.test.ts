@@ -12,14 +12,14 @@ import {
     hasImportCheckMatchingDedupContext,
     hasImportCheckMatchingContext,
     matchesImportPreviewSignalFilter,
-    resolveImportCheckMatchingTransferParserSources,
+    resolveImportCheckMatchingTransferParserIds,
     shouldShowImportCheckMatchingDedupSourceCount
 } from '@/views/desktop/transactions/import/checkDataMatching.ts';
 
 describe('checkDataMatching helpers', () => {
     test('builds matching context summaries for parser, dedup, and manual annotation display', () => {
         const summary = getImportCheckMatchingContextSummary({
-            parserSource: 'alipay',
+            parserId: 'alipay',
             parserTags: ['parser:alipay', 'channel:wallet'],
             dedupType: 'transfer',
             dedupSourceIds: [101, 102],
@@ -42,8 +42,8 @@ describe('checkDataMatching helpers', () => {
                 wechat: '微信'
             },
             sourceRows: [
-                { id: 101, parserSource: 'wechat' },
-                { id: 102, parserSource: 'alipay' }
+                { id: 101, parserId: 'wechat' },
+                { id: 102, parserId: 'alipay' }
             ]
         })).toBe('匹配 | 支付宝 | 微信');
         expect(getImportCheckMatchingParserTagsText(summary)).toBe('parser:alipay · channel:wallet');
@@ -51,7 +51,7 @@ describe('checkDataMatching helpers', () => {
 
     test('does not surface remaining dedup rows as matching context by themselves', () => {
         const summary = getImportCheckMatchingContextSummary({
-            parserSource: '',
+            parserId: '',
             parserTags: [],
             dedupType: 'remaining',
             dedupSourceIds: [201],
@@ -63,7 +63,7 @@ describe('checkDataMatching helpers', () => {
 
     test('resolves transfer dedup parser labels from a prebuilt lookup keyed by row index or preview id', () => {
         const summary = getImportCheckMatchingContextSummary({
-            parserSource: 'bank',
+            parserId: 'bank',
             dedupType: 'transfer',
             dedupSourceIds: [12, 'preview:9']
         });
@@ -84,7 +84,7 @@ describe('checkDataMatching helpers', () => {
 
     test('resolves transfer dedup parser labels from source-row parser tags', () => {
         const summary = getImportCheckMatchingContextSummary({
-            parserSource: 'bank',
+            parserId: 'bank',
             dedupType: 'transfer',
             dedupSourceIds: [12, 'preview:9']
         });
@@ -99,15 +99,15 @@ describe('checkDataMatching helpers', () => {
                 abc: '农业银行'
             },
             sourceRowLookup: new Map([
-                ['12', { parserSource: 'wechat', parserTags: ['parser:wechat', 'parser:cmbc'] }],
-                ['preview:9', { parserSource: 'alipay', parserTags: ['parser:alipay', 'parser:abc'] }]
+                ['12', { parserId: 'wechat', parserTags: ['parser:wechat', 'parser:cmbc'] }],
+                ['preview:9', { parserId: 'alipay', parserTags: ['parser:alipay', 'parser:abc'] }]
             ])
         })).toBe('匹配 | 银行卡 | 微信 | 民生银行 | 支付宝 | 农业银行');
     });
 
     test('resolves transfer dedup parser labels from combined parser tags', () => {
         const summary = getImportCheckMatchingContextSummary({
-            parserSource: 'cmbc',
+            parserId: 'cmbc',
             parserTags: ['parser:cmbc', 'parser:alipay'],
             dedupType: 'transfer',
             dedupSourceIds: [701, 702]
@@ -166,7 +166,7 @@ describe('checkDataMatching helpers', () => {
 
     test('builds compact signal cell model without exposing raw parser tags in body labels', () => {
         const viewModel = buildImportPreviewSignalViewModel({
-            parserSource: 'alipay',
+            parserId: 'alipay',
             parserTags: ['parser:alipay', 'channel:wallet'],
             dedupType: 'transfer',
             dedupSourceIds: [9],
@@ -187,7 +187,7 @@ describe('checkDataMatching helpers', () => {
                 accountRouteLabel: '账户链路'
             },
             sourceRows: [
-                { id: 9, parserSource: 'wechat' }
+                { id: 9, parserId: 'wechat' }
             ]
         });
 
@@ -248,9 +248,9 @@ describe('checkDataMatching helpers', () => {
 
     test('formats transfer details from structured source metadata and hides redundant parser chip', () => {
         const viewModel = buildImportPreviewSignalViewModel({
-            parserSource: 'cmbc',
+            parserId: 'cmbc',
             parserTags: ['parser:cmbc', 'parser:wechat'],
-            parserSourceChain: [
+            parserIdChain: [
                 {
                     position: 0,
                     role: 'outgoing',
@@ -364,7 +364,7 @@ describe('checkDataMatching helpers', () => {
 
     test('hides parser chip when platform duplicate is present', () => {
         const viewModel = buildImportPreviewSignalViewModel({
-            parserSource: 'alipay',
+            parserId: 'alipay',
             parserTags: ['parser:alipay'],
             dedupType: 'platform_bank',
             dedupSourceIds: [301],
@@ -387,7 +387,7 @@ describe('checkDataMatching helpers', () => {
 
     test('hides parser chip when transfer match dedup is present', () => {
         const viewModel = buildImportPreviewSignalViewModel({
-            parserSource: 'cmbc',
+            parserId: 'cmbc',
             parserTags: ['parser:cmbc'],
             dedupType: 'transfer',
             dedupSourceIds: [11, 12]
@@ -401,7 +401,7 @@ describe('checkDataMatching helpers', () => {
         expect(viewModel.dedup?.labelKey).toBe('Transfer Match');
 
         const crossBatchViewModel = buildImportPreviewSignalViewModel({
-            parserSource: 'cmbc',
+            parserId: 'cmbc',
             parserTags: ['parser:cmbc'],
             dedupType: 'transfer_cross_batch',
             dedupSourceIds: [21, 22]
@@ -457,7 +457,7 @@ describe('checkDataMatching helpers', () => {
 
     test('formats platform duplicate sources from current row and source lookup fallback', () => {
         const viewModel = buildImportPreviewSignalViewModel({
-            parserSource: 'alipay',
+            parserId: 'alipay',
             dedupType: 'platform_bank',
             dedupSourceIds: [301, 'preview:302']
         }, {
@@ -476,9 +476,9 @@ describe('checkDataMatching helpers', () => {
                 recommendedCategoryLabel: '推荐分类',
                 accountRouteLabel: '账户链路'
             },
-            sourceRowLookup: new Map<string, string | { parserSource: string; parserTags: string[] }>([
+            sourceRowLookup: new Map<string, string | { parserId: string; parserTags: string[] }>([
                 ['301', 'icbc'],
-                ['preview:302', { parserSource: 'cmbc', parserTags: ['parser:wechat'] }]
+                ['preview:302', { parserId: 'cmbc', parserTags: ['parser:wechat'] }]
             ])
         });
 
@@ -677,10 +677,10 @@ describe('checkDataMatching helpers', () => {
 
     test('filters rows by visible signal family rather than raw backend fields', () => {
         const parserViewModel = buildImportPreviewSignalViewModel({
-            parserSource: 'alipay'
+            parserId: 'alipay'
         });
         const platformDuplicateViewModel = buildImportPreviewSignalViewModel({
-            parserSource: 'alipay',
+            parserId: 'alipay',
             dedupType: 'platform_bank',
             dedupSourceIds: [301, 302],
             dedupSourceLabels: ['支付宝', '民生银行']
@@ -865,7 +865,7 @@ describe('checkDataMatching helpers', () => {
     });
 
     test('uses default parser-source fallbacks when optional options are omitted', () => {
-        expect(resolveImportCheckMatchingTransferParserSources({
+        expect(resolveImportCheckMatchingTransferParserIds({
             parserId: 'cmbc',
             parserTags: [undefined as unknown as string, 'note:skip', 'parser:wechat'],
             dedupType: 'transfer',

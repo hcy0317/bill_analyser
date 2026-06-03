@@ -1,4 +1,4 @@
-import { type NavigationGuardReturn, type RouteLocation, createRouter, createWebHashHistory } from 'vue-router';
+import { type NavigationGuardReturn, createRouter, createWebHashHistory } from 'vue-router';
 
 import { TemplateType } from '@/core/template.ts';
 import { isUserLogined, isUserUnlocked } from '@/lib/userstate.ts';
@@ -88,45 +88,6 @@ function checkNotLogin(): NavigationGuardReturn {
     }
 
     return true;
-}
-
-function buildRuleCenterRedirect(route: RouteLocation, domain: 'learning' | 'llm') {
-    const query: Record<string, string> = {};
-
-    for (const [key, value] of Object.entries(route.query)) {
-        if (typeof value === 'string' && key !== 'view' && key !== 'pairType') {
-            query[key] = value;
-        }
-    }
-
-    query['domain'] = domain;
-    query['tab'] = domain === 'llm' ? 'overview' : (query['tab'] || 'rules');
-
-    return {
-        path: '/pairing/list',
-        query,
-        replace: true
-    };
-}
-
-function buildLegacyRulesCenterRedirect(route: RouteLocation) {
-    const query: Record<string, string> = {};
-
-    for (const [key, value] of Object.entries(route.query)) {
-        if (typeof value === 'string') {
-            query[key] = value;
-        }
-    }
-
-    if (!query['domain'] && !query['view']) {
-        query['view'] = 'rule-center';
-    }
-
-    return {
-        path: '/pairing/list',
-        query,
-        replace: true
-    };
 }
 
 const router = createRouter({
@@ -233,24 +194,13 @@ const router = createRouter({
                     beforeEnter: checkLogin,
                     props: route => ({
                         initDomain: route.query['domain'],
-                        initPairType: route.query['pairType'],
-                        initView: route.query['view'],
                         initTab: route.query['tab']
                     })
-                },
-                {
-                    path: '/learning/center',
-                    redirect: route => buildRuleCenterRedirect(route, 'learning')
                 },
                 {
                     path: '/recurring/discover',
                     component: RecurringDiscoverPage,
                     beforeEnter: checkLogin
-                },
-
-                {
-                    path: '/rules/center',
-                    redirect: route => buildLegacyRulesCenterRedirect(route)
                 },
                 {
                     path: '/insights',
@@ -320,7 +270,7 @@ const router = createRouter({
                 platform: route.query['platform'],
                 userName: route.query['userName'],
                 errorCode: route.query['errorCode'],
-                errorMessage: route.query['errorMessage']
+                message: route.query['message']
             })
         },
         {

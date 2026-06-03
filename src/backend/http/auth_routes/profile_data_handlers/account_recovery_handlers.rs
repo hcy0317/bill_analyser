@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -61,7 +61,7 @@ async fn verify_email_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
-    if state.config.database_backend.uses_postgres() {
+
         return verify_postgres_email_response(
             &state,
             &headers,
@@ -71,99 +71,6 @@ async fn verify_email_handler(
             request_new_token,
         )
         .await;
-    }
-    let runtime = match open_runtime(&state) {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
-    let user = match get_auth_user_profile(runtime.connection(), user_id) {
-        Ok(Some(value)) => value,
-        Ok(None) => {
-            return auth_rest_error_response(AuthRestError::new(
-                404,
-                "User not found",
-                "User not found",
-            ));
-        }
-        Err(_) => return db_error_response(),
-    };
-    if payload.get("email").and_then(Value::as_str) != Some(user.email.trim()) {
-        return auth_rest_error_response(AuthRestError::new(
-            400,
-            "Invalid token",
-            "Verification token does not match email",
-        ));
-    }
-    if set_user_email_verified(runtime.connection(), user_id, true, &utc_now_text()).is_err() {
-        return db_error_response();
-    }
-    let user = match get_auth_user_profile(runtime.connection(), user_id) {
-        Ok(Some(value)) => value,
-        Ok(None) => {
-            return auth_rest_error_response(AuthRestError::new(
-                404,
-                "User not found",
-                "User not found",
-            ));
-        }
-        Err(_) => return db_error_response(),
-    };
-    let mut new_token = Value::Null;
-    if request_new_token {
-        let tokens = match issue_session_tokens(user.id, &user.username, &state) {
-            Ok(value) => value,
-            Err(response) => return *response,
-        };
-        let created_at = now_text();
-        let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
-        let ip_address = client_ip(&headers, peer_addr);
-        if create_token_session(
-            runtime.connection(),
-            &CreateTokenSessionDraft {
-                user_id: user.id,
-                token_hash: sha256_hex(&tokens.access_token),
-                refresh_token_hash: Some(sha256_hex(&tokens.refresh_token)),
-                expires_at: tokens.expires_at,
-                refresh_expires_at: Some(tokens.refresh_expires_at),
-                user_agent: request_user_agent,
-                ip_address,
-                created_at,
-            },
-        )
-        .is_err()
-        {
-            return db_error_response();
-        }
-        new_token = Value::String(tokens.access_token);
-    }
-    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
-    let ip_address = client_ip(&headers, peer_addr);
-    if log_auth_event(
-        runtime.connection(),
-        AuthEvent {
-            user_id: Some(user.id),
-            username: &user.username,
-            event_type: "email_verified",
-            ip_address: &ip_address,
-            user_agent: &request_user_agent,
-            success: true,
-            error_message: None,
-            metadata: None,
-        },
-    )
-    .is_err()
-    {
-        return db_error_response();
-    }
-
-    success_result(
-        StatusCode::OK,
-        json!({
-            "newToken": new_token,
-            "user": user_profile_payload(&user),
-            "notificationContent": "",
-        }),
-    )
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -193,7 +100,7 @@ async fn resend_public_verification_email_handler(
             "Email and password are required",
         ));
     }
-    if state.config.database_backend.uses_postgres() {
+
         return resend_public_postgres_verification_email_response(
             &state,
             &headers,
@@ -202,54 +109,6 @@ async fn resend_public_verification_email_handler(
             password,
         )
         .await;
-    }
-    let runtime = match open_runtime(&state) {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
-    let user = match get_login_user_by_email(runtime.connection(), &email) {
-        Ok(Some(value)) if bcrypt::verify(password, &value.password_hash).unwrap_or(false) => value,
-        Ok(_) => {
-            return auth_rest_error_response(AuthRestError::new(
-                401,
-                "Invalid credentials",
-                "Invalid email or password",
-            ));
-        }
-        Err(_) => return db_error_response(),
-    };
-    let verification_token = match issue_action_token(&user, "verify_email", 24, &state) {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
-    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
-    let ip_address = client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
-    if log_auth_event(
-        runtime.connection(),
-        AuthEvent {
-            user_id: Some(user.profile.id),
-            username: &user.profile.username,
-            event_type: "verification_email_resend_requested",
-            ip_address: &ip_address,
-            user_agent: &request_user_agent,
-            success: true,
-            error_message: None,
-            metadata: Some(
-                json!({
-                    "email": email,
-                    "delivery": "not_configured_mock_success",
-                    "verification_token": verification_token,
-                })
-                .to_string(),
-            ),
-        },
-    )
-    .is_err()
-    {
-        return db_error_response();
-    }
-
-    success_result(StatusCode::OK, Value::Bool(true))
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -282,7 +141,7 @@ async fn forgot_password_handler(
             "Forget password is currently disabled",
         ));
     }
-    if state.config.database_backend.uses_postgres() {
+
         return forgot_postgres_password_response(
             &state,
             &headers,
@@ -290,49 +149,6 @@ async fn forgot_password_handler(
             &email,
         )
         .await;
-    }
-    let runtime = match open_runtime(&state) {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
-    let user = match get_login_user_by_email(runtime.connection(), &email) {
-        Ok(value) => value,
-        Err(_) => return db_error_response(),
-    };
-    if let Some(user) = user {
-        let reset_token = match issue_action_token(&user, "reset_password", 24, &state) {
-            Ok(value) => value,
-            Err(response) => return *response,
-        };
-        let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
-        let ip_address = client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
-        if log_auth_event(
-            runtime.connection(),
-            AuthEvent {
-                user_id: Some(user.profile.id),
-                username: &user.profile.username,
-                event_type: "password_reset_requested",
-                ip_address: &ip_address,
-                user_agent: &request_user_agent,
-                success: true,
-                error_message: None,
-                metadata: Some(
-                    json!({
-                        "email": email,
-                        "delivery": "not_configured_mock_success",
-                        "reset_token": reset_token,
-                    })
-                    .to_string(),
-                ),
-            },
-        )
-        .is_err()
-        {
-            return db_error_response();
-        }
-    }
-
-    success_result(StatusCode::OK, Value::Bool(true))
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -397,7 +213,7 @@ async fn reset_password_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
-    if state.config.database_backend.uses_postgres() {
+
         return reset_postgres_password_response(
             &state,
             &headers,
@@ -407,57 +223,6 @@ async fn reset_password_handler(
             user_id,
         )
         .await;
-    }
-    let runtime = match open_runtime(&state) {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
-    let user = match get_auth_user_profile(runtime.connection(), user_id) {
-        Ok(Some(value)) if value.email.trim() == email => value,
-        Ok(_) => {
-            return auth_rest_error_response(AuthRestError::new(
-                404,
-                "User not found",
-                "User not found",
-            ));
-        }
-        Err(_) => return db_error_response(),
-    };
-    let password_hash = match bcrypt::hash(password, bcrypt::DEFAULT_COST) {
-        Ok(value) => value,
-        Err(_) => return db_error_response(),
-    };
-    if update_user_password_hash(
-        runtime.connection(),
-        user.id,
-        &password_hash,
-        &utc_now_text(),
-    )
-    .is_err()
-    {
-        return db_error_response();
-    }
-    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
-    let ip_address = client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
-    if log_auth_event(
-        runtime.connection(),
-        AuthEvent {
-            user_id: Some(user.id),
-            username: &user.username,
-            event_type: "password_reset_completed",
-            ip_address: &ip_address,
-            user_agent: &request_user_agent,
-            success: true,
-            error_message: None,
-            metadata: None,
-        },
-    )
-    .is_err()
-    {
-        return db_error_response();
-    }
-
-    success_result(StatusCode::OK, Value::Bool(true))
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -499,7 +264,7 @@ async fn unlink_profile_external_auth_handler(
         ));
     }
 
-    if state.config.database_backend.uses_postgres() {
+
         return unlink_postgres_profile_external_auth_response(
             &state,
             auth,
@@ -509,75 +274,6 @@ async fn unlink_profile_external_auth_handler(
             password,
         )
         .await;
-    }
-
-    let runtime = match open_runtime(&state) {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
-    let user = match get_auth_token_user(runtime.connection(), auth.user_id) {
-        Ok(Some(user)) => user,
-        Ok(None) => {
-            return auth_rest_error_response(AuthRestError::new(
-                404,
-                "User not found",
-                "User not found",
-            ));
-        }
-        Err(_) => return db_error_response(),
-    };
-    if !bcrypt::verify(password, &user.password_hash).unwrap_or(false) {
-        return auth_rest_error_response(AuthRestError::new(
-            400,
-            "Bad Request",
-            "Invalid password",
-        ));
-    }
-
-    let existing =
-        match get_user_external_auth(runtime.connection(), auth.user_id, &external_auth_type) {
-            Ok(Some(value)) => value,
-            Ok(None) => {
-                return auth_rest_error_response(AuthRestError::new(
-                    404,
-                    "Not Found",
-                    "Third-party login is not linked",
-                ));
-            }
-            Err(_) => return db_error_response(),
-        };
-    let success =
-        match delete_user_external_auth(runtime.connection(), auth.user_id, &external_auth_type) {
-            Ok(value) => value,
-            Err(_) => return db_error_response(),
-        };
-    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
-    let ip_address = client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
-    if log_auth_event(
-        runtime.connection(),
-        AuthEvent {
-            user_id: Some(user.id),
-            username: &user.username,
-            event_type: "external_auth_unlinked",
-            ip_address: &ip_address,
-            user_agent: &request_user_agent,
-            success,
-            error_message: None,
-            metadata: Some(
-                json!({
-                    "external_auth_type": external_auth_type,
-                    "external_auth_category": existing.external_auth_category,
-                })
-                .to_string(),
-            ),
-        },
-    )
-    .is_err()
-    {
-        return db_error_response();
-    }
-
-    success_result(StatusCode::OK, Value::Bool(success))
 }
 
 async fn verify_postgres_email_response(

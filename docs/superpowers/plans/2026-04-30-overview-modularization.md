@@ -1,6 +1,6 @@
 # Overview Modularization Archive
 
-This historical planning note has been superseded by the Rust-only backend cutover.
+This historical planning note has been superseded by the Rust-only backend.
 
 Use the current docs instead:
 

@@ -7,7 +7,7 @@ use bill_analyser_core::auth::{
 use serde_json::json;
 
 #[test]
-fn bearer_header_contract_matches_flask_auth_edges() {
+fn bearer_header_contract_matches_current_auth_edges() {
     assert_eq!(
         parse_bearer_authorization_header(""),
         Err(AuthRestError::unauthorized("Missing authorization header"))
@@ -114,7 +114,7 @@ fn token_kind_and_user_agent_projection_match_token_routes() {
 }
 
 #[test]
-fn password_policy_matches_python_registration_messages() {
+fn password_policy_matches_current_registration_messages() {
     let policy = PasswordPolicy {
         min_length: 8,
         require_uppercase: true,

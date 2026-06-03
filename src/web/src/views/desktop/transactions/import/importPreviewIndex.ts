@@ -18,7 +18,7 @@ export interface ImportPreviewIndexItem extends ImportCheckVisibleTransactionLik
     sourceAmount: number;
     counterparty: string;
     paymentMethod: string;
-    parserSource: string;
+    parserId: string;
     parserTags: string[];
     dedupType: string;
     dedupSourceIds: Array<number | string>;
@@ -317,7 +317,7 @@ export function mapImportPreviewIndexResponseItem(item: ImportPreviewIndexRespon
         sourceAmount: Number(item.source_amount || 0),
         counterparty: item.counterparty || '',
         paymentMethod: item.payment_method || '',
-        parserSource: item.parser_source || '',
+        parserId: item.parser_source || '',
         parserTags: item.parser_tags || [],
         dedupType: item.dedup_type || '',
         dedupSourceIds: item.dedup_source_ids || [],
@@ -395,7 +395,7 @@ function previewTypeFilterValue(value: number | null | undefined): string | unde
 
 function namedFilterValue(
     value: string | null | undefined,
-    aliases: Record<string, string | number | undefined> = {}
+    valueLabels: Record<string, string | number | undefined> = {}
 ): string | undefined {
     if (value === null) {
         return undefined;
@@ -409,7 +409,7 @@ function namedFilterValue(
         return PREVIEW_FILTER_NONE_VALUE;
     }
 
-    return String(aliases[value] ?? value);
+    return String(valueLabels[value] ?? value);
 }
 
 export function buildImportPreviewServerQueryFilters(
@@ -532,7 +532,7 @@ export function collectImportPreviewIndexAnnotationIssues(item: ImportPreviewInd
 
 export function buildImportPreviewIndexSignalViewModel(item: ImportPreviewIndexItem): ImportPreviewSignalViewModel {
     return buildImportPreviewSignalViewModel({
-        parserSource: item.parserSource,
+        parserId: item.parserId,
         parserTags: item.parserTags,
         dedupType: item.dedupType,
         dedupSourceIds: item.dedupSourceIds,

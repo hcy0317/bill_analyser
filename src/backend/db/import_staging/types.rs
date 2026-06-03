@@ -1,6 +1,6 @@
-// 中文导读：SQLite repository 层，负责 schema、事务、user-scope 查询、row helper 和跨表写入边界。
-// 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
-// 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
+// 中文导读：Postgres import staging 类型层，定义当前导入 session、preview 与学习/LLM DTO。
+// 维护重点：类型保持当前 v2 API 所需形状，存储实现由 Postgres adapter 负责。
+// 不变式：金额字段明确区分预览元单位与 standard row 分单位。
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportSessionDraft {
@@ -160,7 +160,7 @@ pub fn dedup_bill_from_parser_template(template: &ImportParserTemplateRow) -> De
     ]);
     DedupBill {
         date: template.parser_date.clone(),
-        amount: Money::from_yuan_str(&python_float_text(template.parser_amount))
+        amount: Money::from_yuan_str(&finite_float_text(template.parser_amount))
             .unwrap_or(Money::ZERO),
         transaction_type: template.parser_type.clone(),
         source_account_id: template.parser_account_id.clone(),
@@ -342,32 +342,6 @@ pub enum ImportPreviewPatchField {
     MatchingFeedback,
 }
 
-impl ImportPreviewPatchField {
-    fn column_name(self) -> &'static str {
-        match self {
-            Self::Date => "preview_date",
-            Self::Type => "preview_type",
-            Self::Amount => "preview_amount",
-            Self::DestinationAmount => "preview_destination_amount",
-            Self::MainCategory => "preview_main_category",
-            Self::SubCategory => "preview_sub_category",
-            Self::SourceAccountId => "preview_source_account_id",
-            Self::DestinationAccountId => "preview_destination_account_id",
-            Self::Counterparty => "preview_counterparty",
-            Self::PaymentMethod => "preview_payment_method",
-            Self::Description => "preview_description",
-            Self::RecurringId => "preview_recurring_id",
-            Self::RecurringName => "preview_recurring_name",
-            Self::RecurringCandidateCount => "preview_recurring_candidate_count",
-            Self::RecurringMatchScore => "preview_recurring_match_score",
-            Self::RecurringMatchReasons => "preview_recurring_match_reasons",
-            Self::RecurringMatchedDate => "preview_recurring_matched_date",
-            Self::Selected => "preview_selected",
-            Self::MatchingFeedback => "preview_matching_feedback_json",
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImportPreviewPatchValue {
     Null,
@@ -376,25 +350,6 @@ pub enum ImportPreviewPatchValue {
     Integer(i64),
     Bool(bool),
     Json(Value),
-}
-
-impl ImportPreviewPatchValue {
-    fn into_sql_value(self) -> SqlValue {
-        match self {
-            Self::Null => SqlValue::Null,
-            Self::Text(value) => SqlValue::Text(value),
-            Self::Real(value) => SqlValue::Real(value),
-            Self::Integer(value) => SqlValue::Integer(value),
-            Self::Bool(value) => SqlValue::Integer(i64::from(value)),
-            Self::Json(value) => {
-                if value.is_null() {
-                    SqlValue::Null
-                } else {
-                    SqlValue::Text(value.to_string())
-                }
-            }
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -540,7 +495,6 @@ pub struct ImportPreviewLlmDecisionResult {
     pub preview: Option<ImportPreviewRow>,
     pub event_id: Option<i64>,
     pub applied_fields: Vec<String>,
-    pub restored: bool,
 }
 
 #[derive(Debug, Clone, Copy)]

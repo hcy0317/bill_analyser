@@ -61,7 +61,7 @@ Stage2 import learning first runs deterministic category/account/learning rules.
 
 Vector hits are converted back into the same preview learning signal shape as deterministic learning, including recommendation key, previous/applied preview snapshots, score, source, and lifecycle counters. Weaviate metadata is derived evidence only: it can surface a pending recommendation, but it cannot by itself enable auto-apply. Green auto-apply still requires authoritative lifecycle state and a deterministic or otherwise authoritative projection.
 
-Transfer previews keep their `转账` type. Learning may recommend transfer-compatible category/account fields, but conflicting learned income/expense/investment types are ignored instead of changing the transfer row.
+Transfer previews keep their `转账` type. Learning may recommend transfer-safe category/account fields, but conflicting learned income/expense/investment types are ignored instead of changing the transfer row.
 
 ## Health semantics
 

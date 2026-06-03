@@ -246,7 +246,7 @@ describe('useTransactionsStore.recognizeReceiptImage', () => {
         mockRecognizeReceiptImage.mockRejectedValue({
             response: {
                 status,
-                data: { success: false, errorCode, errorMessage: 'backend says no' }
+                data: { success: false, errorCode, message: 'backend says no' }
             }
         });
 
@@ -262,7 +262,7 @@ describe('useTransactionsStore.recognizeReceiptImage', () => {
         mockRecognizeReceiptImage.mockRejectedValue({
             response: {
                 status: 500,
-                data: { success: false, errorCode: 'gibberish', errorMessage: 'oops' }
+                data: { success: false, errorCode: 'gibberish', message: 'oops' }
             }
         });
 

@@ -1,6 +1,6 @@
 // 中文导读：核心业务合同层，负责把金额、时间、分类、导入、匹配、预算、统计等规则从 HTTP/DB 细节中隔离。
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
-// 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
+// 不变式：金额单位、用户可见类型和API payload 在进入或离开本层时必须显式转换。
 
 use std::collections::BTreeSet;
 
@@ -20,8 +20,6 @@ pub const BACKUP_MAX_RETENTION_DAYS: i64 = 3_650;
 pub const BACKUP_MAX_JOB_TYPE_LEN: usize = 64;
 pub const BACKUP_MAX_SCHEDULE_EXPR_LEN: usize = 256;
 pub const DEFAULT_BACKUP_SYNC_PREFIX: &str = "bill_analyser_backups/";
-pub const DEFAULT_SQLCIPHER_KDF_ITER: i32 = 256_000;
-pub const DEFAULT_SQLCIPHER_PAGE_SIZE: i32 = 4096;
 pub const VALID_REPORT_EXPORT_FORMATS: [&str; 3] = ["pdf", "excel", "html"];
 pub const SUPPORTED_SYNC_PROVIDERS: [&str; 5] = ["oss", "s3", "cos", "azure", "webdav"];
 
@@ -57,7 +55,6 @@ pub struct BackupArchiveSummary {
     pub entry_count: usize,
     pub top_level_entries: Vec<String>,
     pub error: String,
-    pub ready_to_restore: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,7 +70,6 @@ pub struct BackupFileInfoContract {
     pub entry_count: usize,
     pub top_level_entries: Vec<String>,
     pub error: String,
-    pub ready_to_restore: bool,
     pub metadata_checksum_matched: bool,
 }
 
@@ -129,14 +125,6 @@ pub struct BackupJobContract {
     pub last_status: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SqlcipherStatusContract {
-    pub encrypted: bool,
-    pub sqlcipher_available: bool,
-    pub kdf_iter: i32,
-    pub cipher_page_size: i32,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SensitiveAuthMode {
@@ -145,7 +133,7 @@ pub enum SensitiveAuthMode {
 }
 
 impl SensitiveAuthMode {
-    pub const fn as_python_value(self) -> &'static str {
+    pub const fn as_audit_value(self) -> &'static str {
         match self {
             Self::CurrentPassword => "current_password",
             Self::StepUpToken => "step_up_token",
@@ -321,9 +309,6 @@ where
         .filter(|item| !item.is_empty())
         .collect::<Vec<_>>();
     let contains_data_dir = names.iter().any(|name| name.starts_with("data/"));
-    let contains_data_file = names
-        .iter()
-        .any(|name| name.starts_with("data/") && !name.ends_with('/'));
     let top_level_entries = names
         .iter()
         .filter_map(|name| name.split('/').next())
@@ -339,7 +324,6 @@ where
         entry_count: names.len(),
         top_level_entries,
         error: String::new(),
-        ready_to_restore: contains_data_file,
     }
 }
 
@@ -351,7 +335,6 @@ pub fn invalid_backup_archive_summary(error: &str) -> BackupArchiveSummary {
         entry_count: 0,
         top_level_entries: Vec::new(),
         error: error.to_string(),
-        ready_to_restore: false,
     }
 }
 
@@ -381,18 +364,8 @@ pub fn build_backup_file_info(input: BackupFileInfoInput) -> BackupFileInfoContr
         entry_count: input.archive_summary.entry_count,
         top_level_entries: input.archive_summary.top_level_entries,
         error: input.archive_summary.error,
-        ready_to_restore: input.archive_summary.ready_to_restore,
         metadata_checksum_matched,
     }
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-pub fn backup_restore_verify_response(backup_info: &BackupFileInfoContract) -> Value {
-    let restore_ready = backup_info.valid_zip && backup_info.ready_to_restore;
-    json!({
-        "success": restore_ready,
-        "data": backup_info,
-    })
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -574,30 +547,6 @@ pub fn derive_backup_fernet_key(secret: &str) -> Option<String> {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn normalize_sqlcipher_status(
-    encrypt_raw: Option<&str>,
-    key_raw: Option<&str>,
-    sqlcipher_available: bool,
-) -> SqlcipherStatusContract {
-    let requested = env_truthy(encrypt_raw);
-    let key_present = key_raw.is_some_and(|value| !value.trim().is_empty());
-    SqlcipherStatusContract {
-        encrypted: requested && key_present && sqlcipher_available,
-        sqlcipher_available,
-        kdf_iter: DEFAULT_SQLCIPHER_KDF_ITER,
-        cipher_page_size: DEFAULT_SQLCIPHER_PAGE_SIZE,
-    }
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-pub fn encryption_status_response(status: &SqlcipherStatusContract) -> Value {
-    json!({
-        "success": true,
-        "data": status,
-    })
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_comma_separated_ints(raw_value: &str) -> Vec<i64> {
     raw_value
         .split(',')
@@ -664,7 +613,7 @@ pub fn build_user_data_audit_contract(
     let details = if kind == UserDataClearKind::Transactions {
         json!({
             "deleted_count": affected_count,
-            "auth_mode": auth_mode.as_python_value(),
+            "auth_mode": auth_mode.as_audit_value(),
         })
     } else {
         let mut details = result
@@ -672,7 +621,7 @@ pub fn build_user_data_audit_contract(
             .and_then(Value::as_object)
             .cloned()
             .unwrap_or_default();
-        details.insert("auth_mode".to_string(), json!(auth_mode.as_python_value()));
+        details.insert("auth_mode".to_string(), json!(auth_mode.as_audit_value()));
         Value::Object(details)
     };
 
@@ -924,13 +873,6 @@ fn is_windows_reserved_report_name(name: &str) -> bool {
             && (name.starts_with("com") || name.starts_with("lpt"))
             && name.as_bytes()[3].is_ascii_digit()
             && name.as_bytes()[3] != b'0')
-}
-
-fn env_truthy(value: Option<&str>) -> bool {
-    value
-        .map(str::trim)
-        .map(str::to_lowercase)
-        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "yes"))
 }
 
 fn optional_positive_i64_field(

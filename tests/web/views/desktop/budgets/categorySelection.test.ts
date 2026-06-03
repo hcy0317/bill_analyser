@@ -16,7 +16,7 @@ function createCategory(id: string, name: string, subCategories?: TransactionCat
         name,
         parentId: '0',
         type: 1,
-        icon: 'mdi-shape',
+        icon: 'las la-shapes',
         color: '#5470c6',
         comment: '',
         displayOrder: 0,
@@ -91,7 +91,7 @@ describe('categorySelection helpers', () => {
         expect(getBudgetDrilldownCategoryIds(CATEGORIES, '不存在', undefined, '999')).toBe('999');
     });
 
-    test('buildBudgetDrilldownRouteQuery builds transaction-list-compatible query params', () => {
+    test('buildBudgetDrilldownRouteQuery builds transaction-list query params', () => {
         const minDate = new Date(2026, 3, 1, 0, 0, 0);
         const maxDate = new Date(2026, 5, 30, 23, 59, 59);
 

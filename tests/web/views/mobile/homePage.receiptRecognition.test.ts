@@ -50,7 +50,7 @@ describe('mobile HomePage onReceiptRecognitionChanged field mapping', () => {
         expect(handler).toContain("props.f7router.navigate(`/transaction/add?${params.join('&')}`);");
     });
 
-    test('legacy ezbookkeeping-only contract fields are no longer referenced in the handler', () => {
+    test('removed ezbookkeeping-only contract fields are no longer referenced in the handler', () => {
         const handler = extractHandler(readSource(HOMEPAGE_PATH));
         expect(handler).not.toContain('result.type');
         expect(handler).not.toContain('result.categoryId');

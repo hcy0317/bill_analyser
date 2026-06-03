@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -93,17 +93,6 @@ fn parse_json_body(body: Bytes) -> RouteResult<Value> {
     serde_json::from_slice(&body).map_err(|_| Box::new(bad_request("Invalid JSON")))
 }
 
-fn open_runtime(state: &HttpAppState, runtime_label: &'static str) -> RouteResult<SqliteRuntime> {
-    state
-        .open_sqlite_repository_runtime(runtime_label)
-        .map_err(|error| {
-            Box::new(error_response(
-                status_or_internal(error.http_status_code()),
-                error.public_message("Rust taxonomy route runtime DB error"),
-            ))
-        })
-}
-
 fn open_postgres_runtime(
     state: &HttpAppState,
     runtime_label: &'static str,
@@ -113,7 +102,7 @@ fn open_postgres_runtime(
         .map_err(|error| {
             Box::new(error_response(
                 status_or_internal(error.http_status_code()),
-                error.public_message("Rust taxonomy route PostgreSQL runtime DB error"),
+                error.public_message(),
             ))
         })
 }
@@ -207,45 +196,7 @@ fn status_or_internal(status: u16) -> StatusCode {
     StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
-fn parse_aliases(value: Option<&Value>) -> Vec<String> {
-    match value {
-        None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(values)) => values
-            .iter()
-            .map(python_value_text)
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .collect(),
-        Some(Value::String(text)) => parse_alias_string(text),
-        Some(_) => Vec::new(),
-    }
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn parse_alias_string(text: &str) -> Vec<String> {
-    let text = text.trim();
-    if text.is_empty() {
-        return Vec::new();
-    }
-    if text.starts_with('[') {
-        if let Ok(Value::Array(values)) = serde_json::from_str::<Value>(text) {
-            return values
-                .iter()
-                .map(python_value_text)
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-                .collect();
-        }
-    }
-    text.split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-        .collect()
-}
-
-fn python_value_text(value: &Value) -> String {
+fn json_value_text(value: &Value) -> String {
     match value {
         Value::Null => "None".to_string(),
         Value::Bool(true) => "True".to_string(),
@@ -264,7 +215,7 @@ fn template_type_from_query_body(
         return parse_template_type_text(value).or(default);
     }
     if let Some(value) = body.and_then(|value| value.get("templateType")) {
-        return parse_template_type_text(&python_value_text(value)).or(default);
+        return parse_template_type_text(&json_value_text(value)).or(default);
     }
     default
 }
@@ -293,12 +244,12 @@ fn template_display_orders_from_body(body: &Value) -> RouteResult<Vec<TemplateDi
                 "Each item must have id and displayOrder",
             )));
         };
-        let Some(template_id) = object.get("id").and_then(parse_python_int) else {
+        let Some(template_id) = object.get("id").and_then(parse_json_int) else {
             return Err(Box::new(bad_request(
                 "Each item must have id and displayOrder",
             )));
         };
-        let Some(display_order) = object.get("displayOrder").and_then(parse_python_int) else {
+        let Some(display_order) = object.get("displayOrder").and_then(parse_json_int) else {
             return Err(Box::new(bad_request(
                 "Each item must have id and displayOrder",
             )));
@@ -413,7 +364,7 @@ fn string_or_default(value: Option<&Value>, default: &str) -> String {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn parse_python_int(value: &Value) -> Option<i64> {
+fn parse_json_int(value: &Value) -> Option<i64> {
     match value {
         Value::Number(number) => number.as_i64(),
         Value::String(text) => text.trim().parse::<i64>().ok(),

@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -14,17 +14,15 @@ use axum::{
 };
 use base64::{engine::general_purpose, Engine as _};
 use bill_analyser_core::adapters::transaction::{
-    apply_create_category_contract, apply_legacy_modify_preserved_fields,
-    apply_manual_create_defaults, batch_create_persist_error_route_response,
-    batch_create_prepare_error_route_response, batch_create_success_route_response,
-    batch_create_transaction_items, batch_delete_success_payload, batch_update_response,
-    build_reconciliation_transactions, calculate_reconciliation_summary,
-    delete_bill_success_payload, frontend_transaction_from_backend,
-    frontend_transaction_mutation_to_backend, frontend_transaction_type_from_backend,
-    invalid_transaction_picture_file_response, is_allowed_transaction_picture_filename,
-    legacy_delete_bill_success_payload, legacy_modify_bill_success_payload,
-    missing_transaction_picture_file_response, missing_unused_transaction_picture_id_response,
-    normalize_bill_create_aliases, parse_reconciliation_query,
+    apply_create_category_contract, apply_manual_create_defaults,
+    batch_create_persist_error_route_response, batch_create_prepare_error_route_response,
+    batch_create_success_route_response, batch_create_transaction_items,
+    batch_delete_success_payload, batch_update_response, build_reconciliation_transactions,
+    calculate_reconciliation_summary, delete_bill_success_payload,
+    frontend_transaction_from_backend, frontend_transaction_mutation_to_backend,
+    frontend_transaction_type_from_backend, invalid_transaction_picture_file_response,
+    is_allowed_transaction_picture_filename, missing_transaction_picture_file_response,
+    missing_unused_transaction_picture_id_response, parse_reconciliation_query,
     reconciliation_account_not_found_response, reconciliation_category_filters,
     reconciliation_internal_error_response, reconciliation_opening_balance,
     reconciliation_result_payload, reconciliation_type_filter,
@@ -33,30 +31,24 @@ use bill_analyser_core::adapters::transaction::{
     transaction_picture_delete_path, transaction_picture_internal_error_response,
     transaction_picture_upload_id, transaction_picture_upload_success_response,
     unsupported_transaction_picture_type_response, BackendTransactionView, FrontendTransactionTag,
-    ReconciliationBill, ReconciliationCategoryRecord, ReconciliationOpeningBalanceSnapshot,
-    ReconciliationQueryParams, RouteResponseContract, EXPORT_COLUMNS,
+    ReconciliationBill, ReconciliationOpeningBalanceSnapshot, ReconciliationQueryParams,
+    RouteResponseContract, EXPORT_COLUMNS,
 };
 use bill_analyser_core::category_rules::match_rule_expression;
 use bill_analyser_core::{Money, RuntimeError, UserId, UtcOffsetMinutes};
 use bill_analyser_db::{
-    batch_create_bills, batch_create_postgres_bills, batch_delete_bills,
-    batch_delete_postgres_bills, batch_update_bills, batch_update_postgres_bills,
-    bind_bill_to_recurring, bind_postgres_bill_to_recurring, create_bill, create_postgres_bill,
-    delete_bill, delete_postgres_bill, get_bill_by_id, get_bill_recurring_candidates,
-    get_bill_tags, get_bill_update_snapshot, get_first_account_id, get_first_postgres_account_id,
-    get_postgres_bill_by_id, get_postgres_bill_recurring_candidates, get_postgres_bill_tags,
-    get_postgres_bill_update_snapshot, get_postgres_category_by_name,
-    get_postgres_reconciliation_account, list_bills, list_postgres_category_rules,
-    list_postgres_reconciliation_categories, postgres_category_filters_for_ids, query_bills,
-    query_postgres_bills, resolve_postgres_category_by_id, unbind_bill_from_recurring,
-    unbind_postgres_bill_from_recurring, update_bill, update_postgres_bill,
-    update_postgres_category, BillCategoryFilter, BillCreateDraft, BillFilters, BillRecord,
-    BillUpdateDraft, CategoryRuleRecord, PostgresPool, SqliteRuntime,
+    batch_create_postgres_bills, batch_delete_postgres_bills, batch_update_postgres_bills,
+    bind_postgres_bill_to_recurring, create_postgres_bill, delete_postgres_bill,
+    get_first_postgres_account_id, get_postgres_bill_by_id, get_postgres_bill_recurring_candidates,
+    get_postgres_bill_tags, get_postgres_category_by_name, get_postgres_reconciliation_account,
+    list_postgres_category_rules, list_postgres_reconciliation_categories,
+    postgres_category_filters_for_ids, query_postgres_bills, resolve_postgres_category_by_id,
+    unbind_postgres_bill_from_recurring, update_postgres_bill, update_postgres_category,
+    BillCategoryFilter, BillCreateDraft, BillFilters, BillRecord, BillUpdateDraft,
+    CategoryRuleRecord, PostgresPool,
 };
 use chrono::{DateTime, Local};
 use ring::rand::{SecureRandom, SystemRandom};
-use rusqlite::types::Value as SqlValue;
-use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use serde::Deserialize;
 use serde_json::{json, Map, Number, Value};
 
@@ -77,8 +69,6 @@ pub const BILL_CRUD_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/bills/{bill_id}"),
     ("PUT", "/api/bills/{bill_id}"),
     ("DELETE", "/api/bills/{bill_id}"),
-    ("POST", "/api/bills/modify"),
-    ("POST", "/api/bills/delete"),
     ("POST", "/api/bills/batch"),
     ("PUT", "/api/bills/batch/update"),
     ("DELETE", "/api/bills/batch/delete"),
@@ -135,8 +125,6 @@ pub fn bill_runtime_router() -> Router<HttpAppState> {
         )
         .route("/api/bills/by-month", get(bills_by_month_handler))
         .route("/api/bills/get", get(get_bill_query_handler))
-        .route("/api/bills/modify", post(legacy_modify_bill_handler))
-        .route("/api/bills/delete", post(legacy_delete_bill_handler))
         .route("/api/bills/batch", post(batch_create_bills_handler))
         .route("/api/bills/batch/update", put(batch_update_bills_handler))
         .route(

@@ -1,3 +1,5 @@
+#![cfg(not(coverage))]
+
 use std::{
     collections::BTreeMap,
     env,
@@ -79,7 +81,7 @@ fn weaviate_cli_covers_help_disabled_bootstrap_and_config_errors() {
 
     let invalid_postgres = Command::new(bin)
         .args(["--mode", "process-outbox"])
-        .env("BILL_ANALYSER_POSTGRES_URL", "sqlite://data/app.db")
+        .env("BILL_ANALYSER_POSTGRES_URL", "not-postgres://data/app.db")
         .output()
         .expect("run weaviate cli process-outbox with invalid postgres url");
     assert!(!invalid_postgres.status.success());

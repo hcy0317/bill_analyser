@@ -632,17 +632,6 @@ const themePairByFamily: Readonly<Record<ApplicationThemeFamily, Readonly<Record
     dim: { light: ThemeType.DimLight, dark: ThemeType.DimDark }
 };
 
-const legacyThemeAliases: Readonly<Record<string, ApplicationThemeName>> = {
-    halloween: ThemeType.HalloweenDark,
-    forest: ThemeType.ForestDark,
-    wireframe: ThemeType.WireframeLight,
-    black: ThemeType.BlackDark,
-    dracula: ThemeType.DraculaDark,
-    business: ThemeType.BusinessDark,
-    night: ThemeType.NightDark,
-    dim: ThemeType.DimDark
-};
-
 function mergeVuetifyTheme(baseTheme: ApplicationVuetifyThemeDefinition, override: ApplicationThemeOverride = {}): ApplicationVuetifyThemeDefinition {
     return {
         dark: override.dark ?? baseTheme.dark,
@@ -717,10 +706,6 @@ export function isApplicationThemeName(value: string | undefined | null): value 
 export function normalizeThemePreference(value: string | undefined | null): ThemePreference {
     if (value === SYSTEM_THEME_PREFERENCE || isApplicationThemeName(value)) {
         return value;
-    }
-
-    if (value && legacyThemeAliases[value]) {
-        return legacyThemeAliases[value];
     }
 
     return SYSTEM_THEME_PREFERENCE;

@@ -1,6 +1,6 @@
-// 中文导读：PostgreSQL auth repository helpers for cutover-only HTTP paths.
-// 维护重点：Postgres 模式只读取 authoritative 表与 JSONB metadata，不回落 SQLite。
-// 不变式：用户身份、登录锁定和 profile 投影必须保持 user-scope 与前端兼容字段。
+// 中文导读：PostgreSQL auth repository helpers for authoritative HTTP paths.
+// 维护重点：Postgres 模式只读取 authoritative 表与 JSONB metadata，不回落 non-Postgres。
+// 不变式：用户身份、登录锁定和 profile 投影必须保持 user-scope 与前端字段。
 
 use std::collections::HashSet;
 

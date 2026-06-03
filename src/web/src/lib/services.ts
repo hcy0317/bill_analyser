@@ -794,7 +794,7 @@ export default {
             // 这样 Token refresh 请求本身不会被阻塞标志影响
             const refreshPromise = axios.post<ApiResponse<TokenRefreshResponse>>('tokens/refresh', requestBody, {
                 ignoreBlocked: true,
-                noAuth: true  // 使用 refreshToken 而非旧 token
+                noAuth: true  // 使用 refreshToken，不附加 access token
             } as ApiRequestConfig);
 
             // 在请求发出后再设置阻塞标志，防止后续请求干扰
@@ -2119,11 +2119,6 @@ export default {
             return buildApiResponse(response, response.data?.data);
         });
     },
-    migrateCategoryKeywords: (): ApiResponsePromise<any> => {
-        return axios.post('category-rules/migrate').then(response => {
-            return buildApiResponse(response, response.data?.data);
-        });
-    },
     testCategoryRule: (id: number, text: string): ApiResponsePromise<any> => {
         return axios.post(`category-rules/${id}/test`, { text }).then(response => {
             return buildApiResponse(response, response.data?.data);
@@ -2166,11 +2161,6 @@ export default {
     },
     reorderAccountRules: (ruleIds: number[]): ApiResponsePromise<any> => {
         return axios.post('account-rules/reorder', { rule_ids: ruleIds }).then(response => {
-            return buildApiResponse(response, response.data?.data);
-        });
-    },
-    migrateAccountAliases: (): ApiResponsePromise<any> => {
-        return axios.post('account-rules/migrate-aliases').then(response => {
             return buildApiResponse(response, response.data?.data);
         });
     },

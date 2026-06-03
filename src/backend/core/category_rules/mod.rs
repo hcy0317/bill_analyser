@@ -1,6 +1,6 @@
 // 中文导读：核心业务合同层，负责把金额、时间、分类、导入、匹配、预算、统计等规则从 HTTP/DB 细节中隔离。
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
-// 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
+// 不变式：金额单位、用户可见类型和API payload 在进入或离开本层时必须显式转换。
 
 use serde::{Deserialize, Serialize};
 
@@ -39,10 +39,6 @@ pub fn compile_rule_expression(expr: &str, regex_enabled: bool) -> CompiledRuleD
         return CompiledRuleDto::empty();
     }
 
-    if !expr.contains("={") {
-        return compile_legacy_rule(expr);
-    }
-
     let mut parser = RuleExpressionParser::new(expr, regex_enabled);
     match parser.parse() {
         Ok(Some(expression_ast)) => {
@@ -54,7 +50,7 @@ pub fn compile_rule_expression(expr: &str, regex_enabled: bool) -> CompiledRuleD
                 expression_ast: Some(expression_ast),
             };
             if let Some(node) = compiled.expression_ast.clone() {
-                collect_legacy_compiled_fields(&node, &mut compiled);
+                collect_compiled_fields(&node, &mut compiled);
             }
             compiled
         }
@@ -161,68 +157,6 @@ fn match_rule_pattern(text_lower: &str, pattern: &str) -> bool {
             .is_ok_and(|regex| regex.is_match(text_lower));
     }
     text_lower.contains(pattern)
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn compile_legacy_rule(rule: &str) -> CompiledRuleDto {
-    if rule.is_empty() {
-        return CompiledRuleDto::empty();
-    }
-
-    let mut compiled = CompiledRuleDto {
-        or_blocks: Vec::new(),
-        not_patterns: Vec::new(),
-        and_patterns: Vec::new(),
-        is_empty: false,
-        expression_ast: None,
-    };
-    let mut simple_patterns = Vec::new();
-
-    for raw_part in rule.split('&') {
-        let part = raw_part.trim();
-        if part.is_empty() {
-            continue;
-        }
-        let part_upper = part.to_uppercase();
-        if part_upper.starts_with("OR:") {
-            let block: Vec<String> = part[3..]
-                .split('|')
-                .map(|keyword| keyword.trim().to_lowercase())
-                .filter(|keyword| !keyword.is_empty())
-                .collect();
-            if !block.is_empty() {
-                compiled.or_blocks.push(block);
-            }
-        } else if part_upper.starts_with("NOT:") {
-            compiled.not_patterns.extend(
-                part[4..]
-                    .split('|')
-                    .map(|keyword| keyword.trim().to_lowercase())
-                    .filter(|keyword| !keyword.is_empty()),
-            );
-        } else if part_upper.starts_with("AND:") {
-            compiled.and_patterns.extend(
-                part[4..]
-                    .split('|')
-                    .map(|keyword| keyword.trim().to_lowercase())
-                    .filter(|keyword| !keyword.is_empty()),
-            );
-        } else if part_upper.starts_with("REGEX:") {
-            let regex_pattern = part[6..].trim();
-            if !regex_pattern.is_empty() {
-                compiled
-                    .or_blocks
-                    .push(vec![format!("regex:{regex_pattern}")]);
-            }
-        } else {
-            simple_patterns.push(part.to_lowercase());
-        }
-    }
-
-    if !simple_patterns.is_empty() {
-        compiled.or_blocks.push(simple_patterns);
-    }
-    compiled
 }
 
 struct RuleExpressionParser {
@@ -549,11 +483,11 @@ fn clause(operator: &str, patterns: Vec<String>) -> RuleExpressionNodeDto {
     }
 }
 
-fn collect_legacy_compiled_fields(node: &RuleExpressionNodeDto, compiled: &mut CompiledRuleDto) {
+fn collect_compiled_fields(node: &RuleExpressionNodeDto, compiled: &mut CompiledRuleDto) {
     match node.kind.as_str() {
         "all" | "any" => {
             for child in &node.children {
-                collect_legacy_compiled_fields(child, compiled);
+                collect_compiled_fields(child, compiled);
             }
         }
         "not" => {}
@@ -640,16 +574,6 @@ mod tests {
     use super::{compile_rule_expression, match_rule_expression};
 
     #[test]
-    fn compiles_legacy_rule_expression() {
-        let compiled = compile_rule_expression("OR:滴滴|快的&AND:打车&NOT:退款", false);
-
-        assert_eq!(compiled.or_blocks, vec![vec!["滴滴", "快的"]]);
-        assert_eq!(compiled.and_patterns, vec!["打车"]);
-        assert_eq!(compiled.not_patterns, vec!["退款"]);
-        assert!(compiled.expression_ast.is_none());
-    }
-
-    #[test]
     fn compiles_composite_expression_with_visible_not() {
         let compiled = compile_rule_expression(
             "(OR={早餐}/OR={早饭})+AND={咖啡}× NOT={退款}|OR={午餐}",
@@ -716,17 +640,7 @@ mod tests {
     }
 
     #[test]
-    fn matches_legacy_and_expression_rules() {
-        assert!(match_rule_expression(
-            "滴滴 打车",
-            "OR:滴滴|快的&AND:打车",
-            false
-        ));
-        assert!(!match_rule_expression(
-            "滴滴 打车 退款",
-            "OR:滴滴|快的&AND:打车&NOT:退款",
-            false
-        ));
+    fn matches_current_expression_rules() {
         assert!(match_rule_expression(
             "星巴克燕麦拿铁",
             "OR={星巴克}+AND={拿铁}",

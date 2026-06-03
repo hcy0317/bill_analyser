@@ -309,7 +309,7 @@ fn execution_summary_preserves_manual_primary_headroom_and_ambiguous_primaries()
 }
 
 #[test]
-fn category_type_context_normalizes_legacy_expense_and_keeps_investment_separate() {
+fn category_type_context_normalizes_current_expense_and_keeps_investment_separate() {
     let categories = vec![
         json!({"id": 1, "main_category": "基金", "sub_category": "", "type": 1, "icon": "old", "color": "#aaa"}),
         json!({"id": 2, "main_category": "基金", "sub_category": "", "type": 5, "icon": "fund", "color": "#0a0"}),

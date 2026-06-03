@@ -1048,9 +1048,9 @@ function extractPayloadMessage(payload: unknown, depth = 0): string | null {
         return null;
     }
 
-    const errorMessage = 'error' in payload ? extractPayloadMessage(payload.error, depth + 1) : null;
-    if (errorMessage) {
-        return errorMessage;
+    const nestedErrorText = 'error' in payload ? extractPayloadMessage(payload.error, depth + 1) : null;
+    if (nestedErrorText) {
+        return nestedErrorText;
     }
 
     const message = 'message' in payload ? extractPayloadMessage(payload.message, depth + 1) : null;

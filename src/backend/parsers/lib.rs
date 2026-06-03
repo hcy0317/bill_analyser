@@ -541,7 +541,7 @@ fn serialize_money_as_yuan_number<S>(amount: &Money, serializer: S) -> Result<S:
 where
     S: Serializer,
 {
-    // The Python parser contract exposes StandardBill.amount as a JSON number
+    // The current parser contract exposes StandardBill.amount as a JSON number
     // in yuan. Rust keeps cents in Money and converts only at this serde edge.
     let yuan_value = amount
         .to_yuan_string()

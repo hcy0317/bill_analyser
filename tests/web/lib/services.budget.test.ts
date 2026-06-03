@@ -182,7 +182,7 @@ describe('budget service adapters', () => {
             summary: { count: 3, period_start: '2026-01-01', period_end: '2026-03-31' },
             items: [
                 { id: 1, budget_id: 10, budget_type: 'investment', category: 'Fund', period_type: 'yearly', budget_amount: 500, spent_amount: 100, remaining_amount: 400, execution_rate: 20 },
-                { id: 2, budgetId: 20, type: 1, category: 'Legacy', budgetAmount: 1, spentAmount: 0.5, remainingAmount: 0.5, executionRate: 50 },
+                { id: 2, budgetId: 20, type: 1, category: 'Current', budgetAmount: 1, spentAmount: 0.5, remainingAmount: 0.5, executionRate: 50 },
                 { id: 3, budgetId: 30, type: 'unknown', category: 'Unknown' },
                 { id: 4, budgetId: 40, budget_type: BudgetType.Expense, category: 'Direct enum' },
                 { id: 5, budgetId: 50, budget_type: 'expense', category: 'Expense text' },

@@ -153,7 +153,7 @@ fn duplicate_candidates_match_identical_formal_bills_only() {
 }
 
 #[test]
-fn transfer_candidates_preserve_python_pair_rules_and_stable_sort() {
+fn transfer_candidates_preserve_current_pair_rules_and_stable_sort() {
     let anchor = object(json!({
         "id": 10,
         "date": "2026-05-01 10:00:00",
@@ -500,7 +500,7 @@ fn historical_investment_and_learning_candidates_pin_formal_bill_contracts() {
 }
 
 #[test]
-fn session_candidates_project_preview_families_without_legacy_investment() {
+fn session_candidates_project_preview_families_without_removed_investment() {
     let previews = vec![
         json!("bad-preview"),
         json!({
@@ -668,7 +668,7 @@ fn route_request_contracts_validate_pair_query_action_and_feedback_payloads() {
 }
 
 #[test]
-fn investment_keywords_profiles_scores_and_pnl_match_python_fixtures() {
+fn investment_keywords_profiles_scores_and_pnl_match_current_fixtures() {
     assert_eq!(
         normalize_keyword_list(Some(&json!("基金, ETF，基金|黄金；股票、债券")), &[]),
         vec!["基金", "ETF", "黄金", "股票", "债券"]
@@ -796,7 +796,7 @@ fn investment_keywords_profiles_scores_and_pnl_match_python_fixtures() {
 }
 
 #[test]
-fn recurring_detection_preserves_python_hash_frequency_and_suggestion_shape() {
+fn recurring_detection_preserves_current_hash_frequency_and_suggestion_shape() {
     let hash = compute_recurring_pattern_hash("支出", 1999, " Netflix ", Some(3));
     assert_eq!(hash.len(), 16);
     assert_eq!(

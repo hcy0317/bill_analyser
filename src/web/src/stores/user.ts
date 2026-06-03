@@ -192,7 +192,7 @@ export const useUserStore = defineStore('user', () => {
             }).catch(error => {
                 logger.error('failed to retrieve user profile', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve user profile' });
@@ -219,7 +219,7 @@ export const useUserStore = defineStore('user', () => {
             }).catch(error => {
                 logger.error('failed to save editable transaction range', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to update editable transaction range' });
@@ -246,7 +246,7 @@ export const useUserStore = defineStore('user', () => {
             }).catch(error => {
                 logger.error('failed to update user avatar', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to update user avatar' });
@@ -273,7 +273,7 @@ export const useUserStore = defineStore('user', () => {
             }).catch(error => {
                 logger.error('failed to remove user avatar', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to remove user avatar' });
@@ -298,7 +298,7 @@ export const useUserStore = defineStore('user', () => {
             }).catch(error => {
                 logger.error('failed to load user synchronized application settings', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve user synchronized application settings' });
@@ -329,7 +329,7 @@ export const useUserStore = defineStore('user', () => {
             }).catch(error => {
                 logger.error('failed to update user synchronized application settings', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to update user synchronized application settings' });
@@ -355,7 +355,7 @@ export const useUserStore = defineStore('user', () => {
             }).catch(error => {
                 logger.error('failed to disable user synchronized application settings', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to disable user synchronized application settings' });
@@ -403,7 +403,7 @@ export const useUserStore = defineStore('user', () => {
             }).catch(error => {
                 logger.error('failed to retrieve user statistics data', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve user statistics data' });

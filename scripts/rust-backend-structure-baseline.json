@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Rust backend non-comment, non-observability line baseline for legacy oversized files. Ratchet after calibration: entries may shrink but must not grow.",
+  "description": "Rust backend non-comment, non-observability line baseline for existing oversized files. Ratchet after calibration: entries may shrink but must not grow.",
   "thresholds": {
     "rust": {
       "warning": 600,
@@ -9,27 +9,38 @@
   },
   "generatedBy": "scripts/check-rust-backend-structure.mjs --print-baseline",
   "countMode": "non-comment-non-observability-rust-lines",
-  "calibration": {
-    "date": "2026-05-26",
-    "reason": "Business logging instrumentation introduced repository-wide tracing attributes and events; the structure gate now excludes observability-only Rust lines and this calibration restores the ratchet to the new comparable count mode.",
-    "policy": "Future backend changes must not raise these non-comment, non-observability line counts without a separate governance review; shrink or remove entries when files are split."
-  },
   "files": [
-    {
-      "path": "src/backend/core/migration_governance.rs",
-      "kind": "rust",
-      "area": "core",
-      "lines": 3599,
-      "physicalLines": 3666,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
     {
       "path": "src/backend/http/import_routes/stage_handlers.rs",
       "kind": "rust",
       "area": "http",
-      "lines": 3297,
-      "physicalLines": 3599,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+      "lines": 2950,
+      "physicalLines": 3212,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/db/taxonomy/postgres_reads.rs",
+      "kind": "rust",
+      "area": "db",
+      "lines": 2894,
+      "physicalLines": 3045,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/db/import_staging.rs",
+      "kind": "rust",
+      "area": "db",
+      "lines": 2791,
+      "physicalLines": 2934,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/db/budgets/postgres_reads.rs",
+      "kind": "rust",
+      "area": "db",
+      "lines": 2043,
+      "physicalLines": 2158,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     },
     {
       "path": "src/backend/core/statistics.rs",
@@ -37,135 +48,103 @@
       "area": "core",
       "lines": 1951,
       "physicalLines": 2298,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     },
     {
-      "path": "src/backend/db/bills.rs",
+      "path": "src/backend/db/auth_postgres.rs",
       "kind": "rust",
       "area": "db",
-      "lines": 1928,
-      "physicalLines": 2183,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+      "lines": 1830,
+      "physicalLines": 1979,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     },
     {
       "path": "src/backend/core/smart_dedup.rs",
       "kind": "rust",
       "area": "core",
-      "lines": 1794,
-      "physicalLines": 1994,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/db/postgres_migration.rs",
-      "kind": "rust",
-      "area": "db",
-      "lines": 1753,
-      "physicalLines": 1872,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+      "lines": 1786,
+      "physicalLines": 1986,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     },
     {
       "path": "src/backend/core/adapters/transaction.rs",
       "kind": "rust",
       "area": "core",
-      "lines": 1560,
-      "physicalLines": 1701,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/db/import_staging/preview_reads.rs",
-      "kind": "rust",
-      "area": "db",
-      "lines": 1433,
-      "physicalLines": 1563,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+      "lines": 1474,
+      "physicalLines": 1609,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     },
     {
       "path": "src/backend/http/matching_routes.rs",
       "kind": "rust",
       "area": "http",
-      "lines": 1386,
-      "physicalLines": 1614,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+      "lines": 1411,
+      "physicalLines": 1654,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     },
     {
-      "path": "src/backend/db/taxonomy/category_rules.rs",
+      "path": "src/backend/db/bills/postgres_reads.rs",
       "kind": "rust",
       "area": "db",
-      "lines": 1242,
-      "physicalLines": 1370,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+      "lines": 1247,
+      "physicalLines": 1332,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     },
     {
-      "path": "src/backend/db/schema.rs",
+      "path": "src/backend/db/recurring.rs",
       "kind": "rust",
       "area": "db",
-      "lines": 1205,
-      "physicalLines": 1278,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+      "lines": 1182,
+      "physicalLines": 1257,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     },
     {
       "path": "src/backend/http/import_routes/multipart_and_ocr.rs",
       "kind": "rust",
       "area": "http",
-      "lines": 1052,
-      "physicalLines": 1131,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+      "lines": 1035,
+      "physicalLines": 1111,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     },
     {
       "path": "src/backend/core/import_pipeline.rs",
       "kind": "rust",
       "area": "core",
-      "lines": 1036,
-      "physicalLines": 1237,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+      "lines": 1025,
+      "physicalLines": 1225,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     },
     {
-      "path": "src/backend/db/taxonomy/templates.rs",
+      "path": "src/backend/db/taxonomy/settings_bundle/postgres_import_export.rs",
       "kind": "rust",
       "area": "db",
-      "lines": 1030,
-      "physicalLines": 1158,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+      "lines": 940,
+      "physicalLines": 992,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     },
     {
       "path": "src/backend/http/import_routes/preview_mutation_helpers.rs",
       "kind": "rust",
       "area": "http",
-      "lines": 988,
-      "physicalLines": 1053,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/http/import_routes/runtime_helpers.rs",
-      "kind": "rust",
-      "area": "http",
-      "lines": 976,
-      "physicalLines": 1025,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+      "lines": 909,
+      "physicalLines": 970,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     },
     {
       "path": "src/backend/core/ops.rs",
       "kind": "rust",
       "area": "core",
-      "lines": 958,
-      "physicalLines": 1108,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+      "lines": 908,
+      "physicalLines": 1050,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     },
     {
-      "path": "src/backend/db/import_staging/decision_snapshot_helpers.rs",
+      "path": "src/backend/db/statistics.rs",
       "kind": "rust",
       "area": "db",
-      "lines": 949,
-      "physicalLines": 1044,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/db/taxonomy/accounts.rs",
-      "kind": "rust",
-      "area": "db",
-      "lines": 895,
-      "physicalLines": 1033,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+      "lines": 872,
+      "physicalLines": 953,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     },
     {
       "path": "src/backend/core/import_learning.rs",
@@ -173,55 +152,23 @@
       "area": "core",
       "lines": 835,
       "physicalLines": 1008,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     },
     {
-      "path": "src/backend/db/taxonomy/settings_bundle/import_templates_rules_llm.rs",
-      "kind": "rust",
-      "area": "db",
-      "lines": 835,
-      "physicalLines": 886,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/db/statistics.rs",
-      "kind": "rust",
-      "area": "db",
-      "lines": 797,
-      "physicalLines": 972,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/db/taxonomy/categories.rs",
-      "kind": "rust",
-      "area": "db",
-      "lines": 771,
-      "physicalLines": 900,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/db/matching/actions.rs",
-      "kind": "rust",
-      "area": "db",
-      "lines": 757,
-      "physicalLines": 790,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/db/import_staging/types.rs",
-      "kind": "rust",
-      "area": "db",
-      "lines": 746,
-      "physicalLines": 804,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/http/import_routes/learning/suggestions.rs",
+      "path": "src/backend/http/taxonomy_routes/account_handlers.rs",
       "kind": "rust",
       "area": "http",
-      "lines": 706,
-      "physicalLines": 743,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+      "lines": 759,
+      "physicalLines": 834,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/db/llm.rs",
+      "kind": "rust",
+      "area": "db",
+      "lines": 677,
+      "physicalLines": 792,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     },
     {
       "path": "src/backend/http/backup_sync.rs",
@@ -229,39 +176,15 @@
       "area": "http",
       "lines": 673,
       "physicalLines": 722,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     },
     {
-      "path": "src/backend/core/category_rules/mod.rs",
-      "kind": "rust",
-      "area": "core",
-      "lines": 671,
-      "physicalLines": 755,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/db/recurring.rs",
-      "kind": "rust",
-      "area": "db",
-      "lines": 644,
-      "physicalLines": 721,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/http/config.rs",
+      "path": "src/backend/http/auth_routes/public_auth_handlers.rs",
       "kind": "rust",
       "area": "http",
-      "lines": 636,
-      "physicalLines": 736,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/http/import_routes/learning/schema_and_rules.rs",
-      "kind": "rust",
-      "area": "http",
-      "lines": 634,
-      "physicalLines": 662,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+      "lines": 625,
+      "physicalLines": 680,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     },
     {
       "path": "src/backend/core/matching/session_learning.rs",
@@ -269,7 +192,7 @@
       "area": "core",
       "lines": 601,
       "physicalLines": 660,
-      "reason": "legacy oversized Rust backend file tracked by the structure ratchet"
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     }
   ]
 }

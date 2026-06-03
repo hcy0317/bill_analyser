@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -106,7 +106,7 @@ fn load_llm_memory_prompt_context(
     connection: &Connection,
     user_id: UserId,
 ) -> Result<Vec<Value>, ImportV2RouteResponse> {
-    let events = get_llm_memory_events(connection, user_id, None, Some("feedback"), 20, 0)
+    let events = get_llm_memory_events(connection, user_id, None, 20)
         .map_err(db_error_response)?;
     Ok(events
         .into_iter()
@@ -150,32 +150,10 @@ fn load_existing_category_paths(
 
 #[tracing::instrument(level = "debug", skip_all)]
 fn load_existing_category_values(
-    connection: &Connection,
-    user_id: i64,
+    _connection: &Connection,
+    _user_id: i64,
 ) -> Result<Vec<Value>, ImportV2RouteResponse> {
-    if !table_exists(connection, "categories")? {
-        return Ok(Vec::new());
-    }
-    let mut statement = connection
-        .prepare(
-            "SELECT id, main_category, sub_category FROM categories WHERE user_id = ?1 ORDER BY id ASC",
-        )
-        .map_err(db_error_response)?;
-    let rows = statement
-        .query_map(params![user_id], |row| {
-            let id = row.get::<_, i64>(0)?;
-            let main_category = row.get::<_, Option<String>>(1)?.unwrap_or_default();
-            let sub_category = row.get::<_, Option<String>>(2)?.unwrap_or_default();
-            Ok(json!({
-                "id": id,
-                "main_category": main_category,
-                "sub_category": sub_category,
-                "path": category_path(&main_category, &sub_category),
-            }))
-        })
-        .map_err(db_error_response)?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(db_error_response)
+    Ok(Vec::new())
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -190,31 +168,10 @@ fn load_existing_account_names(
 
 #[tracing::instrument(level = "debug", skip_all)]
 fn load_account_id_map(
-    connection: &Connection,
-    user_id: i64,
+    _connection: &Connection,
+    _user_id: i64,
 ) -> Result<BTreeMap<String, i64>, ImportV2RouteResponse> {
-    if !table_exists(connection, "accounts")? {
-        return Ok(BTreeMap::new());
-    }
-    let mut statement = connection
-        .prepare("SELECT id, name FROM accounts WHERE user_id = ?1 ORDER BY id ASC")
-        .map_err(db_error_response)?;
-    let rows = statement
-        .query_map(params![user_id], |row| {
-            Ok((
-                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                row.get::<_, i64>(0)?,
-            ))
-        })
-        .map_err(db_error_response)?;
-    let mut accounts = BTreeMap::new();
-    for row in rows {
-        let (name, id) = row.map_err(db_error_response)?;
-        if !name.trim().is_empty() {
-            accounts.insert(name, id);
-        }
-    }
-    Ok(accounts)
+    Ok(BTreeMap::new())
 }
 
 fn fill_llm_suggestion_account_ids(value: Value, account_ids: &BTreeMap<String, i64>) -> Value {
@@ -280,4 +237,3 @@ fn llm_preview_recommendation_item(
         "applied_fields": result.applied_fields,
     }))
 }
-

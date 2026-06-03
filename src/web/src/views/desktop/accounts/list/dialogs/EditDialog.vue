@@ -158,25 +158,6 @@
                                         v-model="selectedAccount.comment"
                                     />
                                 </v-col>
-                                <v-col cols="12" md="12">
-                                    <v-combobox
-                                        color="primary"
-                                        multiple
-                                        chips
-                                        closable-chips
-                                        persistent-placeholder
-                                        persistent-hint
-                                        :disabled="loading || submitting"
-                                        :label="tt('Account Aliases')"
-                                        :placeholder="tt('Enter aliases for account matching (optional)')"
-                                        :hint="tt('Press Enter to add alias, used for automatic account matching during import')"
-                                        v-model="selectedAccount.aliases"
-                                    >
-                                        <template #chip="{ props, item }">
-                                            <v-chip v-bind="props" :text="item.title" closable color="primary" />
-                                        </template>
-                                    </v-combobox>
-                                </v-col>
                                 <v-col
                                     v-if="canManageSelectedAccountRules"
                                     cols="12"

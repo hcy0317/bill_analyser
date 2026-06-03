@@ -7,11 +7,10 @@ export function extractApiErrorMessage(payload: unknown, fallbackMessage: string
 
     const apiError = payload as {
         error?: string;
-        errorMessage?: string;
         message?: string;
     };
 
-    return apiError.errorMessage || apiError.error || apiError.message || fallbackMessage;
+    return apiError.error || apiError.message || fallbackMessage;
 }
 
 export function isAbortError(error: unknown): boolean {

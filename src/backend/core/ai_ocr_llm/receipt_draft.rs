@@ -1,10 +1,16 @@
 // 中文导读：核心业务合同层，负责把金额、时间、分类、导入、匹配、预算、统计等规则从 HTTP/DB 细节中隔离。
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
-// 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
+// 不变式：金额单位、用户可见类型和API payload 在进入或离开本层时必须显式转换。
 
 use serde_json::{json, Value};
 
-use crate::category_rules::match_rule_expression;
+use crate::{
+    account_rules::{
+        match_account_rules, AccountRuleCandidate, AccountRuleMatchContext, ACCOUNT_ROLE_SOURCE,
+        TRANSACTION_SCOPE_ALL,
+    },
+    category_rules::match_rule_expression,
+};
 
 use super::types::{
     OcrProviderTextResult, PaymentScreenshotParseContract, ReceiptDraftAccount,
@@ -100,7 +106,14 @@ pub fn build_receipt_transaction_draft(
         apply_category_mapping(&mut draft, &text, 0, false, context);
     }
 
-    apply_account_mapping(&mut draft, &text, &context.accounts);
+    apply_account_mapping(
+        &mut draft,
+        &text,
+        parsed,
+        inferred_type.as_ref().map(|(value, _, _, _, _)| *value),
+        &context.account_rules,
+        &context.accounts,
+    );
     apply_tag_mapping(&mut draft, &text, &context.tags);
 
     draft
@@ -312,35 +325,58 @@ fn apply_category_mapping(
 fn apply_account_mapping(
     draft: &mut ReceiptTransactionDraft,
     text: &str,
+    parsed: &PaymentScreenshotParseContract,
+    transaction_type: Option<&str>,
+    account_rules: &[AccountRuleCandidate],
     accounts: &[ReceiptDraftAccount],
 ) {
-    let matches = accounts
-        .iter()
-        .filter_map(|account| {
-            account_match_evidence(account, text).map(|evidence| {
-                (
-                    account,
-                    ReceiptDraftField {
-                        value: json!(account.id),
-                        confidence: 0.88,
-                        reason: "account_alias".to_string(),
-                        evidence,
-                        label: Some(account.name.clone()),
-                        unit: None,
-                    },
-                )
-            })
-        })
-        .collect::<Vec<_>>();
-    if matches.len() == 1 {
-        insert_field(draft, "source_account_id", matches[0].1.clone());
+    if account_rules.is_empty() {
         return;
     }
-    for (_, mut field) in matches.into_iter().take(5) {
-        field.confidence = 0.62;
-        field.reason = "account_alias_ambiguous".to_string();
-        push_candidate(draft, "source_account_id", field);
-    }
+    let context = AccountRuleMatchContext {
+        parser_id: "ocr_receipt".to_string(),
+        parser_label: "Receipt OCR".to_string(),
+        parser_tags: Vec::new(),
+        counterparty: parsed
+            .description
+            .clone()
+            .unwrap_or_else(|| text.to_string()),
+        payment_method: parsed.payment_platform.clone().unwrap_or_default(),
+        description: text.to_string(),
+        expense_counterparty: parsed.description.clone().unwrap_or_default(),
+        expense_payment_method: parsed.payment_platform.clone().unwrap_or_default(),
+        expense_description: text.to_string(),
+        income_counterparty: parsed.description.clone().unwrap_or_default(),
+        income_payment_method: parsed.payment_platform.clone().unwrap_or_default(),
+        income_description: text.to_string(),
+        investment_counterparty: parsed.description.clone().unwrap_or_default(),
+        investment_description: text.to_string(),
+    };
+    let Some(matched) = match_account_rules(
+        account_rules,
+        &context,
+        ACCOUNT_ROLE_SOURCE,
+        transaction_type.unwrap_or(TRANSACTION_SCOPE_ALL),
+    ) else {
+        return;
+    };
+    let account_id = matched.account_id.to_string();
+    let account_name = accounts
+        .iter()
+        .find(|account| account.id == account_id)
+        .map(|account| account.name.clone());
+    insert_field(
+        draft,
+        "source_account_id",
+        ReceiptDraftField {
+            value: json!(account_id),
+            confidence: 0.88,
+            reason: "account_rule".to_string(),
+            evidence: matched.matched_fields,
+            label: account_name,
+            unit: None,
+        },
+    );
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -398,24 +434,6 @@ fn push_candidate(draft: &mut ReceiptTransactionDraft, key: &str, field: Receipt
             .or_default()
             .push(field);
     }
-}
-
-fn account_match_evidence(account: &ReceiptDraftAccount, text: &str) -> Option<Vec<String>> {
-    let normalized_text = normalize_match_text(text);
-    let matched = account
-        .aliases
-        .iter()
-        .map(|alias| alias.trim())
-        .filter(|alias| !alias.is_empty())
-        .filter(|alias| {
-            let normalized_alias = normalize_match_text(alias);
-            !normalized_alias.is_empty()
-                && (normalized_text.contains(&normalized_alias)
-                    || normalized_alias.contains(&normalized_text))
-        })
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    (!matched.is_empty()).then_some(matched)
 }
 
 fn category_label_matches_text(label: &str, text: &str) -> bool {

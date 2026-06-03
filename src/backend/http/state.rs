@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -10,13 +10,10 @@ use std::{
 use serde_json::Value;
 
 use crate::{
-    config::{DatabaseBackend, HttpShellConfig},
-    database_runtime::{
-        open_sqlite_repository_runtime, DatabaseRuntimeBoundary, RouteRepositoryRuntimeError,
-        SqliteRepositoryOpenMode,
-    },
+    config::HttpShellConfig,
+    database_runtime::{DatabaseRuntimeBoundary, RouteRepositoryRuntimeError},
 };
-use bill_analyser_db::{DbError, PostgresRepositoryRuntime, SqliteRuntime};
+use bill_analyser_db::{DbError, PostgresRepositoryRuntime};
 
 #[derive(Debug, Clone)]
 pub struct HttpAppState {
@@ -57,39 +54,10 @@ impl HttpAppState {
         DatabaseRuntimeBoundary::from_config(&self.config)
     }
 
-    pub fn open_sqlite_repository_runtime(
-        &self,
-        runtime_label: &'static str,
-    ) -> Result<SqliteRuntime, RouteRepositoryRuntimeError> {
-        open_sqlite_repository_runtime(
-            &self.config,
-            runtime_label,
-            SqliteRepositoryOpenMode::CreateIfMissing,
-        )
-    }
-
-    pub fn open_existing_sqlite_repository_runtime(
-        &self,
-        runtime_label: &'static str,
-    ) -> Result<SqliteRuntime, RouteRepositoryRuntimeError> {
-        open_sqlite_repository_runtime(
-            &self.config,
-            runtime_label,
-            SqliteRepositoryOpenMode::ExistingOnly,
-        )
-    }
-
     pub fn open_postgres_repository_runtime(
         &self,
         runtime_label: &'static str,
     ) -> Result<PostgresRepositoryRuntime, RouteRepositoryRuntimeError> {
-        if self.config.database_backend != DatabaseBackend::Postgres {
-            return Err(RouteRepositoryRuntimeError::PostgresOpen {
-                runtime_label,
-                reason: "PostgreSQL repository runtime is required after cutover".to_string(),
-            });
-        }
-
         let postgres_url = self.config.postgres_url.as_deref().ok_or_else(|| {
             RouteRepositoryRuntimeError::PostgresOpen {
                 runtime_label,

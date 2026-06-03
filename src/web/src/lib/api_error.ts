@@ -23,7 +23,6 @@ function responseDataMessage(data: unknown): string | null {
     }
 
     return stringField(objectField(data, 'error'))
-        ?? stringField(objectField(data, 'errorMessage'))
         ?? stringField(objectField(data, 'message'));
 }
 

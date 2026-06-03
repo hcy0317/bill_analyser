@@ -320,7 +320,7 @@ function reload(done?: () => void): void {
 function onReceiptRecognitionChanged(result: RecognizedReceiptImageResponse): void {
     // result is RecognizedReceiptImageResponse: { amount(yuan|null), tradeTime(ISO|null), description, provenance, confidence }
     // URL query keys remain ezbookkeeping-style (amount/time/comment) since /transaction/add still parses those names;
-    // only the value sources are migrated to the new C1/C2 contract.
+    // only the value sources are mapped to the C1/C2 contract.
     const params: string[] = [];
 
     if (typeof result.amount === 'number' && Number.isFinite(result.amount)) {

@@ -4,6 +4,7 @@ members = [
     "src/backend/db",
     "src/backend/http",
     "src/backend/parsers",
+    "src/backend/sqlx-postgres-facade",
 ]
 resolver = "2"
 
@@ -40,8 +41,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 unicode-normalization = "0.1"
 url = "2.5"
-rusqlite = { version = "0.32", features = ["bundled"] }
-sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "tls-rustls-ring-webpki", "postgres", "chrono", "uuid", "json", "migrate"] }
+sqlx = { path = "src/backend/sqlx-postgres-facade" }
 tempfile = "3.14"
 walkdir = "2.5"
 zip = { version = "7.2.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }

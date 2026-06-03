@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -15,17 +15,14 @@ use axum::{
     routing::{get, post, put},
     Json, Router,
 };
-use bill_analyser_core::{
-    category_rules::match_rule_expression, encryption_status_response, normalize_sqlcipher_status,
-    UserId,
-};
+use bill_analyser_core::{category_rules::match_rule_expression, UserId};
 use bill_analyser_db::{
-    get_app_setting, get_postgres_login_user_by_id, set_app_setting, sync_all_account_balances,
+    get_postgres_login_user_by_id, list_postgres_llm_configs, load_postgres_ocr_config_setting,
     taxonomy::{
-        account_rules::{AccountRuleRecord, AccountRulesRepository},
-        accounts::{AccountDisplayOrder, AccountRecord, AccountsRepository},
-        categories::{CategoriesRepository, CategoryRecord, CategoryStatistic},
-        category_rules::{CategoryRuleRecord, CategoryRulesRepository},
+        account_rules::AccountRuleRecord,
+        accounts::{AccountDisplayOrder, AccountRecord},
+        categories::{CategoryRecord, CategoryStatistic},
+        category_rules::CategoryRuleRecord,
         postgres_reads::{
             create_postgres_account, create_postgres_account_rule, create_postgres_category,
             create_postgres_category_rule, create_postgres_tag, create_postgres_template,
@@ -34,44 +31,38 @@ use bill_analyser_db::{
             delete_postgres_category_rule, delete_postgres_tag, delete_postgres_template,
             ensure_postgres_category_rule_defaults, get_postgres_account_by_id,
             get_postgres_account_rule, get_postgres_category_by_id, get_postgres_category_by_name,
-            get_postgres_category_rule, get_postgres_legacy_category_rules_setting,
-            get_postgres_sub_accounts, get_postgres_tag, get_postgres_template_by_id,
-            list_postgres_account_rules, list_postgres_accounts, list_postgres_categories,
-            list_postgres_category_rules, list_postgres_legacy_category_engine_rules,
-            list_postgres_tags, list_postgres_templates, migrate_postgres_account_aliases_to_rules,
-            migrate_postgres_category_keywords_to_rules, query_postgres_category_statistics,
+            get_postgres_category_rule, get_postgres_sub_accounts, get_postgres_tag,
+            get_postgres_template_by_id, list_postgres_account_rules, list_postgres_accounts,
+            list_postgres_categories, list_postgres_category_rules, list_postgres_tags,
+            list_postgres_templates, query_postgres_category_statistics,
             query_postgres_rules_overview_payload, reorder_postgres_account_rules,
-            reorder_postgres_category_rules, set_postgres_legacy_category_rules_setting,
-            test_postgres_account_rule_match, update_postgres_account,
-            update_postgres_account_display_orders, update_postgres_account_rule,
-            update_postgres_category, update_postgres_category_display_order,
-            update_postgres_category_rule, update_postgres_main_category_name, update_postgres_tag,
+            reorder_postgres_category_rules, test_postgres_account_rule_match,
+            update_postgres_account, update_postgres_account_display_orders,
+            update_postgres_account_rule, update_postgres_category,
+            update_postgres_category_display_order, update_postgres_category_rule,
+            update_postgres_main_category_name, update_postgres_tag,
             update_postgres_tag_display_orders, update_postgres_template,
             update_postgres_template_display_orders,
         },
-        settings_bundle::{
-            export_taxonomy_sections, import_postgres_settings_bundle, import_settings_bundle,
-        },
-        tags::{TagDisplayOrder, TagRecord, TagsRepository},
-        templates::{TemplateDisplayOrder, TemplateRecord, TemplatesRepository},
+        settings_bundle::{export_taxonomy_sections, import_postgres_settings_bundle},
+        tags::{TagDisplayOrder, TagRecord},
+        templates::{TemplateDisplayOrder, TemplateRecord},
     },
-    AccountBalanceDiscrepancy, AppSettingDraft, PostgresPool, SqliteRuntime,
-    SyncAllAccountBalancesResult,
+    AccountBalanceDiscrepancy, PostgresPool, SyncAllAccountBalancesResult,
 };
 use chrono::Utc;
-use rusqlite::{params, Connection, OptionalExtension};
 use serde::Deserialize;
 use serde_json::{json, Map, Number, Value};
+use sqlx::Row;
 
 use crate::{
-    auth::resolve_user_id_from_headers, bill_routes::recategorize_bills_with_category_rules,
-    config::HttpShellConfig, state::HttpAppState,
+    auth::resolve_user_id_from_headers,
+    bill_routes::recategorize_bills_with_category_rules_postgres, config::HttpShellConfig,
+    state::HttpAppState,
 };
 
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
 const SETTINGS_BUNDLE_SCHEMA_VERSION: i64 = 1;
-const OCR_CONFIG_SETTING_KEY: &str = "receipt_ocr_config";
-const LEGACY_CATEGORY_RULES_CONFIG_KEY_PREFIX: &str = "legacy_category_rules_config:user:";
 const SETTINGS_BUNDLE_SECTION_KEYS: &[&str] = &[
     "accounts",
     "transactionCategories",
@@ -136,8 +127,6 @@ pub const TAXONOMY_CATEGORY_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/categories/flat"),
     ("POST", "/api/categories/import"),
     ("POST", "/api/categories/move"),
-    ("GET", "/api/categories/rules"),
-    ("PUT", "/api/categories/rules"),
     ("GET", "/api/categories/statistics"),
     ("GET", "/api/categories/tree"),
     ("POST", "/api/categories/update-all"),
@@ -153,7 +142,6 @@ pub const TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("PUT", "/api/category-rules/{rule_id}"),
     ("POST", "/api/category-rules/{rule_id}/test"),
     ("POST", "/api/category-rules/defaults"),
-    ("POST", "/api/category-rules/migrate"),
     ("POST", "/api/category-rules/reorder"),
 ];
 
@@ -163,14 +151,12 @@ pub const TAXONOMY_ACCOUNT_RULE_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("DELETE", "/api/account-rules/{rule_id}"),
     ("PUT", "/api/account-rules/{rule_id}"),
     ("POST", "/api/account-rules/{rule_id}/test"),
-    ("POST", "/api/account-rules/migrate-aliases"),
     ("POST", "/api/account-rules/reorder"),
 ];
 
 pub const TAXONOMY_RULE_CENTER_ROUTE_PATTERNS: &[(&str, &str)] = &[("GET", "/api/rules/overview")];
 
 pub const TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS: &[(&str, &str)] = &[
-    ("GET", "/api/settings/encryption/status"),
     ("GET", "/api/settings/bundle/export"),
     ("POST", "/api/settings/bundle/import"),
     ("POST", "/api/settings/bundle/import/preview"),
@@ -187,10 +173,6 @@ pub const TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS: &[(&str, &str)] = &[
 pub fn taxonomy_runtime_router() -> Router<HttpAppState> {
     Router::new()
         .route("/api/rules/overview", get(rules_overview_handler))
-        .route(
-            "/api/settings/encryption/status",
-            get(encryption_status_handler),
-        )
         .route(
             "/api/settings/bundle/export",
             get(export_settings_bundle_handler),
@@ -311,10 +293,6 @@ pub fn taxonomy_runtime_router() -> Router<HttpAppState> {
             axum::routing::post(move_categories_handler),
         )
         .route(
-            "/api/categories/rules",
-            get(get_legacy_category_rules_handler).put(update_legacy_category_rules_handler),
-        )
-        .route(
             "/api/categories/statistics",
             get(category_statistics_handler),
         )
@@ -335,10 +313,6 @@ pub fn taxonomy_runtime_router() -> Router<HttpAppState> {
             axum::routing::post(ensure_category_rule_defaults_handler),
         )
         .route(
-            "/api/category-rules/migrate",
-            axum::routing::post(migrate_category_keywords_handler),
-        )
-        .route(
             "/api/category-rules/:rule_id",
             put(update_category_rule_handler).delete(delete_category_rule_handler),
         )
@@ -353,10 +327,6 @@ pub fn taxonomy_runtime_router() -> Router<HttpAppState> {
         .route(
             "/api/account-rules/reorder",
             axum::routing::post(reorder_account_rules_handler),
-        )
-        .route(
-            "/api/account-rules/migrate-aliases",
-            axum::routing::post(migrate_account_aliases_handler),
         )
         .route(
             "/api/account-rules/:rule_id",

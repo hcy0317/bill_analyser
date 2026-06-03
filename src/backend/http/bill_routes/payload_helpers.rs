@@ -1,83 +1,6 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn create_draft_from_payload(
-    connection: &Connection,
-    user_id: UserId,
-    payload: &Value,
-) -> RouteResult<BillCreateDraft> {
-    let fallback_account_id =
-        get_first_account_id(connection, user_id).map_err(|_| Box::new(db_error_response()))?;
-    let (mut fields, tag_ids, category_id) = if is_frontend_mutation(payload) {
-        let (mut backend_data, metadata) = frontend_transaction_mutation_to_backend(
-            payload,
-            UtcOffsetMinutes::new(DEFAULT_UTC_OFFSET_MINUTES),
-        )
-        .map_err(|error| Box::new(bad_request(error.to_string())))?;
-        apply_manual_create_defaults(&mut backend_data, payload, fallback_account_id)
-            .map_err(|error| Box::new(bad_request(error.to_string())))?;
-        (backend_data, metadata.tag_ids, metadata.category_id)
-    } else {
-        let mut fields = payload_object(payload)?.clone();
-        let tag_ids = extract_tag_ids(&fields)?;
-        let category_id = value_string(
-            fields
-                .get("categoryId")
-                .or_else(|| fields.get("category_id")),
-        )
-        .unwrap_or_default();
-        strip_route_only_keys(&mut fields);
-        normalize_bill_create_aliases(&mut fields);
-        apply_manual_create_defaults(&mut fields, payload, fallback_account_id)
-            .map_err(|error| Box::new(bad_request(error.to_string())))?;
-        (fields, tag_ids, category_id)
-    };
-
-    apply_category_id(connection, user_id, &mut fields, &category_id)?;
-    let category_pair = category_pair_from_fields(&fields);
-    apply_create_category_contract(
-        &mut fields,
-        category_pair
-            .as_ref()
-            .map(|(main, sub)| (main.as_str(), sub.as_str())),
-        None,
-    );
-    ensure_create_defaults(&mut fields);
-    Ok(BillCreateDraft { fields, tag_ids })
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn update_draft_from_payload(
-    connection: &Connection,
-    user_id: UserId,
-    payload: &Value,
-) -> RouteResult<BillUpdateDraft> {
-    let (mut fields, tag_ids, category_id) = if is_frontend_mutation(payload) {
-        let (backend_data, metadata) = frontend_transaction_mutation_to_backend(
-            payload,
-            UtcOffsetMinutes::new(DEFAULT_UTC_OFFSET_MINUTES),
-        )
-        .map_err(|error| Box::new(bad_request(error.to_string())))?;
-        (backend_data, Some(metadata.tag_ids), metadata.category_id)
-    } else {
-        let mut fields = payload_object(payload)?.clone();
-        let tag_ids = tag_ids_for_update(&fields)?;
-        let category_id = value_string(
-            fields
-                .get("categoryId")
-                .or_else(|| fields.get("category_id")),
-        )
-        .unwrap_or_default();
-        strip_route_only_keys(&mut fields);
-        sanitize_backend_update_fields(&mut fields, payload);
-        (fields, tag_ids, category_id)
-    };
-    apply_category_id(connection, user_id, &mut fields, &category_id)?;
-    Ok(BillUpdateDraft { fields, tag_ids })
-}
-
 async fn create_draft_from_payload_postgres(
     pool: &PostgresPool,
     user_id: UserId,
@@ -105,7 +28,6 @@ async fn create_draft_from_payload_postgres(
         )
         .unwrap_or_default();
         strip_route_only_keys(&mut fields);
-        normalize_bill_create_aliases(&mut fields);
         apply_manual_create_defaults(&mut fields, payload, fallback_account_id)
             .map_err(|error| Box::new(bad_request(error.to_string())))?;
         (fields, tag_ids, category_id)

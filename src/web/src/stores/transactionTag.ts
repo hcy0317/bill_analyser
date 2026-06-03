@@ -130,7 +130,7 @@ export const useTransactionTagsStore = defineStore('transactionTags', () => {
                     logger.error('failed to load tag list', error);
                 }
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve tag list' });
@@ -175,7 +175,7 @@ export const useTransactionTagsStore = defineStore('transactionTags', () => {
             }).catch(error => {
                 logger.error('failed to save tag', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     if (!tag.id) {
@@ -210,7 +210,7 @@ export const useTransactionTagsStore = defineStore('transactionTags', () => {
             }).catch(error => {
                 logger.error('failed to add tags', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to add tag' });
@@ -276,7 +276,7 @@ export const useTransactionTagsStore = defineStore('transactionTags', () => {
             }).catch(error => {
                 logger.error('failed to save tags display order', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to move tag' });
@@ -308,7 +308,7 @@ export const useTransactionTagsStore = defineStore('transactionTags', () => {
                 console.error(`[TransactionTagsStore] hideTag error for ${tag.id}`, error);
                 logger.error('failed to update tag visibility', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to update tag visibility' });
@@ -346,7 +346,7 @@ export const useTransactionTagsStore = defineStore('transactionTags', () => {
                 console.error(`[TransactionTagsStore] deleteTag error for ${tag.id}`, error);
                 logger.error('failed to delete tag', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to delete this tag' });

@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -8,7 +8,7 @@ use axum::{
     Json,
 };
 use bill_analyser_core::{statistics::StatisticsContractError, UserId};
-use bill_analyser_db::{PostgresRepositoryRuntime, SqliteRuntime};
+use bill_analyser_db::PostgresRepositoryRuntime;
 use serde_json::{json, Value};
 
 use crate::{auth::resolve_user_id_from_headers, config::HttpShellConfig, state::HttpAppState};
@@ -16,16 +16,6 @@ use crate::{auth::resolve_user_id_from_headers, config::HttpShellConfig, state::
 pub(super) const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
 
 pub(super) type RouteResult<T> = Result<T, Box<Response>>;
-pub(super) fn open_runtime(state: &HttpAppState) -> RouteResult<SqliteRuntime> {
-    state
-        .open_sqlite_repository_runtime("statistics")
-        .map_err(|error| {
-            Box::new(error_response(
-                status_or_internal(error.http_status_code()),
-                error.public_message("Rust statistics route runtime DB error"),
-            ))
-        })
-}
 
 pub(super) fn open_postgres_runtime(
     state: &HttpAppState,
@@ -35,7 +25,7 @@ pub(super) fn open_postgres_runtime(
         .map_err(|error| {
             Box::new(error_response(
                 status_or_internal(error.http_status_code()),
-                error.public_message("Rust statistics route PostgreSQL runtime DB error"),
+                error.public_message(),
             ))
         })
 }
@@ -105,8 +95,8 @@ pub(super) fn asset_trends_error_response(error: StatisticsContractError) -> Res
             StatusCode::BAD_REQUEST,
             json!({
                 "success": false,
-                "errorMessage": error.error,
                 "error": error.error,
+                "message": error.message,
                 "errorCode": 400
             }),
         );

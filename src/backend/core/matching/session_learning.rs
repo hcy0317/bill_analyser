@@ -1,6 +1,6 @@
 // 中文导读：核心业务合同层，负责把金额、时间、分类、导入、匹配、预算、统计等规则从 HTTP/DB 细节中隔离。
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
-// 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
+// 不变式：金额单位、用户可见类型和API payload 在进入或离开本层时必须显式转换。
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_transfer_pair_candidate(
@@ -325,7 +325,7 @@ pub fn build_matching_session_candidates(session_id: &str, previews: &[Value]) -
         }
     }
     let mut summary_counts = Map::new();
-    for kind in LEGACY_SUMMARY_KIND_ORDER {
+    for kind in SUMMARY_KIND_ORDER {
         summary_counts.insert((*kind).to_string(), json!(counts_by_kind[kind]));
     }
     if counts_by_kind["reconciliation"] > 0 {

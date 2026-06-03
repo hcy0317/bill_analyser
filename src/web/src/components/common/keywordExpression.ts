@@ -1,6 +1,6 @@
 export type RuleOperator = 'OR' | 'AND' | 'NOT' | 'REGEX';
 export type RuleJoiner = 'AND' | 'OR';
-export type ExpressionFormat = 'legacy' | 'composite';
+export type ExpressionFormat = 'composite';
 
 export interface RuleClause {
     id: string;
@@ -145,30 +145,9 @@ export function parseExpression(expression: string, options: ParseRuleExpression
         return { clauses: [], sourceFormat: 'empty' };
     }
 
-    const detectedFormat = detectExpressionFormat(trimmed);
-    if (detectedFormat === 'composite') {
-        const parsedComposite = parseCompositeExpression(trimmed, idFactory);
-        if (parsedComposite) {
-            return { clauses: parsedComposite, sourceFormat: 'composite' };
-        }
-        return {
-            clauses: [],
-            sourceFormat: 'raw',
-            rawExpression: expression,
-            errorKey: RULE_EXPRESSION_UNPARSEABLE_KEY
-        };
-    }
-
-    const parsedLegacy = parseLegacyExpression(trimmed, idFactory);
-    if (parsedLegacy.length > 0) {
-        return { clauses: parsedLegacy, sourceFormat: 'legacy' };
-    }
-
-    if (options.format === 'composite') {
-        const parsedComposite = parseCompositeExpression(trimmed, idFactory);
-        if (parsedComposite) {
-            return { clauses: parsedComposite, sourceFormat: 'composite' };
-        }
+    const parsedComposite = parseCompositeExpression(trimmed, idFactory);
+    if (parsedComposite) {
+        return { clauses: parsedComposite, sourceFormat: 'composite' };
     }
 
     return {
@@ -179,11 +158,7 @@ export function parseExpression(expression: string, options: ParseRuleExpression
     };
 }
 
-export function serializeForFormat(clauses: readonly RuleClause[], format: ExpressionFormat): SerializeRuleExpressionResult {
-    if (format === 'legacy') {
-        return { expression: serializeLegacy(clauses) };
-    }
-
+export function serializeForFormat(clauses: readonly RuleClause[], _format: ExpressionFormat): SerializeRuleExpressionResult {
     return serializeComposite(clauses);
 }
 
@@ -227,18 +202,6 @@ export function getRuleExpressionDisplayOperatorColor(
         return 'info';
     }
     return 'primary';
-}
-
-export function serializeLegacy(clauses: readonly RuleClause[]): string {
-    return clauses
-        .map(clause => createRuleClause(clause))
-        .filter(clause => clause.terms.length > 0)
-        .map(clause => {
-            const prefix = clause.operator === 'REGEX' ? 'REGEX' : clause.operator;
-            const separator = clause.operator === 'REGEX' ? '' : '|';
-            return `${prefix}:${clause.terms.join(separator)}`;
-        })
-        .join('&');
 }
 
 export function serializeComposite(clauses: readonly RuleClause[]): SerializeRuleExpressionResult {
@@ -352,34 +315,6 @@ export function unescapeCompositeTerm(term: string): string {
         }
     }
     return chars.join('');
-}
-
-function detectExpressionFormat(expression: string): ExpressionFormat {
-    if (expression.includes('={')) {
-        return 'composite';
-    }
-    return 'legacy';
-}
-
-function parseLegacyExpression(expression: string, idFactory: () => string): RuleClause[] {
-    const clauses: RuleClause[] = [];
-    for (const part of expression.split('&')) {
-        const trimmedPart = part.trim();
-        if (!trimmedPart) {
-            continue;
-        }
-
-        const prefixMatch = /^(OR|AND|NOT|REGEX):/i.exec(trimmedPart);
-        const operator = normalizeOperator(prefixMatch?.[1] ?? 'OR');
-        const content = prefixMatch ? trimmedPart.slice(prefixMatch[0].length) : trimmedPart;
-        const terms = operator === 'REGEX'
-            ? normalizeRuleTerms([content])
-            : normalizeRuleTerms(content.split('|'));
-        if (terms.length > 0) {
-            clauses.push(createRuleClause({ operator, terms }, idFactory));
-        }
-    }
-    return clauses;
 }
 
 function parseCompositeExpression(expression: string, idFactory: () => string, repairDepth = 0): RuleClause[] | null {

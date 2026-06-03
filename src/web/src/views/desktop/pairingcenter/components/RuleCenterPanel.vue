@@ -49,36 +49,14 @@
                                     <span class="font-weight-medium">{{ tt('Category Rules') }}</span>
                                     <v-chip size="x-small" variant="tonal">{{ categoryRules.length }}</v-chip>
                                 </div>
-                                <v-menu
-                                    open-on-hover
-                                    :open-delay="1500"
-                                    location="bottom end"
+                                <v-btn
+                                    color="primary"
+                                    :disabled="loading"
+                                    @click="openCreateDialog"
                                 >
-                                    <template #activator="{ props: menuProps }">
-                                        <v-btn
-                                            v-bind="menuProps"
-                                            color="primary"
-                                            :disabled="loading"
-                                            @click="openCreateDialog"
-                                        >
-                                            <v-icon start :icon="mdiPlus" />
-                                            {{ tt('Add Rule') }}
-                                        </v-btn>
-                                    </template>
-                                    <v-list density="compact" min-width="260">
-                                        <v-list-item
-                                            :disabled="loading"
-                                            @click="migrateKeywords"
-                                        >
-                                            <template #prepend>
-                                                <v-icon :icon="mdiDatabaseImportOutline" />
-                                            </template>
-                                            <v-list-item-title>
-                                                {{ tt('Import Rules from Legacy Keywords') }}
-                                            </v-list-item-title>
-                                        </v-list-item>
-                                    </v-list>
-                                </v-menu>
+                                    <v-icon start :icon="mdiPlus" />
+                                    {{ tt('Add Rule') }}
+                                </v-btn>
                                 <settings-json-import-export-button
                                     section-key="categoryRecognitionRules"
                                     filename-prefix="category-recognition-rules"
@@ -660,7 +638,7 @@ import { ref, computed, onMounted, watch, useTemplateRef } from 'vue';
 import {
     mdiBookCogOutline, mdiRefresh, mdiBrain, mdiCalendarSync,
     mdiCheckCircle, mdiCloseCircle, mdiPlus, mdiPencilOutline, mdiDeleteOutline,
-    mdiTestTube, mdiDatabaseImportOutline, mdiCalendarSearch, mdiTextBoxEditOutline,
+    mdiTestTube, mdiCalendarSearch, mdiTextBoxEditOutline,
     mdiChevronDown, mdiChevronRight, mdiFilterVariant, mdiViewGridOutline,
 } from '@mdi/js';
 import type { ApiResponse, ErrorResponse } from '@/core/api.ts';
@@ -842,13 +820,6 @@ interface ResolvedRuleCategorySelection {
 
 interface CategoryRuleTestResult {
     matched?: boolean | null;
-}
-
-interface CategoryKeywordMigrationResult {
-    migrated?: number | string | null;
-    migrated_count?: number | string | null;
-    skipped?: number | string | null;
-    skipped_count?: number | string | null;
 }
 
 const categoryRules = ref<CategoryRuleItem[]>([]);
@@ -1341,7 +1312,7 @@ function extractPayloadMessage(payload: unknown, depth = 0): string | null {
     };
 
     return extractPayloadMessage(
-        typedPayload.errorMessage ?? typedPayload.error ?? typedPayload.message,
+        typedPayload.error ?? typedPayload.message,
         depth + 1
     );
 }
@@ -1389,11 +1360,6 @@ function buildCategoryRulePayload(form: CategoryRuleForm): CategoryRulePayload {
         regex_enabled: !!form.regex_enabled,
         enabled: !!form.enabled,
     };
-}
-
-function getMigrationCount(value: number | string | null | undefined): number {
-    const count = Number(value ?? 0);
-    return Number.isFinite(count) ? count : 0;
 }
 
 function openCreateDialog() {
@@ -1653,30 +1619,6 @@ async function runTest() {
         error.value = getRequestErrorMessage(e, tt('Test failed'));
     } finally {
         testing.value = false;
-    }
-}
-
-// ── Migrate ────────
-async function migrateKeywords() {
-    loading.value = true;
-    error.value = null;
-    try {
-        const result = requireApiSuccess<CategoryKeywordMigrationResult>(
-            await services.migrateCategoryKeywords(),
-            tt('Migration failed')
-        );
-        const migrated = getMigrationCount(result?.migrated ?? result?.migrated_count);
-        const skipped = getMigrationCount(result?.skipped ?? result?.skipped_count);
-        showSuccessMessage('Migration completed: migrated {migrated}, skipped {skipped}', {
-            migrated,
-            skipped,
-        });
-        categoryStore.updateTransactionCategoryListInvalidState(true);
-        await fetchAll();
-    } catch (e: unknown) {
-        error.value = getRequestErrorMessage(e, tt('Migration failed'));
-    } finally {
-        loading.value = false;
     }
 }
 

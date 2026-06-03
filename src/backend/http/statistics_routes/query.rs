@@ -1,25 +1,19 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
-use bill_analyser_core::{
-    statistics::{
-        parse_statistics_timestamp_range, parse_statistics_year_month_range,
-        validate_asset_trends_span, StatisticsTimestampRange, StatisticsYearMonthRange,
-        StatisticsYearMonthRangeMode,
-    },
-    UserId,
+use bill_analyser_core::statistics::{
+    parse_statistics_timestamp_range, parse_statistics_year_month_range,
+    validate_asset_trends_span, StatisticsTimestampRange, StatisticsYearMonthRange,
+    StatisticsYearMonthRangeMode,
 };
-use bill_analyser_db::{
-    find_statistics_all_date_range, StatisticsAllDateRange, StatisticsBillFilters,
-};
+use bill_analyser_db::{StatisticsAllDateRange, StatisticsBillFilters};
 use chrono::{Datelike, Local, NaiveDate, TimeZone};
 use serde::Deserialize;
 use serde_json::Value;
 
 use super::response::{
-    asset_trends_error_response, bad_request, db_error_response, statistics_error_response,
-    RouteResult,
+    asset_trends_error_response, bad_request, statistics_error_response, RouteResult,
 };
 #[derive(Debug, Default, Deserialize)]
 pub(super) struct CategoryStatisticsQuery {
@@ -135,31 +129,6 @@ pub(super) fn timestamp_range_from_query(
     }
 }
 
-pub(super) fn year_month_range_from_query(
-    start_raw: Option<&str>,
-    end_raw: Option<&str>,
-    connection: &rusqlite::Connection,
-    user_id: UserId,
-) -> RouteResult<Option<StatisticsYearMonthRange>> {
-    let (start_raw, end_raw) = match (start_raw, end_raw) {
-        (Some(start), Some(end)) => (start.to_string(), end.to_string()),
-        _ => {
-            let now = Local::now();
-            (format!("{}01", now.year()), format!("{}12", now.year()))
-        }
-    };
-    let all_range = if matches!(
-        parse_statistics_year_month_range(Some(&start_raw), Some(&end_raw)),
-        Ok(StatisticsYearMonthRangeMode::All)
-    ) {
-        find_statistics_all_date_range(connection, user_id)
-            .map_err(|_| Box::new(db_error_response()))?
-    } else {
-        None
-    };
-    year_month_range_from_values(&start_raw, &end_raw, all_range)
-}
-
 pub(super) fn year_month_range_from_values(
     start_raw: &str,
     end_raw: &str,
@@ -194,24 +163,6 @@ pub(super) fn default_year_month_query_values(
             (format!("{}01", now.year()), format!("{}12", now.year()))
         }
     }
-}
-
-pub(super) fn asset_date_range_from_query(
-    start_raw: Option<&str>,
-    end_raw: Option<&str>,
-    connection: &rusqlite::Connection,
-    user_id: UserId,
-) -> RouteResult<Option<(NaiveDate, NaiveDate)>> {
-    if matches!((start_raw, end_raw), (Some("0"), Some("0"))) {
-        let Some(range) = find_statistics_all_date_range(connection, user_id)
-            .map_err(|_| Box::new(db_error_response()))?
-        else {
-            return Ok(None);
-        };
-        return asset_date_range_from_all_range(Some(range));
-    }
-    let range = timestamp_range_from_query(start_raw, end_raw, true)?;
-    asset_date_range_from_timestamp_range(range)
 }
 
 pub(super) fn asset_date_range_from_all_range(

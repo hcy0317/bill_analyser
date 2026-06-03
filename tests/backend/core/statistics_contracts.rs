@@ -64,7 +64,7 @@ fn range_provider_and_asset_validation_contracts_match_statistics_routes() {
     );
     assert_eq!(
         parse_statistics_timestamp_range(None, None)
-            .expect_err("missing timestamps are prepared by Python route defaults")
+            .expect_err("missing timestamps are rejected by current route validation")
             .error,
         "Invalid timestamp format"
     );
@@ -310,7 +310,7 @@ fn exchange_rate_contracts_cover_provider_conversion_custom_and_fallback_shapes(
 }
 
 #[test]
-fn basic_statistics_collection_contracts_preserve_python_route_shapes() {
+fn basic_statistics_collection_contracts_preserve_current_route_shapes() {
     let bills = vec![
         StatisticsBillInput {
             main_category: "餐饮".to_string(),
@@ -388,7 +388,7 @@ fn basic_statistics_collection_contracts_preserve_python_route_shapes() {
 }
 
 #[test]
-fn networth_calendar_insights_and_chart_shapes_remain_python_compatible() {
+fn networth_calendar_insights_and_chart_shapes_match_current_runtime() {
     let mut liability = account(20, "信用卡", "-20.00");
     liability.account_type = "credit_card".to_string();
     let mut hidden = account(30, "隐藏账户", "999.00");

@@ -79,7 +79,7 @@ const requiredVariableTokens = [
 ] as const;
 
 describe('application theme registry', () => {
-    test('theme order exposes compatible defaults and requested paired classic themes', () => {
+    test('theme order exposes current defaults and requested paired classic themes', () => {
         expect(APPLICATION_THEME_ORDER).toEqual([
             ThemeType.Light,
             ThemeType.Dark,
@@ -124,12 +124,12 @@ describe('application theme registry', () => {
         expect(options.at(-1)).toEqual({ name: 't:Dim', value: ThemeType.DimLight });
     });
 
-    test('theme preference resolver keeps auto compatible and falls back safely', () => {
+    test('theme preference resolver accepts current values and falls back safely', () => {
         expect(resolveThemePreference(SYSTEM_THEME_PREFERENCE, ThemeType.Light)).toBe(ThemeType.Light);
         expect(resolveThemePreference(SYSTEM_THEME_PREFERENCE, ThemeType.Dark)).toBe(ThemeType.Dark);
         expect(resolveThemePreference(ThemeType.DraculaDark, ThemeType.Light)).toBe(ThemeType.DraculaDark);
-        expect(normalizeThemePreference('dracula')).toBe(ThemeType.DraculaDark);
-        expect(resolveThemePreference('wireframe', ThemeType.Dark)).toBe(ThemeType.WireframeLight);
+        expect(normalizeThemePreference('dracula')).toBe(SYSTEM_THEME_PREFERENCE);
+        expect(resolveThemePreference('wireframe', ThemeType.Dark)).toBe(ThemeType.Dark);
         expect(normalizeThemePreference('unknown-theme')).toBe(SYSTEM_THEME_PREFERENCE);
         expect(resolveThemePreference('unknown-theme', ThemeType.Dark)).toBe(ThemeType.Dark);
     });
@@ -163,7 +163,7 @@ describe('application theme registry', () => {
         expect(getNextQuickThemePreference(ThemeType.ForestDark)).toBe(ThemeType.ForestLight);
         expect(getNextQuickThemePreference(ThemeType.Light)).toBe(ThemeType.Dark);
         expect(getNextQuickThemePreference(ThemeType.Dark)).toBe(ThemeType.Light);
-        expect(getNextQuickThemePreference('halloween')).toBe(ThemeType.HalloweenLight);
+        expect(getNextQuickThemePreference('halloween')).toBe(ThemeType.Light);
     });
 
     test('theme family option value maps explicit light and dark variants to one setting item', () => {
@@ -192,7 +192,7 @@ describe('application theme registry', () => {
         }
     });
 
-    test('light and dark keep existing brand-compatible anchor colors', () => {
+    test('light and dark keep existing brand-aligned anchor colors', () => {
         const vuetifyThemes = getVuetifyThemes();
 
         expect(vuetifyThemes.light.colors['primary']).toBe('#c67e48');

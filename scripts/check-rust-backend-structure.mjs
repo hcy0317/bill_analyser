@@ -171,6 +171,7 @@ function listTrackedRustBackendFiles() {
         .split('\0')
         .filter(Boolean)
         .filter(repoRelativePath => repoRelativePath.endsWith('.rs'))
+        .filter(repoRelativePath => fs.existsSync(resolveRepoPath(repoRelativePath)))
         .sort((left, right) => left.localeCompare(right));
 }
 
@@ -217,7 +218,7 @@ function isOversized(record, thresholds) {
 function buildBaseline(records, thresholds) {
     return {
         version: 1,
-        description: 'Rust backend non-comment, non-observability line baseline for legacy oversized files. Ratchet after calibration: entries may shrink but must not grow.',
+        description: 'Rust backend non-comment, non-observability line baseline for existing oversized files. Ratchet after calibration: entries may shrink but must not grow.',
         thresholds,
         generatedBy: 'scripts/check-rust-backend-structure.mjs --print-baseline',
         countMode: 'non-comment-non-observability-rust-lines',
@@ -225,7 +226,7 @@ function buildBaseline(records, thresholds) {
             .filter(record => isOversized(record, thresholds))
             .map(record => ({
                 ...record,
-                reason: 'legacy oversized Rust backend file tracked by the structure ratchet'
+                reason: 'existing oversized Rust backend file tracked by the structure ratchet'
             }))
     };
 }

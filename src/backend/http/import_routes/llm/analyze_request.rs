@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -50,10 +50,7 @@ pub async fn llm_analyze_transactions_runtime_handler(
         if let Err(response) = init_import_runtime_schema(&runtime) {
             return route_response(response);
         }
-        if let Err(response) = init_llm_config_runtime_schema(&runtime) {
-            return route_response(response);
-        }
-        let config = match effective_llm_runtime_config(&state, &runtime, user_id_value) {
+        let config = match effective_llm_runtime_config(&state, user_id_value).await {
             Ok(config) => config,
             Err(response) => return route_response(response),
         };
@@ -109,15 +106,18 @@ pub async fn llm_analyze_transactions_runtime_handler(
                 rule_prompt_template: template,
             }
         } else {
-            if let Err(response) = init_legacy_bills_runtime_schema(&runtime) {
-                return route_response(response);
-            }
-            let transactions = match load_persisted_bill_prompt_values(
-                runtime.connection(),
+            let postgres_runtime = match open_postgres_runtime(&state) {
+                Ok(runtime) => runtime,
+                Err(response) => return route_response(response),
+            };
+            let transactions = match load_postgres_persisted_bill_prompt_values(
+                postgres_runtime.pool(),
                 user_id_value,
                 bill_ids.as_deref(),
                 limit,
-            ) {
+            )
+            .await
+            {
                 Ok(transactions) => transactions,
                 Err(response) => return route_response(response),
             };
@@ -171,7 +171,11 @@ pub async fn llm_analyze_transactions_runtime_handler(
                     Ok(runtime) => runtime,
                     Err(response) => return route_response(response),
                 };
-                if let Err(response) = init_llm_config_runtime_schema(&runtime) {
+                let postgres_runtime = match open_postgres_runtime(&state) {
+                    Ok(runtime) => runtime,
+                    Err(response) => return route_response(response),
+                };
+                if let Err(response) = init_import_runtime_schema(&runtime) {
                     return route_response(response);
                 }
                 let mut seen_expressions = BTreeSet::new();
@@ -183,20 +187,22 @@ pub async fn llm_analyze_transactions_runtime_handler(
                     {
                         continue;
                     }
-                    if match rule_candidate_duplicate(
-                        runtime.connection(),
+                    if match postgres_rule_candidate_duplicate(
+                        postgres_runtime.pool(),
                         user_id_value,
                         &group.main_category,
                         &group.sub_category,
                         &expression,
-                    ) {
+                    )
+                    .await
+                    {
                         Ok(duplicate) => duplicate,
                         Err(response) => return route_response(response),
                     } {
                         continue;
                     }
-                    let candidate = match create_llm_candidate(
-                        runtime.connection(),
+                    let candidate = match create_postgres_llm_candidate(
+                        postgres_runtime.pool(),
                         &LlmCandidateDraft {
                             user_id: user_id_value,
                             candidate_type: "rule_induction".to_string(),
@@ -209,7 +215,9 @@ pub async fn llm_analyze_transactions_runtime_handler(
                             llm_model: provider_response.model.clone(),
                             llm_response_raw: llm_candidate_raw_response(&value),
                         },
-                    ) {
+                    )
+                    .await
+                    {
                         Ok(candidate) => candidate,
                         Err(error) => return route_response(db_error_response(error)),
                     };
@@ -269,13 +277,10 @@ pub async fn llm_analyze_transactions_runtime_handler(
                 .iter()
                 .filter_map(|value| value.get("id").and_then(Value::as_i64))
                 .collect::<BTreeSet<_>>();
-            let runtime = match open_runtime(&state) {
+            let postgres_runtime = match open_postgres_runtime(&state) {
                 Ok(runtime) => runtime,
                 Err(response) => return route_response(response),
             };
-            if let Err(response) = init_llm_config_runtime_schema(&runtime) {
-                return route_response(response);
-            }
             let mut seen_bill_ids = BTreeSet::new();
             for value in parsed {
                 let bill_id = value
@@ -289,8 +294,8 @@ pub async fn llm_analyze_transactions_runtime_handler(
                 {
                     continue;
                 }
-                let candidate = match create_llm_candidate(
-                    runtime.connection(),
+                let candidate = match create_postgres_llm_candidate(
+                    postgres_runtime.pool(),
                     &LlmCandidateDraft {
                         user_id: user_id_value,
                         candidate_type: "classification".to_string(),
@@ -303,7 +308,9 @@ pub async fn llm_analyze_transactions_runtime_handler(
                         llm_model: provider_response.model.clone(),
                         llm_response_raw: llm_candidate_raw_response(&value),
                     },
-                ) {
+                )
+                .await
+                {
                     Ok(candidate) => candidate,
                     Err(error) => return route_response(db_error_response(error)),
                 };
@@ -322,4 +329,3 @@ pub async fn llm_analyze_transactions_runtime_handler(
         }
     }
 }
-

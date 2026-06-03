@@ -428,12 +428,12 @@ export function useI18n() {
 
         if (error.errorCode !== KnownErrorCode.ValidatorError) {
             return {
-                message: `error.${error.errorMessage}`
+                message: `error.${error.message}`
             };
         }
 
         for (const errorInfo of PARAMETERIZED_ERRORS) {
-            const matches = error.errorMessage.match(errorInfo.regex);
+            const matches = error.message.match(errorInfo.regex);
 
             if (matches && matches.length === errorInfo.parameters.length + 1) {
                 return {
@@ -450,7 +450,7 @@ export function useI18n() {
         }
 
         return {
-            message: `error.${error.errorMessage}`
+            message: `error.${error.message}`
         };
     }
 

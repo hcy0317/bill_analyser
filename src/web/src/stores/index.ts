@@ -134,7 +134,7 @@ export const useRootStore = defineStore('root', () => {
                     if (!appLockState || appLockState.username !== data.result.user?.username) {
                         logger.warn('[Login] AppLock username mismatch, will clear tokens AFTER saving new token to prevent 401 errors');
 
-                        // 🆕 关键修复：先保存新token，再清理旧数据
+                        // 关键修复：先保存新token，再清理本地会话数据
                         // 这避免了在token更新过程中出现"无token"的窗口期
                         logger.info('[Login] Step 1: Save new token FIRST');
                         updateCurrentToken(data.result.token);
@@ -232,7 +232,7 @@ export const useRootStore = defineStore('root', () => {
 
                 if (error && error.processed) {
                     reject(error);
-                } else if (error.response && error.response.data && error.response.data.errorMessage) {
+                } else if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else {
                     reject({ message: 'Unable to log in' });
@@ -310,7 +310,7 @@ export const useRootStore = defineStore('root', () => {
 
                 if (error && error.processed) {
                     reject(error);
-                } else if (error.response && error.response.data && error.response.data.errorMessage) {
+                } else if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else {
                     reject({ message: 'Unable to verify' });
@@ -362,7 +362,7 @@ export const useRootStore = defineStore('root', () => {
 
                 if (error && error.processed) {
                     reject(error);
-                } else if (error.response && error.response.data && error.response.data.errorMessage) {
+                } else if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else {
                     reject({ message: 'Unable to log in' });
@@ -405,8 +405,8 @@ export const useRootStore = defineStore('root', () => {
 
                 if (error.response && error.response.data) {
                     const errorData = error.response.data;
-                    if (errorData.errorMessage || errorData.message) {
-                        reject({ message: errorData.errorMessage || errorData.message, error: errorData });
+                    if (errorData.message || errorData.message) {
+                        reject({ message: errorData.message || errorData.message, error: errorData });
                         return;
                     }
                     if (!error.processed) {
@@ -465,7 +465,7 @@ export const useRootStore = defineStore('root', () => {
 
                 if (error && error.processed) {
                     reject(error);
-                } else if (error.response && error.response.data && error.response.data.errorMessage) {
+                } else if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else {
                     reject({ message: 'Unable to logout' });
@@ -507,7 +507,7 @@ export const useRootStore = defineStore('root', () => {
 
                 if (error && error.processed) {
                     reject(error);
-                } else if (error.response && error.response.data && error.response.data.errorMessage) {
+                } else if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else {
                     reject({ message: 'Unable to verify email' });
@@ -532,7 +532,7 @@ export const useRootStore = defineStore('root', () => {
 
                 if (error && error.processed) {
                     reject(error);
-                } else if (error.response && error.response.data && error.response.data.errorMessage) {
+                } else if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else {
                     reject({ message: 'Unable to resend validation email' });
@@ -557,7 +557,7 @@ export const useRootStore = defineStore('root', () => {
 
                 if (error && error.processed) {
                     reject(error);
-                } else if (error.response && error.response.data && error.response.data.errorMessage) {
+                } else if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else {
                     reject({ message: 'Unable to send password reset email' });
@@ -586,7 +586,7 @@ export const useRootStore = defineStore('root', () => {
 
                 if (error && error.processed) {
                     reject(error);
-                } else if (error.response && error.response.data && error.response.data.errorMessage) {
+                } else if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else {
                     reject({ message: 'Unable to reset password' });
@@ -635,7 +635,7 @@ export const useRootStore = defineStore('root', () => {
             }).catch(error => {
                 logger.error('failed to save user profile', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to update user profile' });
@@ -662,7 +662,7 @@ export const useRootStore = defineStore('root', () => {
 
                 if (error && error.processed) {
                     reject(error);
-                } else if (error.response && error.response.data && error.response.data.errorMessage) {
+                } else if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else {
                     reject({ message: 'Unable to resend validation email' });
@@ -702,7 +702,7 @@ export const useRootStore = defineStore('root', () => {
 
                 if (error && error.processed) {
                     reject(error);
-                } else if (error.response && error.response.data && error.response.data.errorMessage) {
+                } else if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else {
                     reject({ message: 'Unable to clear user data' });
@@ -741,7 +741,7 @@ export const useRootStore = defineStore('root', () => {
 
                 if (error && error.processed) {
                     reject(error);
-                } else if (error.response && error.response.data && error.response.data.errorMessage) {
+                } else if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else {
                     reject({ message: 'Unable to clear user data' });
@@ -788,7 +788,7 @@ export const useRootStore = defineStore('root', () => {
 
                 if (error && error.processed) {
                     reject(error);
-                } else if (error.response && error.response.data && error.response.data.errorMessage) {
+                } else if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else {
                     reject({ message: 'Unable to clear user data' });

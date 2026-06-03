@@ -1,74 +1,6 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn update_sub_accounts(
-    repository: &mut AccountsRepository<'_>,
-    account_id: i64,
-    user_id: i64,
-    sub_accounts: &[Value],
-) -> RouteResult<()> {
-    let existing_sub_accounts = repository
-        .get_sub_accounts(account_id, user_id)
-        .map_err(|_| Box::new(db_error_response()))?;
-    let existing_sub_ids = existing_sub_accounts
-        .iter()
-        .filter_map(|account| account.get("id").and_then(value_as_i64))
-        .collect::<Vec<_>>();
-    let mut updated_sub_ids = Vec::new();
-
-    for sub_account in sub_accounts {
-        let sub_account_id = sub_account.get("id").and_then(value_as_i64);
-        let mut sub_payload = frontend_account_to_backend(sub_account)
-            .map_err(|message| Box::new(bad_request(message)))?;
-        if let Some(sub_account_id) =
-            sub_account_id.filter(|candidate| existing_sub_ids.contains(candidate))
-        {
-            repository
-                .update_account(sub_account_id, &Value::Object(sub_payload), user_id)
-                .map_err(|_| Box::new(db_error_response()))?;
-            updated_sub_ids.push(sub_account_id);
-            continue;
-        }
-
-        sub_payload.insert(
-            "parent_id".to_string(),
-            Value::Number(Number::from(account_id)),
-        );
-        repository
-            .create_account(&Value::Object(sub_payload), user_id)
-            .map_err(|_| Box::new(db_error_response()))?;
-    }
-
-    for old_sub_id in existing_sub_ids {
-        if !updated_sub_ids.contains(&old_sub_id) {
-            repository
-                .delete_account(old_sub_id, user_id)
-                .map_err(|_| Box::new(db_error_response()))?;
-        }
-    }
-    Ok(())
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn load_account_with_sub_accounts(
-    repository: &mut AccountsRepository<'_>,
-    account_id: i64,
-    user_id: i64,
-) -> bill_analyser_db::DbResult<Option<AccountRecord>> {
-    let Some(mut account) = repository.get_account(account_id, user_id)? else {
-        return Ok(None);
-    };
-    let sub_accounts = repository.get_sub_accounts(account_id, user_id)?;
-    if !sub_accounts.is_empty() {
-        account.insert(
-            "subAccounts".to_string(),
-            Value::Array(sub_accounts.into_iter().map(Value::Object).collect()),
-        );
-    }
-    Ok(Some(account))
-}
 
 #[tracing::instrument(level = "debug", skip_all)]
 async fn update_postgres_sub_accounts(
@@ -262,13 +194,6 @@ fn frontend_account_to_backend(payload: &Value) -> Result<Map<String, Value>, St
         Value::String(string_or_default(object.get("comment"), "")),
     );
     result.insert(
-        "aliases".to_string(),
-        Value::String(
-            serde_json::to_string(&parse_aliases(object.get("aliases")))
-                .unwrap_or_else(|_| "[]".to_string()),
-        ),
-    );
-    result.insert(
         "display_order".to_string(),
         Value::Number(Number::from(
             object
@@ -353,15 +278,6 @@ fn backend_account_to_frontend(mut account: AccountRecord) -> Map<String, Value>
     result.insert(
         "comment".to_string(),
         Value::String(string_or_default(account.get("comment"), "")),
-    );
-    result.insert(
-        "aliases".to_string(),
-        Value::Array(
-            parse_aliases(account.get("aliases"))
-                .into_iter()
-                .map(Value::String)
-                .collect(),
-        ),
     );
     result.insert(
         "creditCardStatementDate".to_string(),

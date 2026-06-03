@@ -25,37 +25,6 @@ function createIdFactory(): () => string {
 }
 
 describe('keywordExpression helpers', () => {
-    test('parses and serializes legacy expressions without changing legacy callers', () => {
-        const parsed = parseExpression('OR:早餐|咖啡&AND:星巴克&NOT:退款', {
-            format: 'legacy',
-            idFactory: createIdFactory()
-        });
-
-        expect(parsed.sourceFormat).toBe('legacy');
-        expect(parsed.clauses).toMatchObject([
-            { operator: 'OR', terms: ['早餐', '咖啡'], openParens: 0, closeParens: 0 },
-            { operator: 'AND', terms: ['星巴克'], openParens: 0, closeParens: 0 },
-            { operator: 'NOT', terms: ['退款'], openParens: 0, closeParens: 0 }
-        ]);
-        expect(serializeForFormat(parsed.clauses, 'legacy')).toStrictEqual({
-            expression: 'OR:早餐|咖啡&AND:星巴克&NOT:退款'
-        });
-    });
-
-    test('keeps legacy REGEX clauses parseable and serializable', () => {
-        const parsed = parseExpression('REGEX:^coffee.*&OR:breakfast|brunch', {
-            format: 'legacy',
-            idFactory: createIdFactory()
-        });
-
-        expect(parsed.sourceFormat).toBe('legacy');
-        expect(parsed.clauses.map(clause => clause.operator)).toStrictEqual(['REGEX', 'OR']);
-        expect(parsed.clauses[0]?.terms).toStrictEqual(['^coffee.*']);
-        expect(serializeForFormat(parsed.clauses, 'legacy')).toStrictEqual({
-            expression: 'REGEX:^coffee.*&OR:breakfast|brunch'
-        });
-    });
-
     test('parses parenthesized composite expressions and roundtrips escaped terms', () => {
         const expression = '(OR={早餐\\,咖啡,星巴克}+AND={门店\\+优惠})+NOT={退款\\(退货\\)}';
         const parsed = parseExpression(expression, {

@@ -38,7 +38,7 @@ const baseItem = (): ImportPreviewIndexItem => ({
     sourceAmount: 0,
     counterparty: '',
     paymentMethod: '',
-    parserSource: '',
+    parserId: '',
     parserTags: [],
     dedupType: '',
     dedupSourceIds: [],
@@ -92,7 +92,7 @@ describe('import preview index helpers', () => {
                 sourceAccountId: '201',
                 actualSourceAccountName: '招商银行卡',
                 comment: '工资',
-                parserSource: 'alipay',
+                parserId: 'alipay',
             },
             {
                 ...baseItem(),
@@ -169,7 +169,7 @@ describe('import preview index helpers', () => {
             actualSourceAccountName: '支付宝',
             comment: '早餐',
             selected: true,
-            parserSource: 'alipay',
+            parserId: 'alipay',
             parserTags: ['parser:alipay'],
             transferStatus: 'accepted',
             recurringCandidateCount: 2

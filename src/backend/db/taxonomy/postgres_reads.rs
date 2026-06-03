@@ -1,18 +1,15 @@
 // 中文导读：PostgreSQL taxonomy 读仓储，提供硬切换后的账户、分类和标签列表投影。
-// 维护重点：这里把 PostgreSQL authoritative schema 映射回现有 HTTP/前端兼容 DTO，避免 handler 复制 SQL。
-// 不变式：只读路径必须按 user_id 过滤；金额字段从 Postgres 分显式转换为 legacy repository 的元投影。
+// 维护重点：这里把 PostgreSQL authoritative schema 映射回当前 HTTP/前端 DTO，避免 handler 复制 SQL。
+// 不变式：只读路径必须按 user_id 过滤；金额字段从 Postgres 分显式转换为 current repository 的元投影。
 
 use std::collections::BTreeSet;
 
-use bill_analyser_core::{
-    account::parse_aliases_text,
-    account_rules::{
-        normalize_account_role_scope, normalize_account_rule_field_scope,
-        normalize_transaction_type_scope, AccountRuleCandidate, AccountRuleMatch,
-        AccountRuleMatchContext, DEFAULT_FIELD_SCOPES,
-    },
-    category_rules::escape_rule_expression_term,
+use bill_analyser_core::account_rules::{
+    normalize_account_role_scope, normalize_account_rule_field_scope,
+    normalize_transaction_type_scope, AccountRuleCandidate, AccountRuleMatch,
+    AccountRuleMatchContext, DEFAULT_FIELD_SCOPES,
 };
+use bill_analyser_core::category_rules::escape_rule_expression_term;
 use chrono::{DateTime, Utc};
 use serde_json::{json, Map, Number, Value};
 use sqlx::{postgres::PgRow, Postgres, QueryBuilder, Row, Transaction};
@@ -25,9 +22,7 @@ use crate::{
         account_rules::AccountRuleRecord,
         accounts::{AccountDisplayOrder, AccountRecord},
         categories::{CategoryRecord, CategoryStatistic},
-        category_rules::{
-            convert_old_keyword_syntax, CategoryRuleMigrationSummary, CategoryRuleRecord,
-        },
+        category_rules::CategoryRuleRecord,
         tags::{TagDisplayOrder, TagRecord},
         templates::{TemplateDisplayOrder, TemplateRecord},
     },
@@ -604,7 +599,7 @@ pub async fn create_postgres_category_rule(
     .bind(category_id)
     .bind(name)
     .bind(json_array(DEFAULT_FIELD_SCOPES))
-    .bind(legacy_rule_expression_json(&rule_expression, regex_enabled))
+    .bind(rule_expression_json(&rule_expression, regex_enabled))
     .bind(i64_to_i32(priority))
     .bind(enabled)
     .fetch_one(pool)
@@ -669,14 +664,13 @@ pub async fn update_postgres_category_rule(
             "rule_expression" => {
                 let rule_expression = required_postgres_rule_expression(Some(value))?;
                 let regex_enabled = rule_expression_regex_enabled(&rule_expression_json_value);
-                rule_expression_json_value =
-                    legacy_rule_expression_json(&rule_expression, regex_enabled);
+                rule_expression_json_value = rule_expression_json(&rule_expression, regex_enabled);
                 changed = true;
             }
             "regex_enabled" => {
                 let rule_expression = rule_expression_string(&rule_expression_json_value);
                 rule_expression_json_value =
-                    legacy_rule_expression_json(&rule_expression, payload_bool_value(value)?);
+                    rule_expression_json(&rule_expression, payload_bool_value(value)?);
                 changed = true;
             }
             "enabled" => {
@@ -831,74 +825,6 @@ pub async fn ensure_postgres_category_rule_defaults(
     Ok(summary)
 }
 
-pub async fn migrate_postgres_category_keywords_to_rules(
-    pool: &PostgresPool,
-    user_id: i64,
-) -> DbResult<CategoryRuleMigrationSummary> {
-    let rows = sqlx::query(
-        r#"
-        SELECT id, path, name, display_order, metadata
-        FROM categories
-        WHERE user_id = $1
-          AND COALESCE(NULLIF(TRIM(metadata->>'keywords'), ''), '') <> ''
-        ORDER BY display_order ASC, id ASC
-        "#,
-    )
-    .bind(user_id)
-    .fetch_all(pool)
-    .await?;
-
-    let mut summary = CategoryRuleMigrationSummary {
-        migrated: 0,
-        skipped: 0,
-    };
-    for row in rows {
-        let category_id: i64 = row.try_get("id")?;
-        let path: Option<String> = row.try_get("path")?;
-        let name: String = row.try_get("name")?;
-        let priority: i32 = row.try_get("display_order")?;
-        let metadata: Value = row.try_get("metadata")?;
-        let keywords = metadata
-            .get("keywords")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .unwrap_or_default();
-        if keywords.is_empty() {
-            summary.skipped += 1;
-            continue;
-        }
-        let rule_expression = convert_old_keyword_syntax(keywords);
-        if rule_expression.is_empty()
-            || postgres_category_rule_expression_exists(
-                pool,
-                user_id,
-                category_id,
-                &rule_expression,
-            )
-            .await?
-        {
-            summary.skipped += 1;
-            continue;
-        }
-        let (main_category, sub_category) =
-            category_names_from_path(path.as_deref().unwrap_or_default(), &name);
-        let payload = json!({
-            "category_id": category_id,
-            "name": format!("migrated:{main_category}/{sub_category}"),
-            "priority": i64::from(priority),
-            "rule_expression": rule_expression,
-            "regex_enabled": false,
-            "enabled": true,
-        });
-        match create_postgres_category_rule(pool, &payload, user_id).await? {
-            Some(_) => summary.migrated += 1,
-            None => summary.skipped += 1,
-        }
-    }
-
-    Ok(summary)
-}
-
 pub async fn query_postgres_rules_overview_payload(
     pool: &PostgresPool,
     user_id: i64,
@@ -934,30 +860,6 @@ async fn postgres_category_rule_name_exists(
     )
     .bind(user_id)
     .bind(name)
-    .fetch_optional(pool)
-    .await?;
-    Ok(exists.is_some())
-}
-
-async fn postgres_category_rule_expression_exists(
-    pool: &PostgresPool,
-    user_id: i64,
-    category_id: i64,
-    rule_expression: &str,
-) -> DbResult<bool> {
-    let exists = sqlx::query_scalar::<_, i64>(
-        r#"
-        SELECT 1
-        FROM category_rules
-        WHERE user_id = $1
-          AND category_id = $2
-          AND rule_expression = $3
-        LIMIT 1
-        "#,
-    )
-    .bind(user_id)
-    .bind(category_id)
-    .bind(legacy_rule_expression_json(rule_expression, false))
     .fetch_optional(pool)
     .await?;
     Ok(exists.is_some())
@@ -1051,104 +953,6 @@ async fn list_postgres_rules_overview_recurring_rules(
             }))
         })
         .collect()
-}
-
-pub async fn get_postgres_legacy_category_rules_setting(
-    pool: &PostgresPool,
-    key: &str,
-    user_id: i64,
-) -> DbResult<Option<Value>> {
-    let row = sqlx::query("SELECT value FROM settings WHERE user_id = $1 AND key = $2")
-        .bind(user_id)
-        .bind(key)
-        .fetch_optional(pool)
-        .await?;
-    row.map(|row| row.try_get("value"))
-        .transpose()
-        .map_err(Into::into)
-}
-
-pub async fn set_postgres_legacy_category_rules_setting(
-    pool: &PostgresPool,
-    key: &str,
-    value: &Value,
-    user_id: i64,
-) -> DbResult<()> {
-    sqlx::query(
-        r#"
-        INSERT INTO settings (user_id, key, value, sensitive)
-        VALUES ($1, $2, $3, false)
-        ON CONFLICT (user_id, key)
-        DO UPDATE SET value = EXCLUDED.value, updated_at = now(), version = settings.version + 1
-        "#,
-    )
-    .bind(user_id)
-    .bind(key)
-    .bind(value)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-pub async fn list_postgres_legacy_category_engine_rules(
-    pool: &PostgresPool,
-    user_id: i64,
-) -> DbResult<Vec<Value>> {
-    let rows = sqlx::query(
-        r#"
-        SELECT
-            cr.id,
-            cr.category_id,
-            cr.priority AS rule_priority,
-            cr.rule_expression,
-            c.path,
-            c.name AS category_name,
-            c.category_type,
-            c.display_order AS category_priority
-        FROM category_rules cr
-        JOIN categories c ON cr.category_id = c.id
-        WHERE cr.user_id = $1 AND c.user_id = $1 AND cr.enabled = true
-        ORDER BY COALESCE(c.display_order, cr.priority, 999999), cr.category_id, cr.id
-        "#,
-    )
-    .bind(user_id)
-    .fetch_all(pool)
-    .await?;
-
-    let mut rules = Vec::new();
-    for (load_order, row) in rows.into_iter().enumerate() {
-        let category_type_text = row
-            .try_get::<Option<String>, _>("category_type")?
-            .unwrap_or_else(|| "3".to_string());
-        let Some(rule_type) = normalize_legacy_category_rule_type(category_type_text.as_str())
-        else {
-            continue;
-        };
-        let category_id: i64 = row.try_get("category_id")?;
-        let path = row
-            .try_get::<Option<String>, _>("path")?
-            .unwrap_or_default();
-        let category_name: String = row.try_get("category_name")?;
-        let (main_category, sub_category) = category_names_from_path(&path, &category_name);
-        if category_id <= 0 || main_category.trim().is_empty() || sub_category.trim().is_empty() {
-            continue;
-        }
-        let rule_expression: Value = row.try_get("rule_expression")?;
-        let category_priority = i64::from(row.try_get::<i32, _>("category_priority")?);
-        rules.push(serde_json::json!({
-            "id": row.try_get::<i64, _>("id")?,
-            "category_id": category_id,
-            "main": main_category.trim(),
-            "sub": sub_category.trim(),
-            "priority": category_priority,
-            "category_priority": category_priority,
-            "rule_priority": i64::from(row.try_get::<i32, _>("rule_priority")?),
-            "keywords": rule_expression_string(&rule_expression),
-            "type": rule_type,
-            "_load_order": load_order,
-        }));
-    }
-    Ok(rules)
 }
 
 pub async fn list_postgres_account_rules(
@@ -1298,7 +1102,7 @@ pub async fn create_postgres_account_rule(
     .bind(Value::Array(
         field_scope.into_iter().map(Value::String).collect(),
     ))
-    .bind(legacy_rule_expression_json(&rule_expression, regex_enabled))
+    .bind(rule_expression_json(&rule_expression, regex_enabled))
     .bind(regex_enabled)
     .bind(i64_to_i32(priority))
     .bind(enabled)
@@ -1373,15 +1177,13 @@ pub async fn update_postgres_account_rule(
             }
             "rule_expression" | "ruleExpression" => {
                 let rule_expression = required_postgres_rule_expression(Some(value))?;
-                rule_expression_json_value =
-                    legacy_rule_expression_json(&rule_expression, regex_enabled);
+                rule_expression_json_value = rule_expression_json(&rule_expression, regex_enabled);
                 changed = true;
             }
             "regex_enabled" | "regexEnabled" => {
                 regex_enabled = payload_bool_value(value)?;
                 let rule_expression = rule_expression_string(&rule_expression_json_value);
-                rule_expression_json_value =
-                    legacy_rule_expression_json(&rule_expression, regex_enabled);
+                rule_expression_json_value = rule_expression_json(&rule_expression, regex_enabled);
                 changed = true;
             }
             "enabled" => {
@@ -1501,74 +1303,6 @@ pub async fn reorder_postgres_account_rules(
     }
     transaction.commit().await?;
     Ok(true)
-}
-
-pub async fn migrate_postgres_account_aliases_to_rules(
-    pool: &PostgresPool,
-    user_id: i64,
-) -> DbResult<crate::taxonomy::account_rules::AccountRuleMigrationSummary> {
-    let rows = sqlx::query(
-        r#"
-        SELECT id, name, is_active, metadata
-        FROM accounts
-        WHERE user_id = $1
-        ORDER BY display_order ASC, id ASC
-        "#,
-    )
-    .bind(user_id)
-    .fetch_all(pool)
-    .await?;
-    let mut summary = crate::taxonomy::account_rules::AccountRuleMigrationSummary {
-        migrated: 0,
-        skipped: 0,
-    };
-    for row in rows {
-        let account_id: i64 = row.try_get("id")?;
-        let account_name: String = row.try_get("name")?;
-        let is_active: bool = row.try_get("is_active")?;
-        let metadata: Value = row.try_get("metadata")?;
-        let aliases = aliases_from_metadata(&metadata);
-        if !is_active {
-            summary.skipped += i64::try_from(aliases.len()).unwrap_or(i64::MAX);
-            continue;
-        }
-        for alias in aliases {
-            let normalized_alias = alias.trim().to_ascii_lowercase();
-            if normalized_alias.is_empty() {
-                summary.skipped += 1;
-                continue;
-            }
-            let source_key = format!("legacy_alias:{normalized_alias}");
-            if postgres_account_alias_rule_exists(pool, user_id, account_id, &source_key, &alias)
-                .await?
-            {
-                summary.skipped += 1;
-                continue;
-            }
-            let expression = format!("OR={{{}}}", escape_rule_expression_term(alias.trim()));
-            sqlx::query(
-                r#"
-                INSERT INTO account_rules (
-                    user_id, account_id, name, account_role_scope, transaction_type_scope,
-                    field_scope, rule_expression, regex_enabled, priority, enabled,
-                    source, source_key
-                )
-                VALUES ($1, $2, $3, 'any', 'all', $4, $5, false, 1000, true,
-                    'alias_migration', $6)
-                "#,
-            )
-            .bind(user_id)
-            .bind(account_id)
-            .bind(format!("migrated:{}/{}", account_name, alias.trim()))
-            .bind(json_array(DEFAULT_FIELD_SCOPES))
-            .bind(legacy_rule_expression_json(&expression, false))
-            .bind(source_key)
-            .execute(pool)
-            .await?;
-            summary.migrated += 1;
-        }
-    }
-    Ok(summary)
 }
 
 pub async fn test_postgres_account_rule_match(
@@ -2177,10 +1911,6 @@ fn account_from_postgres_row(row: PgRow) -> DbResult<AccountRecord> {
         metadata_value_or_default(&metadata, "comment", Value::String(String::new())),
     );
     account.insert(
-        "aliases".to_string(),
-        metadata_value_or_default(&metadata, "aliases", Value::Array(Vec::new())),
-    );
-    account.insert(
         "parent_id".to_string(),
         metadata_value_or_default(&metadata, "parent_id", Value::Number(Number::from(0))),
     );
@@ -2777,7 +2507,6 @@ fn account_metadata_from_payload(existing: Option<&Value>, payload: &Value) -> V
         "icon",
         "color",
         "comment",
-        "aliases",
         "parent_id",
         "initial_balance",
         "credit_card_statement_date",
@@ -2992,9 +2721,8 @@ fn payload_bool_value(value: &Value) -> DbResult<bool> {
 }
 
 fn required_postgres_i64(value: &Value, field: &str) -> DbResult<i64> {
-    int_value(Some(value)).ok_or_else(|| {
-        DbError::InvalidOperation(format!("{field} must be an integer-compatible value"))
-    })
+    int_value(Some(value))
+        .ok_or_else(|| DbError::InvalidOperation(format!("{field} must be an integer-like value")))
 }
 
 fn required_postgres_rule_expression(value: Option<&Value>) -> DbResult<String> {
@@ -3015,9 +2743,9 @@ fn required_postgres_rule_expression(value: Option<&Value>) -> DbResult<String> 
     }
 }
 
-fn legacy_rule_expression_json(expression: &str, regex_enabled: bool) -> Value {
+fn rule_expression_json(expression: &str, regex_enabled: bool) -> Value {
     serde_json::json!({
-        "legacy_expression": expression,
+        "expression": expression,
         "regex_enabled": regex_enabled,
     })
 }
@@ -3026,7 +2754,7 @@ fn rule_expression_string(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
         Value::Object(object) => object
-            .get("legacy_expression")
+            .get("expression")
             .or_else(|| object.get("rule_expression"))
             .and_then(Value::as_str)
             .map(ToOwned::to_owned)
@@ -3122,14 +2850,6 @@ async fn postgres_account_belongs_to_user(
     Ok(exists)
 }
 
-fn normalize_legacy_category_rule_type(raw_type: &str) -> Option<i64> {
-    match raw_type.trim().parse::<i64>().ok()? {
-        1 => Some(3),
-        2..=5 => Some(raw_type.trim().parse::<i64>().ok()?),
-        _ => None,
-    }
-}
-
 async fn count_postgres_account_rules(
     pool: &PostgresPool,
     rule_ids: &BTreeSet<i64>,
@@ -3172,88 +2892,6 @@ fn account_rule_candidate_from_record(record: AccountRuleRecord) -> DbResult<Acc
         enabled: record.get("enabled").map(value_truthy).unwrap_or(true),
         priority: int_value(record.get("priority")).unwrap_or(100),
     })
-}
-
-fn aliases_from_metadata(metadata: &Value) -> Vec<String> {
-    match metadata.get("aliases") {
-        Some(Value::Array(values)) => values
-            .iter()
-            .flat_map(|value| match value {
-                Value::String(text) => parse_aliases_text(text),
-                Value::Number(number) => vec![number.to_string()],
-                Value::Bool(flag) => vec![flag.to_string()],
-                Value::Null | Value::Array(_) | Value::Object(_) => Vec::new(),
-            })
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .collect(),
-        Some(Value::String(text)) => parse_aliases_text(text),
-        Some(Value::Number(number)) => vec![number.to_string()],
-        Some(Value::Bool(flag)) => vec![flag.to_string()],
-        Some(Value::Null | Value::Object(_)) | None => Vec::new(),
-    }
-}
-
-async fn postgres_account_alias_rule_exists(
-    pool: &PostgresPool,
-    user_id: i64,
-    account_id: i64,
-    source_key: &str,
-    alias: &str,
-) -> DbResult<bool> {
-    if sqlx::query_scalar::<_, bool>(
-        r#"
-        SELECT EXISTS(
-            SELECT 1 FROM account_rules
-            WHERE user_id = $1
-              AND account_id = $2
-              AND source IN ('alias_migration', 'legacy_account_aliases')
-              AND source_key = $3
-        )
-        "#,
-    )
-    .bind(user_id)
-    .bind(account_id)
-    .bind(source_key)
-    .fetch_one(pool)
-    .await?
-    {
-        return Ok(true);
-    }
-
-    let rows = sqlx::query(
-        r#"
-        SELECT rule_expression
-        FROM account_rules
-        WHERE user_id = $1
-          AND account_id = $2
-          AND source IN ('alias_migration', 'legacy_account_aliases')
-        "#,
-    )
-    .bind(user_id)
-    .bind(account_id)
-    .fetch_all(pool)
-    .await?;
-    let normalized_alias = alias.trim().to_ascii_lowercase();
-    for row in rows {
-        let expression: Value = row.try_get("rule_expression")?;
-        if normalize_rule_expression_alias(&rule_expression_string(&expression)) == normalized_alias
-        {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-fn normalize_rule_expression_alias(expression: &str) -> String {
-    expression
-        .trim()
-        .strip_prefix("OR={")
-        .and_then(|value| value.strip_suffix('}'))
-        .unwrap_or(expression)
-        .replace('\\', "")
-        .trim()
-        .to_ascii_lowercase()
 }
 
 fn rounded_minor_units(value: &Value) -> i64 {
@@ -3325,7 +2963,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn category_names_from_postgres_path_preserve_legacy_main_and_sub_fields() {
+    fn category_names_from_postgres_path_preserve_current_main_and_sub_fields() {
         assert_eq!(
             category_names_from_path("餐饮/午餐", "午餐"),
             ("餐饮".to_string(), "午餐".to_string())
@@ -3341,7 +2979,7 @@ mod tests {
     }
 
     #[test]
-    fn metadata_bool_accepts_legacy_json_encodings() {
+    fn metadata_bool_accepts_current_json_encodings() {
         assert_eq!(
             metadata_bool(&serde_json::json!({"hidden": true}), "hidden"),
             Some(true)
@@ -3373,7 +3011,7 @@ mod tests {
     }
 
     #[test]
-    fn postgres_rule_helpers_preserve_legacy_expression_and_alias_edges() {
+    fn postgres_rule_helpers_normalize_current_expression_payloads() {
         assert_eq!(
             rule_expression_string(&serde_json::json!({
                 "operator": "contains_any",
@@ -3383,7 +3021,7 @@ mod tests {
         );
         assert_eq!(
             rule_expression_string(&serde_json::json!({
-                "legacy_expression": "OR={午餐}",
+                "expression": "OR={午餐}",
                 "regex_enabled": "true"
             })),
             "OR={午餐}"
@@ -3403,15 +3041,5 @@ mod tests {
             field_scope_json_array(&serde_json::json!("parser,payment_method")),
             serde_json::json!(["parser", "payment_method"])
         );
-        assert_eq!(
-            aliases_from_metadata(&serde_json::json!({
-                "aliases": ["主卡,工资", 123, true, null, {"bad": true}]
-            })),
-            vec!["主卡", "工资", "123", "true"]
-        );
-        assert_eq!(normalize_rule_expression_alias(r" OR={\子卡} "), "子卡");
-        assert_eq!(normalize_legacy_category_rule_type("1"), Some(3));
-        assert_eq!(normalize_legacy_category_rule_type("5"), Some(5));
-        assert_eq!(normalize_legacy_category_rule_type("9"), None);
     }
 }

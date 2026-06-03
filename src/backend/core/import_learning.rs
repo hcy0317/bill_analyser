@@ -1,6 +1,6 @@
 // 中文导读：核心业务合同层，负责把金额、时间、分类、导入、匹配、预算、统计等规则从 HTTP/DB 细节中隔离。
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
-// 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
+// 不变式：金额单位、用户可见类型和API payload 在进入或离开本层时必须显式转换。
 
 use std::collections::BTreeMap;
 
@@ -658,7 +658,7 @@ pub fn normalize_llm_preview_review_decision(decision: &str) -> Option<&'static 
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn should_restore_llm_previous_preview(
+pub fn should_revert_llm_preview_application(
     decision: &str,
     previous_preview_snapshot: Option<&LlmPreviewSnapshot>,
     applied_preview_snapshot: Option<&LlmPreviewSnapshot>,
@@ -739,7 +739,7 @@ pub fn learning_center_page_response(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn legacy_learning_rules_page_response(
+pub fn learning_rules_page_response(
     result: Vec<Value>,
     total_count: i64,
     page: i64,
@@ -815,7 +815,7 @@ pub fn parse_learning_suggestion_ids(value: Option<&Value>) -> Result<Vec<i64>, 
     let mut seen = BTreeMap::new();
     let mut result = Vec::new();
     for value in values {
-        let suggestion_id = coerce_python_int(value)
+        let suggestion_id = coerce_json_int(value)
             .map_err(|message| format!("Invalid suggestionIds: {message}"))?;
         if seen.insert(suggestion_id, ()).is_none() {
             result.push(suggestion_id);
@@ -972,7 +972,7 @@ fn value_to_i64(value: &Value) -> i64 {
     }
 }
 
-fn coerce_python_int(value: &Value) -> Result<i64, String> {
+fn coerce_json_int(value: &Value) -> Result<i64, String> {
     match value {
         Value::Number(number) => number
             .as_i64()

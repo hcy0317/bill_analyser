@@ -6,7 +6,7 @@
 
 // 中文导读：核心业务合同层，负责把金额、时间、分类、导入、匹配、预算、统计等规则从 HTTP/DB 细节中隔离。
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
-// 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
+// 不变式：金额单位、用户可见类型和API payload 在进入或离开本层时必须显式转换。
 
 pub mod account_rules;
 pub mod adapters;
@@ -20,16 +20,16 @@ pub mod import_learning_lifecycle;
 pub mod import_pipeline;
 pub mod import_pipeline_learning;
 pub mod matching;
-pub mod migration_governance;
 pub mod ops;
 pub mod primitives;
 pub mod response;
 pub mod runtime;
+pub mod runtime_governance;
 pub mod smart_dedup;
 pub mod statistics;
 pub mod weaviate_derived;
 
-pub use adapters::{account, api, category, transaction};
+pub use adapters::{api, category, transaction};
 pub use ai_ocr_llm::{
     build_llm_analysis_response, build_llm_candidate_list_response,
     build_llm_candidate_reject_response, build_llm_classification_prompt,
@@ -61,12 +61,12 @@ pub use import_learning::{
     build_semantic_label, build_semantic_label_counts, composite_hash_from_features,
     evaluate_learning_policy, import_learning_model_version, iter_feature_tokens,
     learning_batch_accept_response, learning_center_page_response, learning_data_response,
-    learning_error_response, legacy_learning_rules_page_response, llm_error_response,
+    learning_error_response, learning_rules_page_response, llm_error_response,
     llm_memory_events_success, normalize_import_learning_suggestion_id,
     normalize_import_learning_text, normalize_learning_text, normalize_llm_preview_review_decision,
     parse_composite_match_value, parse_learning_suggestion_ids, parse_preview_ids,
     parse_route_label, parse_semantic_label, prepare_training_samples,
-    should_restore_llm_previous_preview, ImportLearningDatasetSnapshotPayload,
+    should_revert_llm_preview_application, ImportLearningDatasetSnapshotPayload,
     ImportLearningModelRegistryPayload, ImportLearningPrediction, ImportLearningTrainingSample,
     LearningPolicyDecision, LearningRouteResponse, LlmMemoryEventContract, LlmPreviewApplyPlan,
     LlmPreviewSnapshot, LlmPreviewSuggestion, RouteLabelParts, SemanticLabelParts,
@@ -134,39 +134,26 @@ pub use matching::{
     ManualPairRequest, MatchingCandidateDescriptor, RecurringPattern, CANDIDATE_KIND_ORDER,
     DEFAULT_INVESTMENT_EXCLUDE_KEYWORDS, DEFAULT_INVESTMENT_PLATFORM_KEYWORDS,
     DEFAULT_INVESTMENT_PRODUCT_KEYWORDS, EXPLICIT_INVESTMENT_TYPES, INVESTMENT_PAIR_LOOKBACK_DAYS,
-    INVESTMENT_PAIR_TYPE, LEGACY_SUMMARY_KIND_ORDER, MANUAL_PAIR_SOURCE, MAX_RECURRING_GAP_RATIO,
+    INVESTMENT_PAIR_TYPE, MANUAL_PAIR_SOURCE, MAX_RECURRING_GAP_RATIO,
     MAX_RECURRING_INTERVAL_VARIATION, MIN_RECURRING_OCCURRENCES, MIN_RECURRING_PATTERN_CONFIDENCE,
-    TRANSFER_AMOUNT_TOLERANCE, TRANSFER_PAIR_LOOKBACK_DAYS, TRANSFER_PAIR_TYPE,
-};
-pub use migration_governance::{
-    bills_crud_db_writer_policy, budgets_crud_db_writer_policy, can_delete_python_import_paths,
-    database_schema_db_writer_policy, domain_governance_policies, endpoints_by_owner,
-    expanded_route_manifest, find_domain_policy, find_endpoint_ownership,
-    governance_manifest_snapshot, import_db_writer_policy, import_deletion_blocked_endpoints,
-    import_deletion_gates, manifest_states, migration_state_machine, missing_import_deletion_gates,
-    response_envelope_policies, response_envelope_policy, routes_by_state,
-    rust_http_shell_ownership_matrix, DbWriteInvariant, DbWriterMode, DbWriterPolicy,
-    DecisionRequired, DomainGovernancePolicy, EndpointOwnership, ExpandedRouteManifestEntry,
-    GovernanceManifestSnapshot, ImportDeletionEvidence, ImportDeletionGate, MigrationBlockedStatus,
-    MigrationState, ResponseEnvelopeFamily, ResponseEnvelopePolicy, RouteHandlerId,
+    SUMMARY_KIND_ORDER, TRANSFER_AMOUNT_TOLERANCE, TRANSFER_PAIR_LOOKBACK_DAYS, TRANSFER_PAIR_TYPE,
 };
 pub use ops::{
     backup_archive_summary_from_entries, backup_encryption_secret_configured,
-    backup_restore_verify_response, build_backup_file_info, build_cloud_backup_object_key,
-    build_sync_config_contract, build_user_data_audit_contract, derive_backup_fernet_key,
-    encryption_status_response, invalid_backup_archive_summary, is_allowed_backup_filename,
-    is_safe_backup_archive_member, normalize_backup_job_payload, normalize_report_export_format,
-    normalize_sqlcipher_status, normalize_sync_provider, normalize_user_data_statistics,
+    build_backup_file_info, build_cloud_backup_object_key, build_sync_config_contract,
+    build_user_data_audit_contract, derive_backup_fernet_key, invalid_backup_archive_summary,
+    is_allowed_backup_filename, is_safe_backup_archive_member, normalize_backup_job_payload,
+    normalize_report_export_format, normalize_sync_provider, normalize_user_data_statistics,
     parse_comma_separated_ints, parse_export_timestamp_millis, plan_backup_cleanup,
     resolve_backup_filename, resolve_sensitive_auth_mode, secure_backup_filename,
     secure_report_filename, user_data_statistics_response, BackupArchiveSummary,
     BackupCleanupDecision, BackupCleanupPlan, BackupFileCandidate, BackupFileInfoContract,
     BackupFileInfoInput, BackupFilenameResolution, BackupJobContract, BackupRecordContract,
-    OpsContractError, ReportExportContract, SensitiveAuthMode, SqlcipherStatusContract,
-    SyncConfigContract, UserDataAuditContract, UserDataClearKind, UserDataStatisticsContract,
+    OpsContractError, ReportExportContract, SensitiveAuthMode, SyncConfigContract,
+    UserDataAuditContract, UserDataClearKind, UserDataStatisticsContract,
     BACKUP_DEFAULT_RETENTION_COUNT, BACKUP_DEFAULT_RETENTION_DAYS, BACKUP_ENCRYPTED_SUFFIX,
-    BACKUP_PREFIX, BACKUP_ZIP_SUFFIX, DEFAULT_BACKUP_SYNC_PREFIX, DEFAULT_SQLCIPHER_KDF_ITER,
-    DEFAULT_SQLCIPHER_PAGE_SIZE, SUPPORTED_SYNC_PROVIDERS, VALID_REPORT_EXPORT_FORMATS,
+    BACKUP_PREFIX, BACKUP_ZIP_SUFFIX, DEFAULT_BACKUP_SYNC_PREFIX, SUPPORTED_SYNC_PROVIDERS,
+    VALID_REPORT_EXPORT_FORMATS,
 };
 pub use primitives::{
     normalize_bill_date_text, parse_bill_datetime, AuthContext, BillDateTime, CurrencyCode,
@@ -176,6 +163,18 @@ pub use primitives::{
 pub use response::{ApiError, ApiResponse};
 pub use runtime::{
     runtime_health, runtime_identity_json, RuntimeHealth, RuntimeIdentity, RuntimeStatus,
+};
+pub use runtime_governance::{
+    bills_crud_db_writer_policy, budgets_crud_db_writer_policy, can_delete_retired_import_paths,
+    database_schema_db_writer_policy, domain_governance_policies, endpoints_by_owner,
+    expanded_route_manifest, find_domain_policy, find_endpoint_ownership,
+    governance_manifest_snapshot, import_db_writer_policy, import_deletion_blocked_endpoints,
+    import_deletion_gates, manifest_states, missing_import_deletion_gates,
+    response_envelope_policies, response_envelope_policy, routes_by_state, runtime_state_machine,
+    rust_http_shell_ownership_matrix, DbWriteInvariant, DbWriterMode, DbWriterPolicy,
+    DecisionRequired, DomainGovernancePolicy, EndpointOwnership, ExpandedRouteManifestEntry,
+    GovernanceManifestSnapshot, ImportDeletionEvidence, ImportDeletionGate, ResponseEnvelopeFamily,
+    ResponseEnvelopePolicy, RouteHandlerId, RuntimeBlockedStatus, RuntimeState,
 };
 pub use smart_dedup::{
     build_transfer_source_snapshot, find_cross_batch_transfer_pairs, find_database_duplicates,

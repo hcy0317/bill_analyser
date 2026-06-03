@@ -33,7 +33,7 @@ const SAMPLE_RESPONSE: BudgetInfoResponse = {
     spentAmount: 90000,
     remainingAmount: 30000,
     executionRate: 75,
-    categoryIcon: 'mdi-food',
+    categoryIcon: 'las la-utensils',
     categoryColor: '#5470c6'
 };
 
@@ -50,7 +50,7 @@ describe('Budget model', () => {
         expect(budget.remainingAmountInYuan).toBe(300);
         expect(budget.isOverBudget).toBe(false);
         expect(budget.alertTriggered).toBe(true);
-        expect(budget.categoryIcon).toBe('mdi-food');
+        expect(budget.categoryIcon).toBe('las la-utensils');
         expect(budget.categoryColor).toBe('#5470c6');
     });
 

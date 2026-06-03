@@ -1,10 +1,9 @@
 use bill_analyser_core::ops::{
     backup_archive_summary_from_entries, backup_encryption_secret_configured,
-    backup_restore_verify_response, build_backup_file_info, build_cloud_backup_object_key,
-    build_sync_config_contract, build_user_data_audit_contract, derive_backup_fernet_key,
-    encryption_status_response, invalid_backup_archive_summary, is_safe_backup_archive_member,
-    normalize_backup_job_payload, normalize_backup_sync_prefix, normalize_report_export_format,
-    normalize_sqlcipher_status, normalize_sync_provider, normalize_user_data_statistics,
+    build_backup_file_info, build_cloud_backup_object_key, build_sync_config_contract,
+    build_user_data_audit_contract, derive_backup_fernet_key, invalid_backup_archive_summary,
+    is_safe_backup_archive_member, normalize_backup_job_payload, normalize_backup_sync_prefix,
+    normalize_report_export_format, normalize_sync_provider, normalize_user_data_statistics,
     parse_comma_separated_ints, plan_backup_cleanup, resolve_backup_filename,
     resolve_sensitive_auth_mode, secure_backup_filename, secure_report_filename,
     user_data_statistics_response, BackupFileCandidate, BackupFileInfoInput, BackupRecordContract,
@@ -14,7 +13,7 @@ use bill_analyser_core::ops::{
 use serde_json::json;
 
 #[test]
-fn backup_filename_archive_and_file_info_contracts_preserve_restore_safety_shape() {
+fn backup_filename_archive_and_file_info_contracts_preserve_archive_safety_shape() {
     assert_eq!(
         secure_backup_filename("..\\backup_20260505_120000.zip.enc"),
         "backup_20260505_120000.zip.enc"
@@ -39,7 +38,7 @@ fn backup_filename_archive_and_file_info_contracts_preserve_restore_safety_shape
     assert!(encrypted.encrypted);
 
     let summary = backup_archive_summary_from_entries([
-        "data/bills.db",
+        "data/postgres-export.json",
         "config/server_config.json",
         "data/config/settings.json",
     ]);
@@ -47,37 +46,32 @@ fn backup_filename_archive_and_file_info_contracts_preserve_restore_safety_shape
     assert!(summary.contains_data_dir);
     assert_eq!(summary.entry_count, 3);
     assert_eq!(summary.top_level_entries, vec!["config", "data"]);
-    assert!(summary.ready_to_restore);
 
     let flat_summary = backup_archive_summary_from_entries(["config/server_config.json"]);
     assert!(flat_summary.valid_zip);
     assert!(!flat_summary.contains_data_dir);
-    assert!(!flat_summary.ready_to_restore);
 
     let data_dir_only_summary = backup_archive_summary_from_entries(["data/"]);
     assert!(data_dir_only_summary.valid_zip);
     assert!(data_dir_only_summary.contains_data_dir);
-    assert!(!data_dir_only_summary.ready_to_restore);
 
     let empty_summary = backup_archive_summary_from_entries(Vec::<&str>::new());
     assert!(empty_summary.valid_zip);
     assert_eq!(empty_summary.entry_count, 0);
-    assert!(!empty_summary.ready_to_restore);
 
     let invalid = invalid_backup_archive_summary("not a zip");
     assert!(!invalid.valid_zip);
-    assert!(!invalid.ready_to_restore);
     assert_eq!(invalid.error, "not a zip");
 
-    assert!(is_safe_backup_archive_member("data/bills.db"));
+    assert!(is_safe_backup_archive_member("data/postgres-export.json"));
     assert!(!is_safe_backup_archive_member("../escape.txt"));
     assert!(!is_safe_backup_archive_member("data/../escape.txt"));
     assert!(!is_safe_backup_archive_member("C:/escape.txt"));
     assert!(!is_safe_backup_archive_member("/absolute/escape.txt"));
 
-    let unsafe_summary = backup_archive_summary_from_entries(["data/bills.db", "..\\escape.txt"]);
+    let unsafe_summary =
+        backup_archive_summary_from_entries(["data/postgres-export.json", "..\\escape.txt"]);
     assert!(!unsafe_summary.valid_zip);
-    assert!(!unsafe_summary.ready_to_restore);
     assert!(unsafe_summary.error.contains("备份文件包含不安全路径"));
 
     let info = build_backup_file_info(BackupFileInfoInput {
@@ -93,10 +87,6 @@ fn backup_filename_archive_and_file_info_contracts_preserve_restore_safety_shape
     assert!(info.valid_zip);
     assert!(info.metadata_checksum_matched);
     assert_eq!(info.error, "");
-    assert_eq!(
-        backup_restore_verify_response(&info)["success"],
-        json!(true)
-    );
 
     let empty_info = build_backup_file_info(BackupFileInfoInput {
         filename: "backup_empty.zip".to_string(),
@@ -107,10 +97,8 @@ fn backup_filename_archive_and_file_info_contracts_preserve_restore_safety_shape
         metadata_checksum: Some("sha256-empty".to_string()),
         archive_summary: empty_summary,
     });
-    assert_eq!(
-        backup_restore_verify_response(&empty_info)["success"],
-        json!(false)
-    );
+    assert!(empty_info.valid_zip);
+    assert!(!empty_info.contains_data_dir);
 }
 
 #[test]
@@ -206,7 +194,7 @@ fn backup_cleanup_plan_matches_record_first_retention_semantics() {
 }
 
 #[test]
-fn backup_job_encryption_and_sqlcipher_contracts_match_python_defaults() {
+fn backup_job_and_file_encryption_contracts_match_current_defaults() {
     let job = normalize_backup_job_payload(&json!({
         "id": "7",
         "job_type": " daily ",
@@ -299,18 +287,6 @@ fn backup_job_encryption_and_sqlcipher_contracts_match_python_defaults() {
         Some("K7gNU3sdo-OL0wNhqoVWhr3g6s1xYv72ol_pe_Unols=")
     );
     assert_eq!(derive_backup_fernet_key("   "), None);
-
-    let encrypted = normalize_sqlcipher_status(Some("true"), Some("db-key"), true);
-    assert!(encrypted.encrypted);
-    assert!(encrypted.sqlcipher_available);
-    assert_eq!(encrypted.kdf_iter, 256_000);
-    assert_eq!(encrypted.cipher_page_size, 4096);
-    assert_eq!(
-        encryption_status_response(&encrypted)["data"]["encrypted"],
-        true
-    );
-    assert!(!normalize_sqlcipher_status(Some("1"), Some("db-key"), false).encrypted);
-    assert!(!normalize_sqlcipher_status(Some("yes"), Some(""), true).encrypted);
 }
 
 #[test]

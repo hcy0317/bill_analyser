@@ -11,15 +11,15 @@ describe('rule center navigation mapping', () => {
         expect(normalizeRuleCenterSelection({ domain: 'duplicate', tab: 'overview' })).toEqual({
             domain: 'duplicate',
             tab: 'overview',
-            legacyRuleTab: 'rules',
+            ruleConfigTab: 'rules',
             shouldRewriteQuery: false,
         });
 
         expect(normalizeRuleCenterSelection({ domain: 'investment', tab: 'rules' })).toEqual({
             domain: 'transfer',
-            tab: 'rules',
-            legacyRuleTab: 'rules',
-            shouldRewriteQuery: true,
+            tab: 'overview',
+            ruleConfigTab: 'rules',
+            shouldRewriteQuery: false,
         });
 
         expect(normalizeRuleCenterSelection({ domain: 'llm', tab: 'config' })).toMatchObject({
@@ -43,102 +43,21 @@ describe('rule center navigation mapping', () => {
         expect(normalizeRuleCenterSelection({ domain: 'transfer', tab: 'accounts' })).toEqual({
             domain: 'transfer',
             tab: 'rules',
-            legacyRuleTab: 'accounts',
+            ruleConfigTab: 'accounts',
             shouldRewriteQuery: false,
         });
 
         expect(normalizeRuleCenterSelection({})).toEqual({
             domain: 'transfer',
             tab: 'overview',
-            legacyRuleTab: 'rules',
+            ruleConfigTab: 'rules',
             shouldRewriteQuery: false,
         });
     });
 
-    test('maps legacy view and pairType params to canonical Rule Center params', () => {
-        expect(normalizeRuleCenterSelection({ pairType: 'transfer' })).toMatchObject({
-            domain: 'transfer',
-            tab: 'overview',
-            shouldRewriteQuery: true,
-        });
-
-        expect(normalizeRuleCenterSelection({ pairType: 'duplicate' })).toMatchObject({
-            domain: 'duplicate',
-            tab: 'overview',
-            shouldRewriteQuery: true,
-        });
-
-        expect(normalizeRuleCenterSelection({ pairType: 'investment' })).toMatchObject({
-            domain: 'transfer',
-            tab: 'rules',
-            shouldRewriteQuery: true,
-        });
-
-        expect(normalizeRuleCenterSelection({ view: 'investment-settings' })).toMatchObject({
-            domain: 'transfer',
-            tab: 'rules',
-            shouldRewriteQuery: true,
-        });
-
-        expect(normalizeRuleCenterSelection({ view: 'learning', tab: 'llm' })).toMatchObject({
-            domain: 'llm',
-            tab: 'overview',
-            shouldRewriteQuery: true,
-        });
-
-        expect(normalizeRuleCenterSelection({ view: 'learning', tab: 'ocr-config' })).toMatchObject({
-            domain: 'llm',
-            tab: 'ocr-config',
-            legacyRuleTab: 'learning',
-            shouldRewriteQuery: true,
-        });
-
-        expect(normalizeRuleCenterSelection({ view: 'learning' })).toMatchObject({
-            domain: 'learning',
-            tab: 'overview',
-            legacyRuleTab: 'learning',
-            shouldRewriteQuery: true,
-        });
-
-        expect(normalizeRuleCenterSelection({ view: 'rules', tab: 'recurring' })).toMatchObject({
-            domain: 'transfer',
-            tab: 'rules',
-            legacyRuleTab: 'recurring',
-            shouldRewriteQuery: true,
-        });
-
-        expect(normalizeRuleCenterSelection({ view: 'rules', tab: 'accounts' })).toMatchObject({
-            domain: 'transfer',
-            tab: 'rules',
-            legacyRuleTab: 'accounts',
-            shouldRewriteQuery: true,
-        });
-
-        expect(normalizeRuleCenterSelection({ view: 'rule-center' })).toMatchObject({
-            domain: 'transfer',
-            tab: 'rules',
-            legacyRuleTab: 'rules',
-            shouldRewriteQuery: true,
-        });
-
-        expect(normalizeRuleCenterSelection({ view: 'rule-center', tab: 'investment' })).toMatchObject({
-            domain: 'transfer',
-            tab: 'rules',
-            legacyRuleTab: 'rules',
-            shouldRewriteQuery: true,
-        });
-
-        expect(normalizeRuleCenterSelection({ view: 'rule-center', tab: 'learning' })).toMatchObject({
-            domain: 'learning',
-            tab: 'rules',
-            legacyRuleTab: 'learning',
-            shouldRewriteQuery: true,
-        });
-    });
-
-    test('builds clean canonical queries without spreading legacy params', () => {
+    test('builds clean canonical queries', () => {
         expect(buildRuleCenterQuery(
-            { view: 'rules', pairType: 'investment', foo: 'keep', tab: 'recurring' },
+            { foo: 'keep', tab: 'recurring' },
             'llm',
             'config'
         )).toEqual({
@@ -172,7 +91,6 @@ describe('rule center UX source guards', () => {
         const filterSource = readSource('src/views/desktop/pairingcenter/components/ruleCenterFilters.ts');
 
         expect(source).toContain('v-if="showTabSwitcher"');
-        expect(source).toContain(':open-delay="1500"');
         expect(source).toContain("tt('Rows per page')");
         expect(source).toContain("tt('Rule range'");
         expect(source).toContain('const ruleTableColumnCount = 7');
@@ -216,9 +134,8 @@ describe('rule center UX source guards', () => {
         expect(accountSource).toContain('services.createAccountRule');
         expect(accountSource).toContain('services.reorderAccountRules');
         expect(accountSource).toContain('services.testAccountRule');
-        expect(accountSource).toContain('services.migrateAccountAliases');
         expect(listSource).toContain("value: 'account-recognition'");
-        expect(listSource).toContain("legacyRuleTab: 'accounts'");
+        expect(listSource).toContain("ruleConfigTab: 'accounts'");
         expect(listSource).toContain('<AccountRulePanel');
     });
 
@@ -231,13 +148,13 @@ describe('rule center UX source guards', () => {
         expect(source).not.toContain("tt('Investment Recognition Settings')");
     });
 
-    test('legacy rule center routes preserve investment settings deep links for normalization', () => {
+    test('rule center has no alternate redirect routes', () => {
         const source = readSource('src/router/desktop.ts');
 
-        expect(source).toContain('function buildLegacyRulesCenterRedirect');
-        expect(source).toContain("query['view'] = 'rule-center'");
-        expect(source).toContain("path: '/rules/center'");
-        expect(source).toContain('redirect: route => buildLegacyRulesCenterRedirect(route)');
+        expect(source).not.toContain("path: '/rules/center'");
+        expect(source).not.toContain("path: '/learning/center'");
+        expect(source).not.toContain("route.query['pairType']");
+        expect(source).not.toContain("route.query['view']");
     });
 
     test('transaction category header names investment groups explicitly', () => {

@@ -13,7 +13,7 @@ Shared repository rules live in [AGENTS.md](AGENTS.md); keep this file Claude-sp
 
 - Backend: Rust Axum `bill_http_server` is the sole HTTP runtime entry
 - Frontend: Vue 3, TypeScript, Vite
-- Database: SQLite in WAL mode
+- Database: PostgreSQL authority with required Weaviate vector runtime
 - Core domains: bill import, categorization, budgeting, statistics, accounts, tags
 
 ## Claude Code entrypoints

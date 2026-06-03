@@ -1,6 +1,6 @@
 // 中文导读：核心业务合同层，负责把金额、时间、分类、导入、匹配、预算、统计等规则从 HTTP/DB 细节中隔离。
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
-// 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
+// 不变式：金额单位、用户可见类型和API payload 在进入或离开本层时必须显式转换。
 
 use crate::{
     error::{ErrorCode, RuntimeError},
@@ -199,14 +199,6 @@ pub struct BatchUpdateResponse {
     pub updated_count: usize,
     pub failed_count: usize,
     pub failed_ids: Vec<i64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BackendBillUpdateSnapshot {
-    pub transaction_type: String,
-    pub source_account_id: Option<i64>,
-    pub destination_account_id: Option<i64>,
-    pub destination_amount: Option<Money>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -456,75 +448,6 @@ pub fn apply_manual_create_defaults(
     Ok(())
 }
 
-pub fn normalize_bill_create_aliases(backend_data: &mut Map<String, Value>) {
-    if !backend_data.contains_key("payment_method") {
-        if let Some(channel) = backend_data.remove("channel").filter(|value| {
-            !value_string(Some(value))
-                .unwrap_or_default()
-                .trim()
-                .is_empty()
-        }) {
-            backend_data.insert("payment_method".to_string(), channel);
-        }
-    }
-    if !backend_data.contains_key("main_category") {
-        if let Some(category) = backend_data.remove("category").filter(|value| {
-            !value_string(Some(value))
-                .unwrap_or_default()
-                .trim()
-                .is_empty()
-        }) {
-            backend_data.insert("main_category".to_string(), category);
-        }
-    }
-}
-
-pub fn apply_legacy_modify_preserved_fields(
-    backend_data: &mut Map<String, Value>,
-    frontend_data: &Value,
-    old_bill: &BackendBillUpdateSnapshot,
-) {
-    if frontend_data.get("remark").is_some() && frontend_data.get("type").is_none() {
-        let mut simple_update = Map::new();
-        if let Some(remark) = value_string(frontend_data.get("remark")) {
-            simple_update.insert("description".to_string(), Value::String(remark));
-        }
-        if let Some(comment) = value_string(frontend_data.get("comment")) {
-            simple_update.insert("description".to_string(), Value::String(comment));
-        }
-        simple_update.insert(
-            "type".to_string(),
-            Value::String(old_bill.transaction_type.clone()),
-        );
-        *backend_data = simple_update;
-    }
-
-    if non_empty_map_string(backend_data, "type").is_none() {
-        backend_data.insert(
-            "type".to_string(),
-            Value::String(old_bill.transaction_type.clone()),
-        );
-    }
-    if !backend_data.contains_key("source_account_id") {
-        backend_data.insert(
-            "source_account_id".to_string(),
-            Value::Number(Number::from(old_bill.source_account_id.unwrap_or(0))),
-        );
-    }
-    if !backend_data.contains_key("destination_account_id") {
-        backend_data.insert(
-            "destination_account_id".to_string(),
-            Value::Number(Number::from(old_bill.destination_account_id.unwrap_or(0))),
-        );
-    }
-    if !backend_data.contains_key("destination_amount") {
-        backend_data.insert(
-            "destination_amount".to_string(),
-            money_to_yuan_json(old_bill.destination_amount.unwrap_or(Money::ZERO)),
-        );
-    }
-}
-
 pub fn apply_create_category_contract(
     backend_data: &mut Map<String, Value>,
     resolved_category: Option<(&str, &str)>,
@@ -565,7 +488,7 @@ pub fn batch_create_transaction_items(
     let transactions = match payload {
         Value::Object(object) => object
             .get("transactions")
-            .filter(|value| python_json_truthy(value))
+            .filter(|value| json_value_is_truthy(value))
             .or_else(|| object.get("bills")),
         Value::Array(_) => Some(payload),
         _ => None,
@@ -711,21 +634,6 @@ pub fn delete_bill_success_payload() -> Value {
         "message".to_string(),
         Value::String("Bill deleted successfully".to_string()),
     );
-    Value::Object(payload)
-}
-
-pub fn legacy_delete_bill_success_payload() -> Value {
-    let mut payload = Map::new();
-    payload.insert("success".to_string(), Value::Bool(true));
-    Value::Object(payload)
-}
-
-pub fn legacy_modify_bill_success_payload(bill_id: impl ToString) -> Value {
-    let mut result = Map::new();
-    result.insert("id".to_string(), Value::String(bill_id.to_string()));
-    let mut payload = Map::new();
-    payload.insert("success".to_string(), Value::Bool(true));
-    payload.insert("result".to_string(), Value::Object(result));
     Value::Object(payload)
 }
 
@@ -1486,7 +1394,7 @@ fn frontend_amount_cents(raw_value: Option<&Value>) -> i64 {
     value_to_i64(raw_value, 0).unwrap_or(0)
 }
 
-fn python_json_truthy(value: &Value) -> bool {
+fn json_value_is_truthy(value: &Value) -> bool {
     match value {
         Value::Null => false,
         Value::Bool(value) => *value,

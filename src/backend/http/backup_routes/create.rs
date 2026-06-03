@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -53,7 +53,6 @@ pub(super) fn create_backup_response(
     ensure_sensitive_backup_auth(&auth_runtime, state, headers, None)?;
     let backup_dir = backup_dir(&state.config)?;
     let data_dir = data_dir(&state.config);
-    let sqlite_db_path = state.config.sqlite_db_path.as_deref().map(PathBuf::from);
 
     let user_id = auth_runtime.user_id;
     drop(auth_runtime);
@@ -61,7 +60,6 @@ pub(super) fn create_backup_response(
     let result = create_backup_file(
         &data_dir,
         &backup_dir,
-        sqlite_db_path.as_deref(),
         state.config.backup_encryption_key.as_deref(),
     );
     let auth_runtime = authenticated_backup_runtime(state, headers)?;
@@ -114,9 +112,9 @@ pub(super) fn create_backup_response(
                 Box::new(error_response(error.status, error.message))
             })?;
 
-    if !(backup_info.valid_zip && backup_info.ready_to_restore) {
+    if !backup_info.valid_zip {
         let error_message = if backup_info.error.is_empty() {
-            "backup archive is not ready to restore".to_string()
+            "backup archive is invalid".to_string()
         } else {
             backup_info.error.clone()
         };

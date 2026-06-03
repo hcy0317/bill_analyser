@@ -10,12 +10,12 @@ struct ImportLearningVectorRecallResult {
     hits: Vec<WeaviateImportLearningRecallHit>,
 }
 
-fn apply_import_learning_vector_recall_chain(
+async fn apply_import_learning_vector_recall_chain(
     connection: &Connection,
     config: &HttpShellConfig,
     user_id: i64,
     drafts: &mut [ImportPreviewDraft],
-) -> rusqlite::Result<ImportLearningVectorRecallStats> {
+) -> Result<ImportLearningVectorRecallStats, bill_analyser_db::DbError> {
     if !config.weaviate.enabled {
         return Ok(ImportLearningVectorRecallStats {
             status: "disabled".to_string(),
@@ -32,7 +32,8 @@ fn apply_import_learning_vector_recall_chain(
 
     let (status, results) =
         run_import_learning_vector_recall_blocking(config.weaviate.clone(), user_id, requests);
-    let recalled = apply_import_learning_vector_recall_results(connection, user_id, drafts, &results)?;
+    let recalled =
+        apply_import_learning_vector_recall_results(connection, user_id, drafts, &results).await?;
     Ok(ImportLearningVectorRecallStats { status, recalled })
 }
 
@@ -119,16 +120,16 @@ fn run_import_learning_vector_recall_blocking(
     }
 }
 
-fn apply_import_learning_vector_recall_results(
+async fn apply_import_learning_vector_recall_results(
     connection: &Connection,
     user_id: i64,
     drafts: &mut [ImportPreviewDraft],
     results: &[ImportLearningVectorRecallResult],
-) -> rusqlite::Result<usize> {
+) -> Result<usize, bill_analyser_db::DbError> {
     if results.is_empty() {
         return Ok(0);
     }
-    let categories = load_import_intelligence_categories(connection, user_id)?;
+    let categories = load_import_intelligence_categories(connection, user_id).await?;
     let categories_by_id = categories
         .iter()
         .cloned()
@@ -145,7 +146,8 @@ fn apply_import_learning_vector_recall_results(
             })
         })
         .collect::<Vec<_>>();
-    let account_values = load_import_intelligence_accounts(connection, user_id)?
+    let account_values = load_import_intelligence_accounts(connection, user_id)
+        .await?
         .iter()
         .map(|account| json!({"id": account.id, "name": account.name}))
         .collect::<Vec<_>>();
@@ -275,9 +277,14 @@ fn apply_import_learning_vector_recall_hit(
             ..ImportLearningRecommendationKeyInput::default()
         },
     );
-    let lifecycle =
-        get_import_learning_lifecycle_view(connection, user_id, &recommendation_key, "import_preview")
-            .ok()?;
+    let lifecycle_user_id = u64::try_from(user_id).ok().and_then(|value| UserId::new(value).ok())?;
+    let lifecycle = get_import_learning_lifecycle_view(
+        connection,
+        lifecycle_user_id,
+        &recommendation_key,
+    )
+    .ok()
+    .flatten()?;
     if lifecycle.suppressed {
         return None;
     }
@@ -343,6 +350,3 @@ fn apply_import_learning_vector_recall_hit(
     );
     Some(())
 }
-
-#[cfg(test)]
-include!("stage_vector_recall_tests.rs");

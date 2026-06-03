@@ -100,13 +100,6 @@ export interface AccountRuleTestResult {
     fallbackUsed?: boolean | null;
 }
 
-export interface AccountAliasMigrationResult {
-    migrated?: number | string | null;
-    migrated_count?: number | string | null;
-    skipped?: number | string | null;
-    skipped_count?: number | string | null;
-}
-
 export interface AccountRuleOption<T extends string> {
     readonly titleKey: string;
     readonly value: T;

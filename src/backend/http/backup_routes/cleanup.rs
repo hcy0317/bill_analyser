@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -183,24 +183,6 @@ pub(super) fn apply_cleanup_plan(
 mod tests {
     use super::*;
 
-    fn seed_backup_record(
-        connection: &rusqlite::Connection,
-        filename: &str,
-        status: &str,
-    ) -> Result<i64, DbError> {
-        upsert_backup_record(
-            connection,
-            BackupRecordDraft {
-                backup_name: filename.to_string(),
-                file_path: format!("backup/{filename}"),
-                checksum: "checksum".to_string(),
-                encrypted: filename.ends_with(PUBLIC_ENCRYPTED_BACKUP_SUFFIX),
-                status: status.to_string(),
-                metadata: json!({}),
-            },
-        )
-    }
-
     #[test]
     fn parse_keep_count_accepts_defaults_strings_and_rejects_bad_shapes() {
         assert_eq!(parse_keep_count(&json!({})), Ok(10));
@@ -219,82 +201,5 @@ mod tests {
             parse_keep_count(&json!({"keep_count": {}})),
             Err("keep_count must be an integer".to_string())
         );
-    }
-
-    #[test]
-    fn apply_cleanup_plan_marks_records_deletes_files_and_ignores_duplicates() {
-        let root = tempfile::tempdir().expect("temp dir");
-        let backup_dir = root.path().join("backup");
-        fs::create_dir_all(&backup_dir).expect("backup dir");
-        let db_path = root.path().join("backup-cleanup.db");
-        let sqlite_path =
-            bill_analyser_db::SqliteDbPath::application_file(&db_path).expect("sqlite path");
-        let runtime = SqliteRuntime::open(bill_analyser_db::SqliteConnectionConfig {
-            path: sqlite_path,
-            create_if_missing: true,
-            busy_timeout: std::time::Duration::from_secs(1),
-        })
-        .expect("runtime");
-        init_backup_ops_schema(runtime.connection()).expect("schema");
-
-        seed_backup_record(runtime.connection(), "backup_mark.zip", "created")
-            .expect("mark record");
-        seed_backup_record(runtime.connection(), "backup_delete.zip", "created")
-            .expect("delete record");
-        fs::write(backup_dir.join("backup_delete.zip"), b"delete").expect("delete file");
-        fs::write(backup_dir.join("backup_stray.zip"), b"stray").expect("stray file");
-
-        let decisions = vec![
-            BackupCleanupDecision {
-                filename: "backup_mark.zip".to_string(),
-                action: "mark_deleted".to_string(),
-                reason: "old".to_string(),
-            },
-            BackupCleanupDecision {
-                filename: "backup_mark.zip".to_string(),
-                action: "mark_deleted".to_string(),
-                reason: "duplicate should be ignored".to_string(),
-            },
-            BackupCleanupDecision {
-                filename: "backup_delete.zip".to_string(),
-                action: "delete_file_and_mark_deleted".to_string(),
-                reason: "old".to_string(),
-            },
-            BackupCleanupDecision {
-                filename: "backup_stray.zip".to_string(),
-                action: "delete_stray_file".to_string(),
-                reason: "stray".to_string(),
-            },
-            BackupCleanupDecision {
-                filename: "backup_unknown.zip".to_string(),
-                action: "keep".to_string(),
-                reason: "ignored".to_string(),
-            },
-        ];
-
-        let backup_runtime = BackupOpsRuntime::Sqlite(runtime);
-        apply_cleanup_plan(&backup_runtime, &backup_dir, &decisions).expect("cleanup plan applies");
-        let records = match &backup_runtime {
-            BackupOpsRuntime::Sqlite(runtime) => {
-                list_backup_records(runtime.connection()).expect("records")
-            }
-            BackupOpsRuntime::Postgres(_) => unreachable!(),
-        };
-        let statuses = records
-            .into_iter()
-            .map(|record| (record.backup_name, record.status))
-            .collect::<BTreeMap<_, _>>();
-        assert_eq!(
-            statuses.get("backup_mark.zip").map(String::as_str),
-            Some("deleted")
-        );
-        assert_eq!(
-            statuses.get("backup_delete.zip").map(String::as_str),
-            Some("deleted")
-        );
-        assert!(!backup_dir.join("backup_delete.zip").exists());
-        assert!(!backup_metadata_path(&backup_dir.join("backup_delete.zip")).exists());
-        assert!(!backup_dir.join("backup_stray.zip").exists());
-        assert!(!backup_metadata_path(&backup_dir.join("backup_stray.zip")).exists());
     }
 }

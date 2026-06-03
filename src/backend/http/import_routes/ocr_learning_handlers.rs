@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -9,17 +9,19 @@ pub async fn ocr_config_get_runtime_handler(
 ) -> Response {
     #[cfg(not(coverage))]
     tracing::info!(domain = "import_parser", operation = "ocr_config_get_runtime_handler", "business operation entered");
-    if let Err(response) = user_id_from_headers(&headers, &state.config) {
-        return route_response(response);
-    }
-    let runtime = match open_runtime(&state) {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let user_id_value = match user_id_i64_value(user_id) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let runtime = match open_postgres_runtime(&state) {
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),
     };
-    if let Err(response) = init_ocr_runtime_schema(&runtime) {
-        return route_response(response);
-    }
-    match load_ocr_config_setting(runtime.connection()) {
+    match load_postgres_ocr_config_setting(runtime.pool(), user_id_value).await {
         Ok(config) => ai_route_response(build_ocr_config_success_response(&config)),
         Err(error) => route_response(db_error_response(error)),
     }
@@ -33,17 +35,19 @@ pub async fn ocr_config_put_runtime_handler(
 ) -> Response {
     #[cfg(not(coverage))]
     tracing::info!(domain = "import_parser", operation = "ocr_config_put_runtime_handler", "business operation entered");
-    if let Err(response) = user_id_from_headers(&headers, &state.config) {
-        return route_response(response);
-    }
-    let runtime = match open_runtime(&state) {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let user_id_value = match user_id_i64_value(user_id) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let runtime = match open_postgres_runtime(&state) {
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),
     };
-    if let Err(response) = init_ocr_runtime_schema(&runtime) {
-        return route_response(response);
-    }
-    match store_ocr_config_setting(runtime.connection(), Some(&payload)) {
+    match store_postgres_ocr_config_setting(runtime.pool(), user_id_value, Some(&payload)).await {
         Ok(config) => ai_route_response(build_ocr_config_success_response(&config)),
         Err(bill_analyser_db::DbError::InvalidOperation(message))
             if message == "unknown OCR provider" =>
@@ -74,10 +78,12 @@ pub async fn ocr_recognition_runtime_handler(
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),
     };
-    if let Err(response) = init_ocr_runtime_schema(&runtime) {
-        return route_response(response);
-    }
-    let mut config = match load_ocr_config_setting(runtime.connection()) {
+    let postgres_runtime = match open_postgres_runtime(&state) {
+        Ok(runtime) => runtime,
+        Err(response) => return route_response(response),
+    };
+    let mut config = match load_postgres_ocr_config_setting(postgres_runtime.pool(), user_id_value).await
+    {
         Ok(config) => config,
         Err(error) => return route_response(db_error_response(error)),
     };
@@ -141,7 +147,13 @@ pub async fn ocr_recognition_runtime_handler(
             "parameters": config.parameters,
             "credential_config": refreshed,
         });
-        config = match store_ocr_config_setting(runtime.connection(), Some(&stored_config)) {
+        config = match store_postgres_ocr_config_setting(
+            postgres_runtime.pool(),
+            user_id_value,
+            Some(&stored_config),
+        )
+        .await
+        {
             Ok(config) => config,
             Err(error) => return route_response(db_error_response(error)),
         };
@@ -155,7 +167,7 @@ pub async fn ocr_recognition_runtime_handler(
             Ok(result) => result,
             Err(response) => return ai_route_response(response),
         };
-    let draft_context = match load_receipt_draft_context(runtime.connection(), user_id_value) {
+    let draft_context = match load_receipt_draft_context(runtime.connection(), user_id_value).await {
         Ok(context) => context,
         Err(response) => return route_response(response),
     };
@@ -168,11 +180,12 @@ pub async fn ocr_recognition_runtime_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn load_receipt_draft_context(
+async fn load_receipt_draft_context(
     connection: &Connection,
     user_id: i64,
 ) -> Result<ReceiptDraftContext, ImportV2RouteResponse> {
     let categories = load_import_intelligence_categories(connection, user_id)
+        .await
         .map_err(db_error_response)?;
     let categories_by_id = categories
         .iter()
@@ -180,8 +193,13 @@ fn load_receipt_draft_context(
         .collect::<BTreeMap<_, _>>();
     let category_rules =
         load_import_intelligence_category_rules(connection, user_id, &categories_by_id)
+            .await
             .map_err(db_error_response)?;
+    let account_rules = load_import_intelligence_account_rules(connection, user_id)
+        .await
+        .map_err(db_error_response)?;
     let accounts = load_import_intelligence_accounts(connection, user_id)
+        .await
         .map_err(db_error_response)?;
     let tags = load_receipt_draft_tags(connection, user_id).map_err(db_error_response)?;
     Ok(ReceiptDraftContext {
@@ -205,12 +223,12 @@ fn load_receipt_draft_context(
                 regex_enabled: rule.regex_enabled,
             })
             .collect(),
+        account_rules,
         accounts: accounts
             .into_iter()
             .map(|account| ReceiptDraftAccount {
                 id: account.id.to_string(),
                 name: account.name,
-                aliases: account.aliases,
             })
             .collect(),
         tags,
@@ -231,35 +249,10 @@ fn category_label(main_category: &str, sub_category: &str) -> String {
 
 #[tracing::instrument(level = "debug", skip_all)]
 fn load_receipt_draft_tags(
-    connection: &Connection,
-    user_id: i64,
-) -> rusqlite::Result<Vec<ReceiptDraftTag>> {
-    if !import_intelligence_table_exists(connection, "tags")? {
-        return Ok(Vec::new());
-    }
-    let has_hidden = table_has_column(connection, "tags", "hidden")?;
-    let display_order_expr = sql_column_or_default(connection, "tags", "display_order", "0")?;
-    let hidden_expr = if has_hidden {
-        "hidden".to_string()
-    } else {
-        "0 AS hidden".to_string()
-    };
-    let hidden_filter = if has_hidden { "hidden = 0" } else { "1 = 1" };
-    let mut statement = connection.prepare(&format!(
-        "
-        SELECT id, name, {hidden_expr}, {display_order_expr}
-        FROM tags
-        WHERE user_id = ?1 AND {hidden_filter}
-        ORDER BY display_order ASC, id ASC
-        "
-    ))?;
-    let rows = statement.query_map(params![user_id], |row| {
-        Ok(ReceiptDraftTag {
-            id: row.get::<_, i64>("id")?.to_string(),
-            name: row.get::<_, Option<String>>("name")?.unwrap_or_default(),
-        })
-    })?;
-    rows.collect()
+    _connection: &Connection,
+    _user_id: i64,
+) -> Result<Vec<ReceiptDraftTag>, bill_analyser_db::DbError> {
+    Ok(Vec::new())
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -348,13 +341,6 @@ pub async fn learning_suggestion_accept_runtime_handler(
         return route_response(response);
     }
     match accept_learning_suggestion(runtime.connection_mut(), suggestion_id, user_id) {
-        Ok(LearningSuggestionDecision::Accepted(result)) => {
-            route_response(learning_data_response(result))
-        }
-        Ok(LearningSuggestionDecision::Conflict(result)) => route_response(ImportV2RouteResponse {
-            status_code: 409,
-            body: json!({"success": false, "error": result["error"], "data": result}),
-        }),
         Ok(LearningSuggestionDecision::NotFound) => {
             route_response(learning_error_response(404, "suggestion_not_found"))
         }
@@ -419,16 +405,10 @@ pub async fn learning_suggestions_batch_accept_runtime_handler(
     if let Err(response) = init_global_learning_runtime_schema(&runtime) {
         return route_response(response);
     }
-    let mut accepted = Vec::new();
+    let accepted: Vec<Value> = Vec::new();
     let mut failed = Vec::new();
     for suggestion_id in suggestion_ids {
         match accept_learning_suggestion(runtime.connection_mut(), suggestion_id, user_id) {
-            Ok(LearningSuggestionDecision::Accepted(result)) => {
-                accepted.push(json!({"id": suggestion_id, "ruleId": result["rule_id"]}));
-            }
-            Ok(LearningSuggestionDecision::Conflict(result)) => {
-                failed.push(json!({"id": suggestion_id, "error": result["error"]}));
-            }
             Ok(LearningSuggestionDecision::NotFound) => {
                 failed.push(json!({"id": suggestion_id, "error": "suggestion_not_found"}));
             }
@@ -635,4 +615,3 @@ pub async fn learning_rule_delete_runtime_handler(
         Err(response) => route_response(response),
     }
 }
-

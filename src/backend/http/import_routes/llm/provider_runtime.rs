@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -136,7 +136,7 @@ fn llm_limit_from_object(
 
 #[tracing::instrument(level = "debug", skip_all)]
 fn ensure_import_session_exists(
-    runtime: &SqliteRuntime,
+    runtime: &ImportRuntime,
     session_id: &str,
     user_id: UserId,
 ) -> Result<(), ImportV2RouteResponse> {
@@ -151,16 +151,18 @@ fn ensure_import_session_exists(
     }
 }
 
-fn effective_llm_runtime_config(
+async fn effective_llm_runtime_config(
     state: &HttpAppState,
-    runtime: &SqliteRuntime,
     user_id: i64,
 ) -> Result<Value, ImportV2RouteResponse> {
-    let config = state
-        .get_llm_runtime_config(user_id)
-        .map(Ok)
-        .unwrap_or_else(|| effective_llm_config_from_saved(runtime.connection(), user_id))
-        .map_err(db_error_response)?;
+    let config = if let Some(config) = state.get_llm_runtime_config(user_id) {
+        config
+    } else {
+        let runtime = open_postgres_runtime(state)?;
+        effective_postgres_llm_config_from_saved(runtime.pool(), user_id)
+            .await
+            .map_err(db_error_response)?
+    };
     if !config
         .get("enabled")
         .and_then(Value::as_bool)
@@ -354,7 +356,7 @@ async fn refresh_llm_provider_context(
     let Some(api_key) = provider_auth_access_token(&refreshed) else {
         return Err(llm_relogin_required_response());
     };
-    persist_refreshed_llm_credentials(state, context, &refreshed);
+    persist_refreshed_llm_credentials(state, context, &refreshed).await;
     let mut updated = context.clone();
     updated.api_key = api_key;
     updated.credential_config = refreshed;
@@ -362,7 +364,7 @@ async fn refresh_llm_provider_context(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn persist_refreshed_llm_credentials(
+async fn persist_refreshed_llm_credentials(
     state: &HttpAppState,
     context: &LlmProviderRequestContext,
     credential_config: &Value,
@@ -370,19 +372,19 @@ fn persist_refreshed_llm_credentials(
     let (Some(config_id), Some(user_id)) = (context.config_id, context.user_id) else {
         return;
     };
-    let Ok(runtime) = open_runtime(state) else {
+    let Ok(runtime) = open_postgres_runtime(state) else {
         return;
     };
-    let _ = init_llm_config_runtime_schema(&runtime);
-    let _ = update_llm_config(
-        runtime.connection(),
+    let _ = update_postgres_llm_config(
+        runtime.pool(),
         config_id,
         user_id,
         &LlmConfigUpdate {
             credential_config: Some(credential_config.clone()),
             ..LlmConfigUpdate::default()
         },
-    );
+    )
+    .await;
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -568,4 +570,3 @@ fn reserve_llm_rate_limit(user_id: i64, slots: usize) -> Result<(), ImportV2Rout
     }
     Ok(())
 }
-

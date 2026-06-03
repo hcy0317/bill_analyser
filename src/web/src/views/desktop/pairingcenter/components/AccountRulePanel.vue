@@ -31,36 +31,14 @@
                                 <span class="font-weight-medium">{{ tt('Account Recognition Rules') }}</span>
                                 <v-chip size="x-small" variant="tonal">{{ accountRules.length }}</v-chip>
                             </div>
-                            <v-menu
-                                open-on-hover
-                                :open-delay="1500"
-                                location="bottom end"
+                            <v-btn
+                                color="primary"
+                                :disabled="loading || accountOptions.length === 0"
+                                @click="openCreateDialog"
                             >
-                                <template #activator="{ props: menuProps }">
-                                    <v-btn
-                                        v-bind="menuProps"
-                                        color="primary"
-                                        :disabled="loading || accountOptions.length === 0"
-                                        @click="openCreateDialog"
-                                    >
-                                        <v-icon start :icon="mdiPlus" />
-                                        {{ tt('Add Rule') }}
-                                    </v-btn>
-                                </template>
-                                <v-list density="compact" min-width="260">
-                                    <v-list-item
-                                        :disabled="loading"
-                                        @click="migrateAliases"
-                                    >
-                                        <template #prepend>
-                                            <v-icon :icon="mdiDatabaseImportOutline" />
-                                        </template>
-                                        <v-list-item-title>
-                                            {{ tt('Import Rules from Legacy Aliases') }}
-                                        </v-list-item-title>
-                                    </v-list-item>
-                                </v-list>
-                            </v-menu>
+                                <v-icon start :icon="mdiPlus" />
+                                {{ tt('Add Rule') }}
+                            </v-btn>
                             <settings-json-import-export-button
                                 v-if="props.showSettingsBundleControls"
                                 section-key="accountRecognitionRules"
@@ -438,7 +416,6 @@ import {
     mdiBookAccountOutline,
     mdiCheckCircle,
     mdiCloseCircle,
-    mdiDatabaseImportOutline,
     mdiDeleteOutline,
     mdiPencilOutline,
     mdiPlus,
@@ -463,7 +440,6 @@ import {
     createDefaultAccountRuleForm,
     getAccountRuleLabel,
     normalizeAccountRuleItem,
-    type AccountAliasMigrationResult,
     type AccountRuleFieldScope,
     type AccountRuleForm,
     type AccountRuleItem,
@@ -645,11 +621,6 @@ function showSuccessMessage(message: string, options?: Record<string, unknown>):
     snackbar.value?.showMessage(message, options);
 }
 
-function getMigrationCount(value: number | string | null | undefined): number {
-    const count = Number(value ?? 0);
-    return Number.isFinite(count) ? count : 0;
-}
-
 function isRuleToggling(ruleId: number): boolean {
     return togglingRuleIds.value.includes(ruleId);
 }
@@ -820,28 +791,6 @@ async function runTest(): Promise<void> {
         error.value = getRequestErrorMessage(err, tt('Test failed'));
     } finally {
         testing.value = false;
-    }
-}
-
-async function migrateAliases(): Promise<void> {
-    loading.value = true;
-    error.value = null;
-    try {
-        const result = requireApiSuccess<AccountAliasMigrationResult>(
-            await services.migrateAccountAliases(),
-            tt('Migration failed')
-        );
-        const migrated = getMigrationCount(result?.migrated ?? result?.migrated_count);
-        const skipped = getMigrationCount(result?.skipped ?? result?.skipped_count);
-        showSuccessMessage('Migration completed: migrated {migrated}, skipped {skipped}', {
-            migrated,
-            skipped,
-        });
-        await fetchAll();
-    } catch (err: unknown) {
-        error.value = getRequestErrorMessage(err, tt('Migration failed'));
-    } finally {
-        loading.value = false;
     }
 }
 

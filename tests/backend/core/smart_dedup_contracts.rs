@@ -175,7 +175,7 @@ fn same_batch_duplicate_requires_text_evidence_before_merging_amount_time_matche
 }
 
 #[test]
-fn similar_duplicates_and_split_groups_preserve_python_contract_edges() {
+fn similar_duplicates_and_split_groups_preserve_current_contract_edges() {
     let mut wechat = bill("wechat", "2026-01-03 10:00:00", "-8.80");
     let mut alipay = bill("alipay", "2026-01-03 10:00:20", "-8.81");
     wechat.counterparty = "咖啡店".to_string();
@@ -341,7 +341,7 @@ fn database_duplicate_and_cross_batch_transfer_helpers_match_existing_contract()
 }
 
 #[test]
-fn python_shaped_hidden_fields_round_trip_and_match_dedup_source_ids() {
+fn current_hidden_fields_round_trip_and_match_dedup_source_ids() {
     let value = json!({
         "date": "2026-01-05 12:00:00",
         "amount": -20.50,

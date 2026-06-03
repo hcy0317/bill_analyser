@@ -1,13 +1,7 @@
-// 中文导读：SQLite repository 层，负责 schema、事务、user-scope 查询、row helper 和跨表写入边界。
-// 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
-// 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
+// 中文导读：PostgreSQL auth DTO。实际仓储读写在 `auth_postgres`。
+// 维护重点：保留 HTTP/auth handler 与 Postgres repository 共享的类型，不保留 non-Postgres auth runtime。
 
-use bill_analyser_core::{auth::recovery_code_hash_input, UserId};
-use rusqlite::{params, Connection, OptionalExtension};
-use sha2::{Digest, Sha256};
-use std::collections::HashSet;
-
-use crate::{DbError, DbResult};
+use bill_analyser_core::UserId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TokenSessionRow {
@@ -174,13 +168,3 @@ pub struct LoginFailureUpdate {
     pub failed_attempts: i64,
     pub locked: bool,
 }
-
-include!("auth/users.rs");
-include!("auth/cloud_settings.rs");
-include!("auth/profile.rs");
-include!("auth/sessions.rs");
-include!("auth/logs.rs");
-include!("auth/two_factor.rs");
-include!("auth/login_security.rs");
-include!("auth/rows_helpers.rs");
-include!("../../../tests/backend/db/internal/auth.rs");

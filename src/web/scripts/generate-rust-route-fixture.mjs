@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '..', '..', '..');
-const generatedFrom = 'bill_migration_manifest::governance_manifest_snapshot.routes';
+const generatedFrom = 'bill_runtime_manifest::governance_manifest_snapshot.routes';
 const manifestPath = path.join(
   repoRoot,
   'src',
@@ -61,7 +61,7 @@ function readManifest() {
 function buildManifestFromRust() {
   const output = childProcess.execFileSync(
     'cargo',
-    ['run', '--quiet', '-p', 'bill-analyser-core', '--bin', 'bill_migration_manifest'],
+    ['run', '--quiet', '-p', 'bill-analyser-core', '--bin', 'bill_runtime_manifest'],
     { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] },
   );
   const snapshot = JSON.parse(output);
@@ -90,7 +90,7 @@ function render(manifest) {
 export type RustRouteState =
     | 'rust_implemented'
     | 'rust_owned_verified'
-    | 'python_deleted'
+    | 'retired'
     | 'contract_only'
     | 'planned';
 

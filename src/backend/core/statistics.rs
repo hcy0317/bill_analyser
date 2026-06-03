@@ -1,6 +1,6 @@
 // 中文导读：核心业务合同层，负责把金额、时间、分类、导入、匹配、预算、统计等规则从 HTTP/DB 细节中隔离。
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
-// 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
+// 不变式：金额单位、用户可见类型和API payload 在进入或离开本层时必须显式转换。
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -1351,7 +1351,7 @@ pub fn build_provider_exchange_rates_result(
     for (currency, rate) in rates {
         exchange_rates.push(ExchangeRateItem {
             currency: currency.clone(),
-            rate: format_python_round_rate(*rate),
+            rate: format_rate_text(*rate),
         });
     }
 
@@ -1388,7 +1388,7 @@ pub fn build_builtin_fallback_exchange_rates(
         for (currency, rate) in cny_rates {
             exchange_rates.push(ExchangeRateItem {
                 currency: currency.to_string(),
-                rate: format_python_round_rate(rate),
+                rate: format_rate_text(rate),
             });
         }
     } else if let Some(base_rate) = builtin_cny_based_rates()
@@ -1401,13 +1401,13 @@ pub fn build_builtin_fallback_exchange_rates(
         });
         exchange_rates.push(ExchangeRateItem {
             currency: "CNY".to_string(),
-            rate: format_python_round_rate(1.0 / base_rate),
+            rate: format_rate_text(1.0 / base_rate),
         });
         for (currency, rate) in builtin_cny_based_rates() {
             if currency != base_currency {
                 exchange_rates.push(ExchangeRateItem {
                     currency: currency.to_string(),
-                    rate: format_python_round_rate(rate / base_rate),
+                    rate: format_rate_text(rate / base_rate),
                 });
             }
         }
@@ -2242,7 +2242,7 @@ fn builtin_cny_based_rates() -> Vec<(&'static str, f64)> {
     ]
 }
 
-fn format_python_round_rate(value: f64) -> String {
+fn format_rate_text(value: f64) -> String {
     let rounded = (value * 1_000_000.0).round() / 1_000_000.0;
     let mut text = format!("{rounded:.6}");
     while text.contains('.') && text.ends_with('0') {

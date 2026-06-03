@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -28,7 +28,7 @@ use crate::{
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_router(state: HttpAppState) -> Router {
     // 注册顺序体现 Rust-only `/api/...` 主链：业务 router 在 fallback 之前合并，
-    // 未知 API 统一由 Rust 返回结构化 404，不能重新透传旧 sidecar。
+    // 未知 API 统一由 Rust 返回结构化 404，不能重新透传sidecar。
     let body_limit_bytes = state.config.body_limit_bytes;
     Router::new()
         .route("/api/health", get(health_handler))

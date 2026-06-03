@@ -237,7 +237,7 @@ const props = withDefaults(defineProps<{
     addButtonText?: string;
     showHeader?: boolean;
 }>(), {
-    format: 'legacy',
+    format: 'composite',
     regexEnabled: false,
     showHeader: true,
 });

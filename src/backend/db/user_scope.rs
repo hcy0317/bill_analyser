@@ -1,6 +1,6 @@
-// 中文导读：SQLite repository 层，负责 schema、事务、user-scope 查询、row helper 和跨表写入边界。
-// 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
-// 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
+// 中文导读：PostgreSQL user-scope helper，负责当前用户过滤和 user_id 参数规范化。
+// 维护重点：SQL 片段只生成安全 table alias，不在 handler 中重复拼接 user scope。
+// 不变式：所有业务查询都必须绑定正整数用户 id。
 
 use bill_analyser_core::UserId;
 
@@ -30,7 +30,7 @@ impl UserScope {
 
     pub fn bind_value(self) -> DbResult<i64> {
         i64::try_from(self.user_id.get()).map_err(|_| {
-            DbError::InvalidOperation("user_id does not fit sqlite INTEGER".to_string())
+            DbError::InvalidOperation("user_id does not fit PostgreSQL BIGINT".to_string())
         })
     }
 }

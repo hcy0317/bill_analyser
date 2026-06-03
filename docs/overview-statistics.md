@@ -1,29 +1,18 @@
 # 统计与汇率
 
-统计域由 Rust runtime 和 Rust repository 直接处理。
-HTTP route 层在 `statistics_routes/` 下按读取、Analyzer、汇率处理、汇率 provider 解析和查询/响应 helper 拆分；provider 解析保持纯函数测试，不依赖真实网络。
+统计链路由 Rust route 读取 PostgreSQL 中的账户、分类、账单、预算和汇率数据，并返回前端图表 DTO。
 
-## API
+覆盖范围：
 
-- `GET /api/statistics/category-statistics`
-- `GET /api/statistics/category-statistics/trends`
-- `GET /api/statistics/asset-trends`
-- `GET /api/statistics/category-pie`
-- `GET /api/statistics/top-merchants`
-- `GET /api/statistics/amounts`
-- `GET /api/statistics/overview`
-- `GET /api/statistics/trends`
-- `GET /api/statistics/comparison`
-- `GET /api/statistics/category`
-- `GET /api/statistics/trend`
-- `GET /api/insights/anomalies`
-- `GET /api/statistics/exchange-rates`
-- `PUT /api/statistics/exchange-rates/custom`
-- `DELETE /api/statistics/exchange-rates/custom/{currency}`
+- 金额概览
+- 分类统计
+- 分类趋势
+- 资产趋势
+- 分类饼图
+- 商户排行
+- Analyzer overview/trends/comparison/category/trend
+- insights anomaly data
+- 汇率 provider fallback
+- 用户自定义汇率
 
-## 数据边界
-
-- 统计读取按当前用户过滤 bills/accounts/categories。
-- PostgreSQL cutover 下，金额概览、分类统计、分类趋势、资产趋势、分类饼图、商户排行、日历事件、Analyzer/insights 读取和汇率 REST 直接读写 PostgreSQL bills/accounts/categories/settings/transaction_templates，不打开 SQLite runtime fallback。
-- 汇率 custom rate 写入按当前用户隔离。
-- 金额聚合必须保持元/分语义明确，面向前端的字段按既有 contract 输出。
+金额聚合使用数据库 minor units 字段，返回前端前按 API 契约转换。汇率链路优先使用用户自定义汇率，其次 provider fallback，再到内置兜底值。

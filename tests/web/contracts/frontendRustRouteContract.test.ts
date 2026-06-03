@@ -124,7 +124,7 @@ function frontendPathToRegex(frontendPath: string): RegExp {
 }
 
 const runtimeRoutes = RUST_ROUTE_OWNERSHIP
-    .filter(route => route.state === 'rust_owned_verified' || route.state === 'python_deleted')
+    .filter(route => route.state === 'rust_owned_verified' || route.state === 'retired')
     .map(route => ({
         ...route,
         patternMatcher: routePatternToRegex(route.pattern),
@@ -146,9 +146,9 @@ function findRuntimeRoute(use: FrontendRouteUse): string | null {
 }
 
 describe('frontend Rust route contract', () => {
-    test('keeps the generated Rust route fixture in sync with migration governance', () => {
+    test('keeps the generated Rust route fixture in sync with runtime governance', () => {
         expect(RUST_ROUTE_OWNERSHIP_GENERATED_FROM)
-            .toBe('bill_migration_manifest::governance_manifest_snapshot.routes');
+            .toBe('bill_runtime_manifest::governance_manifest_snapshot.routes');
         childProcess.execFileSync(
             process.execPath,
             ['scripts/generate-rust-route-fixture.mjs', '--check'],

@@ -1,6 +1,6 @@
 // 中文导读：核心业务合同层，负责把金额、时间、分类、导入、匹配、预算、统计等规则从 HTTP/DB 细节中隔离。
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
-// 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
+// 不变式：金额单位、用户可见类型和API payload 在进入或离开本层时必须显式转换。
 
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -115,29 +115,29 @@ pub fn build_budget_history_filter_summary(input: &BudgetHistoryFilterSummaryInp
     let mut fields = BTreeMap::new();
     fields.insert(
         "account_ids",
-        PythonJsonValue::IntArray(sorted_ids(input.account_ids.as_deref())),
+        RenderedJsonValue::IntArray(sorted_ids(input.account_ids.as_deref())),
     );
-    fields.insert("budget_id", PythonJsonValue::OptionalInt(input.budget_id));
+    fields.insert("budget_id", RenderedJsonValue::OptionalInt(input.budget_id));
     fields.insert(
         "budget_type",
-        PythonJsonValue::Int(i64::from(input.budget_type)),
+        RenderedJsonValue::Int(i64::from(input.budget_type)),
     );
     fields.insert(
         "category_id",
-        PythonJsonValue::OptionalInt(input.category_id),
+        RenderedJsonValue::OptionalInt(input.category_id),
     );
     fields.insert(
         "period_type",
-        PythonJsonValue::String(input.period_type.clone().unwrap_or_default()),
+        RenderedJsonValue::String(input.period_type.clone().unwrap_or_default()),
     );
     fields.insert(
         "tag_ids",
-        PythonJsonValue::IntArray(sorted_ids(input.tag_ids.as_deref())),
+        RenderedJsonValue::IntArray(sorted_ids(input.tag_ids.as_deref())),
     );
 
     let rendered = fields
         .into_iter()
-        .map(|(key, value)| format!("{}: {}", python_json_string(key), value.render()))
+        .map(|(key, value)| format!("{}: {}", rendered_json_string(key), value.render()))
         .collect::<Vec<_>>()
         .join(", ");
     format!("{{{rendered}}}")

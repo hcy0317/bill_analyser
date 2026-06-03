@@ -1,79 +1,5 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
-// 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
-// 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn resolve_import_file_parser_id(requested_parser: &str, filename: &str, content: &str) -> String {
-    let requested_parser = requested_parser.trim().to_ascii_lowercase();
-    if !requested_parser.is_empty() && requested_parser != "auto" {
-        return requested_parser;
-    }
-    let probe = format!("{} {}", filename.to_ascii_lowercase(), content);
-    for (keyword, parser_id) in [
-        ("微信", "wechat"),
-        ("wechat", "wechat"),
-        ("支付宝", "alipay"),
-        ("alipay", "alipay"),
-        ("农业银行", "abc"),
-        ("abc", "abc"),
-        ("工商银行", "icbc"),
-        ("icbc", "icbc"),
-        ("建设银行", "ccb"),
-        ("ccb", "ccb"),
-        ("招商银行", "cmb"),
-        ("cmb", "cmb"),
-        ("民生银行", "cmbc"),
-        ("cmbc", "cmbc"),
-    ] {
-        if probe.contains(keyword) {
-            return parser_id.to_string();
-        }
-    }
-    "rust-import".to_string()
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn parse_standard_bills_from_csv_text(
-    text: &str,
-    parser_id: &str,
-    require_known_headers: bool,
-) -> ParsedCsvBills {
-    let Some((start_line, delimiter)) = detect_csv_table_start(text, require_known_headers) else {
-        return ParsedCsvBills::default();
-    };
-    let csv_text = text.lines().skip(start_line).collect::<Vec<_>>().join("\n");
-    let mut reader = csv::ReaderBuilder::new()
-        .has_headers(true)
-        .flexible(true)
-        .delimiter(delimiter as u8)
-        .from_reader(csv_text.as_bytes());
-    let headers = match reader.headers() {
-        Ok(headers) => headers.clone(),
-        Err(_) => return ParsedCsvBills::default(),
-    };
-    if require_known_headers && !looks_like_import_headers(headers.iter()) {
-        return ParsedCsvBills::default();
-    }
-    let mut raw_bills = Vec::new();
-    for record in reader.records().filter_map(Result::ok) {
-        let mut raw_bill = RawBill::default();
-        for (index, header) in headers.iter().enumerate() {
-            let Some(value) = record.get(index) else {
-                continue;
-            };
-            apply_csv_header_to_raw_bill(&mut raw_bill, header, value);
-        }
-        if !raw_bill.date.trim().is_empty()
-            || !raw_bill.trade_time.trim().is_empty()
-            || !raw_bill.amount.trim().is_empty()
-        {
-            raw_bills.push(raw_bill);
-        }
-    }
-    ParsedCsvBills {
-        bills: post_process_raw_bills(parser_id, &raw_bills),
-    }
-}
+// 中文导读：当前导入解析映射 helper，只服务 /api/bills/import/v2 当前路径。
+// 维护重点：只保留 column-mapped 文本导入和当前 DTO 转换，不恢复历史读取/迁移入口。
 
 #[tracing::instrument(level = "debug", skip_all)]
 fn detect_csv_table_start(text: &str, require_known_headers: bool) -> Option<(usize, char)> {
@@ -103,68 +29,10 @@ fn looks_like_import_headers<'a>(headers: impl Iterator<Item = &'a str>) -> bool
             || header == "time"
             || header.contains("trade_time")
     });
-    let has_amount = headers.iter().any(|header| {
-        header.contains("金额") || header == "amount" || header.contains("source_amount")
-    });
+    let has_amount = headers
+        .iter()
+        .any(|header| header.contains("金额") || header == "amount" || header.contains("source_amount"));
     has_date && has_amount
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn apply_csv_header_to_raw_bill(raw_bill: &mut RawBill, header: &str, value: &str) {
-    let header = normalized_header_key(header);
-    let value = value.trim();
-    if value.is_empty() {
-        return;
-    }
-    if header.contains("交易时间")
-        || header.contains("交易日期")
-        || header.contains("记账日期")
-        || header == "date"
-        || header == "time"
-        || header.contains("trade_time")
-    {
-        raw_bill.trade_time = value.to_string();
-    } else if header.contains("收支类型")
-        || header.contains("收/支")
-        || header.contains("交易类型")
-        || header == "type"
-        || header.contains("trade_type")
-        || header.contains("transaction_type")
-    {
-        raw_bill.transaction_type = value.to_string();
-    } else if header.contains("金额") || header == "amount" || header.contains("source_amount") {
-        raw_bill.amount = value.to_string();
-    } else if header.contains("商品") || header.contains("商品说明") || header == "goods" {
-        raw_bill.goods = value.to_string();
-    } else if header.contains("备注") || header.contains("说明") || header == "remark" {
-        raw_bill.remark = value.to_string();
-    } else if header.contains("摘要") || header == "summary" || header == "abstract" {
-        raw_bill.summary = value.to_string();
-    } else if header.contains("交易对方") || header.contains("对方") || header == "counterparty"
-    {
-        raw_bill.counterparty = value.to_string();
-    } else if header.contains("商户") || header == "merchant" {
-        raw_bill.merchant = value.to_string();
-    } else if header.contains("店铺") || header == "shop" {
-        raw_bill.shop = value.to_string();
-    } else if header.contains("支付方式")
-        || header.contains("收/付款方式")
-        || header == "payment_method"
-        || header == "account"
-    {
-        raw_bill.payment_method = value.to_string();
-    } else if header.contains("交易分类") || header == "category" {
-        raw_bill.original_category = value.to_string();
-    } else if header.contains("交易单号") || header == "transaction_id" || header == "order_id"
-    {
-        raw_bill.transaction_id = value.to_string();
-    } else if header.contains("商家订单号") || header == "merchant_id" {
-        raw_bill.merchant_id = value.to_string();
-    } else if header.contains("状态") || header == "status" {
-        raw_bill.status = value.to_string();
-    } else if raw_bill.description.is_empty() {
-        raw_bill.description = value.to_string();
-    }
 }
 
 fn normalized_header_key(header: &str) -> String {
@@ -211,7 +79,7 @@ fn standard_bills_from_column_mapped_text(
         }
     }
     let mut bills = Vec::new();
-    for row in rows.iter().skip(has_header as usize) {
+    for row in rows.iter().skip(usize::from(has_header)) {
         let Some((raw_bill, main_category, sub_category)) =
             raw_bill_from_column_mapped_row(row, &column_mapping, &type_mapping)
         else {
@@ -350,49 +218,6 @@ fn first_non_empty_text(values: impl IntoIterator<Item = String>) -> String {
         .unwrap_or_default()
 }
 
-fn now_text() -> String {
-    Utc::now()
-        .naive_utc()
-        .format("%Y-%m-%dT%H:%M:%S%.f")
-        .to_string()
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn normalize_config_text(value: &str) -> String {
-    value
-        .trim()
-        .replace([' ', '\t', '\r', '\n'], "")
-        .to_ascii_lowercase()
-}
-
-fn config_text(value: &Value, keys: &[&str]) -> Option<String> {
-    value
-        .as_object()
-        .and_then(|object| config_text_from_object(object, keys))
-}
-
-fn config_text_from_object(object: &Map<String, Value>, keys: &[&str]) -> Option<String> {
-    first_value(object, keys)
-        .and_then(value_to_text)
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-fn config_id_value(config: &Value) -> Option<i64> {
-    config.as_object().and_then(|object| {
-        first_value(object, &["id", "configId", "config_id"])
-            .and_then(value_to_i64)
-            .filter(|value| *value > 0)
-    })
-}
-
-fn bool_value(config: &Value, key: &str) -> Option<bool> {
-    config
-        .as_object()
-        .and_then(|object| object.get(key))
-        .and_then(value_to_bool)
-}
-
 fn value_to_bool(value: &Value) -> Option<bool> {
     match value {
         Value::Bool(value) => Some(*value),
@@ -406,102 +231,7 @@ fn value_to_bool(value: &Value) -> Option<bool> {
     }
 }
 
-fn string_array_field_from_object(
-    object: &Map<String, Value>,
-    keys: &[&str],
-) -> Option<Vec<String>> {
-    first_value(object, keys).and_then(|value| match value {
-        Value::Array(values) => Some(
-            values
-                .iter()
-                .filter_map(value_to_text)
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-                .collect::<Vec<_>>(),
-        ),
-        Value::String(text) => Some(
-            text.split([',', '|'])
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-                .collect::<Vec<_>>(),
-        ),
-        _ => None,
-    })
-}
-
-fn config_string_array(config: &Value, keys: &[&str]) -> Option<Vec<String>> {
-    config
-        .as_object()
-        .and_then(|object| string_array_field_from_object(object, keys))
-}
-
-fn header_signature_from_headers(headers: &[String]) -> String {
-    headers
-        .iter()
-        .map(|header| header.trim())
-        .filter(|header| !header.is_empty())
-        .collect::<Vec<_>>()
-        .join("|")
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn normalize_learning_match_value(value: &str) -> String {
-    value
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim()
-        .to_ascii_lowercase()
-}
-
-fn legacy_bill_type(object: &Map<String, Value>) -> String {
-    first_value(object, &["type", "transaction_type", "transactionType"])
-        .and_then(value_to_preview_type_text)
-        .unwrap_or_else(|| "支出".to_string())
-}
-
-fn legacy_bill_amount(object: &Map<String, Value>) -> Option<f64> {
-    first_value(
-        object,
-        &[
-            "sourceAmount",
-            "source_amount",
-            "destinationAmount",
-            "destination_amount",
-        ],
-    )
-    .and_then(value_to_f64)
-    .map(|value| value / 100.0)
-    .or_else(|| first_value(object, &["amount"]).and_then(value_to_f64))
-}
-
-fn legacy_confirm_amount_for_type(bill_type: &str, amount: f64) -> f64 {
-    let amount = amount.abs();
-    if matches!(bill_type.trim(), "支出" | "expense") {
-        -amount
-    } else {
-        amount
-    }
-}
-
-fn legacy_bill_date(object: &Map<String, Value>) -> String {
-    if let Some(date) = first_text_from_object(
-        object,
-        &["timeText", "date", "transaction_time", "tradeTime"],
-    ) {
-        return date.split_whitespace().next().unwrap_or(&date).to_string();
-    }
-    if let Some(timestamp) = first_value(object, &["time"]).and_then(value_to_i64) {
-        if let Some(datetime) = chrono::DateTime::from_timestamp(timestamp, 0) {
-            return datetime.date_naive().format("%Y-%m-%d").to_string();
-        }
-    }
-    Utc::now().date_naive().format("%Y-%m-%d").to_string()
-}
-
 fn user_id_i64_value(user_id: UserId) -> Result<i64, ImportV2RouteResponse> {
     i64::try_from(user_id.get())
-        .map_err(|_| import_v2_error_response(400, "user id exceeds sqlite integer range"))
+        .map_err(|_| import_v2_error_response(400, "user id exceeds PostgreSQL BIGINT range"))
 }
-

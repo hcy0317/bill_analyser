@@ -20,7 +20,7 @@ export const useUserExternalAuthStore = defineStore('userExternalAUth', () => {
             }).catch(error => {
                 logger.error('failed to load third-party logins list', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve third-party logins list' });
@@ -45,7 +45,7 @@ export const useUserExternalAuthStore = defineStore('userExternalAUth', () => {
             }).catch(error => {
                 logger.error('failed to revoke token', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to unlink third-party login' });

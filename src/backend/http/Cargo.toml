@@ -26,10 +26,10 @@ http.workspace = true
 qrcodegen.workspace = true
 reqwest.workspace = true
 ring.workspace = true
-rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+sqlx.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
@@ -41,7 +41,6 @@ walkdir.workspace = true
 zip.workspace = true
 
 [dev-dependencies]
-sqlx.workspace = true
 tower.workspace = true
 
 [[bin]]
@@ -51,42 +50,6 @@ path = "bin/bill_http_server.rs"
 [[bin]]
 name = "bill_weaviate_derived_index"
 path = "bin/bill_weaviate_derived_index.rs"
-
-[[test]]
-name = "auth_runtime_contract"
-path = "../../../tests/backend/http/auth_runtime_contract.rs"
-
-[[test]]
-name = "backup_runtime_contract"
-path = "../../../tests/backend/http/backup_runtime_contract.rs"
-
-[[test]]
-name = "bills_runtime_contract"
-path = "../../../tests/backend/http/bills_runtime_contract.rs"
-
-[[test]]
-name = "budget_runtime_contract"
-path = "../../../tests/backend/http/budget_runtime_contract.rs"
-
-[[test]]
-name = "config_runtime_contract"
-path = "../../../tests/backend/http/config_runtime_contract.rs"
-
-[[test]]
-name = "import_runtime_contract"
-path = "../../../tests/backend/http/import_runtime_contract.rs"
-
-[[test]]
-name = "matching_runtime_contract"
-path = "../../../tests/backend/http/matching_runtime_contract.rs"
-
-[[test]]
-name = "statistics_runtime_contract"
-path = "../../../tests/backend/http/statistics_runtime_contract.rs"
-
-[[test]]
-name = "taxonomy_runtime_contract"
-path = "../../../tests/backend/http/taxonomy_runtime_contract.rs"
 
 [[test]]
 name = "weaviate_runtime_contract"

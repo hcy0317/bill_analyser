@@ -25,8 +25,6 @@ const BASE_RESPONSE: ImportTransactionResponse = {
     comment: '工作日午餐',
     counterparty: '兰州拉面',
     paymentMethod: '微信支付',
-    parserSource: 'wechat',
-    parserTags: ['parser:wechat', 'channel:wallet'],
     matching: {
         transfer: {
             candidate_type: '转账',
@@ -86,7 +84,7 @@ describe('ImportTransaction model', () => {
         expect(transaction.originalTagNames).toStrictEqual(['午饭']);
         expect(transaction.counterparty).toBe('兰州拉面');
         expect(transaction.paymentMethod).toBe('微信支付');
-        expect(transaction.parserSource).toBe('wechat');
+        expect(transaction.parserId).toBe('wechat');
         expect(transaction.parserTags).toStrictEqual(['parser:wechat', 'channel:wallet']);
         expect(transaction.matching?.transfer.candidate_type).toBe('转账');
         expect(transaction.matching?.parser.tags).toStrictEqual(['parser:wechat', 'channel:wallet']);
@@ -119,12 +117,10 @@ describe('ImportTransaction model', () => {
     test('partial matching payloads are normalized without throwing', () => {
         const parserOnly = ImportTransaction.of({
             ...BASE_RESPONSE,
-            parserSource: '',
-            parserTags: [],
             matching: {
                 parser: {
-                    parser_id: 'alipay',
-                    parser_tags: ['parser:alipay']
+                    id: 'alipay',
+                    tags: ['parser:alipay']
                 },
                 dedup: {
                     type: 'remaining',
@@ -142,7 +138,7 @@ describe('ImportTransaction model', () => {
             } as unknown as ImportTransactionResponse['matching']
         }, 5);
 
-        expect(parserOnly.parserSource).toBe('alipay');
+        expect(parserOnly.parserId).toBe('alipay');
         expect(parserOnly.parserTags).toStrictEqual(['parser:alipay']);
         expect(parserOnly.matching?.transfer.candidate_type).toBe('');
         expect(parserOnly.matching?.learning.rule_id).toBeNull();
@@ -298,8 +294,8 @@ describe('ImportTransaction model', () => {
         }, 6);
 
         expect(transaction.matching).toBeUndefined();
-        expect(transaction.parserSource).toBe('wechat');
-        expect(transaction.parserTags).toStrictEqual(['parser:wechat', 'channel:wallet']);
+        expect(transaction.parserId).toBe('');
+        expect(transaction.parserTags).toStrictEqual([]);
         expect(transaction.dedupType).toBe('duplicate');
         expect(transaction.dedupSourceIds).toStrictEqual([9, 10]);
         expect(() => transaction.resetTransferSuggestionDecisionState()).not.toThrow();
@@ -392,8 +388,6 @@ describe('ImportTransaction model', () => {
             recurringMatchScore: 0,
             recurringMatchReasons: '',
             recurringMatchedDate: '',
-            parserSource: '',
-            parserTags: [],
             isManuallyAnnotated: false,
             matching: {
                 transfer: {
@@ -459,7 +453,7 @@ describe('ImportTransaction model', () => {
         expect(transaction.recurringCandidateCount).toBe(2);
         expect(transaction.recurringMatchReasons).toBe('date|amount');
 
-        expect(transaction.parserSource).toBe('alipay');
+        expect(transaction.parserId).toBe('alipay');
         expect(transaction.parserTags).toStrictEqual(['parser:alipay', 'channel:wallet']);
         expect(transaction.dedupType).toBe('transfer');
         expect(transaction.dedupSourceIds).toStrictEqual([101, 102]);
@@ -591,7 +585,7 @@ describe('ImportTransaction model', () => {
                 }
             }
         }, 12);
-        const legacyAutoApplied = ImportTransaction.of({
+        const autoAppliedRecommendation = ImportTransaction.of({
             ...BASE_RESPONSE,
             matching: {
                 ...BASE_RESPONSE.matching!,
@@ -634,11 +628,11 @@ describe('ImportTransaction model', () => {
         expect(autoApplied.isLearningRecommendationAccepted()).toBe(true);
         expect(autoApplied.canClearLearningRecommendationDecision()).toBe(true);
 
-        expect(legacyAutoApplied.hasLearningRecommendation()).toBe(true);
-        expect(legacyAutoApplied.hasPendingLearningRecommendation()).toBe(false);
-        expect(legacyAutoApplied.getLearningRecommendationReviewStatus()).toBe('auto-applied');
-        expect(legacyAutoApplied.isLearningRecommendationAccepted()).toBe(true);
-        expect(legacyAutoApplied.canClearLearningRecommendationDecision()).toBe(true);
+        expect(autoAppliedRecommendation.hasLearningRecommendation()).toBe(true);
+        expect(autoAppliedRecommendation.hasPendingLearningRecommendation()).toBe(false);
+        expect(autoAppliedRecommendation.getLearningRecommendationReviewStatus()).toBe('auto-applied');
+        expect(autoAppliedRecommendation.isLearningRecommendationAccepted()).toBe(true);
+        expect(autoAppliedRecommendation.canClearLearningRecommendationDecision()).toBe(true);
     });
 
     test('investment review helpers expose pending, accepted, and rejected states', () => {
@@ -726,8 +720,7 @@ describe('ImportTransaction model', () => {
             ...BASE_RESPONSE,
             comment: '工作日午餐',
             counterparty: '兰州拉面',
-            paymentMethod: '微信支付',
-            parserSource: 'wechat'
+            paymentMethod: '微信支付'
         }, 13);
         const changed = ImportTransaction.of({
             ...BASE_RESPONSE,

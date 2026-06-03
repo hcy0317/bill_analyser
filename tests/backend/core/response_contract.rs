@@ -5,7 +5,7 @@ use serde_json::json;
 fn success_response_serializes_runtime_shell_envelope_shape() {
     let response = ApiResponse::success(json!({
         "runtime": "rust",
-        "business_migration": "none",
+        "database": "postgres",
     }));
 
     let serialized = serde_json::to_value(&response).expect("response serializes");
@@ -16,7 +16,7 @@ fn success_response_serializes_runtime_shell_envelope_shape() {
             "success": true,
             "data": {
                 "runtime": "rust",
-                "business_migration": "none",
+                "database": "postgres",
             }
         })
     );

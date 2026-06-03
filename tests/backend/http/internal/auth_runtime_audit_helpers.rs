@@ -128,7 +128,6 @@ mod tests {
         let body = json!({
             "nickname": "Alice",
             "email": "alice@example.test",
-            "avatar": true,
             "language": "en",
             "defaultCurrency": "USD",
             "firstDayOfWeek": 2,
@@ -164,6 +163,12 @@ mod tests {
         assert!(!updates
             .iter()
             .any(|update| matches!(update, AuthUserProfileUpdate::Avatar(_))));
+        assert_eq!(
+            profile_updates_from_body(json!({ "avatar": true }).as_object().expect("object"))
+                .expect_err("profile avatar update rejected")
+                .message,
+            "Avatar must be updated via /api/profile/avatar"
+        );
         assert!(updates.contains(&AuthUserProfileUpdate::DefaultAccountId(None)));
         assert!(updates.contains(&AuthUserProfileUpdate::TransactionEditScope(3)));
         assert!(updates.contains(&AuthUserProfileUpdate::FiscalYearStart(4)));

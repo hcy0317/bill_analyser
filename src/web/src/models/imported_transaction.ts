@@ -67,18 +67,13 @@ function hasDedupSourceIds(rawValue: Array<number | string> | string | undefined
     return normalizeDedupSourceIds(rawValue).length > 0;
 }
 
-type LegacyImportMatchingParserPayload = Partial<ImportMatchingPayload['parser']> & {
-    parser_id?: string;
-    parser_tags?: string[];
-};
-
 type SparseImportMatchingPayload = {
     transfer?: Partial<ImportMatchingPayload['transfer']>;
     investment?: Partial<ImportMatchingPayload['investment']>;
     learning?: Partial<ImportMatchingPayload['learning']>;
     recurring?: Partial<ImportMatchingPayload['recurring']>;
     dedup?: Partial<ImportMatchingPayload['dedup']>;
-    parser?: LegacyImportMatchingParserPayload;
+    parser?: Partial<ImportMatchingPayload['parser']>;
     annotation?: Partial<ImportMatchingPayload['annotation']>;
     reconciliation?: ImportMatchingPayload['reconciliation'];
     stage2_baseline?: ImportMatchingPayload['stage2_baseline'];
@@ -90,9 +85,7 @@ function normalizeImportMatchingPayload(matching?: SparseImportMatchingPayload):
     }
 
     const parser = matching.parser;
-    const parserTags = Array.isArray(parser?.tags) && parser.tags.length > 0
-        ? parser.tags
-        : (Array.isArray(parser?.parser_tags) ? parser.parser_tags : []);
+    const parserTags = Array.isArray(parser?.tags) ? parser.tags : [];
     const dedupSourceIds = normalizeDedupSourceIds(matching.dedup?.source_ids);
 
     return {
@@ -156,7 +149,7 @@ function normalizeImportMatchingPayload(matching?: SparseImportMatchingPayload):
             sources: matching.dedup?.sources || [],
         },
         parser: {
-            id: getFirstNonEmptyString(parser?.id, parser?.parser_id),
+            id: parser?.id || '',
             tags: parserTags,
             source_chain: parser?.source_chain || [],
         },
@@ -211,7 +204,7 @@ export class ImportTransaction implements ImportTransactionResponse {
     public recurringMatchedDate: string;
 
     // v7: 解析器来源标识
-    public parserSource: string;
+    public parserId: string;
     public parserTags: string[];
     public dedupType: string;
     public dedupSourceIds: Array<number | string>;
@@ -288,10 +281,10 @@ export class ImportTransaction implements ImportTransactionResponse {
         this.recurringMatchReasons = getFirstNonEmptyString(recurring?.match_reasons, response.recurringMatchReasons);
         this.recurringMatchedDate = getFirstNonEmptyString(recurring?.matched_date, response.recurringMatchedDate);
 
-        this.parserSource = getFirstNonEmptyString(parser?.id, response.parserSource);
+        this.parserId = getFirstNonEmptyString(parser?.id);
         this.parserTags = Array.isArray(parser?.tags) && parser.tags.length > 0
             ? parser.tags
-            : (response.parserTags || []);
+            : [];
         this.dedupType = getFirstNonEmptyString(dedup?.type, response.dedupType);
         this.dedupSourceIds = hasDedupSourceIds(dedup?.source_ids)
             ? normalizeDedupSourceIds(dedup?.source_ids)
@@ -457,7 +450,7 @@ export class ImportTransaction implements ImportTransactionResponse {
 
     public getLearningRecommendationInputFingerprint(): string {
         return JSON.stringify({
-            parserSource: (this.parserSource || '').trim(),
+            parserId: (this.parserId || '').trim(),
             counterparty: (this.counterparty || '').trim(),
             paymentMethod: (this.paymentMethod || '').trim(),
             comment: (this.comment || '').trim()
@@ -477,7 +470,7 @@ export class ImportTransaction implements ImportTransactionResponse {
     }
 
     public hasMatchingContextSummary(): boolean {
-        return !!this.parserSource || this.hasMatchingDedupContext() || this.isManuallyAnnotated;
+        return !!this.parserId || this.hasMatchingDedupContext() || this.isManuallyAnnotated;
     }
 
     public getMatchingDedupSummary(): string {
@@ -613,8 +606,6 @@ export interface ImportTransactionResponse {
     readonly recurringMatchScore?: number;
     readonly recurringMatchReasons?: string;
     readonly recurringMatchedDate?: string;
-    readonly parserSource?: string;
-    readonly parserTags?: string[];
     readonly dedupType?: string;
     readonly dedupSourceIds?: Array<number | string> | string;
     readonly matching?: ImportMatchingPayload;

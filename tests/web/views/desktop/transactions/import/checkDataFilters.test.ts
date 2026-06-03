@@ -147,7 +147,7 @@ describe('checkDataFilters helpers', () => {
 
     test('applies existing annotation, signal, and date filters to visible-row calculation', () => {
         const rows: TestRow[] = [
-            { id: 1, time: 100, type: 5, comment: 'parser-row', signalState: { parserSource: 'alipay' } },
+            { id: 1, time: 100, type: 5, comment: 'parser-row', signalState: { parserId: 'alipay' } },
             { id: 2, time: 200, type: 5, comment: 'learning-row', signalState: { learningStatus: 'pending', learningSummary: '支出 | 餐饮/咖啡' } },
             { id: 3, time: 300, type: 5, comment: 'manual-row', isManuallyAnnotated: true },
             { id: 4, time: 400, type: 5, comment: 'missing-row', hasAnnotationIssues: true },

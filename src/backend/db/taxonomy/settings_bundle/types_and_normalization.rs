@@ -1,10 +1,8 @@
-// 中文导读：SQLite repository 层，负责 schema、事务、user-scope 查询、row helper 和跨表写入边界。
-// 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
-// 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
+// 中文导读：PostgreSQL settings bundle 规范化与导入统计 helper。
+// 维护重点：设置包只描述当前 Postgres/Weaviate 运行态的可导入分区。
 
 const SETTINGS_BUNDLE_SCHEMA_VERSION: i64 = 1;
 const LOCAL_REF_NAMESPACE: &str = "__local_settings_bundle_id__";
-const OCR_CONFIG_SETTING_KEY: &str = "receipt_ocr_config";
 const SECTION_KEYS: [&str; 9] = [
     "accounts",
     "transactionCategories",
@@ -80,13 +78,6 @@ struct ExistingTags {
     by_name: BTreeMap<String, i64>,
 }
 
-#[derive(Debug, Clone)]
-struct ExistingLlmConfig {
-    id: i64,
-    api_key: String,
-    credential_config: String,
-}
-
 pub fn normalize_settings_bundle_sections(bundle: &Value) -> DbResult<Value> {
     let bundle_object = bundle.as_object().ok_or_else(|| {
         DbError::InvalidOperation("Settings bundle must be a JSON object".to_string())
@@ -98,7 +89,7 @@ pub fn normalize_settings_bundle_sections(bundle: &Value) -> DbResult<Value> {
         .ok_or_else(|| {
             let raw_value = bundle_object
                 .get("schemaVersion")
-                .map(json_to_python_like_string)
+                .map(json_to_display_string)
                 .unwrap_or_else(|| "None".to_string());
             DbError::InvalidOperation(format!(
                 "Unsupported settings bundle schemaVersion: {raw_value}"
@@ -205,7 +196,6 @@ pub fn normalize_account_import(payload: &Value) -> Value {
         "hidden": i64::from(safe_bool(item.get("hidden"))),
         "display_order": safe_int(get_any(item, &["displayOrder", "display_order"]), 0),
         "comment": safe_text(item.get("comment"), ""),
-        "aliases": dump_json_list(item.get("aliases")),
         "parent_id": parent_id,
     })
 }

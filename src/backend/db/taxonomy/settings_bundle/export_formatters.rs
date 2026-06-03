@@ -1,6 +1,6 @@
-// 中文导读：SQLite repository 层，负责 schema、事务、user-scope 查询、row helper 和跨表写入边界。
+// 中文导读：non-Postgres repository 层，负责 schema、事务、user-scope 查询、row helper 和跨表写入边界。
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
-// 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
+// 不变式：业务写入默认 rollback-on-error，审计与缓存只有在注释明确时才能作为 best-effort。
 
 fn export_account(
     account: &Value,
@@ -22,7 +22,6 @@ fn export_account(
         "hidden": safe_bool(account.get("hidden")),
         "displayOrder": safe_int(account.get("display_order"), 0),
         "comment": safe_text(account.get("comment"), ""),
-        "aliases": load_json_list(account.get("aliases")),
         "parentRef": account_refs.get(&parent_id).cloned().unwrap_or_default(),
         "parentName": account_names.get(&parent_id).cloned().unwrap_or_default(),
     })

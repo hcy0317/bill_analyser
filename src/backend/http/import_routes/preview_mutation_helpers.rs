@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -411,56 +411,11 @@ struct PreviewPayloadCategory {
 
 #[tracing::instrument(level = "debug", skip_all)]
 fn load_preview_payload_category(
-    connection: &Connection,
-    user_id: UserId,
-    category_id: i64,
+    _connection: &Connection,
+    _user_id: UserId,
+    _category_id: i64,
 ) -> Result<Option<PreviewPayloadCategory>, ImportV2RouteResponse> {
-    if category_id <= 0 || !preview_payload_table_exists(connection, "categories")? {
-        return Ok(None);
-    }
-
-    let user_id = user_id_i64_value(user_id)?;
-    if preview_payload_column_exists(connection, "categories", "type")? {
-        connection
-            .query_row(
-                "
-                SELECT type, main_category, sub_category
-                FROM categories
-                WHERE id = ?1 AND user_id = ?2
-                LIMIT 1
-                ",
-                params![category_id, user_id],
-                |row| {
-                    Ok(PreviewPayloadCategory {
-                        type_code: row.get::<_, Option<i64>>(0)?,
-                        main_category: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                        sub_category: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                    })
-                },
-            )
-            .optional()
-            .map_err(db_error_response)
-    } else {
-        connection
-            .query_row(
-                "
-                SELECT main_category, sub_category
-                FROM categories
-                WHERE id = ?1 AND user_id = ?2
-                LIMIT 1
-                ",
-                params![category_id, user_id],
-                |row| {
-                    Ok(PreviewPayloadCategory {
-                        type_code: None,
-                        main_category: row.get::<_, Option<String>>(0)?.unwrap_or_default(),
-                        sub_category: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                    })
-                },
-            )
-            .optional()
-            .map_err(db_error_response)
-    }
+    Ok(None)
 }
 
 fn set_preview_patch_text_change(
@@ -484,46 +439,9 @@ fn preview_payload_category_type_name(type_code: Option<i64>) -> Option<&'static
     }
 }
 
-fn preview_payload_table_exists(
-    connection: &Connection,
-    table_name: &str,
-) -> Result<bool, ImportV2RouteResponse> {
-    Ok(connection
-        .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1",
-            params![table_name],
-            |_| Ok(()),
-        )
-        .optional()
-        .map_err(db_error_response)?
-        .is_some())
-}
-
-fn preview_payload_column_exists(
-    connection: &Connection,
-    table_name: &str,
-    column_name: &str,
-) -> Result<bool, ImportV2RouteResponse> {
-    if table_name != "categories" {
-        return Ok(false);
-    }
-
-    let mut statement = connection
-        .prepare(&format!("PRAGMA table_info({table_name})"))
-        .map_err(db_error_response)?;
-    let mut rows = statement.query([]).map_err(db_error_response)?;
-    while let Some(row) = rows.next().map_err(db_error_response)? {
-        let name: String = row.get(1).map_err(db_error_response)?;
-        if name == column_name {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
 #[tracing::instrument(level = "debug", skip_all)]
 fn apply_preview_updates_from_payload(
-    runtime: &mut SqliteRuntime,
+    runtime: &mut ImportRuntime,
     session_id: &str,
     user_id: UserId,
     payload: &Value,
@@ -888,7 +806,6 @@ fn llm_decision_result_response(
         "event_id": result.event_id,
         "applied_fields": result.applied_fields,
         "decision": decision,
-        "restored": result.restored,
     }))
 }
 
@@ -1050,4 +967,3 @@ fn preview_row_is_categorized(row: &&ImportPreviewRow) -> bool {
 fn preview_row_has_account(row: &&ImportPreviewRow) -> bool {
     row.preview_source_account_id.is_some() || row.preview_destination_account_id.is_some()
 }
-

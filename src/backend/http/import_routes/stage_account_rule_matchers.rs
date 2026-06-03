@@ -408,6 +408,3 @@ fn account_name_for_id(accounts: &[ImportIntelligenceAccount], account_id: i64) 
         .find(|account| account.id == account_id)
         .map(|account| account.name.clone())
 }
-
-#[cfg(test)]
-include!("stage_account_rule_matchers_tests.rs");

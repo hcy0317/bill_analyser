@@ -99,7 +99,7 @@ describe('import preview draft cloning', () => {
                 suppressed: false
             },
             _learningDecisionBaseline: {
-                inputFingerprint: '{"parserSource":"alipay"}',
+                inputFingerprint: '{"parserId":"alipay"}',
                 type: 3,
                 categoryId: '10',
                 recurringTemplateId: '',

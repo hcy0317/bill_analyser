@@ -1,9 +1,9 @@
 // 中文导读：核心业务合同层，负责把金额、时间、分类、导入、匹配、预算、统计等规则从 HTTP/DB 细节中隔离。
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
-// 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
+// 不变式：金额单位、用户可见类型和API payload 在进入或离开本层时必须显式转换。
 
 pub const CANDIDATE_KIND_ORDER: &[&str] = &["reconciliation", "transfer", "learning", "recurring"];
-pub const LEGACY_SUMMARY_KIND_ORDER: &[&str] = &["transfer", "learning", "recurring"];
+pub const SUMMARY_KIND_ORDER: &[&str] = &["transfer", "learning", "recurring"];
 pub const TRANSFER_PAIR_TYPE: &str = "transfer";
 pub const INVESTMENT_PAIR_TYPE: &str = "investment";
 pub const DUPLICATE_CANDIDATE_KIND: &str = "duplicate";
@@ -385,7 +385,7 @@ pub fn build_learning_rule_revision(rule: &Map<String, Value>) -> String {
         ),
         ("parser_id", value_to_string(rule.get("parser_id"))),
     ];
-    let revision_source = python_json_object_string(&payload);
+    let revision_source = json_object_text(&payload);
     let digest = Sha1::digest(revision_source.as_bytes());
     hex_prefix(&digest, 16)
 }

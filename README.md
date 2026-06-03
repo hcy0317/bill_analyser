@@ -2,7 +2,7 @@
 
 Bill Analyser 是一个面向个人与家庭场景的账单分析系统，支持多来源账单导入、智能去重、自动分类、预算管理和统计分析。
 
-本项目当前后端运行态是 Rust Axum `bill_http_server`，Rust workspace 位于 `src/backend/*`。运行态启动要求本地 PostgreSQL 与 Weaviate 服务可达；PostgreSQL 是 cutover 边界，SQLite 仅保留为迁移来源和 isolated test fixture。前端使用 Vue 3 + TypeScript + Vite。
+本项目当前后端运行态是 Rust Axum `bill_http_server`，Rust workspace 位于 `src/backend/*`。运行态启动要求本地 PostgreSQL 与 Weaviate 服务可达；PostgreSQL 是唯一业务数据库，Weaviate 是必需派生向量索引与 learning recall 服务。前端使用 Vue 3 + TypeScript + Vite。
 
 ## 核心能力
 
@@ -22,8 +22,7 @@ Bill Analyser 是一个面向个人与家庭场景的账单分析系统，支持
 | Rust stable | 后端运行时 |
 | Axum | HTTP API |
 | Tokio | 异步运行时 |
-| SQLx / PostgreSQL | 运行态 cutover 边界与权威库基座 |
-| Rusqlite / SQLite WAL | 迁移来源、legacy fixtures 与显式兼容测试 |
+| SQLx / PostgreSQL | 唯一运行态权威库 |
 | Weaviate | 必需的派生向量索引与 learning recall 服务 |
 | cargo-llvm-cov | 覆盖率门禁 |
 
@@ -51,7 +50,7 @@ bill_analyser/
 │   └── web/               # 前端契约与组件测试
 ├── docs/                  # 项目文档
 ├── config/                # 配置文件
-├── data/                  # 本地数据库与数据文件
+├── data/                  # 本地应用数据文件
 ├── logs/                  # 运行日志
 ├── uploads/               # 上传临时文件
 ├── backup/                # 备份文件
@@ -86,14 +85,14 @@ cd ..\..
 .\一键启动.ps1
 ```
 
-一键启动脚本会按端口清理旧服务，先通过 `docker compose -f docker-compose.postgres.yml up -d postgres weaviate` 确保必需服务运行，再构建并启动 Rust HTTP 后端、启动 Vite 前端，并分别等待后端健康检查和前端首页可访问。
+一键启动脚本会按端口清理已有服务，先通过 `docker compose -f docker-compose.postgres.yml up -d postgres weaviate` 确保必需服务运行，再构建并启动 Rust HTTP 后端、启动 Vite 前端，并分别等待后端健康检查和前端首页可访问。
 
 常用参数：
 
 ```powershell
 .\一键启动.ps1 -BackendOnly   # 只启动 Rust 后端
 .\一键启动.ps1 -FrontendOnly  # 只启动前端
-.\一键启动.ps1 -NoAutoStop    # 不自动停止旧服务
+.\一键启动.ps1 -NoAutoStop    # 不自动停止已有服务
 .\一键启动.ps1 -NoBrowser     # 启动完成后不自动打开浏览器
 ```
 
@@ -119,13 +118,10 @@ docker compose -f docker-compose.postgres.yml up -d postgres weaviate
 启动脚本默认配置：
 
 - `BILL_ANALYSER_HTTP_BIND=127.0.0.1:5000`
-- `BILL_ANALYSER_SQLITE_DB_PATH=data\bills.db`
 - `BILL_ANALYSER_DATABASE_BACKEND=postgres`
 - `BILL_ANALYSER_POSTGRES_URL=postgres://bill_analyser:bill_analyser_dev@127.0.0.1:5432/bill_analyser`
-- `BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER=true`
 - `BILL_ANALYSER_WEAVIATE_ENABLED=true`
 - `BILL_ANALYSER_WEAVIATE_ENDPOINT=http://127.0.0.1:8088`
-- `BILL_ANALYSER_MIGRATION_MODE=disabled`
 - `start_backend.ps1` 会预检 Postgres 和 Weaviate 端口，不可达时直接失败并提示先启动 compose 服务
 - `BILL_ANALYSER_RUST_HTTP_SERVER` 可指定已构建的 `bill_http_server` 可执行文件，未指定时脚本会自动构建 debug 版本
 
@@ -137,34 +133,19 @@ docker compose -f docker-compose.postgres.yml up -d postgres weaviate
 docker compose -f docker-compose.postgres.yml up -d postgres weaviate
 $env:BILL_ANALYSER_DATABASE_BACKEND = "postgres"
 $env:BILL_ANALYSER_POSTGRES_URL = "postgres://bill_analyser:bill_analyser_dev@127.0.0.1:5432/bill_analyser"
-$env:BILL_ANALYSER_MIGRATION_MODE = "validate"
-$env:BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER = "true"
 $env:BILL_ANALYSER_WEAVIATE_ENABLED = "true"
 $env:BILL_ANALYSER_WEAVIATE_ENDPOINT = "http://127.0.0.1:8088"
 ```
 
-`/api/health` 会显示 `database_backend`、`route_repository_backend`、`postgres_cutover_status`、`postgres_configured`、`postgres_url_redacted`、`migration_mode`、`migration_status`、`weaviate_required` 和 `weaviate_status`，其中 Postgres URL 只输出脱敏形式。`route_repository_backend=postgres_required_after_cutover` 表示 cutover 开关已经禁止 SQLite fallback 但 backend 或 Postgres URL 仍未满足要求；`route_repository_backend=postgres_pending_repositories` 表示 PostgreSQL runtime 已可被后续 repository 使用，但当前业务 route 尚未接管。Weaviate 必须通过 `/v1/.well-known/ready` 返回 ready，健康状态才可能为 `ok`。
-
-SQLite 到 PostgreSQL 的迁移工具当前支持 dry-run、export 和 import-check：
-
-```powershell
-cargo run -p bill-analyser-db --bin bill_sqlite_to_postgres_migrate -- --mode dry-run --sqlite data\bills.db --output migration-report.json
-cargo run -p bill-analyser-db --bin bill_sqlite_to_postgres_migrate -- --mode export --sqlite data\bills.db --output migration-bundle.json
-cargo run -p bill-analyser-db --bin bill_sqlite_to_postgres_migrate -- --mode import-check --bundle migration-bundle.json --output migration-import-check.json
-cargo run -p bill-analyser-db --bin bill_sqlite_to_postgres_migrate -- --mode import --bundle migration-bundle.json --postgres-url $env:BILL_ANALYSER_POSTGRES_URL --output migration-import-report.json
-```
-
-详见 `docs/postgres-migration.md`。
+`/api/health` 会显示 `database_backend`、`route_repository_backend`、`postgres_authority_status`、`postgres_configured`、`postgres_url_redacted`、`weaviate_required` 和 `weaviate_status`，其中 Postgres URL 只输出脱敏形式。`route_repository_backend=postgres_authority` 表示 HTTP 仓储边界已以 PostgreSQL 为权威。Weaviate 必须通过 `/v1/.well-known/ready` 返回 ready，健康状态才可能为 `ok`。
 
 ### 手动启动
 
 ```powershell
 # 终端 1
 docker compose -f docker-compose.postgres.yml up -d postgres weaviate
-$env:BILL_ANALYSER_SQLITE_DB_PATH = "data\bills.db"
 $env:BILL_ANALYSER_DATABASE_BACKEND = "postgres"
 $env:BILL_ANALYSER_POSTGRES_URL = "postgres://bill_analyser:bill_analyser_dev@127.0.0.1:5432/bill_analyser"
-$env:BILL_ANALYSER_REQUIRE_POSTGRES_AFTER_CUTOVER = "true"
 $env:BILL_ANALYSER_WEAVIATE_ENABLED = "true"
 $env:BILL_ANALYSER_WEAVIATE_ENDPOINT = "http://127.0.0.1:8088"
 $env:BILL_ANALYSER_HTTP_BIND = "127.0.0.1:5000"
@@ -226,7 +207,7 @@ npm run build
 
 ### REST 优先
 
-Rust `bill_http_server` 是唯一 HTTP 运行时入口。当前运行态以 `REST /api/...` 为主，不应为新功能重新引入 `/api/v1/*`、Python/Flask sidecar 或旧式代理兜底作为主链。
+Rust `bill_http_server` 是唯一 HTTP 运行时入口。当前运行态以 `REST /api/...` 为主，不应为新功能重新引入 `/api/v1/*`、sidecar 或代理兜底作为主链。
 
 ### 金额单位
 
@@ -252,8 +233,8 @@ Rust `bill_http_server` 是唯一 HTTP 运行时入口。当前运行态以 `RES
 
 ### 端口被占用
 
-先运行 `.\停止服务器.ps1`，再重新启动。`.\一键启动.ps1` 默认也会按后端和前端端口清理旧服务；如果手动设置了 `BILL_ANALYSER_HTTP_BIND`，脚本会从该地址解析后端端口。
+先运行 `.\停止服务器.ps1`，再重新启动。`.\一键启动.ps1` 默认也会按后端和前端端口清理已有服务；如果手动设置了 `BILL_ANALYSER_HTTP_BIND`，脚本会从该地址解析后端端口。
 
-### 数据库锁定
+### 数据库连接失败
 
-停止所有后端实例和测试进程后重试，避免多个进程同时写 SQLite。
+确认 `docker compose -f docker-compose.postgres.yml up -d postgres weaviate` 已启动，并检查 `BILL_ANALYSER_POSTGRES_URL` 与 `BILL_ANALYSER_WEAVIATE_ENDPOINT`。

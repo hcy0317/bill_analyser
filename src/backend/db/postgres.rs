@@ -17,7 +17,6 @@ pub struct PostgresMigrationDescriptor {
 const INITIAL_SCHEMA_TABLES: &[&str] = &[
     "users",
     "accounts",
-    "account_aliases_legacy",
     "categories",
     "tags",
     "bills",
@@ -117,6 +116,24 @@ const BACKUP_OPS_INDEXES: &[&str] = &[
     "idx_backup_audit_logs_status",
 ];
 
+const LLM_IMPORT_RUNTIME_TABLES: &[&str] = &[
+    "llm_configs",
+    "llm_candidates",
+    "llm_memory_events",
+    "import_annotation_samples",
+];
+
+const LLM_IMPORT_RUNTIME_INDEXES: &[&str] = &[
+    "idx_llm_configs_user_active",
+    "idx_llm_candidates_user_status",
+    "idx_llm_memory_events_user_created",
+    "idx_import_annotation_samples_user_session",
+];
+
+const IMPORT_SESSION_KEY_TABLES: &[&str] = &["import_sessions"];
+
+const IMPORT_SESSION_KEY_INDEXES: &[&str] = &["idx_import_sessions_user_session_key"];
+
 const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
     PostgresMigrationDescriptor {
         version: 1,
@@ -181,6 +198,20 @@ const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
         required_tables: BACKUP_OPS_TABLES,
         required_indexes: BACKUP_OPS_INDEXES,
     },
+    PostgresMigrationDescriptor {
+        version: 10,
+        file_name: "0010_llm_import_runtime.sql",
+        description: "authoritative PostgreSQL LLM config, candidate, memory, and import annotation tables",
+        required_tables: LLM_IMPORT_RUNTIME_TABLES,
+        required_indexes: LLM_IMPORT_RUNTIME_INDEXES,
+    },
+    PostgresMigrationDescriptor {
+        version: 11,
+        file_name: "0011_import_session_key.sql",
+        description: "authoritative import session API key and counters",
+        required_tables: IMPORT_SESSION_KEY_TABLES,
+        required_indexes: IMPORT_SESSION_KEY_INDEXES,
+    },
 ];
 
 pub fn postgres_migrations_dir() -> PathBuf {
@@ -212,7 +243,7 @@ mod tests {
     #[test]
     fn postgres_manifest_points_to_existing_initial_schema() {
         let manifest = postgres_migration_manifest();
-        assert_eq!(manifest.len(), 9);
+        assert_eq!(manifest.len(), 11);
         assert_eq!(manifest[0].version, 1);
         assert_eq!(manifest[0].file_name, POSTGRES_INITIAL_SCHEMA_FILE);
         assert_eq!(manifest[1].version, 2);
@@ -223,6 +254,8 @@ mod tests {
         assert_eq!(manifest[6].version, 7);
         assert_eq!(manifest[7].version, 8);
         assert_eq!(manifest[8].version, 9);
+        assert_eq!(manifest[9].version, 10);
+        assert_eq!(manifest[10].version, 11);
         assert!(postgres_initial_schema_path().exists());
         for descriptor in manifest.iter().skip(1) {
             assert!(postgres_migrations_dir()

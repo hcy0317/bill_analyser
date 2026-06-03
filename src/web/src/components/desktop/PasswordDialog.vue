@@ -27,13 +27,13 @@
                     :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
                     :label="labelContent"
                     :placeholder="placeholderContent"
-                    :error-messages="errorMessage"
+                    :error-messages="validationMessage"
                     variant="outlined"
                     density="comfortable"
                     autofocus
                     @click:append-inner="showPassword = !showPassword"
                     @keyup.enter="confirm"
-                    @update:model-value="errorMessage = ''"
+                    @update:model-value="validationMessage = ''"
                 ></v-text-field>
 
                 <!-- 提示信息 -->
@@ -75,7 +75,7 @@ const { tt } = useI18n();
 const showState = ref<boolean>(false);
 const password = ref<string>('');
 const showPassword = ref<boolean>(false);
-const errorMessage = ref<string>('');
+const validationMessage = ref<string>('');
 const titleContent = ref<string>(props.title || tt('Verify Operation Password'));
 const textContent = ref<string>(props.text || '');
 const warningContent = ref<string>(props.warning || '');
@@ -96,7 +96,7 @@ function open(
 ): Promise<string | undefined> {
     showState.value = true;
     password.value = '';
-    errorMessage.value = '';
+    validationMessage.value = '';
     showPassword.value = false;
     warningContent.value = '';
     labelContent.value = tt('Operation Password');
@@ -160,7 +160,7 @@ function open(
 
 function confirm(): void {
     if (!password.value) {
-        errorMessage.value = tt('Password cannot be empty');
+        validationMessage.value = tt('Password cannot be empty');
         return;
     }
 
@@ -199,7 +199,7 @@ watch(() => props.show, (val) => {
     showState.value = !!val;
     if (val) {
         password.value = '';
-        errorMessage.value = '';
+        validationMessage.value = '';
         showPassword.value = false;
     }
 });

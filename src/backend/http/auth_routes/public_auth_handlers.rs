@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -120,7 +120,7 @@ async fn register_handler(
         nickname
     };
     let created_at = utc_now_text();
-    if state.config.database_backend.uses_postgres() {
+
         return register_postgres_response(
             &state,
             &body,
@@ -136,108 +136,6 @@ async fn register_handler(
             created_at,
         )
         .await;
-    }
-    let runtime = match open_runtime(&state) {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
-    let username_exists = match auth_username_exists(runtime.connection(), &username) {
-        Ok(value) => value,
-        Err(_) => return db_error_response(),
-    };
-    if username_exists {
-        if log_auth_event(
-            runtime.connection(),
-            AuthEvent {
-                user_id: None,
-                username: &username,
-                event_type: "register_failed",
-                ip_address: &ip_address,
-                user_agent: &request_user_agent,
-                success: false,
-                error_message: Some("Username already exists".to_string()),
-                metadata: None,
-            },
-        )
-        .is_err()
-        {
-            return db_error_response();
-        }
-        return auth_rest_error_response(AuthRestError::new(
-            409,
-            "Username exists",
-            "Username already exists",
-        ));
-    }
-    let email_exists = match auth_email_exists(runtime.connection(), &email) {
-        Ok(value) => value,
-        Err(_) => return db_error_response(),
-    };
-    if email_exists {
-        if log_auth_event(
-            runtime.connection(),
-            AuthEvent {
-                user_id: None,
-                username: &username,
-                event_type: "register_failed",
-                ip_address: &ip_address,
-                user_agent: &request_user_agent,
-                success: false,
-                error_message: Some("Email already exists".to_string()),
-                metadata: None,
-            },
-        )
-        .is_err()
-        {
-            return db_error_response();
-        }
-        return auth_rest_error_response(AuthRestError::new(
-            409,
-            "Email exists",
-            "Email already exists",
-        ));
-    }
-    let register_result = match create_registered_user_with_defaults(
-        runtime.connection(),
-        &RegisterUserDraft {
-            username: username.clone(),
-            email: email.clone(),
-            password_hash,
-            nickname,
-            language,
-            default_currency,
-            first_day_of_week,
-            email_verified: !state.config.auth_require_email_verification,
-            created_at: created_at.clone(),
-        },
-        &register_preset_categories_from_body(&body),
-        &AuthLogDraft {
-            user_id: None,
-            username: username.clone(),
-            event_type: "register_success".to_string(),
-            ip_address: ip_address.clone(),
-            user_agent: request_user_agent,
-            success: true,
-            error_message: None,
-            metadata: None,
-            created_at,
-        },
-    ) {
-        Ok(value) => value,
-        Err(_) => return db_error_response(),
-    };
-    success_result(
-        StatusCode::OK,
-        json!({
-            "user_id": register_result.user_id,
-            "username": username,
-            "email": email,
-            "needVerifyEmail": state.config.auth_require_email_verification,
-            "presetCategoriesSaved": register_result.preset_categories_saved,
-            "presetAccountsSaved": register_result.preset_accounts_saved,
-            "message": "Registration successful",
-        }),
-    )
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -307,7 +205,7 @@ async fn login_handler(
     let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
     let ip_address = login_client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
 
-    if state.config.database_backend.uses_postgres() {
+
         return login_postgres_response(
             &state,
             &login_name,
@@ -316,183 +214,6 @@ async fn login_handler(
             &ip_address,
         )
         .await;
-    }
-    let runtime = match open_runtime(&state) {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
-
-    let user = match get_login_user_by_login_name(runtime.connection(), &login_name) {
-        Ok(Some(value)) => value,
-        Ok(None) => {
-            if log_auth_event(
-                runtime.connection(),
-                AuthEvent {
-                    user_id: None,
-                    username: &login_name,
-                    event_type: "login_failed",
-                    ip_address: &ip_address,
-                    user_agent: &request_user_agent,
-                    success: false,
-                    error_message: Some("User not found".to_string()),
-                    metadata: None,
-                },
-            )
-            .is_err()
-            {
-                return db_error_response();
-            }
-            return invalid_login_credentials_response();
-        }
-        Err(_) => return db_error_response(),
-    };
-
-    if login_lock_is_active(&user.locked_until) {
-        if log_login_failure(
-            runtime.connection(),
-            &user,
-            &ip_address,
-            &request_user_agent,
-            "Account locked",
-        )
-        .is_err()
-        {
-            return db_error_response();
-        }
-        return auth_rest_error_response(AuthRestError::new(
-            403,
-            "Account locked",
-            "Account is temporarily locked due to multiple failed login attempts",
-        ));
-    }
-    let expired_locked_until = if user.locked_until.trim().is_empty() {
-        None
-    } else {
-        Some(user.locked_until.as_str())
-    };
-
-    if !bcrypt::verify(password, &user.password_hash).unwrap_or(false) {
-        let lockout_until = login_lockout_until_text(state.config.auth_lockout_duration_minutes);
-        if increment_failed_login(
-            runtime.connection(),
-            user.profile.id,
-            state.config.auth_max_login_attempts,
-            &lockout_until,
-            expired_locked_until,
-        )
-        .is_err()
-            || log_login_failure(
-                runtime.connection(),
-                &user,
-                &ip_address,
-                &request_user_agent,
-                "Invalid password",
-            )
-            .is_err()
-        {
-            return db_error_response();
-        }
-        return invalid_login_credentials_response();
-    }
-
-    if !user.is_active {
-        if log_login_failure(
-            runtime.connection(),
-            &user,
-            &ip_address,
-            &request_user_agent,
-            "Account not active",
-        )
-        .is_err()
-        {
-            return db_error_response();
-        }
-        return auth_rest_error_response(AuthRestError::new(
-            403,
-            "Account not active",
-            "Your account has been deactivated",
-        ));
-    }
-
-    if user.two_factor_enabled {
-        let pending_token = match issue_action_token(&user, "pending_2fa", 1, &state) {
-            Ok(value) => value,
-            Err(response) => return *response,
-        };
-        if log_auth_event(
-            runtime.connection(),
-            AuthEvent {
-                user_id: Some(user.profile.id),
-                username: &user.profile.username,
-                event_type: "login_2fa_pending",
-                ip_address: &ip_address,
-                user_agent: &request_user_agent,
-                success: true,
-                error_message: None,
-                metadata: None,
-            },
-        )
-        .is_err()
-        {
-            return db_error_response();
-        }
-        return success_result(
-            StatusCode::OK,
-            json!({
-                "token": pending_token,
-                "need2FA": true,
-            }),
-        );
-    }
-
-    let cloud_settings =
-        match list_application_cloud_settings(runtime.connection(), user.profile.id) {
-            Ok(value) => value,
-            Err(_) => return db_error_response(),
-        };
-    let tokens = match issue_session_tokens(user.profile.id, &user.profile.username, &state) {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
-    let now = utc_now_text();
-    let session_draft = CreateTokenSessionDraft {
-        user_id: user.profile.id,
-        token_hash: sha256_hex(&tokens.access_token),
-        refresh_token_hash: Some(sha256_hex(&tokens.refresh_token)),
-        expires_at: tokens.expires_at.clone(),
-        refresh_expires_at: Some(tokens.refresh_expires_at.clone()),
-        user_agent: request_user_agent.clone(),
-        ip_address: ip_address.clone(),
-        created_at: now.clone(),
-    };
-    if persist_login_success(
-        runtime.connection(),
-        &session_draft,
-        user.profile.id,
-        &user.profile.username,
-        &now,
-        &ip_address,
-        &request_user_agent,
-    )
-    .is_err()
-    {
-        return db_error_response();
-    }
-    let mut user_payload = user_profile_payload(&user.profile);
-    if let Value::Object(ref mut object) = user_payload {
-        object.insert("id".to_string(), Value::from(user.profile.id.get()));
-    }
-
-    success_result(
-        StatusCode::OK,
-        json!({
-            "token": tokens.access_token,
-            "refreshToken": tokens.refresh_token,
-            "need2FA": false,
-            "user": user_payload,
-            "applicationCloudSettings": application_cloud_settings_payload(cloud_settings),
-        }),
-    )
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -519,7 +240,7 @@ async fn refresh_token_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
-    if state.config.database_backend.uses_postgres() {
+
         return refresh_postgres_response(
             &state,
             claims.user_id,
@@ -528,79 +249,6 @@ async fn refresh_token_handler(
             connect_info.map(|ConnectInfo(addr)| addr),
         )
         .await;
-    }
-    let runtime = match open_runtime(&state) {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
-    let refresh_token_hash = sha256_hex(refresh_token);
-    let refresh_session =
-        match get_active_refresh_session(runtime.connection(), &refresh_token_hash) {
-            Ok(Some(value)) => value,
-            Ok(None) => return invalid_refresh_token_response(),
-            Err(_) => return db_error_response(),
-        };
-    if refresh_session.user_id != claims.user_id || !refresh_session.user_is_active {
-        return invalid_refresh_token_response();
-    }
-    if refresh_session_is_expired(&refresh_session.refresh_expires_at) {
-        return refresh_token_expired_response();
-    }
-
-    let user = match get_auth_user_profile(runtime.connection(), claims.user_id) {
-        Ok(Some(value)) => value,
-        Ok(None) => {
-            return auth_rest_error_response(AuthRestError::new(
-                404,
-                "User not found",
-                "User does not exist",
-            ));
-        }
-        Err(_) => return db_error_response(),
-    };
-    let tokens = match issue_session_tokens(user.id, &user.username, &state) {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
-    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
-    let ip_address = client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
-    let session_id = match rotate_refresh_token_session(
-        runtime.connection(),
-        refresh_session.id,
-        &refresh_token_hash,
-        &CreateTokenSessionDraft {
-            user_id: user.id,
-            token_hash: sha256_hex(&tokens.access_token),
-            refresh_token_hash: Some(sha256_hex(&tokens.refresh_token)),
-            expires_at: tokens.expires_at.clone(),
-            refresh_expires_at: Some(tokens.refresh_expires_at.clone()),
-            user_agent: request_user_agent,
-            ip_address,
-            created_at: now_text(),
-        },
-    ) {
-        Ok(Some(value)) => value,
-        Ok(None) => return invalid_refresh_token_response(),
-        Err(_) => return db_error_response(),
-    };
-    if session_id <= 0 {
-        return db_error_response();
-    }
-    let cloud_settings = match list_application_cloud_settings(runtime.connection(), user.id) {
-        Ok(value) => value,
-        Err(_) => return db_error_response(),
-    };
-
-    success_result(
-        StatusCode::OK,
-        json!({
-            "token": tokens.access_token,
-            "refreshToken": tokens.refresh_token,
-            "newToken": tokens.access_token,
-            "user": user_profile_payload(&user),
-            "applicationCloudSettings": application_cloud_settings_payload(cloud_settings),
-        }),
-    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1029,4 +677,3 @@ async fn refresh_postgres_response(
         }),
     )
 }
-

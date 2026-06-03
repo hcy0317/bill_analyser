@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -85,21 +85,6 @@ pub(super) async fn sync_backup_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub(super) async fn verify_backup_restore_handler(
-    State(state): State<HttpAppState>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    #[cfg(not(coverage))]
-    tracing::info!(
-        domain = "backup_user_data",
-        operation = "verify_backup_restore_handler",
-        "business operation entered"
-    );
-    blocking_route(move || verify_backup_restore_response(&state, &headers, body)).await
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn download_backup_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -138,21 +123,6 @@ pub(super) async fn delete_backup_handler(
         "business operation entered"
     );
     blocking_route(move || delete_backup_response(&state, &headers, &filename)).await
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-pub(super) async fn restore_backup_handler(
-    State(state): State<HttpAppState>,
-    headers: HeaderMap,
-    AxumPath(filename): AxumPath<String>,
-) -> Response {
-    #[cfg(not(coverage))]
-    tracing::info!(
-        domain = "backup_user_data",
-        operation = "restore_backup_handler",
-        "business operation entered"
-    );
-    blocking_route(move || restore_backup_response(&state, &headers, &filename)).await
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

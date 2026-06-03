@@ -1,35 +1,19 @@
 # 后端模块
 
-后端是 Rust workspace，按 HTTP runtime、core contract、database repository、parser 四层维护。详细的路径索引、请求生命周期、导入管线、repository 数据流和验证矩阵见 [Rust 后端导航图](backend-map.md)；本页只保留稳定分层摘要。
+后端由 Rust workspace 承载，主入口是 `src/backend/http/bin/bill_http_server.rs`。
 
-## `src/backend/http`
+## HTTP
 
-Axum HTTP 入口，负责路由注册、认证上下文、请求解析、multipart 上传、response envelope 和 structured error。handler 解析请求并投影响应，复杂 SQL 和跨表事务下沉到 core/db。主要 route modules：
+`src/backend/http` 负责 Axum route、认证上下文、request DTO、response envelope、上传处理、runtime state、route ownership 和业务 facade。handler 只编排请求，不直接散落复杂 SQL。
 
-- `auth_routes/` facade + auth route helper shards
-- `bill_routes/`
-- `import_routes/`
-- `taxonomy_routes/` facade + taxonomy route helper shards for accounts/account rules/tags, category mutations, category formatters, settings bundle handlers, serialization, audit/rule helpers and common helpers
-- `budget_routes.rs` facade + `budget_routes/`
-- `statistics_routes/`
-- `matching_routes.rs`
-- `backup_routes/`
+## Core
 
-## `src/backend/db`
+`src/backend/core` 负责金额、时间、分类、预算、统计、导入、matching、LLM/OCR、认证和备份的业务合同。跨 route 的规则先放在 core，再由 db/http 调用。
 
-SQLite repository 层，负责 WAL/FK 连接配置、schema 初始化、事务 helper、user-scope 查询、业务表 CRUD 和导入 preview/session staging。Auth repository 由 `auth.rs` facade 聚合 `auth/` 下的 user/session/profile/cloud settings/2FA/log/row helper 模块；auth registration 由 `auth_registration.rs` facade 聚合默认 seed、注册、分类、账户与测试模块；import staging repository 由 `import_staging.rs` facade 聚合 `import_staging/` 下的 session/template/preview/decision/LLM memory/confirm/row helper 模块；matching repository 由 `matching.rs` facade 聚合 `matching/` 下的 schema/actions/candidate query/reconciliation/serialization/helper 模块；budget repository 由 `budgets.rs` facade 聚合 `budgets/` 下的 CRUD/import/execution/history/forecast/hierarchy/row helper 模块；taxonomy repository 包含 category rules 与 account rules，settings bundle repository 由 `taxonomy/settings_bundle/mod.rs` facade 聚合导入、导出、规范化和 JSON helper 分片。
+## DB
 
-## `src/backend/core`
+`src/backend/db` 负责 SQLx PostgreSQL pool、schema scripts、repositories、transactions、user scope、import staging、settings bundle、backup metadata 和 vector outbox。所有业务 repository 都以当前用户为边界。
 
-共享业务合同与治理层，包含迁移治理清单、金额/时间/统计/分类相关公共规则、预算 period/category/history/forecast/export 合同、matching candidate/learning/investment/recurring 规则、按 LLM config/provider/prompt/response 与 OCR config/parser 分片的 `ai_ocr_llm` 合同、auth/security/ops/import pipeline 合同和 CLI bridge 测试目标。
+## Parsers
 
-## `src/backend/parsers`
-
-账单解析器 crate，提供 parser registry、`RawBill` / `StandardBill`、parser tags、provider-specific CSV/XLS/XLSX/HTML-xls 解析和 golden fixture 合同。
-
-## 约束
-
-- Route handler 不直接承载复杂 SQL；复杂读写下沉到 repository/runtime。
-- API 兼容优先通过 DTO/envelope/adapter 层处理，不在前端 store 中重复补丁。
-- 业务写入保持事务原子性、user-scope 和审计 best-effort。
-- 维护入口优先从 `docs/backend-map.md` 的开发路径和验证矩阵开始，避免把路径索引复制到多处后漂移。
+`src/backend/parsers` 负责 dedicated parser 检测和标准账单归一化。导入 route 只接收 parser 输出，不在 HTTP 层重复解析账单业务字段。

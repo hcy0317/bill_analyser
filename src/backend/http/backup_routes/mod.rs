@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -22,27 +22,23 @@ use axum::{
 };
 use base64::{engine::general_purpose, Engine as _};
 use bill_analyser_core::{
-    backup_archive_summary_from_entries, backup_restore_verify_response, build_backup_file_info,
-    build_sync_config_contract, derive_backup_fernet_key, invalid_backup_archive_summary,
-    is_safe_backup_archive_member, normalize_backup_job_payload, plan_backup_cleanup,
-    resolve_backup_filename, BackupCleanupDecision, BackupFileCandidate, BackupFileInfoContract,
-    BackupFileInfoInput, BackupRecordContract, SyncConfigContract, UserId,
+    backup_archive_summary_from_entries, build_backup_file_info, build_sync_config_contract,
+    derive_backup_fernet_key, invalid_backup_archive_summary, normalize_backup_job_payload,
+    plan_backup_cleanup, resolve_backup_filename, BackupCleanupDecision, BackupFileCandidate,
+    BackupFileInfoContract, BackupFileInfoInput, BackupRecordContract, SyncConfigContract, UserId,
 };
 use bill_analyser_db::{
-    create_backup_audit_log_best_effort, create_or_update_backup_job,
     create_or_update_postgres_backup_job, create_postgres_backup_audit_log_best_effort,
-    init_backup_ops_schema, list_backup_jobs, list_backup_records, list_postgres_backup_jobs,
-    list_postgres_backup_records, update_backup_record_by_filename,
-    update_postgres_backup_record_by_filename, upsert_backup_record, upsert_postgres_backup_record,
-    BackupAuditLogDraft, BackupJobDraft, BackupJobRow, BackupRecordDraft, BackupRecordRow, DbError,
-    DbResult, PostgresRepositoryRuntime, SqliteRuntime,
+    list_postgres_backup_jobs, list_postgres_backup_records,
+    update_postgres_backup_record_by_filename, upsert_postgres_backup_record, BackupAuditLogDraft,
+    BackupJobDraft, BackupJobRow, BackupRecordDraft, BackupRecordRow, DbError, DbResult,
+    PostgresRepositoryRuntime,
 };
 use chrono::{Local, Utc};
 use fernet::Fernet;
 use ring::hmac;
 use serde_json::{json, Map, Value};
 use sha2::Digest;
-use tempfile::{Builder as TempFileBuilder, TempDir};
 use tokio_util::io::ReaderStream;
 use url::Url;
 use walkdir::WalkDir;
@@ -74,7 +70,6 @@ struct AuthenticatedBackupRuntime {
 }
 
 enum BackupOpsRuntime {
-    Sqlite(SqliteRuntime),
     Postgres(PostgresRepositoryRuntime),
 }
 
@@ -136,8 +131,6 @@ pub const BACKUP_OPS_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/backup/download/{filename}"),
     ("GET", "/api/backup/jobs"),
     ("POST", "/api/backup/jobs"),
-    ("POST", "/api/backup/restore/{filename}"),
-    ("POST", "/api/backup/restore/verify"),
     ("POST", "/api/backup/sync"),
 ];
 
@@ -160,20 +153,9 @@ pub fn backup_ops_runtime_router() -> Router<HttpAppState> {
             "/api/backup/jobs",
             get(list_backup_jobs_handler).post(save_backup_job_handler),
         )
-        .route(
-            "/api/backup/restore/:filename",
-            post(restore_backup_handler),
-        )
-        .route(
-            "/api/backup/restore/verify",
-            post(verify_backup_restore_handler),
-        )
 }
 
 mod archive;
-#[cfg(test)]
-#[path = "../../../../tests/backend/http/internal/backup_archive_tests.rs"]
-mod archive_tests;
 mod audit;
 mod auth;
 mod cleanup;
@@ -184,7 +166,6 @@ mod handlers;
 mod jobs;
 mod payload;
 mod response;
-mod restore;
 mod sync;
 
 use archive::*;
@@ -197,13 +178,12 @@ use download::*;
 use jobs::*;
 use payload::*;
 use response::*;
-use restore::*;
 use sync::*;
 
 use handlers::{
     cleanup_backups_handler, create_backup_handler, delete_backup_handler, download_backup_handler,
-    list_backup_files_handler, list_backup_jobs_handler, restore_backup_handler,
-    save_backup_job_handler, sync_backup_handler, verify_backup_restore_handler,
+    list_backup_files_handler, list_backup_jobs_handler, save_backup_job_handler,
+    sync_backup_handler,
 };
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -234,7 +214,6 @@ where
 
 fn list_backup_records_for_runtime(runtime: &BackupOpsRuntime) -> DbResult<Vec<BackupRecordRow>> {
     match runtime {
-        BackupOpsRuntime::Sqlite(runtime) => list_backup_records(runtime.connection()),
         BackupOpsRuntime::Postgres(runtime) => {
             block_on_backup_db(list_postgres_backup_records(runtime.pool()))
         }
@@ -246,7 +225,6 @@ fn upsert_backup_record_for_runtime(
     draft: BackupRecordDraft,
 ) -> DbResult<i64> {
     match runtime {
-        BackupOpsRuntime::Sqlite(runtime) => upsert_backup_record(runtime.connection(), draft),
         BackupOpsRuntime::Postgres(runtime) => {
             block_on_backup_db(upsert_postgres_backup_record(runtime.pool(), draft))
         }
@@ -260,12 +238,6 @@ fn update_backup_record_for_runtime(
     metadata_update: Value,
 ) -> DbResult<bool> {
     match runtime {
-        BackupOpsRuntime::Sqlite(runtime) => update_backup_record_by_filename(
-            runtime.connection(),
-            filename,
-            status,
-            metadata_update,
-        ),
         BackupOpsRuntime::Postgres(runtime) => {
             block_on_backup_db(update_postgres_backup_record_by_filename(
                 runtime.pool(),
@@ -282,7 +254,6 @@ fn list_backup_jobs_for_runtime(
     user_id: UserId,
 ) -> DbResult<Vec<BackupJobRow>> {
     match runtime {
-        BackupOpsRuntime::Sqlite(runtime) => list_backup_jobs(runtime.connection(), user_id),
         BackupOpsRuntime::Postgres(runtime) => {
             block_on_backup_db(list_postgres_backup_jobs(runtime.pool(), user_id))
         }
@@ -295,9 +266,6 @@ fn create_or_update_backup_job_for_runtime(
     draft: BackupJobDraft,
 ) -> DbResult<i64> {
     match runtime {
-        BackupOpsRuntime::Sqlite(runtime) => {
-            create_or_update_backup_job(runtime.connection(), user_id, draft)
-        }
         BackupOpsRuntime::Postgres(runtime) => block_on_backup_db(
             create_or_update_postgres_backup_job(runtime.pool(), user_id, draft),
         ),

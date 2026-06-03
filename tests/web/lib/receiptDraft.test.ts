@@ -112,12 +112,12 @@ describe('receiptDraft helper', () => {
         expect(transaction.tagIds).toStrictEqual(['tag-3']);
     });
 
-    test('rejects invalid candidate fields and falls back to legacy OCR fields', () => {
+    test('rejects invalid candidate fields and falls back to top-level OCR fields', () => {
         const transaction = new EditableTransactionFixture();
         const result: RecognizedReceiptImageResponse = {
             amount: 12.34,
             tradeTime: '2026-06-01T01:02:03Z',
-            description: 'legacy text',
+            description: 'receipt text',
             paymentPlatform: null,
             provenance: { provider: 'tesseract', requestId: 'req-2' },
             confidence: 0.51,
@@ -140,7 +140,7 @@ describe('receiptDraft helper', () => {
 
         expect(transaction.sourceAmount).toBe(1234);
         expect(transaction.time).toBe(Math.floor(Date.parse('2026-06-01T01:02:03Z') / 1000));
-        expect(transaction.comment).toBe('legacy text');
+        expect(transaction.comment).toBe('receipt text');
         expect(buildReceiptDraftCandidateHints(undefined)).toStrictEqual([]);
     });
 });

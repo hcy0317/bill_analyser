@@ -1,6 +1,6 @@
 // 中文导读：核心业务合同层，负责把金额、时间、分类、导入、匹配、预算、统计等规则从 HTTP/DB 细节中隔离。
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
-// 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
+// 不变式：金额单位、用户可见类型和API payload 在进入或离开本层时必须显式转换。
 
 
 fn select_budget_items(items: &[Value], detail_mode: bool) -> Vec<Value> {
@@ -186,7 +186,7 @@ fn sorted_ids(values: Option<&[i64]>) -> Vec<i64> {
     values
 }
 
-fn python_json_string(value: &str) -> String {
+fn rendered_json_string(value: &str) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
 }
 
@@ -198,20 +198,20 @@ fn forecast_strategy_explanation(strategy: &str, period_count: usize) -> String 
     }
 }
 
-enum PythonJsonValue {
+enum RenderedJsonValue {
     Int(i64),
     OptionalInt(Option<i64>),
     String(String),
     IntArray(Vec<i64>),
 }
 
-impl PythonJsonValue {
+impl RenderedJsonValue {
     fn render(&self) -> String {
         match self {
             Self::Int(value) => value.to_string(),
             Self::OptionalInt(Some(value)) => value.to_string(),
             Self::OptionalInt(None) => "null".to_string(),
-            Self::String(value) => python_json_string(value),
+            Self::String(value) => rendered_json_string(value),
             Self::IntArray(values) => {
                 let body = values
                     .iter()

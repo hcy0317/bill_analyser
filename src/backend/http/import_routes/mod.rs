@@ -4,7 +4,7 @@
 //! transfer/learning decisions, LLM/OCR entrypoints, and confirm/cancel
 //! staging cleanup for the `/api/bills/import...` and related LLM/OCR routes.
 
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -12,7 +12,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{delete, get, post, put},
+    routing::{get, post, put},
     Json, Router,
 };
 use base64::{engine::general_purpose, Engine as _};
@@ -55,51 +55,51 @@ use bill_analyser_core::{
     WEAVIATE_RULE_STATE_POSTGRES_AUTHORITATIVE,
 };
 use bill_analyser_db::{
-    accept_llm_candidate, activate_llm_config, apply_preview_llm_recommendation,
+    accept_postgres_llm_candidate, activate_postgres_llm_config, apply_preview_llm_recommendation,
     apply_preview_patches_preserving_selection, apply_preview_transfer_decision,
-    calculate_import_bill_hash, clear_import_preview_materialization_state, clear_session_data,
-    confirm_preview_to_bills, confirm_preview_to_bills_with_ack, count_llm_candidates,
-    create_llm_candidate, create_llm_config, dedup_bills_from_parser_templates, delete_llm_config,
-    effective_llm_config_from_saved, get_app_setting, get_import_annotation_samples,
+    clear_import_preview_materialization_state, clear_session_data,
+    confirm_preview_to_bills_with_ack, count_postgres_llm_candidates,
+    create_postgres_llm_candidate, create_postgres_llm_config, dedup_bills_from_parser_templates,
+    delete_postgres_llm_config, effective_postgres_llm_config_from_saved,
     get_import_history_candidate_bills_for_session, get_import_learning_lifecycle_view,
     get_import_session, get_import_standard_rows_by_session, get_llm_memory_events,
-    get_preview_bill_by_id, get_preview_by_session, get_preview_filter_index_by_session,
-    get_unprocessed_templates_for_dedup, init_app_settings_schema, init_import_staging_schema,
-    init_llm_runtime_schema, insert_import_decision_groups_batch,
-    insert_import_history_materializations_batch, insert_preview_bills_batch, list_llm_candidates,
-    list_llm_configs, load_ocr_config_setting,
+    get_postgres_llm_candidate_by_id, get_preview_bill_by_id, get_preview_by_session,
+    get_preview_filter_index_by_session, get_unprocessed_templates_for_dedup,
+    init_import_staging_schema, insert_import_decision_groups_batch,
+    insert_import_history_materializations_batch, insert_preview_bills_batch,
+    list_postgres_llm_candidates, list_postgres_llm_configs, load_postgres_ocr_config_setting,
     mark_unprocessed_parser_templates_processed_for_session,
     parser_template_draft_from_standard_bill, preview_draft_from_history_duplicate,
     preview_draft_from_history_transfer, preview_drafts_from_dedup_bills,
-    query_preview_page_by_session, record_import_learning_lifecycle_feedback, reject_llm_candidate,
+    query_preview_page_by_session, reject_postgres_llm_candidate,
     replace_preview_selection_with_patches, reset_session_preview_selection,
-    review_preview_llm_recommendation, save_import_annotation_samples, set_app_setting,
-    stage_import_parser_templates_with_sources, store_ocr_config_setting,
-    update_import_session_status, update_llm_config, update_preview_bill,
+    review_preview_llm_recommendation, save_import_annotation_samples,
+    stage_import_parser_templates_with_sources, store_postgres_ocr_config_setting,
+    update_import_session_status, update_postgres_llm_config, update_preview_bill,
     update_preview_bills_batch, update_preview_recurring_match_decision, update_preview_selection,
-    update_session_preview_selection_by_query, AppSettingDraft, ImportAnnotationSampleDraft,
+    update_session_preview_selection_by_query, ImportAnnotationSampleDraft,
     ImportDecisionGroupDraft, ImportDecisionGroupMemberDraft, ImportHistoryBillRow,
     ImportHistoryDuplicatePreviewInput, ImportHistoryMaterializationDraft,
-    ImportHistoryRewriteAcknowledgement, ImportHistoryTransferPreviewInput,
-    ImportLearningLifecycleRecordInput, ImportPreviewDecision, ImportPreviewDecisionResult,
-    ImportPreviewDraft, ImportPreviewExpectedState, ImportPreviewLlmDecisionResult,
-    ImportPreviewLlmReviewRequest, ImportPreviewLlmSuggestion, ImportPreviewPageRequest,
-    ImportPreviewPatch, ImportPreviewPatchField, ImportPreviewPatchValue,
+    ImportHistoryRewriteAcknowledgement, ImportHistoryTransferPreviewInput, ImportPreviewDecision,
+    ImportPreviewDecisionResult, ImportPreviewDraft, ImportPreviewExpectedState,
+    ImportPreviewLlmDecisionResult, ImportPreviewLlmReviewRequest, ImportPreviewLlmSuggestion,
+    ImportPreviewPageRequest, ImportPreviewPatch, ImportPreviewPatchField, ImportPreviewPatchValue,
     ImportPreviewQueryFilters, ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate,
     ImportPreviewRow, ImportSessionDraft, ImportSessionStatusUpdate, ImportSourceDraft,
-    ImportStandardRowDraft, LlmCandidateDraft, LlmConfigDraft, LlmConfigUpdate, SqliteRuntime,
+    ImportStandardRowDraft, LlmCandidateDraft, LlmConfigDraft, LlmConfigUpdate, PostgresPool,
+    PostgresRepositoryRuntime,
 };
 use bill_analyser_parsers::{
-    parse_dedicated_import_bytes, parse_dedicated_import_bytes_with_decision, parser_source_label,
-    post_process_raw_bills, DedicatedParserDecision, RawBill, StandardBill,
+    parse_dedicated_import_bytes_with_decision, parser_source_label, post_process_raw_bills,
+    DedicatedParserDecision, RawBill, StandardBill,
 };
 use bytes::{Bytes, BytesMut};
 use chrono::{NaiveDate, Utc};
 use encoding_rs::GBK;
-use rusqlite::{params, Connection, OptionalExtension};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
+use sqlx::{Postgres, QueryBuilder, Row};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
     env, fs, io,
@@ -114,6 +114,8 @@ use std::{
 };
 use tokio::time::sleep;
 use url::Url;
+
+type Connection = PostgresPool;
 
 use crate::{
     auth::resolve_user_id_from_headers,
@@ -135,8 +137,6 @@ const LLM_CANDIDATE_RAW_RESPONSE_MAX_BYTES: usize = 16_384;
 const LLM_RULE_INDUCTION_MAX_CANDIDATES_PER_GROUP: usize = 5;
 const LLM_RULE_SYNTHESIS_MAX_GROUPS: usize = 8;
 const LLM_RULE_SYNTHESIS_MAX_EVIDENCE_PER_GROUP: usize = 4;
-const IMPORT_LEARNING_MODEL_KEY: &str = "import-learning-dual-head";
-
 pub const IMPORT_SKELETON_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/bills/import/v2/parse"),
     ("POST", "/api/bills/import/v2/parse_generic"),
@@ -174,21 +174,6 @@ pub const IMPORT_SKELETON_ROUTE_PATTERNS: &[(&str, &str)] = &[
         "/api/bills/import/v2/learning/{session_id}/suggestions",
     ),
     ("POST", "/api/bills/import/v2/learning/{session_id}/promote"),
-    ("POST", "/api/bills/import/preview"),
-    ("POST", "/api/bills/import/confirm"),
-    ("POST", "/api/bills/import/batch"),
-    ("POST", "/api/bills/parse_import"),
-    ("POST", "/api/bills/import/upload"),
-    ("GET", "/api/bills/import/parsers"),
-    ("POST", "/api/bills/import/reclassify"),
-    ("GET", "/api/bills/import/configs"),
-    ("POST", "/api/bills/import/configs"),
-    ("POST", "/api/bills/import/configs/match"),
-    ("POST", "/api/bills/import/configs/suggest"),
-    ("DELETE", "/api/bills/import/configs/{config_id}"),
-    ("GET", "/api/bills/import/learning-rules"),
-    ("PUT", "/api/bills/import/learning-rules/{rule_id}"),
-    ("DELETE", "/api/bills/import/learning-rules/{rule_id}"),
     ("POST", "/api/llm/preview-recommend/accept"),
     ("POST", "/api/llm/preview-recommend/reject"),
     ("GET", "/api/llm/memory"),
@@ -271,59 +256,6 @@ pub fn import_runtime_router() -> Router<HttpAppState> {
         .route(
             "/api/bills/import/v2/learning/:session_id/promote",
             post(import_learning_promote_runtime_handler),
-        )
-        .route(
-            "/api/bills/import/preview",
-            post(legacy_import_preview_runtime_handler),
-        )
-        .route(
-            "/api/bills/import/confirm",
-            post(legacy_import_confirm_runtime_handler),
-        )
-        .route(
-            "/api/bills/import/batch",
-            post(legacy_import_batch_runtime_handler),
-        )
-        .route(
-            "/api/bills/parse_import",
-            post(legacy_parse_import_runtime_handler),
-        )
-        .route(
-            "/api/bills/import/upload",
-            post(legacy_import_upload_runtime_handler),
-        )
-        .route(
-            "/api/bills/import/parsers",
-            get(legacy_import_parsers_runtime_handler),
-        )
-        .route(
-            "/api/bills/import/reclassify",
-            post(legacy_import_reclassify_runtime_handler),
-        )
-        .route(
-            "/api/bills/import/configs",
-            get(import_configs_list_runtime_handler).post(import_configs_save_runtime_handler),
-        )
-        .route(
-            "/api/bills/import/configs/match",
-            post(import_configs_match_runtime_handler),
-        )
-        .route(
-            "/api/bills/import/configs/suggest",
-            post(import_configs_suggest_runtime_handler),
-        )
-        .route(
-            "/api/bills/import/configs/:config_id",
-            delete(import_configs_delete_runtime_handler),
-        )
-        .route(
-            "/api/bills/import/learning-rules",
-            get(import_learning_rules_list_runtime_handler),
-        )
-        .route(
-            "/api/bills/import/learning-rules/:rule_id",
-            put(import_learning_rule_update_runtime_handler)
-                .delete(import_learning_rule_delete_runtime_handler),
         )
         .route(
             "/api/llm/preview-recommend",
@@ -420,20 +352,19 @@ pub fn import_runtime_router() -> Router<HttpAppState> {
         )
 }
 
-include!("legacy_handlers.rs");
 include!("stage_vector_recall.rs");
 include!("stage_handlers.rs");
 include!("stage_account_rule_matchers.rs");
 include!("duplicate_materialization.rs");
 include!("transfer_materialization.rs");
+include!("parse_handlers.rs");
 include!("llm_handlers.rs");
 include!("ocr_learning_handlers.rs");
 include!("response_payload.rs");
 include!("response_payload_ledger.rs");
 include!("multipart_and_ocr.rs");
 include!("parser_mapping.rs");
-include!("legacy_import_helpers.rs");
 include!("learning_runtime.rs");
-include!("legacy_storage.rs");
+include!("import_file_helpers.rs");
 include!("preview_mutation_helpers.rs");
 include!("runtime_helpers.rs");

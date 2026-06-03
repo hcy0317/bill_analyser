@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -8,7 +8,6 @@ use super::*;
 pub(super) fn create_backup_file(
     data_dir: &Path,
     backup_dir: &Path,
-    sqlite_db_path: Option<&Path>,
     encryption_key: Option<&str>,
 ) -> FileRouteResult<Option<PathBuf>> {
     if !data_dir.exists() {
@@ -21,100 +20,13 @@ pub(super) fn create_backup_file(
         )
     })?;
     remove_stale_plaintext_backup_temps(backup_dir)?;
-    let source = prepare_backup_source(data_dir, backup_dir, sqlite_db_path)?;
     let backup_path = unique_backup_zip_path(backup_dir);
-    create_backup_zip(source.data_dir(), &backup_path)?;
+    create_backup_zip(data_dir, &backup_path)?;
     if let Some(secret) = encryption_key.filter(|value| !value.trim().is_empty()) {
         Ok(Some(encrypt_backup_file(&backup_path, secret)?))
     } else {
         Ok(Some(backup_path))
     }
-}
-
-pub(super) struct BackupSource {
-    data_dir: PathBuf,
-    _temp: Option<TempDir>,
-}
-
-impl BackupSource {
-    fn borrowed(data_dir: &Path) -> Self {
-        Self {
-            data_dir: data_dir.to_path_buf(),
-            _temp: None,
-        }
-    }
-
-    #[tracing::instrument(level = "debug", skip_all)]
-    pub(super) fn data_dir(&self) -> &Path {
-        &self.data_dir
-    }
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-pub(super) fn prepare_backup_source(
-    data_dir: &Path,
-    backup_dir: &Path,
-    sqlite_db_path: Option<&Path>,
-) -> FileRouteResult<BackupSource> {
-    let Some(sqlite_db_path) = sqlite_db_path else {
-        return Ok(BackupSource::borrowed(data_dir));
-    };
-    if !sqlite_db_path.starts_with(data_dir) {
-        return Ok(BackupSource::borrowed(data_dir));
-    }
-
-    let sqlite_relative = sqlite_db_path
-        .strip_prefix(data_dir)
-        .map_err(|error| BackupFileRuntimeError::internal(error.to_string()))?
-        .to_path_buf();
-    let temp = TempFileBuilder::new()
-        .prefix("backup_source_")
-        .tempdir_in(backup_dir)?;
-    let staged_data_dir = temp.path().join(
-        data_dir
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or("data"),
-    );
-    let sqlite_sidecars = sqlite_sidecar_relative_paths(&sqlite_relative);
-    copy_dir_all_filtered(data_dir, &staged_data_dir, &|relative| {
-        relative == sqlite_relative.as_path()
-            || sqlite_sidecars
-                .iter()
-                .any(|sidecar| sidecar.as_path() == relative)
-    })?;
-    if sqlite_db_path.exists() {
-        snapshot_sqlite_database(sqlite_db_path, &staged_data_dir.join(&sqlite_relative))?;
-    }
-    Ok(BackupSource {
-        data_dir: staged_data_dir,
-        _temp: Some(temp),
-    })
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-pub(super) fn sqlite_sidecar_relative_paths(sqlite_relative: &Path) -> Vec<PathBuf> {
-    let raw = sqlite_relative.to_string_lossy();
-    [format!("{raw}-wal"), format!("{raw}-shm")]
-        .into_iter()
-        .map(PathBuf::from)
-        .collect()
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-pub(super) fn snapshot_sqlite_database(source: &Path, target: &Path) -> FileRouteResult<()> {
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    if target.exists() {
-        fs::remove_file(target)?;
-    }
-    let connection = rusqlite::Connection::open(source)
-        .map_err(|error| BackupFileRuntimeError::internal(error.to_string()))?;
-    connection
-        .execute("VACUUM INTO ?1", [target.to_string_lossy().as_ref()])
-        .map_err(|error| BackupFileRuntimeError::internal(error.to_string()))?;
-    Ok(())
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -365,7 +277,6 @@ pub(super) fn build_backup_metadata(
         "contains_data_dir": archive_summary.contains_data_dir,
         "entry_count": archive_summary.entry_count,
         "top_level_entries": archive_summary.top_level_entries,
-        "ready_to_restore": archive_summary.ready_to_restore,
     });
     Ok(metadata)
 }
@@ -426,7 +337,6 @@ pub(super) fn upsert_backup_record_from_info(
                 "contains_data_dir": backup_info.contains_data_dir,
                 "entry_count": backup_info.entry_count,
                 "top_level_entries": backup_info.top_level_entries,
-                "ready_to_restore": backup_info.ready_to_restore,
             }),
         },
     )

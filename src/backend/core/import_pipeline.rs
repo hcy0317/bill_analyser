@@ -1,6 +1,6 @@
 // 中文导读：核心业务合同层，负责把金额、时间、分类、导入、匹配、预算、统计等规则从 HTTP/DB 细节中隔离。
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
-// 不变式：金额单位、用户可见类型和兼容 payload 在进入或离开本层时必须显式转换。
+// 不变式：金额单位、用户可见类型和API payload 在进入或离开本层时必须显式转换。
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -48,8 +48,8 @@ pub const BILLS_PREVIEW_CONTRACT_FIELDS: &[&str] = &[
     "preview_recurring_matched_date",
     "preview_matching_feedback_json",
 ];
-// preview row 的兼容字段清单。任何删改都要同时复核后端投影、前端模型和
-// matching feedback 的 sparse payload 兼容性。
+// preview row 的字段清单。任何删改都要同时复核后端投影、前端模型和
+// matching feedback 的 sparse payload 契约一致性。
 include!("import_history_rewrite.rs");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -333,11 +333,11 @@ pub fn build_import_preview_filter_index_item(
         payment_method: string_field_from_map(preview_item, "preview_payment_method"),
         selected: preview_item
             .get("preview_selected")
-            .map(python_truthy)
+            .map(json_value_is_truthy)
             .unwrap_or(true),
         is_manually_annotated: preview_item
             .get("preview_is_manually_annotated")
-            .map(python_truthy)
+            .map(json_value_is_truthy)
             .unwrap_or(false),
         parser_source: string_field_from_map(preview_item, "preview_parser_id"),
         parser_tags: list_field_from_map(preview_item, "preview_parser_tags"),
@@ -404,7 +404,7 @@ pub fn resolve_import_preview_transfer_signal_status(
     let transfer_score = float_field_from_map(preview_item, "transfer_suggestion_score");
     let transfer_suppressed = transfer_matching
         .and_then(|matching| matching.get("suppressed"))
-        .map(python_truthy)
+        .map(json_value_is_truthy)
         .unwrap_or(false);
 
     if (transfer_has_candidate || matches!(suggested_preview_type.trim(), "转账" | "transfer"))
@@ -453,7 +453,7 @@ pub fn resolve_import_preview_learning_signal_status(
             || learning_rule_id > 0)
             && !learning_matching
                 .and_then(|matching| matching.get("suppressed"))
-                .map(python_truthy)
+                .map(json_value_is_truthy)
                 .unwrap_or(false);
 
     if has_pending_learning {
@@ -663,11 +663,11 @@ fn populate_annotation_matching_section(
     let annotation = section_object_mut(payload_object, "annotation");
     let is_manually_annotated = annotation
         .get("is_manually_annotated")
-        .map(python_truthy)
+        .map(json_value_is_truthy)
         .unwrap_or(false)
         || preview_item
             .get("preview_is_manually_annotated")
-            .map(python_truthy)
+            .map(json_value_is_truthy)
             .unwrap_or(false);
     annotation.insert(
         "is_manually_annotated".to_string(),
@@ -1209,7 +1209,7 @@ fn value_to_i64(value: &Value) -> i64 {
     }
 }
 
-fn python_truthy(value: &Value) -> bool {
+fn json_value_is_truthy(value: &Value) -> bool {
     match value {
         Value::Null => false,
         Value::Bool(value) => *value,

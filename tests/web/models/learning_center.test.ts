@@ -60,7 +60,7 @@ describe('learning center feature chips', () => {
         ]);
     });
 
-    test('normalizes compact legacy c/d/p/m feature strings without exposing raw source', () => {
+    test('normalizes compact c/d/p/m feature strings without exposing raw source', () => {
         const rule = {
             ...baseRule,
             matchFeaturesJson: 'c=网银在线（北京）科技有限公司客户备付金|d=快捷支付退货 | 网银在线（北京）科技有限公司客户备付金 | 网络银行 | 695438343|p=cmbc|m=网络银行',

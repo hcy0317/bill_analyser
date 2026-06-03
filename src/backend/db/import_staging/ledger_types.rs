@@ -1,4 +1,4 @@
-// 中文导读：SQLite repository 层，定义导入 source 与 standard row 台账 DTO。
+// 中文导读：Postgres import staging 层，定义导入 source 与 standard row 台账 DTO。
 // 维护重点：这些类型只描述 staging 行形状，业务合并、去重和匹配规则留在 core/http 流程。
 // 不变式：standard row 金额使用分单位，source/row 查询必须保持 user/session scope。
 

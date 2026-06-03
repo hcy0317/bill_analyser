@@ -1,6 +1,6 @@
-// 中文导读：SQLite repository 层，负责 schema、事务、user-scope 查询、row helper 和跨表写入边界。
+// 中文导读：PostgreSQL repository 层错误类型，负责统一仓储错误边界。
 // 维护重点：SQL 与数据行映射集中在本层，HTTP handler 不应复制查询逻辑或绕过事务 helper。
-// 不变式：业务写入默认 rollback-on-error，审计与兼容缓存只有在注释明确时才能作为 best-effort。
+// 不变式：业务写入默认 rollback-on-error，审计与缓存只有在注释明确时才能作为 best-effort。
 
 use thiserror::Error;
 
@@ -12,8 +12,6 @@ pub enum DbError {
     UnsafePath(String),
     #[error("invalid database operation: {0}")]
     InvalidOperation(String),
-    #[error("sqlite error: {0}")]
-    Sqlite(#[from] rusqlite::Error),
     #[error("postgres error: {0}")]
     Postgres(#[from] sqlx::Error),
     #[error("io error: {0}")]

@@ -192,7 +192,7 @@ export const useExchangeRatesStore = defineStore('exchangeRates', () => {
 
                 if (error && error.processed) {
                     reject(error);
-                } else if (error.response && error.response.data && error.response.data.errorMessage) {
+                } else if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else {
                     reject({ message: 'Unable to retrieve exchange rates data' });
@@ -225,7 +225,7 @@ export const useExchangeRatesStore = defineStore('exchangeRates', () => {
             }).catch(error => {
                 logger.error('failed to update user custom exchange rate', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to update user custom exchange rate' });
@@ -260,7 +260,7 @@ export const useExchangeRatesStore = defineStore('exchangeRates', () => {
             }).catch(error => {
                 logger.error('failed to delete user custom exchange rate', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to delete this user custom exchange rate' });

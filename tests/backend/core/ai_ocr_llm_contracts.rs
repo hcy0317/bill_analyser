@@ -1,3 +1,6 @@
+use bill_analyser_core::account_rules::{
+    AccountRuleCandidate, ACCOUNT_ROLE_SOURCE, FIELD_DESCRIPTION, TRANSACTION_SCOPE_ALL,
+};
 use bill_analyser_core::ai_ocr_llm::{
     build_llm_analysis_response, build_llm_candidate_list_response,
     build_llm_candidate_reject_response, build_llm_classification_prompt,
@@ -251,10 +254,20 @@ fn ocr_recognition_success_response_maps_taxonomy_to_auto_fill_and_candidates() 
             rule_expression: "OR:瑞幸|拿铁".to_string(),
             regex_enabled: false,
         }],
+        account_rules: vec![AccountRuleCandidate {
+            rule_id: 601,
+            account_id: 200,
+            account_role_scope: ACCOUNT_ROLE_SOURCE.to_string(),
+            transaction_type_scope: TRANSACTION_SCOPE_ALL.to_string(),
+            field_scope: vec![FIELD_DESCRIPTION.to_string()],
+            rule_expression: "OR={招商银行,招行}".to_string(),
+            regex_enabled: false,
+            enabled: true,
+            priority: 1,
+        }],
         accounts: vec![ReceiptDraftAccount {
             id: "200".to_string(),
             name: "招商银行".to_string(),
-            aliases: vec!["招商银行".to_string(), "招行".to_string()],
         }],
         tags: vec![ReceiptDraftTag {
             id: "7".to_string(),
@@ -287,7 +300,7 @@ fn ocr_recognition_success_response_maps_taxonomy_to_auto_fill_and_candidates() 
 }
 
 #[test]
-fn llm_provider_alias_defaults_match_python_factory() {
+fn llm_provider_alias_defaults_match_current_factory() {
     assert!(llm_available_providers().contains(&"anthropic".to_string()));
     assert!(llm_available_providers().contains(&"openai-compatible".to_string()));
     assert!(llm_available_providers().contains(&"azure-openai".to_string()));
@@ -324,7 +337,7 @@ fn llm_provider_alias_defaults_match_python_factory() {
             provider_name,
             Some(&json!({"api_key": "secret", "base_url": "", "model": ""})),
         )
-        .expect("openai-compatible defaults");
+        .expect("provider defaults");
         assert_eq!(config.provider_kind, "openai_compatible");
         assert_eq!(config.provider_name, provider_name);
         assert_eq!(config.base_url, base_url);
@@ -339,7 +352,7 @@ fn llm_provider_alias_defaults_match_python_factory() {
             "model": "custom-chat",
         })),
     )
-    .expect("default custom-compatible endpoint");
+    .expect("default custom endpoint");
     assert_eq!(
         default_openai_compatible.base_url,
         "https://api.openai.com/v1"

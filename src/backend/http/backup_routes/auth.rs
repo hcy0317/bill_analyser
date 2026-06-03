@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -27,21 +27,15 @@ pub(super) fn authenticated_backup_runtime(
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn open_backup_ops_runtime(state: &HttpAppState) -> RouteResult<BackupOpsRuntime> {
-    if state.config.database_backend.uses_postgres() {
-        let runtime = state
-            .open_postgres_repository_runtime("backup ops")
-            .map_err(|error| {
-                Box::new(error_response(
-                    status_or_internal(error.http_status_code()),
-                    error.public_message("Rust backup ops route runtime DB error"),
-                ))
-            })?;
-        return Ok(BackupOpsRuntime::Postgres(runtime));
-    }
-
-    let runtime = open_runtime(state)?;
-    init_backup_ops_schema(runtime.connection()).map_err(|_| Box::new(db_error_response()))?;
-    Ok(BackupOpsRuntime::Sqlite(runtime))
+    let runtime = state
+        .open_postgres_repository_runtime("backup ops")
+        .map_err(|error| {
+            Box::new(error_response(
+                status_or_internal(error.http_status_code()),
+                error.public_message(),
+            ))
+        })?;
+    Ok(BackupOpsRuntime::Postgres(runtime))
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

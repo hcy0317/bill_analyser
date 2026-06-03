@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -8,28 +8,6 @@ fn invalid_login_credentials_response() -> Response {
         "Invalid credentials",
         "Invalid username or password",
     ))
-}
-
-fn log_login_failure(
-    connection: &rusqlite::Connection,
-    user: &AuthLoginUserRow,
-    ip_address: &str,
-    user_agent: &str,
-    error_message: &str,
-) -> bill_analyser_db::DbResult<i64> {
-    log_auth_event(
-        connection,
-        AuthEvent {
-            user_id: Some(user.profile.id),
-            username: &user.profile.username,
-            event_type: "login_failed",
-            ip_address,
-            user_agent,
-            success: false,
-            error_message: Some(error_message.to_string()),
-            metadata: None,
-        },
-    )
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

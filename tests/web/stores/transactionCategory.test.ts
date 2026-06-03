@@ -55,7 +55,7 @@ function buildCategoryResponse(): CategoryResponseMap {
                 name: '餐饮',
                 parentId: '0',
                 type: CategoryType.Expense,
-                icon: 'mdi-food',
+                icon: 'las la-utensils',
                 color: '#ff9800',
                 comment: '',
                 displayOrder: 1,

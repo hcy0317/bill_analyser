@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -16,8 +16,6 @@ pub struct HttpShellIdentity {
     pub crate_name: String,
     pub version: String,
     pub runtime_boundary: String,
-    pub business_migration: String,
-    pub api_takeover: bool,
 }
 
 impl HttpShellIdentity {
@@ -28,19 +26,15 @@ impl HttpShellIdentity {
 
     #[tracing::instrument(level = "debug", skip_all)]
     pub fn for_import_route_mode(import_route_mode: ImportRouteMode) -> Self {
-        let (runtime_boundary, business_migration) = match import_route_mode {
-            ImportRouteMode::ImportDbRuntime => (
-                "rust-http:rust-only-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+matching-recurring-calendar-networth-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+ai-llm-config-candidates-runtime+ai-llm-provider-generation-runtime+ai-ocr-recognition-runtime+auth-login-register-token-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime+backup-ops-sync-runtime",
-                "import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+matching-recurring-calendar-networth-runtime+statistics-read-runtime+statistics-analyzer-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+ai-learning-center-runtime+ai-llm-config-candidates-runtime+ai-llm-provider-generation-runtime+ai-ocr-recognition-runtime+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime+backup-ops-sync-runtime",
-            ),
+        let runtime_boundary = match import_route_mode {
+            ImportRouteMode::ImportDbRuntime =>
+                "rust-http:postgres-authority+weaviate-required+bills+budgets+matching+statistics+taxonomy+import+ai+auth+backup-runtime",
         };
 
         Self {
             crate_name: env!("CARGO_PKG_NAME").to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
             runtime_boundary: runtime_boundary.to_string(),
-            business_migration: business_migration.to_string(),
-            api_takeover: true,
         }
     }
 }
@@ -65,7 +59,7 @@ pub fn http_shell_health_with_weaviate_status(
     let mut details = BTreeMap::new();
     details.insert(
         "owned_routes".to_string(),
-        "/api/health,/api/runtime,import/preview-adjacent runtime routes,bills CRUD runtime routes,bills picture runtime routes,bills export runtime route,bills recurring runtime routes,bills reconciliation runtime route,bills category actions runtime routes,budgets CRUD/execution/forecast/history/import runtime routes,matching/recurring/calendar/networth runtime routes,statistics read/analyzer/exchange runtime routes,taxonomy account CRUD/display-order/sync-balances/transaction-action/account-rule list-create-update-delete-reorder-migrate-test runtime routes,taxonomy tag CRUD/display-order runtime routes,taxonomy category master-data/statistics/category-rule-list-test/rule-overview/settings-bundle import-export runtime routes,taxonomy templates CRUD/display-order runtime routes,global Learning Center suggestions/rules runtime routes,LLM config/candidates/provider-generation runtime routes,OCR config and receipt recognition runtime routes,auth login/register/token/account-recovery/OAuth2 authorize/profile/cloud/external-auth/system/user-data-statistics-export-clear/2fa-status/2fa-verify/2fa-recovery-verify/2fa-write/step-up runtime routes,backup ops runtime routes".to_string(),
+        "/api/health,/api/runtime,import/preview-adjacent runtime routes,bills CRUD runtime routes,bills picture runtime routes,bills export runtime route,bills recurring runtime routes,bills reconciliation runtime route,bills category actions runtime routes,budgets CRUD/execution/forecast/history/import runtime routes,matching/recurring/calendar/networth runtime routes,statistics read/analyzer/exchange runtime routes,taxonomy account CRUD/display-order/sync-balances/transaction-action/account-rule list-create-update-delete-reorder-test runtime routes,taxonomy tag CRUD/display-order runtime routes,taxonomy category master-data/statistics/category-rule-list-test/rule-overview/settings-bundle import-export runtime routes,taxonomy templates CRUD/display-order runtime routes,global Learning Center suggestions/rules runtime routes,LLM config/candidates/provider-generation runtime routes,OCR config and receipt recognition runtime routes,auth login/register/token/OAuth2 authorize/profile/cloud/external-auth/system/user-data-statistics-export-clear/2FA status/verify/recovery-code/write/step-up runtime routes,backup ops runtime routes".to_string(),
     );
     details.insert(
         "import_route_mode".to_string(),
@@ -80,10 +74,10 @@ pub fn http_shell_health_with_weaviate_status(
         "route_repository_backend".to_string(),
         database_boundary.route_repository_backend_str().to_string(),
     );
-    let postgres_cutover_status = DatabaseRuntimeBoundary::postgres_cutover_status(config);
+    let postgres_authority_status = DatabaseRuntimeBoundary::postgres_authority_status(config);
     details.insert(
-        "postgres_cutover_status".to_string(),
-        postgres_cutover_status.to_string(),
+        "postgres_authority_status".to_string(),
+        postgres_authority_status.to_string(),
     );
     details.insert(
         "postgres_configured".to_string(),
@@ -94,14 +88,6 @@ pub fn http_shell_health_with_weaviate_status(
         config
             .redacted_postgres_url()
             .unwrap_or_else(|| "unconfigured".to_string()),
-    );
-    details.insert(
-        "migration_mode".to_string(),
-        config.migration_mode.as_str().to_string(),
-    );
-    details.insert(
-        "migration_status".to_string(),
-        "placeholder:not_started".to_string(),
     );
     details.insert("weaviate_status".to_string(), weaviate_status.to_string());
     details.insert(
@@ -117,23 +103,7 @@ pub fn http_shell_health_with_weaviate_status(
         config.weaviate.collection_prefix.clone(),
     );
     details.insert("weaviate_required".to_string(), "true".to_string());
-    details.insert(
-        "require_postgres_after_cutover".to_string(),
-        config.require_postgres_after_cutover.to_string(),
-    );
-    details.insert(
-        "legacy_sqlite_runtime_allowed".to_string(),
-        config.legacy_sqlite_runtime_allowed().to_string(),
-    );
     if config.import_route_mode == ImportRouteMode::ImportDbRuntime {
-        details.insert(
-            "sqlite_db_path_configured".to_string(),
-            config.sqlite_db_path.is_some().to_string(),
-        );
-        details.insert(
-            "sqlite_legacy_path_configured".to_string(),
-            config.sqlite_legacy_path.is_some().to_string(),
-        );
         details.insert(
             "bills_crud_runtime".to_string(),
             "owned core bills/transactions CRUD, transaction picture upload/unused cleanup, bills CSV/XLSX export, recurring candidates/match, reconciliation statements, and category quick actions".to_string(),
@@ -160,7 +130,7 @@ pub fn http_shell_health_with_weaviate_status(
         );
         details.insert(
             "taxonomy_categories_runtime".to_string(),
-            "owned category list/tree/flat/detail/create/update/delete/batch/move/import/export/all/statistics routes plus category-rule list/create/update/delete/reorder/defaults/migrate/test, account-rule list/create/update/delete/reorder/migrate-aliases/test, rule overview, and settings bundle import/preview/export routes with user-scoped DB reads and writes".to_string(),
+            "owned category list/tree/flat/detail/create/update/delete/batch/move/import/export/all/statistics routes plus category-rule list/create/update/delete/reorder/defaults/test, account-rule list/create/update/delete/reorder/test, rule overview, and settings bundle import/preview/export routes with user-scoped DB reads and writes".to_string(),
         );
         details.insert(
             "taxonomy_templates_runtime".to_string(),
@@ -172,7 +142,7 @@ pub fn http_shell_health_with_weaviate_status(
         );
         details.insert(
             "backup_ops_runtime".to_string(),
-            "owned backup file list/create/download/delete/restore/verify/cleanup, job list/save, and cloud sync routes backed by Rust zip/Fernet file I/O plus PostgreSQL backup_records, backup_jobs, and backup_audit_logs metadata; no SQLite backup_ops fallback is used in PostgreSQL authority runtime".to_string(),
+            "owned backup file list/create/download/delete/verify/cleanup, job list/save, and cloud sync routes backed by Rust zip/Fernet file I/O plus PostgreSQL backup_records, backup_jobs, and backup_audit_logs metadata; restore and historical database recovery are not runtime capabilities".to_string(),
         );
     }
     details.insert("business_api".to_string(), "rust-only-http".to_string());
@@ -187,5 +157,28 @@ pub fn http_shell_health_with_weaviate_status(
         },
         identity: HttpShellIdentity::for_import_route_mode(config.import_route_mode),
         details,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::http_shell_health_with_weaviate_status;
+    use crate::HttpShellConfig;
+
+    #[test]
+    fn health_details_expose_current_postgres_authority_status_only() {
+        let config = HttpShellConfig::default();
+        let health = http_shell_health_with_weaviate_status(&config, "healthy");
+
+        assert_eq!(health.status, "ok");
+        assert_eq!(
+            health.details.get("route_repository_backend"),
+            Some(&"postgres_authority".to_string())
+        );
+        assert_eq!(
+            health.details.get("postgres_authority_status"),
+            Some(&"complete:postgres_authority".to_string())
+        );
+        assert!(!health.details.contains_key("postgres_cutover_status"));
     }
 }

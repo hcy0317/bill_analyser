@@ -42,7 +42,7 @@ export const useSystemsStore = defineStore('systems', () => {
             }).catch(error => {
                 logger.error('failed to retrieve server version', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
+                if (error.response && error.response.data && error.response.data.message) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve server version' });

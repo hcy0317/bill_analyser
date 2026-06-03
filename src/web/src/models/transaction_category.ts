@@ -38,14 +38,6 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
         }
     }
 
-    public get keywords(): string | undefined {
-        return this.ruleExpression;
-    }
-
-    public set keywords(value: string | undefined) {
-        this.ruleExpression = value;
-    }
-
     public get hidden(): boolean {
         return !this.visible;
     }
@@ -98,8 +90,6 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
     }
 
     public toCreateRequest(clientSessionId: string): TransactionCategoryCreateRequest {
-        const ruleExpression = this.ruleExpression;
-
         return {
             name: this.name,
             type: this.type,
@@ -108,15 +98,12 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
             color: this.color,
             comment: this.comment,
             displayOrder: this.displayOrder,
-            ruleExpression,
-            keywords: ruleExpression,
+            ruleExpression: this.ruleExpression,
             clientSessionId: clientSessionId
         };
     }
 
     public toModifyRequest(): TransactionCategoryModifyRequest {
-        const ruleExpression = this.ruleExpression;
-
         return {
             id: this.id,
             name: this.name,
@@ -125,8 +112,7 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
             color: this.color,
             comment: this.comment,
             displayOrder: this.displayOrder,
-            ruleExpression,
-            keywords: ruleExpression,
+            ruleExpression: this.ruleExpression,
             hidden: !this.visible
         };
     }
@@ -157,7 +143,7 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
         const categoryRules = Array.isArray(json.categoryRules)
             ? (json.categoryRules as TransactionCategoryRuleSummary[])
             : undefined;
-        const ruleExpression = json.ruleExpression ?? json.keywords;
+        const ruleExpression = json.ruleExpression;
 
         return new TransactionCategory(
             String(json.id),
@@ -228,7 +214,6 @@ export interface TransactionCategoryCreateRequest {
     readonly comment: string;
     readonly displayOrder: number;
     readonly ruleExpression?: string;
-    readonly keywords?: string;
     readonly clientSessionId: string;
 }
 
@@ -253,7 +238,6 @@ export interface TransactionCategoryModifyRequest {
     readonly comment: string;
     readonly displayOrder: number;
     readonly ruleExpression?: string;
-    readonly keywords?: string;
     readonly hidden: boolean;
 }
 
@@ -287,7 +271,6 @@ export interface TransactionCategoryInfoResponse {
     readonly hidden: boolean;
     readonly ruleExpression?: string;
     readonly categoryRules?: TransactionCategoryRuleSummary[];
-    readonly keywords?: string;
     readonly subCategories?: TransactionCategoryInfoResponse[];
 }
 

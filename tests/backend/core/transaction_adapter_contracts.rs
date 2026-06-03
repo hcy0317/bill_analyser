@@ -1,6 +1,5 @@
 use bill_analyser_core::adapters::transaction::{
-    apply_create_category_contract, apply_legacy_modify_preserved_fields,
-    apply_manual_create_defaults, batch_create_failure_response,
+    apply_create_category_contract, apply_manual_create_defaults, batch_create_failure_response,
     batch_create_persist_error_route_response, batch_create_prepare_error_route_response,
     batch_create_success_response, batch_create_success_route_response,
     batch_create_transaction_items, batch_delete_success_payload,
@@ -10,10 +9,8 @@ use bill_analyser_core::adapters::transaction::{
     frontend_transaction_from_backend, frontend_transaction_mutation_to_backend,
     invalid_reconciliation_account_id_response, invalid_transaction_picture_file_response,
     is_allowed_transaction_picture_filename, is_formula_like_export_cell,
-    legacy_delete_bill_success_payload, legacy_modify_bill_success_payload,
     missing_reconciliation_parameters_response, missing_transaction_picture_file_response,
-    missing_unused_transaction_picture_id_response, month_date_range,
-    normalize_bill_create_aliases, parse_reconciliation_query,
+    missing_unused_transaction_picture_id_response, month_date_range, parse_reconciliation_query,
     reconciliation_account_not_found_response, reconciliation_category_filters,
     reconciliation_internal_error_response, reconciliation_opening_balance,
     reconciliation_result_payload, reconciliation_success_response, reconciliation_type_filter,
@@ -27,9 +24,8 @@ use bill_analyser_core::adapters::transaction::{
     transaction_picture_upload_success_payload, transaction_picture_upload_success_response,
     unsupported_transaction_picture_type_message, unsupported_transaction_picture_type_response,
     validate_batch_route_update_fields, validate_bill_create_fields, validate_bill_update_fields,
-    AccountBalanceBill, BackendBillUpdateSnapshot, BackendTransactionView, BillAccountSyncSnapshot,
-    FrontendTransactionTag, ReconciliationBill, ReconciliationCategoryRecord,
-    ReconciliationOpeningBalanceSnapshot,
+    AccountBalanceBill, BackendTransactionView, BillAccountSyncSnapshot, FrontendTransactionTag,
+    ReconciliationBill, ReconciliationCategoryRecord, ReconciliationOpeningBalanceSnapshot,
 };
 use bill_analyser_core::primitives::{Money, TransactionType, UtcOffsetMinutes};
 use chrono::Local;
@@ -49,7 +45,7 @@ fn local_date_from_timestamp(seconds: i64) -> String {
 }
 
 #[test]
-fn backend_transaction_view_serializes_like_python_frontend_adapter() {
+fn backend_transaction_view_serializes_for_frontend_adapter() {
     let bill = BackendTransactionView {
         id: "42".to_string(),
         time_sequence_id: Some("seq-42".to_string()),
@@ -134,7 +130,7 @@ fn transfer_destination_amount_uses_backend_destination_yuan_when_present() {
 }
 
 #[test]
-fn zero_destination_amount_falls_back_to_source_amount_like_python_adapter() {
+fn zero_destination_amount_falls_back_to_source_amount() {
     let bill = BackendTransactionView {
         id: "100".to_string(),
         transaction_type: TransactionType::Expense,
@@ -209,7 +205,7 @@ fn export_cells_escape_formula_like_text_columns_only() {
 }
 
 #[test]
-fn frontend_mutation_to_backend_and_create_defaults_match_python_write_adapter() {
+fn frontend_mutation_to_backend_and_create_defaults_match_current_write_adapter() {
     let frontend = json!({
         "type": 3,
         "time": 1_735_758_245,
@@ -268,53 +264,7 @@ fn frontend_mutation_to_backend_and_create_defaults_match_python_write_adapter()
 }
 
 #[test]
-fn legacy_modify_aliases_and_create_category_contracts_cover_python_prepare_edges() {
-    let frontend = json!({"remark": "原备注", "comment": "新备注"});
-    let old_bill = BackendBillUpdateSnapshot {
-        transaction_type: "转账".to_string(),
-        source_account_id: Some(3),
-        destination_account_id: Some(4),
-        destination_amount: Some(money("88.00")),
-    };
-    let (mut backend, _) = frontend_transaction_mutation_to_backend(
-        &json!({"sourceAmount": 0, "destinationAmount": 0}),
-        UtcOffsetMinutes::new(480),
-    )
-    .unwrap();
-
-    apply_legacy_modify_preserved_fields(&mut backend, &frontend, &old_bill);
-
-    assert_eq!(backend["description"], "新备注");
-    assert_eq!(backend["type"], "转账");
-    assert_eq!(backend["source_account_id"], 3);
-    assert_eq!(backend["destination_account_id"], 4);
-    assert_eq!(backend["destination_amount"], 88.0);
-    assert!(backend.get("amount").is_none());
-    assert!(backend.get("date").is_none());
-    assert_eq!(
-        legacy_modify_bill_success_payload(42),
-        json!({"success": true, "result": {"id": "42"}})
-    );
-
-    let mut aliased = json!({
-        "channel": "微信",
-        "category": "餐饮",
-        "date": "2025-01-02",
-        "type": "支出",
-        "amount": -12.34,
-        "counterparty": "早餐店",
-        "description": "早餐"
-    })
-    .as_object()
-    .unwrap()
-    .clone();
-    normalize_bill_create_aliases(&mut aliased);
-    assert_eq!(aliased["payment_method"], "微信");
-    assert_eq!(aliased["main_category"], "餐饮");
-    assert!(aliased.get("channel").is_none());
-    assert!(aliased.get("category").is_none());
-    validate_bill_create_fields(aliased.keys().map(String::as_str)).unwrap();
-
+fn create_category_contracts_cover_current_rest_edges() {
     let mut category_by_id = json!({"type": "支出"}).as_object().unwrap().clone();
     apply_create_category_contract(&mut category_by_id, Some(("餐饮", "早餐")), None);
     assert_eq!(category_by_id["main_category"], "餐饮");
@@ -479,10 +429,6 @@ fn batch_create_items_and_update_field_guards_match_route_and_db_contracts() {
         json!({"success": true, "result": true, "message": "Bill deleted successfully"})
     );
     assert_eq!(
-        legacy_delete_bill_success_payload(),
-        json!({"success": true})
-    );
-    assert_eq!(
         batch_delete_success_payload(2),
         json!({"success": true, "result": {"deleted_count": 2}})
     );
@@ -637,7 +583,7 @@ fn reconciliation_query_filters_and_error_envelopes_match_bills_route_contract()
 
     let timestamp_error =
         parse_reconciliation_query(Some("abc"), Some(i64::MAX), Some(0), None, None, None)
-            .expect_err("date conversion should run before account_id parsing like Python");
+            .expect_err("date conversion should run before account_id parsing");
     assert_eq!(timestamp_error.status_code, 500);
     assert_eq!(
         timestamp_error.body,
@@ -783,7 +729,7 @@ fn reconciliation_opening_balance_preserves_all_time_and_filtered_fallbacks() {
 }
 
 #[test]
-fn reconciliation_summary_transactions_and_payload_pin_python_balance_trace() {
+fn reconciliation_summary_transactions_and_payload_pin_current_balance_trace() {
     let account_id = 1;
     let bills = vec![
         ReconciliationBill {

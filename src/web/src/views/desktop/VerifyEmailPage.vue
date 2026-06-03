@@ -26,7 +26,7 @@
                             <h4 class="text-h4 mb-2">{{ tt('Verify your email') }}</h4>
                             <p class="mb-0" v-if="token && loading">{{ tt('Verifying...') }}</p>
                             <p class="mb-0" v-if="token && verified">{{ tt('Email address is verified') }}</p>
-                            <p class="mb-0" v-if="token && !verified && errorMessage">{{ errorMessage }}</p>
+                            <p class="mb-0" v-if="token && !verified && verificationMessage">{{ verificationMessage }}</p>
                             <p class="mb-0" v-if="!token && !email">{{ tt('Parameter Invalid') }}</p>
                             <p class="mb-0" v-if="!token && email">{{ tt(hasValidEmailVerifyToken ? 'format.misc.accountActivationAndResendValidationEmailTip' : 'format.misc.resendValidationEmailTip', { email: email }) }}</p>
                         </v-card-text>
@@ -143,7 +143,7 @@ const password = ref<string>('');
 const loading = ref<boolean>(true);
 const resending = ref<boolean>(false);
 const verified = ref<boolean>(false);
-const errorMessage = ref<string>('');
+const verificationMessage = ref<string>('');
 
 const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
 
@@ -168,7 +168,7 @@ function init(): void {
         verified.value = false;
 
         if (!error.processed) {
-            errorMessage.value = te(error.message || error);
+            verificationMessage.value = te(error.message || error);
             snackbar.value?.showError(error);
         }
     });

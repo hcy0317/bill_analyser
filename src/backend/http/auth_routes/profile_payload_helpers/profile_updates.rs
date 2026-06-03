@@ -1,140 +1,6 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
-// 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
-// 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
-
-fn request_body_object(body: &[u8]) -> Map<String, Value> {
-    let parsed = serde_json::from_slice::<Value>(body).ok();
-    json_object_or_empty(parsed.as_ref())
-}
-
-fn validated_profile_updates(
-    connection: &rusqlite::Connection,
-    user_id: UserId,
-    current_user: &AuthUserProfileRow,
-    body: &Map<String, Value>,
-) -> Result<Vec<AuthUserProfileUpdate>, AuthRestError> {
-    if body.contains_key("avatar") {
-        return Err(AuthRestError::new(
-            400,
-            "Bad Request",
-            "Avatar must be updated via /api/profile/avatar",
-        ));
-    }
-    let updates = profile_updates_from_body(body)?;
-    validate_profile_email_update(connection, user_id, current_user, &updates)?;
-    validate_profile_reference_ids(connection, user_id, &updates)?;
-    Ok(updates)
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn validate_profile_email_update(
-    connection: &rusqlite::Connection,
-    user_id: UserId,
-    current_user: &AuthUserProfileRow,
-    updates: &[AuthUserProfileUpdate],
-) -> Result<(), AuthRestError> {
-    let Some(new_email) = updates.iter().find_map(|update| match update {
-        AuthUserProfileUpdate::Email(value) => Some(value),
-        _ => None,
-    }) else {
-        return Ok(());
-    };
-    if !valid_email_address(new_email) {
-        return Err(AuthRestError::new(
-            400,
-            "Bad Request",
-            "Invalid email address",
-        ));
-    }
-    if new_email == &current_user.email {
-        return Ok(());
-    }
-    match auth_email_exists_for_other_user(connection, user_id, new_email) {
-        Ok(false) => Ok(()),
-        Ok(true) => Err(AuthRestError::new(
-            409,
-            "Email exists",
-            "Email already exists",
-        )),
-        Err(_) => Err(AuthRestError::new(
-            500,
-            "Internal Server Error",
-            "Rust auth token runtime DB error",
-        )),
-    }
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn validate_profile_reference_ids(
-    connection: &rusqlite::Connection,
-    user_id: UserId,
-    updates: &[AuthUserProfileUpdate],
-) -> Result<(), AuthRestError> {
-    for update in updates {
-        match update {
-            AuthUserProfileUpdate::DefaultAccountId(Some(account_id)) => {
-                validate_profile_account_id(connection, user_id, *account_id, "defaultAccountId")?;
-            }
-            AuthUserProfileUpdate::CashAccountId(Some(account_id)) => {
-                validate_profile_account_id(connection, user_id, *account_id, "cashAccountId")?;
-            }
-            AuthUserProfileUpdate::CashTransferCategoryId(Some(category_id)) => {
-                validate_profile_category_id(
-                    connection,
-                    user_id,
-                    *category_id,
-                    "cashTransferCategoryId",
-                )?;
-            }
-            _ => {}
-        }
-    }
-    Ok(())
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn validate_profile_account_id(
-    connection: &rusqlite::Connection,
-    user_id: UserId,
-    account_id: i64,
-    field_name: &str,
-) -> Result<(), AuthRestError> {
-    match auth_account_belongs_to_user(connection, user_id, account_id) {
-        Ok(true) => Ok(()),
-        Ok(false) => Err(AuthRestError::new(
-            400,
-            "Bad Request",
-            format!("{field_name} is invalid"),
-        )),
-        Err(_) => Err(AuthRestError::new(
-            500,
-            "Internal Server Error",
-            "Rust auth token runtime DB error",
-        )),
-    }
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn validate_profile_category_id(
-    connection: &rusqlite::Connection,
-    user_id: UserId,
-    category_id: i64,
-    field_name: &str,
-) -> Result<(), AuthRestError> {
-    match auth_category_belongs_to_user(connection, user_id, category_id) {
-        Ok(true) => Ok(()),
-        Ok(false) => Err(AuthRestError::new(
-            400,
-            "Bad Request",
-            format!("{field_name} is invalid"),
-        )),
-        Err(_) => Err(AuthRestError::new(
-            500,
-            "Internal Server Error",
-            "Rust auth token runtime DB error",
-        )),
-    }
-}
+// 中文导读：profile 更新请求 DTO 解析与 Postgres-only 校验。
+// 维护重点：只校验当前 user-scoped Postgres 账户/分类引用。
+// 不变式：avatar 只能通过 /api/profile/avatar 更新，email 更新必须做格式和唯一性检查。
 
 fn valid_email_address(value: &str) -> bool {
     let value = value.trim();
@@ -164,6 +30,13 @@ fn profile_email_changed(updates: &[AuthUserProfileUpdate], current_email: &str)
 fn profile_updates_from_body(
     body: &Map<String, Value>,
 ) -> Result<Vec<AuthUserProfileUpdate>, AuthRestError> {
+    if body.contains_key("avatar") {
+        return Err(AuthRestError::new(
+            400,
+            "Bad Request",
+            "Avatar must be updated via /api/profile/avatar",
+        ));
+    }
     let mut updates = Vec::new();
     if let Some(value) = body.get("nickname") {
         updates.push(AuthUserProfileUpdate::Nickname(profile_string(

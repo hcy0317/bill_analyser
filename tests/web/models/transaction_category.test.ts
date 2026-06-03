@@ -14,7 +14,7 @@ const SAMPLE_CATEGORY_RESPONSE: TransactionCategoryInfoResponse = {
     name: '餐饮',
     parentId: '0',
     type: CategoryType.Expense,
-    icon: 'mdi-food',
+    icon: 'las la-utensils',
     color: '#5470c6',
     comment: '主分类',
     displayOrder: 1,
@@ -25,7 +25,7 @@ const SAMPLE_CATEGORY_RESPONSE: TransactionCategoryInfoResponse = {
             name: '早餐',
             parentId: '100',
             type: CategoryType.Expense,
-            icon: 'mdi-coffee',
+            icon: 'las la-coffee',
             color: '#91cc75',
             comment: '子分类',
             displayOrder: 1,
@@ -85,7 +85,7 @@ describe('TransactionCategory model', () => {
                     name: '午餐',
                     parentId: '100',
                     type: CategoryType.Expense,
-                    icon: 'mdi-silverware-fork-knife',
+                    icon: 'las la-utensils',
                     color: '#fac858',
                     comment: '额外子分类',
                     displayOrder: 2,
@@ -102,7 +102,7 @@ describe('TransactionCategory model', () => {
                     name: '咖啡',
                     parentId: '101',
                     type: CategoryType.Expense,
-                    icon: 'mdi-coffee',
+                    icon: 'las la-coffee',
                     color: '#73c0de',
                     comment: '孙分类',
                     displayOrder: 1,
@@ -138,10 +138,9 @@ describe('TransactionCategory model', () => {
         expect(target.displayOrder).toBe(9);
         expect(target.visible).toBe(false);
         expect(target.ruleExpression).toBe('OR={地铁,打车}');
-        expect(target.keywords).toBe('OR={地铁,打车}');
     });
 
-    test('TransactionCategory request converters preserve canonical rule expression and legacy alias', () => {
+    test('TransactionCategory request converters preserve canonical rule expression', () => {
         const category = TransactionCategory.of({
             ...SAMPLE_CATEGORY_RESPONSE,
             ruleExpression: 'OR={早餐,咖啡}'
@@ -151,12 +150,11 @@ describe('TransactionCategory model', () => {
             name: '餐饮',
             type: CategoryType.Expense,
             parentId: '0',
-            icon: 'mdi-food',
+            icon: 'las la-utensils',
             color: '#5470c6',
             comment: '主分类',
             displayOrder: 1,
             ruleExpression: 'OR={早餐,咖啡}',
-            keywords: 'OR={早餐,咖啡}',
             clientSessionId: 'session-1'
         });
 
@@ -164,28 +162,16 @@ describe('TransactionCategory model', () => {
             id: '100',
             name: '餐饮',
             parentId: '0',
-            icon: 'mdi-food',
+            icon: 'las la-utensils',
             color: '#5470c6',
             comment: '主分类',
             displayOrder: 1,
             ruleExpression: 'OR={早餐,咖啡}',
-            keywords: 'OR={早餐,咖啡}',
             hidden: false
         });
     });
 
-    test('TransactionCategory.of accepts legacy keywords payloads as ruleExpression compatibility input', () => {
-        const category = TransactionCategory.of({
-            ...SAMPLE_CATEGORY_RESPONSE,
-            keywords: '早餐|咖啡'
-        });
-
-        expect(category.ruleExpression).toBe('早餐|咖啡');
-        expect(category.keywords).toBe('早餐|咖啡');
-    });
-
     test('TransactionCategory icons are display-resolved through the shared category resolver', () => {
-        const legacyCategory = TransactionCategory.of(SAMPLE_CATEGORY_RESPONSE);
         const presetCategory = TransactionCategory.of({
             ...SAMPLE_CATEGORY_RESPONSE,
             icon: 830 as unknown as string
@@ -195,7 +181,7 @@ describe('TransactionCategory model', () => {
             icon: 'las la-wallet'
         });
 
-        expect(resolveCategoryIcon(legacyCategory.icon)).toBe('las la-utensils');
+        expect(resolveCategoryIcon(SAMPLE_CATEGORY_RESPONSE.icon)).toBe('las la-utensils');
         expect(resolveCategoryIcon(presetCategory.icon)).toBe('las la-chart-pie');
         expect(resolveCategoryIcon(lineAwesomeCategory.icon)).toBe('las la-wallet');
     });

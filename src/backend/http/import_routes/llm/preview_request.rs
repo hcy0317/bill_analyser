@@ -1,4 +1,4 @@
-// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端兼容响应投影。
+// 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
@@ -46,9 +46,6 @@ pub async fn llm_preview_recommend_runtime_handler(
         if let Err(response) = init_import_runtime_schema(&runtime) {
             return route_response(response);
         }
-        if let Err(response) = init_llm_config_runtime_schema(&runtime) {
-            return route_response(response);
-        }
         if let Err(response) = ensure_import_session_exists(&runtime, &session_id, user_id) {
             return route_response(response);
         }
@@ -88,7 +85,7 @@ pub async fn llm_preview_recommend_runtime_handler(
                 400,
             ));
         }
-        let config = match effective_llm_runtime_config(&state, &runtime, user_id_value) {
+        let config = match effective_llm_runtime_config(&state, user_id_value).await {
             Ok(config) => config,
             Err(response) => return route_response(response),
         };
@@ -177,7 +174,7 @@ pub async fn llm_preview_recommend_runtime_handler(
         };
         let result = match apply_preview_llm_recommendation(
             runtime.connection_mut(),
-            bill_analyser_db::ImportPreviewLlmApplyRequest {
+            &bill_analyser_db::ImportPreviewLlmApplyRequest {
                 session_id: &prepared.session_id,
                 preview_id,
                 user_id,
@@ -205,4 +202,3 @@ pub async fn llm_preview_recommend_runtime_handler(
         ),
     })
 }
-
