@@ -841,6 +841,12 @@ defineExpose({
     flex: 0 0 auto;
 }
 
+.account-recognition-rule-panel,
+.account-recognition-rule-panel :deep(.v-col) {
+    min-width: 0;
+    max-width: 100%;
+}
+
 .account-rule-table-toolbar--external {
     padding: 0;
 }
@@ -855,6 +861,11 @@ defineExpose({
 
 .account-rule-table {
     table-layout: fixed;
+}
+
+.account-rule-table :deep(.v-table__wrapper) {
+    max-width: 100%;
+    overflow-x: auto;
 }
 
 .account-rule-table :deep(th),

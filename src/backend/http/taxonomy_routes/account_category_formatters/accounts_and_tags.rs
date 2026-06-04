@@ -232,6 +232,13 @@ fn frontend_account_to_backend(payload: &Value) -> Result<Map<String, Value>, St
 fn backend_account_to_frontend(mut account: AccountRecord) -> Map<String, Value> {
     let hidden = account.get("hidden").map(value_truthy).unwrap_or(false);
     let sub_accounts = account.remove("subAccounts");
+    let account_type = normalize_frontend_account_type(account.get("type"));
+    let account_category = normalize_frontend_account_category(
+        account.get("category"),
+        account.get("type"),
+        account.get("name"),
+        account.get("icon"),
+    );
     let mut result = Map::new();
     result.insert(
         "id".to_string(),
@@ -247,18 +254,9 @@ fn backend_account_to_frontend(mut account: AccountRecord) -> Map<String, Value>
     );
     result.insert(
         "category".to_string(),
-        account
-            .get("category")
-            .cloned()
-            .unwrap_or_else(|| Value::Number(Number::from(0))),
+        Value::Number(Number::from(account_category)),
     );
-    result.insert(
-        "type".to_string(),
-        account
-            .get("type")
-            .cloned()
-            .unwrap_or_else(|| Value::Number(Number::from(0))),
-    );
+    result.insert("type".to_string(), Value::Number(Number::from(account_type)));
     result.insert(
         "icon".to_string(),
         Value::String(string_or_default(account.get("icon"), "")),
@@ -321,6 +319,160 @@ fn backend_account_to_frontend(mut account: AccountRecord) -> Map<String, Value>
     result
 }
 
+fn normalize_frontend_account_type(value: Option<&Value>) -> i64 {
+    match value {
+        Some(Value::Number(number)) if number.as_i64() == Some(2) => 2,
+        Some(Value::String(value)) => {
+            let normalized = value.trim().to_ascii_lowercase();
+            if normalized == "2"
+                || normalized == "multi"
+                || normalized == "multi_sub_accounts"
+                || normalized == "multiple_sub_accounts"
+                || normalized == "multiple sub-accounts"
+            {
+                2
+            } else {
+                1
+            }
+        }
+        _ => 1,
+    }
+}
+
+fn normalize_frontend_account_category(
+    category: Option<&Value>,
+    account_type: Option<&Value>,
+    name: Option<&Value>,
+    icon: Option<&Value>,
+) -> i64 {
+    if let Some(category) = category.and_then(value_as_i64) {
+        if (1..=9).contains(&category) {
+            return category;
+        }
+    }
+
+    for hint in [
+        normalized_account_hint(category),
+        normalized_account_hint(name),
+        normalized_account_hint(account_type),
+    ] {
+        if let Some(category) = category_from_account_hint(&hint) {
+            return category;
+        }
+    }
+
+    if let Some(category) = category_from_account_icon(&normalized_account_hint(icon)) {
+        return category;
+    }
+
+    1
+}
+
+fn normalized_account_hint(value: Option<&Value>) -> String {
+    value_string(value, "").trim().to_ascii_lowercase()
+}
+
+fn hint_contains_any(hint: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| hint.contains(needle))
+}
+
+fn category_from_account_hint(hint: &str) -> Option<i64> {
+    if hint.is_empty() {
+        return None;
+    }
+
+    if hint_contains_any(
+        hint,
+        &[
+            "信用卡",
+            "credit_card",
+            "credit-card",
+            "credit card",
+        ],
+    ) {
+        return Some(3);
+    }
+    if hint_contains_any(
+        hint,
+        &[
+            "证券",
+            "投资",
+            "理财",
+            "基金",
+            "股票",
+            "黄金",
+            "期货",
+            "债券",
+            "资产",
+            "investment",
+            "securities",
+            "brokerage",
+        ],
+    ) {
+        return Some(7);
+    }
+    if hint_contains_any(
+        hint,
+        &["应收", "垫付", "垫款", "借账", "待收", "receivable", "receivables"],
+    ) {
+        return Some(6);
+    }
+    if hint_contains_any(
+        hint,
+        &["贷款", "负债", "房贷", "车贷", "借入", "欠款", "应付", "debt", "loan"],
+    ) {
+        return Some(5);
+    }
+    if hint_contains_any(hint, &["定期", "存单", "certificate", "deposit"]) {
+        return Some(9);
+    }
+    if hint_contains_any(hint, &["储蓄", "savings", "saving"]) {
+        return Some(8);
+    }
+    if hint_contains_any(
+        hint,
+        &[
+            "支付宝",
+            "微信",
+            "零钱",
+            "第三方",
+            "三方",
+            "paypal",
+            "virtual_account",
+            "virtual",
+        ],
+    ) {
+        return Some(4);
+    }
+    if hint_contains_any(hint, &["现金", "cash"]) {
+        return Some(1);
+    }
+    if hint_contains_any(
+        hint,
+        &["银行卡", "借记", "银行", "checking", "bank_card", "bank", "debit"],
+    ) {
+        return Some(2);
+    }
+
+    None
+}
+
+fn category_from_account_icon(icon: &str) -> Option<i64> {
+    if icon.is_empty() {
+        return None;
+    }
+
+    match icon {
+        "1" => Some(1),
+        "100" => Some(2),
+        value if value.starts_with("830") || value == "500" => Some(4),
+        value if value.starts_with("700") => Some(6),
+        value if value.starts_with("600") => Some(5),
+        value if value.starts_with("80") => Some(7),
+        _ => None,
+    }
+}
+
 fn format_tag_list_response(tags: Vec<TagRecord>) -> Value {
     Value::Array(
         tags.into_iter()
@@ -354,4 +506,140 @@ fn backend_tag_to_frontend(tag: TagRecord) -> Map<String, Value> {
     result.insert("hidden".to_string(), Value::Bool(hidden));
     result.insert("visible".to_string(), Value::Bool(!hidden));
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backend_account_to_frontend_normalizes_missing_legacy_category_and_type() {
+        let mut account = Map::new();
+        account.insert("id".to_string(), Value::Number(Number::from(17000000044_i64)));
+        account.insert("name".to_string(), Value::String("工商银行".to_string()));
+        account.insert("type".to_string(), Value::Number(Number::from(0)));
+        account.insert("category".to_string(), Value::Number(Number::from(0)));
+        account.insert("hidden".to_string(), Value::Bool(false));
+
+        let frontend = backend_account_to_frontend(account);
+
+        assert_eq!(frontend.get("type").and_then(Value::as_i64), Some(1));
+        assert_eq!(frontend.get("category").and_then(Value::as_i64), Some(2));
+        assert_eq!(frontend.get("hidden").and_then(Value::as_bool), Some(false));
+        assert_eq!(frontend.get("visible").and_then(Value::as_bool), Some(true));
+    }
+
+    #[test]
+    fn backend_account_to_frontend_preserves_known_category_and_multi_type() {
+        let mut account = Map::new();
+        account.insert("id".to_string(), Value::Number(Number::from(93)));
+        account.insert("name".to_string(), Value::String("支付宝（三方主账户）".to_string()));
+        account.insert("type".to_string(), Value::Number(Number::from(2)));
+        account.insert("category".to_string(), Value::Number(Number::from(4)));
+
+        let frontend = backend_account_to_frontend(account);
+
+        assert_eq!(frontend.get("type").and_then(Value::as_i64), Some(2));
+        assert_eq!(frontend.get("category").and_then(Value::as_i64), Some(4));
+    }
+
+    #[test]
+    fn backend_account_to_frontend_maps_legacy_text_category_hints() {
+        let mut account = Map::new();
+        account.insert("id".to_string(), Value::Number(Number::from(38)));
+        account.insert("name".to_string(), Value::String("农业银行信用卡".to_string()));
+        account.insert("type".to_string(), Value::String("credit_card".to_string()));
+        account.insert("category".to_string(), Value::Null);
+
+        let frontend = backend_account_to_frontend(account);
+
+        assert_eq!(frontend.get("type").and_then(Value::as_i64), Some(1));
+        assert_eq!(frontend.get("category").and_then(Value::as_i64), Some(3));
+    }
+
+    #[test]
+    fn backend_account_to_frontend_maps_legacy_text_category_hint_variants() {
+        let cases = [
+            ("investment", 7),
+            ("loan", 5),
+            ("receivable", 6),
+            ("bank", 2),
+            ("saving", 8),
+            ("virtual_account", 4),
+        ];
+
+        for (account_type, expected_category) in cases {
+            let mut account = Map::new();
+            account.insert("id".to_string(), Value::Number(Number::from(1)));
+            account.insert("name".to_string(), Value::String(account_type.to_string()));
+            account.insert("type".to_string(), Value::String(account_type.to_string()));
+
+            let frontend = backend_account_to_frontend(account);
+
+            assert_eq!(
+                frontend.get("category").and_then(Value::as_i64),
+                Some(expected_category)
+            );
+        }
+    }
+
+    #[test]
+    fn backend_account_to_frontend_normalizes_legacy_multi_type_string() {
+        let mut account = Map::new();
+        account.insert("id".to_string(), Value::Number(Number::from(93)));
+        account.insert("name".to_string(), Value::String("支付宝".to_string()));
+        account.insert(
+            "type".to_string(),
+            Value::String("multiple_sub_accounts".to_string()),
+        );
+
+        let frontend = backend_account_to_frontend(account);
+
+        assert_eq!(frontend.get("type").and_then(Value::as_i64), Some(2));
+        assert_eq!(frontend.get("category").and_then(Value::as_i64), Some(4));
+    }
+
+    #[test]
+    fn backend_account_to_frontend_infers_recovered_account_category_distribution() {
+        let cases = [
+            ("农业银行", 1, "", 2),
+            ("农业银行信用卡", 1, "110", 3),
+            ("邮储银行信用卡", 1, "110", 3),
+            ("浦发银行信用卡", 1, "110", 3),
+            ("民生银行", 1, "100", 2),
+            ("建设银行", 1, "100", 2),
+            ("工商银行", 0, "100", 2),
+            ("微信", 1, "8302", 4),
+            ("中信建投证券", 1, "801", 7),
+            ("支付宝（三方主账户）", 2, "8300", 4),
+            ("支付宝（投资主账户）", 2, "8300", 7),
+            ("花呗", 1, "8300", 4),
+            ("活期资产", 1, "8300", 7),
+            ("稳健理财", 1, "8300", 7),
+            ("进阶理财", 1, "8300", 7),
+            ("垫付款", 1, "700", 6),
+            ("借账单", 1, "700", 6),
+            ("现金", 1, "1", 1),
+        ];
+
+        for (name, account_type, icon, expected_category) in cases {
+            let mut account = Map::new();
+            account.insert("id".to_string(), Value::Number(Number::from(1)));
+            account.insert("name".to_string(), Value::String(name.to_string()));
+            account.insert(
+                "type".to_string(),
+                Value::Number(Number::from(account_type)),
+            );
+            account.insert("category".to_string(), Value::Null);
+            account.insert("icon".to_string(), Value::String(icon.to_string()));
+
+            let frontend = backend_account_to_frontend(account);
+
+            assert_eq!(
+                frontend.get("category").and_then(Value::as_i64),
+                Some(expected_category),
+                "{name} should map to category {expected_category}"
+            );
+        }
+    }
 }

@@ -1,6 +1,12 @@
 <template>
-    <v-dialog :width="account.type === AccountType.MultiSubAccounts.type ? 1000 : 800" :persistent="isAccountModified" v-model="showState">
-        <v-card class="pa-2 pa-sm-4 pa-md-8">
+    <v-dialog
+        class="account-edit-dialog"
+        width="calc(100vw - 32px)"
+        :max-width="account.type === AccountType.MultiSubAccounts.type ? 1000 : 800"
+        :persistent="isAccountModified"
+        v-model="showState"
+    >
+        <v-card class="account-edit-card pa-2 pa-sm-4 pa-md-8">
             <template #title>
                 <div class="d-flex align-center justify-center">
                     <div class="d-flex w-100 align-center justify-center">
@@ -20,8 +26,8 @@
                     </v-btn>
                 </div>
             </template>
-            <v-card-text class="d-flex flex-column flex-md-row mt-md-4 pt-0">
-                <div class="mb-4" v-if="account.type === AccountType.MultiSubAccounts.type">
+            <v-card-text class="account-edit-content d-flex flex-column flex-md-row mt-md-4 pt-0">
+                <div class="account-edit-tabs mb-4" v-if="account.type === AccountType.MultiSubAccounts.type">
                     <v-tabs direction="vertical" :disabled="loading || submitting" v-model="currentAccountIndex">
                         <v-tab :value="-1">
                             <span>{{ tt('Main Account') }}</span>
@@ -37,7 +43,7 @@
                     </v-tabs>
                 </div>
 
-                <v-window class="d-flex flex-grow-1 disable-tab-transition w-100-window-container"
+                <v-window class="account-edit-window d-flex flex-grow-1 disable-tab-transition w-100-window-container"
                           :class="{ 'ms-md-5': account.type === AccountType.MultiSubAccounts.type }"
                           v-model="activeTab">
                     <v-window-item value="account">
@@ -454,7 +460,48 @@ defineExpose({
 </script>
 
 <style scoped>
+.account-edit-card,
+.account-edit-content,
+.account-edit-window {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.account-edit-card {
+    overflow: hidden;
+}
+
+.account-edit-content {
+    overflow-x: hidden;
+}
+
+.account-edit-tabs {
+    flex: 0 0 180px;
+    min-width: 0;
+    max-width: 100%;
+}
+
 .account-rule-section {
     min-width: 0;
+    max-width: 100%;
+}
+
+.account-rule-section :deep(.account-recognition-rule-panel),
+.account-rule-section :deep(.v-row),
+.account-rule-section :deep(.v-col) {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.account-rule-section :deep(.v-table__wrapper) {
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+@media (max-width: 960px) {
+    .account-edit-tabs {
+        flex-basis: auto;
+        width: 100%;
+    }
 }
 </style>
