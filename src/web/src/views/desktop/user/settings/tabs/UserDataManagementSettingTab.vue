@@ -109,6 +109,42 @@
         </v-col>
 
         <v-col cols="12">
+            <v-card>
+                <template #title>
+                    <span>{{ tt('Settings JSON Import/Export') }}</span>
+                </template>
+
+                <v-card-text>
+                    <span class="text-body-1">{{ tt('Manage per-domain settings JSON import and export from Data Management.') }}</span>
+                </v-card-text>
+
+                <v-divider />
+
+                <v-list lines="two" class="py-0">
+                    <v-list-item
+                        :key="entry.sectionKey"
+                        v-for="entry in settingsBundleDataManagementEntries"
+                        :title="entry.title"
+                        :subtitle="entry.description"
+                    >
+                        <template #append>
+                            <div class="d-flex align-center flex-wrap justify-end gap-2">
+                                <settings-json-import-export-button
+                                    :section-key="entry.sectionKey"
+                                    button-class="settings-json-entry-button"
+                                    @imported="reloadUserDataStatistics(false)"
+                                />
+                                <v-btn variant="text" color="primary" :to="entry.desktopRoute">
+                                    {{ tt('Open') }}
+                                </v-btn>
+                            </div>
+                        </template>
+                    </v-list-item>
+                </v-list>
+            </v-card>
+        </v-col>
+
+        <v-col cols="12">
             <v-card :class="{ 'disabled': clearingData }">
                 <template #title>
                     <span class="text-error">{{ tt('Danger Zone') }}</span>
@@ -164,6 +200,7 @@
 
 <script setup lang="ts">
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
+import SettingsJsonImportExportButton from '@/components/desktop/SettingsJsonImportExportButton.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 
 import { onMounted, ref, useTemplateRef } from 'vue';
@@ -194,7 +231,12 @@ type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
 type SnackBarType = InstanceType<typeof SnackBar>;
 
 const { tt } = useI18n();
-const { dataStatistics, displayDataStatistics, getExportFileName } = useDataManagementPageBase();
+const {
+    dataStatistics,
+    displayDataStatistics,
+    settingsBundleDataManagementEntries,
+    getExportFileName
+} = useDataManagementPageBase();
 
 const rootStore = useRootStore();
 const userStore = useUserStore();

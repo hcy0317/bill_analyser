@@ -1,11 +1,31 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import {
+    SETTINGS_BUNDLE_DATA_MANAGEMENT_ENTRIES,
+    SETTINGS_BUNDLE_SECTION_LABEL_KEYS,
+    buildSettingsBundleSectionFileName,
+    sanitizeWindowsFileNameSegment,
+    type SettingsBundleSectionKey,
+} from '@/models/data_management.ts';
+
 describe('settings JSON per-page import/export controls', () => {
     const readSource = (relativePath: string) => fs.readFileSync(
         path.resolve(process.cwd(), relativePath),
         'utf-8'
     );
+
+    const expectedSettingsSections: SettingsBundleSectionKey[] = [
+        'accounts',
+        'transactionCategories',
+        'transactionTags',
+        'transactionTemplates',
+        'scheduledTransactions',
+        'categoryRecognitionRules',
+        'accountRecognitionRules',
+        'llmConfigs',
+        'ocrConfig',
+    ];
 
     test('keeps export inside the shared import button hover card', () => {
         const source = readSource('src/components/desktop/SettingsJsonImportExportButton.vue');
@@ -73,5 +93,63 @@ describe('settings JSON per-page import/export controls', () => {
         expect(confirmDialog).not.toContain('map(d => tt(d, actualOptions))');
         expect(confirmDialog).not.toContain('map(d => tt(d, options))');
         expect(importButton).toContain('getApiErrorMessageOrDefault(error,');
+    });
+
+    test('builds localized Windows-safe per-section export filenames', () => {
+        const timestamp = new Date('2026-06-06T12:34:56.000Z');
+
+        expect(buildSettingsBundleSectionFileName('分类识别规则', timestamp))
+            .toBe('分类识别规则_20260606123456.json');
+        expect(buildSettingsBundleSectionFileName('账户:识别/规则*', timestamp))
+            .toBe('账户_识别_规则_20260606123456.json');
+        expect(buildSettingsBundleSectionFileName('CON', timestamp))
+            .toBe('_CON_20260606123456.json');
+        expect(sanitizeWindowsFileNameSegment('///', 'settings'))
+            .toBe('settings');
+        expect(buildSettingsBundleSectionFileName('OCR 配置', timestamp))
+            .not.toMatch(/[<>:"/\\|?*\u0000-\u001f]/);
+    });
+
+    test('uses localized labels for every settings bundle data-management entry', () => {
+        expect(Object.keys(SETTINGS_BUNDLE_SECTION_LABEL_KEYS)).toEqual(expectedSettingsSections);
+        expect(SETTINGS_BUNDLE_DATA_MANAGEMENT_ENTRIES.map(entry => entry.sectionKey))
+            .toEqual(expectedSettingsSections);
+        expect(new Set(SETTINGS_BUNDLE_DATA_MANAGEMENT_ENTRIES.map(entry => entry.sectionKey)).size)
+            .toBe(expectedSettingsSections.length);
+
+        for (const entry of SETTINGS_BUNDLE_DATA_MANAGEMENT_ENTRIES) {
+            expect(entry.titleKey).toBe(SETTINGS_BUNDLE_SECTION_LABEL_KEYS[entry.sectionKey]);
+            expect(entry.desktopRoute).toMatch(/^\//);
+        }
+    });
+
+    test('surfaces integrated settings JSON entries from desktop and mobile Data Management pages', () => {
+        const desktopDataManagement = readSource('src/views/desktop/user/settings/tabs/UserDataManagementSettingTab.vue');
+        const mobileDataManagement = readSource('src/views/mobile/users/DataManagementPage.vue');
+
+        expect(desktopDataManagement).toContain("tt('Settings JSON Import/Export')");
+        expect(desktopDataManagement).toContain('settingsBundleDataManagementEntries');
+        expect(desktopDataManagement).toContain('<settings-json-import-export-button');
+        expect(desktopDataManagement).toContain(':section-key="entry.sectionKey"');
+        expect(desktopDataManagement).toContain(':to="entry.desktopRoute"');
+        expect(desktopDataManagement).toContain("tt('Export Data')");
+
+        expect(mobileDataManagement).toContain("tt('Settings JSON Import/Export')");
+        expect(mobileDataManagement).toContain('settingsBundleDataManagementEntries');
+        expect(mobileDataManagement).toContain(':link="entry.mobileRoute || null"');
+        expect(mobileDataManagement).toContain("tt('Export Data')");
+    });
+
+    test('keeps localized settings JSON labels available for Chinese filenames and entries', () => {
+        const en = JSON.parse(readSource('src/locales/en.json')) as Record<string, string>;
+        const zhHans = JSON.parse(readSource('src/locales/zh_Hans.json')) as Record<string, string>;
+        const zhHant = JSON.parse(readSource('src/locales/zh_Hant.json')) as Record<string, string>;
+
+        expect(en['Settings JSON Import/Export']).toBe('Settings JSON Import/Export');
+        expect(zhHans['Category Recognition Rules']).toBe('分类识别规则');
+        expect(zhHans['Account Recognition Rules']).toBe('账户识别规则');
+        expect(zhHans['Settings JSON Import/Export']).toBe('设置 JSON 导入/导出');
+        expect(zhHant['Account Recognition Rules']).toBe('帳戶識別規則');
+        expect(zhHant['OCR Config']).toBe('OCR 設定');
     });
 });

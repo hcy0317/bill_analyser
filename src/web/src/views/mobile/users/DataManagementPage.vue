@@ -28,6 +28,18 @@
                             @click="exportedData = null; showExportDataSheet = true">{{ tt('Export Data') }}</f7-list-button>
         </f7-list>
 
+        <f7-block-title>{{ tt('Settings JSON Import/Export') }}</f7-block-title>
+        <f7-list strong inset dividers class="margin-vertical" :class="{ 'disabled': loading }">
+            <f7-list-item
+                :key="entry.sectionKey"
+                v-for="entry in settingsBundleDataManagementEntries"
+                :title="entry.title"
+                :footer="entry.description"
+                :link="entry.mobileRoute || null"
+                :after="entry.mobileRoute ? tt('Open') : ''"
+            ></f7-list-item>
+        </f7-list>
+
         <f7-list strong inset dividers class="margin-vertical" :class="{ 'disabled': loading }">
             <f7-list-button color="red" @click="clearAllTransactions(null)">{{ tt('Clear All Transactions') }}</f7-list-button>
             <f7-list-button color="red" @click="clearAllData(null)">{{ tt('Clear All Data') }}</f7-list-button>
@@ -106,7 +118,12 @@ const props = defineProps<{
 
 const { tt } = useI18n();
 const { showToast, routeBackOnError } = useI18nUIComponents();
-const { dataStatistics, displayDataStatistics, getExportFileName } = useDataManagementPageBase();
+const {
+    dataStatistics,
+    displayDataStatistics,
+    settingsBundleDataManagementEntries,
+    getExportFileName
+} = useDataManagementPageBase();
 
 const rootStore = useRootStore();
 const userStore = useUserStore();

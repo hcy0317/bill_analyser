@@ -4,7 +4,12 @@ import { useI18n } from '@/locales/helpers.ts';
 
 import { useUserStore } from '@/stores/user.ts';
 
-import type { DataStatisticsResponse, DisplayDataStatistics } from '@/models/data_management.ts';
+import {
+    SETTINGS_BUNDLE_DATA_MANAGEMENT_ENTRIES,
+    type DataStatisticsResponse,
+    type DisplayDataStatistics,
+    type DisplaySettingsBundleDataManagementEntry,
+} from '@/models/data_management.ts';
 
 export function useDataManagementPageBase() {
     const { tt, formatNumberToLocalizedNumerals } = useI18n();
@@ -34,6 +39,14 @@ export function useDataManagementPageBase() {
         };
     });
 
+    const settingsBundleDataManagementEntries = computed<DisplaySettingsBundleDataManagementEntry[]>(() => (
+        SETTINGS_BUNDLE_DATA_MANAGEMENT_ENTRIES.map(entry => ({
+            ...entry,
+            title: tt(entry.titleKey),
+            description: tt(entry.descriptionKey),
+        }))
+    ));
+
     function getExportFileName(fileExtension: string): string {
         const nickname = userStore.currentUserNickname;
 
@@ -51,6 +64,7 @@ export function useDataManagementPageBase() {
         dataStatistics,
         // 计算状态
         displayDataStatistics,
+        settingsBundleDataManagementEntries,
         // 函数
         getExportFileName
     }

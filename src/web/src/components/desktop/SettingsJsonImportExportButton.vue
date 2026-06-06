@@ -41,10 +41,12 @@ import SnackBar from '@/components/desktop/SnackBar.vue';
 import { useI18n } from '@/locales/helpers.ts';
 import { getApiErrorMessageOrDefault } from '@/lib/api_error.ts';
 import { openTextFileContent, startDownloadFile } from '@/lib/ui/common.ts';
-import type {
-    SettingsBundleImportResult,
-    SettingsBundleSectionKey,
-    SettingsBundleImportSectionSummary,
+import {
+    SETTINGS_BUNDLE_SECTION_LABEL_KEYS,
+    buildSettingsBundleSectionFileName,
+    type SettingsBundleImportResult,
+    type SettingsBundleSectionKey,
+    type SettingsBundleImportSectionSummary,
 } from '@/models/data_management.ts';
 import { useUserStore } from '@/stores/user.ts';
 
@@ -80,18 +82,6 @@ const importing = ref(false);
 const exporting = ref(false);
 const busy = computed(() => importing.value || exporting.value);
 
-const sectionLabels: Record<SettingsBundleSectionKey, string> = {
-    accounts: 'Accounts',
-    transactionCategories: 'Transaction Categories',
-    transactionTags: 'Transaction Tags',
-    transactionTemplates: 'Transaction Templates',
-    scheduledTransactions: 'Scheduled Transactions',
-    categoryRecognitionRules: 'Category Recognition Rules',
-    accountRecognitionRules: 'Account Recognition Rules',
-    llmConfigs: 'LLM Configs',
-    ocrConfig: 'OCR Config',
-};
-
 const emptySummary: SettingsBundleImportSectionSummary = {
     created: 0,
     updated: 0,
@@ -99,14 +89,12 @@ const emptySummary: SettingsBundleImportSectionSummary = {
 };
 
 function getSectionFileName(): string {
-    const timestamp = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
-    const prefix = props.filenamePrefix || props.sectionKey;
-    return `bill-analyser-${prefix}-settings-${timestamp}.json`;
+    return buildSettingsBundleSectionFileName(tt(SETTINGS_BUNDLE_SECTION_LABEL_KEYS[props.sectionKey]));
 }
 
 function buildImportDetails(result: SettingsBundleImportResult): string[] {
     const summary = result.sections[props.sectionKey] || emptySummary;
-    const sectionLabel = tt(sectionLabels[props.sectionKey]);
+    const sectionLabel = tt(SETTINGS_BUNDLE_SECTION_LABEL_KEYS[props.sectionKey]);
     const details = [
         `${sectionLabel}: ${tt('Created')} ${summary.created}, ${tt('Updated')} ${summary.updated}, ${tt('Skipped')} ${summary.skipped}`,
     ];
