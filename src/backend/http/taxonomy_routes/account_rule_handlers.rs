@@ -26,8 +26,6 @@ async fn list_account_rules_handler(
             db_user_id(user_id),
             query.account_id,
             account_rules_enabled_only(&query),
-            None,
-            None,
         )
         .await
         {

@@ -42,7 +42,9 @@ async fn settings_bundle_import_upserts_templates_when_postgres_available(
     assert_eq!(dry_run["dryRun"], true);
     assert_eq!(dry_run["sections"]["transactionTemplates"]["created"], 1);
     assert_eq!(dry_run["sections"]["scheduledTransactions"]["created"], 1);
+    assert_eq!(dry_run["sections"]["accountRecognitionRules"]["created"], 1);
     assert_no_unsupported_template_warning(&dry_run);
+    assert_deprecated_scope_warning(&dry_run);
 
     let template_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*)::BIGINT FROM transaction_templates WHERE user_id = $1")
@@ -50,23 +52,33 @@ async fn settings_bundle_import_upserts_templates_when_postgres_available(
             .fetch_one(&pool)
             .await?;
     assert_eq!(template_count, 0);
+    assert_account_rule_scope_columns_absent(&pool).await?;
 
     let imported = import_postgres_settings_bundle(&pool, &bundle, user_id, false).await?;
     assert_eq!(imported["sections"]["transactionTemplates"]["created"], 1);
     assert_eq!(imported["sections"]["scheduledTransactions"]["created"], 1);
+    assert_eq!(
+        imported["sections"]["accountRecognitionRules"]["created"],
+        1
+    );
     assert_no_unsupported_template_warning(&imported);
+    assert_deprecated_scope_warning(&imported);
 
     assert_template_row(&pool, user_id, 1, "午餐模板", 1234, 0, false).await?;
     assert_template_row(&pool, user_id, 2, "房租计划", 250000, 250000, false).await?;
+    assert_account_rule_row(&pool, user_id, "工资卡识别", false).await?;
 
     let updated_bundle = settings_bundle_payload(unique, 1999, 300000, true);
     let updated = import_postgres_settings_bundle(&pool, &updated_bundle, user_id, false).await?;
     assert_eq!(updated["sections"]["transactionTemplates"]["updated"], 1);
     assert_eq!(updated["sections"]["scheduledTransactions"]["updated"], 1);
+    assert_eq!(updated["sections"]["accountRecognitionRules"]["updated"], 1);
     assert_no_unsupported_template_warning(&updated);
+    assert_deprecated_scope_warning(&updated);
 
     assert_template_row(&pool, user_id, 1, "午餐模板", 1999, 0, true).await?;
     assert_template_row(&pool, user_id, 2, "房租计划", 300000, 300000, true).await?;
+    assert_account_rule_row(&pool, user_id, "工资卡识别", false).await?;
 
     pool.close().await;
     admin_pool
@@ -141,6 +153,17 @@ fn settings_bundle_payload(
                 "autoCreate": true,
                 "displayOrder": 5,
                 "hidden": hidden
+            }],
+            "accountRecognitionRules": [{
+                "name": "工资卡识别",
+                "accountRef": format!("account:bank:{unique}"),
+                "ruleExpression": format!("OR={{工资卡-{unique}}}"),
+                "priority": 3,
+                "regexEnabled": false,
+                "enabled": true,
+                "accountRoleScope": "source",
+                "transactionTypeScope": "expense",
+                "fieldScope": ["payment_method"]
             }]
         }
     })
@@ -158,6 +181,68 @@ fn assert_no_unsupported_template_warning(result: &Value) {
             .unwrap_or_default()
             .contains("not supported")
     }));
+}
+
+fn assert_deprecated_scope_warning(result: &Value) {
+    let warnings = result
+        .get("warnings")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    assert!(warnings.iter().any(|warning| {
+        warning
+            .as_str()
+            .unwrap_or_default()
+            .contains("Ignored deprecated account rule scope fields")
+    }));
+}
+
+async fn assert_account_rule_scope_columns_absent(
+    pool: &bill_analyser_db::PostgresPool,
+) -> Result<(), Box<dyn Error>> {
+    let count: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)::BIGINT
+        FROM information_schema.columns
+        WHERE table_name = 'account_rules'
+          AND column_name IN ('account_role_scope', 'transaction_type_scope', 'field_scope')
+        "#,
+    )
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(count, 0);
+    Ok(())
+}
+
+async fn assert_account_rule_row(
+    pool: &bill_analyser_db::PostgresPool,
+    user_id: i64,
+    name: &str,
+    regex_enabled: bool,
+) -> Result<(), Box<dyn Error>> {
+    let row = sqlx::query(
+        r#"
+        SELECT name, rule_expression, regex_enabled, enabled, priority
+        FROM account_rules
+        WHERE user_id = $1 AND name = $2
+        "#,
+    )
+    .bind(user_id)
+    .bind(name)
+    .fetch_one(pool)
+    .await?;
+
+    assert_eq!(row.try_get::<String, _>("name")?, name);
+    assert!(row
+        .try_get::<Value, _>("rule_expression")?
+        .get("expression")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .starts_with("OR={工资卡-"));
+    assert_eq!(row.try_get::<bool, _>("regex_enabled")?, regex_enabled);
+    assert!(row.try_get::<bool, _>("enabled")?);
+    assert_eq!(row.try_get::<i32, _>("priority")?, 3);
+    Ok(())
 }
 
 async fn assert_template_row(

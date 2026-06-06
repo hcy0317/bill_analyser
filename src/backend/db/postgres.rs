@@ -134,6 +134,10 @@ const IMPORT_SESSION_KEY_TABLES: &[&str] = &["import_sessions"];
 
 const IMPORT_SESSION_KEY_INDEXES: &[&str] = &["idx_import_sessions_user_session_key"];
 
+const ACCOUNT_RULE_SCOPE_CLEANUP_TABLES: &[&str] = &["account_rules"];
+
+const ACCOUNT_RULE_SCOPE_CLEANUP_INDEXES: &[&str] = &["idx_account_rules_user_enabled_priority"];
+
 const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
     PostgresMigrationDescriptor {
         version: 1,
@@ -212,6 +216,13 @@ const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
         required_tables: IMPORT_SESSION_KEY_TABLES,
         required_indexes: IMPORT_SESSION_KEY_INDEXES,
     },
+    PostgresMigrationDescriptor {
+        version: 12,
+        file_name: "0012_drop_account_rule_scope_columns.sql",
+        description: "remove deprecated persisted account rule role/type/field scope columns",
+        required_tables: ACCOUNT_RULE_SCOPE_CLEANUP_TABLES,
+        required_indexes: ACCOUNT_RULE_SCOPE_CLEANUP_INDEXES,
+    },
 ];
 
 pub fn postgres_migrations_dir() -> PathBuf {
@@ -243,19 +254,12 @@ mod tests {
     #[test]
     fn postgres_manifest_points_to_existing_initial_schema() {
         let manifest = postgres_migration_manifest();
-        assert_eq!(manifest.len(), 11);
+        assert_eq!(manifest.len(), 12);
         assert_eq!(manifest[0].version, 1);
         assert_eq!(manifest[0].file_name, POSTGRES_INITIAL_SCHEMA_FILE);
-        assert_eq!(manifest[1].version, 2);
-        assert_eq!(manifest[2].version, 3);
-        assert_eq!(manifest[3].version, 4);
-        assert_eq!(manifest[4].version, 5);
-        assert_eq!(manifest[5].version, 6);
-        assert_eq!(manifest[6].version, 7);
-        assert_eq!(manifest[7].version, 8);
-        assert_eq!(manifest[8].version, 9);
-        assert_eq!(manifest[9].version, 10);
-        assert_eq!(manifest[10].version, 11);
+        for (index, descriptor) in manifest.iter().enumerate() {
+            assert_eq!(descriptor.version, i64::try_from(index + 1).unwrap());
+        }
         assert!(postgres_initial_schema_path().exists());
         for descriptor in manifest.iter().skip(1) {
             assert!(postgres_migrations_dir()
@@ -281,6 +285,38 @@ mod tests {
         assert!(schema.contains("amount stored in cents"));
         assert!(schema.contains("updated_at TIMESTAMPTZ NOT NULL DEFAULT now()"));
         assert!(schema.contains("version BIGINT NOT NULL DEFAULT 1"));
+    }
+
+    #[test]
+    fn account_rule_scope_cleanup_removes_deprecated_columns_and_rebuilds_index() {
+        let schema = fs::read_to_string(postgres_initial_schema_path()).unwrap();
+        let account_rules_section = schema
+            .split("CREATE TABLE IF NOT EXISTS account_rules")
+            .nth(1)
+            .and_then(|section| {
+                section
+                    .split("CREATE TABLE IF NOT EXISTS import_sessions")
+                    .next()
+            })
+            .expect("account_rules section");
+
+        assert!(account_rules_section.contains("account_role_scope"));
+        assert!(account_rules_section.contains("transaction_type_scope"));
+        assert!(account_rules_section.contains("field_scope"));
+        assert!(schema.contains("idx_account_rules_user_enabled_type_priority"));
+        assert!(!schema.contains("idx_account_rules_user_enabled_priority"));
+
+        let migration = fs::read_to_string(
+            postgres_migrations_dir().join("0012_drop_account_rule_scope_columns.sql"),
+        )
+        .unwrap();
+        assert!(
+            migration.contains("DROP INDEX IF EXISTS idx_account_rules_user_enabled_type_priority")
+        );
+        assert!(migration.contains("DROP COLUMN IF EXISTS account_role_scope"));
+        assert!(migration.contains("DROP COLUMN IF EXISTS transaction_type_scope"));
+        assert!(migration.contains("DROP COLUMN IF EXISTS field_scope"));
+        assert!(migration.contains("idx_account_rules_user_enabled_priority"));
     }
 
     #[test]

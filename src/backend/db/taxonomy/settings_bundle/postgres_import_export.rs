@@ -1103,8 +1103,6 @@ async fn import_postgres_settings_account_rules(
         if let Some(warning) = account_rule_scope_compat_warning(item) {
             warnings.push(warning);
         }
-        let (account_role_scope, transaction_type_scope, field_scope) =
-            default_account_rule_scope_columns();
         let name = safe_text(item.get("name"), "");
         let priority = safe_int(item.get("priority"), 100);
         let regex_enabled = safe_bool(get_any(item, &["regexEnabled", "regex_enabled"]));
@@ -1129,14 +1127,11 @@ async fn import_postgres_settings_account_rules(
                     rule_expression = $4,
                     regex_enabled = $5,
                     enabled = $6,
-                    account_role_scope = $7,
-                    transaction_type_scope = $8,
-                    field_scope = $9,
-                    source = $10,
-                    source_key = $11,
+                    source = $7,
+                    source_key = $8,
                     updated_at = now(),
                     version = version + 1
-                WHERE id = $12 AND user_id = $13
+                WHERE id = $9 AND user_id = $10
                 "#,
             )
             .bind(account_id)
@@ -1145,9 +1140,6 @@ async fn import_postgres_settings_account_rules(
             .bind(rule_expression_json)
             .bind(regex_enabled)
             .bind(enabled)
-            .bind(account_role_scope)
-            .bind(transaction_type_scope)
-            .bind(field_scope)
             .bind(source)
             .bind(source_key)
             .bind(rule_id)
@@ -1162,10 +1154,9 @@ async fn import_postgres_settings_account_rules(
             r#"
             INSERT INTO account_rules (
                 user_id, account_id, name, priority, rule_expression,
-                regex_enabled, enabled, account_role_scope, transaction_type_scope,
-                field_scope, source, source_key
+                regex_enabled, enabled, source, source_key
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING id
             "#,
         )
@@ -1176,9 +1167,6 @@ async fn import_postgres_settings_account_rules(
         .bind(rule_expression_json)
         .bind(regex_enabled)
         .bind(enabled)
-        .bind(account_role_scope.clone())
-        .bind(transaction_type_scope.clone())
-        .bind(field_scope)
         .bind(source)
         .bind(source_key)
         .fetch_one(&mut **transaction)
@@ -1195,7 +1183,7 @@ async fn load_existing_postgres_account_rules(
 ) -> DbResult<AccountRuleSettingsIndex> {
     let rows = sqlx::query(
         r#"
-        SELECT id, account_id, rule_expression, name, account_role_scope, transaction_type_scope
+        SELECT id, account_id, rule_expression, name
         FROM account_rules
         WHERE user_id = $1
         "#,

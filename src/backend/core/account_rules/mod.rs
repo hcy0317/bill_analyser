@@ -86,15 +86,6 @@ pub struct AccountRuleMatchContext {
 pub struct AccountRuleCandidate {
     pub rule_id: i64,
     pub account_id: i64,
-    /// Deprecated compatibility storage. PR1 keeps old DB/API payloads readable,
-    /// but matching must not let persisted scope choose account role/type.
-    pub account_role_scope: String,
-    /// Deprecated compatibility storage. Matching uses the caller's stabilized
-    /// transaction context instead of this stored value.
-    pub transaction_type_scope: String,
-    /// Deprecated compatibility storage. Matching uses context-derived field
-    /// bundles instead of this stored value.
-    pub field_scope: Vec<String>,
     pub rule_expression: String,
     pub regex_enabled: bool,
     pub enabled: bool,
@@ -316,12 +307,11 @@ mod tests {
     use super::{
         match_account_rules, normalize_account_role_scope, normalize_account_rule_field_scope,
         normalize_transaction_type_scope, AccountRuleCandidate, AccountRuleMatchContext,
-        ACCOUNT_ROLE_DESTINATION, ACCOUNT_ROLE_SOURCE, FIELD_COUNTERPARTY, FIELD_DESCRIPTION,
-        FIELD_EXPENSE_COUNTERPARTY, FIELD_EXPENSE_DESCRIPTION, FIELD_EXPENSE_PAYMENT_METHOD,
-        FIELD_INCOME_COUNTERPARTY, FIELD_INCOME_DESCRIPTION, FIELD_INCOME_PAYMENT_METHOD,
-        FIELD_INVESTMENT_COUNTERPARTY, FIELD_INVESTMENT_DESCRIPTION, FIELD_PARSER,
-        FIELD_PAYMENT_METHOD, TRANSACTION_SCOPE_ALL, TRANSACTION_SCOPE_EXPENSE,
-        TRANSACTION_SCOPE_TRANSFER,
+        ACCOUNT_ROLE_SOURCE, FIELD_COUNTERPARTY, FIELD_DESCRIPTION, FIELD_EXPENSE_COUNTERPARTY,
+        FIELD_EXPENSE_DESCRIPTION, FIELD_EXPENSE_PAYMENT_METHOD, FIELD_INCOME_COUNTERPARTY,
+        FIELD_INCOME_DESCRIPTION, FIELD_INCOME_PAYMENT_METHOD, FIELD_INVESTMENT_COUNTERPARTY,
+        FIELD_INVESTMENT_DESCRIPTION, FIELD_PARSER, FIELD_PAYMENT_METHOD, TRANSACTION_SCOPE_ALL,
+        TRANSACTION_SCOPE_EXPENSE, TRANSACTION_SCOPE_TRANSFER,
     };
 
     #[test]
@@ -376,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn account_rule_matching_uses_priority_and_ignores_deprecated_scopes() {
+    fn account_rule_matching_uses_priority_and_requested_context() {
         let context = AccountRuleMatchContext {
             parser_id: "wechat_pay".to_string(),
             counterparty: "招商银行".to_string(),
@@ -388,9 +378,6 @@ mod tests {
             AccountRuleCandidate {
                 rule_id: 2,
                 account_id: 20,
-                account_role_scope: ACCOUNT_ROLE_DESTINATION.to_string(),
-                transaction_type_scope: TRANSACTION_SCOPE_EXPENSE.to_string(),
-                field_scope: vec![FIELD_COUNTERPARTY.to_string()],
                 rule_expression: "OR={招商银行}".to_string(),
                 regex_enabled: false,
                 enabled: true,
@@ -399,9 +386,6 @@ mod tests {
             AccountRuleCandidate {
                 rule_id: 1,
                 account_id: 10,
-                account_role_scope: ACCOUNT_ROLE_SOURCE.to_string(),
-                transaction_type_scope: TRANSACTION_SCOPE_EXPENSE.to_string(),
-                field_scope: vec![FIELD_PAYMENT_METHOD.to_string()],
                 rule_expression: "OR={工资卡}".to_string(),
                 regex_enabled: false,
                 enabled: true,
@@ -426,7 +410,7 @@ mod tests {
             ACCOUNT_ROLE_SOURCE,
             TRANSACTION_SCOPE_TRANSFER,
         )
-        .expect("deprecated transaction scope ignored");
+        .expect("requested transaction scope is reflected");
         assert_eq!(transfer_matched.account_id, 20);
         assert_eq!(
             transfer_matched.transaction_type_scope,
@@ -444,12 +428,6 @@ mod tests {
         let rules = vec![AccountRuleCandidate {
             rule_id: 7,
             account_id: 70,
-            account_role_scope: ACCOUNT_ROLE_SOURCE.to_string(),
-            transaction_type_scope: TRANSACTION_SCOPE_EXPENSE.to_string(),
-            field_scope: vec![
-                FIELD_COUNTERPARTY.to_string(),
-                FIELD_DESCRIPTION.to_string(),
-            ],
             rule_expression: "AND={支付宝,余额宝}".to_string(),
             regex_enabled: false,
             enabled: true,
@@ -485,9 +463,6 @@ mod tests {
         let default_scope_rule = AccountRuleCandidate {
             rule_id: 8,
             account_id: 80,
-            account_role_scope: ACCOUNT_ROLE_SOURCE.to_string(),
-            transaction_type_scope: TRANSACTION_SCOPE_ALL.to_string(),
-            field_scope: vec![FIELD_COUNTERPARTY.to_string()],
             rule_expression: "OR={默认付款账户}".to_string(),
             regex_enabled: false,
             enabled: true,
@@ -518,9 +493,6 @@ mod tests {
             let rule = AccountRuleCandidate {
                 rule_id: 100 + index as i64,
                 account_id: 900 + index as i64,
-                account_role_scope: ACCOUNT_ROLE_SOURCE.to_string(),
-                transaction_type_scope: TRANSACTION_SCOPE_ALL.to_string(),
-                field_scope: vec![field.to_string()],
                 rule_expression: format!("OR={{{term}}}"),
                 regex_enabled: false,
                 enabled: true,

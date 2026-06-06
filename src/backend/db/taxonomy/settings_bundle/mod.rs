@@ -28,19 +28,6 @@ fn account_rule_scope_compat_warning(item: &Value) -> Option<String> {
     })
 }
 
-fn default_account_rule_scope_columns() -> (String, String, Value) {
-    (
-        bill_analyser_core::account_rules::ACCOUNT_ROLE_ANY.to_string(),
-        bill_analyser_core::account_rules::TRANSACTION_SCOPE_ALL.to_string(),
-        Value::Array(
-            bill_analyser_core::account_rules::DEFAULT_FIELD_SCOPES
-                .iter()
-                .map(|value| Value::String((*value).to_string()))
-                .collect(),
-        ),
-    )
-}
-
 fn section_items<'payload>(sections: &'payload Value, section: &str) -> &'payload [Value] {
     sections
         .get(section)
@@ -129,21 +116,6 @@ mod account_rule_settings_tests {
             "ruleExpression": "OR={工资卡}"
         }))
         .is_none());
-    }
-
-    #[test]
-    fn default_account_rule_scope_columns_pin_storage_compat_defaults() {
-        let (role, transaction_type, fields) = default_account_rule_scope_columns();
-
-        assert_eq!(role, bill_analyser_core::account_rules::ACCOUNT_ROLE_ANY);
-        assert_eq!(
-            transaction_type,
-            bill_analyser_core::account_rules::TRANSACTION_SCOPE_ALL
-        );
-        assert_eq!(
-            fields,
-            json!(["counterparty", "payment_method", "description"])
-        );
     }
 }
 

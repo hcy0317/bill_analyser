@@ -5,9 +5,7 @@
 use std::collections::BTreeSet;
 
 use bill_analyser_core::account_rules::{
-    normalize_account_role_scope, normalize_account_rule_field_scope,
-    normalize_transaction_type_scope, AccountRuleCandidate, AccountRuleMatch,
-    AccountRuleMatchContext, ACCOUNT_ROLE_ANY, DEFAULT_FIELD_SCOPES, TRANSACTION_SCOPE_ALL,
+    AccountRuleCandidate, AccountRuleMatch, AccountRuleMatchContext, DEFAULT_FIELD_SCOPES,
 };
 use bill_analyser_core::category_rules::escape_rule_expression_term;
 use chrono::{DateTime, Utc};
@@ -961,18 +959,7 @@ pub async fn list_postgres_account_rules(
     user_id: i64,
     account_id: Option<i64>,
     enabled_only: bool,
-    account_role_scope: Option<&str>,
-    transaction_type_scope: Option<&str>,
 ) -> DbResult<Vec<AccountRuleRecord>> {
-    let normalized_role_scope = account_role_scope
-        .map(|scope| normalize_account_role_scope(Some(scope)).map_err(DbError::InvalidOperation))
-        .transpose()?;
-    let normalized_transaction_scope = transaction_type_scope
-        .map(|scope| {
-            normalize_transaction_type_scope(Some(scope)).map_err(DbError::InvalidOperation)
-        })
-        .transpose()?;
-
     let mut builder = QueryBuilder::<Postgres>::new(account_rule_select_sql());
     builder.push(" WHERE ar.user_id = ");
     builder.push_bind(user_id);
@@ -984,14 +971,6 @@ pub async fn list_postgres_account_rules(
     }
     if enabled_only {
         builder.push(" AND ar.enabled = true");
-    }
-    if let Some(scope) = normalized_role_scope {
-        builder.push(" AND ar.account_role_scope = ");
-        builder.push_bind(scope);
-    }
-    if let Some(scope) = normalized_transaction_scope {
-        builder.push(" AND ar.transaction_type_scope = ");
-        builder.push_bind(scope);
     }
     builder.push(" ORDER BY ar.priority ASC, ar.id ASC");
 
@@ -1049,26 +1028,6 @@ pub async fn create_postgres_account_rule(
         .map(payload_bool_value)
         .transpose()?
         .unwrap_or(true);
-    let account_role_scope = normalize_account_role_scope(
-        object
-            .get("account_role_scope")
-            .or_else(|| object.get("accountRoleScope"))
-            .and_then(Value::as_str),
-    )
-    .map_err(DbError::InvalidOperation)?;
-    let transaction_type_scope = normalize_transaction_type_scope(
-        object
-            .get("transaction_type_scope")
-            .or_else(|| object.get("transactionTypeScope"))
-            .and_then(Value::as_str),
-    )
-    .map_err(DbError::InvalidOperation)?;
-    let field_scope = normalize_account_rule_field_scope(
-        object
-            .get("field_scope")
-            .or_else(|| object.get("fieldScope")),
-    )
-    .map_err(DbError::InvalidOperation)?;
     let name = object
         .get("name")
         .map(payload_scalar_text)
@@ -1088,21 +1047,15 @@ pub async fn create_postgres_account_rule(
     let row = sqlx::query(
         r#"
         INSERT INTO account_rules (
-            user_id, account_id, name, account_role_scope, transaction_type_scope,
-            field_scope, rule_expression, regex_enabled, priority, enabled, source
+            user_id, account_id, name, rule_expression, regex_enabled, priority, enabled, source
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING id
         "#,
     )
     .bind(user_id)
     .bind(account_id)
     .bind(name)
-    .bind(account_role_scope)
-    .bind(transaction_type_scope)
-    .bind(Value::Array(
-        field_scope.into_iter().map(Value::String).collect(),
-    ))
     .bind(rule_expression_json(&rule_expression, regex_enabled))
     .bind(regex_enabled)
     .bind(i64_to_i32(priority))
@@ -1127,8 +1080,7 @@ pub async fn update_postgres_account_rule(
     }
     let existing = sqlx::query(
         r#"
-        SELECT account_id, name, account_role_scope, transaction_type_scope, field_scope,
-            rule_expression, regex_enabled, priority, enabled, source
+        SELECT account_id, name, rule_expression, regex_enabled, priority, enabled, source
         FROM account_rules
         WHERE id = $1 AND user_id = $2
         "#,
@@ -1143,9 +1095,6 @@ pub async fn update_postgres_account_rule(
 
     let mut account_id = existing.try_get::<Option<i64>, _>("account_id")?;
     let mut name: String = existing.try_get("name")?;
-    let mut account_role_scope: String = existing.try_get("account_role_scope")?;
-    let mut transaction_type_scope: String = existing.try_get("transaction_type_scope")?;
-    let mut field_scope: Value = existing.try_get("field_scope")?;
     let mut rule_expression_json_value: Value = existing.try_get("rule_expression")?;
     let mut regex_enabled: bool = existing.try_get("regex_enabled")?;
     let mut priority = i64::from(existing.try_get::<i32, _>("priority")?);
@@ -1155,11 +1104,35 @@ pub async fn update_postgres_account_rule(
 
     for (key, value) in object {
         match key.as_str() {
-            "id" | "user_id" | "userId" | "created_at" | "createdAt" | "updated_at"
-            | "updatedAt" | "applied_count" | "appliedCount" | "last_applied_at"
-            | "lastAppliedAt" | "match_count" | "matchCount" | "last_matched_at"
-            | "lastMatchedAt" | "source_key" | "sourceKey" | "account_name" | "accountName"
-            | "account_type" | "accountType" | "account_hidden" | "accountHidden" => {}
+            "id"
+            | "user_id"
+            | "userId"
+            | "created_at"
+            | "createdAt"
+            | "updated_at"
+            | "updatedAt"
+            | "applied_count"
+            | "appliedCount"
+            | "last_applied_at"
+            | "lastAppliedAt"
+            | "match_count"
+            | "matchCount"
+            | "last_matched_at"
+            | "lastMatchedAt"
+            | "source_key"
+            | "sourceKey"
+            | "account_name"
+            | "accountName"
+            | "account_type"
+            | "accountType"
+            | "account_hidden"
+            | "accountHidden"
+            | "account_role_scope"
+            | "accountRoleScope"
+            | "transaction_type_scope"
+            | "transactionTypeScope"
+            | "field_scope"
+            | "fieldScope" => {}
             "account_id" | "accountId" => {
                 let next_account_id = required_postgres_i64(value, "account_id")?;
                 if !postgres_account_belongs_to_user(pool, next_account_id, user_id).await? {
@@ -1191,26 +1164,6 @@ pub async fn update_postgres_account_rule(
                 enabled = payload_bool_value(value)?;
                 changed = true;
             }
-            "account_role_scope" | "accountRoleScope" => {
-                account_role_scope = normalize_account_role_scope(value.as_str())
-                    .map_err(DbError::InvalidOperation)?;
-                changed = true;
-            }
-            "transaction_type_scope" | "transactionTypeScope" => {
-                transaction_type_scope = normalize_transaction_type_scope(value.as_str())
-                    .map_err(DbError::InvalidOperation)?;
-                changed = true;
-            }
-            "field_scope" | "fieldScope" => {
-                field_scope = Value::Array(
-                    normalize_account_rule_field_scope(Some(value))
-                        .map_err(DbError::InvalidOperation)?
-                        .into_iter()
-                        .map(Value::String)
-                        .collect(),
-                );
-                changed = true;
-            }
             "source" => {
                 source = payload_scalar_text(value)?;
                 changed = true;
@@ -1227,24 +1180,18 @@ pub async fn update_postgres_account_rule(
         UPDATE account_rules
         SET account_id = $1,
             name = $2,
-            account_role_scope = $3,
-            transaction_type_scope = $4,
-            field_scope = $5,
-            rule_expression = $6,
-            regex_enabled = $7,
-            priority = $8,
-            enabled = $9,
-            source = $10,
+            rule_expression = $3,
+            regex_enabled = $4,
+            priority = $5,
+            enabled = $6,
+            source = $7,
             updated_at = now(),
             version = version + 1
-        WHERE id = $11 AND user_id = $12
+        WHERE id = $8 AND user_id = $9
         "#,
     )
     .bind(account_id)
     .bind(name)
-    .bind(account_role_scope)
-    .bind(transaction_type_scope)
-    .bind(field_scope)
     .bind(rule_expression_json_value)
     .bind(regex_enabled)
     .bind(i64_to_i32(priority))
@@ -1724,8 +1671,7 @@ fn account_rule_select_sql() -> &'static str {
             ar.id, ar.user_id, ar.account_id, ar.name, ar.priority,
             ar.rule_expression, ar.regex_enabled, ar.enabled,
             ar.match_count, ar.last_matched_at,
-            ar.account_role_scope, ar.transaction_type_scope,
-            ar.field_scope, ar.source, ar.source_key, ar.created_at, ar.updated_at,
+            ar.source, ar.source_key, ar.created_at, ar.updated_at,
             a.name AS account_name, a.account_type AS account_type, NOT a.is_active AS account_hidden
         FROM account_rules ar
         JOIN accounts a ON ar.account_id = a.id
@@ -1798,7 +1744,6 @@ fn category_rule_result_has_displayable_expression(record: &DbResult<CategoryRul
 
 fn account_rule_from_postgres_row(row: PgRow) -> DbResult<AccountRuleRecord> {
     let rule_expression_json: Value = row.try_get("rule_expression")?;
-    let field_scope: Value = row.try_get("field_scope")?;
     let regex_enabled: bool = row.try_get("regex_enabled")?;
     let enabled: bool = row.try_get("enabled")?;
     let mut record = Map::new();
@@ -1830,20 +1775,6 @@ fn account_rule_from_postgres_row(row: PgRow) -> DbResult<AccountRuleRecord> {
         &mut record,
         "last_matched_at",
         row.try_get("last_matched_at")?,
-    );
-    insert_string(
-        &mut record,
-        "account_role_scope",
-        row.try_get("account_role_scope")?,
-    );
-    insert_string(
-        &mut record,
-        "transaction_type_scope",
-        row.try_get("transaction_type_scope")?,
-    );
-    record.insert(
-        "field_scope".to_string(),
-        field_scope_json_array(&field_scope),
     );
     insert_string(&mut record, "source", row.try_get("source")?);
     record.insert(
@@ -2816,21 +2747,6 @@ fn json_array(values: &[&str]) -> Value {
     )
 }
 
-fn field_scope_json_array(value: &Value) -> Value {
-    Value::Array(
-        normalize_account_rule_field_scope(Some(value))
-            .unwrap_or_else(|_| {
-                DEFAULT_FIELD_SCOPES
-                    .iter()
-                    .map(|value| (*value).to_string())
-                    .collect()
-            })
-            .into_iter()
-            .map(Value::String)
-            .collect(),
-    )
-}
-
 async fn postgres_category_belongs_to_user(
     pool: &PostgresPool,
     category_id: i64,
@@ -2884,22 +2800,6 @@ fn account_rule_candidate_from_record(record: AccountRuleRecord) -> DbResult<Acc
     Ok(AccountRuleCandidate {
         rule_id: int_value(record.get("id")).unwrap_or_default(),
         account_id: int_value(record.get("account_id")).unwrap_or_default(),
-        account_role_scope: normalize_account_role_scope(
-            record.get("account_role_scope").and_then(Value::as_str),
-        )
-        .unwrap_or_else(|_| ACCOUNT_ROLE_ANY.to_string()),
-        transaction_type_scope: normalize_transaction_type_scope(
-            record.get("transaction_type_scope").and_then(Value::as_str),
-        )
-        .unwrap_or_else(|_| TRANSACTION_SCOPE_ALL.to_string()),
-        field_scope: normalize_account_rule_field_scope(record.get("field_scope")).unwrap_or_else(
-            |_| {
-                DEFAULT_FIELD_SCOPES
-                    .iter()
-                    .map(|value| (*value).to_string())
-                    .collect()
-            },
-        ),
         rule_expression: record
             .get("rule_expression")
             .and_then(Value::as_str)
@@ -3054,10 +2954,6 @@ mod tests {
             42
         );
         assert!(required_postgres_rule_expression(Some(&serde_json::json!(" "))).is_err());
-        assert_eq!(
-            field_scope_json_array(&serde_json::json!("parser,payment_method")),
-            serde_json::json!(["parser", "payment_method"])
-        );
     }
 
     #[test]
@@ -3090,7 +2986,7 @@ mod tests {
     }
 
     #[test]
-    fn account_rule_candidate_defaults_invalid_deprecated_scope_columns() {
+    fn account_rule_candidate_ignores_deprecated_scope_columns() {
         let mut record = AccountRuleRecord::new();
         record.insert("id".to_string(), serde_json::json!(7));
         record.insert("account_id".to_string(), serde_json::json!(42));
@@ -3113,14 +3009,11 @@ mod tests {
 
         let candidate = account_rule_candidate_from_record(record).expect("candidate");
 
-        assert_eq!(candidate.account_role_scope, ACCOUNT_ROLE_ANY);
-        assert_eq!(candidate.transaction_type_scope, TRANSACTION_SCOPE_ALL);
-        assert_eq!(
-            candidate.field_scope,
-            DEFAULT_FIELD_SCOPES
-                .iter()
-                .map(|value| (*value).to_string())
-                .collect::<Vec<_>>()
-        );
+        assert_eq!(candidate.rule_id, 7);
+        assert_eq!(candidate.account_id, 42);
+        assert_eq!(candidate.rule_expression, "OR={工资卡}");
+        assert!(!candidate.regex_enabled);
+        assert!(candidate.enabled);
+        assert_eq!(candidate.priority, 5);
     }
 }

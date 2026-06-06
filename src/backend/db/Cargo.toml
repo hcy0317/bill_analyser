@@ -38,5 +38,9 @@ path = "../../../tests/backend/db/settings_bundle_postgres.rs"
 name = "category_rules_postgres"
 path = "../../../tests/backend/db/category_rules_postgres.rs"
 
+[[test]]
+name = "account_rules_postgres"
+path = "../../../tests/backend/db/account_rules_postgres.rs"
+
 [lints]
 workspace = true

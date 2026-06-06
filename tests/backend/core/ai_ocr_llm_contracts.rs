@@ -1,6 +1,4 @@
-use bill_analyser_core::account_rules::{
-    AccountRuleCandidate, ACCOUNT_ROLE_SOURCE, FIELD_DESCRIPTION, TRANSACTION_SCOPE_ALL,
-};
+use bill_analyser_core::account_rules::AccountRuleCandidate;
 use bill_analyser_core::ai_ocr_llm::{
     build_llm_analysis_response, build_llm_candidate_list_response,
     build_llm_candidate_reject_response, build_llm_classification_prompt,
@@ -257,9 +255,6 @@ fn ocr_recognition_success_response_maps_taxonomy_to_auto_fill_and_candidates() 
         account_rules: vec![AccountRuleCandidate {
             rule_id: 601,
             account_id: 200,
-            account_role_scope: ACCOUNT_ROLE_SOURCE.to_string(),
-            transaction_type_scope: TRANSACTION_SCOPE_ALL.to_string(),
-            field_scope: vec![FIELD_DESCRIPTION.to_string()],
             rule_expression: "OR={招商银行,招行}".to_string(),
             regex_enabled: false,
             enabled: true,

@@ -730,8 +730,7 @@ async fn load_import_intelligence_account_rules(
 ) -> Result<Vec<AccountRuleCandidate>, bill_analyser_db::DbError> {
     let rows = sqlx::query(
         r#"
-        SELECT ar.id, ar.account_id, ar.account_role_scope, ar.transaction_type_scope,
-               ar.field_scope, ar.rule_expression, ar.regex_enabled, ar.enabled, ar.priority
+        SELECT ar.id, ar.account_id, ar.rule_expression, ar.regex_enabled, ar.enabled, ar.priority
         FROM account_rules ar
         JOIN accounts a ON a.id = ar.account_id AND a.user_id = ar.user_id
         WHERE ar.user_id = $1 AND ar.enabled = true AND a.is_active = true
@@ -743,14 +742,10 @@ async fn load_import_intelligence_account_rules(
     .await?;
     rows.into_iter()
         .map(|row| {
-            let field_scope: Value = row.try_get("field_scope")?;
             let expression: Value = row.try_get("rule_expression")?;
             Ok(AccountRuleCandidate {
                 rule_id: row.try_get("id")?,
                 account_id: row.try_get("account_id")?,
-                account_role_scope: row.try_get("account_role_scope")?,
-                transaction_type_scope: row.try_get("transaction_type_scope")?,
-                field_scope: account_rule_field_scope_from_value(&field_scope),
                 rule_expression: rule_expression_string(&expression),
                 regex_enabled: row.try_get("regex_enabled")?,
                 enabled: row.try_get("enabled")?,
@@ -904,16 +899,6 @@ fn rule_expression_from_contains_any(object: &Map<String, Value>) -> Option<Stri
         .filter(|value| !value.trim().is_empty())
         .collect::<Vec<_>>();
     (!values.is_empty()).then(|| format!("OR={{{}}}", values.join(",")))
-}
-
-fn account_rule_field_scope_from_value(value: &Value) -> Vec<String> {
-    bill_analyser_core::account_rules::normalize_account_rule_field_scope(Some(value))
-        .unwrap_or_else(|_| {
-            bill_analyser_core::account_rules::DEFAULT_FIELD_SCOPES
-                .iter()
-                .map(|value| (*value).to_string())
-                .collect()
-        })
 }
 
 fn text_from_json(value: &Value, key: &str) -> String {

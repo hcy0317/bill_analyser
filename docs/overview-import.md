@@ -22,8 +22,8 @@
 - 同批重复按时间窗口、同向金额、方向和文本证据合并，保留基底预览行并把来源链、合并原因和成员写入 `import_decision_groups` / `import_decision_group_members`。
 - 同批转账按时间窗口、同额反向金额和不同来源配对，以支出侧为基底合并交易对方、支付方式和描述；支出/收入两侧原始交易对方、支付方式、描述、账户和 parser 信息保留在 `matching.transfer.source_chain`，并写入 `same_batch_transfer` decision group。
 - stage2 phase precedence 固定为：parser 标准行 → 同批重复/转账与正式账单 materialization → 分类规则/内置分类兜底 → recurring projection → 可自动应用的 learning projection → 账户规则匹配 → stage2 baseline 持久化。账户规则必须最后运行，因为 learning projection 可以改写 `preview_type`、分类和显式账户，recurring/transfer/investment 信号也会改变账户角色上下文。
-- stage2 账户识别以 `account_rules` 为权威，但当前合同只保留“账户 + 表达式 + 优先级/启停”。旧 `account_role_scope`、`transaction_type_scope` 与 `field_scope` 只作为 PR7 前的兼容列/旧 payload 输入存在，匹配时被运行时上下文取代：转账按稳定后的来源/目标侧字段匹配来源/目标账户；投资先按 parser/支付方式匹配来源账户，再按交易对方优先、描述兜底匹配投资账户；收入/支出按最终 `preview_type` 匹配仍为空的来源账户。
-- 账户规则不得覆盖 parser、learning 或用户编辑已经显式给出的账户；旧 scope payload 或旧设置包字段会被忽略/default 并返回 warning，新设置包导出不再包含这些 scope 字段。
+- stage2 账户识别以 `account_rules` 为权威，但当前合同只保留“账户 + 表达式 + 优先级/启停”。旧 `account_role_scope`、`transaction_type_scope` 与 `field_scope` 不再落库，旧 payload/query/settings bundle 携带这些字段时只产生兼容 warning 并被忽略；匹配时由运行时上下文决定目标：转账按稳定后的来源/目标侧字段匹配来源/目标账户；投资先按 parser/支付方式匹配来源账户，再按交易对方优先、描述兜底匹配投资账户；收入/支出按最终 `preview_type` 匹配仍为空的来源账户。
+- 账户规则不得覆盖 parser、learning 或用户编辑已经显式给出的账户；旧 scope payload 或旧设置包字段会被忽略并返回 warning，新设置包导出不再包含这些 scope 字段。
 - 多文件 parser work 可以并发执行，但 session/template staging 仍保持一次性写入。
 - preview page 承担 Check Data 的分页、排序、筛选与轻量聚合 metadata；缺少分类、缺少账户和转账账户复核状态按当前预览字段计算。
 - preview 的 transfer 和 LLM 建议只有 pending 状态展示接受/拒绝动作。learning 建议按 `recommendation_key` 进入生命周期表：默认 `yellow` 只在信号列展示推荐类型、分类和账户，不自动改写预览字段；用户接受/拒绝会写入 `import_learning_feedback_events` 并更新 `import_learning_lifecycle`，同一建议接受达到 3 次后变为 `green` 并允许后续导入自动应用。

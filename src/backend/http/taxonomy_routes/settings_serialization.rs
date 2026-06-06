@@ -70,7 +70,7 @@ async fn build_postgres_settings_bundle(
                 .collect(),
         ),
     );
-    let account_rules = list_postgres_account_rules(pool, user_id, None, false, None, None)
+    let account_rules = list_postgres_account_rules(pool, user_id, None, false)
         .await
         .map_err(|error| error.to_string())?;
     sections.insert(

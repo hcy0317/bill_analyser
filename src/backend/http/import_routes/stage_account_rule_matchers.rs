@@ -418,9 +418,6 @@ mod account_rule_matcher_tests {
         AccountRuleCandidate {
             rule_id: account_id + 100,
             account_id,
-            account_role_scope: ACCOUNT_ROLE_DESTINATION.to_string(),
-            transaction_type_scope: TRANSACTION_SCOPE_INCOME.to_string(),
-            field_scope: vec!["parser".to_string()],
             rule_expression: expression.to_string(),
             regex_enabled: false,
             enabled: true,
