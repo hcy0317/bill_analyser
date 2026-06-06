@@ -530,6 +530,7 @@ pub async fn list_postgres_category_rules(
     let rows = builder.build().fetch_all(pool).await?;
     rows.into_iter()
         .map(category_rule_from_postgres_row)
+        .filter(category_rule_result_has_displayable_expression)
         .collect()
 }
 
@@ -1779,6 +1780,20 @@ fn category_rule_from_postgres_row(row: PgRow) -> DbResult<CategoryRuleRecord> {
             .unwrap_or_default(),
     );
     Ok(record)
+}
+
+fn category_rule_has_displayable_expression(record: &CategoryRuleRecord) -> bool {
+    record
+        .get("rule_expression")
+        .and_then(Value::as_str)
+        .is_some_and(|expression| !expression.trim().is_empty())
+}
+
+fn category_rule_result_has_displayable_expression(record: &DbResult<CategoryRuleRecord>) -> bool {
+    match record {
+        Ok(record) => category_rule_has_displayable_expression(record),
+        Err(_) => true,
+    }
 }
 
 fn account_rule_from_postgres_row(row: PgRow) -> DbResult<AccountRuleRecord> {
@@ -3043,6 +3058,35 @@ mod tests {
             field_scope_json_array(&serde_json::json!("parser,payment_method")),
             serde_json::json!(["parser", "payment_method"])
         );
+    }
+
+    #[test]
+    fn category_rule_display_guard_rejects_legacy_only_empty_expression_projection() {
+        assert_eq!(
+            rule_expression_string(&serde_json::json!({
+                "legacy_expression": "OR={旧规则}"
+            })),
+            ""
+        );
+
+        let mut legacy_only_record = CategoryRuleRecord::new();
+        legacy_only_record.insert("rule_expression".to_string(), serde_json::json!(" "));
+        assert!(!category_rule_has_displayable_expression(
+            &legacy_only_record
+        ));
+
+        let mut current_record = CategoryRuleRecord::new();
+        current_record.insert(
+            "rule_expression".to_string(),
+            serde_json::json!("OR={午餐}"),
+        );
+        assert!(category_rule_has_displayable_expression(&current_record));
+        assert!(category_rule_result_has_displayable_expression(&Ok(
+            current_record
+        )));
+        assert!(category_rule_result_has_displayable_expression(&Err(
+            DbError::InvalidOperation("row projection failed".to_string())
+        )));
     }
 
     #[test]
