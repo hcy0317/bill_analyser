@@ -170,12 +170,26 @@
                                     md="12"
                                     class="account-rule-section"
                                 >
-                                    <AccountRulePanel
-                                        :account-id="selectedAccountRuleAccountId"
-                                        :title="tt('Account Recognition Rules')"
-                                        :show-settings-bundle-controls="false"
-                                        hide-header
-                                        embedded
+                                    <v-progress-linear
+                                        v-if="accountRuleLoading"
+                                        indeterminate
+                                        color="primary"
+                                        class="mb-3"
+                                    />
+                                    <v-alert
+                                        v-if="accountRuleLoadFailed"
+                                        type="warning"
+                                        variant="tonal"
+                                        density="compact"
+                                        class="mb-3"
+                                    >
+                                        {{ tt('Failed to load account rules') }}
+                                    </v-alert>
+                                    <category-rule-builder-fields
+                                        v-model="selectedAccountRuleBuilderModel"
+                                        :auto-rule-name="autoSelectedAccountRuleName"
+                                        :disabled="loading || submitting || accountRuleLoading || accountRuleLoadFailed"
+                                        title="Account Recognition Rules"
                                     />
                                 </v-col>
                                 <v-col class="py-0" cols="12" md="12" v-if="editAccountId && !isNewAccount(selectedAccount)">
@@ -213,7 +227,7 @@
 <script setup lang="ts">
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
-import AccountRulePanel from '@/views/desktop/pairingcenter/components/AccountRulePanel.vue';
+import CategoryRuleBuilderFields from '@/components/common/CategoryRuleBuilderFields.vue';
 
 import { ref, computed, useTemplateRef, watch, onMounted, onUnmounted } from 'vue';
 
@@ -228,10 +242,19 @@ import { AccountType } from '@/core/account.ts';
 import { ALL_ACCOUNT_ICONS } from '@/consts/icon.ts';
 import { ALL_ACCOUNT_COLORS } from '@/consts/color.ts';
 import { Account } from '@/models/account.ts';
+import {
+    accountRuleToForm,
+    buildAccountRulePayload,
+    createDefaultAccountRuleForm,
+    normalizeAccountRuleItem,
+    type AccountRuleForm,
+    type AccountRuleItem,
+} from '@/models/account_rule.ts';
 
 import { isNumber } from '@/lib/common.ts';
 import { getCurrentUnixTime } from '@/lib/datetime.ts';
 import { generateRandomUUID } from '@/lib/misc.ts';
+import services from '@/lib/services.ts';
 
 import {
     mdiDotsVertical,
@@ -243,6 +266,13 @@ interface AccountEditResponse {
     message: string;
     id?: string;
     account?: Account;
+}
+
+interface AccountRuleBuilderModel {
+    priority: number;
+    ruleExpression: string;
+    regexEnabled: boolean;
+    enabled: boolean;
 }
 
 type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
@@ -278,6 +308,12 @@ const snackbar = useTemplateRef<SnackBarType>('snackbar');
 const showState = ref<boolean>(false);
 const activeTab = ref<string>('account');
 const currentAccountIndex = ref<number>(-1);
+const accountRuleLoading = ref<boolean>(false);
+const accountRuleLoadFailed = ref<boolean>(false);
+const primaryAccountRuleId = ref<number | null>(null);
+const selectedAccountRuleDraft = ref<AccountRuleForm>(createDefaultAccountRuleForm());
+
+let accountRuleLoadRequestId = 0;
 
 const selectedAccount = computed<Account>(() => {
     if (currentAccountIndex.value < 0) {
@@ -296,6 +332,29 @@ const canManageSelectedAccountRules = computed<boolean>(() => (
     && !isNewAccount(selectedAccount.value)
     && selectedAccountRuleAccountId.value !== null
 ));
+const autoSelectedAccountRuleName = computed<string>(() => {
+    const accountName = (selectedAccount.value.name || '').trim() || tt('Account');
+    return `${accountName} - ${tt('Account Rule')}`;
+});
+const selectedAccountRuleBuilderModel = computed<AccountRuleBuilderModel>({
+    get: () => ({
+        priority: selectedAccountRuleDraft.value.priority,
+        ruleExpression: selectedAccountRuleDraft.value.ruleExpression,
+        regexEnabled: selectedAccountRuleDraft.value.regexEnabled,
+        enabled: selectedAccountRuleDraft.value.enabled,
+    }),
+    set: (value) => {
+        const parsedPriority = Number(value.priority ?? 100);
+
+        selectedAccountRuleDraft.value = {
+            ...selectedAccountRuleDraft.value,
+            priority: Number.isFinite(parsedPriority) ? parsedPriority : 100,
+            ruleExpression: String(value.ruleExpression ?? ''),
+            regexEnabled: !!value.regexEnabled,
+            enabled: value.enabled !== false,
+        };
+    },
+});
 
 const accountAmountTitle = computed<string>(() => {
     if (currentAccountIndex.value < 0) {
@@ -316,10 +375,150 @@ const isAccountModified = computed<boolean>(() => {
 let resolveFunc: ((value: AccountEditResponse) => void) | null = null;
 let rejectFunc: ((reason?: unknown) => void) | null = null;
 
+function resetSelectedAccountRuleEditor(accountId: number | null = selectedAccountRuleAccountId.value): void {
+    accountRuleLoadRequestId += 1;
+    accountRuleLoading.value = false;
+    accountRuleLoadFailed.value = false;
+    primaryAccountRuleId.value = null;
+    selectedAccountRuleDraft.value = createDefaultAccountRuleForm(accountId ?? '');
+}
+
+function requireApiSuccess<T>(response: { data?: { success?: boolean; result: T } }, fallback: string): T {
+    if (response.data?.success) {
+        return response.data.result;
+    }
+
+    throw new Error(fallback);
+}
+
+function getRequestErrorMessage(err: unknown, fallback: string): string {
+    if (err instanceof Error && err.message) {
+        return tt(err.message);
+    }
+
+    if (err && typeof err === 'object' && 'message' in err && typeof err.message === 'string') {
+        return tt(err.message);
+    }
+
+    return fallback;
+}
+
+function isProcessedError(err: unknown): boolean {
+    return !!(
+        err
+        && typeof err === 'object'
+        && 'processed' in err
+        && err.processed === true
+    );
+}
+
+function getSortedAccountRules(rules: AccountRuleItem[]): AccountRuleItem[] {
+    return [...rules].sort((firstRule, secondRule) => (
+        firstRule.priority - secondRule.priority
+        || firstRule.id - secondRule.id
+    ));
+}
+
+async function loadSelectedAccountRule(accountId: number | null = selectedAccountRuleAccountId.value): Promise<void> {
+    if (!showState.value || !canManageSelectedAccountRules.value || accountId === null) {
+        resetSelectedAccountRuleEditor(accountId);
+        return;
+    }
+
+    const requestId = ++accountRuleLoadRequestId;
+    accountRuleLoading.value = true;
+    accountRuleLoadFailed.value = false;
+    selectedAccountRuleDraft.value = {
+        ...selectedAccountRuleDraft.value,
+        accountId: String(accountId),
+    };
+
+    try {
+        const result = requireApiSuccess<Record<string, unknown>[]>(
+            await services.getAccountRules(accountId),
+            tt('Failed to load account rules')
+        );
+
+        if (requestId !== accountRuleLoadRequestId || accountId !== selectedAccountRuleAccountId.value) {
+            return;
+        }
+
+        const rules = getSortedAccountRules((result ?? []).map(item => normalizeAccountRuleItem(item)));
+        const primaryRule = rules[0] ?? null;
+
+        primaryAccountRuleId.value = primaryRule?.id ?? null;
+        selectedAccountRuleDraft.value = primaryRule
+            ? {
+                ...accountRuleToForm(primaryRule),
+                accountId: String(accountId),
+            }
+            : createDefaultAccountRuleForm(accountId);
+    } catch (err: unknown) {
+        if (requestId !== accountRuleLoadRequestId) {
+            return;
+        }
+
+        primaryAccountRuleId.value = null;
+        selectedAccountRuleDraft.value = createDefaultAccountRuleForm(accountId);
+        accountRuleLoadFailed.value = true;
+        snackbar.value?.showError(getRequestErrorMessage(err, tt('Failed to load account rules')));
+    } finally {
+        if (requestId === accountRuleLoadRequestId) {
+            accountRuleLoading.value = false;
+        }
+    }
+}
+
+function buildSelectedAccountRulePayload(accountId: number): ReturnType<typeof buildAccountRulePayload> | null {
+    const ruleExpression = selectedAccountRuleDraft.value.ruleExpression.trim();
+
+    if (!ruleExpression) {
+        return null;
+    }
+
+    return buildAccountRulePayload({
+        ...selectedAccountRuleDraft.value,
+        accountId: String(accountId),
+    }, autoSelectedAccountRuleName.value);
+}
+
+async function syncSelectedAccountRule(accountId: number): Promise<void> {
+    const payload = buildSelectedAccountRulePayload(accountId);
+
+    if (!payload) {
+        if (primaryAccountRuleId.value !== null) {
+            requireApiSuccess(
+                await services.deleteAccountRule(primaryAccountRuleId.value),
+                tt('Failed to delete rule')
+            );
+            primaryAccountRuleId.value = null;
+        }
+        return;
+    }
+
+    if (primaryAccountRuleId.value !== null) {
+        requireApiSuccess(
+            await services.updateAccountRule(primaryAccountRuleId.value, payload),
+            tt('Failed to save rule')
+        );
+        return;
+    }
+
+    const createdRule = requireApiSuccess<Partial<AccountRuleItem>>(
+        await services.createAccountRule(payload),
+        tt('Failed to save rule')
+    );
+
+    if (createdRule.id !== undefined && createdRule.id !== null) {
+        primaryAccountRuleId.value = Number(createdRule.id);
+    }
+}
+
 function open(options?: { id?: string, currentAccount?: Account, category?: number }): Promise<AccountEditResponse> {
     showState.value = true;
     loading.value = true;
     submitting.value = false;
+    resetSelectedAccountRuleEditor();
 
     const newAccount = Account.createNewAccount(userStore.currentUserDefaultCurrency, getCurrentUnixTime());
     account.value.fillFrom(newAccount);
@@ -364,7 +563,7 @@ function open(options?: { id?: string, currentAccount?: Account, category?: numb
     });
 }
 
-function save(): void {
+async function save(): Promise<void> {
     const problemMessage = inputEmptyProblemMessage.value;
 
     if (problemMessage) {
@@ -374,29 +573,41 @@ function save(): void {
 
     submitting.value = true;
 
-    accountsStore.saveAccount({
-        account: account.value,
-        subAccounts: subAccounts.value,
-        isEdit: !!editAccountId.value,
-        clientSessionId: clientSessionId.value
-    }).then((savedAccount) => {
-        submitting.value = false;
+    const wasEdit = !!editAccountId.value;
+    const selectedRuleAccountId = selectedAccountRuleAccountId.value;
+    const canSyncSelectedRule = (
+        canManageSelectedAccountRules.value
+        && !accountRuleLoadFailed.value
+        && selectedRuleAccountId !== null
+    );
+
+    try {
+        const savedAccount = await accountsStore.saveAccount({
+            account: account.value,
+            subAccounts: subAccounts.value,
+            isEdit: wasEdit,
+            clientSessionId: clientSessionId.value
+        });
 
         let message = 'You have saved this account';
 
-        if (!editAccountId.value) {
+        if (!wasEdit) {
             message = 'You have added a new account';
+        }
+
+        if (canSyncSelectedRule) {
+            await syncSelectedAccountRule(selectedRuleAccountId);
         }
 
         resolveFunc?.({ message, id: savedAccount.id, account: savedAccount });
         showState.value = false;
-    }).catch(error => {
-        submitting.value = false;
-
-        if (!error.processed) {
-            snackbar.value?.showError(error);
+    } catch (error: unknown) {
+        if (!isProcessedError(error)) {
+            snackbar.value?.showError(getRequestErrorMessage(error, tt('Unable to save account')));
         }
-    });
+    } finally {
+        submitting.value = false;
+    }
 }
 
 function removeSubAccount(currentSubAccount: Account): void {
@@ -427,6 +638,18 @@ watch(() => account.value.type, () => {
         addSubAccount();
     }
 });
+
+watch(
+    () => [showState.value, selectedAccountRuleAccountId.value, canManageSelectedAccountRules.value] as const,
+    ([visible, accountId, canManage]) => {
+        if (!visible || !canManage || accountId === null) {
+            resetSelectedAccountRuleEditor(accountId);
+            return;
+        }
+
+        void loadSelectedAccountRule(accountId);
+    }
+);
 
 function onKeydown(e: KeyboardEvent): void {
     if (!showState.value) {
@@ -484,18 +707,15 @@ defineExpose({
 .account-rule-section {
     min-width: 0;
     max-width: 100%;
+    overflow-x: hidden;
 }
 
-.account-rule-section :deep(.account-recognition-rule-panel),
-.account-rule-section :deep(.v-row),
-.account-rule-section :deep(.v-col) {
+.account-rule-section :deep(.category-rule-builder),
+.account-rule-section :deep(.category-rule-builder__content),
+.account-rule-section :deep(.rule-expression-input),
+.account-rule-section :deep(.rule-expression-groups) {
     min-width: 0;
     max-width: 100%;
-}
-
-.account-rule-section :deep(.v-table__wrapper) {
-    max-width: 100%;
-    overflow-x: auto;
 }
 
 @media (max-width: 960px) {
