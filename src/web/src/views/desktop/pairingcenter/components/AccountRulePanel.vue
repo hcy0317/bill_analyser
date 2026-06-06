@@ -79,20 +79,32 @@
                     </thead>
                     <tbody v-if="accountRuleGroups.length > 0">
                     <template v-for="categoryGroup in accountRuleGroups" :key="categoryGroup.key">
-                        <tr class="account-rule-category-row">
+                        <tr
+                            class="account-rule-category-row account-rule-category-group-row"
+                            role="button"
+                            tabindex="0"
+                            @click="toggleCategoryGroup(categoryGroup.key)"
+                            @keydown.enter.prevent="toggleCategoryGroup(categoryGroup.key)"
+                            @keydown.space.prevent="toggleCategoryGroup(categoryGroup.key)"
+                        >
                             <td :colspan="accountRuleTableColumnCount">
                                 <div class="account-rule-category-header">
                                     <v-btn
                                         icon
                                         variant="text"
                                         size="x-small"
-                                        @click="toggleCategoryGroup(categoryGroup.key)"
+                                        @click.stop="toggleCategoryGroup(categoryGroup.key)"
                                     >
                                         <v-icon :icon="isCategoryExpanded(categoryGroup.key) ? mdiChevronDown : mdiChevronRight" />
                                     </v-btn>
+                                    <ItemIcon
+                                        icon-type="account"
+                                        size="22px"
+                                        :icon-id="categoryGroup.categoryIcon"
+                                        :color="categoryGroup.categoryColor"
+                                    />
                                     <span class="font-weight-medium">{{ categoryGroup.categoryName }}</span>
-                                    <v-chip size="x-small" variant="tonal">{{ tt('Rules') }} {{ categoryGroup.ruleCount }}</v-chip>
-                                    <v-chip size="x-small" variant="tonal">{{ tt('Matched') }} {{ categoryGroup.matchCount }}</v-chip>
+                                    <v-chip size="x-small" variant="tonal">{{ categoryGroup.ruleCount }}</v-chip>
                                 </div>
                             </td>
                         </tr>
@@ -121,17 +133,9 @@
                                 <div
                                     v-for="rule in accountGroup.rules"
                                     :key="rule.id"
-                                    class="account-rule-expression-item"
+                                    class="account-rule-expression-item account-rule-target-expression-line"
                                 >
                                     <div class="account-rule-expression-main">
-                                        <div class="account-rule-expression-title-row">
-                                            <span class="font-weight-medium">{{ rule.name || accountGroup.accountName }}</span>
-                                            <v-chip size="x-small" variant="tonal">{{ tt('Priority') }} {{ rule.priority }}</v-chip>
-                                            <v-chip size="x-small" :color="rule.regexEnabled ? 'info' : undefined" variant="tonal">
-                                                {{ rule.regexEnabled ? tt('Use Regex') : tt('Plain Text') }}
-                                            </v-chip>
-                                            <v-chip size="x-small" variant="tonal">{{ tt('Matched') }} {{ rule.matchCount || rule.appliedCount }}</v-chip>
-                                        </div>
                                         <rule-expression-display
                                             :rule-id="rule.id"
                                             :groups="getRuleExpressionGroups(rule)"
@@ -787,9 +791,18 @@ defineExpose({
     min-width: 520px;
 }
 
-.account-rule-category-row td {
-    background: rgba(var(--v-theme-primary), 0.08);
-    padding-block: 6px;
+.account-rule-category-group-row {
+    background: transparent;
+    cursor: pointer;
+    font-size: 0.95rem;
+}
+
+.account-rule-category-group-row td {
+    padding-block: 12px;
+}
+
+.account-rule-category-group-row:hover {
+    background: rgba(var(--v-theme-primary), 0.04);
 }
 
 .account-rule-category-header {
@@ -812,7 +825,7 @@ defineExpose({
     margin-left: 8px;
 }
 
-.account-rule-expression-item {
+.account-rule-target-expression-line {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
@@ -820,21 +833,13 @@ defineExpose({
     padding-block: 10px;
 }
 
-.account-rule-expression-item + .account-rule-expression-item {
+.account-rule-target-expression-line + .account-rule-target-expression-line {
     border-top: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
 }
 
 .account-rule-expression-main {
     min-width: 0;
     flex: 1 1 auto;
-}
-
-.account-rule-expression-title-row {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-bottom: 6px;
 }
 
 .account-rule-expression-actions {
@@ -851,7 +856,7 @@ defineExpose({
         table-layout: auto;
     }
 
-    .account-rule-expression-item {
+    .account-rule-target-expression-line {
         flex-direction: column;
     }
 

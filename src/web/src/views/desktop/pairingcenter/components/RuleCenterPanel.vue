@@ -90,7 +90,7 @@
                                         <v-checkbox-btn
                                             :model-value="allVisibleRulesSelected"
                                             :indeterminate="someVisibleRulesSelected && !allVisibleRulesSelected"
-                                            :disabled="paginatedDisplayCategoryRules.length === 0 || bulkOperating"
+                                            :disabled="paginatedCategoryRuleTargets.length === 0 || bulkOperating"
                                             density="compact"
                                             hide-details
                                             @update:model-value="setVisibleRulesSelected"
@@ -303,8 +303,8 @@
                                 </th>
                             </tr>
                             </thead>
-                            <tbody v-if="groupedCategoryRules.length > 0">
-                            <template v-for="group in groupedCategoryRules" :key="group.key">
+                            <tbody v-if="groupedCategoryRuleTargets.length > 0">
+                            <template v-for="group in groupedCategoryRuleTargets" :key="group.key">
                                 <tr
                                     class="rule-center-group-row"
                                     role="button"
@@ -326,104 +326,137 @@
                                                 :color="group.color"
                                             />
                                             <span class="font-weight-medium">{{ group.title }}</span>
-                                            <v-chip size="x-small" variant="tonal">{{ group.items.length }}</v-chip>
+                                            <v-chip size="x-small" variant="tonal">{{ group.ruleCount }}</v-chip>
                                         </div>
                                     </td>
                                 </tr>
                                 <template v-if="!isCategoryGroupCollapsed(group.key)">
-                                    <tr v-for="item in group.items" :key="item.id">
+                                    <tr v-for="targetGroup in group.targets" :key="targetGroup.key">
                                         <td class="rule-center-column-select">
                                             <v-checkbox-btn
-                                                :model-value="isRuleSelected(item.id)"
+                                                :model-value="isCategoryRuleTargetSelected(targetGroup)"
+                                                :indeterminate="isCategoryRuleTargetPartiallySelected(targetGroup)"
                                                 :disabled="bulkOperating"
                                                 density="compact"
                                                 hide-details
-                                                @update:model-value="setRuleSelected(item.id, $event)"
+                                                @update:model-value="setCategoryRuleTargetSelected(targetGroup, $event)"
                                             />
                                         </td>
                                         <td class="rule-center-column-category">
-                                            <div class="d-flex align-center" :title="item.category_full_name">
+                                            <div class="d-flex align-center" :title="targetGroup.category_full_name">
                                                 <ItemIcon
                                                     icon-type="category"
                                                     size="24px"
-                                                    :icon-id="item.category_icon"
-                                                    :color="item.category_color"
+                                                    :icon-id="targetGroup.category_icon"
+                                                    :color="targetGroup.category_color"
                                                 />
-                                                <span class="ms-2 text-truncate">{{ item.category_display_name }}</span>
+                                                <span class="ms-2 text-truncate">{{ targetGroup.category_display_name }}</span>
                                             </div>
                                         </td>
                                         <td class="rule-center-column-expression">
-                                            <rule-expression-display
-                                                :rule-id="item.id"
-                                                :groups="getRuleExpressionGroups(item)"
-                                                :expanded-clause-keys="expandedExpressionClauseKeys"
-                                                :max-collapsed-terms="maxCollapsedExpressionTerms"
-                                                @update:expanded-clause-keys="expandedExpressionClauseKeys = $event"
-                                            />
-                                        </td>
-                                        <td class="rule-center-column-regex text-no-wrap">
-                                            <v-icon
-                                                :icon="item.regex_enabled ? mdiCheckCircle : mdiCloseCircle"
-                                                :color="item.regex_enabled ? 'info' : 'grey'"
-                                                size="small"
-                                            />
-                                        </td>
-                                        <td class="rule-center-column-enabled">
-                                            <div class="d-inline-flex" @click.stop>
-                                                <v-switch
-                                                    :model-value="item.enabled"
-                                                    density="compact"
-                                                    hide-details
-                                                    color="success"
-                                                    :disabled="isRuleToggling(item.id) || bulkOperating"
-                                                    @update:model-value="toggleEnabled(item, $event)"
+                                            <div
+                                                v-for="item in targetGroup.rules"
+                                                :key="item.id"
+                                                class="rule-center-target-expression-line"
+                                            >
+                                                <rule-expression-display
+                                                    :rule-id="item.id"
+                                                    :groups="getRuleExpressionGroups(item)"
+                                                    :expanded-clause-keys="expandedExpressionClauseKeys"
+                                                    :max-collapsed-terms="maxCollapsedExpressionTerms"
+                                                    @update:expanded-clause-keys="expandedExpressionClauseKeys = $event"
                                                 />
                                             </div>
                                         </td>
-                                        <td class="rule-center-column-applied">{{ item.applied_count }}</td>
+                                        <td class="rule-center-column-regex text-no-wrap">
+                                            <div
+                                                v-for="item in targetGroup.rules"
+                                                :key="item.id"
+                                                class="rule-center-target-expression-line rule-center-target-expression-line--center"
+                                            >
+                                                <v-icon
+                                                    :icon="item.regex_enabled ? mdiCheckCircle : mdiCloseCircle"
+                                                    :color="item.regex_enabled ? 'info' : 'grey'"
+                                                    size="small"
+                                                />
+                                            </div>
+                                        </td>
+                                        <td class="rule-center-column-enabled">
+                                            <div
+                                                v-for="item in targetGroup.rules"
+                                                :key="item.id"
+                                                class="rule-center-target-expression-line rule-center-target-expression-line--center"
+                                            >
+                                                <div class="d-inline-flex" @click.stop>
+                                                    <v-switch
+                                                        :model-value="item.enabled"
+                                                        density="compact"
+                                                        hide-details
+                                                        color="success"
+                                                        :disabled="isRuleToggling(item.id) || bulkOperating"
+                                                        @update:model-value="toggleEnabled(item, $event)"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td class="rule-center-column-applied">
+                                            <div
+                                                v-for="item in targetGroup.rules"
+                                                :key="item.id"
+                                                class="rule-center-target-expression-line rule-center-target-expression-line--center"
+                                            >
+                                                {{ item.applied_count }}
+                                            </div>
+                                        </td>
                                         <td class="rule-center-column-actions">
-                                            <div class="rule-center-actions-row">
-                                                <v-tooltip :text="tt('Test')" location="top">
-                                                    <template #activator="{ props }">
-                                                        <v-btn
-                                                            v-bind="props"
-                                                            icon
-                                                            variant="text"
-                                                            size="small"
-                                                            color="success"
-                                                            @click="openTestDialog(item)"
-                                                        >
-                                                            <v-icon :icon="mdiTestTube" size="small" />
-                                                        </v-btn>
-                                                    </template>
-                                                </v-tooltip>
-                                                <v-tooltip :text="tt('Edit')" location="top">
-                                                    <template #activator="{ props }">
-                                                        <v-btn
-                                                            v-bind="props"
-                                                            icon
-                                                            variant="text"
-                                                            size="small"
-                                                            @click="openEditDialog(item)"
-                                                        >
-                                                            <v-icon :icon="mdiPencilOutline" size="small" />
-                                                        </v-btn>
-                                                    </template>
-                                                </v-tooltip>
-                                                <v-tooltip :text="tt('Delete')" location="top">
-                                                    <template #activator="{ props }">
-                                                        <v-btn
-                                                            v-bind="props"
-                                                            icon
-                                                            variant="text"
-                                                            size="small"
-                                                            color="error"
-                                                            @click="confirmDelete(item)"
-                                                        >
-                                                            <v-icon :icon="mdiDeleteOutline" size="small" />
-                                                        </v-btn>
-                                                    </template>
-                                                </v-tooltip>
+                                            <div
+                                                v-for="item in targetGroup.rules"
+                                                :key="item.id"
+                                                class="rule-center-target-expression-line rule-center-target-expression-line--center"
+                                            >
+                                                <div class="rule-center-actions-row">
+                                                    <v-tooltip :text="tt('Test')" location="top">
+                                                        <template #activator="{ props }">
+                                                            <v-btn
+                                                                v-bind="props"
+                                                                icon
+                                                                variant="text"
+                                                                size="small"
+                                                                color="success"
+                                                                @click="openTestDialog(item)"
+                                                            >
+                                                                <v-icon :icon="mdiTestTube" size="small" />
+                                                            </v-btn>
+                                                        </template>
+                                                    </v-tooltip>
+                                                    <v-tooltip :text="tt('Edit')" location="top">
+                                                        <template #activator="{ props }">
+                                                            <v-btn
+                                                                v-bind="props"
+                                                                icon
+                                                                variant="text"
+                                                                size="small"
+                                                                @click="openEditDialog(item)"
+                                                            >
+                                                                <v-icon :icon="mdiPencilOutline" size="small" />
+                                                            </v-btn>
+                                                        </template>
+                                                    </v-tooltip>
+                                                    <v-tooltip :text="tt('Delete')" location="top">
+                                                        <template #activator="{ props }">
+                                                            <v-btn
+                                                                v-bind="props"
+                                                                icon
+                                                                variant="text"
+                                                                size="small"
+                                                                color="error"
+                                                                @click="confirmDelete(item)"
+                                                            >
+                                                                <v-icon :icon="mdiDeleteOutline" size="small" />
+                                                            </v-btn>
+                                                        </template>
+                                                    </v-tooltip>
+                                                </div>
                                             </div>
                                         </td>
                                     </tr>
@@ -439,7 +472,7 @@
                             </tbody>
                         </v-table>
                         <div
-                            v-if="filteredDisplayCategoryRules.length > 0"
+                            v-if="orderedCategoryRuleTargets.length > 0"
                             class="rule-center-pagination d-flex flex-column flex-sm-row align-sm-center justify-end ga-3 px-4 py-3"
                         >
                             <div class="text-caption text-medium-emphasis">
@@ -768,12 +801,27 @@ interface DisplayCategoryRuleItem extends CategoryRuleItem {
     category_group_color: string;
 }
 
+interface CategoryRuleTargetGroup {
+    key: string;
+    category_display_name: string;
+    category_full_name: string;
+    category_icon: string;
+    category_color: string;
+    category_group_key: string;
+    category_group_name: string;
+    category_group_icon: string;
+    category_group_color: string;
+    rules: DisplayCategoryRuleItem[];
+    ruleCount: number;
+}
+
 interface CategoryRuleGroup {
     key: string;
     title: string;
     icon: string;
     color: string;
-    items: DisplayCategoryRuleItem[];
+    targets: CategoryRuleTargetGroup[];
+    ruleCount: number;
 }
 
 interface CategoryRuleForm {
@@ -876,29 +924,6 @@ const displayCategoryRules = computed<DisplayCategoryRuleItem[]>(() => categoryR
         category_group_color: group.color,
     };
 }));
-
-const groupedCategoryRules = computed<CategoryRuleGroup[]>(() => {
-    const groupsByKey = new Map<string, CategoryRuleGroup>();
-
-    for (const item of paginatedDisplayCategoryRules.value) {
-        const group = groupsByKey.get(item.category_group_key) ?? {
-            key: item.category_group_key,
-            title: item.category_group_name,
-            icon: item.category_group_icon,
-            color: item.category_group_color,
-            items: [],
-        };
-        group.items.push(item);
-        groupsByKey.set(item.category_group_key, group);
-    }
-
-    return [...groupsByKey.values()]
-        .map(group => ({
-            ...group,
-            items: [...group.items].sort(compareDisplayCategoryRules),
-        }))
-        .sort((firstGroup, secondGroup) => firstGroup.title.localeCompare(secondGroup.title, 'zh-Hans'));
-});
 
 // ── Category selector options ────────
 function getCategoryTypeLabel(type: number): string {
@@ -1133,6 +1158,15 @@ function compareDisplayCategoryRules(firstRule: DisplayCategoryRuleItem, secondR
         || firstRule.id - secondRule.id;
 }
 
+function compareCategoryRuleExpressions(
+    firstRule: DisplayCategoryRuleItem,
+    secondRule: DisplayCategoryRuleItem
+): number {
+    return firstRule.priority - secondRule.priority
+        || firstRule.name.localeCompare(secondRule.name, 'zh-Hans')
+        || firstRule.id - secondRule.id;
+}
+
 function compareDisplayCategoryRuleOrder(
     firstRule: DisplayCategoryRuleItem,
     secondRule: DisplayCategoryRuleItem
@@ -1140,6 +1174,60 @@ function compareDisplayCategoryRuleOrder(
     return firstRule.category_group_name.localeCompare(secondRule.category_group_name, 'zh-Hans')
         || firstRule.category_group_key.localeCompare(secondRule.category_group_key, 'zh-Hans')
         || compareDisplayCategoryRules(firstRule, secondRule);
+}
+
+function compareCategoryRuleTargetGroups(
+    firstGroup: CategoryRuleTargetGroup,
+    secondGroup: CategoryRuleTargetGroup
+): number {
+    return firstGroup.category_group_name.localeCompare(secondGroup.category_group_name, 'zh-Hans')
+        || firstGroup.category_group_key.localeCompare(secondGroup.category_group_key, 'zh-Hans')
+        || firstGroup.category_full_name.localeCompare(secondGroup.category_full_name, 'zh-Hans')
+        || firstGroup.key.localeCompare(secondGroup.key, 'zh-Hans');
+}
+
+function makeCategoryRuleTargetKey(item: DisplayCategoryRuleItem): string {
+    const categoryId = item.category_id !== null && item.category_id !== undefined
+        ? String(item.category_id).trim()
+        : '';
+    if (categoryId) {
+        return `category:${categoryId}`;
+    }
+
+    const normalizedCategoryName = normalizeCategoryNameKey(item.category_full_name);
+    return normalizedCategoryName ? `category-name:${normalizedCategoryName}` : 'unassigned';
+}
+
+function buildCategoryRuleTargetGroups(items: DisplayCategoryRuleItem[]): CategoryRuleTargetGroup[] {
+    const groupsByKey = new Map<string, CategoryRuleTargetGroup>();
+
+    for (const item of items) {
+        const targetKey = makeCategoryRuleTargetKey(item);
+        const group = groupsByKey.get(targetKey) ?? {
+            key: targetKey,
+            category_display_name: item.category_display_name,
+            category_full_name: item.category_full_name,
+            category_icon: item.category_icon,
+            category_color: item.category_color,
+            category_group_key: item.category_group_key,
+            category_group_name: item.category_group_name,
+            category_group_icon: item.category_group_icon,
+            category_group_color: item.category_group_color,
+            rules: [],
+            ruleCount: 0,
+        };
+        group.rules.push(item);
+        group.ruleCount = group.rules.length;
+        groupsByKey.set(targetKey, group);
+    }
+
+    return [...groupsByKey.values()]
+        .map(group => ({
+            ...group,
+            rules: [...group.rules].sort(compareCategoryRuleExpressions),
+            ruleCount: group.rules.length,
+        }))
+        .sort(compareCategoryRuleTargetGroups);
 }
 
 function matchesRuleExpressionFilter(expression: string): boolean {
@@ -1210,31 +1298,61 @@ const filteredDisplayCategoryRules = computed<DisplayCategoryRuleItem[]>(() => {
 const orderedFilteredDisplayCategoryRules = computed<DisplayCategoryRuleItem[]>(() => (
     [...filteredDisplayCategoryRules.value].sort(compareDisplayCategoryRuleOrder)
 ));
+const orderedCategoryRuleTargets = computed<CategoryRuleTargetGroup[]>(() => (
+    buildCategoryRuleTargetGroups(orderedFilteredDisplayCategoryRules.value)
+));
 const rulePageCount = computed(() => Math.max(
     1,
-    Math.ceil(orderedFilteredDisplayCategoryRules.value.length / ruleItemsPerPage.value)
+    Math.ceil(orderedCategoryRuleTargets.value.length / ruleItemsPerPage.value)
 ));
-const paginatedDisplayCategoryRules = computed<DisplayCategoryRuleItem[]>(() => {
+const paginatedCategoryRuleTargets = computed<CategoryRuleTargetGroup[]>(() => {
     const startIndex = (rulePage.value - 1) * ruleItemsPerPage.value;
-    return orderedFilteredDisplayCategoryRules.value.slice(startIndex, startIndex + ruleItemsPerPage.value);
+    return orderedCategoryRuleTargets.value.slice(startIndex, startIndex + ruleItemsPerPage.value);
 });
 const rulePaginationStart = computed(() => (
-    filteredDisplayCategoryRules.value.length === 0
+    orderedCategoryRuleTargets.value.length === 0
         ? 0
         : (rulePage.value - 1) * ruleItemsPerPage.value + 1
 ));
 const rulePaginationEnd = computed(() => Math.min(
-    filteredDisplayCategoryRules.value.length,
+    orderedCategoryRuleTargets.value.length,
     rulePage.value * ruleItemsPerPage.value
 ));
 const rulePaginationLabel = computed(() => {
-    if (filteredDisplayCategoryRules.value.length === 0) {
+    if (orderedCategoryRuleTargets.value.length === 0) {
         return `0 / ${categoryRules.value.length}`;
     }
 
-    return `${rulePaginationStart.value}-${rulePaginationEnd.value} / ${filteredDisplayCategoryRules.value.length}`;
+    return `${rulePaginationStart.value}-${rulePaginationEnd.value} / ${orderedCategoryRuleTargets.value.length}`;
 });
-const visibleRuleIds = computed(() => paginatedDisplayCategoryRules.value.map(item => item.id));
+const groupedCategoryRuleTargets = computed<CategoryRuleGroup[]>(() => {
+    const groupsByKey = new Map<string, CategoryRuleGroup>();
+
+    for (const targetGroup of paginatedCategoryRuleTargets.value) {
+        const group = groupsByKey.get(targetGroup.category_group_key) ?? {
+            key: targetGroup.category_group_key,
+            title: targetGroup.category_group_name,
+            icon: targetGroup.category_group_icon,
+            color: targetGroup.category_group_color,
+            targets: [],
+            ruleCount: 0,
+        };
+        group.targets.push(targetGroup);
+        group.ruleCount += targetGroup.ruleCount;
+        groupsByKey.set(targetGroup.category_group_key, group);
+    }
+
+    return [...groupsByKey.values()]
+        .map(group => ({
+            ...group,
+            targets: [...group.targets].sort(compareCategoryRuleTargetGroups),
+            ruleCount: group.targets.reduce((sum, item) => sum + item.ruleCount, 0),
+        }))
+        .sort((firstGroup, secondGroup) => firstGroup.title.localeCompare(secondGroup.title, 'zh-Hans'));
+});
+const visibleRuleIds = computed(() => (
+    paginatedCategoryRuleTargets.value.flatMap(targetGroup => targetGroup.rules.map(item => item.id))
+));
 const allVisibleRulesSelected = computed(() => (
     visibleRuleIds.value.length > 0
     && visibleRuleIds.value.every(ruleId => selectedRuleIdSet.value.has(ruleId))
@@ -1451,16 +1569,29 @@ async function toggleEnabled(item: CategoryRuleItem, nextEnabled: unknown) {
     }
 }
 
-function isRuleSelected(ruleId: number): boolean {
-    return selectedRuleIdSet.value.has(ruleId);
+function getCategoryRuleTargetRuleIds(targetGroup: CategoryRuleTargetGroup): number[] {
+    return targetGroup.rules.map(item => item.id);
 }
 
-function setRuleSelected(ruleId: number, selected: unknown): void {
+function isCategoryRuleTargetSelected(targetGroup: CategoryRuleTargetGroup): boolean {
+    const ruleIds = getCategoryRuleTargetRuleIds(targetGroup);
+    return ruleIds.length > 0 && ruleIds.every(ruleId => selectedRuleIdSet.value.has(ruleId));
+}
+
+function isCategoryRuleTargetPartiallySelected(targetGroup: CategoryRuleTargetGroup): boolean {
+    const ruleIds = getCategoryRuleTargetRuleIds(targetGroup);
+    return ruleIds.some(ruleId => selectedRuleIdSet.value.has(ruleId))
+        && !isCategoryRuleTargetSelected(targetGroup);
+}
+
+function setCategoryRuleTargetSelected(targetGroup: CategoryRuleTargetGroup, selected: unknown): void {
     const nextSelectedRuleIds = new Set(selectedRuleIds.value);
-    if (selected) {
-        nextSelectedRuleIds.add(ruleId);
-    } else {
-        nextSelectedRuleIds.delete(ruleId);
+    for (const ruleId of getCategoryRuleTargetRuleIds(targetGroup)) {
+        if (selected) {
+            nextSelectedRuleIds.add(ruleId);
+        } else {
+            nextSelectedRuleIds.delete(ruleId);
+        }
     }
 
     selectedRuleIds.value = [...nextSelectedRuleIds];
@@ -1722,7 +1853,7 @@ watch(ruleItemsPerPage, () => {
 });
 
 watch(
-    () => filteredDisplayCategoryRules.value.length,
+    () => orderedCategoryRuleTargets.value.length,
     () => {
         if (rulePage.value > rulePageCount.value) {
             rulePage.value = rulePageCount.value;
@@ -1897,6 +2028,21 @@ defineExpose({
     justify-content: center;
     gap: 2px;
     flex-wrap: nowrap;
+}
+
+.rule-center-target-expression-line {
+    min-height: 40px;
+    padding-block: 8px;
+}
+
+.rule-center-target-expression-line + .rule-center-target-expression-line {
+    border-top: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+}
+
+.rule-center-target-expression-line--center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .rule-center-pagination {

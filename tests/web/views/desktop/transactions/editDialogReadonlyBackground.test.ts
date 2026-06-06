@@ -8,15 +8,20 @@ function readSource(relativePath: string): string {
 }
 
 describe('desktop transaction edit dialog readonly affordance', () => {
-    test('readonly shading is scoped to Vuetify field controls instead of the whole form', () => {
+    test('readonly controls use immutable field styling instead of gray shallow fill', () => {
         const source = readSource('src/views/desktop/transactions/list/dialogs/EditDialog.vue');
         const readonlyFormRule = source.match(/\.transaction-readonly-form\s*\{(?<body>[^}]*)\}/);
+        const readonlyFieldRule = source.match(/\.transaction-readonly-form\s+\.v-field\s*\{(?<body>[^}]*)\}/);
+        const readonlyOverlayRule = source.match(/\.transaction-readonly-form\s+\.v-field__overlay\s*\{(?<body>[^}]*)\}/);
 
         expect(readonlyFormRule?.groups?.['body'] ?? '').not.toMatch(/background|border|border-radius|padding|margin/);
         expect(source).not.toMatch(/\.transaction-readonly-form\s+:deep/);
         expect(source).toMatch(/\.transaction-readonly-form\s+\.v-field\s*\{/);
         expect(source).toMatch(/\.transaction-readonly-form\s+\.v-field__overlay\s*\{/);
-        expect(source).toMatch(/background-color:\s*rgba\(var\(--v-theme-on-surface\),\s*0\.08\)/);
+        expect(readonlyFieldRule?.groups?.['body'] ?? '').not.toMatch(/background-color:\s*rgba\(var\(--v-theme-on-surface\),\s*0\.08\)/);
+        expect(readonlyFieldRule?.groups?.['body'] ?? '').toContain('background-color: transparent !important;');
+        expect(readonlyFieldRule?.groups?.['body'] ?? '').toContain('border-color: rgba(var(--v-theme-on-surface), 0.24) !important;');
+        expect(readonlyOverlayRule?.groups?.['body'] ?? '').toContain('opacity: 0 !important;');
     });
 
     test('scheduled and historical matching panels share the readonly surface background', () => {

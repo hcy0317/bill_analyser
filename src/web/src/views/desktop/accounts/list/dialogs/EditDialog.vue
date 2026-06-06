@@ -153,17 +153,6 @@
                                         v-model="selectedAccount.balanceTime"
                                         @error="onShowDateTimeError" />
                                 </v-col>
-                                <v-col cols="12" md="12">
-                                    <v-textarea
-                                        type="text"
-                                        persistent-placeholder
-                                        rows="3"
-                                        :disabled="loading || submitting"
-                                        :label="tt('Description')"
-                                        :placeholder="currentAccountIndex < 0 ? tt('Your account description (optional)') : tt('Your sub-account description (optional)')"
-                                        v-model="selectedAccount.comment"
-                                    />
-                                </v-col>
                                 <v-col
                                     v-if="canManageSelectedAccountRules"
                                     cols="12"
@@ -189,7 +178,18 @@
                                         v-model="selectedAccountRuleBuilderModel"
                                         :auto-rule-name="autoSelectedAccountRuleName"
                                         :disabled="loading || submitting || accountRuleLoading || accountRuleLoadFailed"
-                                        title="Account Recognition Rules"
+                                        title="Account Matching"
+                                    />
+                                </v-col>
+                                <v-col cols="12" md="12">
+                                    <v-textarea
+                                        type="text"
+                                        persistent-placeholder
+                                        rows="3"
+                                        :disabled="loading || submitting"
+                                        :label="tt('Description')"
+                                        :placeholder="currentAccountIndex < 0 ? tt('Your account description (optional)') : tt('Your sub-account description (optional)')"
+                                        v-model="selectedAccount.comment"
                                     />
                                 </v-col>
                                 <v-col class="py-0" cols="12" md="12" v-if="editAccountId && !isNewAccount(selectedAccount)">

@@ -1959,12 +1959,13 @@ defineExpose({
 }
 
 .transaction-readonly-form .v-field {
-    background-color: rgba(var(--v-theme-on-surface), 0.08) !important;
+    background-color: transparent !important;
+    border-color: rgba(var(--v-theme-on-surface), 0.24) !important;
     border-radius: 8px;
 }
 
 .transaction-readonly-form .v-field__overlay {
-    opacity: 0.06 !important;
+    opacity: 0 !important;
 }
 
 .transaction-readonly-form .v-field__input,

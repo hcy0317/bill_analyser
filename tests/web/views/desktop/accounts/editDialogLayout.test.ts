@@ -18,8 +18,12 @@ describe('desktop account edit dialog layout contract', () => {
         expect(editDialog).toContain('CategoryRuleBuilderFields');
         expect(editDialog).toContain('<category-rule-builder-fields');
         expect(editDialog).toContain('v-model="selectedAccountRuleBuilderModel"');
-        expect(editDialog).toContain('title="Account Recognition Rules"');
+        expect(editDialog).toContain('title="Account Matching"');
+        expect(editDialog).not.toContain('title="Account Recognition Rules"');
         expect(editDialog).toContain("`${accountName} - ${tt('Account Rule')}`");
+        expect(editDialog.indexOf('title="Account Matching"')).toBeLessThan(
+            editDialog.indexOf(':label="tt(\'Description\')"')
+        );
         expect(editDialog).not.toContain('бд');
         expect(editDialog).toContain('accountRuleLoading');
         expect(editDialog).toContain('accountRuleLoadFailed');

@@ -148,6 +148,35 @@ describe('rule center UX source guards', () => {
         expect(listSource).toContain('<AccountRulePanel');
     });
 
+    test('category and account recognition merge target rows without noisy account metadata', () => {
+        const source = readSource('src/views/desktop/pairingcenter/components/RuleCenterPanel.vue');
+        const accountSource = readSource('src/views/desktop/pairingcenter/components/AccountRulePanel.vue');
+        const modelSource = readSource('src/models/account_rule.ts');
+
+        expect(source).toContain('groupedCategoryRuleTargets');
+        expect(source).toContain('rule-center-target-expression-line');
+        expect(source).toContain('setCategoryRuleTargetSelected');
+        expect(source).toContain('targetGroup.rules');
+        expect(source).toContain('Math.ceil(orderedCategoryRuleTargets.value.length / ruleItemsPerPage.value)');
+        expect(source).toContain('paginatedCategoryRuleTargets.value.flatMap(targetGroup => targetGroup.rules.map(item => item.id))');
+        expect(source).toContain('for (const ruleId of visibleRuleIds.value)');
+        expect(source).not.toContain('v-for="item in group.items"');
+
+        expect(accountSource).toContain('categoryGroup.categoryIcon');
+        expect(accountSource).toContain('account-rule-category-group-row');
+        expect(accountSource).toContain('account-rule-target-expression-line');
+        expect(accountSource).not.toContain("{{ tt('Rules') }} {{ categoryGroup.ruleCount }}");
+        expect(accountSource).not.toContain("{{ tt('Matched') }} {{ categoryGroup.matchCount }}");
+        expect(accountSource).not.toContain('account-rule-expression-title-row');
+        expect(accountSource).not.toContain('rule.name || accountGroup.accountName');
+        expect(accountSource).not.toContain("{{ tt('Priority') }} {{ rule.priority }}");
+        expect(accountSource).not.toContain("rule.regexEnabled ? tt('Use Regex') : tt('Plain Text')");
+        expect(accountSource).not.toContain("{{ tt('Matched') }} {{ rule.matchCount || rule.appliedCount }}");
+
+        expect(modelSource).toContain('readonly categoryIcon: string;');
+        expect(modelSource).toContain('categoryIcon: String(category?.defaultAccountIconId ?? \'\')');
+    });
+
     test('investment recognition settings page is removed from rule configuration', () => {
         const source = readSource('src/views/desktop/pairingcenter/ListPage.vue');
 

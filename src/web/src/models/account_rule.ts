@@ -90,6 +90,8 @@ export interface AccountRuleCategoryGroup {
     readonly key: string;
     readonly categoryType: number;
     readonly categoryName: string;
+    readonly categoryIcon: string;
+    readonly categoryColor: string;
     readonly displayOrder: number;
     readonly accounts: AccountRuleAccountGroup[];
     readonly ruleCount: number;
@@ -203,12 +205,19 @@ export function buildAccountRuleGroups(
         const categoryType = normalizedCategoryType(account?.category ?? rule.accountType);
         const category = AccountCategory.valueOf(categoryType);
         const categoryKey = `category:${categoryType || 'unknown'}`;
+        const categoryMetadata = {
+            categoryIcon: String(category?.defaultAccountIconId ?? ''),
+            categoryColor: '',
+            displayOrder: category?.displayOrder ?? Number.MAX_SAFE_INTEGER,
+        };
         const categoryGroup = getOrCreateCategoryGroup(
             categoryGroups,
             categoryKey,
             categoryType,
             category ? translate(category.name) : translate('Account'),
-            category?.displayOrder ?? Number.MAX_SAFE_INTEGER
+            categoryMetadata.categoryIcon,
+            categoryMetadata.categoryColor,
+            categoryMetadata.displayOrder
         );
         const accountKey = `account:${rule.accountId}`;
         const accountGroup = getOrCreateAccountGroup(categoryGroup, accountKey, rule, account, parent);
@@ -225,6 +234,8 @@ export function buildAccountRuleGroups(
                 key: categoryGroup.key,
                 categoryType: categoryGroup.categoryType,
                 categoryName: categoryGroup.categoryName,
+                categoryIcon: categoryGroup.categoryIcon,
+                categoryColor: categoryGroup.categoryColor,
                 displayOrder: categoryGroup.displayOrder,
                 accounts,
                 ruleCount: accounts.reduce((sum, item) => sum + item.ruleCount, 0),
@@ -250,6 +261,8 @@ function getOrCreateCategoryGroup(
     key: string,
     categoryType: number,
     categoryName: string,
+    categoryIcon: string,
+    categoryColor: string,
     displayOrder: number
 ): MutableAccountRuleCategoryGroup {
     const existing = groups.get(key);
@@ -261,6 +274,8 @@ function getOrCreateCategoryGroup(
         key,
         categoryType,
         categoryName,
+        categoryIcon,
+        categoryColor,
         displayOrder,
         accountMap: new Map(),
         ruleCount: 0,

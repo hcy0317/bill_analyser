@@ -1085,6 +1085,34 @@ fn domain_policies_record_current_rust_runtime_state() {
 }
 
 #[test]
+fn rust_http_server_runs_postgres_migrations_before_listening() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let server_source =
+        fs::read_to_string(repo_root.join("src/backend/http/bin/bill_http_server.rs"))
+            .expect("bill_http_server source");
+
+    let state_init = server_source
+        .find("let state = HttpAppState::new(config)?;")
+        .expect("state init");
+    let migration_gate = server_source
+        .find("run_startup_postgres_migrations_if_configured(&state, postgres_configured).await?;")
+        .expect("startup migration gate");
+    let prepare_before_bind = server_source
+        .find("let state = prepare_http_state(config).await?;")
+        .expect("prepare before bind");
+    let bind = server_source
+        .find("TcpListener::bind(bind_addr).await?")
+        .expect("bind listener");
+
+    assert!(
+        state_init < migration_gate && prepare_before_bind < bind,
+        "PostgreSQL migrations must complete after state init and before HTTP listen"
+    );
+    assert!(server_source.contains("open_postgres_repository_runtime(\"startup migrations\")"));
+    assert!(server_source.contains("run_postgres_migrations(runtime.pool()).await?;"));
+}
+
+#[test]
 fn domain_db_invariant_ids_match_public_writer_policy_helpers() {
     for (domain, policy) in [
         ("database-schema", database_schema_db_writer_policy()),

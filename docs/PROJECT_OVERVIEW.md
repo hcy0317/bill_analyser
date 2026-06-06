@@ -30,6 +30,8 @@ Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预
 
 `/api/health` 的 details 暴露 PostgreSQL 配置状态、脱敏 URL、route repository backend、Weaviate ready 状态、脱敏 endpoint、API key 是否配置与 collection prefix。PostgreSQL 不可连接或 Weaviate ready probe 未通过时，整体 health 返回 `unhealthy`。
 
+Rust HTTP 主入口在开始监听前会对配置的 PostgreSQL 运行 `src/backend/db/postgres/migrations` 当前迁移目录，确保后续运行态路由看到最新 schema；该目录属于 Rust DB crate 的运行态输入，部署/打包时必须随服务保留；未配置 PostgreSQL URL 时，仓储路由保持配置缺失状态并由 health/route error 暴露。
+
 ## API 与业务域
 
 当前 HTTP route 覆盖登录、注册、邮箱验证、密码重置、refresh token、token session、logout、2FA、profile、user-data 统计与导出、交易清空、账户/分类/标签/模板主数据、分类规则、账户规则、设置包导入导出、账单列表与详情、手工交易、批量交易、账单导出、分类 quick-add/refresh、周期模板候选与绑定、matching pairs、净值快照、日历事件、预算 CRUD/导出/导入/执行/预测/快照、统计金额概览、分类统计、分类趋势、资产趋势、分类饼图、商户排行、Analyzer/insights、汇率读取与用户自定义汇率、备份文件 list/create/download/delete/verify/cleanup、备份任务与 cloud sync 元数据。
@@ -48,7 +50,7 @@ multipart 上传并行执行 dedicated parser 检测，每个文件必须且只�
 
 分类识别使用 `category_rules` 规则表达式；分类规则列表只暴露能投影出非空表达式的规则，避免旧恢复行或坏数据在规则中心显示为空匹配式。账户识别使用 `account_rules` 表和同一表达式匹配器模型，账户规则 API 和设置包导出不再传播旧 role/type/field scope 字段；旧 payload 或旧 bundle 中的 scope 字段会被忽略并返回兼容 warning。REST API 覆盖账户规则 list/create/update/delete/reorder/test，以及分类规则 list/create/update/delete/reorder/defaults/test。设置包按当前 PostgreSQL 主链导出并导入/upsert `accounts`、`transactionCategories`、`transactionTags`、`transactionTemplates`、`scheduledTransactions`、`categoryRecognitionRules` 与 `accountRecognitionRules`；`transactionTemplates` 和 `scheduledTransactions` 在账户、分类、标签引用重映射完成后写入 `transaction_templates`，有效导出不再以 unsupported section warning 跳过。
 
-桌面规则中心的“规则配置”包含分类识别、账户识别和周期识别三个二级页；账户识别规则按账户主分类、父账户/子账户分组展示，同一账户下可呈现多条规则表达式；移动端通过 `/account/rules` 提供同样分组后的账户规则列表与紧凑编辑/测试入口。
+桌面规则中心的“规则配置”包含分类识别、账户识别和周期识别三个二级页；分类识别按一级分类聚类展示，同一分类目标的多条规则表达式在同一行内分行呈现；账户识别按账户主分类、父账户/子账户分组展示，主分类行只呈现图标和规则数量，同一账户下的多条规则表达式在同一行内分行呈现，不重复显示规则名、优先级、匹配次数等运行态元数据；移动端通过 `/account/rules` 提供同样分组后的账户规则列表与紧凑编辑/测试入口。
 
 ## Matching
 
@@ -68,7 +70,7 @@ multipart 上传并行执行 dedicated parser 检测，每个文件必须且只�
 
 ## LLM/OCR
 
-LLM 临时配置保存在 Rust 进程内 user-scoped map，saved config 落库并按 API key 规则脱敏。provider 生成保留 allowlist/SSRF 防护、响应体上限、候选截断和 rate limit。OCR recognition 默认 disabled，配置后可通过 Tesseract、本地 JSON OCR 或 LLM vision provider 返回结构化交易草稿。
+LLM 临时配置保存在 Rust 进程内 user-scoped map，saved config、候选项、memory event 与 annotation sample 由 PostgreSQL 迁移表承载并按 API key 规则脱敏。provider 生成保留 allowlist/SSRF 防护、响应体上限、候选截断和 rate limit。OCR recognition 默认 disabled，配置后可通过 Tesseract、本地 JSON OCR 或 LLM vision provider 返回结构化交易草稿。
 
 ## 文档入口
 

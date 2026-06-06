@@ -1,0 +1,136 @@
+use std::{env, error::Error, str::FromStr};
+
+use bill_analyser_db::{
+    count_postgres_llm_candidates, create_postgres_llm_candidate, create_postgres_llm_config,
+    effective_postgres_llm_config_from_saved, list_postgres_llm_candidates,
+    list_postgres_llm_configs, run_postgres_migrations, LlmCandidateDraft, LlmConfigDraft,
+    PostgresPool,
+};
+use serde_json::json;
+use sqlx::{postgres::PgConnectOptions, postgres::PgPoolOptions, Executor, Row};
+
+#[tokio::test]
+async fn llm_runtime_tables_round_trip_after_postgres_migrations() -> Result<(), Box<dyn Error>> {
+    let Ok(postgres_url) = env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+        eprintln!(
+            "skipping PostgreSQL LLM runtime smoke: BILL_ANALYSER_TEST_POSTGRES_URL is not set"
+        );
+        return Ok(());
+    };
+    let unique = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
+    let test_db = format!("llm_runtime_test_{unique}");
+    let base_options = PgConnectOptions::from_str(&postgres_url)?;
+    let admin_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(base_options.clone().database("postgres"))
+        .await?;
+    admin_pool
+        .execute(format!(r#"CREATE DATABASE "{}""#, test_db).as_str())
+        .await?;
+
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(base_options.database(&test_db))
+        .await?;
+    run_postgres_migrations(&pool).await?;
+    assert_llm_runtime_table_exists(&pool, "llm_configs").await?;
+    assert_llm_runtime_table_exists(&pool, "llm_candidates").await?;
+    assert_llm_runtime_table_exists(&pool, "llm_memory_events").await?;
+    assert_llm_runtime_table_exists(&pool, "import_annotation_samples").await?;
+
+    let user_id: i64 =
+        sqlx::query("INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id")
+            .bind(format!("llm-runtime-{unique}"))
+            .bind(format!("llm-runtime-{unique}@example.test"))
+            .fetch_one(&pool)
+            .await?
+            .try_get("id")?;
+
+    let inactive_default = effective_postgres_llm_config_from_saved(&pool, user_id).await?;
+    assert_eq!(inactive_default["enabled"], false);
+
+    let config = create_postgres_llm_config(
+        &pool,
+        user_id,
+        &LlmConfigDraft {
+            name: format!("primary-{unique}"),
+            provider: "openai".to_string(),
+            model: "gpt-test".to_string(),
+            api_key: "secret-token".to_string(),
+            base_url: "https://example.test/v1".to_string(),
+            credential_config: json!({}),
+            advanced_settings: json!({"temperature": 0.1}),
+            is_active: true,
+        },
+    )
+    .await?;
+    assert_eq!(config["is_active"], true);
+    assert_eq!(list_postgres_llm_configs(&pool, user_id).await?.len(), 1);
+
+    let effective = effective_postgres_llm_config_from_saved(&pool, user_id).await?;
+    assert_eq!(effective["enabled"], true);
+    assert_eq!(effective["provider_config"]["model"], "gpt-test");
+    assert_eq!(effective["provider_config"]["api_key"], "secret-token");
+
+    let candidate = create_postgres_llm_candidate(
+        &pool,
+        &LlmCandidateDraft {
+            user_id,
+            candidate_type: "classification".to_string(),
+            source_bill_ids: vec![1, 2],
+            suggested_main_category: "餐饮".to_string(),
+            suggested_sub_category: "咖啡".to_string(),
+            suggested_rule_expression: String::new(),
+            confidence: 0.82,
+            llm_provider: "openai".to_string(),
+            llm_model: "gpt-test".to_string(),
+            llm_response_raw: "{\"ok\":true}".to_string(),
+        },
+    )
+    .await?;
+    assert_eq!(candidate["status"], "pending");
+
+    let candidates = list_postgres_llm_candidates(
+        &pool,
+        user_id,
+        Some("pending"),
+        Some("classification"),
+        20,
+        0,
+    )
+    .await?;
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(
+        count_postgres_llm_candidates(&pool, user_id, Some("pending"), Some("classification"))
+            .await?,
+        1
+    );
+
+    pool.close().await;
+    admin_pool
+        .execute(format!(r#"DROP DATABASE IF EXISTS "{}" WITH (FORCE)"#, test_db).as_str())
+        .await?;
+
+    Ok(())
+}
+
+async fn assert_llm_runtime_table_exists(
+    pool: &PostgresPool,
+    table_name: &str,
+) -> Result<(), Box<dyn Error>> {
+    let exists: bool = sqlx::query_scalar(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_schema = 'public'
+              AND table_name = $1
+        )
+        "#,
+    )
+    .bind(table_name)
+    .fetch_one(pool)
+    .await?;
+    assert!(exists, "missing LLM runtime table {table_name}");
+    Ok(())
+}

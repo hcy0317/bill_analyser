@@ -35,6 +35,10 @@ name = "settings_bundle_postgres"
 path = "../../../tests/backend/db/settings_bundle_postgres.rs"
 
 [[test]]
+name = "llm_postgres"
+path = "../../../tests/backend/db/llm_postgres.rs"
+
+[[test]]
 name = "category_rules_postgres"
 path = "../../../tests/backend/db/category_rules_postgres.rs"
 

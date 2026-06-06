@@ -140,6 +140,10 @@ describe('account rule model', () => {
         const groups = buildAccountRuleGroups(rules, accounts, key => key);
 
         expect(groups.map(group => group.categoryName)).toEqual(['Cash', 'Checking Account']);
+        expect(groups.map(group => group.categoryIcon)).toEqual([
+            AccountCategory.Cash.defaultAccountIconId,
+            AccountCategory.CheckingAccount.defaultAccountIconId,
+        ]);
         expect(groups[0]?.accounts[0]?.displayName).toBe('现金');
         expect(groups[1]?.accounts[0]?.displayName).toBe('银行 / 储蓄卡');
         expect(groups[1]?.accounts[0]?.rules.map(rule => rule.name)).toEqual(['招商', '工资']);
