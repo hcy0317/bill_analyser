@@ -270,7 +270,7 @@ pub fn resolve_template_payload(payload: &Value) -> Value {
         "scheduled_frequency_type": safe_int(get_any(item, &["scheduledFrequencyType", "scheduled_frequency_type"]), 0),
         "start_date": scheduled_start,
         "end_date": safe_text(get_any(item, &["scheduledEndDate", "endDate"]), ""),
-        "next_date": safe_text(get_any_with_default(item, &["nextDate"], scheduled_start_value(item)), ""),
+        "next_date": safe_text(get_any_with_default(item, &["nextDate", "scheduledNextDate", "scheduled_next_date"], scheduled_start_value(item)), ""),
         "enabled": i64::from(safe_bool_with_default(get_any(item, &["enabled"]), true)),
         "auto_create": i64::from(safe_bool(get_any(item, &["autoCreate", "auto_create"]))),
     });

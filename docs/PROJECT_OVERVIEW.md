@@ -34,7 +34,7 @@ Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预
 
 当前 HTTP route 覆盖登录、注册、邮箱验证、密码重置、refresh token、token session、logout、2FA、profile、user-data 统计与导出、交易清空、账户/分类/标签/模板主数据、分类规则、账户规则、设置包导入导出、账单列表与详情、手工交易、批量交易、账单导出、分类 quick-add/refresh、周期模板候选与绑定、matching pairs、净值快照、日历事件、预算 CRUD/导出/导入/执行/预测/快照、统计金额概览、分类统计、分类趋势、资产趋势、分类饼图、商户排行、Analyzer/insights、汇率读取与用户自定义汇率、备份文件 list/create/download/delete/verify/cleanup、备份任务与 cloud sync 元数据。
 
-金额在数据库中使用明确的 minor units 字段；前端/API 的元/分转换只在 DTO 转换边界完成。
+金额在数据库中使用明确的 minor units 字段；前端/API 的元/分转换只在 DTO 转换边界完成。预算 API 的 `amount` 继续使用元单位导出/导入并由仓储写入预算金额字段；交易模板 DTO 与设置包中的 `sourceAmount`、`destinationAmount` 保持分单位并写入 `transaction_templates.*_minor_units`，避免设置包导入时二次乘以 100。
 
 ## 导入链路
 
@@ -46,7 +46,7 @@ multipart 上传并行执行 dedicated parser 检测，每个文件必须且只�
 
 ## 分类与规则中心
 
-分类识别使用 `category_rules` 规则表达式；账户识别使用 `account_rules` 表和同一表达式匹配器模型，账户规则 API 和设置包导出不再传播旧 role/type/field scope 字段；旧 payload 或旧 bundle 中的 scope 字段会被忽略并返回兼容 warning。REST API 覆盖账户规则 list/create/update/delete/reorder/test，以及分类规则 list/create/update/delete/reorder/defaults/test。设置包导出投影 `accounts`、`transactionCategories`、`transactionTags`、`transactionTemplates`、`scheduledTransactions`、`categoryRecognitionRules` 与 `accountRecognitionRules`。
+分类识别使用 `category_rules` 规则表达式；账户识别使用 `account_rules` 表和同一表达式匹配器模型，账户规则 API 和设置包导出不再传播旧 role/type/field scope 字段；旧 payload 或旧 bundle 中的 scope 字段会被忽略并返回兼容 warning。REST API 覆盖账户规则 list/create/update/delete/reorder/test，以及分类规则 list/create/update/delete/reorder/defaults/test。设置包按当前 PostgreSQL 主链导出并导入/upsert `accounts`、`transactionCategories`、`transactionTags`、`transactionTemplates`、`scheduledTransactions`、`categoryRecognitionRules` 与 `accountRecognitionRules`；`transactionTemplates` 和 `scheduledTransactions` 在账户、分类、标签引用重映射完成后写入 `transaction_templates`，有效导出不再以 unsupported section warning 跳过。
 
 桌面规则中心的“规则配置”包含分类识别、账户识别和周期识别三个二级页；移动端通过 `/account/rules` 提供账户规则列表与紧凑编辑/测试入口。
 
