@@ -506,26 +506,16 @@ async fn apply_import_intelligence_chain(
             draft.preview_main_category.clone(),
             draft.preview_sub_category.clone(),
         );
-        let before_account = (
-            draft.preview_source_account_id,
-            draft.preview_destination_account_id,
-        );
-
         if preview_type_code(&draft.preview_type) == Some(4) {
             if !apply_transfer_category_rule_match(draft, &category_rules) {
                 apply_transfer_default_category(draft, &categories, transfer_category.as_ref());
             }
-            apply_transfer_account_rule_match(draft, &account_rules, &accounts);
         } else if preview_type_code(&draft.preview_type) == Some(5) {
             if !apply_investment_category_rule_match(draft, &category_rules) {
                 apply_builtin_category_rule_fallback(draft, &categories);
             }
-            apply_investment_account_rule_match(draft, &account_rules, &accounts);
-        } else {
-            if !apply_income_expense_category_rule_match(draft, &category_rules) {
-                apply_builtin_category_rule_fallback(draft, &categories);
-            }
-            apply_standard_account_rule_match(draft, &account_rules, &accounts);
+        } else if !apply_income_expense_category_rule_match(draft, &category_rules) {
+            apply_builtin_category_rule_fallback(draft, &categories);
         }
 
         if let Some(candidate) = best_recurring_candidate_for_draft(draft, &recurring_templates) {
@@ -548,6 +538,15 @@ async fn apply_import_intelligence_chain(
                 increment_applied_learning_rules(connection, user_id_i64, &[rule_id])?;
             }
         }
+
+        let before_account_rule = (
+            draft.preview_source_account_id,
+            draft.preview_destination_account_id,
+        );
+        // Account recognition is intentionally last in stage2: type/transfer,
+        // recurring, and learning projections may still change the account
+        // role, transaction type, or explicit accounts that rules must consume.
+        apply_account_rule_match_after_semantic_projection(draft, &account_rules, &accounts);
         persist_stage2_actionable_baseline(draft);
 
         if before_category
@@ -559,7 +558,7 @@ async fn apply_import_intelligence_chain(
         {
             stats.category_matched += 1;
         }
-        if before_account
+        if before_account_rule
             != (
                 draft.preview_source_account_id,
                 draft.preview_destination_account_id,
@@ -570,6 +569,19 @@ async fn apply_import_intelligence_chain(
     }
 
     Ok(stats)
+}
+
+fn apply_account_rule_match_after_semantic_projection(
+    draft: &mut ImportPreviewDraft,
+    account_rules: &[AccountRuleCandidate],
+    accounts: &[ImportIntelligenceAccount],
+) -> bool {
+    match preview_type_code(&draft.preview_type) {
+        Some(4) => apply_transfer_account_rule_match(draft, account_rules, accounts),
+        Some(5) => apply_investment_account_rule_match(draft, account_rules, accounts),
+        Some(2 | 3) => apply_standard_account_rule_match(draft, account_rules, accounts),
+        _ => false,
+    }
 }
 
 fn user_id_i64_for_sql(user_id: UserId) -> Result<i64, bill_analyser_db::DbError> {

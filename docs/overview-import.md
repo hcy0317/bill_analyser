@@ -3,7 +3,7 @@
 导入主链在 Rust runtime 中完成，保持三阶段用户体验：
 
 1. **解析**：parser-first multipart 上传会并发检测多个上传文件并保持文件响应顺序；每个文件必须且只能由一个 dedicated parser 命中，命中结果会带 `parser_decision` 证据进入标准账单解析，未命中或多 parser 冲突会作为 unmatched 文件返回；JSON parse 使用已提供 parser id 生成标准账单 draft。
-2. **去重预览**：写入 session/source/template/standard-row staging，执行同批重复折叠、同批转账配对、正式账单重复/转账 materialization、分类规则匹配、账户规则匹配、transfer/recurring/learning/LLM decision，再批量写入 preview staging；stage2 默认不在响应内联全量 preview，前端首屏请求 preview page。
+2. **去重预览**：写入 session/source/template/standard-row staging，执行同批重复折叠、同批转账配对、正式账单重复/转账 materialization、分类规则匹配、transfer/recurring/learning/LLM decision、账户规则匹配，再批量写入 preview staging；stage2 默认不在响应内联全量 preview，前端首屏请求 preview page。
 3. **确认导入**：用户确认后在事务内写入正式账单表，并更新账户余额、学习事件和审计；涉及改写/合并正式账单的预览行必须带可见操作标记并提交服务端可验证 acknowledgement。
 
 ## 核心模块
@@ -21,7 +21,9 @@
 - `import_sources` 保存文件级 parser signal / confidence / decision metadata；`import_standard_rows` 保存标准化行、金额分单位、方向、parser payload 和原始标准 payload，source/row 写入必须与 parser template staging 处于同一事务。
 - 同批重复按时间窗口、同向金额、方向和文本证据合并，保留基底预览行并把来源链、合并原因和成员写入 `import_decision_groups` / `import_decision_group_members`。
 - 同批转账按时间窗口、同额反向金额和不同来源配对，以支出侧为基底合并交易对方、支付方式和描述；支出/收入两侧原始交易对方、支付方式、描述、账户和 parser 信息保留在 `matching.transfer.source_chain`，并写入 `same_batch_transfer` decision group。
-- stage2 账户识别以 `account_rules` 为权威：转账先用隐藏支出/收入侧字段分别匹配来源/目标账户；投资先按 parser/支付方式匹配来源账户，再按交易对方优先、描述兜底匹配投资账户；收入/支出只匹配当前类型的账户规则。
+- stage2 phase precedence 固定为：parser 标准行 → 同批重复/转账与正式账单 materialization → 分类规则/内置分类兜底 → recurring projection → 可自动应用的 learning projection → 账户规则匹配 → stage2 baseline 持久化。账户规则必须最后运行，因为 learning projection 可以改写 `preview_type`、分类和显式账户，recurring/transfer/investment 信号也会改变账户角色上下文。
+- stage2 账户识别以 `account_rules` 为权威，但当前合同只保留“账户 + 表达式 + 优先级/启停”。旧 `account_role_scope`、`transaction_type_scope` 与 `field_scope` 只作为 PR7 前的兼容列/旧 payload 输入存在，匹配时被运行时上下文取代：转账按稳定后的来源/目标侧字段匹配来源/目标账户；投资先按 parser/支付方式匹配来源账户，再按交易对方优先、描述兜底匹配投资账户；收入/支出按最终 `preview_type` 匹配仍为空的来源账户。
+- 账户规则不得覆盖 parser、learning 或用户编辑已经显式给出的账户；旧 scope payload 或旧设置包字段会被忽略/default 并返回 warning，新设置包导出不再包含这些 scope 字段。
 - 多文件 parser work 可以并发执行，但 session/template staging 仍保持一次性写入。
 - preview page 承担 Check Data 的分页、排序、筛选与轻量聚合 metadata；缺少分类、缺少账户和转账账户复核状态按当前预览字段计算。
 - preview 的 transfer 和 LLM 建议只有 pending 状态展示接受/拒绝动作。learning 建议按 `recommendation_key` 进入生命周期表：默认 `yellow` 只在信号列展示推荐类型、分类和账户，不自动改写预览字段；用户接受/拒绝会写入 `import_learning_feedback_events` 并更新 `import_learning_lifecycle`，同一建议接受达到 3 次后变为 `green` 并允许后续导入自动应用。

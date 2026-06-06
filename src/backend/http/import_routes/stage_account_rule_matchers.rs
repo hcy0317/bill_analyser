@@ -273,7 +273,8 @@ fn transfer_entry_tags(entry: &Value) -> Vec<String> {
 }
 
 fn parser_tags_from_value(value: Option<&Value>) -> Vec<String> {
-    value.and_then(Value::as_array)
+    value
+        .and_then(Value::as_array)
         .map(|values| {
             values
                 .iter()
@@ -324,8 +325,8 @@ fn annotate_account_rule_match(
         "matched_fields": rule_match.matched_fields.clone(),
         "priority": rule_match.priority,
         "fallback_used": rule_match.fallback_used,
-        "account_role_scope": rule_match.account_role_scope.clone(),
-        "transaction_type_scope": rule_match.transaction_type_scope.clone(),
+        "match_role": rule_match.account_role_scope.clone(),
+        "transaction_type": rule_match.transaction_type_scope.clone(),
         "reason": "account rule expression matched",
         "review_status": "auto_applied",
     });
@@ -407,4 +408,111 @@ fn account_name_for_id(accounts: &[ImportIntelligenceAccount], account_id: i64) 
         .iter()
         .find(|account| account.id == account_id)
         .map(|account| account.name.clone())
+}
+
+#[cfg(test)]
+mod account_rule_matcher_tests {
+    use super::*;
+
+    fn candidate(account_id: i64, expression: &str) -> AccountRuleCandidate {
+        AccountRuleCandidate {
+            rule_id: account_id + 100,
+            account_id,
+            account_role_scope: ACCOUNT_ROLE_DESTINATION.to_string(),
+            transaction_type_scope: TRANSACTION_SCOPE_INCOME.to_string(),
+            field_scope: vec!["parser".to_string()],
+            rule_expression: expression.to_string(),
+            regex_enabled: false,
+            enabled: true,
+            priority: 1,
+        }
+    }
+
+    fn account(id: i64, name: &str) -> ImportIntelligenceAccount {
+        ImportIntelligenceAccount {
+            id,
+            name: name.to_string(),
+        }
+    }
+
+    #[test]
+    fn account_rules_consume_final_preview_type_after_semantic_projection() {
+        let mut draft = ImportPreviewDraft {
+            preview_type: "支出".to_string(),
+            preview_counterparty: "星巴克".to_string(),
+            preview_payment_method: "招商工资卡".to_string(),
+            preview_description: "学习已把原收入行投影为支出".to_string(),
+            ..ImportPreviewDraft::default()
+        };
+        let rules = vec![candidate(42, "OR={招商工资卡}")];
+        let accounts = vec![account(42, "招商银行")];
+
+        assert!(apply_account_rule_match_after_semantic_projection(
+            &mut draft, &rules, &accounts
+        ));
+
+        assert_eq!(draft.preview_source_account_id, Some(42));
+        let account_rule = draft
+            .preview_matching_feedback
+            .pointer("/account_rule/source")
+            .expect("account rule feedback");
+        assert_eq!(account_rule["match_role"], "source");
+        assert_eq!(account_rule["transaction_type"], "expense");
+        assert!(account_rule.get("account_role_scope").is_none());
+        assert!(account_rule.get("transaction_type_scope").is_none());
+    }
+
+    #[test]
+    fn explicit_projected_account_wins_over_account_rule() {
+        let mut draft = ImportPreviewDraft {
+            preview_type: "支出".to_string(),
+            preview_source_account_id: Some(7),
+            preview_payment_method: "招商工资卡".to_string(),
+            ..ImportPreviewDraft::default()
+        };
+        let rules = vec![candidate(42, "OR={招商工资卡}")];
+        let accounts = vec![account(42, "招商银行")];
+
+        assert!(!apply_account_rule_match_after_semantic_projection(
+            &mut draft, &rules, &accounts
+        ));
+
+        assert_eq!(draft.preview_source_account_id, Some(7));
+        assert!(draft
+            .preview_matching_feedback
+            .pointer("/account_rule/source")
+            .is_none());
+    }
+
+    #[test]
+    fn semantic_projection_dispatch_handles_transfer_investment_and_unknown_types() {
+        let mut transfer = ImportPreviewDraft {
+            preview_type: "转账".to_string(),
+            ..ImportPreviewDraft::default()
+        };
+        let mut investment = ImportPreviewDraft {
+            preview_type: "投资".to_string(),
+            ..ImportPreviewDraft::default()
+        };
+        let mut unknown = ImportPreviewDraft {
+            preview_type: "待确认".to_string(),
+            ..ImportPreviewDraft::default()
+        };
+
+        assert!(!apply_account_rule_match_after_semantic_projection(
+            &mut transfer,
+            &[],
+            &[]
+        ));
+        assert!(!apply_account_rule_match_after_semantic_projection(
+            &mut investment,
+            &[],
+            &[]
+        ));
+        assert!(!apply_account_rule_match_after_semantic_projection(
+            &mut unknown,
+            &[],
+            &[]
+        ));
+    }
 }

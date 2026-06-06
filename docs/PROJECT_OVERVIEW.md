@@ -38,15 +38,15 @@ Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预
 
 ## 导入链路
 
-导入链路由 Rust 完成 parser-first 上传、JSON parse、session/source/template/standard-row staging、dedup、转账 materialization、分类规则与账户规则匹配、recurring/learning/LLM decision、preview page、preview update/reclassify、confirm 与 cleanup。
+导入链路由 Rust 完成 parser-first 上传、JSON parse、session/source/template/standard-row staging、dedup、转账 materialization、分类规则、recurring/learning/LLM decision、账户规则匹配、preview page、preview update/reclassify、confirm 与 cleanup。
 
-multipart 上传并行执行 dedicated parser 检测，每个文件必须且只能命中一个 dedicated parser 才会进入标准账单解析。stage2 先处理转账分类与账户规则，再处理投资、收入和支出语义；确定性规则链未命中时，通过 Weaviate 召回派生 learning 建议。Weaviate metadata 本身不会触发自动改写。
+multipart 上传并行执行 dedicated parser 检测，每个文件必须且只能命中一个 dedicated parser 才会进入标准账单解析。stage2 phase precedence 为：同批/跨批 dedup 与转账 materialization 先形成预览基底，分类规则与内置分类兜底先确定类型/分类，recurring 与可自动应用的 learning projection 可继续改写类型、分类或显式账户，账户规则最后消费稳定后的预览类型、转账/投资上下文和仍为空的账户字段。确定性规则链未命中时，通过 Weaviate 召回派生 learning 建议。Weaviate metadata 本身不会触发自动改写。
 
-账户识别以 `account_rules` 为权威；前端账户 DTO 不包含别名字段，账户规则通过规则表达式、字段范围、交易类型范围、账户角色范围、优先级和启停状态管理。账户 API 在 DTO 边界把恢复数据或旧式数据中缺失的账户类型、账户分类归一成当前前端分类合同；缺失分类会优先保留显式值，再按账户名称、图标和旧式类型推断，不用统一现金兜底覆盖已恢复账户。
+账户识别以 `account_rules` 为权威；前端账户 DTO 不包含别名字段，账户规则以账户、表达式、优先级、启停状态为当前合同。旧 `account_role_scope`、`transaction_type_scope` 与 `field_scope` 字段在 PR7 schema cleanup 前仍可兼容读取或被旧 payload 携带，但匹配不再由这些持久化 scope 决定；导入运行时按稳定后的账单类型、账户角色和上下文字段包决定匹配目标。账户 API 在 DTO 边界把恢复数据或旧式数据中缺失的账户类型、账户分类归一成当前前端分类合同；缺失分类会优先保留显式值，再按账户名称、图标和旧式类型推断，不用统一现金兜底覆盖已恢复账户。
 
 ## 分类与规则中心
 
-分类识别使用 `category_rules` 规则表达式；账户识别使用 `account_rules` 表和同一匹配器模型。REST API 覆盖账户规则 list/create/update/delete/reorder/test，以及分类规则 list/create/update/delete/reorder/defaults/test。设置包导出投影 `accounts`、`transactionCategories`、`transactionTags`、`transactionTemplates`、`scheduledTransactions`、`categoryRecognitionRules` 与 `accountRecognitionRules`。
+分类识别使用 `category_rules` 规则表达式；账户识别使用 `account_rules` 表和同一表达式匹配器模型，账户规则 API 和设置包导出不再传播旧 role/type/field scope 字段；旧 payload 或旧 bundle 中的 scope 字段会被忽略并返回兼容 warning。REST API 覆盖账户规则 list/create/update/delete/reorder/test，以及分类规则 list/create/update/delete/reorder/defaults/test。设置包导出投影 `accounts`、`transactionCategories`、`transactionTags`、`transactionTemplates`、`scheduledTransactions`、`categoryRecognitionRules` 与 `accountRecognitionRules`。
 
 桌面规则中心的“规则配置”包含分类识别、账户识别和周期识别三个二级页；移动端通过 `/account/rules` 提供账户规则列表与紧凑编辑/测试入口。
 

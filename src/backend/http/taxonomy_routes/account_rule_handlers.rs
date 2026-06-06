@@ -20,17 +20,18 @@ async fn list_account_rules_handler(
             Ok(value) => value,
             Err(response) => return *response,
         };
+        let warnings = account_rule_query_compat_warnings(&query);
         return match list_postgres_account_rules(
             runtime.pool(),
             db_user_id(user_id),
             query.account_id,
             account_rules_enabled_only(&query),
-            query.account_role_scope.as_deref(),
-            query.transaction_type_scope.as_deref(),
+            None,
+            None,
         )
         .await
         {
-            Ok(rules) => json_response(StatusCode::OK, format_account_rules_response(rules)),
+            Ok(rules) => json_response(StatusCode::OK, format_account_rules_response(rules, warnings)),
             Err(DbError::InvalidOperation(message)) => bad_request(message),
             Err(_) => account_rule_db_error_response(),
         };
@@ -50,6 +51,8 @@ async fn create_account_rule_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    let warnings = deprecated_account_rule_scope_warnings(&body);
+    let sanitized_body = account_rule_payload_without_deprecated_scope(&body);
     let Some(object) = body.as_object() else {
         return bad_request("No data provided");
     };
@@ -68,14 +71,18 @@ async fn create_account_rule_handler(
             Err(response) => return *response,
         };
         let user_id = db_user_id(user_id);
-        let rule_id = match create_postgres_account_rule(runtime.pool(), &body, user_id).await {
+        let rule_id = match create_postgres_account_rule(runtime.pool(), &sanitized_body, user_id).await {
             Ok(Some(value)) => value,
             Ok(None) => return bad_request("Failed to create account rule"),
             Err(DbError::InvalidOperation(message)) => return bad_request(message),
             Err(_) => return account_rule_db_error_response(),
         };
         return match get_postgres_account_rule(runtime.pool(), rule_id, user_id).await {
-            Ok(Some(rule)) => account_rule_data_response(StatusCode::CREATED, rule),
+            Ok(Some(rule)) => account_rule_data_response_with_warnings(
+                StatusCode::CREATED,
+                rule,
+                warnings,
+            ),
             Ok(None) => account_rule_db_error_response(),
             Err(_) => account_rule_db_error_response(),
         };
@@ -96,6 +103,8 @@ async fn update_account_rule_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    let warnings = deprecated_account_rule_scope_warnings(&body);
+    let sanitized_body = account_rule_payload_without_deprecated_scope(&body);
     if body
         .as_object()
         .and_then(|object| object.get("rule_expression").or_else(|| object.get("ruleExpression")))
@@ -110,9 +119,26 @@ async fn update_account_rule_handler(
             Err(response) => return *response,
         };
         let user_id = db_user_id(user_id);
-        return match update_postgres_account_rule(runtime.pool(), rule_id, &body, user_id).await {
+        if sanitized_body
+            .as_object()
+            .is_some_and(Map::is_empty)
+            && !warnings.is_empty()
+        {
+            return match get_postgres_account_rule(runtime.pool(), rule_id, user_id).await {
+                Ok(Some(rule)) => {
+                    account_rule_data_response_with_warnings(StatusCode::OK, rule, warnings)
+                }
+                Ok(None) => not_found("Account rule not found"),
+                Err(_) => account_rule_db_error_response(),
+            };
+        }
+        return match update_postgres_account_rule(runtime.pool(), rule_id, &sanitized_body, user_id).await {
             Ok(true) => match get_postgres_account_rule(runtime.pool(), rule_id, user_id).await {
-                Ok(Some(rule)) => account_rule_data_response(StatusCode::OK, rule),
+                Ok(Some(rule)) => account_rule_data_response_with_warnings(
+                    StatusCode::OK,
+                    rule,
+                    warnings,
+                ),
                 Ok(None) => account_rule_db_error_response(),
                 Err(_) => account_rule_db_error_response(),
             },
@@ -255,8 +281,8 @@ async fn test_account_rule_handler(
                         "matchedFields": matched.matched_fields,
                         "priority": matched.priority,
                         "fallbackUsed": matched.fallback_used,
-                        "accountRoleScope": matched.account_role_scope,
-                        "transactionTypeScope": matched.transaction_type_scope,
+                        "matchRole": matched.account_role_scope,
+                        "transactionType": matched.transaction_type_scope,
                     }
                 }),
             ),
@@ -280,26 +306,38 @@ async fn test_account_rule_handler(
         };
 }
 
-fn format_account_rules_response(rules: Vec<AccountRuleRecord>) -> Value {
+fn format_account_rules_response(rules: Vec<AccountRuleRecord>, warnings: Vec<String>) -> Value {
     let total = rules.len();
-    json!({
+    let mut response = json!({
         "success": true,
         "data": Value::Array(rules.into_iter().map(account_rule_api_record).collect()),
         "total": total,
-    })
+    });
+    if !warnings.is_empty() {
+        response["warnings"] = json!(warnings);
+    }
+    response
 }
 
-fn account_rule_data_response(status: StatusCode, rule: AccountRuleRecord) -> Response {
+fn account_rule_data_response_with_warnings(
+    status: StatusCode,
+    rule: AccountRuleRecord,
+    warnings: Vec<String>,
+) -> Response {
+    let mut payload = json!({"success": true, "data": account_rule_api_record(rule)});
+    if !warnings.is_empty() {
+        payload["warnings"] = json!(warnings);
+    }
     json_response(
         status,
-        json!({"success": true, "data": account_rule_api_record(rule)}),
+        payload,
     )
 }
 
 fn account_rule_api_record(mut rule: AccountRuleRecord) -> Value {
-    let field_scope = rule
-        .remove("field_scope")
-        .unwrap_or_else(|| json!(["counterparty", "payment_method", "description"]));
+    rule.remove("account_role_scope");
+    rule.remove("transaction_type_scope");
+    rule.remove("field_scope");
     json!({
         "id": rule["id"],
         "user_id": rule["user_id"],
@@ -323,12 +361,6 @@ fn account_rule_api_record(mut rule: AccountRuleRecord) -> Value {
         "matchCount": value_as_i64_or(rule.get("match_count"), 0),
         "last_matched_at": rule.get("last_matched_at").cloned().unwrap_or(Value::Null),
         "lastMatchedAt": rule.get("last_matched_at").cloned().unwrap_or(Value::Null),
-        "account_role_scope": string_or_default(rule.get("account_role_scope"), "any"),
-        "accountRoleScope": string_or_default(rule.get("account_role_scope"), "any"),
-        "transaction_type_scope": string_or_default(rule.get("transaction_type_scope"), "all"),
-        "transactionTypeScope": string_or_default(rule.get("transaction_type_scope"), "all"),
-        "field_scope": field_scope.clone(),
-        "fieldScope": field_scope,
         "source": string_or_default(rule.get("source"), "manual"),
         "source_key": rule.get("source_key").cloned().unwrap_or(Value::Null),
         "sourceKey": rule.get("source_key").cloned().unwrap_or(Value::Null),
@@ -337,6 +369,59 @@ fn account_rule_api_record(mut rule: AccountRuleRecord) -> Value {
         "updated_at": rule["updated_at"],
         "updatedAt": rule["updated_at"],
     })
+}
+
+fn account_rule_query_compat_warnings(query: &AccountRulesQuery) -> Vec<String> {
+    if query.account_role_scope.is_some() || query.transaction_type_scope.is_some() {
+        vec![
+            "Ignored deprecated account rule scope query filters; account recognition now uses stabilized import context"
+                .to_string(),
+        ]
+    } else {
+        Vec::new()
+    }
+}
+
+fn deprecated_account_rule_scope_warnings(body: &Value) -> Vec<String> {
+    let Some(object) = body.as_object() else {
+        return Vec::new();
+    };
+    if [
+        "account_role_scope",
+        "accountRoleScope",
+        "transaction_type_scope",
+        "transactionTypeScope",
+        "field_scope",
+        "fieldScope",
+    ]
+    .iter()
+    .any(|key| object.contains_key(*key))
+    {
+        vec![
+            "Ignored deprecated account rule scope fields; account recognition now uses stabilized import context"
+                .to_string(),
+        ]
+    } else {
+        Vec::new()
+    }
+}
+
+fn account_rule_payload_without_deprecated_scope(body: &Value) -> Value {
+    let Some(object) = body.as_object() else {
+        return body.clone();
+    };
+    let mut sanitized = object.clone();
+    for key in [
+        "account_role_scope",
+        "accountRoleScope",
+        "transaction_type_scope",
+        "transactionTypeScope",
+        "field_scope",
+        "fieldScope",
+    ] {
+        sanitized.remove(key);
+    }
+    Value::Object(sanitized)
 }
 
 fn account_rules_enabled_only(query: &AccountRulesQuery) -> bool {
@@ -407,4 +492,122 @@ fn value_string_array(value: Option<&Value>) -> Vec<String> {
         .map(|value| string_or_default(Some(value), ""))
         .filter(|value| !value.trim().is_empty())
         .collect()
+}
+
+#[cfg(test)]
+mod account_rule_handler_tests {
+    use super::*;
+
+    #[test]
+    fn account_rule_api_projection_omits_deprecated_scope_fields() {
+        let mut rule = Map::new();
+        rule.insert("id".to_string(), json!(1));
+        rule.insert("user_id".to_string(), json!(9));
+        rule.insert("account_id".to_string(), json!(42));
+        rule.insert("account_name".to_string(), json!("招商银行"));
+        rule.insert("account_type".to_string(), json!("bank"));
+        rule.insert("account_hidden".to_string(), json!(false));
+        rule.insert("name".to_string(), json!("工资卡"));
+        rule.insert("priority".to_string(), json!(10));
+        rule.insert("rule_expression".to_string(), json!("OR={工资卡}"));
+        rule.insert("regex_enabled".to_string(), json!(false));
+        rule.insert("enabled".to_string(), json!(true));
+        rule.insert("applied_count".to_string(), json!(0));
+        rule.insert("match_count".to_string(), json!(0));
+        rule.insert("account_role_scope".to_string(), json!("destination"));
+        rule.insert("transaction_type_scope".to_string(), json!("income"));
+        rule.insert("field_scope".to_string(), json!(["parser"]));
+        rule.insert("source".to_string(), json!("manual"));
+        rule.insert("created_at".to_string(), json!("2026-06-06T00:00:00Z"));
+        rule.insert("updated_at".to_string(), json!("2026-06-06T00:00:00Z"));
+
+        let projected = account_rule_api_record(rule);
+
+        assert!(projected.get("accountRoleScope").is_none());
+        assert!(projected.get("transactionTypeScope").is_none());
+        assert!(projected.get("fieldScope").is_none());
+        assert_eq!(projected["accountId"], json!(42));
+    }
+
+    #[test]
+    fn deprecated_account_rule_scope_payload_is_stripped_with_warning() {
+        let payload = json!({
+            "accountId": 42,
+            "ruleExpression": "OR={工资卡}",
+            "accountRoleScope": "destination",
+            "transaction_type_scope": "income",
+            "fieldScope": ["parser"]
+        });
+
+        let sanitized = account_rule_payload_without_deprecated_scope(&payload);
+
+        assert_eq!(deprecated_account_rule_scope_warnings(&payload).len(), 1);
+        assert_eq!(sanitized["accountId"], json!(42));
+        assert_eq!(sanitized["ruleExpression"], json!("OR={工资卡}"));
+        assert!(sanitized.get("accountRoleScope").is_none());
+        assert!(sanitized.get("transaction_type_scope").is_none());
+        assert!(sanitized.get("fieldScope").is_none());
+    }
+
+    #[test]
+    fn account_rule_response_helpers_surface_scope_warnings() {
+        let query = AccountRulesQuery {
+            account_id: None,
+            enabled_only: None,
+            account_role_scope: Some("source".to_string()),
+            transaction_type_scope: None,
+        };
+        let warnings = account_rule_query_compat_warnings(&query);
+        let response = format_account_rules_response(Vec::new(), warnings);
+
+        assert_eq!(response["total"], json!(0));
+        assert!(response["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("deprecated account rule scope query"));
+
+        let clean_payload = json!({"accountId": 42, "ruleExpression": "OR={工资卡}"});
+        assert!(deprecated_account_rule_scope_warnings(&clean_payload).is_empty());
+    }
+
+    #[test]
+    fn account_rule_response_helpers_cover_clean_and_scalar_inputs() {
+        let mut rule = Map::new();
+        rule.insert("id".to_string(), json!(1));
+        rule.insert("user_id".to_string(), json!(9));
+        rule.insert("account_id".to_string(), json!(42));
+        rule.insert("account_name".to_string(), json!("招商银行"));
+        rule.insert("account_type".to_string(), json!("bank"));
+        rule.insert("account_hidden".to_string(), json!(false));
+        rule.insert("name".to_string(), json!("工资卡"));
+        rule.insert("priority".to_string(), json!(10));
+        rule.insert("rule_expression".to_string(), json!("OR={工资卡}"));
+        rule.insert("regex_enabled".to_string(), json!(false));
+        rule.insert("enabled".to_string(), json!(true));
+        rule.insert("applied_count".to_string(), json!(0));
+        rule.insert("match_count".to_string(), json!(0));
+        rule.insert("source".to_string(), json!("manual"));
+        rule.insert("created_at".to_string(), json!("2026-06-06T00:00:00Z"));
+        rule.insert("updated_at".to_string(), json!("2026-06-06T00:00:00Z"));
+
+        let response = account_rule_data_response_with_warnings(
+            StatusCode::CREATED,
+            rule,
+            vec!["compat warning".to_string()],
+        );
+        assert_eq!(response.status(), StatusCode::CREATED);
+
+        let clean_query = AccountRulesQuery {
+            account_id: None,
+            enabled_only: None,
+            account_role_scope: None,
+            transaction_type_scope: None,
+        };
+        assert!(account_rule_query_compat_warnings(&clean_query).is_empty());
+        assert!(deprecated_account_rule_scope_warnings(&Value::Null).is_empty());
+        assert_eq!(
+            account_rule_payload_without_deprecated_scope(&json!("raw")),
+            json!("raw")
+        );
+    }
 }

@@ -1,6 +1,6 @@
-// 中文导读：核心业务合同层，负责账户识别规则的字段作用域、类型作用域和匹配解释。
+// 中文导读：核心业务合同层，负责账户识别规则的表达式匹配和匹配解释。
 // 维护重点：本模块只处理与请求无关的规则语义，仓储和 HTTP 层不得重复实现匹配规则。
-// 不变式：账户规则复用分类规则表达式语法；导入账户识别以本模块的作用域规则为权威。
+// 不变式：账户规则复用分类规则表达式语法；导入账户识别由稳定后的预览上下文决定角色、类型和字段包。
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -86,8 +86,14 @@ pub struct AccountRuleMatchContext {
 pub struct AccountRuleCandidate {
     pub rule_id: i64,
     pub account_id: i64,
+    /// Deprecated compatibility storage. PR1 keeps old DB/API payloads readable,
+    /// but matching must not let persisted scope choose account role/type.
     pub account_role_scope: String,
+    /// Deprecated compatibility storage. Matching uses the caller's stabilized
+    /// transaction context instead of this stored value.
     pub transaction_type_scope: String,
+    /// Deprecated compatibility storage. Matching uses context-derived field
+    /// bundles instead of this stored value.
     pub field_scope: Vec<String>,
     pub rule_expression: String,
     pub regex_enabled: bool,
@@ -181,29 +187,10 @@ pub fn match_account_rules(
     candidates.sort_by_key(|rule| (rule.priority, rule.rule_id));
 
     for rule in candidates {
-        if !rule.enabled
-            || !scope_allows(
-                &rule.account_role_scope,
-                &requested_role_scope,
-                ACCOUNT_ROLE_ANY,
-            )
-            || !scope_allows(
-                &rule.transaction_type_scope,
-                &transaction_type,
-                TRANSACTION_SCOPE_ALL,
-            )
-        {
+        if !rule.enabled {
             continue;
         }
-        let field_scope = if rule.field_scope.is_empty() {
-            DEFAULT_FIELD_SCOPES
-                .iter()
-                .map(|value| (*value).to_string())
-                .collect()
-        } else {
-            rule.field_scope.clone()
-        };
-        let field_values = context.field_values(&field_scope);
+        let field_values = context.contextual_field_values();
         let combined_text = field_values
             .iter()
             .map(|(_, value)| value.as_str())
@@ -229,14 +216,22 @@ pub fn match_account_rules(
             fallback_used: matched_fields.is_empty(),
             matched_fields,
             priority: rule.priority,
-            account_role_scope: rule.account_role_scope.clone(),
-            transaction_type_scope: rule.transaction_type_scope.clone(),
+            account_role_scope: requested_role_scope.clone(),
+            transaction_type_scope: transaction_type.clone(),
         });
     }
     None
 }
 
 impl AccountRuleMatchContext {
+    fn contextual_field_values(&self) -> Vec<(String, String)> {
+        let fields = FIELD_SCOPES
+            .iter()
+            .map(|field| (*field).to_string())
+            .collect::<Vec<_>>();
+        self.field_values(&fields)
+    }
+
     fn field_values(&self, fields: &[String]) -> Vec<(String, String)> {
         fields
             .iter()
@@ -285,10 +280,6 @@ fn normalize_scope(
     } else {
         Err(format!("unsupported {field}: {normalized}"))
     }
-}
-
-fn scope_allows(rule_scope: &str, requested_scope: &str, wildcard: &str) -> bool {
-    rule_scope == wildcard || rule_scope == requested_scope
 }
 
 fn parse_field_scope_text(text: &str) -> Vec<String> {
@@ -385,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn account_rule_matching_uses_priority_scope_and_combined_fields() {
+    fn account_rule_matching_uses_priority_and_ignores_deprecated_scopes() {
         let context = AccountRuleMatchContext {
             parser_id: "wechat_pay".to_string(),
             counterparty: "招商银行".to_string(),
@@ -424,16 +415,23 @@ mod tests {
             TRANSACTION_SCOPE_EXPENSE,
         )
         .expect("source account match");
-        assert_eq!(matched.account_id, 10);
-        assert_eq!(matched.matched_fields, vec![FIELD_PAYMENT_METHOD]);
+        assert_eq!(matched.account_id, 20);
+        assert_eq!(matched.matched_fields, vec![FIELD_COUNTERPARTY]);
+        assert_eq!(matched.account_role_scope, ACCOUNT_ROLE_SOURCE);
+        assert_eq!(matched.transaction_type_scope, TRANSACTION_SCOPE_EXPENSE);
 
-        assert!(match_account_rules(
+        let transfer_matched = match_account_rules(
             &rules,
             &context,
             ACCOUNT_ROLE_SOURCE,
             TRANSACTION_SCOPE_TRANSFER,
         )
-        .is_none());
+        .expect("deprecated transaction scope ignored");
+        assert_eq!(transfer_matched.account_id, 20);
+        assert_eq!(
+            transfer_matched.transaction_type_scope,
+            TRANSACTION_SCOPE_TRANSFER
+        );
     }
 
     #[test]
@@ -470,7 +468,7 @@ mod tests {
     }
 
     #[test]
-    fn account_rule_matching_uses_default_and_hidden_field_scopes() {
+    fn account_rule_matching_uses_context_derived_fields() {
         let context = AccountRuleMatchContext {
             payment_method: "默认付款账户".to_string(),
             expense_counterparty: "支出方".to_string(),
@@ -489,7 +487,7 @@ mod tests {
             account_id: 80,
             account_role_scope: ACCOUNT_ROLE_SOURCE.to_string(),
             transaction_type_scope: TRANSACTION_SCOPE_ALL.to_string(),
-            field_scope: Vec::new(),
+            field_scope: vec![FIELD_COUNTERPARTY.to_string()],
             rule_expression: "OR={默认付款账户}".to_string(),
             regex_enabled: false,
             enabled: true,

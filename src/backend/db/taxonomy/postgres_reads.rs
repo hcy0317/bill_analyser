@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use bill_analyser_core::account_rules::{
     normalize_account_role_scope, normalize_account_rule_field_scope,
     normalize_transaction_type_scope, AccountRuleCandidate, AccountRuleMatch,
-    AccountRuleMatchContext, DEFAULT_FIELD_SCOPES,
+    AccountRuleMatchContext, ACCOUNT_ROLE_ANY, DEFAULT_FIELD_SCOPES, TRANSACTION_SCOPE_ALL,
 };
 use bill_analyser_core::category_rules::escape_rule_expression_term;
 use chrono::{DateTime, Utc};
@@ -2872,13 +2872,19 @@ fn account_rule_candidate_from_record(record: AccountRuleRecord) -> DbResult<Acc
         account_role_scope: normalize_account_role_scope(
             record.get("account_role_scope").and_then(Value::as_str),
         )
-        .map_err(DbError::InvalidOperation)?,
+        .unwrap_or_else(|_| ACCOUNT_ROLE_ANY.to_string()),
         transaction_type_scope: normalize_transaction_type_scope(
             record.get("transaction_type_scope").and_then(Value::as_str),
         )
-        .map_err(DbError::InvalidOperation)?,
-        field_scope: normalize_account_rule_field_scope(record.get("field_scope"))
-            .map_err(DbError::InvalidOperation)?,
+        .unwrap_or_else(|_| TRANSACTION_SCOPE_ALL.to_string()),
+        field_scope: normalize_account_rule_field_scope(record.get("field_scope")).unwrap_or_else(
+            |_| {
+                DEFAULT_FIELD_SCOPES
+                    .iter()
+                    .map(|value| (*value).to_string())
+                    .collect()
+            },
+        ),
         rule_expression: record
             .get("rule_expression")
             .and_then(Value::as_str)
@@ -3036,6 +3042,41 @@ mod tests {
         assert_eq!(
             field_scope_json_array(&serde_json::json!("parser,payment_method")),
             serde_json::json!(["parser", "payment_method"])
+        );
+    }
+
+    #[test]
+    fn account_rule_candidate_defaults_invalid_deprecated_scope_columns() {
+        let mut record = AccountRuleRecord::new();
+        record.insert("id".to_string(), serde_json::json!(7));
+        record.insert("account_id".to_string(), serde_json::json!(42));
+        record.insert(
+            "account_role_scope".to_string(),
+            serde_json::json!("wallet"),
+        );
+        record.insert(
+            "transaction_type_scope".to_string(),
+            serde_json::json!("refund"),
+        );
+        record.insert("field_scope".to_string(), serde_json::json!(["bad"]));
+        record.insert(
+            "rule_expression".to_string(),
+            serde_json::json!("OR={工资卡}"),
+        );
+        record.insert("regex_enabled".to_string(), serde_json::json!(false));
+        record.insert("enabled".to_string(), serde_json::json!(true));
+        record.insert("priority".to_string(), serde_json::json!(5));
+
+        let candidate = account_rule_candidate_from_record(record).expect("candidate");
+
+        assert_eq!(candidate.account_role_scope, ACCOUNT_ROLE_ANY);
+        assert_eq!(candidate.transaction_type_scope, TRANSACTION_SCOPE_ALL);
+        assert_eq!(
+            candidate.field_scope,
+            DEFAULT_FIELD_SCOPES
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect::<Vec<_>>()
         );
     }
 }

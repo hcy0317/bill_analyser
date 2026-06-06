@@ -219,12 +219,6 @@ fn export_settings_account_rule(
         "ruleExpression": string_or_default(rule.get("rule_expression"), ""),
         "regexEnabled": rule.get("regex_enabled").is_some_and(value_truthy),
         "enabled": rule.get("enabled").map(value_truthy).unwrap_or(true),
-        "accountRoleScope": string_or_default(rule.get("account_role_scope"), "any"),
-        "transactionTypeScope": string_or_default(rule.get("transaction_type_scope"), "all"),
-        "fieldScope": rule
-            .get("field_scope")
-            .cloned()
-            .unwrap_or_else(|| json!(["counterparty", "payment_method", "description"])),
         "source": string_or_default(rule.get("source"), "manual"),
         "sourceKey": rule.get("source_key").cloned().unwrap_or(Value::Null),
     })

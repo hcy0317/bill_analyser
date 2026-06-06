@@ -779,41 +779,11 @@ async fn import_postgres_settings_account_rules(
             warnings.push("Skipped account rule with missing account or ruleExpression".to_string());
             continue;
         }
-        let account_role_scope = match bill_analyser_core::account_rules::normalize_account_role_scope(
-            get_any(item, &["accountRoleScope", "account_role_scope"]).and_then(Value::as_str),
-        ) {
-            Ok(value) => value,
-            Err(message) => {
-                section.skipped += 1;
-                warnings.push(format!("Skipped account rule with invalid role scope: {message}"));
-                continue;
-            }
-        };
-        let transaction_type_scope =
-            match bill_analyser_core::account_rules::normalize_transaction_type_scope(
-                get_any(item, &["transactionTypeScope", "transaction_type_scope"])
-                    .and_then(Value::as_str),
-            ) {
-                Ok(value) => value,
-                Err(message) => {
-                    section.skipped += 1;
-                    warnings.push(format!(
-                        "Skipped account rule with invalid transaction type scope: {message}"
-                    ));
-                    continue;
-                }
-            };
-        let field_scope = match bill_analyser_core::account_rules::normalize_account_rule_field_scope(
-            get_any(item, &["fieldScope", "field_scope"]),
-        ) {
-            Ok(value) => value,
-            Err(message) => {
-                section.skipped += 1;
-                warnings.push(format!("Skipped account rule with invalid field scope: {message}"));
-                continue;
-            }
-        };
-        let field_scope = Value::Array(field_scope.into_iter().map(Value::String).collect());
+        if let Some(warning) = account_rule_scope_compat_warning(item) {
+            warnings.push(warning);
+        }
+        let (account_role_scope, transaction_type_scope, field_scope) =
+            default_account_rule_scope_columns();
         let name = safe_text(item.get("name"), "");
         let priority = safe_int(item.get("priority"), 100);
         let regex_enabled = safe_bool(get_any(item, &["regexEnabled", "regex_enabled"]));
@@ -824,8 +794,6 @@ async fn import_postgres_settings_account_rules(
             account_id,
             rule_expression.clone(),
             name.clone(),
-            account_role_scope.clone(),
-            transaction_type_scope.clone(),
         );
         let rule_expression_json = postgres_rule_expression_json(&rule_expression, regex_enabled);
         let source_key = (!source_key.is_empty()).then_some(source_key);
@@ -919,15 +887,11 @@ async fn load_existing_postgres_account_rules(
         let account_id = row.try_get::<Option<i64>, _>("account_id")?.unwrap_or(0);
         let expression: Value = row.try_get("rule_expression")?;
         let name: String = row.try_get("name")?;
-        let account_role_scope: String = row.try_get("account_role_scope")?;
-        let transaction_type_scope: String = row.try_get("transaction_type_scope")?;
         existing.insert(
             (
                 account_id,
                 postgres_rule_expression_string(&expression),
                 name,
-                account_role_scope,
-                transaction_type_scope,
             ),
             row.try_get("id")?,
         );
