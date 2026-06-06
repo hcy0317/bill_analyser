@@ -1,30 +1,4 @@
-export type AccountRuleRoleScope =
-    'any'
-    | 'source'
-    | 'destination'
-    | 'investment'
-    | 'payment_method_source';
-
-export type AccountRuleTransactionTypeScope =
-    'all'
-    | 'income'
-    | 'expense'
-    | 'transfer'
-    | 'investment';
-
-export type AccountRuleFieldScope =
-    'parser'
-    | 'counterparty'
-    | 'payment_method'
-    | 'description'
-    | 'expense_counterparty'
-    | 'expense_payment_method'
-    | 'expense_description'
-    | 'income_counterparty'
-    | 'income_payment_method'
-    | 'income_description'
-    | 'investment_counterparty'
-    | 'investment_description';
+import { AccountCategory } from '@/core/account.ts';
 
 export interface AccountRuleItem {
     readonly id: number;
@@ -44,12 +18,6 @@ export interface AccountRuleItem {
     readonly appliedCount: number;
     readonly match_count: number;
     readonly matchCount: number;
-    readonly account_role_scope: AccountRuleRoleScope;
-    readonly accountRoleScope: AccountRuleRoleScope;
-    readonly transaction_type_scope: AccountRuleTransactionTypeScope;
-    readonly transactionTypeScope: AccountRuleTransactionTypeScope;
-    readonly field_scope: AccountRuleFieldScope[];
-    readonly fieldScope: AccountRuleFieldScope[];
     readonly source?: string | null;
     readonly source_key?: string | null;
     readonly sourceKey?: string | null;
@@ -62,9 +30,6 @@ export interface AccountRuleForm {
     ruleExpression: string;
     regexEnabled: boolean;
     enabled: boolean;
-    accountRoleScope: AccountRuleRoleScope;
-    transactionTypeScope: AccountRuleTransactionTypeScope;
-    fieldScope: AccountRuleFieldScope[];
 }
 
 export interface AccountRulePayload {
@@ -74,9 +39,6 @@ export interface AccountRulePayload {
     rule_expression: string;
     regex_enabled: boolean;
     enabled: boolean;
-    account_role_scope: AccountRuleRoleScope;
-    transaction_type_scope: AccountRuleTransactionTypeScope;
-    field_scope: AccountRuleFieldScope[];
 }
 
 export interface AccountRuleTestContext {
@@ -88,8 +50,6 @@ export interface AccountRuleTestContext {
         parserId: string;
         parserLabel: string;
     };
-    account_role_scope: AccountRuleRoleScope;
-    transaction_type_scope: AccountRuleTransactionTypeScope;
 }
 
 export interface AccountRuleTestResult {
@@ -100,47 +60,41 @@ export interface AccountRuleTestResult {
     fallbackUsed?: boolean | null;
 }
 
-export interface AccountRuleOption<T extends string> {
-    readonly titleKey: string;
-    readonly value: T;
+export interface AccountRuleGroupingAccount {
+    readonly id: string | number;
+    readonly name: string;
+    readonly parentId?: string | number | null;
+    readonly category?: number | null;
+    readonly displayOrder?: number | null;
+    readonly icon?: string | null;
+    readonly color?: string | null;
 }
 
-export const ACCOUNT_RULE_ROLE_SCOPE_OPTIONS: AccountRuleOption<AccountRuleRoleScope>[] = [
-    { titleKey: 'Any Account Role', value: 'any' },
-    { titleKey: 'Source Account', value: 'source' },
-    { titleKey: 'Destination Account', value: 'destination' },
-    { titleKey: 'Investment Account', value: 'investment' },
-    { titleKey: 'Payment Method Source', value: 'payment_method_source' },
-];
+export interface AccountRuleAccountGroup {
+    readonly key: string;
+    readonly accountId: number;
+    readonly accountName: string;
+    readonly displayName: string;
+    readonly parentAccountName: string;
+    readonly categoryType: number;
+    readonly icon: string;
+    readonly color: string;
+    readonly displayOrder: number;
+    readonly parentDisplayOrder: number;
+    readonly rules: AccountRuleItem[];
+    readonly ruleCount: number;
+    readonly matchCount: number;
+}
 
-export const ACCOUNT_RULE_TRANSACTION_SCOPE_OPTIONS: AccountRuleOption<AccountRuleTransactionTypeScope>[] = [
-    { titleKey: 'All Transaction Types', value: 'all' },
-    { titleKey: 'Income', value: 'income' },
-    { titleKey: 'Expense', value: 'expense' },
-    { titleKey: 'Transfer', value: 'transfer' },
-    { titleKey: 'Investment', value: 'investment' },
-];
-
-export const ACCOUNT_RULE_FIELD_SCOPE_OPTIONS: AccountRuleOption<AccountRuleFieldScope>[] = [
-    { titleKey: 'Parser Signal', value: 'parser' },
-    { titleKey: 'Counterparty', value: 'counterparty' },
-    { titleKey: 'Payment Method', value: 'payment_method' },
-    { titleKey: 'Description', value: 'description' },
-    { titleKey: 'Expense Counterparty', value: 'expense_counterparty' },
-    { titleKey: 'Expense Payment Method', value: 'expense_payment_method' },
-    { titleKey: 'Expense Description', value: 'expense_description' },
-    { titleKey: 'Income Counterparty', value: 'income_counterparty' },
-    { titleKey: 'Income Payment Method', value: 'income_payment_method' },
-    { titleKey: 'Income Description', value: 'income_description' },
-    { titleKey: 'Investment Counterparty', value: 'investment_counterparty' },
-    { titleKey: 'Investment Description', value: 'investment_description' },
-];
-
-export const DEFAULT_ACCOUNT_RULE_FIELD_SCOPE: AccountRuleFieldScope[] = [
-    'counterparty',
-    'payment_method',
-    'description',
-];
+export interface AccountRuleCategoryGroup {
+    readonly key: string;
+    readonly categoryType: number;
+    readonly categoryName: string;
+    readonly displayOrder: number;
+    readonly accounts: AccountRuleAccountGroup[];
+    readonly ruleCount: number;
+    readonly matchCount: number;
+}
 
 export function createDefaultAccountRuleForm(accountId?: number | string | null): AccountRuleForm {
     return {
@@ -150,9 +104,6 @@ export function createDefaultAccountRuleForm(accountId?: number | string | null)
         ruleExpression: '',
         regexEnabled: false,
         enabled: true,
-        accountRoleScope: 'any',
-        transactionTypeScope: 'all',
-        fieldScope: [...DEFAULT_ACCOUNT_RULE_FIELD_SCOPE],
     };
 }
 
@@ -162,18 +113,18 @@ export function normalizeAccountRuleItem(raw: Record<string, unknown>): AccountR
     const regexEnabled = toBoolean(raw['regexEnabled'] ?? raw['regex_enabled']);
     const appliedCount = toFiniteNumber(raw['appliedCount'] ?? raw['applied_count'], 0);
     const matchCount = toFiniteNumber(raw['matchCount'] ?? raw['match_count'], 0);
-    const accountRoleScope = normalizeRoleScope(raw['accountRoleScope'] ?? raw['account_role_scope']);
-    const transactionTypeScope = normalizeTransactionTypeScope(raw['transactionTypeScope'] ?? raw['transaction_type_scope']);
-    const fieldScope = normalizeFieldScope(raw['fieldScope'] ?? raw['field_scope']);
 
     return {
         id: toFiniteNumber(raw['id'], 0),
         account_id: accountId,
         accountId,
         accountName: String(raw['accountName'] ?? raw['account_name'] ?? ''),
-        accountType: raw['accountType'] === null || raw['accountType'] === undefined
+        accountType: raw['accountType'] === null
+            || raw['accountType'] === undefined
+            || raw['account_type'] === null
+            || raw['account_type'] === undefined
             ? null
-            : toFiniteNumber(raw['accountType'], 0),
+            : toFiniteNumber(raw['accountType'] ?? raw['account_type'], 0),
         accountHidden: toBoolean(raw['accountHidden'] ?? raw['account_hidden']),
         name: String(raw['name'] ?? ''),
         priority: toFiniteNumber(raw['priority'], 100),
@@ -186,12 +137,6 @@ export function normalizeAccountRuleItem(raw: Record<string, unknown>): AccountR
         appliedCount,
         match_count: matchCount,
         matchCount,
-        account_role_scope: accountRoleScope,
-        accountRoleScope,
-        transaction_type_scope: transactionTypeScope,
-        transactionTypeScope,
-        field_scope: fieldScope,
-        fieldScope,
         source: raw['source'] === undefined || raw['source'] === null ? null : String(raw['source']),
         source_key: raw['source_key'] === undefined || raw['source_key'] === null ? null : String(raw['source_key']),
         sourceKey: raw['sourceKey'] === undefined || raw['sourceKey'] === null ? null : String(raw['sourceKey']),
@@ -206,9 +151,6 @@ export function accountRuleToForm(rule: AccountRuleItem): AccountRuleForm {
         ruleExpression: rule.ruleExpression,
         regexEnabled: rule.regexEnabled,
         enabled: rule.enabled,
-        accountRoleScope: rule.accountRoleScope,
-        transactionTypeScope: rule.transactionTypeScope,
-        fieldScope: [...rule.fieldScope],
     };
 }
 
@@ -223,10 +165,6 @@ export function buildAccountRulePayload(form: AccountRuleForm, fallbackName: str
         throw new Error('Expression is required');
     }
 
-    const fieldScope = form.fieldScope.length > 0
-        ? [...new Set(form.fieldScope)]
-        : [...DEFAULT_ACCOUNT_RULE_FIELD_SCOPE];
-
     return {
         account_id: accountId,
         name: String(form.name || fallbackName).trim() || fallbackName,
@@ -234,17 +172,10 @@ export function buildAccountRulePayload(form: AccountRuleForm, fallbackName: str
         rule_expression: ruleExpression,
         regex_enabled: !!form.regexEnabled,
         enabled: !!form.enabled,
-        account_role_scope: form.accountRoleScope,
-        transaction_type_scope: form.transactionTypeScope,
-        field_scope: fieldScope,
     };
 }
 
-export function buildAccountRuleTestContext(
-    text: string,
-    accountRoleScope: AccountRuleRoleScope,
-    transactionTypeScope: AccountRuleTransactionTypeScope
-): AccountRuleTestContext {
+export function buildAccountRuleTestContext(text: string): AccountRuleTestContext {
     const normalizedText = String(text || '').trim();
     return {
         context: {
@@ -255,53 +186,156 @@ export function buildAccountRuleTestContext(
             parserId: normalizedText,
             parserLabel: normalizedText,
         },
-        account_role_scope: accountRoleScope,
-        transaction_type_scope: transactionTypeScope,
     };
 }
 
-export function getAccountRuleLabel(
-    options: AccountRuleOption<string>[],
-    value: string,
+export function buildAccountRuleGroups(
+    rules: AccountRuleItem[],
+    accounts: AccountRuleGroupingAccount[],
     translate: (key: string) => string
-): string {
-    return translate(options.find(option => option.value === value)?.titleKey || value);
-}
+): AccountRuleCategoryGroup[] {
+    const accountMap = new Map(accounts.map(account => [String(account.id), account]));
+    const categoryGroups = new Map<string, MutableAccountRuleCategoryGroup>();
 
-function normalizeRoleScope(value: unknown): AccountRuleRoleScope {
-    const normalized = normalizeScopeText(value);
-    return ACCOUNT_RULE_ROLE_SCOPE_OPTIONS.some(option => option.value === normalized)
-        ? normalized as AccountRuleRoleScope
-        : 'any';
-}
-
-function normalizeTransactionTypeScope(value: unknown): AccountRuleTransactionTypeScope {
-    const normalized = normalizeScopeText(value);
-    if (normalized === 'any') {
-        return 'all';
+    for (const rule of [...rules].sort(compareRules)) {
+        const account = accountMap.get(String(rule.accountId));
+        const parent = resolveParentAccount(account, accountMap);
+        const categoryType = normalizedCategoryType(account?.category ?? rule.accountType);
+        const category = AccountCategory.valueOf(categoryType);
+        const categoryKey = `category:${categoryType || 'unknown'}`;
+        const categoryGroup = getOrCreateCategoryGroup(
+            categoryGroups,
+            categoryKey,
+            categoryType,
+            category ? translate(category.name) : translate('Account'),
+            category?.displayOrder ?? Number.MAX_SAFE_INTEGER
+        );
+        const accountKey = `account:${rule.accountId}`;
+        const accountGroup = getOrCreateAccountGroup(categoryGroup, accountKey, rule, account, parent);
+        accountGroup.rules.push(rule);
+        accountGroup.rules.sort(compareRules);
+        accountGroup.ruleCount = accountGroup.rules.length;
+        accountGroup.matchCount = accountGroup.rules.reduce((sum, item) => sum + (item.matchCount || item.appliedCount), 0);
     }
 
-    return ACCOUNT_RULE_TRANSACTION_SCOPE_OPTIONS.some(option => option.value === normalized)
-        ? normalized as AccountRuleTransactionTypeScope
-        : 'all';
+    return Array.from(categoryGroups.values())
+        .map(categoryGroup => {
+            const accounts = Array.from(categoryGroup.accountMap.values()).sort(compareAccountGroups);
+            return {
+                key: categoryGroup.key,
+                categoryType: categoryGroup.categoryType,
+                categoryName: categoryGroup.categoryName,
+                displayOrder: categoryGroup.displayOrder,
+                accounts,
+                ruleCount: accounts.reduce((sum, item) => sum + item.ruleCount, 0),
+                matchCount: accounts.reduce((sum, item) => sum + item.matchCount, 0),
+            };
+        })
+        .sort((first, second) => first.displayOrder - second.displayOrder
+            || first.categoryName.localeCompare(second.categoryName, 'zh-Hans'));
 }
 
-function normalizeFieldScope(value: unknown): AccountRuleFieldScope[] {
-    const rawValues = Array.isArray(value)
-        ? value
-        : typeof value === 'string'
-            ? value.split(/[;,|，；]/)
-            : DEFAULT_ACCOUNT_RULE_FIELD_SCOPE;
-    const allowedValues = new Set(ACCOUNT_RULE_FIELD_SCOPE_OPTIONS.map(option => option.value));
-    const result = rawValues
-        .map(item => normalizeScopeText(item))
-        .filter((item): item is AccountRuleFieldScope => allowedValues.has(item as AccountRuleFieldScope));
-
-    return result.length > 0 ? [...new Set(result)] : [...DEFAULT_ACCOUNT_RULE_FIELD_SCOPE];
+interface MutableAccountRuleAccountGroup extends AccountRuleAccountGroup {
+    rules: AccountRuleItem[];
+    ruleCount: number;
+    matchCount: number;
 }
 
-function normalizeScopeText(value: unknown): string {
-    return String(value ?? '').trim().toLowerCase().replaceAll('-', '_');
+interface MutableAccountRuleCategoryGroup extends Omit<AccountRuleCategoryGroup, 'accounts'> {
+    readonly accountMap: Map<string, MutableAccountRuleAccountGroup>;
+}
+
+function getOrCreateCategoryGroup(
+    groups: Map<string, MutableAccountRuleCategoryGroup>,
+    key: string,
+    categoryType: number,
+    categoryName: string,
+    displayOrder: number
+): MutableAccountRuleCategoryGroup {
+    const existing = groups.get(key);
+    if (existing) {
+        return existing;
+    }
+
+    const created: MutableAccountRuleCategoryGroup = {
+        key,
+        categoryType,
+        categoryName,
+        displayOrder,
+        accountMap: new Map(),
+        ruleCount: 0,
+        matchCount: 0,
+    };
+    groups.set(key, created);
+    return created;
+}
+
+function getOrCreateAccountGroup(
+    categoryGroup: MutableAccountRuleCategoryGroup,
+    key: string,
+    rule: AccountRuleItem,
+    account: AccountRuleGroupingAccount | undefined,
+    parent: AccountRuleGroupingAccount | undefined
+): MutableAccountRuleAccountGroup {
+    const existing = categoryGroup.accountMap.get(key);
+    if (existing) {
+        return existing;
+    }
+
+    const accountName = account?.name || rule.accountName || 'Account';
+    const parentAccountName = parent?.name || '';
+    const created: MutableAccountRuleAccountGroup = {
+        key,
+        accountId: rule.accountId,
+        accountName,
+        displayName: parentAccountName ? `${parentAccountName} / ${accountName}` : accountName,
+        parentAccountName,
+        categoryType: categoryGroup.categoryType,
+        icon: String(account?.icon ?? ''),
+        color: String(account?.color ?? ''),
+        displayOrder: normalizedDisplayOrder(account?.displayOrder),
+        parentDisplayOrder: normalizedDisplayOrder(parent?.displayOrder ?? account?.displayOrder),
+        rules: [],
+        ruleCount: 0,
+        matchCount: 0,
+    };
+    categoryGroup.accountMap.set(key, created);
+    return created;
+}
+
+function resolveParentAccount(
+    account: AccountRuleGroupingAccount | undefined,
+    accountMap: Map<string, AccountRuleGroupingAccount>
+): AccountRuleGroupingAccount | undefined {
+    const parentId = String(account?.parentId ?? '');
+    if (!parentId || parentId === '0') {
+        return undefined;
+    }
+
+    return accountMap.get(parentId);
+}
+
+function compareRules(first: AccountRuleItem, second: AccountRuleItem): number {
+    return first.priority - second.priority
+        || first.accountId - second.accountId
+        || first.id - second.id;
+}
+
+function compareAccountGroups(first: AccountRuleAccountGroup, second: AccountRuleAccountGroup): number {
+    return first.parentDisplayOrder - second.parentDisplayOrder
+        || first.displayOrder - second.displayOrder
+        || first.displayName.localeCompare(second.displayName, 'zh-Hans')
+        || first.accountId - second.accountId;
+}
+
+function normalizedCategoryType(value: unknown): number {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function normalizedDisplayOrder(value: unknown): number {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
 }
 
 function toFiniteNumber(value: unknown, fallback: number): number {

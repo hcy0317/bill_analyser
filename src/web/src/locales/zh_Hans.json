@@ -2984,6 +2984,7 @@
     "Enter description or counterparty text...": "输入描述或交易对手文本...",
     "Require (AND)": "必含（且）",
     "Regex": "正则表达式",
+    "Plain Text": "普通文本",
     "Regex Patterns": "正则匹配式",
     "Enter regex pattern": "输入正则表达式",
     "Add Config": "添加配置",

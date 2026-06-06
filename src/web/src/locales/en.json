@@ -2982,6 +2982,7 @@
     "Require (AND)": "Require (AND)",
     "Exclude (NOT)": "Exclude (NOT)",
     "Regex": "Regex",
+    "Plain Text": "Plain Text",
     "Regex Patterns": "Regex Matching Expression",
     "Enter regex pattern": "Enter regex pattern",
     "Add Config": "Add Config",

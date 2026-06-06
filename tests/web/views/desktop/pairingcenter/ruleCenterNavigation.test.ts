@@ -134,6 +134,15 @@ describe('rule center UX source guards', () => {
         expect(accountSource).toContain('services.createAccountRule');
         expect(accountSource).toContain('services.reorderAccountRules');
         expect(accountSource).toContain('services.testAccountRule');
+        expect(accountSource).toContain('buildAccountRuleGroups');
+        expect(accountSource).toContain('account-rule-category-row');
+        expect(accountSource).toContain('account-rule-expression-item');
+        expect(accountSource).not.toContain('ACCOUNT_RULE_ROLE_SCOPE_OPTIONS');
+        expect(accountSource).not.toContain('ACCOUNT_RULE_TRANSACTION_SCOPE_OPTIONS');
+        expect(accountSource).not.toContain('ACCOUNT_RULE_FIELD_SCOPE_OPTIONS');
+        expect(accountSource).not.toContain('accountRoleScope');
+        expect(accountSource).not.toContain('transactionTypeScope');
+        expect(accountSource).not.toContain('fieldScope');
         expect(listSource).toContain("value: 'account-recognition'");
         expect(listSource).toContain("ruleConfigTab: 'accounts'");
         expect(listSource).toContain('<AccountRulePanel');

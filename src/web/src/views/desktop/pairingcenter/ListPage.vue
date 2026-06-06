@@ -47,7 +47,7 @@
                                     <span>{{ currentPageTitle }}</span>
 
                                     <div
-                                        v-if="showRuleHeaderActions"
+                                        v-show="showRuleHeaderActions"
                                         :id="ruleHeaderActionsTargetId"
                                         class="rule-center-title-actions rule-center-title-actions--compact ms-3"
                                     />

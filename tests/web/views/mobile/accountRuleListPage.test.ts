@@ -23,7 +23,7 @@ describe('mobile account recognition rule parity', () => {
         expect(source).toContain('`/account/rules?accountId=${subAccount.id}`');
     });
 
-    test('mobile rule page wires CRUD, test, and scope controls', () => {
+    test('mobile rule page wires grouped CRUD without legacy scope controls', () => {
         const source = readSource('src/views/mobile/accounts/RuleListPage.vue');
 
         expect(source).toContain('services.getAccountRules');
@@ -31,9 +31,15 @@ describe('mobile account recognition rule parity', () => {
         expect(source).toContain('services.updateAccountRule');
         expect(source).toContain('services.deleteAccountRule');
         expect(source).toContain('services.testAccountRule');
-        expect(source).toContain('ACCOUNT_RULE_ROLE_SCOPE_OPTIONS');
-        expect(source).toContain('ACCOUNT_RULE_TRANSACTION_SCOPE_OPTIONS');
-        expect(source).toContain('ACCOUNT_RULE_FIELD_SCOPE_OPTIONS');
-        expect(source).toContain('toggleFieldScope');
+        expect(source).toContain('buildAccountRuleGroups');
+        expect(source).toContain('account-rule-mobile-category-block');
+        expect(source).toContain('account-rule-mobile-expression-item');
+        expect(source).not.toContain('ACCOUNT_RULE_ROLE_SCOPE_OPTIONS');
+        expect(source).not.toContain('ACCOUNT_RULE_TRANSACTION_SCOPE_OPTIONS');
+        expect(source).not.toContain('ACCOUNT_RULE_FIELD_SCOPE_OPTIONS');
+        expect(source).not.toContain('accountRoleScope');
+        expect(source).not.toContain('transactionTypeScope');
+        expect(source).not.toContain('fieldScope');
+        expect(source).not.toContain('toggleFieldScope');
     });
 });

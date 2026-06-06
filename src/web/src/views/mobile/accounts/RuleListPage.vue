@@ -15,29 +15,56 @@
 
         <template v-else>
             <f7-block-title>{{ tt('Account Recognition Rules') }}</f7-block-title>
-            <f7-list strong inset dividers class="margin-vertical" v-if="accountRules.length > 0">
-                <f7-list-item
-                    swipeout
-                    :key="rule.id"
-                    v-for="rule in orderedAccountRules"
-                    :title="resolveAccountName(rule)"
-                    :after="getRoleScopeLabel(rule.accountRoleScope)"
-                    :subtitle="rule.ruleExpression"
-                    :footer="formatRuleFooter(rule)"
-                >
-                    <f7-swipeout-actions right>
-                        <f7-swipeout-button color="green" close :text="tt('Test')" @click="openTestSheet(rule)"></f7-swipeout-button>
-                        <f7-swipeout-button color="orange" close :text="tt('Edit')" @click="openEditSheet(rule)"></f7-swipeout-button>
-                        <f7-swipeout-button color="red" close @click="confirmDelete(rule)">
-                            <f7-icon f7="trash"></f7-icon>
-                        </f7-swipeout-button>
-                    </f7-swipeout-actions>
-                </f7-list-item>
-            </f7-list>
+            <template v-if="accountRuleGroups.length > 0">
+                <template v-for="categoryGroup in accountRuleGroups" :key="categoryGroup.key">
+                    <f7-block-title>
+                        {{ categoryGroup.categoryName }} · {{ categoryGroup.ruleCount }} {{ tt('Rules') }}
+                    </f7-block-title>
+                    <f7-list strong inset dividers class="margin-vertical account-rule-mobile-category-block account-rule-mobile-group">
+                        <li
+                            v-for="accountGroup in categoryGroup.accounts"
+                            :key="accountGroup.key"
+                            class="account-rule-mobile-account-item"
+                        >
+                            <div class="item-content">
+                                <div class="item-inner">
+                                    <div class="item-title-row">
+                                        <div class="item-title">{{ accountGroup.displayName }}</div>
+                                        <div class="item-after">{{ accountGroup.ruleCount }} {{ tt('Rules') }}</div>
+                                    </div>
+                                    <div
+                                        v-for="rule in accountGroup.rules"
+                                        :key="rule.id"
+                                        class="account-rule-mobile-expression-item"
+                                    >
+                                        <div class="account-rule-mobile-expression-title">
+                                            {{ rule.name || accountGroup.accountName }}
+                                        </div>
+                                        <div class="account-rule-mobile-expression-body">
+                                            {{ rule.ruleExpression }}
+                                        </div>
+                                        <div class="account-rule-mobile-expression-meta">
+                                            {{ tt('Priority') }} {{ rule.priority }} ·
+                                            {{ rule.regexEnabled ? tt('Use Regex') : tt('Plain Text') }} ·
+                                            {{ tt('Matched') }} {{ rule.matchCount || rule.appliedCount }}
+                                        </div>
+                                        <div class="account-rule-mobile-actions">
+                                            <f7-button small outline color="green" @click="openTestSheet(rule)">{{ tt('Test') }}</f7-button>
+                                            <f7-button small outline color="orange" @click="openEditSheet(rule)">{{ tt('Edit') }}</f7-button>
+                                            <f7-button small outline color="red" @click="confirmDelete(rule)">
+                                                <f7-icon f7="trash"></f7-icon>
+                                            </f7-button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </li>
+                    </f7-list>
+                </template>
+            </template>
             <f7-list strong inset dividers class="margin-vertical" v-else>
                 <f7-list-item :title="tt('No account rules')"></f7-list-item>
             </f7-list>
-
         </template>
 
         <f7-sheet
@@ -85,44 +112,6 @@
                         :value="String(ruleForm.priority)"
                         @input="updatePriority"
                     ></f7-list-input>
-                    <f7-list-item
-                        link="#"
-                        no-chevron
-                        class="list-item-with-header-and-title"
-                        :header="tt('Account Role')"
-                        :title="getRoleScopeLabel(ruleForm.accountRoleScope)"
-                        @click="showRoleScopePopup = true"
-                    >
-                        <list-item-selection-popup
-                            value-type="item"
-                            key-field="value"
-                            value-field="value"
-                            title-field="title"
-                            :title="tt('Account Role')"
-                            :items="roleScopeItems"
-                            v-model:show="showRoleScopePopup"
-                            v-model="ruleForm.accountRoleScope">
-                        </list-item-selection-popup>
-                    </f7-list-item>
-                    <f7-list-item
-                        link="#"
-                        no-chevron
-                        class="list-item-with-header-and-title"
-                        :header="tt('Transaction Type')"
-                        :title="getTransactionScopeLabel(ruleForm.transactionTypeScope)"
-                        @click="showTransactionScopePopup = true"
-                    >
-                        <list-item-selection-popup
-                            value-type="item"
-                            key-field="value"
-                            value-field="value"
-                            title-field="title"
-                            :title="tt('Transaction Type')"
-                            :items="transactionScopeItems"
-                            v-model:show="showTransactionScopePopup"
-                            v-model="ruleForm.transactionTypeScope">
-                        </list-item-selection-popup>
-                    </f7-list-item>
                     <f7-list-input
                         type="textarea"
                         :label="tt('Rule Matching Expression')"
@@ -135,18 +124,6 @@
                     <f7-list-item :title="tt('Enabled')">
                         <f7-toggle :checked="ruleForm.enabled" @toggle:change="ruleForm.enabled = $event"></f7-toggle>
                     </f7-list-item>
-                </f7-list>
-
-                <f7-block-title>{{ tt('Field Scope') }}</f7-block-title>
-                <f7-list strong inset dividers class="margin-vertical account-rule-field-list">
-                    <f7-list-item
-                        checkbox
-                        :key="option.value"
-                        v-for="option in fieldScopeItems"
-                        :title="option.title"
-                        :checked="ruleForm.fieldScope.includes(option.value)"
-                        @change="toggleFieldScope(option.value, $event)"
-                    ></f7-list-item>
                 </f7-list>
 
                 <f7-block class="grid grid-cols-2 grid-gap">
@@ -171,44 +148,6 @@
                         :placeholder="tt('Enter parser, counterparty, payment method or description text')"
                         v-model:value="testText"
                     ></f7-list-input>
-                    <f7-list-item
-                        link="#"
-                        no-chevron
-                        class="list-item-with-header-and-title"
-                        :header="tt('Account Role')"
-                        :title="getRoleScopeLabel(testRoleScope)"
-                        @click="showTestRoleScopePopup = true"
-                    >
-                        <list-item-selection-popup
-                            value-type="item"
-                            key-field="value"
-                            value-field="value"
-                            title-field="title"
-                            :title="tt('Account Role')"
-                            :items="roleScopeItems"
-                            v-model:show="showTestRoleScopePopup"
-                            v-model="testRoleScope">
-                        </list-item-selection-popup>
-                    </f7-list-item>
-                    <f7-list-item
-                        link="#"
-                        no-chevron
-                        class="list-item-with-header-and-title"
-                        :header="tt('Transaction Type')"
-                        :title="getTransactionScopeLabel(testTransactionScope)"
-                        @click="showTestTransactionScopePopup = true"
-                    >
-                        <list-item-selection-popup
-                            value-type="item"
-                            key-field="value"
-                            value-field="value"
-                            title-field="title"
-                            :title="tt('Transaction Type')"
-                            :items="transactionScopeItems"
-                            v-model:show="showTestTransactionScopePopup"
-                            v-model="testTransactionScope">
-                        </list-item-selection-popup>
-                    </f7-list-item>
                     <f7-list-item v-if="testResult !== null" :title="testResult ? tt('Match!') : tt('No match')" />
                 </f7-list>
                 <f7-block class="grid grid-cols-2 grid-gap">
@@ -239,21 +178,15 @@ import { useI18nUIComponents, showLoading, hideLoading } from '@/lib/ui/mobile.t
 import services from '@/lib/services.ts';
 import type { Account } from '@/models/account.ts';
 import {
-    ACCOUNT_RULE_FIELD_SCOPE_OPTIONS,
-    ACCOUNT_RULE_ROLE_SCOPE_OPTIONS,
-    ACCOUNT_RULE_TRANSACTION_SCOPE_OPTIONS,
     accountRuleToForm,
+    buildAccountRuleGroups,
     buildAccountRulePayload,
     buildAccountRuleTestContext,
     createDefaultAccountRuleForm,
-    getAccountRuleLabel,
     normalizeAccountRuleItem,
-    type AccountRuleFieldScope,
     type AccountRuleForm,
     type AccountRuleItem,
-    type AccountRuleRoleScope,
     type AccountRuleTestResult,
-    type AccountRuleTransactionTypeScope,
 } from '@/models/account_rule.ts';
 import { useAccountsStore } from '@/stores/account.ts';
 
@@ -280,16 +213,10 @@ const showEditSheet = ref(false);
 const editingRule = ref<AccountRuleItem | null>(null);
 const ruleForm = ref<AccountRuleForm>(createDefaultAccountRuleForm(initialAccountId));
 const showAccountPopup = ref(false);
-const showRoleScopePopup = ref(false);
-const showTransactionScopePopup = ref(false);
 const showTestSheet = ref(false);
 const testRuleId = ref(0);
 const testText = ref('');
-const testRoleScope = ref<AccountRuleRoleScope>('any');
-const testTransactionScope = ref<AccountRuleTransactionTypeScope>('all');
 const testResult = ref<boolean | null>(null);
-const showTestRoleScopePopup = ref(false);
-const showTestTransactionScopePopup = ref(false);
 const showDeleteActionSheet = ref(false);
 const deletingRule = ref<AccountRuleItem | null>(null);
 
@@ -303,23 +230,7 @@ const selectedAccountName = computed(() => (
     accountOptions.value.find(option => option.id === ruleForm.value.accountId)?.name || tt('Account')
 ));
 const autoRuleName = computed(() => `${selectedAccountName.value} · ${tt('Account Rule')}`);
-const orderedAccountRules = computed(() => [...accountRules.value].sort((firstRule, secondRule) => (
-    firstRule.priority - secondRule.priority
-    || resolveAccountName(firstRule).localeCompare(resolveAccountName(secondRule), 'zh-Hans')
-    || firstRule.id - secondRule.id
-)));
-const roleScopeItems = computed(() => ACCOUNT_RULE_ROLE_SCOPE_OPTIONS.map(option => ({
-    title: tt(option.titleKey),
-    value: option.value,
-})));
-const transactionScopeItems = computed(() => ACCOUNT_RULE_TRANSACTION_SCOPE_OPTIONS.map(option => ({
-    title: tt(option.titleKey),
-    value: option.value,
-})));
-const fieldScopeItems = computed(() => ACCOUNT_RULE_FIELD_SCOPE_OPTIONS.map(option => ({
-    title: tt(option.titleKey),
-    value: option.value,
-})));
+const accountRuleGroups = computed(() => buildAccountRuleGroups(accountRules.value, allAccounts.value, tt));
 
 function normalizeRouteAccountId(value: unknown): number | null {
     const accountId = Number.parseInt(String(value ?? ''), 10);
@@ -338,47 +249,10 @@ function getRequestErrorMessage(error: unknown, fallback: string): string {
     return error instanceof Error && error.message ? tt(error.message) : fallback;
 }
 
-function resolveAccount(rule: AccountRuleItem): Account | null {
-    return allAccounts.value.find(account => String(account.id) === String(rule.accountId)) ?? null;
-}
-
-function resolveAccountName(rule: AccountRuleItem): string {
-    return resolveAccount(rule)?.name || rule.accountName || tt('Account');
-}
-
-function getRoleScopeLabel(value: string): string {
-    return getAccountRuleLabel(ACCOUNT_RULE_ROLE_SCOPE_OPTIONS, value, tt);
-}
-
-function getTransactionScopeLabel(value: string): string {
-    return getAccountRuleLabel(ACCOUNT_RULE_TRANSACTION_SCOPE_OPTIONS, value, tt);
-}
-
-function getFieldScopeLabel(value: string): string {
-    return getAccountRuleLabel(ACCOUNT_RULE_FIELD_SCOPE_OPTIONS, value, tt);
-}
-
-function formatRuleFooter(rule: AccountRuleItem): string {
-    const fields = rule.fieldScope.slice(0, 3).map(getFieldScopeLabel).join(' / ');
-    const typeScope = getTransactionScopeLabel(rule.transactionTypeScope);
-    return `${typeScope} · ${fields} · ${tt('Matched')} ${rule.matchCount || rule.appliedCount}`;
-}
-
 function updatePriority(event: Event): void {
     const input = event.target as HTMLInputElement | null;
     const priority = Number(input?.value ?? 100);
     ruleForm.value.priority = Number.isFinite(priority) ? priority : 100;
-}
-
-function toggleFieldScope(field: AccountRuleFieldScope, event: Event): void {
-    const input = event.target as HTMLInputElement | null;
-    const nextFields = new Set(ruleForm.value.fieldScope);
-    if (input?.checked) {
-        nextFields.add(field);
-    } else {
-        nextFields.delete(field);
-    }
-    ruleForm.value.fieldScope = Array.from(nextFields);
 }
 
 function openCreateSheet(): void {
@@ -396,8 +270,6 @@ function openEditSheet(rule: AccountRuleItem): void {
 function openTestSheet(rule: AccountRuleItem): void {
     testRuleId.value = rule.id;
     testText.value = '';
-    testRoleScope.value = rule.accountRoleScope;
-    testTransactionScope.value = rule.transactionTypeScope;
     testResult.value = null;
     showTestSheet.value = true;
 }
@@ -446,7 +318,7 @@ async function runTest(): Promise<void> {
         const result = requireApiSuccess<AccountRuleTestResult>(
             await services.testAccountRule(
                 testRuleId.value,
-                buildAccountRuleTestContext(testText.value, testRoleScope.value, testTransactionScope.value)
+                buildAccountRuleTestContext(testText.value)
             ),
             tt('Test failed')
         );
@@ -518,7 +390,44 @@ void loadAll();
     height: min(86vh, 720px);
 }
 
-.account-rule-field-list {
-    --f7-list-item-min-height: 42px;
+.account-rule-mobile-account-item {
+    list-style: none;
+}
+
+.account-rule-mobile-account-item .item-inner {
+    display: block;
+    width: 100%;
+}
+
+.account-rule-mobile-expression-item {
+    padding-block: 10px;
+}
+
+.account-rule-mobile-expression-item + .account-rule-mobile-expression-item {
+    border-top: 1px solid var(--f7-list-item-border-color);
+}
+
+.account-rule-mobile-expression-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.account-rule-mobile-expression-body {
+    color: var(--f7-text-color);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.account-rule-mobile-expression-meta {
+    color: var(--f7-list-item-footer-text-color);
+    font-size: 12px;
+    margin-top: 4px;
+}
+
+.account-rule-mobile-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
 }
 </style>

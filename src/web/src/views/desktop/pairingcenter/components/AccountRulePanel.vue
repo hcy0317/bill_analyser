@@ -18,7 +18,7 @@
                     {{ error }}
                 </v-alert>
 
-                <Teleport :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
+                <Teleport defer :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
                     <div
                         class="account-rule-table-toolbar d-flex flex-column flex-lg-row align-lg-center ga-3"
                         :class="{
@@ -75,174 +75,156 @@
                         <th class="account-rule-column-expression">
                             <div class="account-rule-header-cell">{{ tt('Rule Matching Expression') }}</div>
                         </th>
-                        <th class="account-rule-column-scope">
-                            <div class="account-rule-header-cell">{{ tt('Account Role') }}</div>
-                        </th>
-                        <th class="account-rule-column-scope">
-                            <div class="account-rule-header-cell">{{ tt('Transaction Type') }}</div>
-                        </th>
-                        <th class="account-rule-column-fields">
-                            <div class="account-rule-header-cell">{{ tt('Field Scope') }}</div>
-                        </th>
-                        <th class="account-rule-column-regex text-no-wrap">
-                            <div class="account-rule-header-cell">{{ tt('Use Regex') }}</div>
-                        </th>
-                        <th class="account-rule-column-enabled text-no-wrap">
-                            <div class="account-rule-header-cell">{{ tt('Enabled') }}</div>
-                        </th>
-                        <th class="account-rule-column-applied text-no-wrap">
-                            <div class="account-rule-header-cell">{{ tt('Matched') }}</div>
-                        </th>
-                        <th class="account-rule-column-actions text-no-wrap">
-                            <div class="account-rule-header-cell">{{ tt('Actions') }}</div>
-                        </th>
                     </tr>
                     </thead>
-                    <tbody v-if="accountRules.length > 0">
-                    <tr v-for="(item, index) in orderedAccountRules" :key="item.id">
-                        <td class="account-rule-column-account">
-                            <div class="d-flex align-center" :title="resolveAccountName(item)">
-                                <ItemIcon
-                                    icon-type="account"
-                                    size="24px"
-                                    :icon-id="resolveAccountIcon(item)"
-                                    :color="resolveAccountColor(item)"
-                                />
-                                <span class="ms-2 text-truncate">{{ resolveAccountName(item) }}</span>
-                            </div>
-                        </td>
-                        <td class="account-rule-column-expression">
-                            <rule-expression-display
-                                :rule-id="item.id"
-                                :groups="getRuleExpressionGroups(item)"
-                                :expanded-clause-keys="expandedExpressionClauseKeys"
-                                :max-collapsed-terms="4"
-                                @update:expanded-clause-keys="expandedExpressionClauseKeys = $event"
-                            />
-                        </td>
-                        <td class="account-rule-column-scope">
-                            <v-chip size="x-small" variant="tonal" color="primary">
-                                {{ getRoleScopeLabel(item.accountRoleScope) }}
-                            </v-chip>
-                        </td>
-                        <td class="account-rule-column-scope">
-                            <v-chip size="x-small" variant="tonal">
-                                {{ getTransactionScopeLabel(item.transactionTypeScope) }}
-                            </v-chip>
-                        </td>
-                        <td class="account-rule-column-fields">
-                            <div class="account-rule-field-chips">
-                                <v-chip
-                                    v-for="field in getVisibleFieldScope(item)"
-                                    :key="field"
-                                    size="x-small"
-                                    variant="tonal"
+                    <tbody v-if="accountRuleGroups.length > 0">
+                    <template v-for="categoryGroup in accountRuleGroups" :key="categoryGroup.key">
+                        <tr class="account-rule-category-row">
+                            <td :colspan="accountRuleTableColumnCount">
+                                <div class="account-rule-category-header">
+                                    <v-btn
+                                        icon
+                                        variant="text"
+                                        size="x-small"
+                                        @click="toggleCategoryGroup(categoryGroup.key)"
+                                    >
+                                        <v-icon :icon="isCategoryExpanded(categoryGroup.key) ? mdiChevronDown : mdiChevronRight" />
+                                    </v-btn>
+                                    <span class="font-weight-medium">{{ categoryGroup.categoryName }}</span>
+                                    <v-chip size="x-small" variant="tonal">{{ tt('Rules') }} {{ categoryGroup.ruleCount }}</v-chip>
+                                    <v-chip size="x-small" variant="tonal">{{ tt('Matched') }} {{ categoryGroup.matchCount }}</v-chip>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr
+                            v-for="accountGroup in categoryGroup.accounts"
+                            v-show="isCategoryExpanded(categoryGroup.key)"
+                            :key="accountGroup.key"
+                        >
+                            <td class="account-rule-column-account">
+                                <div class="account-rule-account-cell" :title="accountGroup.displayName">
+                                    <ItemIcon
+                                        icon-type="account"
+                                        size="24px"
+                                        :icon-id="accountGroup.icon"
+                                        :color="accountGroup.color"
+                                    />
+                                    <div class="account-rule-account-text">
+                                        <span class="text-truncate">{{ accountGroup.accountName }}</span>
+                                        <span v-if="accountGroup.parentAccountName" class="text-caption text-medium-emphasis text-truncate">
+                                            {{ accountGroup.parentAccountName }}
+                                        </span>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="account-rule-column-expression">
+                                <div
+                                    v-for="rule in accountGroup.rules"
+                                    :key="rule.id"
+                                    class="account-rule-expression-item"
                                 >
-                                    {{ getFieldScopeLabel(field) }}
-                                </v-chip>
-                                <v-chip
-                                    v-if="item.fieldScope.length > maxVisibleFieldChips"
-                                    size="x-small"
-                                    variant="outlined"
-                                >
-                                    +{{ item.fieldScope.length - maxVisibleFieldChips }}
-                                </v-chip>
-                            </div>
-                        </td>
-                        <td class="account-rule-column-regex">
-                            <v-icon
-                                :icon="item.regexEnabled ? mdiCheckCircle : mdiCloseCircle"
-                                :color="item.regexEnabled ? 'info' : 'grey'"
-                                size="small"
-                            />
-                        </td>
-                        <td class="account-rule-column-enabled">
-                            <div class="d-inline-flex" @click.stop>
-                                <v-switch
-                                    :model-value="item.enabled"
-                                    density="compact"
-                                    hide-details
-                                    color="success"
-                                    :disabled="isRuleToggling(item.id)"
-                                    @update:model-value="toggleEnabled(item, $event)"
-                                />
-                            </div>
-                        </td>
-                        <td class="account-rule-column-applied">{{ item.matchCount || item.appliedCount }}</td>
-                        <td class="account-rule-column-actions">
-                            <div class="account-rule-actions-row">
-                                <v-tooltip :text="tt('Move Up')" location="top">
-                                    <template #activator="{ props }">
-                                        <v-btn
-                                            v-bind="props"
-                                            icon
-                                            variant="text"
-                                            size="small"
-                                            :disabled="index === 0 || reordering"
-                                            @click="moveRule(item, -1)"
-                                        >
-                                            <v-icon :icon="mdiArrowUp" size="small" />
-                                        </v-btn>
-                                    </template>
-                                </v-tooltip>
-                                <v-tooltip :text="tt('Move Down')" location="top">
-                                    <template #activator="{ props }">
-                                        <v-btn
-                                            v-bind="props"
-                                            icon
-                                            variant="text"
-                                            size="small"
-                                            :disabled="index >= orderedAccountRules.length - 1 || reordering"
-                                            @click="moveRule(item, 1)"
-                                        >
-                                            <v-icon :icon="mdiArrowDown" size="small" />
-                                        </v-btn>
-                                    </template>
-                                </v-tooltip>
-                                <v-tooltip :text="tt('Test')" location="top">
-                                    <template #activator="{ props }">
-                                        <v-btn
-                                            v-bind="props"
-                                            icon
-                                            variant="text"
-                                            size="small"
-                                            color="success"
-                                            @click="openTestDialog(item)"
-                                        >
-                                            <v-icon :icon="mdiTestTube" size="small" />
-                                        </v-btn>
-                                    </template>
-                                </v-tooltip>
-                                <v-tooltip :text="tt('Edit')" location="top">
-                                    <template #activator="{ props }">
-                                        <v-btn
-                                            v-bind="props"
-                                            icon
-                                            variant="text"
-                                            size="small"
-                                            @click="openEditDialog(item)"
-                                        >
-                                            <v-icon :icon="mdiPencilOutline" size="small" />
-                                        </v-btn>
-                                    </template>
-                                </v-tooltip>
-                                <v-tooltip :text="tt('Delete')" location="top">
-                                    <template #activator="{ props }">
-                                        <v-btn
-                                            v-bind="props"
-                                            icon
-                                            variant="text"
-                                            size="small"
-                                            color="error"
-                                            @click="confirmDelete(item)"
-                                        >
-                                            <v-icon :icon="mdiDeleteOutline" size="small" />
-                                        </v-btn>
-                                    </template>
-                                </v-tooltip>
-                            </div>
-                        </td>
-                    </tr>
+                                    <div class="account-rule-expression-main">
+                                        <div class="account-rule-expression-title-row">
+                                            <span class="font-weight-medium">{{ rule.name || accountGroup.accountName }}</span>
+                                            <v-chip size="x-small" variant="tonal">{{ tt('Priority') }} {{ rule.priority }}</v-chip>
+                                            <v-chip size="x-small" :color="rule.regexEnabled ? 'info' : undefined" variant="tonal">
+                                                {{ rule.regexEnabled ? tt('Use Regex') : tt('Plain Text') }}
+                                            </v-chip>
+                                            <v-chip size="x-small" variant="tonal">{{ tt('Matched') }} {{ rule.matchCount || rule.appliedCount }}</v-chip>
+                                        </div>
+                                        <rule-expression-display
+                                            :rule-id="rule.id"
+                                            :groups="getRuleExpressionGroups(rule)"
+                                            :expanded-clause-keys="expandedExpressionClauseKeys"
+                                            :max-collapsed-terms="4"
+                                            @update:expanded-clause-keys="expandedExpressionClauseKeys = $event"
+                                        />
+                                    </div>
+                                    <div class="account-rule-expression-actions">
+                                        <div class="d-inline-flex" @click.stop>
+                                            <v-switch
+                                                :model-value="rule.enabled"
+                                                density="compact"
+                                                hide-details
+                                                color="success"
+                                                :disabled="isRuleToggling(rule.id)"
+                                                @update:model-value="toggleEnabled(rule, $event)"
+                                            />
+                                        </div>
+                                        <v-tooltip :text="tt('Move Up')" location="top">
+                                            <template #activator="{ props }">
+                                                <v-btn
+                                                    v-bind="props"
+                                                    icon
+                                                    variant="text"
+                                                    size="small"
+                                                    :disabled="getOrderedRuleIndex(rule) === 0 || reordering"
+                                                    @click="moveRule(rule, -1)"
+                                                >
+                                                    <v-icon :icon="mdiArrowUp" size="small" />
+                                                </v-btn>
+                                            </template>
+                                        </v-tooltip>
+                                        <v-tooltip :text="tt('Move Down')" location="top">
+                                            <template #activator="{ props }">
+                                                <v-btn
+                                                    v-bind="props"
+                                                    icon
+                                                    variant="text"
+                                                    size="small"
+                                                    :disabled="getOrderedRuleIndex(rule) >= orderedAccountRules.length - 1 || reordering"
+                                                    @click="moveRule(rule, 1)"
+                                                >
+                                                    <v-icon :icon="mdiArrowDown" size="small" />
+                                                </v-btn>
+                                            </template>
+                                        </v-tooltip>
+                                        <v-tooltip :text="tt('Test')" location="top">
+                                            <template #activator="{ props }">
+                                                <v-btn
+                                                    v-bind="props"
+                                                    icon
+                                                    variant="text"
+                                                    size="small"
+                                                    color="success"
+                                                    @click="openTestDialog(rule)"
+                                                >
+                                                    <v-icon :icon="mdiTestTube" size="small" />
+                                                </v-btn>
+                                            </template>
+                                        </v-tooltip>
+                                        <v-tooltip :text="tt('Edit')" location="top">
+                                            <template #activator="{ props }">
+                                                <v-btn
+                                                    v-bind="props"
+                                                    icon
+                                                    variant="text"
+                                                    size="small"
+                                                    @click="openEditDialog(rule)"
+                                                >
+                                                    <v-icon :icon="mdiPencilOutline" size="small" />
+                                                </v-btn>
+                                            </template>
+                                        </v-tooltip>
+                                        <v-tooltip :text="tt('Delete')" location="top">
+                                            <template #activator="{ props }">
+                                                <v-btn
+                                                    v-bind="props"
+                                                    icon
+                                                    variant="text"
+                                                    size="small"
+                                                    color="error"
+                                                    @click="confirmDelete(rule)"
+                                                >
+                                                    <v-icon :icon="mdiDeleteOutline" size="small" />
+                                                </v-btn>
+                                            </template>
+                                        </v-tooltip>
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                    </template>
                     </tbody>
                     <tbody v-else>
                     <tr>
@@ -256,7 +238,7 @@
         </v-col>
     </v-row>
 
-    <v-dialog v-model="showEditDialog" max-width="780" persistent>
+    <v-dialog v-model="showEditDialog" max-width="720" persistent>
         <v-card>
             <v-card-title>{{ editingRule ? tt('Edit Rule') : tt('Create Rule') }}</v-card-title>
             <v-card-text>
@@ -292,39 +274,6 @@
                                 :disabled="saving"
                             />
                         </v-col>
-                        <v-col cols="12" md="6">
-                            <v-select
-                                v-model="ruleForm.accountRoleScope"
-                                :items="roleScopeItems"
-                                density="comfortable"
-                                variant="outlined"
-                                :label="tt('Account Role')"
-                                :disabled="saving"
-                            />
-                        </v-col>
-                        <v-col cols="12" md="6">
-                            <v-select
-                                v-model="ruleForm.transactionTypeScope"
-                                :items="transactionScopeItems"
-                                density="comfortable"
-                                variant="outlined"
-                                :label="tt('Transaction Type')"
-                                :disabled="saving"
-                            />
-                        </v-col>
-                        <v-col cols="12">
-                            <v-select
-                                v-model="ruleForm.fieldScope"
-                                :items="fieldScopeItems"
-                                density="comfortable"
-                                variant="outlined"
-                                multiple
-                                chips
-                                closable-chips
-                                :label="tt('Field Scope')"
-                                :disabled="saving"
-                            />
-                        </v-col>
                         <v-col cols="12">
                             <category-rule-builder-fields
                                 v-model="ruleBuilderModel"
@@ -354,34 +303,9 @@
                     :label="tt('Text to test')"
                     :placeholder="tt('Enter parser, counterparty, payment method or description text')"
                 />
-                <v-row>
-                    <v-col cols="12" md="6">
-                        <v-select
-                            v-model="testRoleScope"
-                            :items="roleScopeItems"
-                            density="comfortable"
-                            variant="outlined"
-                            :label="tt('Account Role')"
-                        />
-                    </v-col>
-                    <v-col cols="12" md="6">
-                        <v-select
-                            v-model="testTransactionScope"
-                            :items="transactionScopeItems"
-                            density="comfortable"
-                            variant="outlined"
-                            :label="tt('Transaction Type')"
-                        />
-                    </v-col>
-                </v-row>
                 <v-alert v-if="testResult !== null" :type="testResult ? 'success' : 'warning'" class="mt-3">
                     {{ testResult ? tt('Match!') : tt('No match') }}
                 </v-alert>
-                <div v-if="testMatchedFields.length > 0" class="account-rule-field-chips mt-3">
-                    <v-chip v-for="field in testMatchedFields" :key="field" size="small" variant="tonal">
-                        {{ getFieldScopeLabel(field) }}
-                    </v-chip>
-                </div>
             </v-card-text>
             <v-card-actions>
                 <v-spacer />
@@ -414,8 +338,8 @@ import {
     mdiArrowDown,
     mdiArrowUp,
     mdiBookAccountOutline,
-    mdiCheckCircle,
-    mdiCloseCircle,
+    mdiChevronDown,
+    mdiChevronRight,
     mdiDeleteOutline,
     mdiPencilOutline,
     mdiPlus,
@@ -431,21 +355,15 @@ import services from '@/lib/services.ts';
 import { useI18n } from '@/locales/helpers.ts';
 import type { Account } from '@/models/account.ts';
 import {
-    ACCOUNT_RULE_FIELD_SCOPE_OPTIONS,
-    ACCOUNT_RULE_ROLE_SCOPE_OPTIONS,
-    ACCOUNT_RULE_TRANSACTION_SCOPE_OPTIONS,
     accountRuleToForm,
+    buildAccountRuleGroups,
     buildAccountRulePayload,
     buildAccountRuleTestContext,
     createDefaultAccountRuleForm,
-    getAccountRuleLabel,
     normalizeAccountRuleItem,
-    type AccountRuleFieldScope,
     type AccountRuleForm,
     type AccountRuleItem,
     type AccountRuleTestResult,
-    type AccountRuleTransactionTypeScope,
-    type AccountRuleRoleScope,
 } from '@/models/account_rule.ts';
 import { useAccountsStore } from '@/stores/account.ts';
 import RuleExpressionDisplay from './RuleExpressionDisplay.vue';
@@ -490,6 +408,7 @@ const error = ref<string | null>(null);
 const accountRules = ref<AccountRuleItem[]>([]);
 const togglingRuleIds = ref<number[]>([]);
 const expandedExpressionClauseKeys = ref<string[]>([]);
+const expandedCategoryKeys = ref<string[]>([]);
 const showEditDialog = ref(false);
 const editingRule = ref<AccountRuleItem | null>(null);
 const ruleForm = ref<AccountRuleForm>(createDefaultAccountRuleForm(props.accountId));
@@ -497,15 +416,11 @@ const showTestDialog = ref(false);
 const testRuleId = ref<number>(0);
 const testRuleName = ref('');
 const testText = ref('');
-const testRoleScope = ref<AccountRuleRoleScope>('any');
-const testTransactionScope = ref<AccountRuleTransactionTypeScope>('all');
 const testResult = ref<boolean | null>(null);
-const testMatchedFields = ref<string[]>([]);
 const showDeleteDialog = ref(false);
 const deletingRule = ref<AccountRuleItem | null>(null);
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
-const maxVisibleFieldChips = 3;
-const accountRuleTableColumnCount = 9;
+const accountRuleTableColumnCount = 2;
 
 const title = computed(() => props.title);
 const hasHeaderActionsTarget = computed(() => Boolean(props.headerActionsTarget));
@@ -521,24 +436,13 @@ const accountOptions = computed<AccountRuleAccountOption[]>(() => allAccounts.va
 const orderedAccountRules = computed<AccountRuleItem[]>(() => (
     [...accountRules.value].sort((firstRule, secondRule) => (
         firstRule.priority - secondRule.priority
-        || resolveAccountName(firstRule).localeCompare(resolveAccountName(secondRule), 'zh-Hans')
+        || firstRule.accountId - secondRule.accountId
         || firstRule.id - secondRule.id
     ))
 ));
+const accountRuleGroups = computed(() => buildAccountRuleGroups(accountRules.value, allAccounts.value, tt));
 const selectedAccountOption = computed(() => accountOptions.value.find(option => option.id === ruleForm.value.accountId) ?? null);
 const autoRuleName = computed(() => `${selectedAccountOption.value?.name || tt('Account')} · ${tt('Account Rule')}`);
-const roleScopeItems = computed(() => ACCOUNT_RULE_ROLE_SCOPE_OPTIONS.map(option => ({
-    title: tt(option.titleKey),
-    value: option.value,
-})));
-const transactionScopeItems = computed(() => ACCOUNT_RULE_TRANSACTION_SCOPE_OPTIONS.map(option => ({
-    title: tt(option.titleKey),
-    value: option.value,
-})));
-const fieldScopeItems = computed(() => ACCOUNT_RULE_FIELD_SCOPE_OPTIONS.map(option => ({
-    title: tt(option.titleKey),
-    value: option.value,
-})));
 const ruleBuilderModel = computed({
     get: () => ({
         priority: ruleForm.value.priority,
@@ -562,36 +466,18 @@ const ruleBuilderModel = computed({
     },
 });
 
-function resolveAccount(rule: AccountRuleItem): Account | null {
-    return allAccounts.value.find(account => String(account.id) === String(rule.accountId)) ?? null;
+function getOrderedRuleIndex(rule: AccountRuleItem): number {
+    return orderedAccountRules.value.findIndex(item => item.id === rule.id);
 }
 
-function resolveAccountName(rule: AccountRuleItem): string {
-    return resolveAccount(rule)?.name || rule.accountName || tt('Account');
+function isCategoryExpanded(key: string): boolean {
+    return expandedCategoryKeys.value.includes(key);
 }
 
-function resolveAccountIcon(rule: AccountRuleItem): string {
-    return resolveAccount(rule)?.icon || '';
-}
-
-function resolveAccountColor(rule: AccountRuleItem): string {
-    return resolveAccount(rule)?.color || '';
-}
-
-function getRoleScopeLabel(value: string): string {
-    return getAccountRuleLabel(ACCOUNT_RULE_ROLE_SCOPE_OPTIONS, value, tt);
-}
-
-function getTransactionScopeLabel(value: string): string {
-    return getAccountRuleLabel(ACCOUNT_RULE_TRANSACTION_SCOPE_OPTIONS, value, tt);
-}
-
-function getFieldScopeLabel(value: string): string {
-    return getAccountRuleLabel(ACCOUNT_RULE_FIELD_SCOPE_OPTIONS, value, tt);
-}
-
-function getVisibleFieldScope(rule: AccountRuleItem): AccountRuleFieldScope[] {
-    return rule.fieldScope.slice(0, maxVisibleFieldChips);
+function toggleCategoryGroup(key: string): void {
+    expandedCategoryKeys.value = isCategoryExpanded(key)
+        ? expandedCategoryKeys.value.filter(item => item !== key)
+        : [...expandedCategoryKeys.value, key];
 }
 
 function getRuleExpressionGroups(rule: AccountRuleItem): RuleExpressionDisplayGroup[] {
@@ -759,12 +645,9 @@ async function doDelete(): Promise<void> {
 
 function openTestDialog(item: AccountRuleItem): void {
     testRuleId.value = item.id;
-    testRuleName.value = item.name || resolveAccountName(item);
+    testRuleName.value = item.name || item.accountName || tt('Account');
     testText.value = '';
-    testRoleScope.value = item.accountRoleScope;
-    testTransactionScope.value = item.transactionTypeScope;
     testResult.value = null;
-    testMatchedFields.value = [];
     showTestDialog.value = true;
 }
 
@@ -779,15 +662,13 @@ async function runTest(): Promise<void> {
         const result = requireApiSuccess<AccountRuleTestResult>(
             await services.testAccountRule(
                 testRuleId.value,
-                buildAccountRuleTestContext(testText.value, testRoleScope.value, testTransactionScope.value)
+                buildAccountRuleTestContext(testText.value)
             ),
             tt('Test failed')
         );
         testResult.value = !!result?.matched;
-        testMatchedFields.value = result?.matchedFields ?? [];
     } catch (err: unknown) {
         testResult.value = null;
-        testMatchedFields.value = [];
         error.value = getRequestErrorMessage(err, tt('Test failed'));
     } finally {
         testing.value = false;
@@ -827,6 +708,17 @@ watch(
         }
         void fetchAccountRules();
     }
+);
+
+watch(
+    accountRuleGroups,
+    (groups) => {
+        const nextKeys = groups.map(group => group.key);
+        expandedCategoryKeys.value = expandedCategoryKeys.value.length === 0
+            ? nextKeys
+            : nextKeys.filter(key => expandedCategoryKeys.value.includes(key) || !expandedCategoryKeys.value.length);
+    },
+    { immediate: true }
 );
 
 onMounted(() => fetchAll());
@@ -888,60 +780,83 @@ defineExpose({
 }
 
 .account-rule-column-account {
-    width: 190px;
+    width: 260px;
 }
 
 .account-rule-column-expression {
-    min-width: 320px;
+    min-width: 520px;
 }
 
-.account-rule-column-scope {
-    width: 128px;
-    text-align: center;
+.account-rule-category-row td {
+    background: rgba(var(--v-theme-primary), 0.08);
+    padding-block: 6px;
 }
 
-.account-rule-column-fields {
-    width: 210px;
+.account-rule-category-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 32px;
 }
 
-.account-rule-column-regex {
-    width: 118px;
-    text-align: center;
+.account-rule-account-cell {
+    display: flex;
+    align-items: center;
+    min-width: 0;
 }
 
-.account-rule-column-enabled {
-    width: 104px;
-    text-align: center;
+.account-rule-account-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    margin-left: 8px;
 }
 
-.account-rule-column-applied {
-    width: 84px;
-    text-align: center;
+.account-rule-expression-item {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding-block: 10px;
 }
 
-.account-rule-column-actions {
-    width: 214px;
-    text-align: center;
+.account-rule-expression-item + .account-rule-expression-item {
+    border-top: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
 }
 
-.account-rule-actions-row {
+.account-rule-expression-main {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.account-rule-expression-title-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.account-rule-expression-actions {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-end;
     gap: 2px;
+    flex: 0 0 auto;
     flex-wrap: nowrap;
-}
-
-.account-rule-field-chips {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px;
 }
 
 @media (max-width: 960px) {
     .account-rule-table {
         table-layout: auto;
+    }
+
+    .account-rule-expression-item {
+        flex-direction: column;
+    }
+
+    .account-rule-expression-actions {
+        justify-content: flex-start;
     }
 }
 </style>

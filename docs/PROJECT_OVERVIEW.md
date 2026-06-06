@@ -48,7 +48,7 @@ multipart 上传并行执行 dedicated parser 检测，每个文件必须且只�
 
 分类识别使用 `category_rules` 规则表达式；账户识别使用 `account_rules` 表和同一表达式匹配器模型，账户规则 API 和设置包导出不再传播旧 role/type/field scope 字段；旧 payload 或旧 bundle 中的 scope 字段会被忽略并返回兼容 warning。REST API 覆盖账户规则 list/create/update/delete/reorder/test，以及分类规则 list/create/update/delete/reorder/defaults/test。设置包按当前 PostgreSQL 主链导出并导入/upsert `accounts`、`transactionCategories`、`transactionTags`、`transactionTemplates`、`scheduledTransactions`、`categoryRecognitionRules` 与 `accountRecognitionRules`；`transactionTemplates` 和 `scheduledTransactions` 在账户、分类、标签引用重映射完成后写入 `transaction_templates`，有效导出不再以 unsupported section warning 跳过。
 
-桌面规则中心的“规则配置”包含分类识别、账户识别和周期识别三个二级页；移动端通过 `/account/rules` 提供账户规则列表与紧凑编辑/测试入口。
+桌面规则中心的“规则配置”包含分类识别、账户识别和周期识别三个二级页；账户识别规则按账户主分类、父账户/子账户分组展示，同一账户下可呈现多条规则表达式；移动端通过 `/account/rules` 提供同样分组后的账户规则列表与紧凑编辑/测试入口。
 
 ## Matching
 
