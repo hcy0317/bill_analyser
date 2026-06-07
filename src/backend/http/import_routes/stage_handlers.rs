@@ -666,7 +666,7 @@ async fn load_import_intelligence_category_rules(
 ) -> Result<Vec<ImportIntelligenceRule>, bill_analyser_db::DbError> {
     let rows = sqlx::query(
         r#"
-        SELECT id, category_id, priority, rule_expression, regex_enabled
+        SELECT id, category_id, priority, rule_expression
         FROM category_rules
         WHERE user_id = $1 AND enabled = true
         ORDER BY priority ASC, id ASC
@@ -682,7 +682,7 @@ async fn load_import_intelligence_category_rules(
             let expression = row.try_get::<Value, _>("rule_expression").ok()?;
             let id = row.try_get("id").ok()?;
             let priority = row.try_get::<i32, _>("priority").ok()?;
-            let regex_enabled = row.try_get("regex_enabled").ok()?;
+            let regex_enabled = rule_expression_regex_enabled(&expression);
             Some(Ok(ImportIntelligenceRule {
                 id,
                 category_id,
@@ -879,6 +879,26 @@ fn rule_expression_string(value: &Value) -> String {
             .unwrap_or_default(),
         Value::Null => String::new(),
         Value::Number(_) | Value::Bool(_) | Value::Array(_) => value.to_string(),
+    }
+}
+
+fn rule_expression_regex_enabled(value: &Value) -> bool {
+    value
+        .get("regex_enabled")
+        .or_else(|| value.get("regexEnabled"))
+        .map(json_value_truthy)
+        .unwrap_or(false)
+}
+
+fn json_value_truthy(value: &Value) -> bool {
+    match value {
+        Value::Bool(value) => *value,
+        Value::Number(value) => value.as_i64().unwrap_or_default() != 0,
+        Value::String(value) => matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "true" | "1" | "yes" | "y" | "on"
+        ),
+        Value::Null | Value::Array(_) | Value::Object(_) => false,
     }
 }
 
@@ -3204,5 +3224,45 @@ pub async fn import_learning_rule_delete_runtime_handler(
         }),
         Ok(false) => route_response(import_v2_error_response(404, "Rule not found")),
         Err(response) => route_response(response),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn category_rule_regex_flag_comes_from_rule_expression_json() {
+        assert!(rule_expression_regex_enabled(&json!({
+            "expression": "商户",
+            "regex_enabled": true
+        })));
+        assert!(rule_expression_regex_enabled(&json!({
+            "expression": "商户",
+            "regexEnabled": "1"
+        })));
+        assert!(!rule_expression_regex_enabled(&json!({
+            "expression": "商户"
+        })));
+        assert!(rule_expression_regex_enabled(&json!({
+            "expression": "商户",
+            "regex_enabled": 1
+        })));
+        assert!(!rule_expression_regex_enabled(&json!({
+            "expression": "商户",
+            "regex_enabled": null
+        })));
+    }
+
+    #[test]
+    fn import_db_error_response_keeps_public_message_generic() {
+        let response = db_error_response("column category_rules.regex_enabled does not exist");
+
+        assert_eq!(response.status_code, 500);
+        assert_eq!(response.body["success"], false);
+        assert_eq!(
+            response.body["error"],
+            "Rust import route runtime DB error"
+        );
     }
 }

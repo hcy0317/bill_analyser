@@ -49,7 +49,12 @@ fn user_id_from_headers(
         .map_err(|error| import_v2_error_response(error.status, &error.message))
 }
 
-fn db_error_response(_error: impl std::fmt::Display) -> ImportV2RouteResponse {
+fn db_error_response(error: impl std::fmt::Display) -> ImportV2RouteResponse {
+    let error_text = error.to_string();
+    #[cfg(not(coverage))]
+    tracing::error!(domain = "import_runtime", operation = "db_error_response", error = %error_text, "Rust import route runtime DB error");
+    #[cfg(coverage)]
+    let _ = &error_text;
     import_v2_error_response(500, "Rust import route runtime DB error")
 }
 

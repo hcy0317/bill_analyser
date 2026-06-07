@@ -78,6 +78,25 @@ fn bill_dates_match_current_normalization_formats() {
 }
 
 #[test]
+fn bill_dates_normalize_excel_serial_and_fractional_day_times() {
+    let cases = [
+        ("2021-12-10 0.8513888888888889", "2021-12-10 20:26:00"),
+        ("2021/12/10 0.5", "2021-12-10 12:00:00"),
+        ("45167", "2023-08-29 00:00:00"),
+        ("45167.5", "2023-08-29 12:00:00"),
+        ("45167 0.8513888888888889", "2023-08-29 20:26:00"),
+    ];
+
+    for (raw, expected) in cases {
+        assert_eq!(normalize_bill_date_text(raw), expected);
+    }
+
+    for raw in ["19999", "80001", "20230827", "12.34", "45167 1.0"] {
+        assert_eq!(normalize_bill_date_text(raw), raw);
+    }
+}
+
+#[test]
 fn currency_ids_pagination_sorting_and_auth_context_use_explicit_types() {
     let currency = CurrencyCode::parse(" usd ").unwrap();
     assert_eq!(currency.as_str(), "USD");

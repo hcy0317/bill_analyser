@@ -4,12 +4,16 @@
 
 use std::{fmt, str::FromStr};
 
-use chrono::{Datelike, NaiveDate, NaiveDateTime};
+use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::error::{ErrorCode, RuntimeError};
 
 const NORMALIZED_BILL_DATE_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
+const EXCEL_SERIAL_UNIX_EPOCH_DAYS: i64 = 25_569;
+const EXCEL_SERIAL_DATE_MIN_DAYS: i64 = 20_000;
+const EXCEL_SERIAL_DATE_MAX_DAYS: i64 = 80_000;
+const SECONDS_PER_DAY: f64 = 86_400.0;
 const BILL_DATE_TIME_FORMATS: &[&str] = &[
     "%Y-%m-%d %H:%M:%S",
     "%Y-%m-%d %H:%M",
@@ -109,6 +113,10 @@ pub fn parse_bill_datetime(raw_value: &str) -> Option<BillDateTime> {
         }
     }
 
+    if let Some(parsed) = parse_excel_serial_bill_datetime(text) {
+        return Some(parsed);
+    }
+
     None
 }
 
@@ -116,6 +124,79 @@ pub fn normalize_bill_date_text(raw_value: &str) -> String {
     parse_bill_datetime(raw_value)
         .map(BillDateTime::normalize)
         .unwrap_or_else(|| raw_value.trim().to_string())
+}
+
+fn parse_excel_serial_bill_datetime(text: &str) -> Option<BillDateTime> {
+    if let Some((date_token, fraction_token)) = split_date_and_fractional_time(text) {
+        let date = parse_textual_bill_date(date_token)
+            .or_else(|| parse_integral_excel_serial_bill_date(date_token))?;
+        let fraction = parse_fractional_day(fraction_token)?;
+        return combine_date_and_fractional_day(date, fraction);
+    }
+
+    let serial_days = text.parse::<f64>().ok()?;
+    if !serial_days.is_finite() {
+        return None;
+    }
+    let date_days = serial_days.floor();
+    let date = excel_serial_days_to_date(date_days)?;
+    let fraction = serial_days - date_days;
+    combine_date_and_fractional_day(date, fraction)
+}
+
+fn split_date_and_fractional_time(text: &str) -> Option<(&str, &str)> {
+    let mut parts = text.split_whitespace();
+    let date_token = parts.next()?;
+    let fraction_token = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((date_token, fraction_token))
+}
+
+fn parse_textual_bill_date(text: &str) -> Option<NaiveDate> {
+    BILL_DATE_FORMATS
+        .iter()
+        .find_map(|format| NaiveDate::parse_from_str(text, format).ok())
+}
+
+fn parse_integral_excel_serial_bill_date(text: &str) -> Option<NaiveDate> {
+    let serial_days = text.parse::<f64>().ok()?;
+    if !serial_days.is_finite() || serial_days.fract().abs() > f64::EPSILON {
+        return None;
+    }
+    excel_serial_days_to_date(serial_days)
+}
+
+fn excel_serial_days_to_date(serial_days: f64) -> Option<NaiveDate> {
+    if !serial_days.is_finite() {
+        return None;
+    }
+    let date_days = serial_days.floor();
+    if date_days < EXCEL_SERIAL_DATE_MIN_DAYS as f64
+        || date_days > EXCEL_SERIAL_DATE_MAX_DAYS as f64
+    {
+        return None;
+    }
+    let offset_days = date_days as i64 - EXCEL_SERIAL_UNIX_EPOCH_DAYS;
+    NaiveDate::from_ymd_opt(1970, 1, 1)?.checked_add_signed(Duration::days(offset_days))
+}
+
+fn parse_fractional_day(text: &str) -> Option<f64> {
+    let fraction = text.parse::<f64>().ok()?;
+    if fraction.is_finite() && (0.0..1.0).contains(&fraction) {
+        Some(fraction)
+    } else {
+        None
+    }
+}
+
+fn combine_date_and_fractional_day(date: NaiveDate, fraction: f64) -> Option<BillDateTime> {
+    let seconds = (fraction * SECONDS_PER_DAY).round() as i64;
+    let date_time = date
+        .and_hms_opt(0, 0, 0)?
+        .checked_add_signed(Duration::seconds(seconds))?;
+    Some(BillDateTime::new(date_time))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
