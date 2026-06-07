@@ -18,10 +18,30 @@ describe('desktop transaction edit dialog readonly affordance', () => {
         expect(source).not.toMatch(/\.transaction-readonly-form\s+:deep/);
         expect(source).toMatch(/\.transaction-readonly-form\s+\.v-field\s*\{/);
         expect(source).toMatch(/\.transaction-readonly-form\s+\.v-field__overlay\s*\{/);
+        expect(source).toMatch(/\.transaction-readonly-form\s+\.v-input--readonly\s+\.v-field\s*\{/);
         expect(readonlyFieldRule?.groups?.['body'] ?? '').not.toMatch(/background-color:\s*rgba\(var\(--v-theme-on-surface\),\s*0\.08\)/);
         expect(readonlyFieldRule?.groups?.['body'] ?? '').toContain('background-color: transparent !important;');
         expect(readonlyFieldRule?.groups?.['body'] ?? '').toContain('border-color: rgba(var(--v-theme-on-surface), 0.24) !important;');
         expect(readonlyOverlayRule?.groups?.['body'] ?? '').toContain('opacity: 0 !important;');
+        expect(source.match(/\.transaction-readonly-form\s+\.v-input--readonly\s+\.v-field\s*\{(?<body>[^}]*)\}/)?.groups?.['body'] ?? '')
+            .toContain('pointer-events: none;');
+    });
+
+    test('readonly transaction type and geo controls cannot open editing selectors', () => {
+        const source = readSource('src/views/desktop/transactions/list/dialogs/EditDialog.vue');
+        const readonlyTabsRule = source.match(/\.transaction-type-tabs-readonly\s+\.v-tab\s*\{(?<body>[^}]*)\}/);
+        const readonlySelectedTabRule = source.match(/\.transaction-type-tabs-readonly\s+\.v-tab--selected\s*\{(?<body>[^}]*)\}/);
+
+        expect(source).toContain(':aria-readonly="mode === TransactionEditPageMode.View"');
+        expect(source).toContain(':disabled="loading || submitting || mode === TransactionEditPageMode.View" v-model="transaction.type"');
+        expect(readonlyTabsRule?.groups?.['body'] ?? '').toContain('pointer-events: none;');
+        expect(readonlyTabsRule?.groups?.['body'] ?? '').toContain('cursor: default !important;');
+        expect(readonlySelectedTabRule?.groups?.['body'] ?? '').toContain('background-color: transparent !important;');
+        expect(readonlySelectedTabRule?.groups?.['body'] ?? '').toContain('border: 1px solid rgba(var(--v-theme-on-surface), 0.24);');
+        expect(source).toContain('v-model:menu="editableGeoMenuState"');
+        expect(source).toContain('get: () => mode.value !== TransactionEditPageMode.View && geoMenuState.value');
+        expect(source).toContain('geoMenuState.value = mode.value !== TransactionEditPageMode.View && value;');
+        expect(source).toContain('if (mode.value === TransactionEditPageMode.View) {\n        return;\n    }\n\n    if (isSupportGetGeoLocationByClick() && setGeoLocationByClickMap.value)');
     });
 
     test('scheduled and historical matching panels share the readonly surface background', () => {

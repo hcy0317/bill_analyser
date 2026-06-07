@@ -54,6 +54,7 @@
                         <v-tabs class="v-tabs-pill"
                             :class="{ 'transaction-type-tabs-readonly': mode === TransactionEditPageMode.View }"
                             direction="vertical"
+                            :aria-readonly="mode === TransactionEditPageMode.View"
                             :disabled="loading || submitting || mode === TransactionEditPageMode.View" v-model="transaction.type">
                         <v-tab :value="TransactionType.Expense" v-if="transaction.type !== TransactionType.ModifyBalance">
                             <span>{{ tt('Expense') }}</span>
@@ -383,12 +384,13 @@
                                 </v-col>
                                 <v-col cols="12" md="12" v-if="type === TransactionEditPageType.Transaction">
                                     <v-select
+                                        class="transaction-edit-geo-location"
                                         persistent-placeholder
                                         :readonly="mode === TransactionEditPageMode.View"
                                         :disabled="loading || submitting"
                                         :label="tt('Geographic Location')"
                                         v-model="transaction"
-                                        v-model:menu="geoMenuState"
+                                        v-model:menu="editableGeoMenuState"
                                     >
                                         <template #selection>
                                             <span class="cursor-pointer" v-if="transaction.geoLocation">{{ `(${formatCoordinate(transaction.geoLocation, coordinateDisplayType)})` }}</span>
@@ -851,6 +853,12 @@ const activeTab = ref<string>('basicInfo');
 const originalTransactionEditable = ref<boolean>(false);
 const noTransactionDraft = ref<boolean>(false);
 const geoMenuState = ref<boolean>(false);
+const editableGeoMenuState = computed<boolean>({
+    get: () => mode.value !== TransactionEditPageMode.View && geoMenuState.value,
+    set: (value: boolean) => {
+        geoMenuState.value = mode.value !== TransactionEditPageMode.View && value;
+    }
+});
 const tagSearchContent = ref<string>('');
 const removingPictureId = ref<string>('');
 const recognizingPicture = ref<boolean>(false);
@@ -1641,6 +1649,10 @@ function updateGeoLocation(forceUpdate: boolean): void {
 }
 
 function updateSpecifiedGeoLocation(coordinate: Coordinate): void {
+    if (mode.value === TransactionEditPageMode.View) {
+        return;
+    }
+
     if (isSupportGetGeoLocationByClick() && setGeoLocationByClickMap.value) {
         transaction.value.setLatitudeAndLongitude(coordinate.latitude, coordinate.longitude);
         map.value?.setMarkerPosition(transaction.value.geoLocation);
@@ -1951,27 +1963,48 @@ defineExpose({
 .transaction-type-tabs-readonly .v-tab {
     opacity: 1 !important;
     color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)) !important;
+    cursor: default !important;
+    pointer-events: none;
+    user-select: none;
 }
 
 .transaction-type-tabs-readonly .v-tab--selected {
-    background-color: rgba(var(--v-theme-on-surface), 0.08) !important;
+    background-color: transparent !important;
+    border: 1px solid rgba(var(--v-theme-on-surface), 0.24);
     color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)) !important;
+}
+
+.transaction-type-tabs-readonly .v-tab__overlay {
+    opacity: 0 !important;
 }
 
 .transaction-readonly-form .v-field {
     background-color: transparent !important;
     border-color: rgba(var(--v-theme-on-surface), 0.24) !important;
     border-radius: 8px;
+    color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)) !important;
 }
 
 .transaction-readonly-form .v-field__overlay {
     opacity: 0 !important;
 }
 
+.transaction-readonly-form .v-input--readonly .v-field {
+    pointer-events: none;
+}
+
 .transaction-readonly-form .v-field__input,
+.transaction-readonly-form .v-field input,
 .transaction-readonly-form .v-select__selection,
 .transaction-readonly-form textarea {
-    cursor: default;
+    color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)) !important;
+    cursor: default !important;
+    user-select: text;
+}
+
+.transaction-readonly-form .v-field__append-inner .v-icon,
+.transaction-readonly-form .v-field__prepend-inner .v-icon {
+    color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)) !important;
 }
 
 .recurring-match-card {

@@ -155,8 +155,47 @@
                 </div>
             </template>
 
-            <div class="mt-4 cursor-default">
-                <steps-bar min-width="700" :clickable="false" :steps="allSteps" :current-step="currentStep" />
+            <div class="import-flow-progress mt-4 cursor-default" aria-live="polite">
+                <div class="d-flex align-start justify-space-between gap-4 flex-wrap">
+                    <div>
+                        <div class="text-caption text-medium-emphasis">
+                            {{ tt('Import') }} {{ currentFlowProgressIndex + 1 }}/{{ importFlowProgressItems.length }}
+                        </div>
+                        <h5 class="text-subtitle-1 mb-1">{{ currentFlowProgressItem.title }}</h5>
+                        <div class="text-body-2 text-medium-emphasis">{{ currentFlowProgressDetail }}</div>
+                    </div>
+                    <v-chip density="comfortable" color="primary" variant="tonal">
+                        {{ tt('Current') }}
+                    </v-chip>
+                </div>
+
+                <v-progress-linear
+                    class="mt-4"
+                    color="primary"
+                    bg-opacity="0.12"
+                    rounded
+                    height="8"
+                    :model-value="currentFlowProgressValue"
+                />
+
+                <div class="import-flow-progress__trail mt-3" role="list" :aria-label="tt('Import Preview')">
+                    <div
+                        v-for="(item, index) in importFlowProgressItems"
+                        :key="item.key"
+                        role="listitem"
+                        :aria-current="item.active ? 'step' : undefined"
+                        :class="[
+                            'import-flow-progress__step',
+                            {
+                                'import-flow-progress__step--active': item.active,
+                                'import-flow-progress__step--complete': item.complete
+                            }
+                        ]"
+                    >
+                        <span class="import-flow-progress__marker">{{ index + 1 }}</span>
+                        <span class="import-flow-progress__label">{{ item.title }}</span>
+                    </div>
+                </div>
             </div>
 
             <v-window class="disable-tab-transition" v-model="currentStep">
@@ -427,7 +466,6 @@
 </template>
 
 <script setup lang="ts">
-import type { StepBarItem } from '@/components/desktop/StepsBar.vue';
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 import ImportTransactionDefineColumnTab from './tabs/ImportTransactionDefineColumnTab.vue';
@@ -476,6 +514,7 @@ import type { LocalizedImportFileTypeSubType } from '@/core/file.ts';
 import { ImportTransaction, type ImportTransactionResponse } from '@/models/imported_transaction.ts';
 
 import { getCurrentToken } from '@/lib/userstate.ts';
+import { openImportFileDialog } from '@/lib/importFileDialog.ts';
 import services from '@/lib/services.ts';
 import logger from '@/lib/logger.ts';
 import { DEFAULT_IMPORT_API_TIMEOUT, DEFAULT_IMPORT_PARSE_API_TIMEOUT } from '@/consts/api.ts';
@@ -498,6 +537,15 @@ type ImportTransactionExecuteCustomScriptTabType = InstanceType<typeof ImportTra
 type ImportTransactionCheckDataTabType = InstanceType<typeof ImportTransactionCheckDataTab>;
 
 type ImportTransactionDialogStep = 'uploadFile' | 'defineColumn' | 'executeCustomScript' | 'checkData' | 'finalResult';
+type ImportFlowProgressKey = 'selectSource' | 'parseStageRows' | 'reviewPreview' | 'confirmImport' | 'result';
+
+interface ImportFlowProgressItem {
+    complete: boolean;
+    key: ImportFlowProgressKey;
+    title: string;
+    active: boolean;
+}
+
 enum ImportDSVProcessMethod {
     AutoDetect,
     ColumnMapping,
@@ -573,6 +621,21 @@ const PREVIEW_TRANSACTION_TYPE_MAP: Record<string, number> = {
     '转账': 4,
     '投资': 5,
     '退款': 2
+};
+
+const IMPORT_FLOW_PROGRESS_ORDER: ImportFlowProgressKey[] = [
+    'selectSource',
+    'parseStageRows',
+    'reviewPreview',
+    'confirmImport',
+    'result'
+];
+
+const FALLBACK_IMPORT_FLOW_PROGRESS_ITEM: ImportFlowProgressItem = {
+    active: true,
+    complete: false,
+    key: 'selectSource',
+    title: ''
 };
 
 defineProps<{
@@ -659,17 +722,88 @@ const editingImportConfig = ref<ImportConfigMatchResult | null>(null);
 const showCheckDataFilterMenu = ref<boolean>(false);
 const openedCheckDataFilterGroups = ref<string[]>([]);
 
-const allSteps = computed<StepBarItem[]>(() => {
-    const defineColumnSubTitle = unmatchedFilesQueue.value.length > 0
-        ? `${unmatchedFilesQueue.value[currentUnmatchedIndex.value]?.originalName || ''} (${currentUnmatchedIndex.value + 1}/${unmatchedFilesQueue.value.length})`
-        : tt('Map columns to fields');
-    return [
-        { name: 'uploadFile', title: tt('Select File'), subTitle: tt('Select the file to import') },
-        { name: 'defineColumn', title: tt('Define Columns'), subTitle: defineColumnSubTitle },
-        { name: 'executeCustomScript', title: tt('Custom Script'), subTitle: tt('Execute Custom Script') },
-        { name: 'checkData', title: tt('Check Data'), subTitle: tt('Verify and edit data') },
-        { name: 'finalResult', title: tt('Import Result'), subTitle: tt('View import result') }
-    ];
+const importFlowProgressTitleMap = computed<Record<ImportFlowProgressKey, string>>(() => ({
+    selectSource: tt('Select File'),
+    parseStageRows: `${tt('Parser')} / ${tt('Define Columns')}`,
+    reviewPreview: tt('Check Data'),
+    confirmImport: `${tt('Confirm')} ${tt('Import')}`,
+    result: tt('Import Result')
+}));
+
+const currentImportFlowProgressKey = computed<ImportFlowProgressKey>(() => {
+    if (currentStep.value === 'finalResult') {
+        return 'result';
+    }
+
+    if (currentStep.value === 'checkData') {
+        return submitting.value ? 'confirmImport' : 'reviewPreview';
+    }
+
+    if (
+        currentStep.value === 'defineColumn'
+        || currentStep.value === 'executeCustomScript'
+        || (currentStep.value === 'uploadFile' && submitting.value)
+    ) {
+        return 'parseStageRows';
+    }
+
+    return 'selectSource';
+});
+
+const currentFlowProgressIndex = computed<number>(() => {
+    const index = IMPORT_FLOW_PROGRESS_ORDER.indexOf(currentImportFlowProgressKey.value);
+    return index >= 0 ? index : 0;
+});
+
+const importFlowProgressItems = computed<ImportFlowProgressItem[]>(() => {
+    const activeIndex = currentFlowProgressIndex.value;
+    const titles = importFlowProgressTitleMap.value;
+
+    return IMPORT_FLOW_PROGRESS_ORDER.map((key, index) => ({
+        active: index === activeIndex,
+        complete: index < activeIndex,
+        key,
+        title: titles[key]
+    }));
+});
+
+const currentFlowProgressItem = computed<ImportFlowProgressItem>(() => {
+    return importFlowProgressItems.value[currentFlowProgressIndex.value]
+        ?? importFlowProgressItems.value[0]
+        ?? FALLBACK_IMPORT_FLOW_PROGRESS_ITEM;
+});
+
+const currentFlowProgressValue = computed<number>(() => {
+    return ((currentFlowProgressIndex.value + 1) / IMPORT_FLOW_PROGRESS_ORDER.length) * 100;
+});
+
+const currentFlowProgressDetail = computed<string>(() => {
+    if (currentImportFlowProgressKey.value === 'parseStageRows') {
+        if (unmatchedFilesQueue.value.length > 0) {
+            const fileName = unmatchedFilesQueue.value[currentUnmatchedIndex.value]?.originalName || '';
+            return `${fileName} (${currentUnmatchedIndex.value + 1}/${unmatchedFilesQueue.value.length})`;
+        }
+
+        return matchedImportConfig.value?.name || tt('Parser');
+    }
+
+    if (currentImportFlowProgressKey.value === 'reviewPreview') {
+        return previewTotalCount.value > 0
+            ? tt('format.misc.previewCount', { count: getDisplayCount(previewTotalCount.value) })
+            : tt('Import Preview');
+    }
+
+    if (currentImportFlowProgressKey.value === 'confirmImport') {
+        return importProcess.value > 0
+            ? tt('format.misc.importingTransactions', { process: formatNumberToLocalizedNumerals(importProcess.value, 2) })
+            : tt('Confirm');
+    }
+
+    if (currentImportFlowProgressKey.value === 'result') {
+        return tt('format.misc.importTransactionResult', { count: getDisplayCount(importedCount.value || 0) });
+    }
+
+    return fileName.value || supportedImportFileExtensions.value;
 });
 
 const fileType = computed<string>(() => {
@@ -907,12 +1041,16 @@ function open(): Promise<void> {
     });
 }
 
-function showOpenFileDialog(): void {
+async function showOpenFileDialog(): Promise<void> {
     if (submitting.value) {
         return;
     }
 
-    fileInput.value?.click();
+    await openImportFileDialog({
+        accept: supportedImportFileExtensions.value,
+        fileInput: fileInput.value,
+        onFilesSelected: setSelectedImportFiles
+    });
 }
 
 function setImportFile(event: Event): void {
@@ -926,11 +1064,15 @@ function setImportFile(event: Event): void {
         return;
     }
 
-    importFiles.value = Array.from(el.files);
+    setSelectedImportFiles(Array.from(el.files));
+    el.value = '';
+}
+
+function setSelectedImportFiles(files: readonly File[]): void {
+    importFiles.value = Array.from(files);
     processDSVMethod.value = ImportDSVProcessMethod.AutoDetect;
     matchedImportConfig.value = null;
     parsedFileData.value = undefined;
-    el.value = '';
 }
 
 function looksLikeStructuredBillStatementFile(file?: File): boolean {
@@ -2075,6 +2217,68 @@ defineExpose({
 </script>
 
 <style scoped>
+.import-flow-progress {
+    border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+    border-radius: 16px;
+    padding: 16px;
+    background: rgba(var(--v-theme-surface), 0.78);
+}
+
+.import-flow-progress__trail {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.import-flow-progress__step {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    color: rgba(var(--v-theme-on-surface), 0.58);
+    font-size: 0.78rem;
+}
+
+.import-flow-progress__marker {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 24px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 1px solid rgba(var(--v-theme-on-surface), 0.18);
+    color: currentColor;
+    font-weight: 700;
+}
+
+.import-flow-progress__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.import-flow-progress__step--active {
+    color: rgb(var(--v-theme-primary));
+    font-weight: 700;
+}
+
+.import-flow-progress__step--complete {
+    color: rgba(var(--v-theme-on-surface), 0.78);
+}
+
+.import-flow-progress__step--active .import-flow-progress__marker,
+.import-flow-progress__step--complete .import-flow-progress__marker {
+    border-color: rgb(var(--v-theme-primary));
+    background: rgba(var(--v-theme-primary), 0.12);
+}
+
+@media (max-width: 700px) {
+    .import-flow-progress__trail {
+        grid-template-columns: 1fr;
+    }
+}
+
 .import-check-data-filter-drawer :deep(.v-navigation-drawer__content) {
     display: flex;
     flex-direction: column;

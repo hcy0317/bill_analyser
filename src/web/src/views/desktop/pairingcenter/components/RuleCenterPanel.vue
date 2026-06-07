@@ -36,7 +36,7 @@
                 <v-tabs-window v-model="activeTab">
                     <!-- Category Rules -->
                     <v-tabs-window-item v-if="hasTab('rules')" value="rules">
-                        <Teleport :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
+                        <Teleport defer :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
                         <div
                             class="rule-center-table-toolbar d-flex flex-column flex-lg-row align-lg-center ga-3"
                             :class="{
@@ -556,10 +556,20 @@
     </v-row>
 
     <!-- Create / Edit Dialog -->
-    <v-dialog v-model="showEditDialog" max-width="700" persistent>
-        <v-card>
-            <v-card-title>{{ editingRule ? tt('Edit Rule') : tt('Create Rule') }}</v-card-title>
-            <v-card-text>
+    <v-dialog
+        v-model="showEditDialog"
+        class="rule-center-edit-dialog"
+        width="calc(100vw - 32px)"
+        max-width="700"
+        persistent
+    >
+        <v-card class="rule-center-edit-card pa-2 pa-sm-4 pa-md-8">
+            <template #title>
+                <div class="d-flex w-100 align-center justify-center">
+                    <h4 class="text-h4">{{ editingRule ? tt('Edit Rule') : tt('Create Rule') }}</h4>
+                </div>
+            </template>
+            <v-card-text class="rule-center-edit-dialog-content mt-md-4 pt-0">
                 <v-form ref="ruleFormRef">
                     <two-column-select
                         v-model="ruleForm.category_id"
@@ -599,11 +609,16 @@
                     />
                 </v-form>
             </v-card-text>
-            <v-card-actions>
-                <v-spacer />
-                <v-btn @click="showEditDialog = false">{{ tt('Cancel') }}</v-btn>
-                <v-btn color="primary" :loading="saving" @click="saveRule">{{ tt('Save') }}</v-btn>
-            </v-card-actions>
+            <v-card-text class="overflow-y-visible">
+                <div class="rule-center-edit-dialog-actions w-100 d-flex justify-center mt-2 mt-sm-4 mt-md-6 gap-4">
+                    <v-btn variant="tonal" :disabled="saving" @click="showEditDialog = false">
+                        {{ tt('Cancel') }}
+                    </v-btn>
+                    <v-btn color="primary" :loading="saving" @click="saveRule">
+                        {{ tt('Save') }}
+                    </v-btn>
+                </div>
+            </v-card-text>
         </v-card>
     </v-dialog>
 
@@ -2028,6 +2043,15 @@ defineExpose({
     justify-content: center;
     gap: 2px;
     flex-wrap: nowrap;
+}
+
+.rule-center-edit-dialog-content {
+    max-height: min(64vh, 640px);
+    overflow-y: auto;
+}
+
+.rule-center-edit-dialog-actions {
+    align-items: center;
 }
 
 .rule-center-target-expression-line {

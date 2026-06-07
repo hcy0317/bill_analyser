@@ -136,6 +136,18 @@ describe('i18n key contract for reported warning surfaces', () => {
         }
     });
 
+    test('account matching rule builder title exists in active locales', () => {
+        const accountEditDialog = readSource('src/views/desktop/accounts/list/dialogs/EditDialog.vue');
+
+        expect(accountEditDialog).toContain('title="Account Matching"');
+
+        for (const locale of activeLocales) {
+            const messages = readLocale(locale);
+
+            expect(messages).toHaveProperty('Account Matching');
+        }
+    });
+
     test('default locale contains every statically referenced translation key', () => {
         const defaultMessages = readLocale(DEFAULT_LANGUAGE);
         const missingKeys = staticTranslationKeys.filter(key => !hasLocaleKey(defaultMessages, key));

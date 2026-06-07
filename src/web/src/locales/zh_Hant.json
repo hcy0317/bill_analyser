@@ -2641,6 +2641,7 @@
     "LLM session analysis cannot run because the import session is missing.": "匯入會話不存在，無法執行 LLM 會話分析。",
     "Too many preview rows selected for LLM session analysis.": "所選預覽列過多，無法執行 LLM 會話分析。",
     "Category Matching": "分類匹配",
+    "Account Matching": "帳戶匹配",
     "Category Matching Rule Expression": "分類匹配規則表達式",
     "Add Rule Block": "新增規則區塊",
     "No rule expression defined yet": "尚未定義規則表達式",

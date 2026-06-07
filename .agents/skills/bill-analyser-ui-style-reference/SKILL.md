@@ -75,6 +75,7 @@ Use this skill when you are:
 - For dialogs:
   - prefer `v-dialog > v-card > v-toolbar + v-card-text + v-card-actions`
   - use `ConfirmDialog.vue` as the action hierarchy reference
+  - for desktop add/edit forms that mirror account edit/new-account flows, use viewport-aware dialog width, padded cards (`pa-2 pa-sm-4 pa-md-8` or equivalent), centered `text-h4` title slots, content spacing aligned with account edit, and centered bottom primary/secondary actions instead of compact toolbars
 
 ## Mobile Conventions (Framework7)
 

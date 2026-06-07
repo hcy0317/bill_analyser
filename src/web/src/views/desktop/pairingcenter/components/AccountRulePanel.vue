@@ -242,10 +242,20 @@
         </v-col>
     </v-row>
 
-    <v-dialog v-model="showEditDialog" max-width="720" persistent>
-        <v-card>
-            <v-card-title>{{ editingRule ? tt('Edit Rule') : tt('Create Rule') }}</v-card-title>
-            <v-card-text>
+    <v-dialog
+        v-model="showEditDialog"
+        class="account-rule-edit-dialog"
+        width="calc(100vw - 32px)"
+        max-width="720"
+        persistent
+    >
+        <v-card class="account-rule-edit-card pa-2 pa-sm-4 pa-md-8">
+            <template #title>
+                <div class="d-flex w-100 align-center justify-center">
+                    <h4 class="text-h4">{{ editingRule ? tt('Edit Rule') : tt('Create Rule') }}</h4>
+                </div>
+            </template>
+            <v-card-text class="account-rule-edit-dialog-content mt-md-4 pt-0">
                 <v-form>
                     <v-row>
                         <v-col cols="12" md="7">
@@ -289,11 +299,16 @@
                     </v-row>
                 </v-form>
             </v-card-text>
-            <v-card-actions>
-                <v-spacer />
-                <v-btn @click="showEditDialog = false">{{ tt('Cancel') }}</v-btn>
-                <v-btn color="primary" :loading="saving" @click="saveRule">{{ tt('Save') }}</v-btn>
-            </v-card-actions>
+            <v-card-text class="overflow-y-visible">
+                <div class="account-rule-edit-dialog-actions w-100 d-flex justify-center mt-2 mt-sm-4 mt-md-6 gap-4">
+                    <v-btn variant="tonal" :disabled="saving" @click="showEditDialog = false">
+                        {{ tt('Cancel') }}
+                    </v-btn>
+                    <v-btn color="primary" :loading="saving" @click="saveRule">
+                        {{ tt('Save') }}
+                    </v-btn>
+                </div>
+            </v-card-text>
         </v-card>
     </v-dialog>
 
@@ -849,6 +864,15 @@ defineExpose({
     gap: 2px;
     flex: 0 0 auto;
     flex-wrap: nowrap;
+}
+
+.account-rule-edit-dialog-content {
+    max-height: min(64vh, 640px);
+    overflow-y: auto;
+}
+
+.account-rule-edit-dialog-actions {
+    align-items: center;
 }
 
 @media (max-width: 960px) {
