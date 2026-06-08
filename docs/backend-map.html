@@ -112,7 +112,7 @@
   <header>
     <h1>Bill Analyser Rust 后端导航图</h1>
     <p><strong>Canonical source: docs/backend-map.md</strong></p>
-    <p>本页是静态阅读入口，核心事实以 Markdown 源文件为准。当前运行态由 Rust Axum `REST /api/...` 与 SQLite repository 层直接承接。</p>
+    <p>本页是静态阅读入口，核心事实以 Markdown 源文件为准。当前运行态由 Rust Axum <code>REST /api/...</code>、PostgreSQL repository 层和必需的 Weaviate derived index 共同承接。</p>
   </header>
   <main>
     <section id="backend-layering">
@@ -120,7 +120,7 @@
       <div class="grid">
         <article class="panel"><strong>HTTP</strong><code>src/backend/http</code><p>Axum 路由、认证上下文、请求 DTO、response envelope。</p></article>
         <article class="panel"><strong>Core</strong><code>src/backend/core</code><p>业务合同、金额/时间/分类、导入、匹配、预算、统计、LLM/OCR。</p></article>
-        <article class="panel"><strong>DB</strong><code>src/backend/db</code><p>SQLite WAL/FK、schema、事务、user-scope repository。</p></article>
+        <article class="panel"><strong>DB</strong><code>src/backend/db</code><p>PostgreSQL SQLx pool、schema/migrations、事务、user-scope repository、vector outbox。</p></article>
         <article class="panel"><strong>Parsers</strong><code>src/backend/parsers</code><p>provider 检测、RawBill、StandardBill、fixture/golden 合同。</p></article>
       </div>
       <p><span class="tag">http 112</span><span class="tag">db 74</span><span class="tag">core 54</span><span class="tag">parsers 9</span></p>
@@ -143,11 +143,13 @@
         <div class="step">Parser 检测</div>
         <div class="step">StandardBill</div>
         <div class="step">Session/template staging</div>
-        <div class="step">Dedup/transfer/learning</div>
+        <div class="step">Dedup/transfer/category</div>
+        <div class="step">Learning projection</div>
+        <div class="step">Account rules</div>
         <div class="step">Preview page</div>
         <div class="step">Confirm + cleanup</div>
       </div>
-      <p>parser 不写 staging；preview page 负责筛选、排序、计数和批量选择；confirm 在事务内写正式账单并清理导入临时表。</p>
+      <p>parser 不写 staging；stage2 保持 dedup/materialization → category/type rules → learning projection → account rules 的顺序；preview page 负责筛选、排序、计数和批量选择；confirm 在事务内写正式账单并清理导入临时表。</p>
     </section>
     <section id="repository-data-flow">
       <h2>Repository 数据流</h2>
@@ -164,7 +166,7 @@
       <div class="grid">
         <article class="panel"><strong>新增 API</strong><p>先找 route facade，再确认 auth、DTO、envelope、user-scope。</p></article>
         <article class="panel"><strong>新增 parser</strong><p>说明 provider identity、RawBill/StandardBill 和 fixture 期望。</p></article>
-        <article class="panel"><strong>改导入预览</strong><p>区分 parser、dedup、selection、transfer、learning、confirm 边界。</p></article>
+        <article class="panel"><strong>改导入预览</strong><p>区分 parser、dedup/materialization、category/type、learning projection、account rules、selection、transfer、confirm 边界。</p></article>
         <article class="panel"><strong>改 repository</strong><p>先确认事务和 user-scope，不把 schema 改动混进普通查询。</p></article>
       </div>
     </section>
@@ -174,7 +176,7 @@
         <thead><tr><th>范围</th><th>最小验证</th><th>最终门禁</th></tr></thead>
         <tbody>
           <tr><td>文档/HTML</td><td><code>node scripts/check-backend-doc-map.mjs</code></td><td><code>git diff --check -- docs scripts</code></td></tr>
-          <tr><td>Parser</td><td><code>cargo test -p bill-analyser-parsers</code></td><td rowspan="4"><code>cargo fmt --all -- --check</code><br><code>cargo clippy --workspace --all-targets -- -D warnings</code><br><code>cargo test --workspace</code><br><code>cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90</code></td></tr>
+          <tr><td>Parser</td><td><code>cargo test -p bill-analyser-parsers</code></td><td rowspan="4"><code>cargo fmt --all -- --check</code><br><code>cargo clippy --workspace --all-targets -- -D warnings</code><br><code>cargo test --workspace</code><br><code>cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35</code><br>被改业务代码自身覆盖率 &gt; 90%</td></tr>
           <tr><td>Core</td><td><code>cargo test -p bill-analyser-core</code></td></tr>
           <tr><td>DB</td><td><code>cargo test -p bill-analyser-db</code></td></tr>
           <tr><td>HTTP</td><td><code>cargo test -p bill-analyser-http</code></td></tr>

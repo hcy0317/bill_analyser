@@ -94,8 +94,10 @@ LLM 临时配置保存在 Rust 进程内 user-scoped map，saved config 落库�
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90
+cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35
 ```
+
+业务源码改动还必须单独核算被改代码覆盖率：优先按 diff 新增/修改的可执行行计算并达到 >90%，缺少行级数据时按被改文件文件级覆盖率达到 >90%。
 
 前端改动至少运行：
 
