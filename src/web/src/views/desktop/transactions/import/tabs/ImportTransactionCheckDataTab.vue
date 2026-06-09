@@ -832,6 +832,12 @@ import {
     resolveImportPreviewDefaultTransferCategoryId,
     type ImportPreviewRecord
 } from '../importPreview.ts';
+import {
+    getImportPreviewTransactionTypeNumber
+} from '../importPreviewTransaction.ts';
+import {
+    buildImportPreviewUpdateFromTransaction
+} from '../importPreviewUpdates.ts';
 import { cloneImportPreviewDraftTransaction } from '../importPreviewDrafts.ts';
 import {
     buildImportPreviewServerQueryFilters,
@@ -2060,25 +2066,6 @@ function isLLMDecisionBusy(item: ImportTransaction): boolean {
     return previewId !== null && hasDecisionLoadingId(llmDecisionLoadingIds.value, previewId);
 }
 
-function getPreviewTransactionTypeNumber(previewType?: string): number | undefined {
-    const normalizedPreviewType = (previewType || '').trim();
-
-    if (normalizedPreviewType === '收入') {
-        return TransactionType.Income;
-    }
-    if (normalizedPreviewType === '支出') {
-        return TransactionType.Expense;
-    }
-    if (normalizedPreviewType === '转账') {
-        return TransactionType.Transfer;
-    }
-    if (normalizedPreviewType === '投资') {
-        return TransactionType.Investment;
-    }
-
-    return undefined;
-}
-
 function getTransferDecisionExpectedState(item: ImportTransaction): Record<string, string | number | null> {
     return buildImportCheckDecisionExpectedState({
         sessionId: props.sessionId || '',
@@ -2191,7 +2178,7 @@ function resolvePreviewDecisionItem(
 
 function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData: ImportPreviewRecord): void {
     const previousType = item.type;
-    const nextType = getPreviewTransactionTypeNumber(previewData.preview_type);
+    const nextType = getImportPreviewTransactionTypeNumber(previewData.preview_type);
     if (nextType !== undefined) {
         item.type = nextType;
     }
@@ -2208,7 +2195,7 @@ function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData
     item.sourceAmount = convertImportPreviewAmountToCents(previewData.preview_amount, item.sourceAmount || 0);
     item.destinationAmount = convertImportPreviewAmountToCents(previewData.preview_destination_amount, item.destinationAmount || 0);
 
-    item.suggestedType = getPreviewTransactionTypeNumber(previewData.suggested_preview_type);
+    item.suggestedType = getImportPreviewTransactionTypeNumber(previewData.suggested_preview_type);
     item.transferSuggestionScore = Number(previewData.transfer_suggestion_score || 0);
     item.transferSuggestionLevel = previewData.transfer_suggestion_level || '';
     item.transferSuggestionReason = previewData.transfer_suggestion_reason || '';
@@ -3172,45 +3159,20 @@ function buildPreviewUpdates(options: { selectedOnly: boolean }): Record<string,
     const transactions = getTrackedTransactionsForSelection().filter(transaction => (
         !options.selectedOnly || transaction.selected
     ));
-    const typeReverseMap: Record<number, string> = {
-        2: '收入',
-        3: '支出',
-        4: '转账',
-        5: '投资'
-    };
 
     return transactions.map(transaction => {
         const categoryPath = getAcceptedCategoryPathForTransaction(transaction);
         const clearTransferDecision = shouldClearTransferDecisionOnSync(transaction);
         const clearLearningDecision = shouldClearLearningDecisionOnSync(transaction);
         const clearLlmDecision = shouldClearLlmDecisionOnSync(transaction);
-        const clearActionableSuggestions = [
-            clearTransferDecision ? 'transfer' : '',
-            clearLearningDecision ? 'learning' : '',
-            clearLlmDecision ? 'llm' : ''
-        ].filter(Boolean);
-        return {
-            id: (transaction as { _previewId?: number })._previewId,
-            preview_type: typeReverseMap[transaction.type] || '支出',
-            preview_amount: transaction.sourceAmount / 100,
-            preview_destination_amount: transaction.destinationAmount / 100,
-            preview_source_account_id: transaction.sourceAccountId ? parseInt(transaction.sourceAccountId, 10) : null,
-            preview_destination_account_id: transaction.destinationAccountId ? parseInt(transaction.destinationAccountId, 10) : null,
-            preview_recurring_id: transaction.recurringTemplateId ? parseInt(transaction.recurringTemplateId, 10) : null,
-            preview_recurring_name: transaction.recurringTemplateName || '',
-            preview_recurring_candidate_count: transaction.recurringCandidateCount || 0,
-            preview_recurring_match_score: transaction.recurringMatchScore || 0,
-            preview_recurring_match_reasons: transaction.recurringMatchReasons || '',
-            preview_recurring_matched_date: transaction.recurringMatchedDate || '',
-            category_id: categoryPath ? parseInt(categoryPath.id, 10) : null,
-            preview_main_category: categoryPath?.mainCategory || '',
-            preview_sub_category: categoryPath?.subCategory || '',
-            clear_transfer_decision: clearTransferDecision,
-            clear_learning_decision: clearLearningDecision,
-            clear_llm_decision: clearLlmDecision,
-            clear_actionable_suggestions: clearActionableSuggestions,
-            selected: transaction.selected
-        };
+
+        return buildImportPreviewUpdateFromTransaction(transaction, {
+            categoryPath,
+            clearTransferDecision,
+            clearLearningDecision,
+            clearLlmDecision,
+            includeSuggestionDecisionClears: true
+        });
     }).filter(item => !!item.id);
 }
 

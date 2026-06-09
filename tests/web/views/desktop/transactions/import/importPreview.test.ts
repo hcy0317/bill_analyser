@@ -11,7 +11,7 @@ import {
 } from '@/views/desktop/transactions/import/importPreview.ts';
 
 function readSource(relativePath: string): string {
-    return fs.readFileSync(path.resolve(process.cwd(), relativePath), 'utf-8');
+    return fs.readFileSync(path.resolve(process.cwd(), relativePath), 'utf-8').replace(/\r\n/g, '\n');
 }
 
 const categoriesById = {
@@ -309,6 +309,7 @@ describe('import preview server-paged reset guards', () => {
     test('check-data manual edits clear only actionable suggestion families', () => {
         const typeSource = readSource('src/views/desktop/transactions/import/checkDataTypes.ts');
         const tabSource = readSource('src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue');
+        const updateSource = readSource('src/views/desktop/transactions/import/importPreviewUpdates.ts');
 
         expect(typeSource).toContain('_shouldClearTransferDecision?: boolean;');
         expect(typeSource).toContain('_shouldClearLearningDecision?: boolean;');
@@ -318,11 +319,13 @@ describe('import preview server-paged reset guards', () => {
         expect(tabSource).toContain('if (previewState._shouldClearLearningDecision) {');
         expect(tabSource).toContain('if (!item.hasPendingLearningRecommendation()) {');
         expect(tabSource).toContain('if (previewState._shouldClearLlmDecision) {');
-        expect(tabSource).toContain("clearLearningDecision ? 'learning' : ''");
-        expect(tabSource).toContain("clearLlmDecision ? 'llm' : ''");
-        expect(tabSource).toContain('clear_learning_decision: clearLearningDecision,');
-        expect(tabSource).toContain('clear_llm_decision: clearLlmDecision,');
-        expect(tabSource).toContain('clear_actionable_suggestions: clearActionableSuggestions,');
+        expect(tabSource).toContain('buildImportPreviewUpdateFromTransaction(transaction, {');
+        expect(tabSource).toContain('includeSuggestionDecisionClears: true');
+        expect(updateSource).toContain("clearLearningDecision ? 'learning' : ''");
+        expect(updateSource).toContain("clearLlmDecision ? 'llm' : ''");
+        expect(updateSource).toContain("update['clear_learning_decision'] = clearLearningDecision;");
+        expect(updateSource).toContain("update['clear_llm_decision'] = clearLlmDecision;");
+        expect(updateSource).toContain("update['clear_actionable_suggestions'] = clearActionableSuggestions;");
         expect(tabSource.match(/syncTransferDecisionDraftState\(/g)).toHaveLength(3);
     });
 

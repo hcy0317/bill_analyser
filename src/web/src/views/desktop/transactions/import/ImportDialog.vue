@@ -473,10 +473,17 @@ import ImportTransactionExecuteCustomScriptTab from './tabs/ImportTransactionExe
 import ImportTransactionCheckDataTab from './tabs/ImportTransactionCheckDataTab.vue';
 import {
     resolveImportPreviewCategoryPath,
-    resolveImportPreviewCategoryId,
-    resolveImportPreviewDefaultTransferCategoryId,
     type ImportPreviewRecord
 } from './importPreview.ts';
+import {
+    buildImportTransactionFromPreviewRecord,
+    type ImportPreviewTransactionDraft
+} from './importPreviewTransaction.ts';
+import {
+    buildImportPreviewUpdateFromTransaction,
+    getPreviewIdFromImportTransaction,
+    getPreviewUpdateId
+} from './importPreviewUpdates.ts';
 import type {
     ImportPreviewMetadata,
     ImportPreviewServerQueryFilters,
@@ -496,7 +503,6 @@ import {
 import { ref, computed, nextTick, useTemplateRef, watch } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
-import { getTimezoneOffsetMinutes } from '@/lib/datetime.ts';
 
 import { useAccountsStore } from '@/stores/account.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
@@ -511,7 +517,7 @@ import { type NumeralSystem } from '@/core/numeral.ts';
 import { CategoryType } from '@/core/category.ts';
 
 import type { LocalizedImportFileTypeSubType } from '@/core/file.ts';
-import { ImportTransaction, type ImportTransactionResponse } from '@/models/imported_transaction.ts';
+import { ImportTransaction } from '@/models/imported_transaction.ts';
 
 import { getCurrentToken } from '@/lib/userstate.ts';
 import { openImportFileDialog } from '@/lib/importFileDialog.ts';
@@ -605,23 +611,10 @@ interface ImportFieldMappings {
     tagSeparator?: string;
 }
 
-type ImportTransactionWithPreviewId = ImportTransaction & {
-    _previewId?: number;
-    _shouldClearTransferDecision?: boolean;
-};
-
 interface ImportTransactionCheckDataFilterMenuGroup {
     title: string;
     summary?: string;
 }
-
-const PREVIEW_TRANSACTION_TYPE_MAP: Record<string, number> = {
-    '支出': 3,
-    '收入': 2,
-    '转账': 4,
-    '投资': 5,
-    '退款': 2
-};
 
 const IMPORT_FLOW_PROGRESS_ORDER: ImportFlowProgressKey[] = [
     'selectSource',
@@ -907,14 +900,6 @@ function normalizeImportConfigMatchResult(config: Partial<ImportConfigMatchResul
         matchScore: config.matchScore,
         matchReason: config.matchReason
     };
-}
-
-function getPreviewTransactionType(previewType?: string): number | undefined {
-    if (!previewType) {
-        return undefined;
-    }
-
-    return PREVIEW_TRANSACTION_TYPE_MAP[previewType];
 }
 
 function isActiveCheckDataFilterGroup(summary?: string): boolean {
@@ -1402,18 +1387,6 @@ function normalizePreviewPageSortDirection(value: string | null | undefined): 'a
     return String(value || '').toLowerCase() === 'desc' ? 'desc' : 'asc';
 }
 
-function getDefaultPreviewCategoryId(type: number): string {
-    if (type !== 4) {
-        return '';
-    }
-
-    return resolveImportPreviewDefaultTransferCategoryId(
-        transactionCategoriesStore.allTransactionCategoriesMap,
-        transactionCategoriesStore.allTransactionCategories[CategoryType.Transfer],
-        userStore.currentUserCashTransferCategoryId
-    );
-}
-
 const PREVIEW_PAGE_FILTER_PARAM_NAMES: Record<keyof ImportPreviewServerQueryFilters, string> = {
     minDatetime: 'min_datetime',
     maxDatetime: 'max_datetime',
@@ -1691,102 +1664,12 @@ async function parseData(): Promise<void> {
  * 将后端预览数据转换为前端导入交易格式
  */
 function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: number): ImportTransaction {
-    const type = getPreviewTransactionType(item.preview_type) ?? 3;
-
-    // 解析时间
-    const timeStr = item.preview_date || '';
-    const time = new Date(timeStr).getTime() / 1000;
-
-    // 金额转换：后端是元，前端期望分
-    const amountInCents = Math.round(Math.abs(item.preview_amount || 0) * 100);
-    const destAmountInCents = Math.round(Math.abs(item.preview_destination_amount || 0) * 100);
-
-    // Prefer the persisted preview category id, then verify any name fallback against real categories.
-    const mainCat = item.preview_main_category || '';
-    const subCat = item.preview_sub_category || '';
-    const categoryId = resolveImportPreviewCategoryId(
-        item,
-        transactionCategoriesStore.allTransactionCategoriesMap
-    ) || getDefaultPreviewCategoryId(type);
-    const categoryPath = resolveImportPreviewCategoryPath(
-        categoryId,
-        transactionCategoriesStore.allTransactionCategoriesMap
-    );
-
-    // 账户ID
-    const sourceAccountId = item.preview_source_account_id ? String(item.preview_source_account_id) : '';
-    const destAccountId = item.preview_destination_account_id ? String(item.preview_destination_account_id) : '';
-
-    // 时区
-    const currentTimezone = settingsStore.appSettings.timeZone;
-    const defaultUtcOffset = getTimezoneOffsetMinutes(currentTimezone);
-    const parserId = item.preview_parser_id || item.matching?.parser?.id || '';
-    const parserTags = Array.isArray(item.preview_parser_tags)
-        ? item.preview_parser_tags
-        : (item.matching?.parser?.tags || []);
-    const matchingPayload = item.matching || parserId || parserTags.length > 0
-        ? {
-            ...(item.matching || {}),
-            parser: {
-                ...(item.matching?.parser || {}),
-                id: parserId,
-                tags: parserTags
-            }
-        } as ImportTransactionResponse['matching']
-        : undefined;
-
-    const responseItem: ImportTransactionResponse = {
-        type: type,
-        categoryId: categoryId,
-        originalCategoryName: subCat || mainCat || categoryPath?.displayCategory || '',
-        time: isNaN(time) ? Date.now() / 1000 : time,
-        utcOffset: defaultUtcOffset,
-        sourceAccountId: sourceAccountId,
-        originalSourceAccountName: item.preview_payment_method || '',
-        originalSourceAccountCurrency: 'CNY',
-        destinationAccountId: destAccountId,
-        sourceAmount: amountInCents,
-        // v6.55: 转账和投资类型都使用目标金额
-        destinationAmount: (type === 4 || type === 5) ? destAmountInCents || amountInCents : amountInCents,
-        tagIds: [],
-        originalTagNames: [],
-        comment: item.preview_description || '',
-        counterparty: item.preview_counterparty || '',
-        paymentMethod: item.preview_payment_method || '',
-        suggestedType: getPreviewTransactionType(item.suggested_preview_type),
-        transferSuggestionScore: Number(item.transfer_suggestion_score || 0),
-        transferSuggestionLevel: item.transfer_suggestion_level || '',
-        transferSuggestionReason: item.transfer_suggestion_reason || '',
-        investmentSignalScore: Number(item.investment_signal_score || 0),
-        investmentSignalLevel: item.investment_signal_level || '',
-        investmentSignalReason: item.investment_signal_reason || '',
-        learningRecommendationScore: Number(item.learning_recommendation_score || 0),
-        learningRecommendationLevel: item.learning_recommendation_level || '',
-        learningRecommendationReason: item.learning_recommendation_reason || '',
-        learningRecommendationType: item.learning_recommendation_type || '',
-        learningRecommendationSummary: item.learning_recommendation_summary || '',
-        investmentPlatform: item.investment_platform || '',
-        investmentProduct: item.investment_product || '',
-        recurringTemplateId: item.preview_recurring_id ? String(item.preview_recurring_id) : '',
-        recurringTemplateName: item.preview_recurring_name || '',
-        recurringCandidateCount: Number(item.preview_recurring_candidate_count || 0),
-        recurringMatchScore: Number(item.preview_recurring_match_score || 0),
-        recurringMatchReasons: item.preview_recurring_match_reasons || '',
-        recurringMatchedDate: item.preview_recurring_matched_date || '',
-        dedupType: item.dedup_type || '',
-        dedupSourceIds: item.dedup_source_ids || [],
-        matching: matchingPayload,
-        isManuallyAnnotated: !!item.preview_is_manually_annotated,
-        selected: !!(item.preview_selected ?? item.selected)
-    };
-
-    // 添加预览表ID和解析器来源，用于阶段3确认导入
-    const previewIndex = typeof item.id === 'number' ? item.id : index;
-    const transaction = ImportTransaction.of(responseItem, previewIndex);
-    const previewTransaction = transaction as ImportTransactionWithPreviewId;
-    previewTransaction._previewId = item.id;  // 保存预览表记录ID
-
-    return transaction;
+    return buildImportTransactionFromPreviewRecord(item, index, {
+        categoriesById: transactionCategoriesStore.allTransactionCategoriesMap,
+        transferCategories: transactionCategoriesStore.allTransactionCategories[CategoryType.Transfer],
+        cashTransferCategoryId: userStore.currentUserCashTransferCategoryId,
+        timeZone: settingsStore.appSettings.timeZone
+    });
 }
 
 /**
@@ -1846,8 +1729,7 @@ async function cleanupServerSession(): Promise<void> {
 }
 
 function getPreviewIdFromTransaction(transaction: ImportTransaction): number | null {
-    const previewId = (transaction as ImportTransactionWithPreviewId)._previewId;
-    return typeof previewId === 'number' && Number.isFinite(previewId) && previewId > 0 ? previewId : null;
+    return getPreviewIdFromImportTransaction(transaction);
 }
 
 function getHistoryRewriteOperationFromTransaction(
@@ -1861,12 +1743,6 @@ function getHistoryRewriteOperationFromTransaction(
         reconciliationAcknowledgementToken: transaction.matching?.reconciliation?.acknowledgement_token,
         reconciliationDestructiveAckRequired: !!transaction.matching?.reconciliation?.destructive_ack_required
     });
-}
-
-function getPreviewUpdateId(update: Record<string, unknown>): number | null {
-    const rawId = update['id'];
-    const numericId = typeof rawId === 'number' ? rawId : Number(String(rawId || '').trim());
-    return Number.isFinite(numericId) && numericId > 0 ? Math.trunc(numericId) : null;
 }
 
 async function fetchSelectedPreviewTransactionsForConfirm(
@@ -2083,43 +1959,20 @@ async function submit(): Promise<void> {
             const previewUpdates = serverPagedPreviewMode.value
                 ? selectedPreviewUpdates
                 : selectedTransactions.map(t => {
-                // 类型反向映射
-                const typeReverseMap: Record<number, string> = {
-                    2: '收入',
-                    3: '支出',
-                    4: '转账',
-                    5: '投资'
-                };
+                    const rawCategoryPath = resolveImportPreviewCategoryPath(
+                        t.categoryId,
+                        transactionCategoriesStore.allTransactionCategoriesMap
+                    );
+                    const categoryPath = rawCategoryPath
+                        && (rawCategoryPath.type === null || rawCategoryPath.type === t.type)
+                        ? rawCategoryPath
+                        : null;
 
-                const rawCategoryPath = resolveImportPreviewCategoryPath(
-                    t.categoryId,
-                    transactionCategoriesStore.allTransactionCategoriesMap
-                );
-                const categoryPath = rawCategoryPath
-                    && (rawCategoryPath.type === null || rawCategoryPath.type === t.type)
-                    ? rawCategoryPath
-                    : null;
-
-                return {
-                    id: (t as ImportTransactionWithPreviewId)._previewId,
-                    preview_type: typeReverseMap[t.type] || '支出',
-                    preview_amount: t.sourceAmount / 100,  // 分转元
-                    preview_destination_amount: t.destinationAmount / 100,
-                    preview_source_account_id: t.sourceAccountId ? parseInt(t.sourceAccountId) : null,
-                    preview_destination_account_id: t.destinationAccountId ? parseInt(t.destinationAccountId) : null,
-                    preview_recurring_id: t.recurringTemplateId ? parseInt(t.recurringTemplateId) : null,
-                    preview_recurring_name: t.recurringTemplateName || '',
-                    preview_recurring_candidate_count: t.recurringCandidateCount || 0,
-                    preview_recurring_match_score: t.recurringMatchScore || 0,
-                    preview_recurring_match_reasons: t.recurringMatchReasons || '',
-                    preview_recurring_matched_date: t.recurringMatchedDate || '',
-                    category_id: categoryPath ? parseInt(categoryPath.id, 10) : null,
-                    preview_main_category: categoryPath?.mainCategory || '',
-                    preview_sub_category: categoryPath?.subCategory || '',
-                    clear_transfer_decision: !!(t as ImportTransactionWithPreviewId)._shouldClearTransferDecision,
-                    selected: t.selected
-                };
-            });
+                    return buildImportPreviewUpdateFromTransaction(t, {
+                        categoryPath,
+                        clearTransferDecision: !!(t as ImportPreviewTransactionDraft)._shouldClearTransferDecision
+                    });
+                });
 
             const token = getCurrentToken();
             const headers: Record<string, string> = {
