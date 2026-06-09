@@ -55,5 +55,9 @@ path = "bin/bill_weaviate_derived_index.rs"
 name = "weaviate_runtime_contract"
 path = "../../../tests/backend/http/weaviate_runtime_contract.rs"
 
+[[test]]
+name = "import_runtime_contract"
+path = "../../../tests/backend/http/import_runtime_contract.rs"
+
 [lints]
 workspace = true

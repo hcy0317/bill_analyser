@@ -184,6 +184,31 @@ fn preview_matching_payload_preserves_sparse_feedback_extras_and_parser_aliases(
 }
 
 #[test]
+fn preview_matching_payload_preserves_stage2_baseline_snapshot() {
+    let preview = json!({
+        "preview_type": "支出",
+        "preview_main_category": "餐饮",
+        "preview_sub_category": "午餐",
+        "preview_source_account_id": 42,
+        "preview_matching_feedback": {
+            "stage2_baseline": {
+                "preview_type": "支出",
+                "preview_main_category": "餐饮",
+                "preview_sub_category": "午餐",
+                "preview_source_account_id": 42,
+                "preview_destination_account_id": null
+            }
+        }
+    });
+    let matching = build_import_preview_matching_payload(preview.as_object().unwrap());
+
+    assert_eq!(matching["stage2_baseline"]["preview_type"], "支出");
+    assert_eq!(matching["stage2_baseline"]["preview_main_category"], "餐饮");
+    assert_eq!(matching["stage2_baseline"]["preview_source_account_id"], 42);
+    assert!(matching["stage2_baseline"]["preview_destination_account_id"].is_null());
+}
+
+#[test]
 fn history_rewrite_matching_payload_exposes_operation_ack_evidence() {
     let operation_id =
         build_import_history_rewrite_operation_id("update_history", 9001, 3, "hist:9001");
