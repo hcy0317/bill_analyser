@@ -1,10 +1,94 @@
 use std::{env, error::Error, str::FromStr};
 
 use bill_analyser_db::{
-    run_postgres_migrations, taxonomy::settings_bundle::import_postgres_settings_bundle,
+    run_postgres_migrations,
+    taxonomy::settings_bundle::{
+        export_taxonomy_sections, import_postgres_settings_bundle,
+        normalize_settings_bundle_sections,
+    },
 };
 use serde_json::{json, Value};
 use sqlx::{postgres::PgConnectOptions, postgres::PgPoolOptions, Executor, Row};
+
+#[test]
+fn settings_bundle_taxonomy_export_preserves_importable_refs_and_minor_units(
+) -> Result<(), Box<dyn Error>> {
+    let sections = export_taxonomy_sections(&json!({
+        "accounts": [
+            {"id": 1, "name": "现金", "type": 1, "currency": "CNY", "balance": 12.34},
+            {"id": 2, "name": "工资卡", "type": 1, "currency": "CNY", "balance": 0}
+        ],
+        "categories": [{
+            "id": 3,
+            "type": 3,
+            "main_category": "餐饮",
+            "sub_category": "午餐"
+        }],
+        "tags": [{"id": 7, "name": "项目"}],
+        "templates": [{
+            "id": "8",
+            "templateType": 1,
+            "name": "午餐模板",
+            "type": 3,
+            "categoryId": "3",
+            "sourceAccountId": "1",
+            "sourceAmount": 1999,
+            "destinationAmount": 0,
+            "tagIds": ["7"]
+        }],
+        "scheduled": [{
+            "id": "9",
+            "templateType": 2,
+            "name": "房租计划",
+            "type": 4,
+            "categoryId": "3",
+            "sourceAccountId": "1",
+            "destinationAccountId": "2",
+            "sourceAmount": 250000,
+            "destinationAmount": 250000,
+            "tagIds": ["7"],
+            "scheduledStartDate": "2026-06-01"
+        }]
+    }))?;
+
+    let account = &sections["accounts"][0];
+    assert_eq!(account["externalRef"], "account:1");
+    assert_eq!(account["balance"], 12.34);
+
+    let template = &sections["transactionTemplates"][0];
+    assert_eq!(template["sourceAccountRef"], "account:1");
+    assert_eq!(template["sourceAccountName"], "现金");
+    assert_eq!(template["categoryRef"], "category:3");
+    assert_eq!(template["tagRefs"], json!(["tag:7"]));
+    assert_eq!(template["sourceAmount"], 1999);
+    assert!(template.get("id").is_none());
+    assert!(template.get("tagIds").is_none());
+
+    let scheduled = &sections["scheduledTransactions"][0];
+    assert_eq!(scheduled["sourceAccountRef"], "account:1");
+    assert_eq!(scheduled["destinationAccountRef"], "account:2");
+    assert_eq!(scheduled["categoryRef"], "category:3");
+    assert_eq!(scheduled["tagRefs"], json!(["tag:7"]));
+    assert_eq!(scheduled["sourceAmount"], 250000);
+    assert_eq!(scheduled["destinationAmount"], 250000);
+    assert!(scheduled.get("id").is_none());
+    assert!(scheduled.get("tagIds").is_none());
+
+    let normalized = normalize_settings_bundle_sections(&json!({
+        "schemaVersion": 1,
+        "sections": sections
+    }))?;
+    assert_eq!(normalized["transactionTemplates"][0]["sourceAmount"], 1999);
+    assert_eq!(
+        normalized["scheduledTransactions"][0]["destinationAmount"],
+        250000
+    );
+    assert!(normalized["accountRecognitionRules"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    Ok(())
+}
 
 #[tokio::test]
 async fn settings_bundle_import_upserts_templates_when_postgres_available(
@@ -24,7 +108,7 @@ async fn settings_bundle_import_upserts_templates_when_postgres_available(
         .await?;
 
     let pool = PgPoolOptions::new()
-        .max_connections(1)
+        .max_connections(5)
         .connect_with(base_options.database(&test_db))
         .await?;
     run_postgres_migrations(&pool).await?;
@@ -36,6 +120,8 @@ async fn settings_bundle_import_upserts_templates_when_postgres_available(
             .fetch_one(&pool)
             .await?
             .try_get("id")?;
+    let cash_name = format!("现金-{unique}");
+    let bank_name = format!("工资卡-{unique}");
 
     let bundle = settings_bundle_payload(unique, 1234, 250000, false);
     let dry_run = import_postgres_settings_bundle(&pool, &bundle, user_id, true).await?;
@@ -66,7 +152,48 @@ async fn settings_bundle_import_upserts_templates_when_postgres_available(
 
     assert_template_row(&pool, user_id, 1, "午餐模板", 1234, 0, false).await?;
     assert_template_row(&pool, user_id, 2, "房租计划", 250000, 250000, false).await?;
-    assert_account_rule_row(&pool, user_id, "工资卡识别", false).await?;
+    assert_account_balance_cents(&pool, user_id, &cash_name, 1234).await?;
+    assert_account_balance_cents(&pool, user_id, &bank_name, 0).await?;
+    assert_account_rule_row(
+        &pool,
+        user_id,
+        "工资卡识别",
+        &bank_name,
+        false,
+        "OR={工资卡-",
+        3,
+    )
+    .await?;
+
+    let name_only_rule = json!({
+        "schemaVersion": 1,
+        "sections": {
+            "accountRecognitionRules": [{
+                "name": "工资卡名称回退识别",
+                "accountName": bank_name.clone(),
+                "ruleExpression": format!("OR={{名称回退-{unique}}}"),
+                "priority": 4,
+                "regexEnabled": true,
+                "enabled": true
+            }]
+        }
+    });
+    let name_only_import =
+        import_postgres_settings_bundle(&pool, &name_only_rule, user_id, false).await?;
+    assert_eq!(
+        name_only_import["sections"]["accountRecognitionRules"]["created"],
+        1
+    );
+    assert_account_rule_row(
+        &pool,
+        user_id,
+        "工资卡名称回退识别",
+        &bank_name,
+        true,
+        "OR={名称回退-",
+        4,
+    )
+    .await?;
 
     let updated_bundle = settings_bundle_payload(unique, 1999, 300000, true);
     let updated = import_postgres_settings_bundle(&pool, &updated_bundle, user_id, false).await?;
@@ -78,13 +205,44 @@ async fn settings_bundle_import_upserts_templates_when_postgres_available(
 
     assert_template_row(&pool, user_id, 1, "午餐模板", 1999, 0, true).await?;
     assert_template_row(&pool, user_id, 2, "房租计划", 300000, 300000, true).await?;
-    assert_account_rule_row(&pool, user_id, "工资卡识别", false).await?;
+    assert_account_balance_cents(&pool, user_id, &cash_name, 1234).await?;
+    assert_account_rule_row(
+        &pool,
+        user_id,
+        "工资卡识别",
+        &bank_name,
+        false,
+        "OR={工资卡-",
+        3,
+    )
+    .await?;
 
     pool.close().await;
     admin_pool
         .execute(format!(r#"DROP DATABASE IF EXISTS "{}" WITH (FORCE)"#, test_db).as_str())
         .await?;
 
+    Ok(())
+}
+
+async fn assert_account_balance_cents(
+    pool: &bill_analyser_db::PostgresPool,
+    user_id: i64,
+    name: &str,
+    expected_balance_cents: i64,
+) -> Result<(), Box<dyn Error>> {
+    let balance_cents: i64 = sqlx::query_scalar(
+        r#"
+        SELECT balance_cents::BIGINT
+        FROM accounts
+        WHERE user_id = $1 AND name = $2
+        "#,
+    )
+    .bind(user_id)
+    .bind(name)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(balance_cents, expected_balance_cents);
     Ok(())
 }
 
@@ -218,13 +376,18 @@ async fn assert_account_rule_row(
     pool: &bill_analyser_db::PostgresPool,
     user_id: i64,
     name: &str,
+    expected_account_name: &str,
     regex_enabled: bool,
+    expected_expression_prefix: &str,
+    expected_priority: i32,
 ) -> Result<(), Box<dyn Error>> {
     let row = sqlx::query(
         r#"
-        SELECT name, rule_expression, regex_enabled, enabled, priority
-        FROM account_rules
-        WHERE user_id = $1 AND name = $2
+        SELECT ar.name, ar.rule_expression, ar.regex_enabled, ar.enabled, ar.priority,
+            accounts.name AS account_name
+        FROM account_rules ar
+        JOIN accounts ON accounts.id = ar.account_id AND accounts.user_id = ar.user_id
+        WHERE ar.user_id = $1 AND ar.name = $2
         "#,
     )
     .bind(user_id)
@@ -233,15 +396,19 @@ async fn assert_account_rule_row(
     .await?;
 
     assert_eq!(row.try_get::<String, _>("name")?, name);
+    assert_eq!(
+        row.try_get::<String, _>("account_name")?,
+        expected_account_name
+    );
     assert!(row
         .try_get::<Value, _>("rule_expression")?
         .get("expression")
         .and_then(Value::as_str)
         .unwrap_or_default()
-        .starts_with("OR={工资卡-"));
+        .starts_with(expected_expression_prefix));
     assert_eq!(row.try_get::<bool, _>("regex_enabled")?, regex_enabled);
     assert!(row.try_get::<bool, _>("enabled")?);
-    assert_eq!(row.try_get::<i32, _>("priority")?, 3);
+    assert_eq!(row.try_get::<i32, _>("priority")?, expected_priority);
     Ok(())
 }
 
