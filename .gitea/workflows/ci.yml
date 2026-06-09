@@ -283,6 +283,17 @@ jobs:
       - name: Checkout repository
         uses: https://github.com/actions/checkout@v4
 
+      - name: Setup Node.js 22
+        uses: https://github.com/actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Check backend documentation map
+        run: node scripts/check-backend-doc-map.mjs
+
+      - name: Check governance normalizers
+        run: node scripts/check-governance-normalizers.mjs
+
       - name: Ensure tracked source tree is Rust-only
         run: |
           tracked_py="$(git ls-files '*.py')"
