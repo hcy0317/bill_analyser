@@ -261,3 +261,118 @@ pub(super) fn insights_analyzed_months(value: Option<&str>) -> Result<u32, Strin
         .map(|months| months.min(24))
         .map_err(|_| format!("invalid literal for int() with base 10: '{raw}'"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn local_timestamp(year: i32, month: u32, day: u32) -> i64 {
+        Local
+            .with_ymd_and_hms(year, month, day, 0, 0, 0)
+            .single()
+            .expect("local test timestamp")
+            .timestamp()
+    }
+
+    #[test]
+    fn timestamp_queries_preserve_all_and_bounded_contracts() {
+        let all =
+            timestamp_range_from_query(Some("0"), Some("0"), false).expect("all timestamp range");
+        assert_eq!(
+            all,
+            ResolvedTimestampRange {
+                start_time: 0,
+                end_time: 0,
+                start_date: None,
+                end_date: None,
+            }
+        );
+
+        let start = local_timestamp(2026, 3, 1);
+        let end = local_timestamp(2026, 3, 31);
+        let bounded =
+            timestamp_range_from_query(Some(&start.to_string()), Some(&end.to_string()), false)
+                .expect("bounded timestamp range");
+        assert_eq!(bounded.start_time, start);
+        assert_eq!(bounded.end_time, end);
+        assert_eq!(bounded.start_date.as_deref(), Some("2026-03-01"));
+        assert_eq!(bounded.end_date.as_deref(), Some("2026-03-31"));
+
+        let defaulted =
+            timestamp_range_from_query(None, None, true).expect("default current month");
+        assert!(defaulted.start_time <= defaulted.end_time);
+        assert!(defaulted.start_date.is_some());
+        assert!(timestamp_range_from_query(Some("bad"), Some("0"), false).is_err());
+    }
+
+    #[test]
+    fn year_month_and_asset_range_helpers_keep_route_fallbacks() {
+        let explicit = default_year_month_query_values(Some("202601"), Some("202612"));
+        assert_eq!(explicit, ("202601".to_string(), "202612".to_string()));
+
+        let all_range = StatisticsAllDateRange {
+            start_date: "2026-02-03".to_string(),
+            end_date: "2026-04-05".to_string(),
+        };
+        let range = year_month_range_from_values("197001", "0", Some(all_range.clone()))
+            .expect("all range")
+            .expect("resolved all range");
+        assert_eq!(range.start_date, "2026-02-01");
+        assert_eq!(range.end_date, "2026-04-30");
+
+        let asset_all = asset_date_range_from_all_range(Some(all_range))
+            .expect("asset all date range")
+            .expect("asset range");
+        assert_eq!(asset_all.0.to_string(), "2026-02-03");
+        assert_eq!(asset_all.1.to_string(), "2026-04-05");
+
+        let start = local_timestamp(2026, 3, 1);
+        let end = local_timestamp(2026, 3, 2);
+        let asset_bounded = asset_date_range_from_timestamp_range(ResolvedTimestampRange {
+            start_time: start,
+            end_time: end,
+            start_date: Some("2026-03-01".to_string()),
+            end_date: Some("2026-03-02".to_string()),
+        })
+        .expect("asset timestamp date range")
+        .expect("asset bounded range");
+        assert_eq!(asset_bounded.0.to_string(), "2026-03-01");
+        assert_eq!(asset_bounded.1.to_string(), "2026-03-02");
+    }
+
+    #[test]
+    fn filter_and_scalar_helpers_trim_defaults_and_errors() {
+        let filters = bill_filters_for_timestamp_range(
+            &ResolvedTimestampRange {
+                start_time: 1,
+                end_time: 2,
+                start_date: Some("2026-03-01".to_string()),
+                end_date: Some("2026-03-31".to_string()),
+            },
+            Some("  coffee  "),
+        );
+        assert_eq!(filters.start_date.as_deref(), Some("2026-03-01"));
+        assert_eq!(filters.end_date.as_deref(), Some("2026-03-31"));
+        assert_eq!(filters.keyword.as_deref(), Some("coffee"));
+
+        assert_eq!(
+            parse_date_prefix("2026-03-01T10:00:00")
+                .unwrap()
+                .to_string(),
+            "2026-03-01"
+        );
+        assert!(parse_date_prefix("bad").is_err());
+        assert_eq!(
+            non_empty_string(Some(&"  value  ".to_string())).as_deref(),
+            Some("value")
+        );
+        assert_eq!(analyzer_period(None), "month");
+        assert_eq!(analyzer_period(Some("  year  ")), "year");
+        assert_eq!(insights_analyzed_months(None).unwrap(), 6);
+        assert_eq!(insights_analyzed_months(Some("48")).unwrap(), 24);
+        assert_eq!(
+            insights_analyzed_months(Some("abc")).unwrap_err(),
+            "invalid literal for int() with base 10: 'abc'"
+        );
+    }
+}

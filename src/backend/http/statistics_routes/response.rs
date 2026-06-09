@@ -118,3 +118,84 @@ pub(super) fn json_response(status: StatusCode, body: Value) -> Response {
 pub(super) fn status_or_internal(status: u16) -> StatusCode {
     StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+
+    async fn response_value(response: Response) -> (StatusCode, Value) {
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body bytes");
+        (
+            status,
+            serde_json::from_slice(&body).expect("JSON response body"),
+        )
+    }
+
+    #[tokio::test]
+    async fn success_helpers_pin_result_and_data_envelopes() {
+        let (status, result) =
+            response_value(success_result(StatusCode::OK, json!({"items": [1]}))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(result, json!({"success": true, "result": {"items": [1]}}));
+
+        let (status, data) =
+            response_value(success_data(StatusCode::CREATED, json!({"rows": [2]}))).await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(data, json!({"success": true, "data": {"rows": [2]}}));
+    }
+
+    #[tokio::test]
+    async fn error_helpers_pin_statistics_and_asset_error_shapes() {
+        let (status, basic) = response_value(bad_request("bad query")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(basic, json!({"success": false, "error": "bad query"}));
+
+        let contract_error = StatisticsContractError::new(
+            "Invalid time range",
+            "startTime must be less than or equal to endTime",
+        );
+        let (status, stats) =
+            response_value(statistics_error_response(contract_error, false)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            stats,
+            json!({
+                "success": false,
+                "error": "Invalid time range",
+                "message": "startTime must be less than or equal to endTime"
+            })
+        );
+
+        let invalid_year_month =
+            StatisticsContractError::new("Invalid year-month format", "bad year month");
+        let (status, year_month) =
+            response_value(statistics_error_response(invalid_year_month, true)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            year_month,
+            json!({"success": false, "error": "bad year month"})
+        );
+
+        let wide_asset = StatisticsContractError::new(
+            "资产趋势查询最多支持365天范围，请缩小时间范围",
+            "资产趋势查询最多支持365天范围，请缩小时间范围",
+        );
+        let (status, asset) = response_value(asset_trends_error_response(wide_asset)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(asset["errorCode"], 400);
+        assert_eq!(
+            asset["error"],
+            "资产趋势查询最多支持365天范围，请缩小时间范围"
+        );
+    }
+
+    #[test]
+    fn invalid_status_falls_back_to_internal_server_error() {
+        assert_eq!(status_or_internal(201), StatusCode::CREATED);
+        assert_eq!(status_or_internal(42), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+}
