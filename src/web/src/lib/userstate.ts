@@ -245,9 +245,7 @@ export function updateCurrentToken(token: string): void {
 
     const enableAppLock = isEnableApplicationLock();
     const hasLockState = hasUserAppLockState();
-    const tokenPreview = token ? `${token.substring(0, 20)}...` : 'null';
-
-    logger.info(`[updateCurrentToken] Storing token: preview=${tokenPreview}, length=${token.length}, AppLock=${enableAppLock}, HasLockState=${hasLockState}`);
+    logger.info(`[updateCurrentToken] Storing token: length=${token.length}, AppLock=${enableAppLock}, HasLockState=${hasLockState}`);
 
     if (enableAppLock && hasLockState) {
         const appLockState = getUserAppLockState();

@@ -112,6 +112,12 @@ pub async fn ocr_recognition_runtime_handler(
     if config.provider == NETWORK_OCR_PROVIDER_NAME
         && provider_auth_is_expired(&config.credential_config, Utc::now())
     {
+        if validate_llm_vision_base_url(&config.base_url).is_err() {
+            return ai_route_response(build_ocr_error_response(
+                "provider_unconfigured",
+                Some("OCR provider base URL is not allowed"),
+            ));
+        }
         let client = match reqwest::Client::builder()
             .timeout(StdDuration::from_secs(60))
             .redirect(reqwest::redirect::Policy::none())

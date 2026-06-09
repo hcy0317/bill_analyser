@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 use super::ocr_parser::parse_payment_screenshot_text;
 use super::provider_auth::{normalize_provider_auth_config, redact_provider_auth_config};
 use super::receipt_draft::build_receipt_transaction_draft;
+use super::secret_redaction::redact_secrets_in_value;
 use super::types::{
     AiRouteResponse, OcrConfigContract, OcrProviderTextResult, ReceiptDraftContext,
     OCR_AVAILABLE_PROVIDERS, OCR_DEFAULT_LANG, OCR_DISABLED_PROVIDER_NAME,
@@ -112,12 +113,14 @@ pub fn build_ocr_config_response_payload(config: &OcrConfigContract) -> Value {
         operation = "build_ocr_config_response_payload",
         "business operation entered"
     );
+    let mut safe_parameters = config.parameters.clone();
+    redact_secrets_in_value(&mut safe_parameters);
     json!({
         "provider": config.provider,
         "lang": config.lang,
         "model": config.model,
         "base_url": config.base_url,
-        "parameters": config.parameters,
+        "parameters": safe_parameters,
         "credential_config": redact_provider_auth_config(&config.credential_config),
         "available_providers": ocr_available_providers_with_disabled(),
         "configured": config.provider != OCR_DISABLED_PROVIDER_NAME,

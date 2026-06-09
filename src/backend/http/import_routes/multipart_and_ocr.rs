@@ -2,6 +2,11 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+use ocr_security::{
+    content_type_from_headers, normalize_ocr_llm_max_tokens, truthy_form_value,
+    validate_ocr_image_size,
+};
+
 #[derive(Debug, Clone)]
 struct MultipartPart {
     name: String,
@@ -53,14 +58,6 @@ struct OcrRecognitionInput {
 #[derive(Debug)]
 struct ProviderAuthRefreshError;
 
-fn content_type_from_headers(headers: &HeaderMap) -> String {
-    headers
-        .get(http::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or_default()
-        .to_string()
-}
-
 fn ocr_recognition_input_from_request(
     headers: &HeaderMap,
     body: &[u8],
@@ -82,6 +79,7 @@ fn ocr_recognition_input_from_request(
                 )
             })
             .unwrap_or_else(|| (Vec::new(), "application/octet-stream".to_string()));
+        validate_ocr_image_size(&image.0)?;
         return Ok(OcrRecognitionInput {
             image_bytes: image.0,
             mime: image.1,
@@ -90,6 +88,7 @@ fn ocr_recognition_input_from_request(
                 .is_some_and(|value| truthy_form_value(&value)),
         });
     }
+    validate_ocr_image_size(body)?;
     Ok(OcrRecognitionInput {
         image_bytes: body.to_vec(),
         mime: if content_type.trim().is_empty() {
@@ -99,13 +98,6 @@ fn ocr_recognition_input_from_request(
         },
         cancelled: false,
     })
-}
-
-fn truthy_form_value(value: &str) -> bool {
-    matches!(
-        value.trim().to_ascii_lowercase().as_str(),
-        "1" | "true" | "yes" | "on"
-    )
 }
 
 fn ocr_rate_limit_try_acquire(user_id: i64) -> bool {
@@ -870,6 +862,19 @@ async fn run_network_llm_ocr(
     image_bytes: Vec<u8>,
     mime: String,
 ) -> Result<OcrProviderTextResult, AiRouteResponse> {
+    let base_url = config.base_url.trim_end_matches('/');
+    if base_url.is_empty() {
+        return Err(build_ocr_error_response(
+            "provider_unconfigured",
+            Some("OCR provider base URL is required"),
+        ));
+    }
+    validate_llm_vision_base_url(base_url).map_err(|_| {
+        build_ocr_error_response(
+            "provider_unconfigured",
+            Some("OCR provider base URL is not allowed"),
+        )
+    })?;
     let client = reqwest::Client::builder()
         .timeout(StdDuration::from_secs(60))
         .redirect(reqwest::redirect::Policy::none())
@@ -892,17 +897,7 @@ async fn run_network_llm_ocr(
             Some("OCR provider authorization is missing; sign in again or refresh credentials"),
         ));
     };
-    let base_url = config.base_url.trim_end_matches('/');
-    if base_url.is_empty() {
-        return Err(build_ocr_error_response(
-            "provider_unconfigured",
-            Some("OCR provider base URL is required"),
-        ));
-    }
     let url = format!("{base_url}/chat/completions");
-    validate_provider_token_endpoint(&url, base_url).map_err(|_| {
-        build_ocr_error_response("provider_unconfigured", Some("OCR provider base URL is not allowed"))
-    })?;
     let encoded = general_purpose::STANDARD.encode(&image_bytes);
     let model = if config.model.trim().is_empty() {
         "gpt-4o-mini".to_string()
@@ -919,7 +914,7 @@ async fn run_network_llm_ocr(
             ]
         }],
         "temperature": config.parameters.get("temperature").and_then(Value::as_f64).unwrap_or(0.0),
-        "max_tokens": config.parameters.get("max_tokens").and_then(Value::as_i64).unwrap_or(1200),
+        "max_tokens": normalize_ocr_llm_max_tokens(&config.parameters),
     });
     let response = client
         .post(&url)

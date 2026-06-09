@@ -44,13 +44,13 @@ use bill_analyser_core::{
     preview_state_conflict_response, provider_auth_access_token,
     provider_auth_has_refresh_credential, provider_auth_is_expired, provider_auth_refresh_token,
     render_llm_prompt_template, safe_llm_config_payload, score_learning_rule_similarity,
-    AiRouteResponse, DedupBill, DuplicateGroup, ImportLearningRecommendationKeyInput,
-    ImportPreviewIndexData, ImportPreviewPageData, ImportSessionSummary, ImportStageConfirmData,
-    ImportStageDedupData, ImportStageParseData, ImportV2RouteResponse, LlmProviderConfigContract,
-    OcrConfigContract, OcrProviderTextLine, OcrProviderTextResult, ReceiptDraftAccount,
-    ReceiptDraftCategory, ReceiptDraftCategoryRule, ReceiptDraftContext, ReceiptDraftTag,
-    ReconciliationCandidateType, SmartDeduplicationEngine, TransferPair, UserId,
-    IMPORT_PREVIEW_SORT_KEYS, LLM_SYSTEM_PROMPT, NETWORK_OCR_PROVIDER_NAME,
+    validate_llm_vision_base_url, AiRouteResponse, DedupBill, DuplicateGroup,
+    ImportLearningRecommendationKeyInput, ImportPreviewIndexData, ImportPreviewPageData,
+    ImportSessionSummary, ImportStageConfirmData, ImportStageDedupData, ImportStageParseData,
+    ImportV2RouteResponse, LlmProviderConfigContract, OcrConfigContract, OcrProviderTextLine,
+    OcrProviderTextResult, ReceiptDraftAccount, ReceiptDraftCategory, ReceiptDraftCategoryRule,
+    ReceiptDraftContext, ReceiptDraftTag, ReconciliationCandidateType, SmartDeduplicationEngine,
+    TransferPair, UserId, IMPORT_PREVIEW_SORT_KEYS, LLM_SYSTEM_PROMPT, NETWORK_OCR_PROVIDER_NAME,
     OCR_DISABLED_PROVIDER_NAME, WEAVIATE_RECALL_DEFAULT_LIMIT,
     WEAVIATE_RULE_STATE_POSTGRES_AUTHORITATIVE,
 };
@@ -351,6 +351,8 @@ pub fn import_runtime_router() -> Router<HttpAppState> {
             put(learning_rule_update_runtime_handler).delete(learning_rule_delete_runtime_handler),
         )
 }
+
+mod ocr_security;
 
 include!("stage_vector_recall.rs");
 include!("stage_handlers.rs");

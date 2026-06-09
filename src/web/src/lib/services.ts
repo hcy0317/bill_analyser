@@ -474,7 +474,7 @@ function setAuthorizationHeader(headers: any, token: string): void {
     if (!checkValue) {
         logger.error('[setAuthorizationHeader] FAILED to set Authorization header!');
     } else {
-        logger.debug(`[setAuthorizationHeader] Success, value: ${String(checkValue).substring(0, 30)}...`);
+        logger.debug('[setAuthorizationHeader] Success, authorization header present');
     }
 }
 
@@ -528,7 +528,6 @@ axios.interceptors.request.use((config: ApiRequestConfig) => {
     const tokenStatus = {
         hasToken: !!token,
         tokenLength: token ? token.length : 0,
-        tokenPreview: token ? `${token.substring(0, 20)}...` : 'null',
         localStorage: localStorage.getItem('ebk_user_token') ? 'exists' : 'missing',
         sessionStorage: sessionStorage.getItem('ebk_user_session_token') ? 'exists' : 'missing',
         appLock: isEnableApplicationLock(),
@@ -572,7 +571,6 @@ axios.interceptors.request.use((config: ApiRequestConfig) => {
             defaultsAuth: defaultsAuth ? 'SET' : 'NOT_SET',
             configAuthCapital: configAuthCap ? 'SET' : 'NOT_SET',
             configAuthLower: configAuthLow ? 'SET' : 'NOT_SET',
-            value: configAuthCap ? `${String(configAuthCap).substring(0, 30)}...` : 'MISSING',
             allKeys: Object.keys(config.headers).join(', ')
         });
 
@@ -583,7 +581,6 @@ axios.interceptors.request.use((config: ApiRequestConfig) => {
 
         logger.info(`[Interceptor] Verifying headers after set:`, {
             hasAuthHeader: !!authHeader,
-            authHeaderValue: authHeader ? `${String(authHeader).substring(0, 30)}...` : 'undefined',
             allHeaderKeys: Object.keys(config.headers).join(', '),
             headersObjectType: Object.prototype.toString.call(config.headers),
             hasGetMethod: typeof config.headers.get === 'function',
@@ -606,8 +603,7 @@ axios.interceptors.request.use((config: ApiRequestConfig) => {
                         || config.headers['Authorization'];
     logger.info(`[Interceptor] Final check before return:`, {
         url: url,
-        hasAuth: !!finalAuthCheck,
-        authPreview: finalAuthCheck ? `${String(finalAuthCheck).substring(0, 20)}...` : 'MISSING'
+        hasAuth: !!finalAuthCheck
     });
 
     return config;
@@ -641,7 +637,6 @@ axios.interceptors.response.use((response: any) => {
                           || (typeof error.response.config?.headers?.get === 'function' ? error.response.config.headers.get('Authorization') : null);
 
         logger.error(`[Response Error] ${error.response.status} ${url} - Config had Authorization: ${authInConfig ? 'YES' : 'NO'}`, {
-            authValue: authInConfig ? `${String(authInConfig).substring(0, 30)}...` : 'NONE',
             allConfigHeaders: error.response.config?.headers ? Object.keys(error.response.config.headers).join(', ') : 'N/A',
             responseMessage: getApiErrorMessage(error) || 'N/A'
         });

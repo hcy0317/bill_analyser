@@ -3,7 +3,8 @@
 // 不变式：设置 key 必须非空；OCR provider 必须通过 core 合同校验。
 
 use bill_analyser_core::{
-    normalize_ocr_config, OcrConfigContract, OCR_AVAILABLE_PROVIDERS, OCR_DISABLED_PROVIDER_NAME,
+    normalize_ocr_config, validate_llm_vision_base_url, OcrConfigContract,
+    NETWORK_OCR_PROVIDER_NAME, OCR_AVAILABLE_PROVIDERS, OCR_DISABLED_PROVIDER_NAME,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -125,7 +126,11 @@ pub fn normalize_ocr_config_for_storage(value: Option<&Value>) -> DbResult<OcrCo
         .and_then(Value::as_str)
         .unwrap_or(OCR_DISABLED_PROVIDER_NAME);
     validate_ocr_provider(provider)?;
-    Ok(normalize_ocr_config(value))
+    let config = normalize_ocr_config(value);
+    if config.provider == NETWORK_OCR_PROVIDER_NAME {
+        validate_llm_vision_base_url(&config.base_url).map_err(DbError::InvalidOperation)?;
+    }
+    Ok(config)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

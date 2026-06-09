@@ -12,11 +12,7 @@ pub(super) fn authenticated_backup_runtime(
     let authenticated =
         resolve_authenticated_user_from_headers(headers, &state.config, TRUSTED_USER_SECRET_HEADER)
             .map_err(|error| Box::new(auth_error_response(error)))?;
-    let auth_kind = if authenticated.session_id.is_some() {
-        BackupAuthKind::BearerSession
-    } else {
-        BackupAuthKind::TrustedHeader
-    };
+    let auth_kind = backup_auth_kind_from_headers(headers);
     let runtime = open_backup_ops_runtime(state)?;
     Ok(AuthenticatedBackupRuntime {
         runtime,
@@ -39,13 +35,42 @@ pub(super) fn open_backup_ops_runtime(state: &HttpAppState) -> RouteResult<Backu
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+fn backup_auth_kind_from_headers(headers: &HeaderMap) -> BackupAuthKind {
+    if headers.contains_key(TRUSTED_USER_SECRET_HEADER)
+        || headers.contains_key("x-user-id")
+        || headers.contains_key("x-bill-analyser-user-id")
+    {
+        BackupAuthKind::TrustedHeader
+    } else {
+        BackupAuthKind::BearerSession
+    }
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn ensure_sensitive_backup_auth(
     auth_runtime: &AuthenticatedBackupRuntime,
     state: &HttpAppState,
     headers: &HeaderMap,
     payload: Option<&Value>,
 ) -> RouteResult<()> {
-    if auth_runtime.auth_kind == BackupAuthKind::TrustedHeader {
+    ensure_sensitive_backup_auth_for_kind(
+        auth_runtime.auth_kind,
+        state,
+        headers,
+        payload,
+        auth_runtime.user_id,
+    )
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+fn ensure_sensitive_backup_auth_for_kind(
+    auth_kind: BackupAuthKind,
+    state: &HttpAppState,
+    headers: &HeaderMap,
+    payload: Option<&Value>,
+    user_id: UserId,
+) -> RouteResult<()> {
+    if auth_kind == BackupAuthKind::TrustedHeader {
         return Ok(());
     }
     let Some(token) = backup_step_up_token(headers, payload) else {
@@ -54,7 +79,7 @@ pub(super) fn ensure_sensitive_backup_auth(
             "step-up token is required for backup file operation",
         )));
     };
-    validate_backup_step_up_token(&token, state, auth_runtime.user_id)
+    validate_backup_step_up_token(&token, state, user_id)
         .map_err(|message| Box::new(error_response(StatusCode::UNAUTHORIZED, message)))
 }
 
@@ -156,5 +181,137 @@ pub(super) fn jwt_hmac_algorithm(algorithm: &str) -> Result<hmac::Algorithm, &'s
         "HS384" => Ok(hmac::HMAC_SHA384),
         "HS512" => Ok(hmac::HMAC_SHA512),
         _ => Err("Unsupported JWT algorithm for backup step-up token"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use axum::http::HeaderValue;
+    use chrono::Duration as ChronoDuration;
+
+    const TEST_SECRET: &str = "backup-step-up-secret";
+
+    #[test]
+    fn backup_bearer_auth_requires_step_up_token() {
+        let state = test_state();
+        let headers = HeaderMap::new();
+        let user_id = UserId::new(7).expect("positive user id");
+
+        let error = ensure_sensitive_backup_auth_for_kind(
+            BackupAuthKind::BearerSession,
+            &state,
+            &headers,
+            None,
+            user_id,
+        )
+        .expect_err("bearer-backed backup operations require step-up");
+
+        assert_eq!(error.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn backup_trusted_header_skips_step_up_only_with_trusted_header_shape() {
+        let state = test_state();
+        let mut trusted_headers = HeaderMap::new();
+        trusted_headers.insert(
+            TRUSTED_USER_SECRET_HEADER,
+            HeaderValue::from_static("trusted-secret"),
+        );
+        trusted_headers.insert("x-user-id", HeaderValue::from_static("7"));
+
+        assert_eq!(
+            backup_auth_kind_from_headers(&trusted_headers),
+            BackupAuthKind::TrustedHeader
+        );
+        assert!(
+            ensure_sensitive_backup_auth_for_kind(
+                BackupAuthKind::TrustedHeader,
+                &state,
+                &trusted_headers,
+                None,
+                UserId::new(7).expect("positive user id"),
+            )
+            .is_ok(),
+            "trusted header runtime remains the only step-up bypass"
+        );
+
+        let mut bearer_headers = HeaderMap::new();
+        bearer_headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer opaque-access-token"),
+        );
+        assert_eq!(
+            backup_auth_kind_from_headers(&bearer_headers),
+            BackupAuthKind::BearerSession
+        );
+    }
+
+    #[test]
+    fn backup_step_up_rejects_wrong_user_wrong_type_and_expired_token() {
+        let state = test_state();
+        let headers = HeaderMap::new();
+        let user_id = UserId::new(7).expect("positive user id");
+        let valid = signed_step_up_token(7, "step_up", ChronoDuration::minutes(5));
+
+        assert!(
+            ensure_sensitive_backup_auth_for_kind(
+                BackupAuthKind::BearerSession,
+                &state,
+                &headers,
+                Some(&json!({ "stepUpToken": valid })),
+                user_id,
+            )
+            .is_ok(),
+            "matching fresh step-up token is accepted"
+        );
+
+        for token in [
+            signed_step_up_token(8, "step_up", ChronoDuration::minutes(5)),
+            signed_step_up_token(7, "access", ChronoDuration::minutes(5)),
+            signed_step_up_token(7, "step_up", ChronoDuration::minutes(-1)),
+        ] {
+            assert!(
+                ensure_sensitive_backup_auth_for_kind(
+                    BackupAuthKind::BearerSession,
+                    &state,
+                    &headers,
+                    Some(&json!({ "step_up_token": token })),
+                    user_id,
+                )
+                .is_err(),
+                "wrong-user, wrong-type, and expired step-up tokens fail closed"
+            );
+        }
+    }
+
+    fn test_state() -> HttpAppState {
+        HttpAppState::new(
+            HttpShellConfig::default()
+                .with_auth_jwt_secret(TEST_SECRET)
+                .with_auth_jwt_algorithm("HS256"),
+        )
+        .expect("state")
+    }
+
+    fn signed_step_up_token(user_id: u64, token_type: &str, exp_offset: ChronoDuration) -> String {
+        let now = Utc::now();
+        let header = json!({"alg": "HS256", "typ": "JWT"});
+        let payload = json!({
+            "user_id": user_id,
+            "type": token_type,
+            "iat": now.timestamp(),
+            "exp": (now + exp_offset).timestamp(),
+        });
+        let encoded_header = general_purpose::URL_SAFE_NO_PAD
+            .encode(serde_json::to_vec(&header).expect("header json"));
+        let encoded_payload = general_purpose::URL_SAFE_NO_PAD
+            .encode(serde_json::to_vec(&payload).expect("payload json"));
+        let signing_input = format!("{encoded_header}.{encoded_payload}");
+        let key = hmac::Key::new(hmac::HMAC_SHA256, TEST_SECRET.as_bytes());
+        let signature = hmac::sign(&key, signing_input.as_bytes());
+        let encoded_signature = general_purpose::URL_SAFE_NO_PAD.encode(signature.as_ref());
+        format!("{signing_input}.{encoded_signature}")
     }
 }

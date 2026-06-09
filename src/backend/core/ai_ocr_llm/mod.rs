@@ -27,6 +27,7 @@ pub use llm_prompts::{
 };
 pub use llm_provider::{
     build_llm_provider_config, llm_available_providers, normalize_llm_provider_name,
+    validate_llm_vision_base_url,
 };
 pub use llm_responses::{
     build_llm_analysis_response, build_llm_candidate_list_response,

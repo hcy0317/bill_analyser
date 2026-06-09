@@ -13,11 +13,20 @@ use bill_analyser_core::ai_ocr_llm::{
     normalize_llm_advanced_settings, normalize_llm_provider_name, normalize_ocr_config,
     ocr_available_providers_with_disabled, ocr_error_http_status, parse_llm_json_array_response,
     parse_payment_screenshot_text, render_llm_prompt_template, safe_llm_config_payload,
-    OcrProviderTextLine, OcrProviderTextResult, ReceiptDraftAccount, ReceiptDraftCategory,
-    ReceiptDraftCategoryRule, ReceiptDraftContext, ReceiptDraftTag,
+    validate_llm_vision_base_url, OcrProviderTextLine, OcrProviderTextResult, ReceiptDraftAccount,
+    ReceiptDraftCategory, ReceiptDraftCategoryRule, ReceiptDraftContext, ReceiptDraftTag,
 };
 use serde_json::{json, Value};
 use std::env;
+use std::sync::{Mutex, MutexGuard};
+
+static LLM_ALLOWLIST_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_llm_allowlist_env() -> MutexGuard<'static, ()> {
+    LLM_ALLOWLIST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 struct EnvVarRestore {
     name: &'static str,
@@ -111,6 +120,89 @@ fn ocr_config_and_disabled_safe_errors_match_receipt_routes() {
     assert_eq!(ocr_error_http_status("parse_error"), 422);
     assert_eq!(ocr_error_http_status("cancelled"), 499);
     assert_eq!(ocr_error_http_status("rate_limited"), 429);
+}
+
+#[test]
+fn ocr_config_response_redacts_parameters_and_credentials() {
+    let configured = normalize_ocr_config(Some(&json!({
+        "provider": "llm_vision",
+        "lang": "eng",
+        "model": "gpt-4o-mini",
+        "base_url": "https://api.openai.com/v1",
+        "parameters": {
+            "temperature": 0,
+            "api_key": "parameter-secret",
+            "headers": {
+                "Authorization": "Bearer nested-secret",
+                "safe_header": "visible"
+            }
+        },
+        "credential_config": {
+            "access_token": "credential-secret",
+            "refresh_headers": {
+                "x-api-key": "refresh-header-secret"
+            }
+        }
+    })));
+
+    let payload = build_ocr_config_response_payload(&configured);
+    let serialized = serde_json::to_string(&payload).expect("safe OCR config JSON");
+
+    assert!(!serialized.contains("parameter-secret"));
+    assert!(!serialized.contains("nested-secret"));
+    assert!(!serialized.contains("credential-secret"));
+    assert!(!serialized.contains("refresh-header-secret"));
+    assert_eq!(payload["parameters"]["api_key"], "********");
+    assert_eq!(
+        payload["parameters"]["headers"]["Authorization"],
+        "********"
+    );
+    assert_eq!(payload["parameters"]["headers"]["safe_header"], "visible");
+    assert_eq!(payload["credential_config"]["access_token"], "********");
+    assert_eq!(
+        payload["credential_config"]["refresh_headers"]["x-api-key"],
+        "********"
+    );
+}
+
+#[test]
+fn llm_vision_base_url_reuses_llm_ssrf_allowlist_contract() {
+    let _allowlist_lock = lock_llm_allowlist_env();
+    let _allowlist_restore = EnvVarRestore::capture("BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST");
+    env::remove_var("BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST");
+
+    assert!(validate_llm_vision_base_url("https://api.openai.com/v1").is_ok());
+    assert!(validate_llm_vision_base_url("https://api.deepseek.com/v1").is_ok());
+
+    for unsafe_base_url in [
+        "",
+        "http://127.0.0.1:11434/v1",
+        "http://169.254.169.254/latest/meta-data",
+        "http://metadata.google.internal/computeMetadata/v1",
+        "https://llm.example.test/v1",
+        "https://evil.test\\api.openai.com/v1",
+        "https://api.openai.com\u{0008}.evil.test/v1",
+        "ftp://api.openai.com/v1",
+        "https://user:pass@api.openai.com/v1",
+    ] {
+        assert!(
+            validate_llm_vision_base_url(unsafe_base_url).is_err(),
+            "unsafe llm_vision base URL should fail closed: {unsafe_base_url:?}"
+        );
+    }
+
+    env::set_var("BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST", "llm.example.test");
+    assert!(validate_llm_vision_base_url("https://llm.example.test/v1").is_err());
+    env::set_var(
+        "BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST",
+        "https://llm.example.test",
+    );
+    assert!(validate_llm_vision_base_url("https://llm.example.test/v1").is_ok());
+    env::set_var(
+        "BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST",
+        "http://127.0.0.1:11434",
+    );
+    assert!(validate_llm_vision_base_url("http://127.0.0.1:11434/v1").is_ok());
 }
 
 #[test]
@@ -296,6 +388,10 @@ fn ocr_recognition_success_response_maps_taxonomy_to_auto_fill_and_candidates() 
 
 #[test]
 fn llm_provider_alias_defaults_match_current_factory() {
+    let _allowlist_lock = lock_llm_allowlist_env();
+    let _allowlist_restore = EnvVarRestore::capture("BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST");
+    env::remove_var("BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST");
+
     assert!(llm_available_providers().contains(&"anthropic".to_string()));
     assert!(llm_available_providers().contains(&"openai-compatible".to_string()));
     assert!(llm_available_providers().contains(&"azure-openai".to_string()));
@@ -372,7 +468,6 @@ fn llm_provider_alias_defaults_match_current_factory() {
         })),
     )
     .is_err());
-    let _allowlist_restore = EnvVarRestore::capture("BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST");
     env::set_var("BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST", "llm.example.test");
     assert!(build_llm_provider_config(
         "openai_compatible",

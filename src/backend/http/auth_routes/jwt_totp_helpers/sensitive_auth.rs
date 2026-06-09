@@ -154,17 +154,65 @@ async fn verify_postgres_operation_password(
     }
 
     let stored_password = get_postgres_operation_password(pool, user_id).await?;
-    Ok(match stored_password
-        .as_ref()
+    Ok(stored_operation_password_matches(
+        password,
+        stored_password.as_deref(),
+        operation_password_policy,
+    ))
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+fn stored_operation_password_matches(
+    password: &str,
+    stored_password: Option<&str>,
+    _operation_password_policy: OperationPasswordPolicy,
+) -> bool {
+    match stored_password
+        .map(str::trim)
         .filter(|value| !value.is_empty())
     {
         Some(value) => password == value,
-        None => operation_password_policy == OperationPasswordPolicy::AllowUnset,
-    })
+        None => false,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UserDataExportType {
     Csv,
     Tsv,
+}
+
+#[cfg(test)]
+mod sensitive_auth_contract_tests {
+    use super::*;
+
+    #[test]
+    fn wrong_password_does_not_pass_when_operation_password_is_unset() {
+        assert!(
+            !stored_operation_password_matches(
+                "wrong-current-password",
+                None,
+                OperationPasswordPolicy::AllowUnset,
+            ),
+            "AllowUnset means no separate operation password is required; it must not accept any wrong user password"
+        );
+        assert!(
+            !stored_operation_password_matches(
+                "wrong-current-password",
+                Some("   "),
+                OperationPasswordPolicy::AllowUnset,
+            ),
+            "blank stored operation passwords also fail closed"
+        );
+        assert!(stored_operation_password_matches(
+            "operation-secret",
+            Some("operation-secret"),
+            OperationPasswordPolicy::AllowUnset,
+        ));
+        assert!(!stored_operation_password_matches(
+            "wrong-current-password",
+            Some("operation-secret"),
+            OperationPasswordPolicy::RequireConfigured,
+        ));
+    }
 }

@@ -46,11 +46,11 @@ pub use ai_ocr_llm::{
     parse_llm_json_array_response, parse_payment_screenshot_text, provider_auth_access_token,
     provider_auth_has_refresh_credential, provider_auth_is_expired, provider_auth_refresh_token,
     redact_provider_auth_config, render_llm_prompt_template, safe_llm_config_payload,
-    AiRouteResponse, LlmProviderConfigContract, OcrConfigContract, OcrProviderTextLine,
-    OcrProviderTextResult, PaymentScreenshotParseContract, ReceiptDraftAccount,
-    ReceiptDraftCategory, ReceiptDraftCategoryRule, ReceiptDraftContext, ReceiptDraftField,
-    ReceiptDraftTag, ReceiptTransactionDraft, LLM_AVAILABLE_PROVIDERS, LLM_SYSTEM_PROMPT,
-    NETWORK_OCR_PROVIDER_NAME, OCR_AVAILABLE_PROVIDERS, OCR_DEFAULT_LANG,
+    validate_llm_vision_base_url, AiRouteResponse, LlmProviderConfigContract, OcrConfigContract,
+    OcrProviderTextLine, OcrProviderTextResult, PaymentScreenshotParseContract,
+    ReceiptDraftAccount, ReceiptDraftCategory, ReceiptDraftCategoryRule, ReceiptDraftContext,
+    ReceiptDraftField, ReceiptDraftTag, ReceiptTransactionDraft, LLM_AVAILABLE_PROVIDERS,
+    LLM_SYSTEM_PROMPT, NETWORK_OCR_PROVIDER_NAME, OCR_AVAILABLE_PROVIDERS, OCR_DEFAULT_LANG,
     OCR_DISABLED_PROVIDER_NAME,
 };
 pub use error::{ErrorCode, RuntimeError};

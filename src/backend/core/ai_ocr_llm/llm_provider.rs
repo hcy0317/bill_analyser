@@ -149,6 +149,28 @@ fn validate_llm_base_url(provider: &str, base_url: &str, explicit: bool) -> Resu
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+pub fn validate_llm_vision_base_url(base_url: &str) -> Result<(), String> {
+    let parsed = parse_llm_base_url(base_url)?;
+    if llm_url_matches_openai_compatible_default(&parsed) {
+        return Ok(());
+    }
+    if llm_url_is_allowlisted(&parsed) {
+        if parsed.scheme() == "https" || llm_url_is_local_plain_http_endpoint(&parsed) {
+            return Ok(());
+        }
+        return Err(
+            "LLM provider base_url must use https unless allowlisting a local endpoint".to_string(),
+        );
+    }
+    if llm_url_host_is_forbidden(&parsed) {
+        return Err("LLM provider base_url host is not allowed".to_string());
+    }
+    Err(format!(
+        "LLM provider base_url is not allowed; configure {LLM_BASE_URL_ALLOWLIST_ENV}"
+    ))
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_llm_base_url(base_url: &str) -> Result<Url, String> {
     let trimmed = base_url.trim();
     if trimmed.is_empty() {
@@ -217,6 +239,13 @@ fn llm_url_is_allowlisted(parsed: &Url) -> bool {
         .filter(|entry| !entry.is_empty())
         .map(|entry| entry.trim_end_matches('/').to_ascii_lowercase())
         .any(|entry| entry == full || entry == origin)
+}
+
+fn llm_url_matches_openai_compatible_default(parsed: &Url) -> bool {
+    ["openai", "deepseek", "xai", "google", "openrouter"]
+        .iter()
+        .filter_map(|provider| default_llm_base_url(provider))
+        .any(|default_url| llm_url_origin_matches(parsed, default_url))
 }
 
 fn llm_url_is_local_plain_http_endpoint(parsed: &Url) -> bool {
