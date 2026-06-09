@@ -4,7 +4,7 @@ import path from 'path';
 import { describe, expect, test } from '@jest/globals';
 
 function readSource(relativePath: string): string {
-    return fs.readFileSync(path.resolve(process.cwd(), relativePath), 'utf-8');
+    return fs.readFileSync(path.resolve(process.cwd(), relativePath), 'utf-8').replace(/\r\n/g, '\n');
 }
 
 describe('desktop transaction edit dialog readonly affordance', () => {
