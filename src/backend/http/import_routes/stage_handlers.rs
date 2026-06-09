@@ -840,119 +840,6 @@ async fn load_import_intelligence_recurring_templates(
         .collect()
 }
 
-fn import_intelligence_category_parts(path: Option<&str>, name: &str) -> (String, String) {
-    let path = path.unwrap_or_default().trim();
-    if let Some((main, sub)) = path.split_once('/') {
-        return (main.trim().to_string(), sub.trim().to_string());
-    }
-    if !path.is_empty() {
-        return (path.to_string(), String::new());
-    }
-    (name.trim().to_string(), String::new())
-}
-
-fn import_intelligence_category_value(category: &ImportIntelligenceCategory) -> Value {
-    json!({
-        "id": category.id,
-        "main": category.main_category,
-        "sub": category.sub_category,
-        "type": category.type_code,
-    })
-}
-
-fn import_intelligence_account_value(account: &ImportIntelligenceAccount) -> Value {
-    json!({
-        "id": account.id,
-        "name": account.name,
-    })
-}
-
-fn rule_expression_string(value: &Value) -> String {
-    match value {
-        Value::String(text) => text.clone(),
-        Value::Object(object) => object
-            .get("expression")
-            .or_else(|| object.get("rule_expression"))
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)
-            .or_else(|| rule_expression_from_contains_any(object))
-            .unwrap_or_default(),
-        Value::Null => String::new(),
-        Value::Number(_) | Value::Bool(_) | Value::Array(_) => value.to_string(),
-    }
-}
-
-fn rule_expression_regex_enabled(value: &Value) -> bool {
-    value
-        .get("regex_enabled")
-        .or_else(|| value.get("regexEnabled"))
-        .map(json_value_truthy)
-        .unwrap_or(false)
-}
-
-fn json_value_truthy(value: &Value) -> bool {
-    match value {
-        Value::Bool(value) => *value,
-        Value::Number(value) => value.as_i64().unwrap_or_default() != 0,
-        Value::String(value) => matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "true" | "1" | "yes" | "y" | "on"
-        ),
-        Value::Null | Value::Array(_) | Value::Object(_) => false,
-    }
-}
-
-fn rule_expression_from_contains_any(object: &Map<String, Value>) -> Option<String> {
-    let operator = object
-        .get("operator")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    if operator != "contains_any" {
-        return None;
-    }
-    let values = object
-        .get("values")
-        .and_then(Value::as_array)?
-        .iter()
-        .filter_map(value_to_text)
-        .map(|value| bill_analyser_core::category_rules::escape_rule_expression_term(&value))
-        .filter(|value| !value.trim().is_empty())
-        .collect::<Vec<_>>();
-    (!values.is_empty()).then(|| format!("OR={{{}}}", values.join(",")))
-}
-
-fn text_from_json(value: &Value, key: &str) -> String {
-    optional_text_from_json(value, key).unwrap_or_default()
-}
-
-fn optional_text_from_json(value: &Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(value_to_text)
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-fn optional_i64_from_json(value: &Value, key: &str) -> Option<i64> {
-    value.get(key).and_then(|value| {
-        value
-            .as_i64()
-            .or_else(|| value.as_str()?.trim().parse::<i64>().ok())
-    })
-}
-
-fn string_map_from_json(value: Option<&Value>) -> BTreeMap<String, String> {
-    value
-        .and_then(Value::as_object)
-        .into_iter()
-        .flat_map(|object| object.iter())
-        .filter_map(|(key, value)| {
-            value_to_text(value).map(|value| (key.clone(), value.trim().to_ascii_lowercase()))
-        })
-        .filter(|(_, value)| !value.is_empty())
-        .collect()
-}
-
 #[tracing::instrument(level = "debug", skip_all)]
 fn ensure_base_matching_feedback(draft: &mut ImportPreviewDraft) {
     let parser_id = draft.preview_parser_id.clone();
@@ -3226,7 +3113,6 @@ pub async fn import_learning_rule_delete_runtime_handler(
         Err(response) => route_response(response),
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

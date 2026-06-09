@@ -874,16 +874,6 @@ fn push_nullable_i64_change(
     }
 }
 
-fn value_to_text(value: &Value) -> Option<String> {
-    match value {
-        Value::Null => None,
-        Value::String(text) => Some(text.clone()),
-        Value::Number(number) => Some(number.to_string()),
-        Value::Bool(value) => Some(value.to_string()),
-        Value::Array(_) | Value::Object(_) => Some(value.to_string()),
-    }
-}
-
 fn value_to_preview_type_text(value: &Value) -> Option<String> {
     if let Some(label) = value_to_i64(value).and_then(transaction_type_label_from_i64) {
         return Some(label.to_string());

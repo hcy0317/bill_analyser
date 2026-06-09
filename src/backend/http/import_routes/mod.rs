@@ -355,6 +355,7 @@ pub fn import_runtime_router() -> Router<HttpAppState> {
 mod ocr_security;
 
 include!("stage_vector_recall.rs");
+include!("stage_json_helpers.rs");
 include!("stage_handlers.rs");
 include!("stage_account_rule_matchers.rs");
 include!("duplicate_materialization.rs");
