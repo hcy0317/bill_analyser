@@ -4,7 +4,8 @@ import { TransactionType } from '@/core/transaction.ts';
 import type {
     TransactionCreateRequest,
     TransactionImportRequest,
-    TransactionModifyRequest
+    TransactionModifyRequest,
+    TransactionReconciliationStatementRequest
 } from '@/models/transaction.ts';
 
 const interceptorStub = {
@@ -136,6 +137,31 @@ describe('services transaction facade adapters', () => {
 
         expect(axiosMock.get).toHaveBeenCalledWith(
             'bills/get?id=bill-42&with_pictures=false&trim_account=true&trim_category=true&trim_tag=true'
+        );
+    });
+
+    test('defaults single transaction pictures and appends reconciliation optional filters', async () => {
+        await services.getTransaction({ id: 'bill-99', withPictures: undefined });
+        await services.getReconciliationStatements({
+            accountId: 'bank-card',
+            startTime: 1777550400000,
+            endTime: 1777636800999,
+            categoryIds: 'cat/food',
+            type: 2,
+            keyword: 'salary bonus'
+        } as TransactionReconciliationStatementRequest & {
+            categoryIds: string;
+            type: number;
+            keyword: string;
+        });
+
+        expect(axiosMock.get).toHaveBeenNthCalledWith(
+            1,
+            'bills/get?id=bill-99&with_pictures=true&trim_account=true&trim_category=true&trim_tag=true'
+        );
+        expect(axiosMock.get).toHaveBeenNthCalledWith(
+            2,
+            'bills/reconciliation_statements?account_id=bank-card&start_time=1777550400000&end_time=1777636800999&category_ids=cat/food&type=2&keyword=salary%20bonus'
         );
     });
 

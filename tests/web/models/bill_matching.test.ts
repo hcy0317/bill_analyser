@@ -235,6 +235,53 @@ describe('bill_matching model helpers', () => {
         expect(getBillMatchingCandidateBillAmountCents(candidate)).toBe(8850);
     });
 
+    test('normalizes snake-case bill fields and rounds yuan display amounts to cents', () => {
+        const response = normalizeBillMatchingCandidatesResponse({
+            billId: 101,
+            linkedPair: null,
+            candidates: [{
+                candidateId: 'bill:101:transfer:202',
+                kind: 'transfer',
+                score: '0.82',
+                level: 'medium',
+                reason: 'manual_pair',
+                billId: '202',
+                bill: {
+                    id: '202',
+                    type: 4,
+                    amount: '88.505',
+                    date: '2026-05-21',
+                    description: '内部转账',
+                    counterparty: '银行卡',
+                    payment_method: '网银',
+                    main_category: '转账',
+                    sub_category: '内部',
+                    source_account_id: '12',
+                    destination_account_id: '34'
+                }
+            }]
+        });
+        const candidate = response.candidates[0]!;
+
+        expect(candidate).toMatchObject({
+            candidateId: 'bill:101:transfer:202',
+            kind: 'transfer',
+            score: 0.82,
+            billId: 202
+        });
+        expect(candidate.bill).toMatchObject({
+            id: 202,
+            type: '4',
+            amount: 88.505,
+            paymentMethod: '网银',
+            mainCategory: '转账',
+            subCategory: '内部',
+            sourceAccountId: 12,
+            destinationAccountId: 34
+        });
+        expect(getBillMatchingCandidateBillAmountCents(candidate)).toBe(8851);
+    });
+
     test('keeps historical duplicate candidates actionable with persisted reconciliation actions', () => {
         const response = normalizeBillMatchingCandidatesResponse({
             billId: 101,

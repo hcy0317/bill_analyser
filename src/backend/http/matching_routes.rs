@@ -1395,7 +1395,7 @@ fn status_or_internal(status: u16) -> StatusCode {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    include!("matching_routes_contract_tests.rs");
 
     #[test]
     fn preview_action_payload_parses_expected_state_learning_and_recurring_aliases() {

@@ -76,6 +76,18 @@ fn status_or_internal(status: u16) -> StatusCode {
 #[cfg(test)]
 mod response_helper_tests {
     use super::*;
+    use axum::body::to_bytes;
+
+    async fn response_value(response: Response) -> (StatusCode, Value) {
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body bytes");
+        (
+            status,
+            serde_json::from_slice(&body).expect("JSON response body"),
+        )
+    }
 
     #[test]
     fn response_helpers_cover_error_text_and_status_mapping() {
@@ -92,5 +104,17 @@ mod response_helper_tests {
             status_or_internal(0),
             StatusCode::INTERNAL_SERVER_ERROR
         );
+    }
+
+    #[tokio::test]
+    async fn success_and_error_helpers_pin_bill_route_envelopes() {
+        let (status, success) =
+            response_value(success_result(StatusCode::OK, json!({"items": [1]}))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(success, json!({"success": true, "result": {"items": [1]}}));
+
+        let (status, error) = response_value(error_response(StatusCode::CONFLICT, "duplicate")).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(error, json!({"success": false, "error": "duplicate"}));
     }
 }

@@ -54,5 +54,13 @@ path = "../../../tests/backend/db/import_staging.rs"
 name = "statistics_postgres"
 path = "../../../tests/backend/db/statistics_postgres.rs"
 
+[[test]]
+name = "matching_postgres"
+path = "../../../tests/backend/db/matching_postgres.rs"
+
+[[test]]
+name = "bills_postgres"
+path = "../../../tests/backend/db/bills_postgres.rs"
+
 [lints]
 workspace = true

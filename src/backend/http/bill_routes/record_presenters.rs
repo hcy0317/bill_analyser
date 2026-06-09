@@ -77,3 +77,43 @@ fn record_to_frontend_value_with_related(
     serde_json::to_value(frontend_transaction_from_backend(&bill))
         .map_err(|error| bill_analyser_db::DbError::InvalidOperation(error.to_string()))
 }
+
+#[cfg(test)]
+mod record_presenter_tests {
+    use super::*;
+
+    #[test]
+    fn record_to_frontend_value_with_related_preserves_cents_tags_category_and_accounts() {
+        let mut record = Map::new();
+        record.insert("id".to_string(), json!(42));
+        record.insert("type".to_string(), json!("expense"));
+        record.insert("main_category".to_string(), json!("餐饮"));
+        record.insert("sub_category".to_string(), json!("咖啡"));
+        record.insert("date".to_string(), json!("2026-04-02 09:00:00"));
+        record.insert("amount".to_string(), json!(123.45));
+        record.insert("destination_amount".to_string(), json!(125.0));
+        record.insert("source_account_id".to_string(), json!(10));
+        record.insert("destination_account_id".to_string(), json!(20));
+        record.insert("description".to_string(), json!("B007 咖啡"));
+
+        let value = record_to_frontend_value_with_related(
+            record,
+            vec![json!({"id": "7", "name": "咖啡标签"})],
+            Some("5".to_string()),
+        )
+        .expect("frontend bill value");
+
+        assert_eq!(value["id"], "42");
+        assert_eq!(value["categoryId"], "5");
+        assert_eq!(value["categoryName"], "餐饮");
+        assert_eq!(value["subCategoryName"], "咖啡");
+        assert_eq!(value["sourceAccountId"], "10");
+        assert_eq!(value["destinationAccountId"], "20");
+        assert_eq!(value["amount"], 12345);
+        assert_eq!(value["sourceAmount"], 12345);
+        assert_eq!(value["destinationAmount"], 12500);
+        assert_eq!(value["tagIds"], json!(["7"]));
+        assert_eq!(value["tags"], json!([{"id": "7", "name": "咖啡标签"}]));
+        assert_eq!(value["comment"], "B007 咖啡");
+    }
+}

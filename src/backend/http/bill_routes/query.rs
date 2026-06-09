@@ -147,3 +147,46 @@ async fn postgres_filters_from_query(
         ..BillFilters::default()
     })
 }
+
+#[cfg(test)]
+mod bill_query_tests {
+    use super::*;
+
+    #[test]
+    fn bills_list_query_pins_paging_filter_aliases_and_amount_filter() {
+        let query = BillsListQuery {
+            page: Some(0),
+            count: Some(25),
+            page_size: None,
+            page_size_camel: Some(50),
+            account_ids: Some(" 2,0,bad,3,2".to_string()),
+            account_ids_camel: Some("9".to_string()),
+            category_ids: None,
+            category_ids_camel: Some(" 4,5,invalid ".to_string()),
+            tag_ids: Some("7,,0,8".to_string()),
+            amount_filter: None,
+            amount_filter_camel: Some(" between:10:20 ".to_string()),
+            ..BillsListQuery::default()
+        };
+
+        assert_eq!(query.page(), 1);
+        assert_eq!(query.page_size(), 50, "pageSize takes precedence over count");
+        assert_eq!(query.account_ids(), vec![2, 3, 2]);
+        assert_eq!(query.category_ids(), vec![4, 5]);
+        assert_eq!(query.tag_ids(), vec![7, 8]);
+        assert_eq!(query.amount_filter().as_deref(), Some("between:10:20"));
+
+        let clamped = BillsListQuery {
+            page: Some(4),
+            count: Some(100),
+            page_size: Some(999),
+            page_size_camel: Some(10),
+            amount_filter: Some(" gte:200 ".to_string()),
+            amount_filter_camel: Some("ignored".to_string()),
+            ..BillsListQuery::default()
+        };
+        assert_eq!(clamped.page(), 4);
+        assert_eq!(clamped.page_size(), 500);
+        assert_eq!(clamped.amount_filter().as_deref(), Some("gte:200"));
+    }
+}
