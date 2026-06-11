@@ -1,5 +1,5 @@
 <template>
-    <f7-page ptr @ptr:refresh="reload">
+    <f7-page ptr data-testid="mobile.exchange-rates.page" @ptr:refresh="reload">
         <f7-navbar>
             <f7-nav-left :back-link="tt('Back')"></f7-nav-left>
             <f7-nav-title :title="tt('Exchange Rates Data')"></f7-nav-title>

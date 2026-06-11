@@ -1,5 +1,5 @@
 <template>
-    <f7-page no-navbar no-swipeback login-screen hide-toolbar-on-scroll>
+    <f7-page no-navbar no-swipeback login-screen hide-toolbar-on-scroll data-testid="mobile.auth.login.page">
         <f7-login-screen-title>
             <img alt="logo" class="login-page-logo" :src="APPLICATION_LOGO_PATH" />
             <f7-block class="login-page-tile margin-vertical-half">{{ tt('global.app.title') }}</f7-block>
@@ -11,6 +11,7 @@
 
         <f7-list form dividers class="margin-bottom-half" v-if="isInternalAuthEnabled()">
             <f7-list-input
+                data-testid="mobile.auth.login.username"
                 type="text"
                 autocomplete="username"
                 clear-button
@@ -21,6 +22,7 @@
                 @input="tempToken = ''"
             ></f7-list-input>
             <f7-list-input
+                data-testid="mobile.auth.login.password"
                 type="password"
                 autocomplete="current-password"
                 clear-button
@@ -49,7 +51,7 @@
         </f7-list>
 
         <f7-list class="margin-vertical-half">
-            <f7-list-button :class="{ 'disabled': inputIsEmpty || loggingInByPassword || loggingInByOAuth2 }" :text="tt('Log In')"
+            <f7-list-button data-testid="mobile.auth.login.submit" :class="{ 'disabled': inputIsEmpty || loggingInByPassword || loggingInByOAuth2 }" :text="tt('Log In')"
                             @click="login" v-if="isInternalAuthEnabled()"></f7-list-button>
             <f7-list-item class="login-divider display-flex align-items-center" v-if="isInternalAuthEnabled() && isOAuth2Enabled()">
                 <hr class="margin-inline-end-half" />
@@ -60,7 +62,7 @@
                             @click="loginByOAuth2" v-if="isOAuth2Enabled()"></f7-list-button>
             <f7-block-footer v-if="isInternalAuthEnabled()">
                 <span>{{ tt('Don\'t have an account?') }}</span>&nbsp;
-                <f7-link :class="{ 'disabled': !isUserRegistrationEnabled() || loggingInByPassword || loggingInByOAuth2 }" href="/signup" :text="tt('Create an account')"></f7-link>
+                <f7-link data-testid="mobile.auth.login.signup" :class="{ 'disabled': !isUserRegistrationEnabled() || loggingInByPassword || loggingInByOAuth2 }" href="/signup" :text="tt('Create an account')"></f7-link>
             </f7-block-footer>
             <f7-block-footer class="padding-bottom">
             </f7-block-footer>

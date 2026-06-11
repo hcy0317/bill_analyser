@@ -1,11 +1,12 @@
 <template>
-    <v-row class="match-height">
+    <v-row class="match-height" :data-testid="templateType === TemplateType.Schedule.type ? 'desktop.schedules.page' : 'desktop.templates.page'">
         <v-col cols="12">
             <v-card>
                 <template #title>
                     <div class="title-and-toolbar d-flex align-center">
                         <span>{{ templateType === TemplateType.Schedule.type ? tt('Scheduled Transactions') : tt('Transaction Templates') }}</span>
                         <v-btn class="ms-3" color="default" variant="outlined"
+                               :data-testid="templateType === TemplateType.Schedule.type ? 'desktop.schedules.action.add' : 'desktop.templates.action.add'"
                                :disabled="loading || updating" @click="add">{{ tt('Add') }}</v-btn>
                         <settings-json-import-export-button
                             :section-key="settingsBundleSectionKey"

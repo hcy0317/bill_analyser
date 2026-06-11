@@ -1,5 +1,5 @@
 <template>
-    <f7-page ptr @ptr:refresh="reload" @page:afterin="onPageAfterIn">
+    <f7-page ptr data-testid="mobile.statistics.page" @ptr:refresh="reload" @page:afterin="onPageAfterIn">
         <f7-navbar>
             <f7-nav-left :back-link="tt('Back')"></f7-nav-left>
             <f7-nav-title>

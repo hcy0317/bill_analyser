@@ -1,10 +1,10 @@
 <template>
-    <f7-page ptr @ptr:refresh="reload" @page:afterin="onPageAfterIn">
+    <f7-page ptr data-testid="mobile.budgets.page" @ptr:refresh="reload" @page:afterin="onPageAfterIn">
         <f7-navbar>
             <f7-nav-left :back-link="tt('Back')"></f7-nav-left>
             <f7-nav-title :title="tt('Budget Management')"></f7-nav-title>
             <f7-nav-right class="navbar-compact-icons">
-                <f7-link icon-f7="plus" @click="openCreateSheet"></f7-link>
+                <f7-link data-testid="mobile.budgets.action.add" icon-f7="plus" @click="openCreateSheet"></f7-link>
             </f7-nav-right>
         </f7-navbar>
 

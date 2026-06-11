@@ -1,5 +1,5 @@
 <template>
-    <f7-page>
+    <f7-page data-testid="mobile.settings.page">
         <f7-navbar :title="tt('Settings')" :back-link="tt('Back')"></f7-navbar>
 
         <f7-block-title class="margin-top">{{ currentNickName }}</f7-block-title>

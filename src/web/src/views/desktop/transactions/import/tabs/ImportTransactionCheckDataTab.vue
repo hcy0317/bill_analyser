@@ -1,5 +1,6 @@
 <template>
     <v-data-table
+        data-testid="desktop.import.preview.table"
         fixed-header
         fixed-footer
         show-select

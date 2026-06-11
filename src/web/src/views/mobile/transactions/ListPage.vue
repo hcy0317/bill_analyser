@@ -1,5 +1,6 @@
 <template>
     <f7-page with-subnavbar
+             data-testid="mobile.transactions.page"
              ptr
              infinite
              :infinite-preloader="loadingMore"
@@ -16,7 +17,7 @@
                 </f7-link>
             </f7-nav-title>
             <f7-nav-right class="navbar-compact-icons">
-                <f7-link icon-f7="plus" :class="{ 'disabled': !canAddTransaction }" @click="add"></f7-link>
+                <f7-link data-testid="mobile.transactions.action.add" icon-f7="plus" :class="{ 'disabled': !canAddTransaction }" @click="add"></f7-link>
             </f7-nav-right>
 
             <f7-subnavbar :inner="false">

@@ -484,3 +484,9 @@ uploads/*
 tests/.runtime/
 .omx/
 coverage.json
+
+# Playwright browser E2E artifacts
+src/web/playwright-report/
+src/web/test-results/
+src/web/e2e/.auth/*
+!src/web/e2e/.auth/.gitignore

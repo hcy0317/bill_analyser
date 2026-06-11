@@ -17,6 +17,9 @@
 - `src/web` 下运行 `npm run lint` 或 CI 等价的 `npm run lint:ci`。
 - 前端代码交付补 `npm run test:coverage` 和 `npm run build`。
 - `tests/web/contracts/frontendRustRouteContract.test.ts` 校验生成的 Rust route fixture 未过期，并扫描 Vue/TS axios/fetch 调用，确保当前前端 `/api/...` 请求全部落到当前 Rust-owned route。
+- 浏览器人工实测矩阵见 [浏览器功能实测矩阵](browser-functional-test-matrix.md)，覆盖桌面端、移动端、登录/健康检查/导航冒烟、账单导入预览确认、主数据 CRUD、预算、统计、设置、备份和外部能力边界。
+- 核心浏览器自动化见 [浏览器功能自动化](browser-functional-test-automation.md)，采用“专用测试账号 + fixture 导入 + 开始/结束清理”的模式，优先覆盖登录、导入预览确认、账单列表与统计联动，并在桌面端和移动端分别运行。
+- `src/web` 下的 Playwright specs 通过 `npm run e2e` 运行；无后端时可先跑 `npm run e2e -- --list` 验证配置和测试发现，完整运行要求本地 Rust/PostgreSQL/Weaviate health 为 `ok`。
 
 ## 仓库治理
 

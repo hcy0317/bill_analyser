@@ -1,5 +1,5 @@
 <template>
-    <f7-page :ptr="true" @ptr:refresh="reload">
+    <f7-page :ptr="true" data-testid="mobile.import.preview.page" @ptr:refresh="reload">
         <f7-navbar>
             <f7-nav-left :back-link="tt('Back')"></f7-nav-left>
             <f7-nav-title :title="tt('Import Preview')"></f7-nav-title>
@@ -14,7 +14,7 @@
         </f7-list>
 
         <template v-else>
-            <f7-block class="import-preview-summary">
+            <f7-block class="import-preview-summary" data-testid="mobile.import.preview.summary">
                 <span>{{ tt('format.misc.selectedCount', { count: selectedRows.length, totalCount: filteredRows.length }) }}</span>
                 <span class="history-summary" v-if="selectedHistoryRewriteCount > 0">
                     {{ tt('History Rewrite') }} {{ selectedHistoryRewriteCount }}
@@ -54,7 +54,7 @@
         <f7-toolbar bottom>
             <f7-link @click="selectAllVisible">{{ tt('Select All') }}</f7-link>
             <f7-link @click="selectNoneVisible">{{ tt('Select None') }}</f7-link>
-            <f7-link :class="{ disabled: selectedRows.length < 1 || confirming }" @click="confirmSelected">
+            <f7-link data-testid="mobile.import.preview.action.confirm" :class="{ disabled: selectedRows.length < 1 || confirming }" @click="confirmSelected">
                 {{ tt('Import') }}
             </f7-link>
         </f7-toolbar>

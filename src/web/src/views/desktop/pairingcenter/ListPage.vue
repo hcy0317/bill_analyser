@@ -1,5 +1,5 @@
 <template>
-    <v-row class="match-height">
+    <v-row class="match-height" data-testid="desktop.rules.page">
         <v-col cols="12">
             <v-card>
                 <v-layout class="rule-center-layout">

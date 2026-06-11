@@ -1,5 +1,5 @@
 <template>
-    <v-row class="match-height">
+    <v-row class="match-height" data-testid="desktop.budgets.page">
         <v-col cols="12">
             <v-card>
                 <v-layout>
@@ -63,6 +63,7 @@
                                     <span>{{ currentViewTitle }}</span>
                                     <!-- 操作按钮 -->
                                     <v-btn class="ms-3" color="default" variant="outlined"
+                                           data-testid="desktop.budgets.action.add"
                                            :disabled="loading || updating" @click="add" v-if="activeViewMode === 'budget'">
                                         {{ tt('Add') }}
                                     </v-btn>

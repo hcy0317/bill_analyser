@@ -1,5 +1,5 @@
 <template>
-    <v-row class="match-height">
+    <v-row class="match-height" data-testid="desktop.accounts.page">
         <v-col cols="12">
             <v-card>
                 <v-layout>
@@ -56,6 +56,7 @@
                                             </v-btn>
                                             <span>{{ tt('Account List') }}</span>
                                             <v-btn class="ms-3" color="default" variant="outlined"
+                                                   data-testid="desktop.accounts.action.add"
                                                    :disabled="loading"
                                                    @click="addAccountForCurrentCategory">
                                                 {{ tt('Add') }}

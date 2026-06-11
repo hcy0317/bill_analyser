@@ -1,11 +1,12 @@
 <template>
-    <v-row class="match-height">
+    <v-row class="match-height" data-testid="desktop.tags.page">
         <v-col cols="12">
             <v-card>
                 <template #title>
                     <div class="title-and-toolbar d-flex align-center">
                         <span>{{ tt('Transaction Tags') }}</span>
                         <v-btn class="ms-3" color="default" variant="outlined"
+                               data-testid="desktop.tags.action.add"
                                :disabled="loading || updating || hasEditingTag" @click="add">{{ tt('Add') }}</v-btn>
                         <settings-json-import-export-button
                             section-key="transactionTags"

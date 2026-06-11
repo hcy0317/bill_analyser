@@ -1,5 +1,5 @@
 <template>
-    <v-row class="match-height">
+    <v-row class="match-height" data-testid="desktop.home.page">
         <v-col cols="12" lg="4" md="12">
             <v-card :class="{ 'disabled': loadingOverview }">
                 <template #title>

@@ -1,5 +1,5 @@
 <template>
-    <v-row class="match-height">
+    <v-row class="match-height" data-testid="desktop.transactions.page">
         <v-col cols="12">
             <v-card>
                 <v-layout>
@@ -62,6 +62,7 @@
                                             </v-btn>
                                             <span>{{ tt('Transaction List') }}</span>
                                             <v-btn class="ms-3" color="default" variant="outlined"
+                                                   data-testid="desktop.transactions.action.add"
                                                    :disabled="loading || !canAddTransaction" @click="add()">
                                                 {{ tt('Add') }}
                                                 <v-menu activator="parent" :open-on-hover="true" v-if="isTransactionFromAIImageRecognitionEnabled() || (allTransactionTemplates && allTransactionTemplates.length)">
@@ -84,6 +85,7 @@
                                                 {{ tt('Batch Add') }}
                                             </v-btn>
                                             <v-btn class="ms-3" color="default" variant="outlined"
+                                                   data-testid="desktop.transactions.action.import"
                                                    :disabled="loading" @click="importTransaction"
                                                    v-if="isDataImportingEnabled()">
                                                 {{ tt('Import') }}

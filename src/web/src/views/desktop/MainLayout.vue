@@ -1,7 +1,8 @@
 <template>
     <div class="layout-wrapper layout-nav-type-vertical layout-navbar-static layout-footer-static layout-content-width-fluid"
+         data-testid="desktop.layout.root"
          :class="{ 'layout-overlay-nav': mdAndDown }">
-        <div class="layout-vertical-nav" :class="{'visible': showVerticalOverlayMenu, 'scrolled': isVerticalNavScrolled, 'overlay-nav': mdAndDown}">
+        <div class="layout-vertical-nav" data-testid="desktop.nav.root" :class="{'visible': showVerticalOverlayMenu, 'scrolled': isVerticalNavScrolled, 'overlay-nav': mdAndDown}">
             <div class="nav-header">
                 <router-link to="/" class="app-logo d-flex align-center gap-x-3 app-title-wrapper">
                     <div class="d-flex">
@@ -16,7 +17,7 @@
                 @ps-scroll-y="handleNavScroll"
             >
                 <li class="nav-link home-link">
-                    <router-link to="/">
+                    <router-link to="/" data-testid="desktop.nav.home">
                         <v-icon class="nav-item-icon" :icon="mdiHomeOutline"/>
                         <span class="nav-item-title">{{ tt('Overview') }}</span>
                     </router-link>
@@ -27,7 +28,7 @@
                     </div>
                 </li>
                 <li class="nav-link">
-                    <router-link to="/transaction/list?pageType=0&dateType=7">
+                    <router-link to="/transaction/list?pageType=0&dateType=7" data-testid="desktop.nav.transactions">
                         <v-icon class="nav-item-icon" :icon="mdiListBoxOutline"/>
                         <span class="nav-item-title d-inline-block">{{ tt('Transaction Details') }}</span>
                         <v-btn density="compact" color="secondary" variant="text" size="22"
@@ -39,7 +40,7 @@
                     </router-link>
                 </li>
                 <li class="nav-link">
-                    <router-link to="/statistics/transaction">
+                    <router-link to="/statistics/transaction" data-testid="desktop.nav.statistics">
                         <v-icon class="nav-item-icon" :icon="mdiChartPieOutline"/>
                         <span class="nav-item-title">{{ tt('Statistics & Analysis') }}</span>
                     </router-link>
@@ -50,43 +51,43 @@
                     </div>
                 </li>
                 <li class="nav-link">
-                    <router-link to="/account/list">
+                    <router-link to="/account/list" data-testid="desktop.nav.accounts">
                         <v-icon class="nav-item-icon" :icon="mdiCreditCardOutline"/>
                         <span class="nav-item-title">{{ tt('Accounts') }}</span>
                     </router-link>
                 </li>
                 <li class="nav-link">
-                    <router-link to="/category/list">
+                    <router-link to="/category/list" data-testid="desktop.nav.categories">
                         <v-icon class="nav-item-icon" :icon="mdiViewDashboardOutline"/>
                         <span class="nav-item-title">{{ tt('Transaction Categories') }}</span>
                     </router-link>
                 </li>
                 <li class="nav-link">
-                    <router-link to="/tag/list">
+                    <router-link to="/tag/list" data-testid="desktop.nav.tags">
                         <v-icon class="nav-item-icon" :icon="mdiTagOutline"/>
                         <span class="nav-item-title">{{ tt('Transaction Tags') }}</span>
                     </router-link>
                 </li>
                 <li class="nav-link">
-                    <router-link to="/template/list">
+                    <router-link to="/template/list" data-testid="desktop.nav.templates">
                         <v-icon class="nav-item-icon" :icon="mdiClipboardTextOutline"/>
                         <span class="nav-item-title">{{ tt('Transaction Templates') }}</span>
                     </router-link>
                 </li>
                 <li class="nav-link" v-if="isUserScheduledTransactionEnabled()">
-                    <router-link to="/schedule/list">
+                    <router-link to="/schedule/list" data-testid="desktop.nav.schedules">
                         <v-icon class="nav-item-icon" :icon="mdiClipboardTextClockOutline"/>
                         <span class="nav-item-title">{{ tt('Scheduled Transactions') }}</span>
                     </router-link>
                 </li>
                 <li class="nav-link">
-                    <router-link to="/budget/list">
+                    <router-link to="/budget/list" data-testid="desktop.nav.budgets">
                         <v-icon class="nav-item-icon" :icon="mdiCalculatorVariantOutline"/>
                         <span class="nav-item-title">{{ tt('Budget Management') }}</span>
                     </router-link>
                 </li>
                 <li class="nav-link">
-                    <router-link to="/pairing/list">
+                    <router-link to="/pairing/list" data-testid="desktop.nav.rules">
                         <v-icon class="nav-item-icon" :icon="mdiBookCogOutline"/>
                         <span class="nav-item-title">{{ tt('Rule Center') }}</span>
                     </router-link>
@@ -97,7 +98,7 @@
                     </div>
                 </li>
                 <li class="nav-link">
-                    <router-link to="/exchange_rates">
+                    <router-link to="/exchange_rates" data-testid="desktop.nav.exchange-rates">
                         <v-icon class="nav-item-icon" :icon="mdiSwapHorizontal"/>
                         <span class="nav-item-title">{{ tt('Exchange Rates Data') }}</span>
                     </router-link>
@@ -109,7 +110,7 @@
                     </a>
                 </li>
                 <li class="nav-link">
-                    <router-link to="/about">
+                    <router-link to="/about" data-testid="desktop.nav.about">
                         <v-icon class="nav-item-icon" :icon="mdiInformationOutline"/>
                         <span class="nav-item-title">{{ tt('About') }}</span>
                     </router-link>

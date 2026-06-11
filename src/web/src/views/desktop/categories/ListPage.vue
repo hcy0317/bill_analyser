@@ -1,5 +1,5 @@
 <template>
-    <v-row class="match-height">
+    <v-row class="match-height" data-testid="desktop.categories.page">
         <v-col cols="12">
             <v-card>
                 <v-layout>
@@ -42,6 +42,7 @@
                                             </v-btn>
                                              <span>{{ tt('Transaction Categories') }}</span>
                                              <v-btn class="ms-3" color="default" variant="outlined"
+                                                    data-testid="desktop.categories.action.add"
                                                     :disabled="loading || updating"
                                                     @click="addCategoryByCurrentSelection">
                                                  {{ tt('Add') }}

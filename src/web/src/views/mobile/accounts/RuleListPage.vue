@@ -1,10 +1,10 @@
 <template>
-    <f7-page :ptr="true" @ptr:refresh="reload">
+    <f7-page :ptr="true" data-testid="mobile.account-rules.page" @ptr:refresh="reload">
         <f7-navbar>
             <f7-nav-left :back-link="tt('Back')"></f7-nav-left>
             <f7-nav-title :title="tt('Account Recognition Rules')"></f7-nav-title>
             <f7-nav-right>
-                <f7-link icon-f7="plus" :class="{ disabled: accountOptions.length === 0 }" @click="openCreateSheet"></f7-link>
+                <f7-link data-testid="mobile.account-rules.action.add" icon-f7="plus" :class="{ disabled: accountOptions.length === 0 }" @click="openCreateSheet"></f7-link>
             </f7-nav-right>
         </f7-navbar>
 

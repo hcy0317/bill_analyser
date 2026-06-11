@@ -1,5 +1,5 @@
 <template>
-    <v-row class="match-height">
+    <v-row class="match-height" data-testid="desktop.statistics.page">
         <v-col cols="12">
             <v-card>
                 <v-layout>

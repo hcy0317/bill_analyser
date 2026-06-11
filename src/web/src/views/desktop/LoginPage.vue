@@ -1,5 +1,5 @@
 <template>
-    <div class="layout-wrapper">
+    <div class="layout-wrapper" data-testid="desktop.auth.login.page">
         <router-link to="/">
             <div class="auth-logo d-flex align-start gap-x-3">
                 <img alt="logo" class="login-page-logo" :src="APPLICATION_LOGO_PATH" />
@@ -33,6 +33,7 @@
                                 <v-row>
                                     <v-col cols="12" v-if="isInternalAuthEnabled()">
                                         <v-text-field
+                                            data-testid="desktop.auth.login.username"
                                             type="text"
                                             autocomplete="username"
                                             :autofocus="true"
@@ -47,6 +48,7 @@
 
                                     <v-col cols="12" v-if="isInternalAuthEnabled()">
                                         <v-text-field
+                                            data-testid="desktop.auth.login.password"
                                             autocomplete="current-password"
                                             ref="passwordInput"
                                             type="password"
@@ -102,7 +104,7 @@
                                     </v-col>
 
                                     <v-col cols="12">
-                                        <v-btn block :disabled="inputIsEmpty || loggingInByPassword || loggingInByOAuth2 || verifying"
+                                        <v-btn block data-testid="desktop.auth.login.submit" :disabled="inputIsEmpty || loggingInByPassword || loggingInByOAuth2 || verifying"
                                                @click="login" v-if="isInternalAuthEnabled() && !show2faInput">
                                             {{ tt('Log In') }}
                                             <v-progress-circular indeterminate size="22" class="ms-2" v-if="loggingInByPassword"></v-progress-circular>
@@ -128,7 +130,7 @@
 
                                     <v-col cols="12" class="text-center text-base" v-if="isInternalAuthEnabled()">
                                         <span class="me-1">{{ tt('Don\'t have an account?') }}</span>
-                                        <router-link class="text-primary" to="/signup"
+                                        <router-link class="text-primary" data-testid="desktop.auth.login.signup" to="/signup"
                                                      :class="{ 'disabled': !isUserRegistrationEnabled() || loggingInByPassword || loggingInByOAuth2 || verifying }">
                                             {{ tt('Create an account') }}
                                         </router-link>

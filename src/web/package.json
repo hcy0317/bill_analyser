@@ -15,10 +15,15 @@
     "serve:dist": "vite preview",
     "structure:check": "node ./scripts/check-frontend-structure.mjs",
     "lint": "vue-tsc --noEmit && eslint . --fix",
-    "lint:ci": "vue-tsc --noEmit && eslint .",
+    "lint:ci": "vue-tsc --noEmit && tsc --noEmit --project tsconfig.e2e.json && eslint .",
     "test": "cross-env CI=1 TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --maxWorkers=50%",
     "test:coverage": "npm run test && cross-env CI=1 COVERAGE_GATE=1 TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --maxWorkers=50% --coverage",
-    "test:watch": "cross-env TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --watch"
+    "test:watch": "cross-env TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --watch",
+    "e2e": "playwright test",
+    "e2e:check": "tsc --noEmit --project tsconfig.e2e.json",
+    "e2e:headed": "playwright test --headed",
+    "e2e:ui": "playwright test --ui",
+    "e2e:install": "playwright install chromium"
   },
   "dependencies": {
     "@mdi/js": "^7.4.47",
@@ -52,6 +57,7 @@
   },
   "devDependencies": {
     "@jest/globals": "^30.2.0",
+    "@playwright/test": "^1.60.0",
     "@tsconfig/node24": "^24.0.1",
     "@types/cbor-js": "^0.1.1",
     "@types/crypto-js": "^4.2.2",

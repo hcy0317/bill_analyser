@@ -1,6 +1,6 @@
 <template>
     <v-dialog :persistent="!!persistent" v-model="showState">
-        <v-card class="pa-6 pa-sm-10 pa-md-12">
+        <v-card class="pa-6 pa-sm-10 pa-md-12" data-testid="desktop.import.dialog">
             <template #title>
                 <div class="d-flex align-center justify-center">
                     <div class="d-flex w-100 align-center justify-center">
@@ -232,6 +232,7 @@
 
                         <v-col cols="12" md="12" v-if="!isImportDataFromTextbox">
                             <v-text-field
+                                data-testid="desktop.import.file-name"
                                 readonly
                                 persistent-placeholder
                                 type="text"
@@ -303,6 +304,7 @@
                        :prepend-icon="mdiClose" @click="close(false)"
                        v-if="currentStep !== 'finalResult'">{{ tt('Cancel') }}</v-btn>
                 <v-btn class="button-icon-with-direction" color="primary"
+                       data-testid="desktop.import.action.next"
                        :disabled="loading || submitting || (!isImportDataFromTextbox && !importFile) || (isImportDataFromTextbox && !importData)"
                        :append-icon="!submitting ? mdiArrowRight : undefined" @click="parseData"
                        v-if="currentStep === 'defineColumn' || currentStep === 'executeCustomScript' || currentStep === 'uploadFile'">
@@ -310,6 +312,7 @@
                     <v-progress-circular indeterminate size="22" class="ms-2" v-if="submitting"></v-progress-circular>
                 </v-btn>
                 <v-btn class="button-icon-with-direction" color="teal"
+                       data-testid="desktop.import.action.confirm"
                        :disabled="submitting || importTransactionCheckDataTab?.isEditing || !importTransactionCheckDataTab?.canImport"
                        :append-icon="!submitting ? mdiArrowRight : undefined" @click="submit"
                        v-if="currentStep === 'checkData'">
@@ -462,7 +465,7 @@
             </v-card-actions>
         </v-card>
     </v-dialog>
-    <input ref="fileInput" type="file" multiple style="display: none" :accept="supportedImportFileExtensions" @change="setImportFile($event)" />
+    <input ref="fileInput" data-testid="desktop.import.file-input" type="file" multiple style="display: none" :accept="supportedImportFileExtensions" @change="setImportFile($event)" />
 </template>
 
 <script setup lang="ts">

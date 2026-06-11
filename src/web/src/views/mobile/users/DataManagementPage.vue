@@ -1,5 +1,5 @@
 <template>
-    <f7-page @page:afterin="onPageAfterIn">
+    <f7-page data-testid="mobile.data-management.page" @page:afterin="onPageAfterIn">
         <f7-navbar :title="tt('Data Management')" :back-link="tt('Back')"></f7-navbar>
 
         <f7-list strong inset dividers class="margin-vertical skeleton-text" v-if="loading">

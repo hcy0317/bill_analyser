@@ -1,11 +1,11 @@
 <template>
-    <f7-page :ptr="!sortable" @ptr:refresh="reload" @page:afterin="onPageAfterIn">
+    <f7-page :ptr="!sortable" data-testid="mobile.accounts.page" @ptr:refresh="reload" @page:afterin="onPageAfterIn">
         <f7-navbar>
             <f7-nav-left :back-link="tt('Back')"></f7-nav-left>
             <f7-nav-title :title="tt('Account List')"></f7-nav-title>
             <f7-nav-right class="navbar-compact-icons">
                 <f7-link icon-f7="ellipsis" :class="{ 'disabled': !allAccountCount }" v-if="!sortable" @click="showMoreActionSheet = true"></f7-link>
-                <f7-link href="/account/add" icon-f7="plus" v-if="!sortable"></f7-link>
+                <f7-link data-testid="mobile.accounts.action.add" href="/account/add" icon-f7="plus" v-if="!sortable"></f7-link>
                 <f7-link :text="tt('Done')" :class="{ 'disabled': displayOrderSaving }" @click="saveSortResult" v-else-if="sortable"></f7-link>
             </f7-nav-right>
         </f7-navbar>
