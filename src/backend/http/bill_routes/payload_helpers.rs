@@ -133,8 +133,8 @@ fn optional_json_object_from_body(body: &Bytes) -> Value {
 
 fn is_frontend_mutation(payload: &Value) -> bool {
     payload.as_object().is_some_and(|object| {
-        object.contains_key("sourceAmount")
-            || object.contains_key("destinationAmount")
+        object.contains_key("sourceAmountCents")
+            || object.contains_key("destinationAmountCents")
             || object.contains_key("sourceAccountId")
             || object.contains_key("destinationAccountId")
             || object.contains_key("categoryId")
@@ -191,8 +191,8 @@ fn ensure_create_defaults(fields: &mut Map<String, Value>) {
         .entry("destination_account_id".to_string())
         .or_insert_with(|| Value::Number(Number::from(0)));
     fields
-        .entry("destination_amount".to_string())
-        .or_insert_with(|| json_number(0.0));
+        .entry("destination_amount_cents".to_string())
+        .or_insert_with(|| Value::Number(Number::from(0)));
 }
 
 fn category_pair_from_fields(fields: &Map<String, Value>) -> Option<(String, String)> {

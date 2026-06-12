@@ -37,3 +37,61 @@ include!("budget_routes/routes.rs");
 include!("budget_routes/handlers.rs");
 include!("budget_routes/payloads.rs");
 include!("budget_routes/runtime_helpers.rs");
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn budget_payloads_accept_explicit_camel_cents_and_normalize_to_db_field() {
+        let imported = import_budget_records_from_payload(&json!([
+            {
+                "name": "餐饮月预算",
+                "category": "餐饮",
+                "period_type": "monthly",
+                "amountCents": 12345,
+                "start_date": "2026-06-01"
+            }
+        ]))
+        .expect("import payload");
+        assert_eq!(imported[0].get("amount_cents"), Some(&json!(12345)));
+        assert!(imported[0].get("amountCents").is_none());
+
+        let created = create_fields_from_payload(&json!({
+            "category": "餐饮",
+            "period_type": "monthly",
+            "amountCents": 23456,
+            "start_date": "2026-06-01"
+        }))
+        .expect("create fields");
+        assert_eq!(created.get("amount_cents"), Some(&json!(23456)));
+        assert_eq!(created.get("enabled"), Some(&json!(true)));
+        assert_eq!(created.get("alert_threshold"), Some(&json!(80)));
+
+        let mut existing = BudgetRecord::new();
+        existing.insert("start_date".to_string(), json!("2026-06-01"));
+        let updated = update_fields_from_payload(&json!({"amountCents": 34567}), &existing)
+            .expect("update fields");
+        assert_eq!(updated.get("amount_cents"), Some(&json!(34567)));
+        assert!(updated.get("updated_at").is_some());
+    }
+
+    #[test]
+    fn budget_payloads_require_explicit_amount_cents_after_normalization() {
+        assert!(validate_import_budget_record(
+            &Map::from_iter([
+                ("category".to_string(), json!("餐饮")),
+                ("period_type".to_string(), json!("monthly")),
+                ("start_date".to_string(), json!("2026-06-01")),
+            ]),
+            0,
+        )
+        .is_err());
+
+        assert_eq!(
+            forecast_amount_cents(&json!({"forecast_amount_cents": 9876})),
+            9876
+        );
+        assert_eq!(forecast_amount_cents(&json!({})), 0);
+    }
+}

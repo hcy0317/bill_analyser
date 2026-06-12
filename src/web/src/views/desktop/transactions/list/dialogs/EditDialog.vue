@@ -127,7 +127,7 @@
                                                   :label="sourceAmountTitle"
                                                   :placeholder="tt(sourceAmountName)"
                                                   :enable-formula="mode !== TransactionEditPageMode.View"
-                                                  v-model="transaction.sourceAmount"/>
+                                                  v-model="transaction.sourceAmountCents"/>
                                 </v-col>
                                 <v-col cols="12" :md="6" v-if="transaction.type === TransactionType.Transfer">
                                     <amount-input class="transaction-edit-amount font-weight-bold" color="primary"
@@ -140,7 +140,7 @@
                                                   :label="transferInAmountTitle"
                                                   :placeholder="tt('Transfer In Amount')"
                                                   :enable-formula="mode !== TransactionEditPageMode.View"
-                                                  v-model="transaction.destinationAmount"/>
+                                                  v-model="transaction.destinationAmountCents"/>
                                 </v-col>
                                 <v-col cols="12" :md="6" v-if="transaction.type === TransactionType.Investment">
                                     <amount-input class="transaction-edit-amount font-weight-bold" color="success"
@@ -153,7 +153,7 @@
                                                   :label="tt('Investment Amount')"
                                                   :placeholder="tt('Investment Amount')"
                                                   :enable-formula="mode !== TransactionEditPageMode.View"
-                                                  v-model="transaction.destinationAmount"/>
+                                                  v-model="transaction.destinationAmountCents"/>
                                 </v-col>
                                 <v-col cols="12" md="12" v-if="transaction.type === TransactionType.Expense">
                                     <v-tooltip :disabled="hasAvailableExpenseCategories" :text="hasAvailableExpenseCategories ? '' : tt('No secondary expense categories are available')">
@@ -1155,8 +1155,8 @@ function setTransaction(newTransaction: Transaction | null, options: SetTransact
             categoryId: options.categoryId,
             accountId: options.accountId,
             destinationAccountId: options.destinationAccountId,
-            amount: options.amount,
-            destinationAmount: options.destinationAmount,
+            sourceAmountCents: options.sourceAmountCents,
+            destinationAmountCents: options.destinationAmountCents,
             tagIds: options.tagIds,
             comment: options.comment
         },
@@ -1179,7 +1179,7 @@ function open(options: TransactionEditOptions): Promise<TransactionEditResponse 
     receiptDraftCandidateHints.value = [];
     resetBillRecurringState();
 
-    initAmount.value = options.amount;
+    initAmount.value = options.sourceAmountCents;
     initCategoryId.value = options.categoryId;
     initAccountId.value = options.accountId;
     initTagIds.value = options.tagIds;
@@ -1420,7 +1420,7 @@ function save(): void {
             });
         };
 
-        if (transaction.value.sourceAmount === 0) {
+        if (transaction.value.sourceAmountCents === 0) {
             confirmDialog.value?.open('Are you sure you want to save this transaction with a zero amount?').then(() => {
                 doSubmit();
             });
@@ -1892,18 +1892,18 @@ watch(() => transaction.value.type, (newType, oldType) => {
 });
 
 // Investment金额联动: 当源金额改变时，自动同步到目标金额
-watch(() => transaction.value.sourceAmount, (newSourceAmount) => {
+watch(() => transaction.value.sourceAmountCents, (newSourceAmount) => {
     if (transaction.value.type === TransactionType.Investment) {
         // Investment的源金额和目标金额应该一致
-        transaction.value.destinationAmount = newSourceAmount;
+        transaction.value.destinationAmountCents = newSourceAmount;
     }
 });
 
 // Investment金额联动: 当目标金额改变时，自动同步到源金额
-watch(() => transaction.value.destinationAmount, (newDestinationAmount) => {
+watch(() => transaction.value.destinationAmountCents, (newDestinationAmount) => {
     if (transaction.value.type === TransactionType.Investment) {
         // Investment的源金额和目标金额应该一致
-        transaction.value.sourceAmount = newDestinationAmount;
+        transaction.value.sourceAmountCents = newDestinationAmount;
     }
 });
 

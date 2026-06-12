@@ -100,8 +100,8 @@ fn duplicate_candidates_match_identical_formal_bills_only() {
         "id": 30,
         "date": "2026-05-01 10:00:00",
         "type": "支出",
-        "amount": -88.5,
-        "destination_amount": 0,
+        "amount_cents": -8850,
+        "destination_amount_cents": 0,
         "source_account_id": 7,
         "destination_account_id": 0,
         "counterparty": "咖啡店",
@@ -114,8 +114,8 @@ fn duplicate_candidates_match_identical_formal_bills_only() {
         "id": 31,
         "date": "2026-05-01 10:00:00",
         "type": "支出",
-        "amount": -88.5,
-        "destination_amount": 0,
+        "amount_cents": -8850,
+        "destination_amount_cents": 0,
         "source_account_id": 7,
         "destination_account_id": 0,
         "counterparty": "咖啡店",
@@ -128,8 +128,8 @@ fn duplicate_candidates_match_identical_formal_bills_only() {
         "id": 32,
         "date": "2026-05-01 10:00:00",
         "type": "支出",
-        "amount": -88.5,
-        "destination_amount": 0,
+        "amount_cents": -8850,
+        "destination_amount_cents": 0,
         "source_account_id": 7,
         "destination_account_id": 0,
         "counterparty": "咖啡店",
@@ -158,7 +158,7 @@ fn transfer_candidates_preserve_current_pair_rules_and_stable_sort() {
         "id": 10,
         "date": "2026-05-01 10:00:00",
         "type": "支出",
-        "amount": -100.0,
+        "amount_cents": -10000,
         "source_account_id": 1,
         "destination_account_id": 0,
         "counterparty": "A",
@@ -168,7 +168,7 @@ fn transfer_candidates_preserve_current_pair_rules_and_stable_sort() {
         "id": 12,
         "date": "2026-05-03 10:00:00",
         "type": "收入",
-        "amount": 100.0,
+        "amount_cents": 10000,
         "source_account_id": 2,
         "destination_account_id": 0,
         "counterparty": "B",
@@ -178,7 +178,7 @@ fn transfer_candidates_preserve_current_pair_rules_and_stable_sort() {
         "id": 11,
         "date": "2026-05-01 10:04:00",
         "type": "收入",
-        "amount": 100.0,
+        "amount_cents": 10000,
         "source_account_id": 2,
         "destination_account_id": 0,
         "counterparty": "B",
@@ -188,7 +188,7 @@ fn transfer_candidates_preserve_current_pair_rules_and_stable_sort() {
         "id": 17,
         "date": "2026-05-01 10:06:00",
         "type": "收入",
-        "amount": 100.0,
+        "amount_cents": 10000,
         "source_account_id": 2,
         "destination_account_id": 0,
         "counterparty": "B",
@@ -198,7 +198,7 @@ fn transfer_candidates_preserve_current_pair_rules_and_stable_sort() {
         "id": 18,
         "date": "2026-05-01 10:04:00",
         "type": "收入",
-        "amount": 101.0,
+        "amount_cents": 10100,
         "source_account_id": 2,
         "destination_account_id": 0,
         "counterparty": "B",
@@ -208,7 +208,7 @@ fn transfer_candidates_preserve_current_pair_rules_and_stable_sort() {
         "id": 13,
         "date": "2026-05-01 10:04:00",
         "type": "收入",
-        "amount": 100.0,
+        "amount_cents": 10000,
         "source_account_id": 1
     });
 
@@ -234,7 +234,7 @@ fn transfer_candidates_preserve_current_pair_rules_and_stable_sort() {
         "id": 14,
         "date": "2026-05-01 10:20:00",
         "type": "transfer",
-        "amount": 100.0,
+        "amount_cents": 10000,
         "source_account_id": 2
     }));
     assert!(build_transfer_pair_candidates(&anchor, &[json!(explicit_transfer)]).is_empty());
@@ -248,7 +248,7 @@ fn transfer_candidates_preserve_current_pair_rules_and_stable_sort() {
         "id": 10,
         "date": "2026-05-01 10:10:00",
         "type": "收入",
-        "amount": 100.0,
+        "amount_cents": 10000,
         "source_account_id": 2
     }));
     assert!(build_transfer_pair_candidate(&anchor, &same_id).is_none());
@@ -257,7 +257,7 @@ fn transfer_candidates_preserve_current_pair_rules_and_stable_sort() {
         "id": 15,
         "date": "2026-05-01 10:10:00",
         "type": "收入",
-        "amount": -100.0,
+        "amount_cents": -10000,
         "source_account_id": 2
     }));
     assert!(build_transfer_pair_candidate(&anchor, &same_sign).is_none());
@@ -266,14 +266,14 @@ fn transfer_candidates_preserve_current_pair_rules_and_stable_sort() {
         "id": 16,
         "date": "2026-05-01 10:03:00",
         "type": "收入",
-        "amount": 100.0,
+        "amount_cents": 10000,
         "source_account_id": 2
     });
     let tie_b = json!({
         "id": 15,
         "date": "2026-05-01 10:03:00",
         "type": "收入",
-        "amount": 100.0,
+        "amount_cents": 10000,
         "source_account_id": 2
     });
     let tied_candidates = build_transfer_pair_candidates(&anchor, &[tie_a, tie_b]);
@@ -286,7 +286,7 @@ fn historical_investment_and_learning_candidates_pin_formal_bill_contracts() {
         "id": 20,
         "date": "2026-05-01 10:00:00",
         "type": "投资",
-        "amount": -100.0,
+        "amount_cents": -10000,
         "source_account_id": 1,
         "counterparty": "天天基金",
         "description": "买入 沪深300ETF 申购"
@@ -295,7 +295,7 @@ fn historical_investment_and_learning_candidates_pin_formal_bill_contracts() {
         "id": 21,
         "date": "2026-05-01 10:20:00",
         "type": "投资",
-        "amount": 100.0,
+        "amount_cents": 10000,
         "source_account_id": 2,
         "destination_account_id": 0,
         "counterparty": "天天基金",
@@ -321,7 +321,7 @@ fn historical_investment_and_learning_candidates_pin_formal_bill_contracts() {
         "id": 22,
         "date": "2026-05-03 10:00:00",
         "type": "投资",
-        "amount": 100.0,
+        "amount_cents": 10000,
         "source_account_id": 2,
         "counterparty": "天天基金",
         "description": "卖出 沪深300ETF 赎回"
@@ -330,7 +330,7 @@ fn historical_investment_and_learning_candidates_pin_formal_bill_contracts() {
         "id": 23,
         "date": "2026-05-01 10:20:00",
         "type": "投资",
-        "amount": 100.0,
+        "amount_cents": 10000,
         "source_account_id": 2,
         "counterparty": "天天基金",
         "description": "卖出 沪深300ETF 赎回"
@@ -507,7 +507,7 @@ fn session_candidates_project_preview_families_without_removed_investment() {
             "id": 8,
             "preview_date": "2026-05-01",
             "preview_type": "支出",
-            "preview_amount": -18.5,
+            "preview_amount_cents": -1850,
             "preview_counterparty": "超市",
             "preview_description": "午餐",
             "matching": {
@@ -624,7 +624,7 @@ fn route_request_contracts_validate_pair_query_action_and_feedback_payloads() {
                 "id": 22,
                 "date": "2026-05-01",
                 "type": "支出",
-                "amount": -19.9,
+                "amount_cents": -1990,
                 "counterparty": "超市",
                 "description": "晚餐",
                 "payment_method": "支付宝",
@@ -652,6 +652,8 @@ fn route_request_contracts_validate_pair_query_action_and_feedback_payloads() {
     assert_eq!(action_payload["bill"]["paymentMethod"], "支付宝");
     assert_eq!(action_payload["bill"]["mainCategory"], "餐饮");
     assert_eq!(action_payload["bill"]["sourceAccountId"], 3);
+    assert_eq!(action_payload["bill"]["amountCents"], -1990);
+    assert!(action_payload["bill"].get("amount").is_none());
     assert!(action_payload["bill"].get("payment_method").is_none());
 
     let pair = object(json!({
@@ -848,7 +850,7 @@ fn recurring_detection_preserves_current_hash_frequency_and_suggestion_shape() {
             "id": 98,
             "date": "bad-date",
             "type": "支出",
-            "amount": -19.99,
+            "amount_cents": -1999,
             "source_account_id": 3,
             "counterparty": "Netflix"
         }),
@@ -856,7 +858,7 @@ fn recurring_detection_preserves_current_hash_frequency_and_suggestion_shape() {
             "id": 97,
             "date": "2026-01-01",
             "type": "",
-            "amount": 0.0,
+            "amount_cents": 0,
             "source_account_id": 3,
             "counterparty": ""
         }),
@@ -864,7 +866,7 @@ fn recurring_detection_preserves_current_hash_frequency_and_suggestion_shape() {
             "id": 1,
             "date": "2026-01-01",
             "type": "支出",
-            "amount": -19.99,
+            "amount_cents": -1999,
             "source_account_id": 3,
             "destination_account_id": null,
             "counterparty": "Netflix",
@@ -874,7 +876,7 @@ fn recurring_detection_preserves_current_hash_frequency_and_suggestion_shape() {
             "id": 2,
             "date": "2026-01-31",
             "type": "支出",
-            "amount": -19.99,
+            "amount_cents": -1999,
             "source_account_id": 3,
             "destination_account_id": null,
             "counterparty": "Netflix",
@@ -884,7 +886,7 @@ fn recurring_detection_preserves_current_hash_frequency_and_suggestion_shape() {
             "id": 3,
             "date": "2026-03-02",
             "type": "支出",
-            "amount": -19.99,
+            "amount_cents": -1999,
             "source_account_id": 3,
             "destination_account_id": null,
             "counterparty": "Netflix",
@@ -894,7 +896,7 @@ fn recurring_detection_preserves_current_hash_frequency_and_suggestion_shape() {
             "id": 99,
             "date": "2026-01-01",
             "type": "支出",
-            "amount": -88.0,
+            "amount_cents": -8800,
             "source_account_id": 3,
             "counterparty": "ignored"
         }),
@@ -902,7 +904,7 @@ fn recurring_detection_preserves_current_hash_frequency_and_suggestion_shape() {
             "id": 4,
             "date": "2026-04-01",
             "type": "支出",
-            "amount": -9.99,
+            "amount_cents": -999,
             "source_account_id": 3,
             "counterparty": "Weekly",
             "description": "weekly subscription"
@@ -911,7 +913,7 @@ fn recurring_detection_preserves_current_hash_frequency_and_suggestion_shape() {
             "id": 5,
             "date": "2026-04-08",
             "type": "支出",
-            "amount": -9.99,
+            "amount_cents": -999,
             "source_account_id": 3,
             "counterparty": "Weekly",
             "description": "weekly subscription"
@@ -920,7 +922,7 @@ fn recurring_detection_preserves_current_hash_frequency_and_suggestion_shape() {
             "id": 6,
             "date": "2026-04-15",
             "type": "支出",
-            "amount": -9.99,
+            "amount_cents": -999,
             "source_account_id": 3,
             "counterparty": "Weekly",
             "description": "weekly subscription"
@@ -938,7 +940,7 @@ fn recurring_detection_preserves_current_hash_frequency_and_suggestion_shape() {
         .find(|pattern| pattern.counterparty == "Netflix")
         .expect("netflix pattern");
     assert_eq!(netflix.frequency, "monthly");
-    assert_eq!(netflix.amount, 19.99);
+    assert_eq!(netflix.amount_cents, 1999);
     assert_eq!(netflix.sample_count, 3);
     assert_eq!(netflix.sample_bill_ids, vec![1, 2, 3]);
     assert_eq!(netflix.suggested_next_date, "2026-04-01");
@@ -949,7 +951,7 @@ fn recurring_detection_preserves_current_hash_frequency_and_suggestion_shape() {
         "name": "Netflix",
         "description": "subscription",
         "type": "支出",
-        "amount": 19.99,
+        "amount_cents": 1999,
         "source_account_id": "3",
         "destination_account_id": "",
         "counterparty": "Netflix",
@@ -966,6 +968,7 @@ fn recurring_detection_preserves_current_hash_frequency_and_suggestion_shape() {
         "updated_at": "2026-05-07T10:00:00"
     })));
     assert_eq!(serialized["patternHash"], netflix.pattern_hash);
+    assert_eq!(serialized["amountCents"], 1999);
     assert_eq!(serialized["sampleBillIds"], json!([1, 2, 3]));
     assert_eq!(serialized["sourceAccountId"], "3");
     assert_eq!(serialized["destinationAccountId"], "");

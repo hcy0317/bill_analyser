@@ -62,7 +62,7 @@ describe('budget service adapters', () => {
         expect(buildBudgetExecutionQuery()).toBe('');
     });
 
-    test('maps budget list/detail rows from REST yuan fields to frontend cents', () => {
+    test('maps budget list/detail rows from REST cents fields to frontend cents', () => {
         const mapped = mapRestBudgetToFrontend({
             id: 7,
             name: 'Food',
@@ -70,9 +70,9 @@ describe('budget service adapters', () => {
             sub_category: 'Meals',
             category_id: 'cat-1',
             period_type: BudgetPeriodType.Quarterly,
-            amount: 123.456,
-            spent_amount: 10.4,
-            remaining_amount: 113.056,
+            amount_cents: 12346,
+            spent_amount_cents: 1040,
+            remaining_amount_cents: 11306,
             execution_rate: 12.5,
             alert_threshold: 90,
             enabled: false,
@@ -87,9 +87,9 @@ describe('budget service adapters', () => {
             subCategory: 'Meals',
             categoryId: 'cat-1',
             periodType: BudgetPeriodType.Quarterly,
-            amount: 12346,
-            spentAmount: 1040,
-            remainingAmount: 11306,
+            amountCents: 12346,
+            spentAmountCents: 1040,
+            remainingAmountCents: 11306,
             executionRate: 12.5,
             alertThreshold: 90,
             enabled: false,
@@ -98,38 +98,42 @@ describe('budget service adapters', () => {
             categoryColor: '#123456'
         }));
 
-        expect(mapRestBudgetToFrontend({ amount: 'invalid-number' }).amount).toBe(0);
+        expect(mapRestBudgetToFrontend({ amount_cents: 'invalid-number' }).amountCents).toBe(0);
+        expect(mapRestBudgetToFrontend({ amount_cents: true }).amountCents).toBe(0);
+        expect(mapRestBudgetToFrontend({ amount_cents: 12.34 }).amountCents).toBe(0);
+        expect(mapRestBudgetToFrontend({ amount_cents: '1234' }).amountCents).toBe(1234);
+        expect(mapRestBudgetToFrontend({ amount_cents: '1234.0' }).amountCents).toBe(0);
     });
 
     test('maps execution, forecast, and history responses for frontend budget views', () => {
         expect(mapRestExecutionToFrontend({
-            summary: { total_budget: 200, total_spent: 210, overall_execution_rate: 105 },
+            summary: { total_budget_cents: 20000, total_spent_cents: 21000, overall_execution_rate: 105 },
             items: [{
                 id: 11,
                 category: 'Daily',
                 sub_category: 'Meals',
                 category_id: 'cat-1',
                 category_info: { icon: 'food', color: '#123456' },
-                budget_amount: 100,
-                spent_amount: 120,
-                remaining_amount: -20,
+                budget_amount_cents: 10000,
+                spent_amount_cents: 12000,
+                remaining_amount_cents: -2000,
                 execution_rate: 120,
                 alert_threshold: 80
             }],
             period_start: '2026-05-01',
             period_end: '2026-05-31'
         })).toEqual(expect.objectContaining({
-            totalBudget: 20000,
-            totalSpent: 21000,
+            totalBudgetCents: 20000,
+            totalSpentCents: 21000,
             totalExecutionRate: 105,
             periodStart: '2026-05-01',
             periodEnd: '2026-05-31',
             categories: [expect.objectContaining({
                 budgetId: '11',
                 categoryName: 'Daily-Meals',
-                budgetAmount: 10000,
-                spentAmount: 12000,
-                remainingAmount: -2000,
+                budgetAmountCents: 10000,
+                spentAmountCents: 12000,
+                remainingAmountCents: -2000,
                 isOverBudget: true,
                 alertTriggered: true
             })]
@@ -144,10 +148,10 @@ describe('budget service adapters', () => {
             items: [{
                 category_info: { id: 'cat-2' },
                 category: 'Transport',
-                forecast_amount: 88.88,
-                average_amount: 70,
-                periods: [{ period: '2026-04', amount: 50 }, { period: '2026-05', amount: 75.5 }],
-                budget_amount: 80,
+                forecast_amount_cents: 8888,
+                average_amount_cents: 7000,
+                periods: [{ period: '2026-04', amount_cents: 5000 }, { period: '2026-05', amount_cents: 7550 }],
+                budget_amount_cents: 8000,
                 trend: 'up',
                 projected_over_budget: true,
                 sample_periods: 3,
@@ -165,15 +169,15 @@ describe('budget service adapters', () => {
             avgBacktestMape: 0.2,
             forecasts: [expect.objectContaining({
                 categoryId: 'cat-2',
-                historicalAverage: 7000,
-                currentSpent: 7550,
-                projectedTotal: 8888,
-                budgetAmount: 8000,
+                historicalAverageCents: 7000,
+                currentSpentCents: 7550,
+                projectedTotalCents: 8888,
+                budgetAmountCents: 8000,
                 projectedOverBudget: true,
                 confidence: 'high',
                 periods: [
-                    { period: '2026-04', amount: 5000 },
-                    { period: '2026-05', amount: 7550 }
+                    { period: '2026-04', amountCents: 5000 },
+                    { period: '2026-05', amountCents: 7550 }
                 ]
             })]
         }));
@@ -181,8 +185,8 @@ describe('budget service adapters', () => {
         const history = mapRestHistoryToFrontend({
             summary: { count: 3, period_start: '2026-01-01', period_end: '2026-03-31' },
             items: [
-                { id: 1, budget_id: 10, budget_type: 'investment', category: 'Fund', period_type: 'yearly', budget_amount: 500, spent_amount: 100, remaining_amount: 400, execution_rate: 20 },
-                { id: 2, budgetId: 20, type: 1, category: 'Current', budgetAmount: 1, spentAmount: 0.5, remainingAmount: 0.5, executionRate: 50 },
+                { id: 1, budget_id: 10, budget_type: 'investment', category: 'Fund', period_type: 'yearly', budget_amount_cents: 50000, spent_amount_cents: 10000, remaining_amount_cents: 40000, execution_rate: 20 },
+                { id: 2, budgetId: 20, type: 1, category: 'Current', budgetAmountCents: 100, spentAmountCents: 50, remainingAmountCents: 50, executionRate: 50 },
                 { id: 3, budgetId: 30, type: 'unknown', category: 'Unknown' },
                 { id: 4, budgetId: 40, budget_type: BudgetType.Expense, category: 'Direct enum' },
                 { id: 5, budgetId: 50, budget_type: 'expense', category: 'Expense text' },
@@ -191,21 +195,21 @@ describe('budget service adapters', () => {
         });
 
         expect(history.count).toBe(3);
-        expect(history.items[0]).toEqual(expect.objectContaining({ type: BudgetType.Investment, budgetAmount: 50000 }));
-        expect(history.items[1]).toEqual(expect.objectContaining({ type: BudgetType.Expense, budgetAmount: 100, spentAmount: 50 }));
+        expect(history.items[0]).toEqual(expect.objectContaining({ type: BudgetType.Investment, budgetAmountCents: 50000 }));
+        expect(history.items[1]).toEqual(expect.objectContaining({ type: BudgetType.Expense, budgetAmountCents: 100, spentAmountCents: 50 }));
         expect(history.items[2]).not.toHaveProperty('type');
         expect(history.items[3]).toEqual(expect.objectContaining({ type: BudgetType.Expense }));
         expect(history.items[4]).toEqual(expect.objectContaining({ type: BudgetType.Expense }));
         expect(history.items[5]).toEqual(expect.objectContaining({ type: BudgetType.Investment }));
     });
 
-    test('maps budget mutation and import payloads back to REST yuan fields', () => {
+    test('maps budget mutation and import payloads back to REST cents fields', () => {
         expect(mapBudgetRequestToRest({
             name: 'Groceries',
             category: 'Daily',
             subCategory: 'Food',
             periodType: BudgetPeriodType.Monthly,
-            amount: 12345,
+            amountCents: 12345,
             startDate: '2026-05-01',
             endDate: '2026-05-31'
         })).toEqual({
@@ -213,7 +217,7 @@ describe('budget service adapters', () => {
             category: 'Daily',
             sub_category: 'Food',
             period_type: BudgetPeriodType.Monthly,
-            amount: 123.45,
+            amount_cents: 12345,
             start_date: '2026-05-01',
             end_date: '2026-05-31',
             alert_threshold: 80,
@@ -225,12 +229,12 @@ describe('budget service adapters', () => {
             category: 'Daily',
             subCategory: 'Food',
             periodType: BudgetPeriodType.Monthly,
-            amount: 1000,
+            amountCents: 1000,
             startDate: '2026-05-01'
         })).toEqual(expect.objectContaining({
             sub_category: 'Food',
             period_type: BudgetPeriodType.Monthly,
-            amount: 10,
+            amount_cents: 1000,
             start_date: '2026-05-01'
         }));
 
@@ -239,11 +243,18 @@ describe('budget service adapters', () => {
             category: 'Daily',
             sub_category: 'Food',
             period_type: BudgetPeriodType.Yearly,
-            amount: 10
+            amount_cents: 10
         })).toEqual(expect.objectContaining({
             sub_category: 'Food',
             period_type: BudgetPeriodType.Yearly,
-            amount: 10
+            amount_cents: 10
+        }));
+
+        expect(mapBudgetRequestToRest({ amountCents: true })).toEqual(expect.objectContaining({
+            amount_cents: 0
+        }));
+        expect(mapImportedBudgetToRest({ amount_cents: 12.34 })).toEqual(expect.objectContaining({
+            amount_cents: 0
         }));
     });
 });

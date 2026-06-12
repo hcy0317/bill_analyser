@@ -1,3 +1,5 @@
+import { normalizeStrictAbsoluteCents } from './strictCents.ts';
+
 export interface ImportCheckLearningPreviewTextSyncState {
     previewId?: number | null;
     counterparty?: string;
@@ -66,10 +68,6 @@ export function hasImportCheckLearningExpectedStateDrift(
         || baseline.destinationAccountId !== current.destinationAccountId;
 }
 
-export function convertImportPreviewAmountToCents(amountInYuan: number | undefined, fallbackInCents: number): number {
-    if (typeof amountInYuan !== 'number' || Number.isNaN(amountInYuan)) {
-        return fallbackInCents;
-    }
-
-    return Math.round(Math.abs(amountInYuan) * 100);
+export function normalizeImportPreviewAmountCents(amountInCents: unknown, fallbackInCents: number): number {
+    return normalizeStrictAbsoluteCents(amountInCents, fallbackInCents);
 }

@@ -85,7 +85,7 @@ interface TrendsChartTooltipItem extends SortableTransactionStatisticDataItem {
     readonly name: string;
     readonly color: unknown;
     readonly displayOrders: number[];
-    readonly totalAmount: number;
+    readonly totalAmountCents: number;
 }
 
 const props = defineProps<DesktopTrendsChartProps<TrendsChartDateType>>();
@@ -251,7 +251,7 @@ const allSeries = computed<TrendsChartDataItem[]>(() => {
                 for (let i = 0; i < dataItems.length; i++) {
                     const dataItem = dataItems[i];
                     const value = (dataItem as unknown as Record<string, unknown>)[props.valueField] as number;
-                    const openingValue = (dataItem as unknown as Record<string, unknown>)['totalOpeningAmount'] as number;
+                    const openingValue = (dataItem as unknown as Record<string, unknown>)['totalOpeningAmountCents'] as number;
 
                     if (isNumber(value)) {
                         hasData = true;
@@ -406,7 +406,7 @@ const chartOptions = computed<object>(() => {
             },
             formatter: (params: CallbackDataParams[]) => {
                 let tooltip = '';
-                let totalAmount = 0;
+                let totalAmountCents = 0;
                 let actualDisplayItemCount = 0;
                 const displayItems: TrendsChartTooltipItem[] = [];
 
@@ -432,17 +432,17 @@ const chartOptions = computed<object>(() => {
                         name: name,
                         color: color,
                         displayOrders: displayOrders,
-                        totalAmount: amount
+                        totalAmountCents: amount
                     });
 
-                    totalAmount += amount;
+                    totalAmountCents += amount;
                 }
 
                 sortStatisticsItems(displayItems, props.sortingType);
 
                 for (const item of displayItems) {
-                    if (displayItems.length === 1 || item.totalAmount !== 0) {
-                        const value = formatAmountToLocalizedNumeralsWithCurrency(item.totalAmount, props.defaultCurrency);
+                    if (displayItems.length === 1 || item.totalAmountCents !== 0) {
+                        const value = formatAmountToLocalizedNumeralsWithCurrency(item.totalAmountCents, props.defaultCurrency);
                         tooltip += '<div><span class="chart-pointer" style="background-color: ' + item.color + '"></span>';
                         tooltip += `<span>${item.name}</span><span class="ms-5" style="float: inline-end">${value}</span><br/>`;
                         tooltip += '</div>';
@@ -451,7 +451,7 @@ const chartOptions = computed<object>(() => {
                 }
 
                 if (props.showTotalAmountInTooltip) {
-                    const displayTotalAmount = formatAmountToLocalizedNumeralsWithCurrency(totalAmount, props.defaultCurrency);
+                    const displayTotalAmount = formatAmountToLocalizedNumeralsWithCurrency(totalAmountCents, props.defaultCurrency);
                     tooltip = (actualDisplayItemCount > 0 ? '<div style="border-bottom: ' + (isDarkMode.value ? '#eee' : '#333') + ' dashed 1px">' : '<div></div>')
                         + '<span class="chart-pointer" style="background-color: ' + (isDarkMode.value ? '#eee' : '#333') + '"></span>'
                         + `<span>${tt('Total Amount')}</span><span class="ms-5" style="float: inline-end">${displayTotalAmount}</span><br/>`

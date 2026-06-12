@@ -83,9 +83,9 @@
                                 :items-per-page="10"
                                 hide-default-footer
                             >
-                                <template v-slot:[`item.amount`]="{ item }">
+                                <template v-slot:[`item.amountCents`]="{ item }">
                                     <span :class="getAmountClass(item)">
-                                        {{ formatAmount(item.amount) }}
+                                        {{ formatAmountCents(item.amountCents) }}
                                     </span>
                                 </template>
                             </v-data-table>
@@ -207,7 +207,7 @@ interface ParserInfo {
 interface PreviewBill {
     date: string;
     type: string;
-    amount: number;
+    amountCents: number;
     counterparty: string;
     description: string;
     channel: string;
@@ -268,7 +268,7 @@ const importResult = ref<ImportResult | null>(null);
 const previewHeaders = [
     { title: '日期', key: 'date', sortable: false },
     { title: '类型', key: 'type', sortable: false },
-    { title: '金额', key: 'amount', sortable: false },
+    { title: '金额', key: 'amountCents', sortable: false },
     { title: '对方', key: 'counterparty', sortable: false },
     { title: '描述', key: 'description', sortable: false },
     { title: '渠道', key: 'channel', sortable: false }
@@ -430,11 +430,11 @@ const getParserName = (parserId: string): string => {
     return parser ? parser.name : parserId;
 };
 
-const formatAmount = (amount: number): string => {
+const formatAmountCents = (amountCents: number): string => {
     return new Intl.NumberFormat('zh-CN', {
         style: 'currency',
         currency: 'CNY'
-    }).format(amount);
+    }).format(amountCents / 100);
 };
 
 // 生命周期

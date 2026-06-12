@@ -28,20 +28,20 @@ import {
 import { getAllDateRangesByYearMonthRange } from '@/lib/statistics.ts';
 
 export interface AccountBalanceUnixTimeAndBalanceRange extends UnixTimeRange {
-    minUnixTimeOpeningBalance: number;
-    minUnixTimeClosingBalance: number;
-    maxUnixTimeClosingBalance: number;
+    minUnixTimeOpeningBalanceCents: number;
+    minUnixTimeClosingBalanceCents: number;
+    maxUnixTimeClosingBalanceCents: number;
 }
 
 export interface AccountBalanceTrendsChartItem {
     displayDate: string;
     displayDateRange?: string; // 用于聚合后显示日期范围（如"11-6 ~ 11-12"）
-    openingBalance: number;
-    closingBalance: number;
-    minimumBalance: number;
-    maximumBalance: number;
-    medianBalance: number;
-    averageBalance: number;
+    openingBalanceCents: number;
+    closingBalanceCents: number;
+    minimumBalanceCents: number;
+    maximumBalanceCents: number;
+    medianBalanceCents: number;
+    averageBalanceCents: number;
 }
 
 export interface CommonAccountBalanceTrendsChartProps {
@@ -54,13 +54,13 @@ export interface CommonAccountBalanceTrendsChartProps {
 export function useAccountBalanceTrendsChartBase(props: CommonAccountBalanceTrendsChartProps) {
     console.log(`[AccountBalanceTrendsChartBase] 初始化 - fiscalYearStart=${props.fiscalYearStart}, dateAggregationType=${props.dateAggregationType}, account=${props.account.name}, items数量=${props.items?.length || 0}`);
 
-    // 记录前3笔交易的原始数据，验证accountOpeningBalance字段
+    // 记录前3笔交易的原始数据，验证accountOpeningBalanceCents字段
     if (props.items && props.items.length > 0) {
         console.log(`[AccountBalanceTrendsChartBase] API返回的前3笔交易数据:`);
         for (let i = 0; i < Math.min(3, props.items.length); i++) {
             const item = props.items[i];
             if (item) {
-                console.log(`  #${i + 1}: time=${item.time}, accountOpeningBalance=${item.accountOpeningBalance}, accountClosingBalance=${item.accountClosingBalance}`);
+                console.log(`  #${i + 1}: time=${item.time}, accountOpeningBalanceCents=${item.accountOpeningBalanceCents}, accountClosingBalanceCents=${item.accountClosingBalanceCents}`);
             }
         }
     }
@@ -82,20 +82,20 @@ export function useAccountBalanceTrendsChartBase(props: CommonAccountBalanceTren
         console.log(`[AccountBalanceTrendsChartBase] dataDateRange计算 - 开始处理${props.items.length}条交易记录`);
 
         let minUnixTime = Number.MAX_SAFE_INTEGER, maxUnixTime = 0;
-        let minUnixTimeOpeningBalance = 0;
-        let minUnixTimeClosingBalance = 0;
-        let maxUnixTimeClosingBalance = 0;
+        let minUnixTimeOpeningBalanceCents = 0;
+        let minUnixTimeClosingBalanceCents = 0;
+        let maxUnixTimeClosingBalanceCents = 0;
 
         for (const item of props.items) {
             if (item.time < minUnixTime) {
                 minUnixTime = item.time;
-                minUnixTimeOpeningBalance = item.accountOpeningBalance;
-                minUnixTimeClosingBalance = item.accountClosingBalance;
+                minUnixTimeOpeningBalanceCents = item.accountOpeningBalanceCents;
+                minUnixTimeClosingBalanceCents = item.accountClosingBalanceCents;
             }
 
             if (item.time > maxUnixTime) {
                 maxUnixTime = item.time;
-                maxUnixTimeClosingBalance = item.accountClosingBalance;
+                maxUnixTimeClosingBalanceCents = item.accountClosingBalanceCents;
             }
         }
 
@@ -107,11 +107,11 @@ export function useAccountBalanceTrendsChartBase(props: CommonAccountBalanceTren
         const result = {
             minUnixTime: minUnixTime,
             maxUnixTime: maxUnixTime,
-            minUnixTimeOpeningBalance: minUnixTimeOpeningBalance,
-            minUnixTimeClosingBalance: minUnixTimeClosingBalance,
-            maxUnixTimeClosingBalance: maxUnixTimeClosingBalance
+            minUnixTimeOpeningBalanceCents: minUnixTimeOpeningBalanceCents,
+            minUnixTimeClosingBalanceCents: minUnixTimeClosingBalanceCents,
+            maxUnixTimeClosingBalanceCents: maxUnixTimeClosingBalanceCents
         };
-        console.log(`[AccountBalanceTrendsChartBase] dataDateRange计算完成 - 时间范围: ${new Date(minUnixTime * 1000).toISOString()} ~ ${new Date(maxUnixTime * 1000).toISOString()}, 期初余额: ${minUnixTimeOpeningBalance}, 期末余额: ${maxUnixTimeClosingBalance}`);
+        console.log(`[AccountBalanceTrendsChartBase] dataDateRange计算完成 - 时间范围: ${new Date(minUnixTime * 1000).toISOString()} ~ ${new Date(maxUnixTime * 1000).toISOString()}, 期初余额: ${minUnixTimeOpeningBalanceCents}, 期末余额: ${maxUnixTimeClosingBalanceCents}`);
         return result;
     });
 
@@ -171,12 +171,12 @@ export function useAccountBalanceTrendsChartBase(props: CommonAccountBalanceTren
             dayDataItemsMap[dateRangeMinUnixTime] = dataItems;
         }
 
-        let lastOpeningBalance = dataDateRange.value.minUnixTimeOpeningBalance;
-        let lastClosingBalance = dataDateRange.value.minUnixTimeClosingBalance;
-        let lastMinimumBalance = lastClosingBalance;
-        let lastMaximumBalance = lastClosingBalance;
-        let lastMedianBalance = lastClosingBalance;
-        let lastAverageBalance = lastClosingBalance;
+        let lastOpeningBalanceCents = dataDateRange.value.minUnixTimeOpeningBalanceCents;
+        let lastClosingBalanceCents = dataDateRange.value.minUnixTimeClosingBalanceCents;
+        let lastMinimumBalanceCents = lastClosingBalanceCents;
+        let lastMaximumBalanceCents = lastClosingBalanceCents;
+        let lastMedianBalanceCents = lastClosingBalanceCents;
+        let lastAverageBalanceCents = lastClosingBalanceCents;
         let consecutiveNoChangeCount = 0;  // 连续无变动天数计数器
         let aggregatedStartDate = '';  // 聚合起始日期
         let aggregatedEndDate = '';    // 聚合结束日期
@@ -208,47 +208,47 @@ export function useAccountBalanceTrendsChartBase(props: CommonAccountBalanceTren
                     return data1.time - data2.time;
                 });
 
-                const openingBalance = dataItems[0]!.accountOpeningBalance;
-                const closingBalance = dataItems[dataItems.length - 1]!.accountClosingBalance;
-                const minimumBalance = Math.min(...dataItems.map(item => item.accountClosingBalance));
-                const maximumBalance = Math.max(...dataItems.map(item => item.accountClosingBalance));
-                const medianBalance = dataItems[Math.floor(dataItems.length / 2)]!.accountClosingBalance;
-                const averageBalance = Math.trunc(sumAmounts(dataItems.map(item => item.accountClosingBalance)) / dataItems.length);
+                const openingBalanceCents = dataItems[0]!.accountOpeningBalanceCents;
+                const closingBalanceCents = dataItems[dataItems.length - 1]!.accountClosingBalanceCents;
+                const minimumBalanceCents = Math.min(...dataItems.map(item => item.accountClosingBalanceCents));
+                const maximumBalanceCents = Math.max(...dataItems.map(item => item.accountClosingBalanceCents));
+                const medianBalanceCents = dataItems[Math.floor(dataItems.length / 2)]!.accountClosingBalanceCents;
+                const averageBalanceCents = Math.trunc(sumAmounts(dataItems.map(item => item.accountClosingBalanceCents)) / dataItems.length);
 
                 if (props.account.isAsset) {
-                    lastOpeningBalance = openingBalance;
-                    lastClosingBalance = closingBalance;
-                    lastMinimumBalance = minimumBalance;
-                    lastMaximumBalance = maximumBalance;
-                    lastMedianBalance = medianBalance;
-                    lastAverageBalance = averageBalance;
+                    lastOpeningBalanceCents = openingBalanceCents;
+                    lastClosingBalanceCents = closingBalanceCents;
+                    lastMinimumBalanceCents = minimumBalanceCents;
+                    lastMaximumBalanceCents = maximumBalanceCents;
+                    lastMedianBalanceCents = medianBalanceCents;
+                    lastAverageBalanceCents = averageBalanceCents;
                 } else if (props.account.isLiability) {
-                    lastOpeningBalance = -openingBalance;
-                    lastClosingBalance = -closingBalance;
-                    lastMinimumBalance = -minimumBalance;
-                    lastMaximumBalance = -maximumBalance;
-                    lastMedianBalance = -medianBalance;
-                    lastAverageBalance = -averageBalance;
+                    lastOpeningBalanceCents = -openingBalanceCents;
+                    lastClosingBalanceCents = -closingBalanceCents;
+                    lastMinimumBalanceCents = -minimumBalanceCents;
+                    lastMaximumBalanceCents = -maximumBalanceCents;
+                    lastMedianBalanceCents = -medianBalanceCents;
+                    lastAverageBalanceCents = -averageBalanceCents;
                 } else {
-                    lastOpeningBalance = openingBalance;
-                    lastClosingBalance = closingBalance;
-                    lastMinimumBalance = minimumBalance;
-                    lastMaximumBalance = maximumBalance;
-                    lastMedianBalance = medianBalance;
-                    lastAverageBalance = averageBalance;
+                    lastOpeningBalanceCents = openingBalanceCents;
+                    lastClosingBalanceCents = closingBalanceCents;
+                    lastMinimumBalanceCents = minimumBalanceCents;
+                    lastMaximumBalanceCents = maximumBalanceCents;
+                    lastMedianBalanceCents = medianBalanceCents;
+                    lastAverageBalanceCents = averageBalanceCents;
                 }
 
                 // 添加日志记录数据点
-                console.log(`[AccountBalanceTrends] ${displayDate} (有变动): 开盘=${lastOpeningBalance}, 收盘=${lastClosingBalance}, 最低=${lastMinimumBalance}, 最高=${lastMaximumBalance}`);
+                console.log(`[AccountBalanceTrends] ${displayDate} (有变动): 开盘=${lastOpeningBalanceCents}, 收盘=${lastClosingBalanceCents}, 最低=${lastMinimumBalanceCents}, 最高=${lastMaximumBalanceCents}`);
 
                 ret.push({
                     displayDate: displayDate,
-                    openingBalance: lastOpeningBalance,
-                    closingBalance: lastClosingBalance,
-                    minimumBalance: lastMinimumBalance,
-                    maximumBalance: lastMaximumBalance,
-                    medianBalance: lastMedianBalance,
-                    averageBalance: lastAverageBalance
+                    openingBalanceCents: lastOpeningBalanceCents,
+                    closingBalanceCents: lastClosingBalanceCents,
+                    minimumBalanceCents: lastMinimumBalanceCents,
+                    maximumBalanceCents: lastMaximumBalanceCents,
+                    medianBalanceCents: lastMedianBalanceCents,
+                    averageBalanceCents: lastAverageBalanceCents
                 });
             } else if (props.dateAggregationType === ChartDateAggregationType.Day.type) {
                 // 如果当天没有数据，则使用上一笔期末余额
@@ -259,16 +259,16 @@ export function useAccountBalanceTrendsChartBase(props: CommonAccountBalanceTren
                 if (consecutiveNoChangeCount === 1) {
                     aggregatedStartDate = displayDate;  // 记录聚合起始日期
                     aggregatedEndDate = displayDate;    // 初始化为起始日期
-                    console.log(`[AccountBalanceTrends] ${displayDate} (无变动): 余额=${lastClosingBalance}`);
+                    console.log(`[AccountBalanceTrends] ${displayDate} (无变动): 余额=${lastClosingBalanceCents}`);
                     ret.push({
                         displayDate: displayDate,
                         displayDateRange: displayDate,  // 初始只有一天
-                        openingBalance: lastClosingBalance,
-                        closingBalance: lastClosingBalance,
-                        minimumBalance: lastClosingBalance,
-                        maximumBalance: lastClosingBalance,
-                        medianBalance: lastClosingBalance,
-                        averageBalance: lastClosingBalance
+                        openingBalanceCents: lastClosingBalanceCents,
+                        closingBalanceCents: lastClosingBalanceCents,
+                        minimumBalanceCents: lastClosingBalanceCents,
+                        maximumBalanceCents: lastClosingBalanceCents,
+                        medianBalanceCents: lastClosingBalanceCents,
+                        averageBalanceCents: lastClosingBalanceCents
                     });
                 } else {
                     // 更新聚合结束日期和displayDateRange

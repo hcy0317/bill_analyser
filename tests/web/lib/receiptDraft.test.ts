@@ -16,7 +16,7 @@ import type { ReceiptDraftField, RecognizedReceiptImageResponse } from '@/models
 
 class EditableTransactionFixture {
     public type = TransactionType.Expense;
-    public sourceAmount = 0;
+    public sourceAmountCents = 0;
     public time = 0;
     public comment = '';
     public categoryId = '';
@@ -93,7 +93,7 @@ describe('receiptDraft helper', () => {
         applyReceiptDraftAutoFillToTransaction(transaction, result);
 
         expect(transaction.type).toBe(TransactionType.Income);
-        expect(transaction.sourceAmount).toBe(8850);
+        expect(transaction.sourceAmountCents).toBe(8850);
         expect(transaction.time).toBe(Math.floor(Date.parse('2026-05-02T03:04:05Z') / 1000));
         expect(transaction.comment).toBe('payroll');
         expect(transaction.categoryId).toBe('cat-1');
@@ -138,7 +138,7 @@ describe('receiptDraft helper', () => {
 
         applyReceiptDraftAutoFillToTransaction(transaction, result);
 
-        expect(transaction.sourceAmount).toBe(1234);
+        expect(transaction.sourceAmountCents).toBe(1234);
         expect(transaction.time).toBe(Math.floor(Date.parse('2026-06-01T01:02:03Z') / 1000));
         expect(transaction.comment).toBe('receipt text');
         expect(buildReceiptDraftCandidateHints(undefined)).toStrictEqual([]);

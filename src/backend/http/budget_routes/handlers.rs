@@ -122,7 +122,7 @@ fn budget_forecast_response(
             Ok(value) => value,
             Err(error) => return bad_request(error),
         };
-    let total_forecast = round2(items.iter().map(forecast_amount).sum::<f64>());
+    let total_forecast_cents = items.iter().map(forecast_amount_cents).sum::<i64>();
     let item_count = items.len();
     let avg_backtest_mape = calculate_avg_backtest_mape(&items);
     success_result(
@@ -136,7 +136,7 @@ fn budget_forecast_response(
             "daysElapsed": progress.elapsed_days,
             "daysRemaining": progress.remaining_days,
             "summary": {
-                "total_forecast": total_forecast,
+                "total_forecast_cents": total_forecast_cents,
                 "count": item_count,
                 "forecast_strategy": forecast_strategy,
                 "history_periods": history_periods,

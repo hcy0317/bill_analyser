@@ -25,14 +25,14 @@ fn preview_page_query_normalization_matches_current_v2_contract() {
     let query = normalize_import_preview_page_query(
         Some(0),
         Some(999),
-        Some(" sourceAmount "),
+        Some(" sourceAmountCents "),
         Some("DESC"),
         &[7, 0, 7, -3, 5],
     );
 
     assert_eq!(query.page, 1);
     assert_eq!(query.page_size, 200);
-    assert_eq!(query.sort_by, "sourceAmount");
+    assert_eq!(query.sort_by, "sourceAmountCents");
     assert_eq!(query.sort_direction, ImportPreviewSortDirection::Desc);
     assert_eq!(query.preview_ids, vec![7, 5]);
 
@@ -50,15 +50,15 @@ fn preview_page_query_normalization_matches_current_v2_contract() {
 #[test]
 fn preview_sort_is_stabilized_by_id_and_uses_current_field_mapping() {
     let items = vec![
-        json!({"id": 3, "preview_amount": "8.5", "preview_counterparty": "beta"}),
-        json!({"id": 1, "preview_amount": "bad", "preview_counterparty": "alpha"}),
-        json!({"id": 2, "preview_amount": 8.5, "preview_counterparty": "Alpha"}),
+        json!({"id": 3, "preview_amount_cents": "850", "preview_counterparty": "beta"}),
+        json!({"id": 1, "preview_amount_cents": "bad", "preview_counterparty": "alpha"}),
+        json!({"id": 2, "preview_amount_cents": 850, "preview_counterparty": "Alpha"}),
     ];
 
     let invalid = sort_import_preview_page_items(&items, Some("not-allowed"), Some("desc"));
     assert_eq!(invalid, items);
 
-    let amount_asc = sort_import_preview_page_items(&items, Some("sourceAmount"), Some("asc"));
+    let amount_asc = sort_import_preview_page_items(&items, Some("sourceAmountCents"), Some("asc"));
     assert_eq!(
         amount_asc
             .iter()
@@ -256,7 +256,7 @@ fn preview_filter_index_item_preserves_lightweight_index_shape() {
         "id": 42,
         "preview_date": "2026-05-01 08:00:00",
         "preview_type": "支出",
-        "preview_amount": "-18.6",
+        "preview_amount_cents": -1860,
         "category_id": 9,
         "preview_main_category": "餐饮",
         "preview_sub_category": "早餐",
@@ -308,7 +308,7 @@ fn preview_filter_index_item_preserves_lightweight_index_shape() {
 
     assert_eq!(item.id, 42);
     assert_eq!(item.frontend_type, 3);
-    assert_eq!(item.source_amount, -18.6);
+    assert_eq!(item.source_amount_cents, -1860);
     assert_eq!(item.category_id, "9");
     assert_eq!(item.actual_category_name, "早餐分类");
     assert_eq!(item.source_account_id, "7");
@@ -333,7 +333,7 @@ fn preview_filter_index_item_reads_signals_from_matching_feedback_payload() {
         "id": 77,
         "preview_date": "2026-05-02 08:00:00",
         "preview_type": "支出",
-        "preview_amount": 21.0,
+        "preview_amount_cents": 2100,
         "preview_description": "咖啡",
         "preview_counterparty": "咖啡店",
         "preview_payment_method": "支付宝",
@@ -379,7 +379,7 @@ fn preview_filter_index_item_treats_auto_applied_learning_as_accepted() {
         let preview = json!({
             "id": 78,
             "preview_type": "收入",
-            "preview_amount": 0.22,
+            "preview_amount_cents": 22,
             "preview_main_category": "投资收入",
             "preview_sub_category": "理财收益",
             "preview_matching_feedback": {

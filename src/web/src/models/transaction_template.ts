@@ -15,8 +15,8 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
     public displayOrder: number;
     public hidden: boolean;
 
-    private constructor(id: string, templateType: number, name: string, type: number, categoryId: string, timeZone: string | undefined, utcOffset: number, sourceAccountId: string, destinationAccountId: string, sourceAmount: number, destinationAmount: number, hideAmount: boolean, scheduledFrequencyType: number | undefined, scheduledFrequency: string | undefined, scheduledStartDate: TextualYearMonthDay | undefined, scheduledEndDate: TextualYearMonthDay | undefined, scheduledAt: number | undefined, tagIds: string[], comment: string, editable: boolean, displayOrder: number, hidden: boolean) {
-        super(id, '', type, categoryId, 0, timeZone, utcOffset, sourceAccountId, destinationAccountId, sourceAmount, destinationAmount, hideAmount, tagIds, comment, editable);
+    private constructor(id: string, templateType: number, name: string, type: number, categoryId: string, timeZone: string | undefined, utcOffset: number, sourceAccountId: string, destinationAccountId: string, sourceAmountCents: number, destinationAmountCents: number, hideAmount: boolean, scheduledFrequencyType: number | undefined, scheduledFrequency: string | undefined, scheduledStartDate: TextualYearMonthDay | undefined, scheduledEndDate: TextualYearMonthDay | undefined, scheduledAt: number | undefined, tagIds: string[], comment: string, editable: boolean, displayOrder: number, hidden: boolean) {
+        super(id, '', type, categoryId, 0, timeZone, utcOffset, sourceAccountId, destinationAccountId, sourceAmountCents, destinationAmountCents, hideAmount, tagIds, comment, editable);
         this.templateType = templateType;
         this.name = name;
         this.scheduledFrequencyType = scheduledFrequencyType;
@@ -50,8 +50,8 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
             categoryId: this.getCategoryId(),
             sourceAccountId: this.sourceAccountId,
             destinationAccountId: this.type === TransactionType.Transfer ? this.destinationAccountId : '0',
-            sourceAmount: this.sourceAmount,
-            destinationAmount: this.type === TransactionType.Transfer ? this.destinationAmount : 0,
+            sourceAmountCents: this.sourceAmountCents,
+            destinationAmountCents: this.type === TransactionType.Transfer ? this.destinationAmountCents : 0,
             hideAmount: this.hideAmount,
             tagIds: this.tagIds,
             comment: this.comment,
@@ -73,8 +73,8 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
             categoryId: this.getCategoryId(),
             sourceAccountId: this.sourceAccountId,
             destinationAccountId: this.type === TransactionType.Transfer ? this.destinationAccountId : '0',
-            sourceAmount: this.sourceAmount,
-            destinationAmount: this.type === TransactionType.Transfer ? this.destinationAmount : 0,
+            sourceAmountCents: this.sourceAmountCents,
+            destinationAmountCents: this.type === TransactionType.Transfer ? this.destinationAmountCents : 0,
             hideAmount: this.hideAmount,
             tagIds: this.tagIds,
             comment: this.comment,
@@ -97,8 +97,8 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
             transaction.utcOffset,
             transaction.sourceAccountId,
             transaction.destinationAccountId,
-            transaction.sourceAmount,
-            transaction.destinationAmount,
+            transaction.sourceAmountCents,
+            transaction.destinationAmountCents,
             transaction.hideAmount,
             undefined, // scheduledFrequencyType
             undefined, // scheduledFrequency
@@ -124,8 +124,8 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
             templateResponse.utcOffset ?? 0,
             templateResponse.sourceAccountId,
             templateResponse.destinationAccountId,
-            templateResponse.sourceAmount,
-            templateResponse.destinationAmount,
+            templateResponse.sourceAmountCents,
+            templateResponse.destinationAmountCents,
             templateResponse.hideAmount,
             templateResponse.scheduledFrequencyType,
             templateResponse.scheduledFrequency,
@@ -158,8 +158,8 @@ export interface TransactionTemplateCreateRequest {
     readonly categoryId: string;
     readonly sourceAccountId: string;
     readonly destinationAccountId: string;
-    readonly sourceAmount: number;
-    readonly destinationAmount: number;
+    readonly sourceAmountCents: number;
+    readonly destinationAmountCents: number;
     readonly hideAmount: boolean;
     readonly tagIds: string[];
     readonly comment: string;
@@ -179,8 +179,8 @@ export interface TransactionTemplateModifyRequest {
     readonly categoryId: string;
     readonly sourceAccountId: string;
     readonly destinationAccountId: string;
-    readonly sourceAmount: number;
-    readonly destinationAmount: number;
+    readonly sourceAmountCents: number;
+    readonly destinationAmountCents: number;
     readonly hideAmount: boolean;
     readonly tagIds: string[];
     readonly comment: string;

@@ -42,12 +42,12 @@
                     {{ tt('Sample Periods') }}: {{ forecast.samplePeriods }}
                 </div>
             </td>
-            <td>{{ formatAmount(forecast.historicalAverage / 100) }}</td>
-            <td>{{ formatAmount(forecast.currentSpent / 100) }}</td>
+            <td>{{ formatAmount(forecast.historicalAverageCents / 100) }}</td>
+            <td>{{ formatAmount(forecast.currentSpentCents / 100) }}</td>
             <td :class="{ 'text-error': forecast.projectedOverBudget }">
-                {{ formatAmount(forecast.projectedTotal / 100) }}
+                {{ formatAmount(forecast.projectedTotalCents / 100) }}
             </td>
-            <td>{{ formatAmount(forecast.budgetAmount / 100) }}</td>
+            <td>{{ formatAmount(forecast.budgetAmountCents / 100) }}</td>
             <td>
                 <v-icon v-if="forecast.trend === 'up'" :icon="mdiTrendingUp" color="error" size="20" />
                 <v-icon v-else-if="forecast.trend === 'down'" :icon="mdiTrendingDown" color="success" size="20" />

@@ -193,8 +193,8 @@ pub fn is_ordinary_bank_interest_income(
         return false;
     }
     if has_generic_interest && !has_settlement_interest {
-        let amount = value_to_f64(bill.get("amount"));
-        if matches!(current_type.as_str(), "支出" | "expense" | "3") || amount < 0.0 {
+        let amount_cents = bill_amount_cents(bill);
+        if matches!(current_type.as_str(), "支出" | "expense" | "3") || amount_cents < 0 {
             return false;
         }
     }

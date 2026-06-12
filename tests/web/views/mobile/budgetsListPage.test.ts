@@ -25,8 +25,8 @@ function makeBudget(overrides: Partial<Budget> = {}): Budget {
     b.id = overrides.id ?? 'b-1';
     b.name = overrides.name ?? 'Test Budget';
     b.type = overrides.type ?? BudgetType.Expense;
-    b.amount = overrides.amount ?? 0;
-    b.spentAmount = overrides.spentAmount ?? 0;
+    b.amountCents = overrides.amountCents ?? 0;
+    b.spentAmountCents = overrides.spentAmountCents ?? 0;
     if (overrides.executionRate !== undefined) {
         b.executionRate = overrides.executionRate;
     }
@@ -66,17 +66,17 @@ describe('mobile budgets ListPage helpers (S4)', () => {
 
     describe('getBudgetProgressPercent', () => {
         test('renders progress bar with correct ratio (target=200000 cents, actual=50000 cents → 25%)', () => {
-            const budget = makeBudget({ amount: 200000, spentAmount: 50000 });
+            const budget = makeBudget({ amountCents: 200000, spentAmountCents: 50000 });
             expect(getBudgetProgressPercent(budget)).toBe(25);
         });
 
         test('returns 0 when budget amount is zero or negative', () => {
-            expect(getBudgetProgressPercent(makeBudget({ amount: 0, spentAmount: 100 }))).toBe(0);
-            expect(getBudgetProgressPercent(makeBudget({ amount: -1, spentAmount: 100 }))).toBe(0);
+            expect(getBudgetProgressPercent(makeBudget({ amountCents: 0, spentAmountCents: 100 }))).toBe(0);
+            expect(getBudgetProgressPercent(makeBudget({ amountCents: -1, spentAmountCents: 100 }))).toBe(0);
         });
 
         test('caps over-budget progress at 100 (text rate still shows real %)', () => {
-            const budget = makeBudget({ amount: 100, spentAmount: 250 });
+            const budget = makeBudget({ amountCents: 100, spentAmountCents: 250 });
             expect(getBudgetProgressPercent(budget)).toBe(100);
         });
 
@@ -86,7 +86,7 @@ describe('mobile budgets ListPage helpers (S4)', () => {
         });
 
         test('handles non-finite ratios gracefully', () => {
-            const budget = makeBudget({ amount: 100, spentAmount: Number.NaN });
+            const budget = makeBudget({ amountCents: 100, spentAmountCents: Number.NaN });
             expect(getBudgetProgressPercent(budget)).toBe(0);
         });
     });
@@ -127,15 +127,15 @@ describe('mobile budgets ListPage helpers (S4)', () => {
                 id: 'p-food',
                 category: 'Food',
                 subCategory: '',
-                amount: 10000,
-                spentAmount: 3000
+                amountCents: 10000,
+                spentAmountCents: 3000
             });
             const breakfast = makeBudget({
                 id: 's-breakfast',
                 category: 'Food',
                 subCategory: 'Breakfast',
-                amount: 2000,
-                spentAmount: 500,
+                amountCents: 2000,
+                spentAmountCents: 500,
                 categoryIcon: 'breakfast',
                 categoryColor: '00aa00'
             });
@@ -152,8 +152,8 @@ describe('mobile budgets ListPage helpers (S4)', () => {
             expect(groups[0]!.categoryColor).toBe('ff8800');
             expect(groups[0]!.primaryBudgets.map(b => b.id)).toEqual(['p-food']);
             expect(groups[0]!.subBudgets.map(b => b.subCategory)).toEqual(['Breakfast']);
-            expect(groups[0]!.totalAmount).toBe(10000);
-            expect(groups[0]!.totalSpent).toBe(3000);
+            expect(groups[0]!.totalAmountCents).toBe(10000);
+            expect(groups[0]!.totalSpentCents).toBe(3000);
         });
 
         test('falls back to secondary totals when no primary budget exists', () => {
@@ -161,15 +161,15 @@ describe('mobile budgets ListPage helpers (S4)', () => {
                 id: 's-coffee',
                 category: 'Food',
                 subCategory: 'Coffee',
-                amount: 2000,
-                spentAmount: 2200
+                amountCents: 2000,
+                spentAmountCents: 2200
             });
             const lunch = makeBudget({
                 id: 's-lunch',
                 category: 'Food',
                 subCategory: 'Lunch',
-                amount: 3000,
-                spentAmount: 900
+                amountCents: 3000,
+                spentAmountCents: 900
             });
 
             const groups = buildMobileBudgetGroups({
@@ -178,8 +178,8 @@ describe('mobile budgets ListPage helpers (S4)', () => {
                 collapsedCategories: new Set(['Food'])
             });
 
-            expect(groups[0]!.totalAmount).toBe(5000);
-            expect(groups[0]!.totalSpent).toBe(3100);
+            expect(groups[0]!.totalAmountCents).toBe(5000);
+            expect(groups[0]!.totalSpentCents).toBe(3100);
             expect(groups[0]!.isCollapsed).toBe(true);
             expect(groups[0]!.subBudgets.map(b => b.subCategory)).toEqual(['Coffee', 'Lunch']);
             expect(getBudgetGroupExecutionRate(groups[0]!)).toBe(62);

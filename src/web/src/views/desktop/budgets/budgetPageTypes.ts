@@ -8,11 +8,11 @@ export interface BudgetGroup {
     categoryColor: string;
     primaryBudgets: Budget[];
     subBudgets: Budget[];
-    totalAmount: number;
-    totalSpent: number;
-    subTotalAmount: number;
-    subTotalSpent: number;
-    primaryAmount: number;
-    primarySpent: number;
+    totalAmountCents: number;
+    totalSpentCents: number;
+    subTotalAmountCents: number;
+    subTotalSpentCents: number;
+    primaryAmountCents: number;
+    primarySpentCents: number;
     isCollapsed: boolean;
 }

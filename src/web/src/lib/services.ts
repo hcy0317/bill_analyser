@@ -364,8 +364,8 @@ interface LLMMemoryEventsResponse {
 interface UpdateImportPreviewItemPayload {
     id: number;
     type?: string;
-    amount?: number;
-    destinationAmount?: number;
+    amountCents?: number;
+    destinationAmountCents?: number;
     mainCategory?: string;
     subCategory?: string;
     sourceAccountId?: number | null;
@@ -897,11 +897,11 @@ export default {
         let params = '';
 
         if (req) {
-            const amountFilter = encodeURIComponent(req.amountFilter);
+            const amountFilterCents = encodeURIComponent(req.amountFilterCents);
             const keyword = encodeURIComponent(req.keyword);
-            params = `max_time=${req.maxTime}&min_time=${req.minTime}&type=${req.type}&category_ids=${req.categoryIds}&account_ids=${req.accountIds}&tag_ids=${req.tagIds}&tag_filter_type=${req.tagFilterType}&amount_filter=${amountFilter}&keyword=${keyword}`;
+            params = `max_time=${req.maxTime}&min_time=${req.minTime}&type=${req.type}&category_ids=${req.categoryIds}&account_ids=${req.accountIds}&tag_ids=${req.tagIds}&tag_filter_type=${req.tagFilterType}&amount_filter_cents=${amountFilterCents}&keyword=${keyword}`;
         } else {
-            params = 'max_time=0&min_time=0&type=0&category_ids=&account_ids=&tag_ids=&tag_filter_type=0&amount_filter=&keyword=';
+            params = 'max_time=0&min_time=0&type=0&category_ids=&account_ids=&tag_ids=&tag_filter_type=0&amount_filter_cents=&keyword=';
         }
 
         if (fileType === 'csv') {
@@ -1014,9 +1014,9 @@ export default {
         return axios.get<ApiResponse<TransactionInfoPageWrapperResponse>>(`bills/?${buildTransactionListQuery(req)}`);
     },
     getAllTransactionsByMonth: (req: TransactionListInMonthByPageRequest): ApiResponsePromise<TransactionInfoPageWrapperResponse2> => {
-        const amountFilter = encodeURIComponent(req.amountFilter);
+        const amountFilterCents = encodeURIComponent(req.amountFilterCents);
         const keyword = encodeURIComponent(req.keyword);
-        return axios.get<ApiResponse<TransactionInfoPageWrapperResponse2>>(`bills/by-month?year=${req.year}&month=${req.month}&type=${req.type}&categoryIds=${req.categoryIds}&accountIds=${req.accountIds}&tagIds=${req.tagIds}&tagFilterType=${req.tagFilterType}&amountFilter=${amountFilter}&keyword=${keyword}`);
+        return axios.get<ApiResponse<TransactionInfoPageWrapperResponse2>>(`bills/by-month?year=${req.year}&month=${req.month}&type=${req.type}&categoryIds=${req.categoryIds}&accountIds=${req.accountIds}&tagIds=${req.tagIds}&tagFilterType=${req.tagFilterType}&amountFilterCents=${amountFilterCents}&keyword=${keyword}`);
     },
     getReconciliationStatements: (req: TransactionReconciliationStatementRequest): ApiResponsePromise<TransactionReconciliationStatementResponse> => {
         // 修复：使用正确的后端API路径 /api/bills/reconciliation_statements

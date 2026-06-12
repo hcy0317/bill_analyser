@@ -22,7 +22,7 @@ const SAMPLE_RESPONSE: BudgetInfoResponse = {
     subCategory: '早餐',
     categoryId: 'c-1',
     periodType: BudgetPeriodType.Monthly,
-    amount: 120000,
+    amountCents: 120000,
     startDate: '2026-03-01',
     endDate: '2026-03-31',
     alertThreshold: 75,
@@ -30,8 +30,8 @@ const SAMPLE_RESPONSE: BudgetInfoResponse = {
     type: BudgetType.Expense,
     createdAt: '2026-03-01T00:00:00Z',
     updatedAt: '2026-03-15T00:00:00Z',
-    spentAmount: 90000,
-    remainingAmount: 30000,
+    spentAmountCents: 90000,
+    remainingAmountCents: 30000,
     executionRate: 75,
     categoryIcon: 'las la-utensils',
     categoryColor: '#5470c6'
@@ -61,14 +61,14 @@ describe('Budget model', () => {
             category: '交通',
             subCategory: '',
             periodType: BudgetPeriodType.Yearly,
-            amount: 100,
+            amountCents: 100,
             startDate: '',
             endDate: '',
             alertThreshold: 0,
             enabled: false,
             type: BudgetType.Investment,
-            spentAmount: 160,
-            remainingAmount: -60,
+            spentAmountCents: 160,
+            remainingAmountCents: -60,
             executionRate: 160
         });
 
@@ -89,7 +89,7 @@ describe('Budget model', () => {
             subCategory: undefined,
             categoryId: undefined,
             periodType: undefined,
-            amount: undefined,
+            amountCents: undefined,
             startDate: undefined,
             endDate: undefined,
             alertThreshold: undefined,
@@ -97,8 +97,8 @@ describe('Budget model', () => {
             type: undefined,
             createdAt: undefined,
             updatedAt: undefined,
-            spentAmount: undefined,
-            remainingAmount: undefined,
+            spentAmountCents: undefined,
+            remainingAmountCents: undefined,
             executionRate: undefined,
             categoryIcon: undefined,
             categoryColor: undefined
@@ -110,7 +110,7 @@ describe('Budget model', () => {
         expect(budget.subCategory).toBe('');
         expect(budget.categoryId).toBe('');
         expect(budget.periodType).toBe(BudgetPeriodType.Monthly);
-        expect(budget.amount).toBe(0);
+        expect(budget.amountCents).toBe(0);
         expect(budget.startDate).toBe('');
         expect(budget.endDate).toBe('');
         expect(budget.alertThreshold).toBe(DEFAULT_BUDGET_ALERT_THRESHOLD);
@@ -118,8 +118,8 @@ describe('Budget model', () => {
         expect(budget.type).toBe(BudgetType.Expense);
         expect(budget.createdAt).toBe('');
         expect(budget.updatedAt).toBe('');
-        expect(budget.spentAmount).toBe(0);
-        expect(budget.remainingAmount).toBe(0);
+        expect(budget.spentAmountCents).toBe(0);
+        expect(budget.remainingAmountCents).toBe(0);
         expect(budget.executionRate).toBe(0);
         expect(budget.categoryIcon).toBe('');
         expect(budget.categoryColor).toBe('');
@@ -150,7 +150,7 @@ describe('Budget model', () => {
         budget.category = '交通';
         budget.subCategory = '';
         budget.categoryId = '';
-        budget.amount = 5000;
+        budget.amountCents = 5000;
         budget.startDate = '';
         budget.endDate = '';
 
@@ -160,7 +160,7 @@ describe('Budget model', () => {
             subCategory: undefined,
             categoryId: undefined,
             periodType: BudgetPeriodType.Monthly,
-            amount: 5000,
+            amountCents: 5000,
             startDate: undefined,
             endDate: undefined,
             alertThreshold: DEFAULT_BUDGET_ALERT_THRESHOLD,
@@ -175,7 +175,7 @@ describe('Budget model', () => {
             subCategory: undefined,
             categoryId: undefined,
             periodType: BudgetPeriodType.Monthly,
-            amount: 5000,
+            amountCents: 5000,
             startDate: undefined,
             endDate: undefined,
             alertThreshold: DEFAULT_BUDGET_ALERT_THRESHOLD,
@@ -190,19 +190,19 @@ describe('Budget model', () => {
             budgetId: 'b-0',
             categoryId: 'c-2',
             categoryName: '交通-地铁',
-            budgetAmount: 5000,
-            spentAmount: 6200,
+            budgetAmountCents: 5000,
+            spentAmountCents: 6200,
             executionRate: 124,
-            remainingAmount: -1200,
+            remainingAmountCents: -1200,
             isOverBudget: true,
             alertTriggered: true
         };
 
         budget.updateExecution(execution);
 
-        expect(budget.spentAmount).toBe(6200);
+        expect(budget.spentAmountCents).toBe(6200);
         expect(budget.executionRate).toBe(124);
-        expect(budget.remainingAmount).toBe(-1200);
+        expect(budget.remainingAmountCents).toBe(-1200);
         expect(budget.isOverBudget).toBe(true);
         expect(budget.alertTriggered).toBe(true);
     });

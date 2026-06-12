@@ -20,7 +20,7 @@ export function buildTransactionListQuery(req: TransactionListByMaxTimeRequest):
     appendQueryParam(parts, 'accountIds', req.accountIds);
     appendQueryParam(parts, 'tagIds', req.tagIds);
     appendQueryParam(parts, 'tagFilterType', req.tagFilterType);
-    appendQueryParam(parts, 'amountFilter', req.amountFilter);
+    appendQueryParam(parts, 'amountFilterCents', req.amountFilterCents);
     appendQueryParam(parts, 'keyword', req.keyword);
     appendQueryParam(parts, 'page_size', req.count);
     appendQueryParam(parts, 'page', req.page);

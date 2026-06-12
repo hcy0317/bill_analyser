@@ -9,9 +9,9 @@
         </f7-list>
 
         <f7-list strong inset dividers class="margin-top" v-else-if="!loading">
-            <f7-list-item :title="tt('Expense')" link="/category/list?type=2"></f7-list-item>
-            <f7-list-item :title="tt('Income')" link="/category/list?type=1"></f7-list-item>
-            <f7-list-item :title="tt('Transfer')" link="/category/list?type=3"></f7-list-item>
+            <f7-list-item :title="tt('Expense')" :link="`/category/list?type=${CategoryType.Expense}`"></f7-list-item>
+            <f7-list-item :title="tt('Income')" :link="`/category/list?type=${CategoryType.Income}`"></f7-list-item>
+            <f7-list-item :title="tt('Transfer')" :link="`/category/list?type=${CategoryType.Transfer}`"></f7-list-item>
         </f7-list>
     </f7-page>
 </template>
@@ -24,6 +24,7 @@ import { useI18n } from '@/locales/helpers.ts';
 import { useI18nUIComponents } from '@/lib/ui/mobile.ts';
 
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
+import { CategoryType } from '@/core/category.ts';
 
 const props = defineProps<{
     f7router: Router.Router;

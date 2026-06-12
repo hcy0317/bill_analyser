@@ -86,30 +86,30 @@ export function useReconciliationStatementPageBase() {
     });
 
     const displayTotalInflows = computed<string>(() => {
-        return formatAmountToLocalizedNumeralsWithCurrency(reconciliationStatements.value?.totalInflows ?? 0, currentAccountCurrency.value);
+        return formatAmountToLocalizedNumeralsWithCurrency(reconciliationStatements.value?.totalInflowsCents ?? 0, currentAccountCurrency.value);
     });
 
     const displayTotalOutflows = computed<string>(() => {
-        return formatAmountToLocalizedNumeralsWithCurrency(reconciliationStatements.value?.totalOutflows ?? 0, currentAccountCurrency.value);
+        return formatAmountToLocalizedNumeralsWithCurrency(reconciliationStatements.value?.totalOutflowsCents ?? 0, currentAccountCurrency.value);
     });
 
     const displayTotalBalance = computed<string>(() => {
-        return formatAmountToLocalizedNumeralsWithCurrency((reconciliationStatements?.value?.totalInflows ?? 0) - (reconciliationStatements.value?.totalOutflows ?? 0), currentAccountCurrency.value);
+        return formatAmountToLocalizedNumeralsWithCurrency(reconciliationStatements.value?.netFlowCents ?? 0, currentAccountCurrency.value);
     });
 
     const displayOpeningBalance = computed<string>(() => {
         if (isCurrentLiabilityAccount.value) {
-            return formatAmountToLocalizedNumeralsWithCurrency(-(reconciliationStatements?.value?.openingBalance ?? 0), currentAccountCurrency.value);
+            return formatAmountToLocalizedNumeralsWithCurrency(-(reconciliationStatements?.value?.openingBalanceCents ?? 0), currentAccountCurrency.value);
         } else {
-            return formatAmountToLocalizedNumeralsWithCurrency(reconciliationStatements?.value?.openingBalance ?? 0, currentAccountCurrency.value);
+            return formatAmountToLocalizedNumeralsWithCurrency(reconciliationStatements?.value?.openingBalanceCents ?? 0, currentAccountCurrency.value);
         }
     });
 
     const displayClosingBalance = computed<string>(() => {
         if (isCurrentLiabilityAccount.value) {
-            return formatAmountToLocalizedNumeralsWithCurrency(-(reconciliationStatements?.value?.closingBalance ?? 0), currentAccountCurrency.value);
+            return formatAmountToLocalizedNumeralsWithCurrency(-(reconciliationStatements?.value?.closingBalanceCents ?? 0), currentAccountCurrency.value);
         } else {
-            return formatAmountToLocalizedNumeralsWithCurrency(reconciliationStatements?.value?.closingBalance ?? 0, currentAccountCurrency.value);
+            return formatAmountToLocalizedNumeralsWithCurrency(reconciliationStatements?.value?.closingBalanceCents ?? 0, currentAccountCurrency.value);
         }
     });
 
@@ -154,7 +154,7 @@ export function useReconciliationStatementPageBase() {
             currency = allAccountsMap.value[transaction.sourceAccountId]!.currency;
         }
 
-        return formatAmountToLocalizedNumeralsWithCurrency(transaction.sourceAmount, currency);
+        return formatAmountToLocalizedNumeralsWithCurrency(transaction.sourceAmountCents, currency);
     }
 
     function getDisplayDestinationAmount(transaction: TransactionReconciliationStatementResponseItem): string {
@@ -164,7 +164,7 @@ export function useReconciliationStatementPageBase() {
             currency = allAccountsMap.value[transaction.destinationAccountId]!.currency;
         }
 
-        return formatAmountToLocalizedNumeralsWithCurrency(transaction.destinationAmount, currency);
+        return formatAmountToLocalizedNumeralsWithCurrency(transaction.destinationAmountCents, currency);
     }
 
     function getDisplayAccountBalance(transaction: TransactionReconciliationStatementResponseItem): string {
@@ -182,9 +182,9 @@ export function useReconciliationStatementPageBase() {
         }
 
         if (isLiabilityAccount) {
-            return formatAmountToLocalizedNumeralsWithCurrency(-transaction.accountClosingBalance, currency);
+            return formatAmountToLocalizedNumeralsWithCurrency(-transaction.accountClosingBalanceCents, currency);
         } else {
-            return formatAmountToLocalizedNumeralsWithCurrency(transaction.accountClosingBalance, currency);
+            return formatAmountToLocalizedNumeralsWithCurrency(transaction.accountClosingBalanceCents, currency);
         }
     }
 
@@ -212,13 +212,13 @@ export function useReconciliationStatementPageBase() {
             const transactionTime = parseDateTimeFromUnixTime(transaction.time, transaction.utcOffset, currentTimezoneOffsetMinutes.value).getUnixTime();
             const type = getDisplayTransactionType(transaction);
             let categoryName = allCategoriesMap.value[transaction.categoryId]?.name || '';
-            let displayAmount = formatAmountToWesternArabicNumeralsWithoutDigitGrouping(transaction.sourceAmount);
+            let displayAmount = formatAmountToWesternArabicNumeralsWithoutDigitGrouping(transaction.sourceAmountCents);
             let displayAccountName = allAccountsMap.value[transaction.sourceAccountId]?.name || '';
 
             if (transaction.type === TransactionType.ModifyBalance) {
                 categoryName = tt('Modify Balance');
             } else if (transaction.type === TransactionType.Transfer && transaction.destinationAccountId === accountId.value) {
-                displayAmount = formatAmountToWesternArabicNumeralsWithoutDigitGrouping(transaction.destinationAmount);
+                displayAmount = formatAmountToWesternArabicNumeralsWithoutDigitGrouping(transaction.destinationAmountCents);
             }
 
             if (transaction.type === TransactionType.Transfer && allAccountsMap.value[transaction.destinationAccountId]) {
@@ -228,9 +228,9 @@ export function useReconciliationStatementPageBase() {
             let displayAccountBalance = '';
 
             if (isCurrentLiabilityAccount.value) {
-                displayAccountBalance = formatAmountToWesternArabicNumeralsWithoutDigitGrouping(-transaction.accountClosingBalance);
+                displayAccountBalance = formatAmountToWesternArabicNumeralsWithoutDigitGrouping(-transaction.accountClosingBalanceCents);
             } else {
-                displayAccountBalance = formatAmountToWesternArabicNumeralsWithoutDigitGrouping(transaction.accountClosingBalance);
+                displayAccountBalance = formatAmountToWesternArabicNumeralsWithoutDigitGrouping(transaction.accountClosingBalanceCents);
             }
 
             let description = transaction.comment || '';

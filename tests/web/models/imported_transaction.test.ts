@@ -18,8 +18,8 @@ const BASE_RESPONSE: ImportTransactionResponse = {
     destinationAccountId: '',
     originalDestinationAccountName: '',
     originalDestinationAccountCurrency: '',
-    sourceAmount: 1200,
-    destinationAmount: 0,
+    sourceAmountCents: 1200,
+    destinationAmountCents: 0,
     tagIds: ['301'],
     originalTagNames: ['午饭'],
     comment: '工作日午餐',
@@ -79,7 +79,7 @@ describe('ImportTransaction model', () => {
 
         expect(transaction.categoryId).toBe('101');
         expect(transaction.destinationAccountId).toBe('');
-        expect(transaction.destinationAmount).toBe(0);
+        expect(transaction.destinationAmountCents).toBe(0);
         expect(transaction.tagIds).toStrictEqual(['301']);
         expect(transaction.originalTagNames).toStrictEqual(['午饭']);
         expect(transaction.counterparty).toBe('兰州拉面');
@@ -307,13 +307,13 @@ describe('ImportTransaction model', () => {
             ...BASE_RESPONSE,
             type: TransactionType.Transfer,
             destinationAccountId: '202',
-            destinationAmount: 1200
+            destinationAmountCents: 1200
         }, 0);
         const investment = ImportTransaction.of({
             ...BASE_RESPONSE,
             type: TransactionType.Investment,
             destinationAccountId: '203',
-            destinationAmount: 1200
+            destinationAmountCents: 1200
         }, 1);
         const expense = ImportTransaction.of(BASE_RESPONSE, 2);
 
@@ -478,7 +478,7 @@ describe('ImportTransaction model', () => {
             ...BASE_RESPONSE,
             type: TransactionType.Transfer,
             destinationAccountId: '202',
-            destinationAmount: 1200,
+            destinationAmountCents: 1200,
             matching: {
                 ...BASE_RESPONSE.matching!,
                 transfer: {
@@ -640,7 +640,7 @@ describe('ImportTransaction model', () => {
             ...BASE_RESPONSE,
             type: TransactionType.Investment,
             destinationAccountId: '203',
-            destinationAmount: 1200,
+            destinationAmountCents: 1200,
             matching: {
                 ...BASE_RESPONSE.matching!,
                 investment: {
@@ -659,7 +659,7 @@ describe('ImportTransaction model', () => {
             ...BASE_RESPONSE,
             type: TransactionType.Investment,
             destinationAccountId: '204',
-            destinationAmount: 1200,
+            destinationAmountCents: 1200,
             matching: {
                 ...BASE_RESPONSE.matching!,
                 investment: {
@@ -678,7 +678,7 @@ describe('ImportTransaction model', () => {
             ...BASE_RESPONSE,
             type: TransactionType.Investment,
             destinationAccountId: '205',
-            destinationAmount: 1200,
+            destinationAmountCents: 1200,
             matching: {
                 ...BASE_RESPONSE.matching!,
                 investment: {
@@ -737,13 +737,13 @@ describe('ImportTransaction model', () => {
             ...BASE_RESPONSE,
             type: TransactionType.Transfer,
             destinationAccountId: '202',
-            destinationAmount: 1200
+            destinationAmountCents: 1200
         }, 1);
 
         expect(expense.toCreateRequest()).toMatchObject({
             type: TransactionType.Expense,
             destinationAccountId: '0',
-            destinationAmount: 0,
+            destinationAmountCents: 0,
             hideAmount: false,
             pictureIds: [],
             clientSessionId: ''
@@ -751,7 +751,7 @@ describe('ImportTransaction model', () => {
         expect(transfer.toCreateRequest()).toMatchObject({
             type: TransactionType.Transfer,
             destinationAccountId: '202',
-            destinationAmount: 1200
+            destinationAmountCents: 1200
         });
     });
 
@@ -786,7 +786,7 @@ describe('ImportTransaction model', () => {
             ...BASE_RESPONSE,
             type: TransactionType.Transfer,
             destinationAccountId: '202',
-            destinationAmount: 1200,
+            destinationAmountCents: 1200,
             tagIds: []
         }, 5);
 

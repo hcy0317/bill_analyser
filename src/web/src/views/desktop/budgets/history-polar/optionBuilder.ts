@@ -53,6 +53,8 @@ export function buildHistoricalPolarChartOption(
     model: HistoricalPolarChartModel,
     args: HistoricalPolarChartOptionArgs
 ): Record<string, unknown> {
+    const formatAmountCents = (amountCents: number): string => args.formatAmount(amountCents / 100);
+
     if (!model.slots.length || !model.primaryBands.length) {
         return {
             animation: false,
@@ -100,7 +102,7 @@ export function buildHistoricalPolarChartOption(
                 fontWeight: 700,
                 align: 'center',
                 verticalAlign: 'bottom',
-                formatter: (value: number) => args.formatAmount(value)
+                formatter: (value: number) => formatAmountCents(value)
             },
             splitLine: {
                 show: false
@@ -149,7 +151,7 @@ export function buildHistoricalPolarChartOption(
                 return {
                     stateKey: labelBaseId,
                     dataId: buildHistoricalAmountAxisRenderId(labelBaseId, amountAxisRenderScope),
-                    name: args.formatAmount(amountValue),
+                    name: formatAmountCents(amountValue),
                     amountValue,
                     radiusAxisMaxValue: model.amountAxisMax,
                     color: amountAxisLabelColor
@@ -159,7 +161,7 @@ export function buildHistoricalPolarChartOption(
             'grid-label:amount:',
             'label'
         ),
-        args.formatAmount,
+        formatAmountCents,
         amountAxisLabelColor
     ));
 
@@ -342,10 +344,10 @@ export function buildHistoricalPolarChartOption(
                         startAngleValue: centerAngleValue - barHalfAngle,
                         endAngleValue: centerAngleValue + barHalfAngle,
                         innerRadiusValue: 0,
-                        outerRadiusValue: slot.budgetAmount,
+                        outerRadiusValue: slot.budgetAmountCents,
                         radiusAxisMaxValue: model.amountAxisMax,
                         innerRadiusRatio: 0,
-                        outerRadiusRatio: model.amountAxisMax > 0 ? slot.budgetAmount / model.amountAxisMax : 0,
+                        outerRadiusRatio: model.amountAxisMax > 0 ? slot.budgetAmountCents / model.amountAxisMax : 0,
                         color: withAlpha(slot.color, 0.28),
                         opacity: 1,
                         collapseMode: 'radius'
@@ -371,10 +373,10 @@ export function buildHistoricalPolarChartOption(
                         startAngleValue: centerAngleValue - barHalfAngle,
                         endAngleValue: centerAngleValue + barHalfAngle,
                         innerRadiusValue: 0,
-                        outerRadiusValue: slot.spentAmount,
+                        outerRadiusValue: slot.spentAmountCents,
                         radiusAxisMaxValue: model.amountAxisMax,
                         innerRadiusRatio: 0,
-                        outerRadiusRatio: model.amountAxisMax > 0 ? slot.spentAmount / model.amountAxisMax : 0,
+                        outerRadiusRatio: model.amountAxisMax > 0 ? slot.spentAmountCents / model.amountAxisMax : 0,
                         color: slot.color,
                         opacity: 1,
                         collapseMode: 'radius'
@@ -432,8 +434,8 @@ export function buildHistoricalPolarChartOption(
 
                 return [
                     `<b>${slot.primaryKey} / ${slot.label}</b>`,
-                    `${args.budgetAmountLabel}: ${args.formatAmount(slot.budgetAmount)}`,
-                    `${args.spentAmountLabel}: ${args.formatAmount(slot.spentAmount)}`,
+                    `${args.budgetAmountLabel}: ${formatAmountCents(slot.budgetAmountCents)}`,
+                    `${args.spentAmountLabel}: ${formatAmountCents(slot.spentAmountCents)}`,
                     `${args.executionRateLabel}: ${slot.executionRate}%`
                 ].join('<br/>');
             }

@@ -24,7 +24,7 @@ describe('EditDialog picture OCR wiring', () => {
 
         expect(source).toContain('applyReceiptDraftAutoFillToTransaction(transaction.value, result);');
         expect(helperSource).toContain('receiptDraftAmountToCents(field)');
-        expect(helperSource).toContain('transaction.sourceAmount = Math.round(result.amount * 100)');
+        expect(helperSource).toContain('transaction.sourceAmountCents = Math.round(result.amount * 100)');
         expect(helperSource).toContain('transaction.time = Math.floor(parsedMs / 1000);');
         expect(helperSource).toContain('transaction.comment = result.description;');
         expect(source).toContain("activeTab.value = 'basicInfo';");

@@ -88,7 +88,7 @@
                     :default-currency="defaultCurrency"
                     class="statistics-pie-chart"
                     name-field="name"
-                    value-field="totalAmount"
+                    value-field="totalAmountCents"
                     percent-field="percent"
                     hidden-field="hidden"
                     v-else-if="!loading && categoricalAnalysisData.items && categoricalAnalysisData.items.length"
@@ -114,7 +114,7 @@
                 <div class="display-flex full-line">
                     <div :class="{ 'statistics-list-item-overview-amount': true, 'text-expense': query.chartDataType === ChartDataType.OutflowsByAccount.type || query.chartDataType === ChartDataType.ExpenseByAccount.type || query.chartDataType === ChartDataType.ExpenseByPrimaryCategory.type || query.chartDataType === ChartDataType.ExpenseBySecondaryCategory.type, 'text-income': query.chartDataType === ChartDataType.InflowsByAccount.type || query.chartDataType === ChartDataType.IncomeByAccount.type || query.chartDataType === ChartDataType.IncomeByPrimaryCategory.type || query.chartDataType === ChartDataType.IncomeBySecondaryCategory.type }">
                         <span v-if="!loading && categoricalAnalysisData && categoricalAnalysisData.items && categoricalAnalysisData.items.length">
-                            {{ getDisplayAmount(categoricalAnalysisData.totalAmount, defaultCurrency) }}
+                            {{ getDisplayAmount(categoricalAnalysisData.totalAmountCents, defaultCurrency) }}
                         </span>
                         <span :class="{ 'skeleton-text': loading }" v-else-if="loading || !categoricalAnalysisData || !categoricalAnalysisData.items || !categoricalAnalysisData.items.length">
                             {{ loading ? '***.**' : '---' }}
@@ -179,7 +179,7 @@
                         </template>
 
                         <template #after>
-                            <span>{{ getDisplayAmount(item.totalAmount, defaultCurrency) }}</span>
+                            <span>{{ getDisplayAmount(item.totalAmountCents, defaultCurrency) }}</span>
                         </template>
 
                         <template #inner-end>
@@ -224,7 +224,7 @@
                     :enable-click-item="true"
                     id-field="id"
                     name-field="name"
-                    value-field="totalAmount"
+                    value-field="totalAmountCents"
                     color-field="color"
                     hidden-field="hidden"
                     display-orders-field="displayOrders"
@@ -263,7 +263,7 @@
                     :enable-click-item="true"
                     id-field="id"
                     name-field="name"
-                    value-field="totalAmount"
+                    value-field="totalAmountCents"
                     color-field="color"
                     hidden-field="hidden"
                     display-orders-field="displayOrders"

@@ -126,8 +126,8 @@ function parse(row, index) {
         categoryName: row[4], // ${tt('sample.importTransactionCustomScript.fieldCategoryNameDescription')}
         sourceAccountName: row[5], // ${tt('sample.importTransactionCustomScript.fieldSourceAccountNameDescription')}
         destinationAccountName: row[8], // ${tt('sample.importTransactionCustomScript.fieldDestinationAccountNameDescription')}
-        sourceAmount: row[7], // ${tt('sample.importTransactionCustomScript.fieldSourceAmountDescription')}
-        destinationAmount: row[10], // ${tt('sample.importTransactionCustomScript.fieldDestinationAmountDescription')}
+        sourceAmountCents: row[7], // ${tt('sample.importTransactionCustomScript.fieldSourceAmountDescription')}
+        destinationAmountCents: row[10], // ${tt('sample.importTransactionCustomScript.fieldDestinationAmountDescription')}
         geoLocation: undefined, // ${tt('sample.importTransactionCustomScript.fieldGeoLocationDescription')}
         tagNames: '', // ${tt('sample.importTransactionCustomScript.fieldTagNamesDescription')}
         description: row[13] // ${tt('sample.importTransactionCustomScript.fieldCommentDescription')}
@@ -320,8 +320,8 @@ function onMessage(event: MessageEvent<SandboxResponse>): void {
                 categoryName: (isDefined(item['categoryName']) && item['categoryName'] !== '') ? String(item['categoryName']) : undefined,
                 sourceAccountName: (isDefined(item['sourceAccountName']) && item['sourceAccountName'] !== '') ? String(item['sourceAccountName']) : undefined,
                 destinationAccountName: (isDefined(item['destinationAccountName']) && item['destinationAccountName'] !== '') ? String(item['destinationAccountName']) : undefined,
-                sourceAmount: (isDefined(item['sourceAmount'])) ? String(item['sourceAmount']) : '',
-                destinationAmount: (isDefined(item['destinationAmount']) && item['destinationAmount'] !== '') ? String(item['destinationAmount']) : undefined,
+                sourceAmountCents: (isDefined(item['sourceAmountCents'])) ? String(item['sourceAmountCents']) : '',
+                destinationAmountCents: (isDefined(item['destinationAmountCents']) && item['destinationAmountCents'] !== '') ? String(item['destinationAmountCents']) : undefined,
                 geoLocation: (isDefined(item['geoLocation']) && item['geoLocation']) ? String(item['geoLocation']) : undefined,
                 tagNames: (isDefined(item['tagNames']) && item['tagNames']) ? String(item['tagNames']) : undefined,
                 comment: (isDefined(item['description']) && item['description']) ? String(item['description']) : undefined

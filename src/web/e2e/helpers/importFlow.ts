@@ -54,9 +54,20 @@ interface TransactionListResponse {
 interface TransactionAmountsResponseItem {
     readonly amounts?: Array<{
         readonly currency: string;
-        readonly incomeAmount: number;
-        readonly expenseAmount: number;
+        readonly incomeAmountCents: number;
+        readonly expenseAmountCents: number;
     }>;
+}
+
+interface Entity {
+    readonly id: string | number;
+    readonly name: string;
+}
+
+interface ImportConfirmContext {
+    readonly account: Entity;
+    readonly expenseCategory: Entity;
+    readonly incomeCategory: Entity;
 }
 
 export interface AlipayImportResult {
@@ -70,6 +81,7 @@ export interface AlipayImportResult {
 }
 
 export async function runAlipayImportFlow(client: E2EApiClient): Promise<AlipayImportResult> {
+    const confirmContext = await createImportConfirmContext(client);
     const parse = await client.postMultipart<ImportStageParseData>('bills/import/v2/parse', {
         parser_type: 'auto',
         files: {
@@ -96,14 +108,14 @@ export async function runAlipayImportFlow(client: E2EApiClient): Promise<AlipayI
     const confirm = await client.post<ImportStageConfirmData>('bills/import/v2/confirm', {
         session_id: parse.session_id,
         preserve_unpatched_selection: true,
-        preview_updates: []
+        preview_updates: (preview.preview || []).map(row => buildPreviewUpdate(row, confirmContext))
     });
     expect(confirm.imported_count, 'confirmed imported count').toBeGreaterThan(0);
     expect(confirm.imported_count, 'confirmed imported count must not exceed dedup preview count').toBeLessThanOrEqual(dedup.after_dedup);
     expect(confirm.errors || [], 'confirm errors').toHaveLength(0);
 
     const transactions = await client.get<TransactionListResponse>(
-        'bills/by-month?year=2026&month=1&type=0&categoryIds=&accountIds=&tagIds=&tagFilterType=0&amountFilter=&keyword='
+        'bills/by-month?year=2026&month=1&type=0&categoryIds=&accountIds=&tagIds=&tagFilterType=0&amountFilterCents=&keyword='
     );
     expect(transactions.items || [], 'January transaction list after import').not.toHaveLength(0);
     expect(rowsContaining(transactions.items || [], ALIPAY_SAMPLE_SOURCE_TOTALS.merchant), 'January list rows for fixture merchant').not.toHaveLength(0);
@@ -126,6 +138,126 @@ export async function runAlipayImportFlow(client: E2EApiClient): Promise<AlipayI
     };
 }
 
+async function createImportConfirmContext(client: E2EApiClient): Promise<ImportConfirmContext> {
+    const suffix = `import-${Date.now()}`;
+    const account = entityFromResponse(await client.post<Record<string, unknown>>('accounts', {
+        name: `E2E Import CNY ${suffix}`,
+        category: 1,
+        type: 1,
+        icon: '1',
+        color: '#4c6ef5',
+        currency: 'CNY',
+        balanceCents: 0,
+        balanceTime: 0,
+        comment: `created by ${suffix}`,
+        clientSessionId: suffix
+    }), `E2E Import CNY ${suffix}`);
+    const expenseCategory = entityFromResponse(await client.post<Record<string, unknown>>('categories', {
+        name: `E2E Import Expense ${suffix}`,
+        type: 3,
+        parentId: '0',
+        icon: '1',
+        color: '#e03131',
+        comment: `created by ${suffix}`,
+        displayOrder: 0,
+        ruleExpression: '',
+        clientSessionId: suffix
+    }), `E2E Import Expense ${suffix}`);
+    const incomeCategory = entityFromResponse(await client.post<Record<string, unknown>>('categories', {
+        name: `E2E Import Income ${suffix}`,
+        type: 2,
+        parentId: '0',
+        icon: '1',
+        color: '#2f9e44',
+        comment: `created by ${suffix}`,
+        displayOrder: 0,
+        ruleExpression: '',
+        clientSessionId: suffix
+    }), `E2E Import Income ${suffix}`);
+
+    return { account, expenseCategory, incomeCategory };
+}
+
+function buildPreviewUpdate(
+    row: Record<string, unknown>,
+    context: ImportConfirmContext
+): Record<string, unknown> {
+    const id = numericField(row, ['id']);
+    if (id === null) {
+        throw new Error(`Preview row is missing id: ${JSON.stringify(row)}`);
+    }
+    const previewType = stringField(row, ['preview_type', 'type']);
+    const category = isIncomePreviewType(previewType) ? context.incomeCategory : context.expenseCategory;
+    const categoryId = numericEntityId(category);
+    const accountId = numericEntityId(context.account);
+
+    return {
+        id,
+        preview_type: previewType,
+        preview_amount_cents: numericField(row, ['preview_amount_cents', 'amountCents']) ?? 0,
+        preview_destination_amount_cents: numericField(row, [
+            'preview_destination_amount_cents',
+            'destinationAmountCents'
+        ]) ?? 0,
+        preview_source_account_id: accountId,
+        preview_destination_account_id: null,
+        category_id: categoryId,
+        preview_main_category: category.name,
+        preview_sub_category: '',
+        selected: true
+    };
+}
+
+function isIncomePreviewType(previewType: string): boolean {
+    return ['收入', 'income', '2'].includes(previewType.trim().toLowerCase());
+}
+
+function entityFromResponse(response: Record<string, unknown>, fallbackName: string): Entity {
+    const id = response['id'] ?? response['category_id'] ?? response['categoryId'] ?? response['account_id'] ?? response['accountId'];
+    if (typeof id !== 'string' && typeof id !== 'number') {
+        throw new Error(`Entity response is missing id: ${JSON.stringify(response)}`);
+    }
+
+    return {
+        id,
+        name: typeof response['name'] === 'string' ? response['name'] : fallbackName
+    };
+}
+
+function numericEntityId(entity: Entity): number {
+    const value = typeof entity.id === 'number' ? entity.id : Number(entity.id);
+    if (!Number.isFinite(value) || value <= 0) {
+        throw new Error(`Entity id is not numeric: ${JSON.stringify(entity)}`);
+    }
+    return Math.trunc(value);
+}
+
+function numericField(row: Record<string, unknown>, keys: readonly string[]): number | null {
+    for (const key of keys) {
+        const value = row[key];
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return Math.trunc(value);
+        }
+        if (typeof value === 'string' && value.trim()) {
+            const parsed = Number(value);
+            if (Number.isFinite(parsed)) {
+                return Math.trunc(parsed);
+            }
+        }
+    }
+    return null;
+}
+
+function stringField(row: Record<string, unknown>, keys: readonly string[]): string {
+    for (const key of keys) {
+        const value = row[key];
+        if (typeof value === 'string') {
+            return value;
+        }
+    }
+    return '';
+}
+
 export function januaryTransactionListRoute(env: E2EEnvironment): string {
     return `${env.baseURL}/desktop.html#/transaction/list?pageType=0&dateType=255&minTime=${JANUARY_2026_RANGE.startTime}&maxTime=${JANUARY_2026_RANGE.endTime}&keyword=${encodeURIComponent(ALIPAY_SAMPLE_SOURCE_TOTALS.merchant)}`;
 }
@@ -140,17 +272,17 @@ export function summarizeObservedAmounts(result: AlipayImportResult): string {
         sourceIncomeCents: ALIPAY_SAMPLE_SOURCE_TOTALS.sourceIncomeCents,
         sourceExpenseCents: ALIPAY_SAMPLE_SOURCE_TOTALS.sourceExpenseCents,
         importedCount: result.confirm.imported_count,
-        observedIncomeCents: cny?.incomeAmount,
-        observedExpenseCents: cny?.expenseAmount
+        observedIncomeCents: cny?.incomeAmountCents,
+        observedExpenseCents: cny?.expenseAmountCents
     });
 }
 
 export function expectAlipayStatisticsTotals(januaryAmounts: TransactionAmountsResponseItem): void {
     const cny = januaryAmounts.amounts?.find(item => item.currency === 'CNY');
     expect(cny, 'January statistics must include CNY amount bucket').toBeTruthy();
-    expect(cny?.incomeAmount, 'January CNY income should match the Alipay fixture source total in cents')
+    expect(cny?.incomeAmountCents, 'January CNY income should match the Alipay fixture source total in cents')
         .toBe(ALIPAY_SAMPLE_SOURCE_TOTALS.sourceIncomeCents);
-    expect(cny?.expenseAmount, 'January CNY expense should match the Alipay fixture source total in cents')
+    expect(cny?.expenseAmountCents, 'January CNY expense should match the Alipay fixture source total in cents')
         .toBe(ALIPAY_SAMPLE_SOURCE_TOTALS.sourceExpenseCents);
 }
 

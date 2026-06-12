@@ -28,7 +28,7 @@
                           :style="`top: ${virtualDataItems.topPosition}px`"
                           :virtual-list-index="item.index"
                           :title="item.displayDate"
-                          :after="formatAmountToLocalizedNumeralsWithCurrency(item.closingBalance, account.currency)"
+                          :after="formatAmountToLocalizedNumeralsWithCurrency(item.closingBalanceCents, account.currency)"
                           v-for="item in virtualDataItems.items"
             >
                 <template #media>
@@ -87,22 +87,22 @@ const virtualDataItems = ref<MobileAccountBalanceTrendsChartVirtualListData>({
 
 const allVirtualListItems = computed<MobileAccountBalanceTrendsChartItem[]>(() => {
     const ret: MobileAccountBalanceTrendsChartItem[] = [];
-    let maxClosingBalance = 0;
+    let maxClosingBalanceCents = 0;
 
     for (const [dataItem, index] of itemAndIndex(allDataItems.value)) {
-        if (dataItem.closingBalance > maxClosingBalance) {
-            maxClosingBalance = dataItem.closingBalance;
+        if (dataItem.closingBalanceCents > maxClosingBalanceCents) {
+            maxClosingBalanceCents = dataItem.closingBalanceCents;
         }
 
         const finalDataItem: MobileAccountBalanceTrendsChartItem = {
             index: index,
             displayDate: dataItem.displayDate,
-            openingBalance: dataItem.openingBalance,
-            closingBalance: dataItem.closingBalance,
-            medianBalance: dataItem.medianBalance,
-            averageBalance: dataItem.averageBalance,
-            minimumBalance: dataItem.minimumBalance,
-            maximumBalance: dataItem.maximumBalance,
+            openingBalanceCents: dataItem.openingBalanceCents,
+            closingBalanceCents: dataItem.closingBalanceCents,
+            medianBalanceCents: dataItem.medianBalanceCents,
+            averageBalanceCents: dataItem.averageBalanceCents,
+            minimumBalanceCents: dataItem.minimumBalanceCents,
+            maximumBalanceCents: dataItem.maximumBalanceCents,
             color: `#${DEFAULT_CHART_COLORS[0] as string}`,
             percent: 0.0
         };
@@ -111,8 +111,8 @@ const allVirtualListItems = computed<MobileAccountBalanceTrendsChartItem[]>(() =
     }
 
     for (const item of ret) {
-        if (maxClosingBalance > 0 && item.closingBalance > 0) {
-            item.percent = 100.0 * item.closingBalance / maxClosingBalance;
+        if (maxClosingBalanceCents > 0 && item.closingBalanceCents > 0) {
+            item.percent = 100.0 * item.closingBalanceCents / maxClosingBalanceCents;
         } else {
             item.percent = 0.0;
         }

@@ -741,7 +741,9 @@ fn push_preview_order_by(
     };
     query.push(" ORDER BY ");
     match sort_by {
-        "amount" | "preview_amount" | "sourceAmount" => query.push("p.amount_cents"),
+        "amount_cents" | "preview_amount_cents" | "previewAmountCents" | "sourceAmountCents" => {
+            query.push("p.amount_cents")
+        }
         "counterparty" => query.push("COALESCE(p.merchant, '')"),
         "type" => query.push(
             "CASE lower(p.transaction_type) WHEN '收入' THEN 0 WHEN 'income' THEN 0 WHEN '2' THEN 0 WHEN '支出' THEN 1 WHEN 'expense' THEN 1 WHEN '3' THEN 1 WHEN '转账' THEN 2 WHEN 'transfer' THEN 2 WHEN '4' THEN 2 WHEN '投资' THEN 3 WHEN 'investment' THEN 3 WHEN '5' THEN 3 ELSE 4 END",
@@ -1052,7 +1054,7 @@ pub fn get_preview_filter_index_by_session(
             id: row.id,
             preview_date: row.preview_date,
             preview_type: row.preview_type,
-            preview_amount: row.preview_amount,
+            preview_amount_cents: row.preview_amount_cents,
             category_id: row.category_id,
             preview_main_category: row.preview_main_category,
             preview_sub_category: row.preview_sub_category,
@@ -1941,7 +1943,14 @@ fn bill_create_fields_from_preview(preview: &ImportPreviewRow) -> BillRecord {
     let mut fields = Map::new();
     fields.insert("date".to_string(), json!(preview.preview_date));
     fields.insert("type".to_string(), json!(preview.preview_type));
-    fields.insert("amount".to_string(), json!(preview.preview_amount));
+    fields.insert(
+        "amount_cents".to_string(),
+        json!(preview.preview_amount_cents),
+    );
+    fields.insert(
+        "destination_amount_cents".to_string(),
+        json!(preview.preview_destination_amount_cents),
+    );
     fields.insert(
         "counterparty".to_string(),
         json!(preview.preview_counterparty),
@@ -2500,7 +2509,7 @@ fn build_standard_rows_insert_query<'a>(
             .push_bind(user_id)
             .push_bind(value.source_row_index)
             .push_bind(&value.occurred_at)
-            .push("::timestamptz")
+            .push_unseparated("::timestamptz")
             .push_bind(value.amount_cents)
             .push_bind(&value.direction)
             .push_bind(&value.transaction_type)
@@ -2508,9 +2517,9 @@ fn build_standard_rows_insert_query<'a>(
             .push_bind(&value.payment_method)
             .push_bind(&value.description)
             .push_bind(&value.parser_payload)
-            .push("::jsonb")
+            .push_unseparated("::jsonb")
             .push_bind(&value.standard_payload)
-            .push("::jsonb")
+            .push_unseparated("::jsonb")
             .push("now()")
             .push("now()");
     });
@@ -2626,10 +2635,7 @@ async fn insert_preview_row_async(
     draft: &ImportPreviewDraft,
 ) -> DbResult<i64> {
     let payload = preview_payload_from_draft(draft);
-    let amount_cents = Money::from_yuan_str(&finite_float_text(draft.preview_amount))
-        .unwrap_or(Money::ZERO)
-        .to_cents()
-        .abs();
+    let amount_cents = draft.preview_amount_cents.abs();
     let direction = if draft.preview_type == "收入" || draft.preview_type == "income" {
         "income"
     } else {
@@ -2723,10 +2729,7 @@ struct PreviewRowBatchValue {
 
 fn preview_row_batch_value_from_draft(draft: &ImportPreviewDraft) -> PreviewRowBatchValue {
     let payload = preview_payload_from_draft(draft);
-    let amount_cents = Money::from_yuan_str(&finite_float_text(draft.preview_amount))
-        .unwrap_or(Money::ZERO)
-        .to_cents()
-        .abs();
+    let amount_cents = draft.preview_amount_cents.abs();
     let occurred_at = normalize_bill_date_text(&draft.preview_date);
     PreviewRowBatchValue {
         page_sort_key: format!("{}:{}", occurred_at, draft.preview_counterparty),
@@ -2791,7 +2794,7 @@ fn build_preview_rows_insert_query<'a>(
             .push("'[]'::jsonb")
             .push_bind(&value.merged_source_ids)
             .push_bind(&value.occurred_at)
-            .push("::timestamptz")
+            .push_unseparated("::timestamptz")
             .push_bind(value.amount_cents)
             .push_bind(&value.direction)
             .push_bind(&value.transaction_type)
@@ -2802,7 +2805,7 @@ fn build_preview_rows_insert_query<'a>(
             .push_bind(&value.payment_method)
             .push_bind(&value.description)
             .push_bind(&value.preview_payload)
-            .push("::jsonb")
+            .push_unseparated("::jsonb")
             .push("now()")
             .push("now()");
     });
@@ -2892,10 +2895,7 @@ async fn apply_preview_patch_async(
         "preview_matching_feedback",
         preview.preview_matching_feedback.clone(),
     );
-    let amount_cents = Money::from_yuan_str(&finite_float_text(preview.preview_amount))
-        .unwrap_or(Money::ZERO)
-        .to_cents()
-        .abs();
+    let amount_cents = preview.preview_amount_cents.abs();
     let direction = if preview.preview_type == "收入" || preview.preview_type == "income" {
         "income"
     } else {
@@ -3135,9 +3135,8 @@ fn parser_template_from_pg_row(row: &PgRow) -> DbResult<ImportParserTemplateRow>
 fn preview_from_pg_row(row: &PgRow) -> DbResult<ImportPreviewRow> {
     let payload: Value = row.try_get("preview_payload")?;
     let session_id: String = row.try_get("session_key")?;
-    let preview_amount = payload_f64(&payload, "preview_amount").unwrap_or_else(|| {
-        row.try_get::<i64, _>("amount_cents").unwrap_or_default() as f64 / 100.0
-    });
+    let preview_amount_cents = payload_i64(&payload, "preview_amount_cents")
+        .unwrap_or_else(|| row.try_get::<i64, _>("amount_cents").unwrap_or_default());
     Ok(ImportPreviewRow {
         id: row.try_get("id")?,
         session_id,
@@ -3147,8 +3146,8 @@ fn preview_from_pg_row(row: &PgRow) -> DbResult<ImportPreviewRow> {
         }),
         preview_type: payload_text(&payload, "preview_type")
             .unwrap_or_else(|| row.try_get("transaction_type").unwrap_or_default()),
-        preview_amount,
-        preview_destination_amount: payload_f64(&payload, "preview_destination_amount")
+        preview_amount_cents,
+        preview_destination_amount_cents: payload_i64(&payload, "preview_destination_amount_cents")
             .unwrap_or_default(),
         category_id: payload_i64(&payload, "category_id")
             .or_else(|| payload_i64(&payload, "categoryId"))
@@ -3306,8 +3305,8 @@ fn preview_payload_from_draft(draft: &ImportPreviewDraft) -> Value {
     json!({
         "preview_date": normalize_bill_date_text(&draft.preview_date),
         "preview_type": draft.preview_type,
-        "preview_amount": draft.preview_amount,
-        "preview_destination_amount": draft.preview_destination_amount,
+        "preview_amount_cents": draft.preview_amount_cents,
+        "preview_destination_amount_cents": draft.preview_destination_amount_cents,
         "category_id": draft.category_id,
         "categoryId": draft.category_id,
         "preview_main_category": draft.preview_main_category,
@@ -3347,13 +3346,17 @@ fn apply_patch_value_to_preview(
             preview.preview_type = value.clone();
             payload_set(payload, "preview_type", json!(value));
         }
-        (ImportPreviewPatchField::Amount, ImportPreviewPatchValue::Real(value)) => {
-            preview.preview_amount = value;
-            payload_set(payload, "preview_amount", json!(value));
+        (ImportPreviewPatchField::Amount, ImportPreviewPatchValue::Integer(value)) => {
+            preview.preview_amount_cents = value.abs();
+            payload_set(payload, "preview_amount_cents", json!(value.abs()));
         }
-        (ImportPreviewPatchField::DestinationAmount, ImportPreviewPatchValue::Real(value)) => {
-            preview.preview_destination_amount = value;
-            payload_set(payload, "preview_destination_amount", json!(value));
+        (ImportPreviewPatchField::DestinationAmount, ImportPreviewPatchValue::Integer(value)) => {
+            preview.preview_destination_amount_cents = value.abs();
+            payload_set(
+                payload,
+                "preview_destination_amount_cents",
+                json!(value.abs()),
+            );
         }
         (ImportPreviewPatchField::MainCategory, ImportPreviewPatchValue::Text(value)) => {
             preview.preview_main_category = value.clone();
@@ -3728,9 +3731,10 @@ fn sort_preview_rows(rows: &mut [ImportPreviewRow], sort_by: &str, sort_directio
     let descending = sort_direction.eq_ignore_ascii_case("desc");
     rows.sort_by(|left, right| {
         let order = match sort_by {
-            "amount" | "preview_amount" | "sourceAmount" => {
-                left.preview_amount.total_cmp(&right.preview_amount)
-            }
+            "amount_cents"
+            | "preview_amount_cents"
+            | "previewAmountCents"
+            | "sourceAmountCents" => left.preview_amount_cents.cmp(&right.preview_amount_cents),
             "counterparty" => left.preview_counterparty.cmp(&right.preview_counterparty),
             "type" => preview_type_sort_rank(&left.preview_type)
                 .cmp(&preview_type_sort_rank(&right.preview_type))
@@ -3958,11 +3962,11 @@ fn parser_template_type(transaction_type: &str, amount: Money) -> String {
     }
 }
 
-fn preview_destination_amount_for_bill(bill: &DedupBill, amount: f64) -> f64 {
+fn preview_destination_amount_cents_for_bill(bill: &DedupBill, amount_cents: i64) -> i64 {
     if is_investment_type(&bill.transaction_type) || is_transfer_type(&bill.transaction_type) {
-        amount.abs()
+        amount_cents.abs()
     } else {
-        0.0
+        0
     }
 }
 
@@ -3978,10 +3982,6 @@ fn is_investment_type(bill_type: &str) -> bool {
         bill_type.trim().to_ascii_lowercase().as_str(),
         "投资" | "investment" | "5"
     )
-}
-
-fn money_to_yuan_f64(amount: Money) -> f64 {
-    amount.to_yuan_string().parse::<f64>().unwrap_or_default()
 }
 
 fn parse_positive_i64(value: &str) -> Option<i64> {
@@ -4012,8 +4012,8 @@ mod import_preview_query_tests {
             user_id: 1,
             preview_date: "2026-01-01 09:00:00".to_string(),
             preview_type: "支出".to_string(),
-            preview_amount: 10.0,
-            preview_destination_amount: 0.0,
+            preview_amount_cents: 1000,
+            preview_destination_amount_cents: 0,
             category_id: None,
             preview_main_category: "餐饮".to_string(),
             preview_sub_category: "午餐".to_string(),
@@ -4177,7 +4177,7 @@ mod import_preview_query_tests {
         let draft = ImportPreviewDraft {
             preview_date: "2026-01-01 09:00:00".to_string(),
             preview_type: "收入".to_string(),
-            preview_amount: 12.34,
+            preview_amount_cents: 1234,
             category_id: Some(42),
             preview_main_category: "理财".to_string(),
             preview_sub_category: "理财收益".to_string(),
@@ -4214,7 +4214,8 @@ mod import_preview_query_tests {
             description: Some("手续费".to_string()),
             selected_only: true,
         };
-        let mut query = build_preview_page_query(1, 2, &filters, "sourceAmount", "desc", 50, 100);
+        let mut query =
+            build_preview_page_query(1, 2, &filters, "sourceAmountCents", "desc", 50, 100);
 
         let built = query.build();
         let sql = built.sql();
@@ -4286,23 +4287,23 @@ mod import_preview_query_tests {
     fn preview_page_result_builder_filters_sorts_and_pages_rows() {
         let mut first = preview_row(1);
         first.preview_selected = true;
-        first.preview_amount = 30.0;
+        first.preview_amount_cents = 3000;
         first.preview_description = "保留 3".to_string();
 
         let mut second = preview_row(2);
         second.preview_selected = false;
-        second.preview_amount = 40.0;
+        second.preview_amount_cents = 4000;
         second.preview_description = "过滤".to_string();
 
         let mut third = preview_row(3);
         third.preview_selected = true;
-        third.preview_amount = 10.0;
+        third.preview_amount_cents = 1000;
         third.preview_description = "保留 1".to_string();
 
         let request = ImportPreviewPageRequest {
             page: 2,
             page_size: 1,
-            sort_by: "sourceAmount".to_string(),
+            sort_by: "sourceAmountCents".to_string(),
             sort_direction: "desc".to_string(),
             filters: ImportPreviewQueryFilters {
                 selected_only: true,
@@ -4533,6 +4534,24 @@ mod import_preview_query_tests {
         assert_eq!(row.category_id, None);
         assert_eq!(payload["category_id"], Value::Null);
         assert_eq!(payload["categoryId"], Value::Null);
+
+        apply_patch_value_to_preview(
+            &mut row,
+            &mut payload,
+            ImportPreviewPatchField::Amount,
+            ImportPreviewPatchValue::Integer(-12345),
+        );
+        assert_eq!(row.preview_amount_cents, 12345);
+        assert_eq!(payload["preview_amount_cents"], json!(12345));
+
+        apply_patch_value_to_preview(
+            &mut row,
+            &mut payload,
+            ImportPreviewPatchField::DestinationAmount,
+            ImportPreviewPatchValue::Integer(-54321),
+        );
+        assert_eq!(row.preview_destination_amount_cents, 54321);
+        assert_eq!(payload["preview_destination_amount_cents"], json!(54321));
     }
 
     #[test]
@@ -4575,12 +4594,63 @@ mod import_preview_query_tests {
         assert!(!signal_filter_matches(Some("missing"), &row));
     }
 
+    #[tokio::test]
+    async fn preview_pg_row_projection_reads_explicit_cents_payload_when_database_available(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let Ok(postgres_url) = std::env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+            return Ok(());
+        };
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&postgres_url)
+            .await?;
+        let row = sqlx::query(
+            r#"
+            SELECT
+                7::BIGINT AS id,
+                'session-1'::TEXT AS session_key,
+                2::BIGINT AS user_id,
+                now() AS occurred_at,
+                'expense'::TEXT AS transaction_type,
+                111::BIGINT AS amount_cents,
+                9::BIGINT AS category_id,
+                11::BIGINT AS account_id,
+                12::BIGINT AS transfer_target_account_id,
+                '商户'::TEXT AS merchant,
+                '招商卡'::TEXT AS payment_method,
+                '午餐'::TEXT AS description,
+                true AS selected,
+                ARRAY[1, 2]::BIGINT[] AS merged_source_ids,
+                '{
+                    "preview_date": "2026-06-01 09:00:00",
+                    "preview_type": "支出",
+                    "preview_amount_cents": 12345,
+                    "preview_destination_amount_cents": 54321,
+                    "preview_main_category": "餐饮",
+                    "preview_sub_category": "午餐",
+                    "preview_matching_feedback": {"learning": "accepted"}
+                }'::jsonb AS preview_payload,
+                now() AS created_at
+            "#,
+        )
+        .fetch_one(&pool)
+        .await?;
+
+        let projected = preview_from_pg_row(&row).expect("preview row");
+
+        assert_eq!(projected.preview_amount_cents, 12345);
+        assert_eq!(projected.preview_destination_amount_cents, 54321);
+        assert_eq!(projected.preview_main_category, "餐饮");
+        assert_eq!(projected.dedup_source_ids, vec![1, 2]);
+        Ok(())
+    }
+
     #[test]
     fn bulk_insert_query_builders_preserve_insert_shapes() {
         let preview_draft = ImportPreviewDraft {
             preview_date: "2026-01-01 09:00:00".to_string(),
             preview_type: "支出".to_string(),
-            preview_amount: 10.0,
+            preview_amount_cents: 1000,
             category_id: Some(42),
             preview_counterparty: "商户".to_string(),
             preview_payment_method: "招商卡".to_string(),
@@ -4649,14 +4719,14 @@ mod import_preview_query_tests {
         let mut earlier = preview_row(1);
         earlier.preview_date = "2026-01-01 09:00:00".to_string();
         earlier.preview_type = "支出".to_string();
-        earlier.preview_amount = 30.0;
+        earlier.preview_amount_cents = 3000;
         earlier.preview_payment_method = "B卡".to_string();
         earlier.preview_description = "bbb".to_string();
 
         let mut later = preview_row(2);
         later.preview_date = "2026-01-02 09:00:00".to_string();
         later.preview_type = "收入".to_string();
-        later.preview_amount = 10.0;
+        later.preview_amount_cents = 1000;
         later.preview_payment_method = "A卡".to_string();
         later.preview_description = "aaa".to_string();
 
@@ -4668,7 +4738,7 @@ mod import_preview_query_tests {
         );
 
         let mut rows = vec![earlier.clone(), later.clone()];
-        sort_preview_rows(&mut rows, "sourceAmount", "asc");
+        sort_preview_rows(&mut rows, "sourceAmountCents", "asc");
         assert_eq!(
             rows.iter().map(|row| row.id).collect::<Vec<_>>(),
             vec![2, 1]

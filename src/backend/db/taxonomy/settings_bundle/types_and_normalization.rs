@@ -179,25 +179,50 @@ pub fn export_taxonomy_sections(payload: &Value) -> DbResult<Value> {
     }))
 }
 
-pub fn normalize_account_import(payload: &Value) -> Value {
+pub fn normalize_account_import(payload: &Value) -> Result<Value, Vec<String>> {
     let item = payload.get("item").unwrap_or(&Value::Null);
+    let invalid_minor_unit_warnings = account_minor_unit_warnings(item);
+    if !invalid_minor_unit_warnings.is_empty() {
+        return Err(invalid_minor_unit_warnings);
+    }
     let ref_map = payload.get("ref_map").unwrap_or(&Value::Null);
     let parent_ref = safe_text(get_any(item, &["parentRef", "parent_ref"]), "");
     let parent_id = map_int(ref_map, &parent_ref);
-    json!({
+    Ok(json!({
         "name": safe_text(item.get("name"), ""),
         "type": safe_int(item.get("type"), 1),
         "category": get_any(item, &["category"]).cloned().unwrap_or(Value::Null),
         "currency": safe_text(item.get("currency"), "CNY"),
         "icon": safe_text(item.get("icon"), ""),
         "color": safe_text(item.get("color"), ""),
-        "balance": safe_float(item.get("balance"), 0.0),
-        "initial_balance": safe_float(get_any(item, &["initialBalance", "initial_balance"]), 0.0),
+        "balance_cents": safe_minor_units(get_any(item, &["balanceCents", "balance_cents"]), 0),
+        "initial_balance_cents": safe_minor_units(get_any(item, &["initialBalanceCents", "initial_balance_cents"]), 0),
         "hidden": i64::from(safe_bool(item.get("hidden"))),
         "display_order": safe_int(get_any(item, &["displayOrder", "display_order"]), 0),
         "comment": safe_text(item.get("comment"), ""),
         "parent_id": parent_id,
+    }))
+}
+
+fn account_minor_unit_warnings(item: &Value) -> Vec<String> {
+    [
+        (&["balanceCents", "balance_cents"][..], "balanceCents"),
+        (
+            &["initialBalanceCents", "initial_balance_cents"][..],
+            "initialBalanceCents",
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(keys, field)| {
+        let value = get_any(item, keys)?;
+        if value.is_null() || strict_minor_units(value).is_some() {
+            return None;
+        }
+        Some(format!(
+            "Skipped account with invalid {field}; expected integer cents/minor units"
+        ))
     })
+    .collect()
 }
 
 pub fn normalize_category_import(payload: &Value) -> Value {
@@ -247,15 +272,27 @@ pub fn resolve_template_payload(payload: &Value) -> Value {
     );
     let tag_ids = resolve_tag_ids(item, tag_ref_map, &mut warnings);
     let scheduled_start = safe_text(get_any(item, &["scheduledStartDate", "startDate"]), "");
+    let (source_amount_cents, invalid_source_amount) = template_minor_units_value(
+        item,
+        &["sourceAmountCents", "source_amount_cents"],
+        "sourceAmountCents",
+        &mut warnings,
+    );
+    let (destination_amount_cents, invalid_destination_amount) = template_minor_units_value(
+        item,
+        &["destinationAmountCents", "destination_amount_cents"],
+        "destinationAmountCents",
+        &mut warnings,
+    );
 
     let resolved_payload = json!({
         "description": safe_text(item.get("description"), ""),
         "type": safe_int(item.get("type"), 3),
         "category": category_id.map_or_else(String::new, |value| value.to_string()),
-        "amount": safe_float(get_any(item, &["sourceAmount", "amount"]), 0.0),
+        "source_amount_cents": source_amount_cents,
         "account": source_account_id.to_string(),
         "counterparty": destination_account_id.to_string(),
-        "destination_amount": safe_float(get_any(item, &["destinationAmount", "destination_amount"]), 0.0),
+        "destination_amount_cents": destination_amount_cents,
         "hide_amount": i64::from(safe_bool(get_any(item, &["hideAmount", "hide_amount"]))),
         "tag": tag_ids
             .iter()
@@ -276,16 +313,40 @@ pub fn resolve_template_payload(payload: &Value) -> Value {
     });
 
     let unresolved_warning = template_unresolved_warning(item, &resolved_payload);
-    let unresolved = if let Some(warning) = unresolved_warning {
+    let has_unresolved_refs = if let Some(warning) = unresolved_warning {
         warnings.push(warning);
         true
     } else {
         false
     };
+    let unresolved = has_unresolved_refs || invalid_source_amount || invalid_destination_amount;
 
     json!({
         "payload": resolved_payload,
         "warnings": warnings,
         "unresolved": unresolved,
     })
+}
+
+fn template_minor_units_value(
+    item: &Value,
+    keys: &[&str],
+    field: &str,
+    warnings: &mut Vec<String>,
+) -> (i64, bool) {
+    let Some(value) = get_any(item, keys) else {
+        return (0, false);
+    };
+    if value.is_null() {
+        return (0, false);
+    }
+    match strict_minor_units(value) {
+        Some(value) => (value, false),
+        None => {
+            warnings.push(format!(
+                "Skipped template with invalid {field}; expected integer cents/minor units"
+            ));
+            (0, true)
+        }
+    }
 }

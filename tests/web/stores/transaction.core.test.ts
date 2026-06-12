@@ -88,7 +88,7 @@ function accountResponse(overrides: Partial<AccountInfoResponse>): AccountInfoRe
         icon: '1',
         color: '#ffffff',
         currency: 'CNY',
-        balance: 1234,
+        balanceCents: 1234,
         comment: '',
         displayOrder: 1,
         hidden: false,
@@ -105,7 +105,7 @@ function accountListResponse(): AccountInfoResponse[] {
             category: AccountCategory.CheckingAccount.type,
             type: AccountType.MultiSubAccounts.type,
             currency: '---',
-            balance: 0,
+            balanceCents: 0,
             subAccounts: [
                 accountResponse({
                     id: 'bank-card-a',
@@ -134,8 +134,8 @@ function transactionResponse(overrides: Partial<TransactionInfoResponse> = {}): 
         utcOffset: 480,
         sourceAccountId: 'wallet',
         destinationAccountId: '0',
-        sourceAmount: 1234,
-        destinationAmount: 0,
+        sourceAmountCents: 1234,
+        destinationAmountCents: 0,
         hideAmount: false,
         tagIds: ['tag-breakfast'],
         comment: '早餐',
@@ -144,11 +144,11 @@ function transactionResponse(overrides: Partial<TransactionInfoResponse> = {}): 
     };
 }
 
-function expenseTransaction(overrides: Partial<Pick<Transaction, 'sourceAccountId' | 'sourceAmount' | 'comment'>> = {}): Transaction {
+function expenseTransaction(overrides: Partial<Pick<Transaction, 'sourceAccountId' | 'sourceAmountCents' | 'comment'>> = {}): Transaction {
     const transaction = Transaction.createNewTransaction(TransactionType.Expense, 1777636800, 'Asia/Shanghai', 480);
     transaction.setCategoryId('cat-food');
     transaction.sourceAccountId = overrides.sourceAccountId ?? 'wallet';
-    transaction.sourceAmount = overrides.sourceAmount ?? 1234;
+    transaction.sourceAmountCents = overrides.sourceAmountCents ?? 1234;
     transaction.comment = overrides.comment ?? '早餐';
     transaction.tagIds = ['tag-breakfast'];
     return transaction;
@@ -253,7 +253,7 @@ describe('transaction store service boundary', () => {
                 expect.objectContaining({
                     type: TransactionType.Expense,
                     sourceAccountId: 'wallet',
-                    sourceAmount: 1234,
+                    sourceAmountCents: 1234,
                     clientSessionId: 'batch-session'
                 })
             ]

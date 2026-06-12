@@ -166,14 +166,14 @@
                                                     <v-skeleton-loader type="text" style="width: 60px" :loading="true"></v-skeleton-loader>
                                                 </span>
                                                 <span class="text-income ms-2" v-else-if="!loading">
-                                                    {{ currentMonthTotalAmount.income }}
+                                                    {{ currentMonthTotalAmount.incomeText }}
                                                 </span>
                                                 <span class="text-subtitle-1 ms-3">{{ queryAllFilterAccountIdsCount ? tt('Total Outflows') : tt('Total Expense') }}</span>
                                                 <span class="text-expense ms-2" v-if="loading">
                                                     <v-skeleton-loader type="text" style="width: 60px" :loading="true"></v-skeleton-loader>
                                                 </span>
                                                 <span class="text-expense ms-2" v-else-if="!loading">
-                                                    {{ currentMonthTotalAmount.expense }}
+                                                    {{ currentMonthTotalAmount.expenseText }}
                                                 </span>
                                             </div>
                                         </div>
@@ -185,7 +185,7 @@
                                                               :default-currency="defaultCurrency"
                                                               :min-date="transactionCalendarMinDate"
                                                               :max-date="transactionCalendarMaxDate"
-                                                              :dailyTotalAmounts="currentMonthTransactionData?.dailyTotalAmounts"
+                                                              :daily-total-amounts-cents="currentMonthTransactionData?.dailyTotalAmountsCents"
                                                               v-model="currentCalendarDate"></transaction-calendar>
                                     </v-card-text>
 
@@ -338,7 +338,7 @@
                                                 </v-menu>
                                             </th>
                                             <th class="transaction-table-column-amount text-no-wrap">
-                                                <v-menu ref="amountFilterMenu" class="transaction-amount-menu"
+                                                <v-menu ref="amountFilterCentsMenu" class="transaction-amount-menu"
                                                         eager location="bottom" max-height="500"
                                                         :close-on-content-click="false"
                                                         v-model="amountMenuState"
@@ -350,17 +350,17 @@
                                                                size="small"
                                                                class="transaction-table-header-button"
                                                                :disabled="loading"
-                                                               :color="query.amountFilter ? 'primary' : undefined">
+                                                               :color="query.amountFilterCents ? 'primary' : undefined">
                                                             <span class="transaction-table-header-label">{{ tt('Amount') }}</span>
                                                             <v-icon :icon="mdiMenuDown" />
                                                         </v-btn>
                                                     </template>
                                                     <v-list class="transaction-table-header-menu"
                                                             density="compact"
-                                                            :selected="[query.amountFilter.split(':')[0]]">
+                                                            :selected="[query.amountFilterCents.split(':')[0]]">
                                                         <v-list-item key="" value="" class="text-sm" density="compact"
-                                                                     :class="{ 'list-item-selected': !query.amountFilter }"
-                                                                     :append-icon="(!query.amountFilter && !currentAmountFilterType ? mdiCheck : undefined)">
+                                                                     :class="{ 'list-item-selected': !query.amountFilterCents }"
+                                                                     :append-icon="(!query.amountFilterCents && !currentAmountFilterType ? mdiCheck : undefined)">
                                                             <v-list-item-title class="cursor-pointer"
                                                                                @click="changeAmountFilter('')">
                                                                 <div class="d-flex align-center">
@@ -372,13 +372,13 @@
                                                                   v-for="filterType in AmountFilterType.values()">
                                                             <v-list-item class="text-sm" density="compact"
                                                                          :value="filterType.type"
-                                                                         :class="{ 'list-item-selected': query.amountFilter && query.amountFilter.startsWith(`${filterType.type}:`) || currentAmountFilterType === filterType.type }"
-                                                                         :append-icon="(query.amountFilter && query.amountFilter.startsWith(`${filterType.type}:`) && currentAmountFilterType !== filterType.type ? mdiCheck : undefined)">
+                                                                         :class="{ 'list-item-selected': query.amountFilterCents && query.amountFilterCents.startsWith(`${filterType.type}:`) || currentAmountFilterType === filterType.type }"
+                                                                         :append-icon="(query.amountFilterCents && query.amountFilterCents.startsWith(`${filterType.type}:`) && currentAmountFilterType !== filterType.type ? mdiCheck : undefined)">
                                                                 <v-list-item-title class="cursor-pointer"
                                                                                    @click="onAmountFilterTypeClick(filterType.type)">
                                                                     <div class="d-flex align-center">
                                                                         <span class="text-sm ms-3">{{ tt(filterType.name) }}</span>
-                                                                        <span class="text-sm ms-4" v-if="query.amountFilter && query.amountFilter.startsWith(`${filterType.type}:`) && currentAmountFilterType !== filterType.type">{{ queryAmount }}</span>
+                                                                        <span class="text-sm ms-4" v-if="query.amountFilterCents && query.amountFilterCents.startsWith(`${filterType.type}:`) && currentAmountFilterType !== filterType.type">{{ queryAmount }}</span>
                                                                         <amount-input class="transaction-amount-filter-value ms-4" density="compact"
                                                                                       :currency="defaultCurrency"
                                                                                       v-model="currentAmountFilterValue1"
@@ -806,7 +806,7 @@ interface TransactionListProps {
     initAccountIds?: string,
     initTagIds?: string,
     initTagFilterType?: string,
-    initAmountFilter?: string,
+    initAmountFilterCents?: string,
     initKeyword?: string
 }
 
@@ -826,8 +826,8 @@ interface TransactionTemplateWithIcon {
 }
 
 interface TransactionListDisplayTotalAmount {
-    income: string;
-    expense: string;
+    incomeText: string;
+    expenseText: string;
 }
 
 const router = useRouter();
@@ -909,7 +909,7 @@ const tagFilterIconMap: Record<number, string> = {
 
 const timeFilterMenu = useTemplateRef<VMenu>('timeFilterMenu');
 const categoryFilterMenu = useTemplateRef<VMenu>('categoryFilterMenu');
-const amountFilterMenu = useTemplateRef<VMenu>('amountFilterMenu');
+const amountFilterCentsMenu = useTemplateRef<VMenu>('amountFilterCentsMenu');
 const accountFilterMenu = useTemplateRef<VMenu>('accountFilterMenu');
 const tagFilterMenu = useTemplateRef<VMenu>('tagFilterMenu');
 
@@ -1144,8 +1144,8 @@ const currentMonthTotalAmount = computed<TransactionListDisplayTotalAmount | nul
         }
 
         return {
-            income: getDisplayMonthTotalAmount(transactionData.totalAmount.income, defaultCurrency.value, '', transactionData.totalAmount.incompleteIncome),
-            expense: getDisplayMonthTotalAmount(transactionData.totalAmount.expense, defaultCurrency.value, '', transactionData.totalAmount.incompleteExpense)
+            incomeText: getDisplayMonthTotalAmount(transactionData.totalAmountCents.incomeCents, defaultCurrency.value, '', transactionData.totalAmountCents.incompleteIncome),
+            expenseText: getDisplayMonthTotalAmount(transactionData.totalAmountCents.expenseCents, defaultCurrency.value, '', transactionData.totalAmountCents.incompleteExpense)
         };
     } else {
         return null;
@@ -1175,8 +1175,8 @@ function getCategoryListItemCheckedClass(category: TransactionCategory, queryCat
 }
 
 function getAmountFilterParameterCount(filterType: string): number {
-    const amountFilterType = AmountFilterType.valueOf(filterType);
-    return amountFilterType ? amountFilterType.paramCount : 0;
+    const amountFilterCentsType = AmountFilterType.valueOf(filterType);
+    return amountFilterCentsType ? amountFilterCentsType.paramCount : 0;
 }
 
 function updateUrlWhenChanged(changed: boolean): void {
@@ -1211,7 +1211,7 @@ function init(initProps: TransactionListProps): void {
         accountIds: initProps.initAccountIds,
         tagIds: initProps.initTagIds,
         tagFilterType: initProps.initTagFilterType && parseInt(initProps.initTagFilterType) >= 0 ? parseInt(initProps.initTagFilterType) : undefined,
-        amountFilter: initProps.initAmountFilter || '',
+        amountFilterCents: initProps.initAmountFilterCents || '',
         keyword: initProps.initKeyword || ''
     });
 
@@ -1618,11 +1618,11 @@ function changeAmountFilter(filterType: string): void {
     currentAmountFilterType.value = '';
     amountMenuState.value = false;
 
-    if (query.value.amountFilter === filterType) {
+    if (query.value.amountFilterCents === filterType) {
         return;
     }
 
-    let amountFilter = filterType;
+    let amountFilterCents = filterType;
 
     if (filterType) {
         const amountCount = getAmountFilterParameterCount(filterType);
@@ -1632,25 +1632,25 @@ function changeAmountFilter(filterType: string): void {
         }
 
         if (amountCount === 1) {
-            amountFilter += ':' + currentAmountFilterValue1.value;
+            amountFilterCents += ':' + currentAmountFilterValue1.value;
         } else if (amountCount === 2) {
             if (currentAmountFilterValue2.value < currentAmountFilterValue1.value) {
                 snackbar.value?.showMessage('Incorrect amount range');
                 return;
             }
 
-            amountFilter += ':' + currentAmountFilterValue1.value + ':' + currentAmountFilterValue2.value;
+            amountFilterCents += ':' + currentAmountFilterValue1.value + ':' + currentAmountFilterValue2.value;
         } else {
             return;
         }
     }
 
-    if (query.value.amountFilter === amountFilter) {
+    if (query.value.amountFilterCents === amountFilterCents) {
         return;
     }
 
     const changed = transactionsStore.updateTransactionListFilter({
-        amountFilter: amountFilter
+        amountFilterCents: amountFilterCents
     });
 
     updateUrlWhenChanged(changed);
@@ -1707,7 +1707,7 @@ function addByRecognizingImage(): void {
 
         editDialog.value?.open({
             time: tradeTimeUnixSeconds,
-            amount: amountInCents,
+            sourceAmountCents: amountInCents,
             comment: result.description ?? undefined,
             noTransactionDraft: true
         }).then(result => {
@@ -1842,9 +1842,9 @@ function scrollAmountMenuToSelectedItem(opened: boolean): void {
 
         let amount1 = 0, amount2 = 0;
 
-        if (isString(query.value.amountFilter)) {
+        if (isString(query.value.amountFilterCents)) {
             try {
-                const filterItems = query.value.amountFilter.split(':');
+                const filterItems = query.value.amountFilterCents.split(':');
                 const amountCount = getAmountFilterParameterCount(filterItems[0] as string);
 
                 if (filterItems.length === 2 && amountCount === 1) {
@@ -1854,14 +1854,14 @@ function scrollAmountMenuToSelectedItem(opened: boolean): void {
                     amount2 = parseInt(filterItems[2] as string);
                 }
             } catch (ex) {
-                logger.warn('cannot parse amount from filter value, original value is ' + query.value.amountFilter, ex);
+                logger.warn('cannot parse amount from filter value, original value is ' + query.value.amountFilterCents, ex);
             }
         }
 
         currentAmountFilterValue1.value = amount1;
         currentAmountFilterValue2.value = amount2;
 
-        scrollMenuToSelectedItem(amountFilterMenu.value);
+        scrollMenuToSelectedItem(amountFilterCentsMenu.value);
     }
 }
 
@@ -1898,7 +1898,7 @@ onBeforeRouteUpdate((to) => {
             initAccountIds: (to.query['accountIds'] as string | null) || undefined,
             initTagIds: (to.query['tagIds'] as string | null) || undefined,
             initTagFilterType: (to.query['tagFilterType'] as string | null) || undefined,
-            initAmountFilter: (to.query['amountFilter'] as string | null) || undefined,
+            initAmountFilterCents: (to.query['amountFilterCents'] as string | null) || undefined,
             initKeyword: (to.query['keyword'] as string | null) || undefined
         });
     } else {

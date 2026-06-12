@@ -391,14 +391,6 @@ fn value_as_i64(value: &Value) -> Option<i64> {
     })
 }
 
-fn value_as_f64(value: &Value) -> Option<f64> {
-    value.as_f64().or_else(|| {
-        value
-            .as_str()
-            .and_then(|text| text.trim().parse::<f64>().ok())
-    })
-}
-
 fn value_truthy(value: &Value) -> bool {
     match value {
         Value::Bool(flag) => *flag,
@@ -415,17 +407,4 @@ fn value_truthy(value: &Value) -> bool {
         Value::Object(values) => !values.is_empty(),
         Value::Null => false,
     }
-}
-
-fn yuan_to_cents(value: Option<&Value>) -> i64 {
-    let yuan = value.and_then(value_as_f64).unwrap_or_default();
-    (yuan * 100.0).round() as i64
-}
-
-fn round2(value: f64) -> f64 {
-    (value * 100.0).round() / 100.0
-}
-
-fn json_number(value: f64) -> Value {
-    Number::from_f64(value).map_or(Value::Null, Value::Number)
 }

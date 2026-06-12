@@ -80,7 +80,7 @@ export function filterAndSortForecasts(
                     || compareNullableNumbers(a.backtestMape, b.backtestMape)
                     || compareForecastCategoryNames(a.categoryName, b.categoryName);
             case 'projected_total':
-                return b.projectedTotal - a.projectedTotal
+                return b.projectedTotalCents - a.projectedTotalCents
                     || compareNullableNumbers(a.backtestMape, b.backtestMape)
                     || compareForecastCategoryNames(a.categoryName, b.categoryName);
             case 'category':

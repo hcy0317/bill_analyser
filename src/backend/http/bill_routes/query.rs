@@ -30,9 +30,9 @@ struct BillsListQuery {
     tag_ids: Option<String>,
     #[serde(rename = "tagIds")]
     tag_ids_camel: Option<String>,
-    amount_filter: Option<String>,
-    #[serde(rename = "amountFilter")]
-    amount_filter_camel: Option<String>,
+    amount_filter_cents: Option<String>,
+    #[serde(rename = "amountFilterCents")]
+    amount_filter_cents_camel: Option<String>,
 }
 
 impl BillsListQuery {
@@ -68,11 +68,11 @@ impl BillsListQuery {
         parse_csv_i64(self.tag_ids.as_ref().or(self.tag_ids_camel.as_ref()))
     }
 
-    fn amount_filter(&self) -> Option<String> {
+    fn amount_filter_cents(&self) -> Option<String> {
         non_empty_string(
-            self.amount_filter
+            self.amount_filter_cents
                 .as_ref()
-                .or(self.amount_filter_camel.as_ref()),
+                .or(self.amount_filter_cents_camel.as_ref()),
         )
     }
 }
@@ -143,7 +143,7 @@ async fn postgres_filters_from_query(
         account_ids: query.account_ids(),
         categories,
         tag_ids: query.tag_ids(),
-        amount_filter: query.amount_filter(),
+        amount_filter_cents: query.amount_filter_cents(),
         ..BillFilters::default()
     })
 }
@@ -153,7 +153,7 @@ mod bill_query_tests {
     use super::*;
 
     #[test]
-    fn bills_list_query_pins_paging_filter_aliases_and_amount_filter() {
+    fn bills_list_query_pins_paging_filter_aliases_and_amount_filter_cents() {
         let query = BillsListQuery {
             page: Some(0),
             count: Some(25),
@@ -164,8 +164,8 @@ mod bill_query_tests {
             category_ids: None,
             category_ids_camel: Some(" 4,5,invalid ".to_string()),
             tag_ids: Some("7,,0,8".to_string()),
-            amount_filter: None,
-            amount_filter_camel: Some(" between:10:20 ".to_string()),
+            amount_filter_cents: None,
+            amount_filter_cents_camel: Some(" between:1000:2000 ".to_string()),
             ..BillsListQuery::default()
         };
 
@@ -174,19 +174,22 @@ mod bill_query_tests {
         assert_eq!(query.account_ids(), vec![2, 3, 2]);
         assert_eq!(query.category_ids(), vec![4, 5]);
         assert_eq!(query.tag_ids(), vec![7, 8]);
-        assert_eq!(query.amount_filter().as_deref(), Some("between:10:20"));
+        assert_eq!(
+            query.amount_filter_cents().as_deref(),
+            Some("between:1000:2000")
+        );
 
         let clamped = BillsListQuery {
             page: Some(4),
             count: Some(100),
             page_size: Some(999),
             page_size_camel: Some(10),
-            amount_filter: Some(" gte:200 ".to_string()),
-            amount_filter_camel: Some("ignored".to_string()),
+            amount_filter_cents: Some(" gte:20000 ".to_string()),
+            amount_filter_cents_camel: Some("ignored".to_string()),
             ..BillsListQuery::default()
         };
         assert_eq!(clamped.page(), 4);
         assert_eq!(clamped.page_size(), 500);
-        assert_eq!(clamped.amount_filter().as_deref(), Some("gte:200"));
+        assert_eq!(clamped.amount_filter_cents().as_deref(), Some("gte:20000"));
     }
 }

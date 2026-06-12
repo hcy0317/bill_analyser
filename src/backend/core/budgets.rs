@@ -16,7 +16,7 @@ pub const CURRENT_EXPENSE_CATEGORY_TYPE: i32 = 1;
 pub const VALID_BUDGET_PERIOD_TYPES: [&str; 5] =
     ["daily", "weekly", "monthly", "quarterly", "yearly"];
 
-const SYNCHRONIZED_PRIMARY_TOLERANCE: f64 = 0.01;
+const SYNCHRONIZED_PRIMARY_TOLERANCE_CENTS: i64 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BudgetPeriodRange {
@@ -96,10 +96,10 @@ pub struct BudgetHistoryFilterSummaryInput {
 pub struct BudgetForecastItemInput<'a> {
     pub category: &'a str,
     pub category_info: Value,
-    pub amounts: &'a [f64],
-    pub current_spent: f64,
-    pub primary_budget_amount: f64,
-    pub sub_budget_total: f64,
+    pub amounts_cents: &'a [i64],
+    pub current_spent_cents: i64,
+    pub primary_budget_amount_cents: i64,
+    pub sub_budget_total_cents: i64,
     pub strategy: &'a str,
     pub period_count: usize,
     pub period_labels: Option<&'a [String]>,

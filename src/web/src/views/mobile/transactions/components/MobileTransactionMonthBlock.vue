@@ -15,12 +15,12 @@
                                 <small>
                                     <span>{{ getDisplayLongYearMonth(monthList) }}</span>
                                 </small>
-                                <small class="transaction-amount-statistics" v-if="showTotalAmount && monthList.totalAmount">
+                                <small class="transaction-amount-statistics" v-if="showTotalAmount && monthList.totalAmountCents">
                                     <span class="text-income">
-                                        {{ getDisplayMonthTotalAmount(monthList.totalAmount.income, defaultCurrency, '+', monthList.totalAmount.incompleteIncome) }}
+                                        {{ getDisplayMonthTotalAmount(monthList.totalAmountCents.incomeCents, defaultCurrency, '+', monthList.totalAmountCents.incompleteIncome) }}
                                     </span>
                                     <span class="text-expense">
-                                        {{ getDisplayMonthTotalAmount(monthList.totalAmount.expense, defaultCurrency, '-', monthList.totalAmount.incompleteExpense) }}
+                                        {{ getDisplayMonthTotalAmount(monthList.totalAmountCents.expenseCents, defaultCurrency, '-', monthList.totalAmountCents.incompleteExpense) }}
                                     </span>
                                 </small>
                                 <f7-icon class="combination-list-chevron-icon" :f7="monthList.opened ? 'chevron_up' : 'chevron_down'"></f7-icon>

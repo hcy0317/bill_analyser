@@ -107,7 +107,7 @@ describe('AIImageRecognitionDialog model contract', () => {
         expect(block).not.toContain('result.categoryId');
         expect(block).not.toContain('result.sourceAccountId');
         expect(block).not.toContain('result.destinationAccountId');
-        expect(block).not.toContain('result.sourceAmount');
+        expect(block).not.toContain('result.sourceAmountCents');
         expect(block).not.toContain('result.tagIds');
     });
 });

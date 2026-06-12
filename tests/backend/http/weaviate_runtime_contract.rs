@@ -13,7 +13,7 @@ use bill_analyser_core::{
 };
 use bill_analyser_db::{
     enqueue_vector_outbox_event, load_import_learning_feature_vector_sources,
-    run_postgres_migrations, ImportLearningFeatureVectorSource, VectorOutboxEventDraft,
+    ImportLearningFeatureVectorSource, VectorOutboxEventDraft,
 };
 use bill_analyser_http::{
     build_object_from_feature_source, probe_weaviate_health, process_weaviate_outbox_once,
@@ -22,12 +22,15 @@ use bill_analyser_http::{
     WeaviateRuntimeError,
 };
 use serde_json::json;
-use sqlx::{postgres::PgPoolOptions, Row};
+use sqlx::Row;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
     time::sleep,
 };
+
+#[path = "../db/postgres_test_support.rs"]
+mod postgres_test_support;
 
 #[test]
 fn weaviate_is_required_by_default_config() {
@@ -273,24 +276,23 @@ async fn weaviate_client_covers_disabled_empty_and_existing_schema_edges(
 #[tokio::test(flavor = "multi_thread")]
 async fn weaviate_http_client_processes_outbox_and_rebuilds_from_postgres_when_available(
 ) -> Result<(), Box<dyn Error>> {
-    let Ok(postgres_url) = env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+    let Ok(base_postgres_url) = env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
         return Ok(());
     };
-    let pool = PgPoolOptions::new()
-        .max_connections(1)
-        .connect(&postgres_url)
-        .await?;
-    run_postgres_migrations(&pool).await?;
-    sqlx::query("DELETE FROM vector_outbox_events")
-        .execute(&pool)
-        .await?;
+    let Some(test_db) =
+        postgres_test_support::isolated_postgres_database("weaviate_runtime").await?
+    else {
+        return Ok(());
+    };
+    let postgres_url = postgres_url_for_database(&base_postgres_url, &test_db.db_name)?;
+    let pool = &test_db.pool;
 
     let unique = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
     let user_id: i64 =
         sqlx::query("INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id")
             .bind(format!("weaviate-runtime-{unique}"))
             .bind(format!("weaviate-runtime-{unique}@example.test"))
-            .fetch_one(&pool)
+            .fetch_one(pool)
             .await?
             .try_get("id")?;
     let sample_id: i64 = sqlx::query(
@@ -311,7 +313,7 @@ async fn weaviate_http_client_processes_outbox_and_rebuilds_from_postgres_when_a
         "source_account_id": 3
     }))
     .bind(json!({"parser_id": "wechat"}))
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await?
     .try_get("id")?;
     sqlx::query(
@@ -326,8 +328,8 @@ async fn weaviate_http_client_processes_outbox_and_rebuilds_from_postgres_when_a
     .bind(sample_id)
     .bind("counterparty")
     .bind(format!("feature-hash-{unique}"))
-    .bind(json!({"counterparty": "coffee shop", "amount": 1280}))
-    .execute(&pool)
+    .bind(json!({"counterparty": "coffee shop", "amount_cents": 1280}))
+    .execute(pool)
     .await?;
 
     let (endpoint, requests) = spawn_weaviate_mock(18).await?;
@@ -339,7 +341,7 @@ async fn weaviate_http_client_processes_outbox_and_rebuilds_from_postgres_when_a
     let mut upsert_properties = build_weaviate_required_metadata(user_id, "manual-upsert");
     upsert_properties.insert("parserId".to_string(), json!("wechat"));
     enqueue_vector_outbox_event(
-        &pool,
+        pool,
         &VectorOutboxEventDraft {
             user_id: Some(user_id),
             aggregate_type: "import_learning_feature".to_string(),
@@ -356,7 +358,7 @@ async fn weaviate_http_client_processes_outbox_and_rebuilds_from_postgres_when_a
     )
     .await?;
     enqueue_vector_outbox_event(
-        &pool,
+        pool,
         &VectorOutboxEventDraft {
             user_id: Some(user_id),
             aggregate_type: "import_learning_feature".to_string(),
@@ -371,7 +373,7 @@ async fn weaviate_http_client_processes_outbox_and_rebuilds_from_postgres_when_a
     )
     .await?;
     let invalid_event_id = enqueue_vector_outbox_event(
-        &pool,
+        pool,
         &VectorOutboxEventDraft {
             user_id: Some(user_id),
             aggregate_type: "import_learning_feature".to_string(),
@@ -383,7 +385,7 @@ async fn weaviate_http_client_processes_outbox_and_rebuilds_from_postgres_when_a
     )
     .await?;
     enqueue_vector_outbox_event(
-        &pool,
+        pool,
         &VectorOutboxEventDraft {
             user_id: Some(user_id),
             aggregate_type: "import_learning_feature".to_string(),
@@ -398,7 +400,7 @@ async fn weaviate_http_client_processes_outbox_and_rebuilds_from_postgres_when_a
     )
     .await?;
     enqueue_vector_outbox_event(
-        &pool,
+        pool,
         &VectorOutboxEventDraft {
             user_id: Some(user_id),
             aggregate_type: "import_learning_feature".to_string(),
@@ -412,7 +414,7 @@ async fn weaviate_http_client_processes_outbox_and_rebuilds_from_postgres_when_a
     )
     .await?;
     enqueue_vector_outbox_event(
-        &pool,
+        pool,
         &VectorOutboxEventDraft {
             user_id: Some(user_id),
             aggregate_type: "import_learning_feature".to_string(),
@@ -426,14 +428,14 @@ async fn weaviate_http_client_processes_outbox_and_rebuilds_from_postgres_when_a
     )
     .await?;
 
-    let process_report = process_weaviate_outbox_once(&pool, &config).await?;
+    let process_report = process_weaviate_outbox_once(pool, &config).await?;
     assert_eq!(process_report.claimed, 6);
     assert_eq!(process_report.succeeded, 3);
     assert_eq!(process_report.failed, 3);
     let failed_event =
         sqlx::query("SELECT status, attempts, last_error FROM vector_outbox_events WHERE id = $1")
             .bind(invalid_event_id)
-            .fetch_one(&pool)
+            .fetch_one(pool)
             .await?;
     let failed_status: String = failed_event.try_get("status")?;
     let failed_attempts: i32 = failed_event.try_get("attempts")?;
@@ -443,7 +445,7 @@ async fn weaviate_http_client_processes_outbox_and_rebuilds_from_postgres_when_a
     assert!(failed_error.contains("missing class"));
 
     let disabled_report = process_weaviate_outbox_once(
-        &pool,
+        pool,
         &WeaviateRuntimeConfig {
             enabled: false,
             ..config.clone()
@@ -453,7 +455,7 @@ async fn weaviate_http_client_processes_outbox_and_rebuilds_from_postgres_when_a
     .unwrap_err();
     assert!(matches!(disabled_report, WeaviateRuntimeError::Disabled));
 
-    let sources = load_import_learning_feature_vector_sources(&pool, Some(user_id), 10).await?;
+    let sources = load_import_learning_feature_vector_sources(pool, Some(user_id), 10).await?;
     let object = build_object_from_feature_source(&config, &sources[0])?;
     assert_eq!(
         object.class,
@@ -472,12 +474,12 @@ async fn weaviate_http_client_processes_outbox_and_rebuilds_from_postgres_when_a
     assert_eq!(object.properties["sourceAccountId"], 3);
     assert_eq!(object.properties["ruleState"], "postgres_authoritative");
 
-    let rebuild_report = rebuild_weaviate_from_postgres(&pool, &config, Some(user_id)).await?;
+    let rebuild_report = rebuild_weaviate_from_postgres(pool, &config, Some(user_id)).await?;
     assert_eq!(rebuild_report.source_count, 1);
     assert_eq!(rebuild_report.deleted_classes, 4);
     assert_eq!(rebuild_report.upserted, 1);
     let disabled_rebuild = rebuild_weaviate_from_postgres(
-        &pool,
+        pool,
         &WeaviateRuntimeConfig {
             enabled: false,
             ..config.clone()
@@ -562,7 +564,20 @@ async fn weaviate_http_client_processes_outbox_and_rebuilds_from_postgres_when_a
     assert!(requests.contains("POST /v1/graphql"));
     assert!(requests.contains("\"valueInt\":"));
 
+    test_db.cleanup().await?;
     Ok(())
+}
+
+fn postgres_url_for_database(base_url: &str, database: &str) -> Result<String, Box<dyn Error>> {
+    let (without_query, query) = base_url.split_once('?').unwrap_or((base_url, ""));
+    let (prefix, _) = without_query.rsplit_once('/').ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "postgres URL has no database path",
+        )
+    })?;
+    let query_separator = if query.is_empty() { "" } else { "?" };
+    Ok(format!("{prefix}/{database}{query_separator}{query}"))
 }
 
 fn weaviate_config(endpoint: &str) -> WeaviateRuntimeConfig {

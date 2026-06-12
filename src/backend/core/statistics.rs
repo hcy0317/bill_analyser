@@ -1,14 +1,12 @@
 // 中文导读：核心业务合同层，负责把金额、时间、分类、导入、匹配、预算、统计等规则从 HTTP/DB 细节中隔离。
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
-// 不变式：金额单位、用户可见类型和API payload 在进入或离开本层时必须显式转换。
+// 不变式：金额字段在核心和 API payload 中使用显式 cents/minor units；元单位只用于展示文本。
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{Datelike, Duration, NaiveDate};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-
-use crate::Money;
 
 pub const DEFAULT_EXCHANGE_RATE_PROVIDER_ORDER: [&str; 4] = ["boc_cn", "cmb_cn", "ecb", "rba"];
 pub const TARGET_EXCHANGE_CURRENCIES: [&str; 16] = [
@@ -62,12 +60,12 @@ pub struct StatisticsBillInput {
     pub id: Option<i64>,
     pub date: String,
     pub bill_type: String,
-    pub amount_yuan: String,
+    pub amount_cents: i64,
     pub channel: String,
     pub source_account_id: Option<i64>,
     pub destination_account_id: Option<i64>,
     pub destination_account: String,
-    pub destination_amount_yuan: Option<String>,
+    pub destination_amount_cents: Option<i64>,
     pub main_category: String,
     pub sub_category: String,
     pub counterparty: String,
@@ -87,8 +85,8 @@ pub struct StatisticsAccountInput {
     pub name: String,
     pub account_type: String,
     pub hidden: bool,
-    pub balance_yuan: String,
-    pub initial_balance_yuan: String,
+    pub balance_cents: i64,
+    pub initial_balance_cents: i64,
     pub currency: Option<String>,
     pub icon: Option<String>,
 }
@@ -98,7 +96,7 @@ pub struct StatisticsAccountInput {
 pub struct CategoryStatisticItem {
     pub category_id: String,
     pub account_id: String,
-    pub amount: i64,
+    pub amount_cents: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,8 +110,8 @@ pub struct CategoryTrendBucket {
 #[serde(rename_all = "camelCase")]
 pub struct AssetTrendAccountItem {
     pub account_id: String,
-    pub account_opening_balance: i64,
-    pub account_closing_balance: i64,
+    pub account_opening_balance_cents: i64,
+    pub account_closing_balance_cents: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,13 +129,14 @@ pub struct AssetTrendLegendItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NetWorthAccountEntry {
     pub id: i64,
     pub name: String,
     #[serde(rename = "type")]
     pub account_type: String,
     pub icon: Option<String>,
-    pub balance: f64,
+    pub balance_cents: i64,
     pub currency: String,
 }
 
@@ -146,9 +145,9 @@ pub struct NetWorthAccountEntry {
 pub struct NetWorthSnapshot {
     pub assets: Vec<NetWorthAccountEntry>,
     pub liabilities: Vec<NetWorthAccountEntry>,
-    pub total_assets: f64,
-    pub total_liabilities: f64,
-    pub net_worth: f64,
+    pub total_assets_cents: i64,
+    pub total_liabilities_cents: i64,
+    pub net_worth_cents: i64,
     pub account_count: usize,
 }
 
@@ -156,7 +155,7 @@ pub struct NetWorthSnapshot {
 pub struct RecurringRuleInput {
     pub id: Option<i64>,
     pub name: String,
-    pub amount_yuan: String,
+    pub amount_cents: i64,
     pub bill_type: String,
     pub frequency: String,
     pub next_date: String,
@@ -166,7 +165,7 @@ pub struct RecurringRuleInput {
 #[serde(rename_all = "camelCase")]
 pub struct CalendarBillItem {
     pub id: Option<i64>,
-    pub amount: f64,
+    pub amount_cents: i64,
     #[serde(rename = "type")]
     pub bill_type: String,
     pub counterparty: String,
@@ -179,11 +178,11 @@ pub struct CalendarBillItem {
 #[serde(rename_all = "camelCase")]
 pub struct CalendarEventDay {
     pub date: String,
-    pub income: f64,
-    pub expense: f64,
-    pub transfer_in: f64,
-    pub transfer_out: f64,
-    pub net: f64,
+    pub income_cents: i64,
+    pub expense_cents: i64,
+    pub transfer_in_cents: i64,
+    pub transfer_out_cents: i64,
+    pub net_cents: i64,
     pub count: usize,
     pub bills: Vec<CalendarBillItem>,
 }
@@ -195,7 +194,7 @@ pub struct CalendarRecurringProjection {
     #[serde(rename = "type")]
     pub projection_type: String,
     pub name: String,
-    pub amount: f64,
+    pub amount_cents: i64,
     pub bill_type: String,
     pub frequency: String,
     pub recurring_id: Option<i64>,
@@ -248,13 +247,13 @@ pub struct UserCustomExchangeRateInput {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NameValueStatisticItem {
     pub name: String,
-    pub value: f64,
+    pub value_cents: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TopMerchantStatisticItem {
     pub name: String,
-    pub amount: f64,
+    pub amount_cents: i64,
     pub count: usize,
 }
 
@@ -262,8 +261,8 @@ pub struct TopMerchantStatisticItem {
 #[serde(rename_all = "camelCase")]
 pub struct TransactionAmountBucket {
     pub currency: String,
-    pub income_amount: i64,
-    pub expense_amount: i64,
+    pub income_amount_cents: i64,
+    pub expense_amount_cents: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -275,11 +274,12 @@ pub struct TransactionAmountPeriodResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StatisticsTrendPoint {
     pub date: String,
-    pub income: f64,
-    pub expense: f64,
-    pub net: f64,
+    pub income_cents: i64,
+    pub expense_cents: i64,
+    pub net_cents: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -289,11 +289,12 @@ pub struct StatisticsAnalyzerPeriodRange {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StatisticsAnalyzerTrendBucket {
     pub period: String,
-    pub income: f64,
-    pub expense: f64,
-    pub net: f64,
+    pub income_cents: i64,
+    pub expense_cents: i64,
+    pub net_cents: i64,
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -417,7 +418,7 @@ pub fn build_category_statistics_items(
             |((category_id, account_id), amount)| CategoryStatisticItem {
                 category_id,
                 account_id,
-                amount,
+                amount_cents: amount,
             },
         )
         .collect()
@@ -495,7 +496,7 @@ pub fn build_category_trend_statistics(
                 |((category_id, account_id), amount)| CategoryStatisticItem {
                     category_id,
                     account_id,
-                    amount,
+                    amount_cents: amount,
                 },
             )
             .collect();
@@ -508,7 +509,7 @@ pub fn build_category_trend_statistics(
 pub fn build_asset_trends(
     bills: &[StatisticsBillInput],
     accounts: &[StatisticsAccountInput],
-    balances_before_date_yuan: &BTreeMap<i64, String>,
+    balances_before_date_cents: &BTreeMap<i64, i64>,
     start_date: NaiveDate,
     end_date: NaiveDate,
 ) -> Vec<AssetTrendDay> {
@@ -520,11 +521,11 @@ pub fn build_asset_trends(
     );
     let mut current_balances: BTreeMap<i64, i64> = BTreeMap::new();
     for account in accounts {
-        let initial = yuan_to_cents_lossy(&account.initial_balance_yuan);
-        let history = balances_before_date_yuan
+        let initial = account.initial_balance_cents;
+        let history = balances_before_date_cents
             .get(&account.id)
-            .map(|value| yuan_to_cents_lossy(value))
-            .unwrap_or(0);
+            .copied()
+            .unwrap_or_default();
         current_balances.insert(account.id, initial + history);
     }
 
@@ -552,8 +553,8 @@ pub fn build_asset_trends(
             .iter()
             .map(|account| AssetTrendAccountItem {
                 account_id: account.id.to_string(),
-                account_opening_balance: *opening_balances.get(&account.id).unwrap_or(&0),
-                account_closing_balance: *current_balances.get(&account.id).unwrap_or(&0),
+                account_opening_balance_cents: *opening_balances.get(&account.id).unwrap_or(&0),
+                account_closing_balance_cents: *current_balances.get(&account.id).unwrap_or(&0),
             })
             .collect();
 
@@ -573,9 +574,9 @@ pub fn non_empty_asset_trend_account_ids(days: &[AssetTrendDay]) -> BTreeSet<Str
     let mut ids = BTreeSet::new();
     for day in days {
         for item in &day.items {
-            if item.account_opening_balance != 0
-                || item.account_closing_balance != 0
-                || item.account_opening_balance != item.account_closing_balance
+            if item.account_opening_balance_cents != 0
+                || item.account_closing_balance_cents != 0
+                || item.account_opening_balance_cents != item.account_closing_balance_cents
             {
                 ids.insert(item.account_id.clone());
             }
@@ -620,14 +621,14 @@ pub fn build_net_worth_snapshot(accounts: &[StatisticsAccountInput]) -> NetWorth
     let mut total_liabilities_cents = 0_i64;
 
     for account in accounts.iter().filter(|account| !account.hidden) {
-        let balance_cents = yuan_to_cents_lossy(&account.balance_yuan);
+        let balance_cents = account.balance_cents;
         let account_type = account.account_type.to_lowercase();
         let entry = NetWorthAccountEntry {
             id: account.id,
             name: account.name.clone(),
             account_type: account_type.clone(),
             icon: account.icon.clone(),
-            balance: cents_to_yuan(balance_cents),
+            balance_cents,
             currency: account
                 .currency
                 .clone()
@@ -648,9 +649,9 @@ pub fn build_net_worth_snapshot(accounts: &[StatisticsAccountInput]) -> NetWorth
         account_count: assets.len() + liabilities.len(),
         assets,
         liabilities,
-        total_assets: cents_to_yuan(total_assets_cents),
-        total_liabilities: cents_to_yuan(total_liabilities_cents),
-        net_worth: cents_to_yuan(total_assets_cents - total_liabilities_cents),
+        total_assets_cents,
+        total_liabilities_cents,
+        net_worth_cents: total_assets_cents - total_liabilities_cents,
     }
 }
 
@@ -677,7 +678,7 @@ pub fn build_insight_anomaly_summary(
 
     for bill in bills {
         if is_expense_type(&bill.bill_type) {
-            let amount = yuan_to_cents_lossy(&bill.amount_yuan).abs();
+            let amount = bill.amount_cents.abs();
             if amount > 0 {
                 category_amounts
                     .entry(main_category_or_uncategorized(bill))
@@ -692,7 +693,7 @@ pub fn build_insight_anomaly_summary(
             continue;
         }
         let category = main_category_or_uncategorized(bill);
-        let amount = yuan_to_cents_lossy(&bill.amount_yuan).abs();
+        let amount = bill.amount_cents.abs();
         let Some(amounts) = category_amounts.get(&category) else {
             continue;
         };
@@ -703,16 +704,16 @@ pub fn build_insight_anomaly_summary(
                 "severity": "warning",
                 "billId": bill.id,
                 "date": bill.date.chars().take(10).collect::<String>(),
-                "amount": cents_to_yuan(amount),
+                "amountCents": amount,
                 "category": category,
-                "average": cents_to_yuan(avg.round() as i64),
+                "averageCents": avg.round() as i64,
                 "ratio": round_one_decimal((amount as f64) / avg),
                 "description": first_non_empty(&bill.description, &bill.counterparty),
                 "message": format!(
                     "此笔交易金额 ¥{:.2} 是 {} 分类平均值 ¥{:.2} 的 {:.1} 倍",
-                    cents_to_yuan(amount),
+                    display_amount_from_cents(amount),
                     category,
-                    cents_to_yuan(avg.round() as i64),
+                    display_amount_from_cents(avg.round() as i64),
                     (amount as f64) / avg
                 ),
             }));
@@ -775,18 +776,18 @@ pub fn build_calendar_events_data(
             .or_insert_with(|| empty_calendar_day(date_text.clone()));
         day.count += 1;
 
-        let amount_cents = yuan_to_cents_lossy(&bill.amount_yuan).abs();
+        let amount_cents = bill.amount_cents.abs();
         if is_expense_type(&bill.bill_type) {
-            day.expense = round_money(day.expense + cents_to_yuan(amount_cents));
+            day.expense_cents += amount_cents;
         } else if is_income_type(&bill.bill_type) {
-            day.income = round_money(day.income + cents_to_yuan(amount_cents));
+            day.income_cents += amount_cents;
         } else if is_transfer_type(&bill.bill_type) {
-            day.transfer_out = round_money(day.transfer_out + cents_to_yuan(amount_cents));
+            day.transfer_out_cents += amount_cents;
         }
-        day.net = round_money(day.income - day.expense);
+        day.net_cents = day.income_cents - day.expense_cents;
         day.bills.push(CalendarBillItem {
             id: bill.id,
-            amount: cents_to_yuan(yuan_to_cents_lossy(&bill.amount_yuan)),
+            amount_cents: bill.amount_cents,
             bill_type: bill.bill_type.clone(),
             counterparty: bill.counterparty.clone(),
             description: bill.description.clone(),
@@ -822,21 +823,20 @@ pub fn build_category_pie_data(bills: &[StatisticsBillInput]) -> Vec<NameValueSt
     let mut totals: BTreeMap<String, i64> = BTreeMap::new();
     for bill in bills {
         let category = bill.main_category.clone();
-        *totals.entry(category).or_insert(0) += yuan_to_cents_lossy(&bill.amount_yuan).abs();
+        *totals.entry(category).or_insert(0) += bill.amount_cents.abs();
     }
 
     let mut result = totals
         .into_iter()
         .map(|(name, total)| NameValueStatisticItem {
             name,
-            value: cents_to_yuan(total),
+            value_cents: total,
         })
         .collect::<Vec<_>>();
     result.sort_by(|left, right| {
         right
-            .value
-            .partial_cmp(&left.value)
-            .unwrap_or(std::cmp::Ordering::Equal)
+            .value_cents
+            .cmp(&left.value_cents)
             .then_with(|| left.name.cmp(&right.name))
     });
     result
@@ -861,7 +861,7 @@ pub fn build_top_merchants_data(
             bill.counterparty.clone()
         };
         let entry = totals.entry(merchant).or_insert((0, 0));
-        entry.0 += yuan_to_cents_lossy(&bill.amount_yuan).abs();
+        entry.0 += bill.amount_cents.abs();
         entry.1 += 1;
     }
 
@@ -869,15 +869,14 @@ pub fn build_top_merchants_data(
         .into_iter()
         .map(|(name, (amount, count))| TopMerchantStatisticItem {
             name,
-            amount: cents_to_yuan(amount),
+            amount_cents: amount,
             count,
         })
         .collect::<Vec<_>>();
     result.sort_by(|left, right| {
         right
-            .amount
-            .partial_cmp(&left.amount)
-            .unwrap_or(std::cmp::Ordering::Equal)
+            .amount_cents
+            .cmp(&left.amount_cents)
             .then_with(|| left.name.cmp(&right.name))
     });
     result.truncate(limit);
@@ -910,12 +909,12 @@ pub fn build_transaction_amount_period_result(
     let total_income = bills
         .iter()
         .filter(|bill| is_income_type(&bill.bill_type))
-        .map(|bill| yuan_to_cents_lossy(&bill.amount_yuan).abs())
+        .map(|bill| bill.amount_cents.abs())
         .sum::<i64>();
     let total_expense = bills
         .iter()
         .filter(|bill| is_expense_type(&bill.bill_type))
-        .map(|bill| yuan_to_cents_lossy(&bill.amount_yuan).abs())
+        .map(|bill| bill.amount_cents.abs())
         .sum::<i64>();
 
     TransactionAmountPeriodResult {
@@ -923,8 +922,8 @@ pub fn build_transaction_amount_period_result(
         end_time,
         amounts: vec![TransactionAmountBucket {
             currency: "CNY".to_string(),
-            income_amount: total_income,
-            expense_amount: total_expense,
+            income_amount_cents: total_income,
+            expense_amount_cents: total_expense,
         }],
     }
 }
@@ -955,9 +954,20 @@ pub fn build_statistics_trend_points(analyzer_result: &Value) -> Vec<StatisticsT
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string(),
-            income: round_money(trend.get("income").and_then(Value::as_f64).unwrap_or(0.0)),
-            expense: round_money(trend.get("expense").and_then(Value::as_f64).unwrap_or(0.0)),
-            net: round_money(trend.get("net").and_then(Value::as_f64).unwrap_or(0.0)),
+            income_cents: value_as_i64(
+                trend
+                    .get("incomeCents")
+                    .or_else(|| trend.get("income_cents")),
+            )
+            .unwrap_or(0),
+            expense_cents: value_as_i64(
+                trend
+                    .get("expenseCents")
+                    .or_else(|| trend.get("expense_cents")),
+            )
+            .unwrap_or(0),
+            net_cents: value_as_i64(trend.get("netCents").or_else(|| trend.get("net_cents")))
+                .unwrap_or(0),
         })
         .collect()
 }
@@ -1058,20 +1068,18 @@ pub fn build_statistics_analyzer_trend_bucket(
     let income_cents = bills
         .iter()
         .filter(|bill| is_income_type(&bill.bill_type))
-        .map(|bill| yuan_to_cents_lossy(&bill.amount_yuan))
+        .map(|bill| bill.amount_cents)
         .sum::<i64>();
     let expense_cents = bills
         .iter()
         .filter(|bill| is_expense_type(&bill.bill_type))
-        .map(|bill| yuan_to_cents_lossy(&bill.amount_yuan))
+        .map(|bill| bill.amount_cents)
         .sum::<i64>();
-    let income = round_money(cents_to_yuan(income_cents));
-    let expense = round_money(cents_to_yuan(expense_cents));
     StatisticsAnalyzerTrendBucket {
         period: period.to_string(),
-        income,
-        expense,
-        net: round_money(income - expense),
+        income_cents,
+        expense_cents,
+        net_cents: income_cents + expense_cents,
     }
 }
 
@@ -1094,32 +1102,28 @@ pub fn build_statistics_analyzer_comparison_result(
                 .entry(main_category_or_uncategorized(bill))
                 .or_insert((0, 0, 0));
             if is_income_type(&bill.bill_type) {
-                entry.0 += yuan_to_cents_lossy(&bill.amount_yuan);
+                entry.0 += bill.amount_cents;
             } else if is_expense_type(&bill.bill_type) {
-                entry.1 += yuan_to_cents_lossy(&bill.amount_yuan);
+                entry.1 += bill.amount_cents;
             }
             entry.2 += 1;
         }
         let mut rows = categories
             .into_iter()
             .map(|(name, (income_cents, expense_cents, count))| {
-                let income = round_money(cents_to_yuan(income_cents));
-                let expense = round_money(cents_to_yuan(expense_cents));
                 json!({
                     "name": name,
-                    "income": income,
-                    "expense": expense,
+                    "income_cents": income_cents,
+                    "expense_cents": expense_cents,
                     "count": count,
-                    "net": round_money(income - expense),
+                    "net_cents": income_cents + expense_cents,
                 })
             })
             .collect::<Vec<_>>();
         rows.sort_by(|left, right| {
-            let left_expense = left.get("expense").and_then(Value::as_f64).unwrap_or(0.0);
-            let right_expense = right.get("expense").and_then(Value::as_f64).unwrap_or(0.0);
-            right_expense
-                .partial_cmp(&left_expense)
-                .unwrap_or(std::cmp::Ordering::Equal)
+            let left_expense = value_as_i64(left.get("expense_cents")).unwrap_or(0).abs();
+            let right_expense = value_as_i64(right.get("expense_cents")).unwrap_or(0).abs();
+            right_expense.cmp(&left_expense)
         });
         rows
     } else {
@@ -1148,7 +1152,7 @@ pub fn build_statistics_analyzer_category_result(
     let mut sub_categories: BTreeMap<String, (i64, usize)> = BTreeMap::new();
     let mut total_cents = 0_i64;
     for bill in bills.iter().filter(|bill| is_expense_type(&bill.bill_type)) {
-        let amount = yuan_to_cents_lossy(&bill.amount_yuan);
+        let amount = bill.amount_cents;
         let entry = sub_categories
             .entry(if bill.sub_category.is_empty() {
                 "其他".to_string()
@@ -1164,33 +1168,31 @@ pub fn build_statistics_analyzer_category_result(
     let mut rows = sub_categories
         .into_iter()
         .map(|(sub_category, (amount_cents, count))| {
-            let amount = round_money(cents_to_yuan(amount_cents));
-            let percentage = if total_cents > 0 {
-                round_money((amount_cents as f64 / total_cents as f64) * 100.0)
+            let total_abs_cents = total_cents.abs();
+            let percentage = if total_abs_cents > 0 {
+                round_money((amount_cents.abs() as f64 / total_abs_cents as f64) * 100.0)
             } else {
                 0.0
             };
             json!({
                 "sub_category": sub_category,
-                "amount": amount,
+                "amount_cents": amount_cents,
                 "count": count,
                 "percentage": percentage,
-                "avg_amount": if count > 0 { round_money(amount / count as f64) } else { 0.0 },
+                "avg_amount_cents": average_total_cents(amount_cents, count),
             })
         })
         .collect::<Vec<_>>();
     rows.sort_by(|left, right| {
-        let left_amount = left.get("amount").and_then(Value::as_f64).unwrap_or(0.0);
-        let right_amount = right.get("amount").and_then(Value::as_f64).unwrap_or(0.0);
-        right_amount
-            .partial_cmp(&left_amount)
-            .unwrap_or(std::cmp::Ordering::Equal)
+        let left_amount = value_as_i64(left.get("amount_cents")).unwrap_or(0).abs();
+        let right_amount = value_as_i64(right.get("amount_cents")).unwrap_or(0).abs();
+        right_amount.cmp(&left_amount)
     });
 
     json!({
         "main_category": main_category,
         "period": period,
-        "total_amount": round_money(cents_to_yuan(total_cents)),
+        "total_amount_cents": total_cents,
         "sub_categories": rows,
     })
 }
@@ -1555,23 +1557,14 @@ pub fn build_overview_result_from_report(report: &Value) -> Value {
         "business operation entered"
     );
     let summary = report.get("summary").unwrap_or(&Value::Null);
-    let total_income = round_money(
-        summary
-            .get("total_income")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.0),
-    );
-    let total_expense = round_money(
-        summary
-            .get("total_expense")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.0)
-            .abs(),
-    );
+    let total_income_cents = value_as_i64(summary.get("total_income_cents")).unwrap_or(0);
+    let total_expense_cents = value_as_i64(summary.get("total_expense_cents"))
+        .unwrap_or(0)
+        .abs();
     json!({
-        "total_income": total_income,
-        "total_expense": total_expense,
-        "net_income": round_money(total_income - total_expense),
+        "total_income_cents": total_income_cents,
+        "total_expense_cents": total_expense_cents,
+        "net_income_cents": total_income_cents - total_expense_cents,
         "bill_count": report.get("total_records").and_then(Value::as_i64).unwrap_or(0),
         "by_category": report.get("by_category").cloned().unwrap_or_else(|| json!({})),
         "by_type": report.get("by_type").cloned().unwrap_or_else(|| json!({})),
@@ -1616,7 +1609,7 @@ fn empty_statistics_analyzer_report(generated_at: &str) -> Value {
         "start_date": "",
         "end_date": "",
         "total_records": 0,
-        "summary": {"total_income": 0, "total_expense": 0, "net_income": 0},
+        "summary": {"total_income_cents": 0, "total_expense_cents": 0, "net_income_cents": 0},
         "by_category": {},
         "by_type": {},
         "trend": [],
@@ -1627,24 +1620,20 @@ fn empty_statistics_analyzer_report(generated_at: &str) -> Value {
 }
 
 fn statistics_analyzer_summary(bills: &[StatisticsBillInput]) -> Value {
-    let total_income = cents_to_yuan(
-        bills
-            .iter()
-            .filter(|bill| is_income_type(&bill.bill_type))
-            .map(|bill| yuan_to_cents_lossy(&bill.amount_yuan))
-            .sum(),
-    );
-    let total_expense = cents_to_yuan(
-        bills
-            .iter()
-            .filter(|bill| is_expense_type(&bill.bill_type))
-            .map(|bill| yuan_to_cents_lossy(&bill.amount_yuan))
-            .sum(),
-    );
+    let total_income_cents = bills
+        .iter()
+        .filter(|bill| is_income_type(&bill.bill_type))
+        .map(|bill| bill.amount_cents)
+        .sum::<i64>();
+    let total_expense_cents = bills
+        .iter()
+        .filter(|bill| is_expense_type(&bill.bill_type))
+        .map(|bill| bill.amount_cents)
+        .sum::<i64>();
     json!({
-        "total_income": total_income,
-        "total_expense": total_expense,
-        "net_income": total_income - total_expense,
+        "total_income_cents": total_income_cents,
+        "total_expense_cents": total_expense_cents,
+        "net_income_cents": total_income_cents + total_expense_cents,
     })
 }
 
@@ -1654,7 +1643,7 @@ type AnalyzerCategoryTotals = BTreeMap<String, (usize, i64, AnalyzerSubCategoryT
 fn statistics_analyzer_by_category(bills: &[StatisticsBillInput]) -> Value {
     let mut categories: AnalyzerCategoryTotals = BTreeMap::new();
     for bill in bills {
-        let amount = yuan_to_cents_lossy(&bill.amount_yuan);
+        let amount = bill.amount_cents;
         let entry = categories
             .entry(bill.main_category.clone())
             .or_insert((0, 0, BTreeMap::new()));
@@ -1673,7 +1662,7 @@ fn statistics_analyzer_by_category(bills: &[StatisticsBillInput]) -> Value {
                 sub_category,
                 json!({
                     "count": sub_count,
-                    "total": cents_to_yuan(sub_total_cents),
+                    "total_cents": sub_total_cents,
                 }),
             );
         }
@@ -1681,8 +1670,8 @@ fn statistics_analyzer_by_category(bills: &[StatisticsBillInput]) -> Value {
             category,
             json!({
                 "count": count,
-                "total": cents_to_yuan(total_cents),
-                "average": if count > 0 { cents_to_yuan(total_cents) / count as f64 } else { 0.0 },
+                "total_cents": total_cents,
+                "average_cents": average_total_cents(total_cents, count),
                 "sub_categories": sub_result,
             }),
         );
@@ -1695,7 +1684,7 @@ fn statistics_analyzer_by_type(bills: &[StatisticsBillInput]) -> Value {
     for bill in bills {
         let entry = by_type.entry(bill.bill_type.clone()).or_insert((0, 0));
         entry.0 += 1;
-        entry.1 += yuan_to_cents_lossy(&bill.amount_yuan);
+        entry.1 += bill.amount_cents;
     }
     let mut result = serde_json::Map::new();
     for (bill_type, (count, total_cents)) in by_type {
@@ -1703,8 +1692,8 @@ fn statistics_analyzer_by_type(bills: &[StatisticsBillInput]) -> Value {
             bill_type,
             json!({
                 "count": count,
-                "total": cents_to_yuan(total_cents),
-                "average": if count > 0 { cents_to_yuan(total_cents) / count as f64 } else { 0.0 },
+                "total_cents": total_cents,
+                "average_cents": average_total_cents(total_cents, count),
             }),
         );
     }
@@ -1727,21 +1716,19 @@ fn statistics_analyzer_report_trend(bills: &[StatisticsBillInput], period: &str)
         };
         let entry = buckets.entry(format_date(bucket_date)).or_insert((0, 0));
         if is_income_type(&bill.bill_type) {
-            entry.0 += yuan_to_cents_lossy(&bill.amount_yuan);
+            entry.0 += bill.amount_cents;
         } else if is_expense_type(&bill.bill_type) {
-            entry.1 += yuan_to_cents_lossy(&bill.amount_yuan);
+            entry.1 += bill.amount_cents;
         }
     }
     buckets
         .into_iter()
         .map(|(date, (income_cents, expense_cents))| {
-            let income = cents_to_yuan(income_cents);
-            let expense = cents_to_yuan(expense_cents);
             json!({
                 "date": date,
-                "income": income,
-                "expense": expense,
-                "net": income - expense,
+                "income_cents": income_cents,
+                "expense_cents": expense_cents,
+                "net_cents": income_cents + expense_cents,
             })
         })
         .collect()
@@ -1757,9 +1744,7 @@ fn statistics_analyzer_top_bills(
         .iter()
         .filter(|bill| bill.bill_type == bill_type)
         .collect::<Vec<_>>();
-    rows.sort_by(|left, right| {
-        yuan_to_cents_lossy(&right.amount_yuan).cmp(&yuan_to_cents_lossy(&left.amount_yuan))
-    });
+    rows.sort_by_key(|bill| std::cmp::Reverse(bill.amount_cents.abs()));
     rows.into_iter()
         .take(limit)
         .map(|bill| {
@@ -1768,10 +1753,7 @@ fn statistics_analyzer_top_bills(
                     "date".to_string(),
                     json!(bill.date.chars().take(10).collect::<String>()),
                 ),
-                (
-                    "amount".to_string(),
-                    json!(cents_to_yuan(yuan_to_cents_lossy(&bill.amount_yuan))),
-                ),
+                ("amount_cents".to_string(), json!(bill.amount_cents)),
                 ("counterparty".to_string(), json!(bill.counterparty)),
                 ("description".to_string(), json!(bill.description)),
             ]);
@@ -1908,7 +1890,7 @@ fn resolve_statistics_account_id(
 }
 
 fn signed_statistics_amount_cents(bill: &StatisticsBillInput) -> i64 {
-    let mut amount = yuan_to_cents_lossy(&bill.amount_yuan);
+    let mut amount = bill.amount_cents;
     if is_expense_type(&bill.bill_type) {
         amount = -amount.abs();
     } else if is_income_type(&bill.bill_type) {
@@ -1925,7 +1907,7 @@ fn signed_statistics_amount_cents(bill: &StatisticsBillInput) -> i64 {
 
 #[tracing::instrument(level = "debug", skip_all)]
 fn apply_asset_trend_bill(current_balances: &mut BTreeMap<i64, i64>, bill: &StatisticsBillInput) {
-    let amount = yuan_to_cents_lossy(&bill.amount_yuan).abs();
+    let amount = bill.amount_cents.abs();
     if is_income_type(&bill.bill_type) {
         if let Some(source_id) = bill.source_account_id {
             if let Some(balance) = current_balances.get_mut(&source_id) {
@@ -1947,9 +1929,7 @@ fn apply_asset_trend_bill(current_balances: &mut BTreeMap<i64, i64>, bill: &Stat
         if let Some(destination_id) = bill.destination_account_id {
             if let Some(balance) = current_balances.get_mut(&destination_id) {
                 let destination_amount = bill
-                    .destination_amount_yuan
-                    .as_deref()
-                    .map(yuan_to_cents_lossy)
+                    .destination_amount_cents
                     .filter(|amount| *amount != 0)
                     .unwrap_or(amount)
                     .abs();
@@ -1989,18 +1969,30 @@ fn format_date(date: NaiveDate) -> String {
     date.format("%Y-%m-%d").to_string()
 }
 
-fn yuan_to_cents_lossy(raw_value: &str) -> i64 {
-    Money::from_yuan_str(raw_value.trim())
-        .map(Money::to_cents)
-        .unwrap_or(0)
-}
-
-fn cents_to_yuan(cents: i64) -> f64 {
+fn display_amount_from_cents(cents: i64) -> f64 {
     round_money((cents as f64) / 100.0)
 }
 
 fn round_money(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
+}
+
+fn average_total_cents(total_cents: i64, count: usize) -> i64 {
+    if count == 0 {
+        0
+    } else {
+        (total_cents as f64 / count as f64).round() as i64
+    }
+}
+
+fn value_as_i64(value: Option<&Value>) -> Option<i64> {
+    match value? {
+        Value::Number(number) => number
+            .as_i64()
+            .or_else(|| number.as_u64().and_then(|value| i64::try_from(value).ok())),
+        Value::String(text) => text.trim().parse::<i64>().ok(),
+        Value::Bool(_) | Value::Array(_) | Value::Object(_) | Value::Null => None,
+    }
 }
 
 fn round_one_decimal(value: f64) -> f64 {
@@ -2068,8 +2060,8 @@ fn build_duplicate_charge_anomalies(bills: &[StatisticsBillInput]) -> Vec<Value>
             if (date_b - date_a).num_days().abs() > 3 {
                 break;
             }
-            let amount_a = yuan_to_cents_lossy(&bill_a.amount_yuan).abs();
-            let amount_b = yuan_to_cents_lossy(&bill_b.amount_yuan).abs();
+            let amount_a = bill_a.amount_cents.abs();
+            let amount_b = bill_b.amount_cents.abs();
             let counterparty_a = bill_a.counterparty.trim().to_lowercase();
             let counterparty_b = bill_b.counterparty.trim().to_lowercase();
             if amount_a > 0
@@ -2088,12 +2080,12 @@ fn build_duplicate_charge_anomalies(bills: &[StatisticsBillInput]) -> Vec<Value>
                         "severity": "info",
                         "billIds": [bill_a.id, bill_b.id],
                         "dates": [format_date(date_a), format_date(date_b)],
-                        "amount": cents_to_yuan(amount_a),
+                        "amountCents": amount_a,
                         "counterparty": bill_a.counterparty,
                         "message": format!(
                             "疑似重复扣款: {} ¥{:.2} ({} & {})",
                             bill_a.counterparty,
-                            cents_to_yuan(amount_a),
+                            display_amount_from_cents(amount_a),
                             format_date(date_a),
                             format_date(date_b)
                         ),
@@ -2117,7 +2109,7 @@ fn build_category_spike_anomalies(bills: &[StatisticsBillInput]) -> Vec<Value> {
             .entry(month)
             .or_default()
             .entry(main_category_or_uncategorized(bill))
-            .or_insert(0) += yuan_to_cents_lossy(&bill.amount_yuan).abs();
+            .or_insert(0) += bill.amount_cents.abs();
     }
     if monthly.len() < 3 {
         return Vec::new();
@@ -2146,15 +2138,15 @@ fn build_category_spike_anomalies(bills: &[StatisticsBillInput]) -> Vec<Value> {
                 "severity": "warning",
                 "month": latest,
                 "category": category,
-                "currentAmount": cents_to_yuan(*latest_total),
-                "averageAmount": cents_to_yuan(avg_prev.round() as i64),
+                "currentAmountCents": *latest_total,
+                "averageAmountCents": avg_prev.round() as i64,
                 "ratio": round_one_decimal((*latest_total as f64) / avg_prev),
                 "message": format!(
                     "{} 的 {} 支出 ¥{:.2} 是历史平均 ¥{:.2} 的 {:.1} 倍",
                     latest,
                     category,
-                    cents_to_yuan(*latest_total),
-                    cents_to_yuan(avg_prev.round() as i64),
+                    display_amount_from_cents(*latest_total),
+                    display_amount_from_cents(avg_prev.round() as i64),
                     (*latest_total as f64) / avg_prev
                 ),
             }));
@@ -2166,11 +2158,11 @@ fn build_category_spike_anomalies(bills: &[StatisticsBillInput]) -> Vec<Value> {
 fn empty_calendar_day(date: String) -> CalendarEventDay {
     CalendarEventDay {
         date,
-        income: 0.0,
-        expense: 0.0,
-        transfer_in: 0.0,
-        transfer_out: 0.0,
-        net: 0.0,
+        income_cents: 0,
+        expense_cents: 0,
+        transfer_in_cents: 0,
+        transfer_out_cents: 0,
+        net_cents: 0,
         count: 0,
         bills: Vec::new(),
     }
@@ -2197,7 +2189,7 @@ fn build_calendar_recurring_projections(
                     date: format_date(current),
                     projection_type: "recurring_projection".to_string(),
                     name: rule.name.clone(),
-                    amount: cents_to_yuan(yuan_to_cents_lossy(&rule.amount_yuan)),
+                    amount_cents: rule.amount_cents,
                     bill_type: rule.bill_type.clone(),
                     frequency: rule.frequency.clone(),
                     recurring_id: rule.id,

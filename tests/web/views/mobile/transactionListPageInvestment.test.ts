@@ -53,10 +53,10 @@ describe('mobile AmountFilterPage.vue does not exclude Investment (S3)', () => {
         expect(source).not.toMatch(/excludeInvestment/i);
     });
 
-    test('confirm() persists amountFilter through transactionsStore without type-set restriction', () => {
+    test('confirm() persists amountFilterCents through transactionsStore without type-set restriction', () => {
         const source = readSource(AMOUNT_FILTER_PAGE_PATH);
         expect(source).toContain('transactionsStore.updateTransactionListFilter');
-        expect(source).toContain('amountFilter: amountFilter');
+        expect(source).toContain('amountFilterCents: amountFilterCents');
         // No silent type narrowing
         expect(source).not.toMatch(/type:\s*TransactionType\.(Expense|Income|Transfer)/);
     });

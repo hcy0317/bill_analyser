@@ -28,7 +28,7 @@ export async function createDomainCrudFixture(client: E2EApiClient, env: E2EEnvi
         icon: '1',
         color: '#4c6ef5',
         currency: 'USD',
-        balance: 0,
+        balanceCents: 0,
         balanceTime: 0,
         comment: `created by ${suffix}`,
         clientSessionId: suffix
@@ -47,17 +47,18 @@ export async function createDomainCrudFixture(client: E2EApiClient, env: E2EEnvi
     const tag = await client.post<Entity>('tags', {
         name: `E2E Tag ${suffix}`
     });
-    const budget = await client.post<Entity>('budgets/', {
-        name: `E2E Budget ${suffix}`,
+    const budgetName = `E2E Budget ${suffix}`;
+    const budget = entityFromResponse(await client.post<Record<string, unknown>>('budgets/', {
+        name: budgetName,
         category: category.name,
         sub_category: '',
         period_type: 'monthly',
-        amount: 123.45,
-        start_date: '2026-01-01',
-        end_date: '2026-01-31',
+        amountCents: 12345,
+        start_date: '2026-06-01',
+        end_date: '2026-06-30',
         alert_threshold: 80,
         enabled: true
-    });
+    }), budgetName);
     const template = await client.post<Entity>('templates', buildTemplatePayload({
         name: `E2E Template ${suffix}`,
         templateType: 1,
@@ -125,6 +126,7 @@ export async function updateDomainCrudFixture(client: E2EApiClient, fixture: Dom
     const category = await client.put<Entity>(`categories/${fixture.category.id}`, {
         id: String(fixture.category.id),
         name: `E2E Category ${suffix}`,
+        type: 3,
         parentId: '0',
         icon: '1',
         color: '#f08c00',
@@ -137,17 +139,19 @@ export async function updateDomainCrudFixture(client: E2EApiClient, fixture: Dom
         id: String(fixture.tag.id),
         name: `E2E Tag ${suffix}`
     });
-    const budget = await client.put<Entity>(`budgets/${fixture.budget.id}`, {
-        name: `E2E Budget ${suffix}`,
+    const budgetName = `E2E Budget ${suffix}`;
+    await client.put<Record<string, unknown>>(`budgets/${fixture.budget.id}`, {
+        name: budgetName,
         category: category.name,
         sub_category: '',
         period_type: 'monthly',
-        amount: 234.56,
-        start_date: '2026-01-01',
-        end_date: '2026-01-31',
+        amountCents: 23456,
+        start_date: '2026-06-01',
+        end_date: '2026-06-30',
         alert_threshold: 75,
         enabled: true
     });
+    const budget = { id: fixture.budget.id, name: budgetName };
     const template = await client.put<Entity>(`templates/${fixture.template.id}?templateType=1`, buildTemplatePayload({
         id: String(fixture.template.id),
         name: `E2E Template ${suffix}`,
@@ -212,9 +216,16 @@ export async function deleteDomainCrudFixture(client: E2EApiClient, fixture: Dom
 }
 
 export async function expectEntityVisibleOnPage(page: Page, name: string): Promise<void> {
-    await expect(page.getByText(name, { exact: false }).first(), `entity ${name} should be visible`).toBeVisible({
-        timeout: 15_000
-    });
+    const matches = page.getByText(name, { exact: false });
+    await expect(async () => {
+        const count = await matches.count();
+        for (let index = 0; index < count; index += 1) {
+            if (await matches.nth(index).isVisible()) {
+                return;
+            }
+        }
+        throw new Error(`entity ${name} should be visible`);
+    }).toPass({ timeout: 15_000 });
 }
 
 export async function expectDomainRulesVisibleInApi(client: E2EApiClient, fixture: DomainCrudFixture): Promise<void> {
@@ -244,12 +255,23 @@ function buildTemplatePayload(input: {
         categoryId: input.categoryId,
         sourceAccountId: input.accountId,
         destinationAccountId: '0',
-        sourceAmount: 1234,
-        destinationAmount: 0,
+        sourceAmountCents: 1234,
+        destinationAmountCents: 0,
         hideAmount: false,
         tagIds: [input.tagId],
         comment: `created by ${input.clientSessionId}`,
         clientSessionId: input.clientSessionId
+    };
+}
+
+function entityFromResponse(response: Record<string, unknown>, fallbackName: string): Entity {
+    const id = response['id'] ?? response['budget_id'] ?? response['budgetId'];
+    if (typeof id !== 'string' && typeof id !== 'number') {
+        throw new Error(`Entity response is missing id: ${JSON.stringify(response)}`);
+    }
+    return {
+        id,
+        name: typeof response['name'] === 'string' ? response['name'] : fallbackName
     };
 }
 

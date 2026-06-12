@@ -137,19 +137,26 @@ fn build_preview_patch_from_payload(
         object,
         &["type", "preview_type", "previewType"],
     );
-    push_real_change(
-        &mut changes,
-        object,
-        &["amount", "preview_amount", "previewAmount"],
-        ImportPreviewPatchField::Amount,
-    );
-    push_real_change(
+    push_minor_units_change(
         &mut changes,
         object,
         &[
-            "destinationAmount",
-            "preview_destination_amount",
-            "previewDestinationAmount",
+            "amountCents",
+            "amount_cents",
+            "previewAmountCents",
+            "preview_amount_cents",
+            "sourceAmountCents",
+        ],
+        ImportPreviewPatchField::Amount,
+    );
+    push_minor_units_change(
+        &mut changes,
+        object,
+        &[
+            "destinationAmountCents",
+            "destination_amount_cents",
+            "previewDestinationAmountCents",
+            "preview_destination_amount_cents",
         ],
         ImportPreviewPatchField::DestinationAmount,
     );
@@ -585,6 +592,47 @@ mod preview_mutation_helper_tests {
         assert_eq!(category.type_code, Some(5));
         assert_eq!(category.main_category, "投资");
         assert_eq!(category.sub_category, "理财收益");
+    }
+
+    #[test]
+    fn preview_patch_payload_accepts_explicit_cents_aliases() {
+        let object = Map::from_iter([
+            ("amountCents".to_string(), json!(12345)),
+            ("destinationAmountCents".to_string(), json!("54321")),
+        ]);
+
+        let patch = build_preview_patch_from_payload(7, &object);
+
+        assert_eq!(patch.preview_id, 7);
+        assert_eq!(
+            change_value(&patch, ImportPreviewPatchField::Amount),
+            Some(&ImportPreviewPatchValue::Integer(12345))
+        );
+        assert_eq!(
+            change_value(&patch, ImportPreviewPatchField::DestinationAmount),
+            Some(&ImportPreviewPatchValue::Integer(54321))
+        );
+    }
+
+    #[test]
+    fn preview_patch_payload_rejects_non_integer_cents_values() {
+        let object = Map::from_iter([
+            ("amountCents".to_string(), json!(true)),
+            ("destinationAmountCents".to_string(), json!(12.34)),
+            ("recurringCandidateCount".to_string(), json!(2)),
+        ]);
+
+        let patch = build_preview_patch_from_payload(7, &object);
+
+        assert_eq!(change_value(&patch, ImportPreviewPatchField::Amount), None);
+        assert_eq!(
+            change_value(&patch, ImportPreviewPatchField::DestinationAmount),
+            None
+        );
+        assert_eq!(
+            change_value(&patch, ImportPreviewPatchField::RecurringCandidateCount),
+            Some(&ImportPreviewPatchValue::Integer(2))
+        );
     }
 
     #[tokio::test]
@@ -1039,6 +1087,17 @@ fn push_i64_change(
     }
 }
 
+fn push_minor_units_change(
+    changes: &mut Vec<(ImportPreviewPatchField, ImportPreviewPatchValue)>,
+    object: &Map<String, Value>,
+    keys: &[&str],
+    field: ImportPreviewPatchField,
+) {
+    if let Some(value) = first_value(object, keys).and_then(value_to_minor_units) {
+        changes.push((field, ImportPreviewPatchValue::Integer(value)));
+    }
+}
+
 fn push_nullable_i64_change(
     changes: &mut Vec<(ImportPreviewPatchField, ImportPreviewPatchValue)>,
     object: &Map<String, Value>,
@@ -1092,8 +1151,26 @@ fn value_to_i64(value: &Value) -> Option<i64> {
                 text.parse::<i64>().ok()
             }
         }
-        Value::Bool(value) => Some(i64::from(*value)),
+        Value::Bool(_) => None,
         Value::Array(_) | Value::Object(_) => None,
+    }
+}
+
+fn value_to_minor_units(value: &Value) -> Option<i64> {
+    match value {
+        Value::Null => None,
+        Value::Number(number) => number
+            .as_i64()
+            .or_else(|| number.as_u64().and_then(|value| i64::try_from(value).ok())),
+        Value::String(text) => {
+            let text = text.trim();
+            if text.is_empty() {
+                None
+            } else {
+                text.parse::<i64>().ok()
+            }
+        }
+        Value::Bool(_) | Value::Array(_) | Value::Object(_) => None,
     }
 }
 

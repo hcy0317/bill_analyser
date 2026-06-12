@@ -43,10 +43,10 @@ export interface BudgetCategoryExecution {
     readonly budgetId: string;             // 预算ID
     readonly categoryId: string;           // 分类ID
     readonly categoryName: string;         // 分类名称（主分类-子分类格式）
-    readonly budgetAmount: number;         // 预算金额（分）
-    readonly spentAmount: number;          // 已花费金额（分）
+    readonly budgetAmountCents: number;         // 预算金额（分）
+    readonly spentAmountCents: number;          // 已花费金额（分）
     readonly executionRate: number;        // 执行率（百分比，0-100或更高）
-    readonly remainingAmount: number;      // 剩余金额（分）
+    readonly remainingAmountCents: number;      // 剩余金额（分）
     readonly isOverBudget: boolean;        // 是否超预算
     readonly alertTriggered: boolean;      // 是否触发预警
 }
@@ -55,8 +55,8 @@ export interface BudgetCategoryExecution {
  * 预算执行详情响应
  */
 export interface BudgetExecutionResponse {
-    readonly totalBudget: number;          // 总预算金额（分）
-    readonly totalSpent: number;           // 总已花费金额（分）
+    readonly totalBudgetCents: number;     // 总预算金额（分）
+    readonly totalSpentCents: number;      // 总已花费金额（分）
     readonly totalExecutionRate: number;   // 总执行率（百分比）
     readonly categories: BudgetCategoryExecution[];  // 分类执行详情列表
     readonly periodStart: string;          // 统计周期开始（ISO日期）
@@ -69,10 +69,10 @@ export interface BudgetExecutionResponse {
 export interface BudgetForecastItem {
     readonly categoryId: string;           // 分类ID
     readonly categoryName: string;         // 分类名称
-    readonly historicalAverage: number;    // 历史平均花费（分）
-    readonly currentSpent: number;         // 当前已花费（分）
-    readonly projectedTotal: number;       // 预计总花费（分）
-    readonly budgetAmount: number;         // 预算金额（分）
+    readonly historicalAverageCents: number;    // 历史平均花费（分）
+    readonly currentSpentCents: number;         // 当前已花费（分）
+    readonly projectedTotalCents: number;       // 预计总花费（分）
+    readonly budgetAmountCents: number;         // 预算金额（分）
     readonly projectedOverBudget: boolean; // 预计是否超预算
     readonly trend: 'up' | 'down' | 'stable'; // 趋势：上升/下降/稳定
     readonly samplePeriods?: number;       // 样本周期数
@@ -81,7 +81,7 @@ export interface BudgetForecastItem {
     readonly confidence?: 'high' | 'medium' | 'low'; // 置信等级
     readonly periods?: Array<{            // 历史周期明细（用于图表）
         readonly period: string;          // 周期标识（如 YYYY-MM）
-        readonly amount: number;          // 该周期金额（分）
+        readonly amountCents: number;          // 该周期金额（分）
     }>;
 }
 
@@ -118,7 +118,7 @@ export interface BudgetInfoResponse {
     readonly subCategory: string;          // 子分类
     readonly categoryId?: string;          // 关联的分类ID
     readonly periodType: BudgetPeriodType; // 周期类型
-    readonly amount: number;               // 预算金额（分）
+    readonly amountCents: number;               // 预算金额（分）
     readonly startDate: string;            // 开始日期（ISO格式）
     readonly endDate: string;              // 结束日期（ISO格式）
     readonly alertThreshold: number;       // 预警阈值（百分比，如80表示80%）
@@ -127,8 +127,8 @@ export interface BudgetInfoResponse {
     readonly createdAt?: string;           // 创建时间
     readonly updatedAt?: string;           // 更新时间
     // 运行时字段（从预算执行API返回）
-    readonly spentAmount?: number;         // 已花费金额（分）
-    readonly remainingAmount?: number;     // 剩余金额（分）
+    readonly spentAmountCents?: number;         // 已花费金额（分）
+    readonly remainingAmountCents?: number;     // 剩余金额（分）
     readonly executionRate?: number;       // 执行率（百分比）
     readonly categoryName?: string;        // 分类名称（用于显示）
     readonly categoryIcon?: string;        // 分类图标ID
@@ -201,9 +201,9 @@ export interface BudgetHistoryItem {
     readonly periodType: BudgetPeriodType;  // 周期类型
     readonly periodStart: string;           // 周期开始
     readonly periodEnd: string;             // 周期结束
-    readonly budgetAmount: number;          // 预算金额（分）
-    readonly spentAmount: number;           // 已花费金额（分）
-    readonly remainingAmount: number;       // 剩余金额（分）
+    readonly budgetAmountCents: number;          // 预算金额（分）
+    readonly spentAmountCents: number;           // 已花费金额（分）
+    readonly remainingAmountCents: number;       // 剩余金额（分）
     readonly executionRate: number;         // 执行率
     readonly status: string;                // 状态
     readonly filterSummary: string;         // 筛选摘要
@@ -246,7 +246,7 @@ export interface BudgetCreateRequest {
     readonly subCategory?: string;         // 子分类（可选）
     readonly categoryId?: string;          // 关联分类ID（可选）
     readonly periodType: BudgetPeriodType; // 周期类型
-    readonly amount: number;               // 预算金额（分）
+    readonly amountCents: number;               // 预算金额（分）
     readonly startDate?: string;           // 开始日期（可选，默认当前周期）
     readonly endDate?: string;             // 结束日期（可选）
     readonly alertThreshold?: number;      // 预警阈值（默认80）
@@ -264,7 +264,7 @@ export interface BudgetModifyRequest {
     readonly subCategory?: string;         // 子分类
     readonly categoryId?: string;          // 关联分类ID
     readonly periodType?: BudgetPeriodType;// 周期类型
-    readonly amount?: number;              // 预算金额（分）
+    readonly amountCents?: number;              // 预算金额（分）
     readonly startDate?: string;           // 开始日期
     readonly endDate?: string;             // 结束日期
     readonly alertThreshold?: number;      // 预警阈值
@@ -319,7 +319,7 @@ export class Budget {
     public subCategory: string = '';
     public categoryId: string = '';
     public periodType: BudgetPeriodType = BudgetPeriodType.Monthly;
-    public amount: number = 0;  // 以分为单位
+    public amountCents: number = 0;  // 以分为单位
     public startDate: string = '';
     public endDate: string = '';
     public alertThreshold: number = DEFAULT_BUDGET_ALERT_THRESHOLD;
@@ -333,9 +333,9 @@ export class Budget {
     public categoryColor: string = '';
 
     // 运行时计算字段（从执行详情获取）
-    public spentAmount: number = 0;
+    public spentAmountCents: number = 0;
     public executionRate: number = 0;
-    public remainingAmount: number = 0;
+    public remainingAmountCents: number = 0;
     public isOverBudget: boolean = false;
     public alertTriggered: boolean = false;
 
@@ -350,7 +350,7 @@ export class Budget {
         budget.subCategory = response.subCategory || '';
         budget.categoryId = response.categoryId || '';
         budget.periodType = response.periodType || BudgetPeriodType.Monthly;
-        budget.amount = response.amount || 0;
+        budget.amountCents = response.amountCents || 0;
         budget.startDate = response.startDate || '';
         budget.endDate = response.endDate || '';
         budget.alertThreshold = response.alertThreshold ?? DEFAULT_BUDGET_ALERT_THRESHOLD;
@@ -362,11 +362,11 @@ export class Budget {
         budget.categoryIcon = response.categoryIcon || '';
         budget.categoryColor = response.categoryColor || '';
         // 运行时字段（从预算执行API返回）
-        budget.spentAmount = response.spentAmount || 0;
-        budget.remainingAmount = response.remainingAmount || 0;
+        budget.spentAmountCents = response.spentAmountCents || 0;
+        budget.remainingAmountCents = response.remainingAmountCents || 0;
         budget.executionRate = response.executionRate || 0;
         // 计算是否超预算和是否触发预警
-        budget.isOverBudget = budget.spentAmount > budget.amount;
+        budget.isOverBudget = budget.spentAmountCents > budget.amountCents;
         budget.alertTriggered = budget.executionRate >= budget.alertThreshold;
         return budget;
     }
@@ -414,21 +414,21 @@ export class Budget {
      * 获取金额显示文本（元）
      */
     public get amountInYuan(): number {
-        return this.amount / 100;
+        return this.amountCents / 100;
     }
 
     /**
      * 获取已花费金额显示文本（元）
      */
     public get spentAmountInYuan(): number {
-        return this.spentAmount / 100;
+        return this.spentAmountCents / 100;
     }
 
     /**
      * 获取剩余金额显示文本（元）
      */
     public get remainingAmountInYuan(): number {
-        return this.remainingAmount / 100;
+        return this.remainingAmountCents / 100;
     }
 
     /**
@@ -441,7 +441,7 @@ export class Budget {
             subCategory: this.subCategory || undefined,
             categoryId: this.categoryId || undefined,
             periodType: this.periodType,
-            amount: this.amount,
+            amountCents: this.amountCents,
             startDate: this.startDate || undefined,
             endDate: this.endDate || undefined,
             alertThreshold: this.alertThreshold,
@@ -461,7 +461,7 @@ export class Budget {
             subCategory: this.subCategory || undefined,
             categoryId: this.categoryId || undefined,
             periodType: this.periodType,
-            amount: this.amount,
+            amountCents: this.amountCents,
             startDate: this.startDate || undefined,
             endDate: this.endDate || undefined,
             alertThreshold: this.alertThreshold,
@@ -474,9 +474,9 @@ export class Budget {
      * 更新执行数据
      */
     public updateExecution(execution: BudgetCategoryExecution): void {
-        this.spentAmount = execution.spentAmount;
+        this.spentAmountCents = execution.spentAmountCents;
         this.executionRate = execution.executionRate;
-        this.remainingAmount = execution.remainingAmount;
+        this.remainingAmountCents = execution.remainingAmountCents;
         this.isOverBudget = execution.isOverBudget;
         this.alertTriggered = execution.alertTriggered;
     }

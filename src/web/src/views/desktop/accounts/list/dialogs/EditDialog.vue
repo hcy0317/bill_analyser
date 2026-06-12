@@ -134,7 +134,7 @@
                                         v-model="account.creditCardStatementDate"
                                     ></v-autocomplete>
                                 </v-col>
-                                <v-col cols="12" :md="(!editAccountId || isNewAccount(selectedAccount)) && selectedAccount.balance ? 6 : 12"
+                                <v-col cols="12" :md="(!editAccountId || isNewAccount(selectedAccount)) && selectedAccount.balanceCents ? 6 : 12"
                                        v-if="account.type === AccountType.SingleAccount.type || currentAccountIndex >= 0">
                                     <amount-input :disabled="loading || submitting || (!!editAccountId && !isNewAccount(selectedAccount))"
                                                   :persistent-placeholder="true"
@@ -143,9 +143,9 @@
                                                   :flip-negative="account.isLiability"
                                                   :label="accountAmountTitle"
                                                   :placeholder="accountAmountTitle"
-                                                  v-model="selectedAccount.balance"/>
+                                                  v-model="selectedAccount.balanceCents"/>
                                 </v-col>
-                                <v-col cols="12" md="6" v-show="selectedAccount.balance"
+                                <v-col cols="12" md="6" v-show="selectedAccount.balanceCents"
                                        v-if="(!editAccountId || isNewAccount(selectedAccount)) && (account.type === AccountType.SingleAccount.type || currentAccountIndex >= 0)">
                                     <date-time-select
                                         :disabled="loading || submitting"

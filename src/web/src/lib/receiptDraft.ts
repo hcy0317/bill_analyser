@@ -20,7 +20,7 @@ export interface ReceiptDraftCandidateHint {
 
 export interface ReceiptDraftEditableTransaction {
     type: number;
-    sourceAmount: number;
+    sourceAmountCents: number;
     time: number;
     comment: string;
     sourceAccountId: string;
@@ -135,7 +135,7 @@ export function applyReceiptDraftFieldToTransaction(transaction: ReceiptDraftEdi
     if (key === 'amount') {
         const amountInCents = receiptDraftAmountToCents(field);
         if (amountInCents !== undefined) {
-            transaction.sourceAmount = amountInCents;
+            transaction.sourceAmountCents = amountInCents;
             return true;
         }
 
@@ -227,7 +227,7 @@ export function applyReceiptDraftAutoFillToTransaction(transaction: ReceiptDraft
     if (autoFill?.amount) {
         applyReceiptDraftFieldToTransaction(transaction, 'amount', autoFill.amount);
     } else if (typeof result.amount === 'number' && Number.isFinite(result.amount)) {
-        transaction.sourceAmount = Math.round(result.amount * 100);
+        transaction.sourceAmountCents = Math.round(result.amount * 100);
     }
 
     if (autoFill?.time) {

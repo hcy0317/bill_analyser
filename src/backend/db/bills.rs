@@ -42,9 +42,9 @@ pub struct BillFilters {
     pub account_ids: Vec<i64>,
     pub categories: Vec<BillCategoryFilter>,
     pub tag_ids: Vec<i64>,
-    pub min_amount: Option<f64>,
-    pub max_amount: Option<f64>,
-    pub amount_filter: Option<String>,
+    pub min_amount_cents: Option<i64>,
+    pub max_amount_cents: Option<i64>,
+    pub amount_filter_cents: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -78,9 +78,9 @@ pub struct BillRecurringBindResult {
 pub struct AccountBalanceDiscrepancy {
     pub account_id: i64,
     pub name: String,
-    pub old_balance: f64,
-    pub new_balance: f64,
-    pub diff: f64,
+    pub old_balance_cents: i64,
+    pub new_balance_cents: i64,
+    pub diff_cents: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -112,13 +112,15 @@ pub fn calculate_bill_hash_from_fields(
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn calculate_bill_hash_from_record(record: &BillRecord) -> DbResult<String> {
-    Ok(calculate_bill_hash_from_fields(
-        &record_text(record, "date"),
-        &record_text(record, "type"),
-        record_f64(record, "amount")?,
-        &record_text(record, "counterparty"),
-        &record_text(record, "description"),
-    ))
+    let source = format!(
+        "{}|{}|{}|{}|{}",
+        record_text(record, "date"),
+        record_text(record, "type"),
+        record_i64(record, "amount_cents")?,
+        record_text(record, "counterparty"),
+        record_text(record, "description"),
+    );
+    Ok(format!("{:x}", md5::compute(source.as_bytes())))
 }
 
 fn record_text(record: &BillRecord, key: &str) -> String {
@@ -130,14 +132,14 @@ fn record_text(record: &BillRecord, key: &str) -> String {
     }
 }
 
-fn record_f64(record: &BillRecord, key: &str) -> DbResult<f64> {
+fn record_i64(record: &BillRecord, key: &str) -> DbResult<i64> {
     match record.get(key) {
         Some(Value::Number(value)) => value
-            .as_f64()
+            .as_i64()
             .ok_or_else(|| DbError::InvalidOperation(format!("invalid numeric field: {key}"))),
         Some(Value::String(value)) => value
             .trim()
-            .parse::<f64>()
+            .parse::<i64>()
             .map_err(|_| DbError::InvalidOperation(format!("invalid numeric field: {key}"))),
         _ => Err(DbError::InvalidOperation(format!(
             "missing numeric field: {key}"

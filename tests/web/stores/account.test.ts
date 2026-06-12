@@ -80,7 +80,7 @@ function accountResponse(overrides: Partial<AccountInfoResponse>): AccountInfoRe
         icon: '1',
         color: '#ffffff',
         currency: 'CNY',
-        balance: 1234,
+        balanceCents: 1234,
         comment: '',
         displayOrder: 1,
         hidden: false,
@@ -102,7 +102,7 @@ function buildAccountResponse(): AccountInfoResponse[] {
             category: AccountCategory.CheckingAccount.type,
             type: AccountType.MultiSubAccounts.type,
             currency: '---',
-            balance: 0,
+            balanceCents: 0,
             displayOrder: 2,
             subAccounts: [
                 accountResponse({
@@ -142,11 +142,11 @@ function syncBalancesApiResponse(): SyncBalancesApiResponse {
                 total_accounts: 3,
                 synced_accounts: 2,
                 discrepancies: [{
-                    account_id: 7,
-                    name: '银行卡 A',
-                    old_balance: 1200,
-                    new_balance: 1234,
-                    diff: 34
+                account_id: 7,
+                name: '银行卡 A',
+                oldBalanceCents: 1200,
+                newBalanceCents: 1234,
+                diffCents: 34
                 }],
                 errors: ['skipped archived account']
             }
@@ -212,9 +212,9 @@ describe('accounts store service boundary', () => {
             discrepancies: [{
                 accountId: 7,
                 name: '银行卡 A',
-                oldBalance: 1200,
-                newBalance: 1234,
-                diff: 34
+                oldBalanceCents: 1200,
+                newBalanceCents: 1234,
+                diffCents: 34
             }],
             errors: ['skipped archived account']
         });

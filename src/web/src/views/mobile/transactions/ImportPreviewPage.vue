@@ -314,7 +314,7 @@ function rowSubtitle(row: MobileImportPreviewRow): string {
 }
 
 function formatAmount(row: MobileImportPreviewRow): string {
-    const amount = Number(row.record.preview_amount || 0);
+    const amount = Number(row.record.preview_amount_cents || 0) / 100;
     return Number.isFinite(amount) ? amount.toFixed(2) : '0.00';
 }
 

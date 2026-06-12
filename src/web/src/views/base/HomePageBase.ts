@@ -85,11 +85,11 @@ export function useHomePageBase() {
     }
 
     function getDisplayIncomeAmount(category: TransactionOverviewResponseItem): string {
-        return getDisplayAmount(category.incomeAmount, category.incompleteIncomeAmount);
+        return getDisplayAmount(category.incomeAmountCents, category.incompleteIncomeAmount);
     }
 
     function getDisplayExpenseAmount(category: TransactionOverviewResponseItem): string {
-        return getDisplayAmount(category.expenseAmount, category.incompleteExpenseAmount);
+        return getDisplayAmount(category.expenseAmountCents, category.incompleteExpenseAmount);
     }
 
     return {

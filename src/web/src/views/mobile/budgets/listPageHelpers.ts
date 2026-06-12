@@ -15,12 +15,12 @@ export interface MobileBudgetGroup {
     categoryColor: string;
     primaryBudgets: Budget[];
     subBudgets: Budget[];
-    totalAmount: number;
-    totalSpent: number;
-    primaryAmount: number;
-    primarySpent: number;
-    subTotalAmount: number;
-    subTotalSpent: number;
+    totalAmountCents: number;
+    totalSpentCents: number;
+    primaryAmountCents: number;
+    primarySpentCents: number;
+    subTotalAmountCents: number;
+    subTotalSpentCents: number;
     isCollapsed: boolean;
 }
 
@@ -40,11 +40,11 @@ export function formatBudgetAmount(amountInYuan: number): string {
  * Budget.executionRateText.
  */
 export function getBudgetProgressPercent(budget: Budget): number {
-    if (!budget || !budget.amount || budget.amount <= 0) {
+    if (!budget || !budget.amountCents || budget.amountCents <= 0) {
         return 0;
     }
 
-    const ratio = (budget.spentAmount / budget.amount) * 100;
+    const ratio = (budget.spentAmountCents / budget.amountCents) * 100;
 
     if (!Number.isFinite(ratio) || ratio < 0) {
         return 0;
@@ -54,11 +54,11 @@ export function getBudgetProgressPercent(budget: Budget): number {
 }
 
 export function getBudgetGroupProgressPercent(group: MobileBudgetGroup): number {
-    if (!group || group.totalAmount <= 0) {
+    if (!group || group.totalAmountCents <= 0) {
         return 0;
     }
 
-    const ratio = (group.totalSpent / group.totalAmount) * 100;
+    const ratio = (group.totalSpentCents / group.totalAmountCents) * 100;
     if (!Number.isFinite(ratio) || ratio < 0) {
         return 0;
     }
@@ -67,11 +67,11 @@ export function getBudgetGroupProgressPercent(group: MobileBudgetGroup): number 
 }
 
 export function getBudgetGroupExecutionRate(group: MobileBudgetGroup): number {
-    if (!group || group.totalAmount <= 0) {
+    if (!group || group.totalAmountCents <= 0) {
         return 0;
     }
 
-    const ratio = (group.totalSpent / group.totalAmount) * 100;
+    const ratio = (group.totalSpentCents / group.totalAmountCents) * 100;
     return Number.isFinite(ratio) && ratio >= 0 ? ratio : 0;
 }
 
@@ -105,12 +105,12 @@ export function buildMobileBudgetGroups({
                 categoryColor: primaryCategory?.color || budget.categoryColor || '',
                 primaryBudgets: [],
                 subBudgets: [],
-                totalAmount: 0,
-                totalSpent: 0,
-                primaryAmount: 0,
-                primarySpent: 0,
-                subTotalAmount: 0,
-                subTotalSpent: 0,
+                totalAmountCents: 0,
+                totalSpentCents: 0,
+                primaryAmountCents: 0,
+                primarySpentCents: 0,
+                subTotalAmountCents: 0,
+                subTotalSpentCents: 0,
                 isCollapsed: collapsedCategories.has(categoryKey)
             });
         }
@@ -118,12 +118,12 @@ export function buildMobileBudgetGroups({
         const group = groups.get(categoryKey)!;
         if (!budget.subCategory) {
             group.primaryBudgets.push(budget);
-            group.primaryAmount += budget.amount;
-            group.primarySpent += budget.spentAmount;
+            group.primaryAmountCents += budget.amountCents;
+            group.primarySpentCents += budget.spentAmountCents;
         } else {
             group.subBudgets.push(budget);
-            group.subTotalAmount += budget.amount;
-            group.subTotalSpent += budget.spentAmount;
+            group.subTotalAmountCents += budget.amountCents;
+            group.subTotalSpentCents += budget.spentAmountCents;
         }
 
         if (!group.categoryIcon && budget.categoryIcon) {
@@ -136,14 +136,14 @@ export function buildMobileBudgetGroups({
 
     for (const group of groups.values()) {
         if (group.primaryBudgets.length > 1) {
-            group.totalAmount = group.primaryAmount + group.subTotalAmount;
-            group.totalSpent = group.primarySpent + group.subTotalSpent;
+            group.totalAmountCents = group.primaryAmountCents + group.subTotalAmountCents;
+            group.totalSpentCents = group.primarySpentCents + group.subTotalSpentCents;
         } else if (group.primaryBudgets.length > 0) {
-            group.totalAmount = group.primaryAmount;
-            group.totalSpent = group.primarySpent > 0 ? group.primarySpent : group.subTotalSpent;
+            group.totalAmountCents = group.primaryAmountCents;
+            group.totalSpentCents = group.primarySpentCents > 0 ? group.primarySpentCents : group.subTotalSpentCents;
         } else {
-            group.totalAmount = group.subTotalAmount;
-            group.totalSpent = group.subTotalSpent;
+            group.totalAmountCents = group.subTotalAmountCents;
+            group.totalSpentCents = group.subTotalSpentCents;
         }
 
         group.subBudgets.sort((a, b) => (a.subCategory || a.name).localeCompare(b.subCategory || b.name));

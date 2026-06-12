@@ -132,8 +132,8 @@ export const useOverviewStore = defineStore('overview', () => {
             return {
                 thisMonth: {
                     valid: false,
-                    incomeAmount: 0,
-                    expenseAmount: 0,
+                    incomeAmountCents: 0,
+                    expenseAmountCents: 0,
                     incompleteIncomeAmount: false,
                     incompleteExpenseAmount: false
                 }
@@ -150,39 +150,39 @@ export const useOverviewStore = defineStore('overview', () => {
                 return;
             }
 
-            let totalIncomeAmount = 0;
-            let totalExpenseAmount = 0;
+            let totalIncomeAmountCents = 0;
+            let totalExpenseAmountCents = 0;
             let hasUnCalculatedTotalIncome = false;
             let hasUnCalculatedTotalExpense = false;
 
             if (item.amounts) {
                 for (const amount of item.amounts) {
                     if (amount.currency !== defaultCurrency) {
-                        const incomeAmount = exchangeRatesStore.getExchangedAmount(amount.incomeAmount, amount.currency, defaultCurrency);
-                        const expenseAmount = exchangeRatesStore.getExchangedAmount(amount.expenseAmount, amount.currency, defaultCurrency);
+                        const incomeAmountCents = exchangeRatesStore.getExchangedAmount(amount.incomeAmountCents, amount.currency, defaultCurrency);
+                        const expenseAmountCents = exchangeRatesStore.getExchangedAmount(amount.expenseAmountCents, amount.currency, defaultCurrency);
 
-                        if (isNumber(incomeAmount)) {
-                            totalIncomeAmount += Math.trunc(incomeAmount);
+                        if (isNumber(incomeAmountCents)) {
+                            totalIncomeAmountCents += Math.trunc(incomeAmountCents);
                         } else {
                             hasUnCalculatedTotalIncome = true;
                         }
 
-                        if (isNumber(expenseAmount)) {
-                            totalExpenseAmount += Math.trunc(expenseAmount);
+                        if (isNumber(expenseAmountCents)) {
+                            totalExpenseAmountCents += Math.trunc(expenseAmountCents);
                         } else {
                             hasUnCalculatedTotalExpense = true;
                         }
                     } else {
-                        totalIncomeAmount += amount.incomeAmount;
-                        totalExpenseAmount += amount.expenseAmount;
+                        totalIncomeAmountCents += amount.incomeAmountCents;
+                        totalExpenseAmountCents += amount.expenseAmountCents;
                     }
                 }
             }
 
             finalOverviewData[field] = {
                 valid: true,
-                incomeAmount: totalIncomeAmount,
-                expenseAmount: totalExpenseAmount,
+                incomeAmountCents: totalIncomeAmountCents,
+                expenseAmountCents: totalExpenseAmountCents,
                 incompleteIncomeAmount: hasUnCalculatedTotalIncome,
                 incompleteExpenseAmount: hasUnCalculatedTotalExpense,
                 amounts: item.amounts || []

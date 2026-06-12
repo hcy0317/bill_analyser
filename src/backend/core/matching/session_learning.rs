@@ -19,10 +19,13 @@ pub fn build_transfer_pair_candidate(
     if anchor_id == candidate_id {
         return None;
     }
-    let anchor_amount = value_to_f64(anchor_bill.get("amount"));
-    let candidate_amount = value_to_f64(candidate_bill.get("amount"));
-    if (anchor_amount.abs() - candidate_amount.abs()).abs() > TRANSFER_AMOUNT_TOLERANCE
-        || anchor_amount * candidate_amount >= 0.0
+    let anchor_amount_cents = bill_amount_cents(anchor_bill);
+    let candidate_amount_cents = bill_amount_cents(candidate_bill);
+    if (anchor_amount_cents.abs() - candidate_amount_cents.abs()).abs()
+        > TRANSFER_AMOUNT_TOLERANCE_CENTS
+        || anchor_amount_cents == 0
+        || candidate_amount_cents == 0
+        || anchor_amount_cents.signum() == candidate_amount_cents.signum()
     {
         return None;
     }
@@ -54,7 +57,7 @@ pub fn build_transfer_pair_candidate(
             "id": candidate_id,
             "date": value_to_string(candidate_bill.get("date")),
             "type": value_to_string(candidate_bill.get("type")),
-            "amount": candidate_amount,
+            "amount_cents": candidate_amount_cents,
             "counterparty": value_to_string(candidate_bill.get("counterparty")),
             "description": value_to_string(candidate_bill.get("description")),
             "payment_method": value_to_string(candidate_bill.get("payment_method")),
@@ -178,11 +181,11 @@ fn duplicate_bill_fields_match(
         }
     }
 
-    for field_name in ["amount", "destination_amount"] {
-        if (value_to_f64(anchor_bill.get(field_name)) - value_to_f64(candidate_bill.get(field_name)))
-            .abs()
-            > TRANSFER_AMOUNT_TOLERANCE
-        {
+    for field_name in ["amount_cents", "destination_amount_cents"] {
+        let anchor_amount_cents = value_to_i64(anchor_bill.get(field_name)).unwrap_or_default();
+        let candidate_amount_cents =
+            value_to_i64(candidate_bill.get(field_name)).unwrap_or_default();
+        if (anchor_amount_cents - candidate_amount_cents).abs() > TRANSFER_AMOUNT_TOLERANCE_CENTS {
             return false;
         }
     }
@@ -206,10 +209,13 @@ pub fn build_investment_pair_candidate(
     if anchor_id == candidate_id {
         return None;
     }
-    let anchor_amount = value_to_f64(anchor_bill.get("amount"));
-    let candidate_amount = value_to_f64(candidate_bill.get("amount"));
-    if (anchor_amount.abs() - candidate_amount.abs()).abs() > TRANSFER_AMOUNT_TOLERANCE
-        || anchor_amount * candidate_amount >= 0.0
+    let anchor_amount_cents = bill_amount_cents(anchor_bill);
+    let candidate_amount_cents = bill_amount_cents(candidate_bill);
+    if (anchor_amount_cents.abs() - candidate_amount_cents.abs()).abs()
+        > TRANSFER_AMOUNT_TOLERANCE_CENTS
+        || anchor_amount_cents == 0
+        || candidate_amount_cents == 0
+        || anchor_amount_cents.signum() == candidate_amount_cents.signum()
     {
         return None;
     }

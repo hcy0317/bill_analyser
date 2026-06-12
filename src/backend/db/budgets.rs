@@ -76,8 +76,8 @@ pub(crate) struct BudgetPeriodGroupKey {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct BudgetForecastBudgetAmount {
-    pub(crate) primary: f64,
-    pub(crate) sub_total: f64,
+    pub(crate) primary_cents: i64,
+    pub(crate) sub_total_cents: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -88,14 +88,14 @@ pub(crate) struct BudgetForecastCategoryTotals {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BudgetForecastPeriodAmount {
     pub(crate) period: String,
-    pub(crate) amount: f64,
+    pub(crate) amount_cents: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BudgetForecastRow {
     period: String,
     category: String,
-    amount: f64,
+    amount_cents: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,7 +109,7 @@ const BUDGET_UPDATE_COLUMNS: &[&str] = &[
     "category",
     "sub_category",
     "period_type",
-    "amount",
+    "amount_cents",
     "start_date",
     "end_date",
     "alert_threshold",
@@ -139,13 +139,14 @@ fn normalize_create_payload(fields: &BudgetRecord, now: &str) -> DbResult<Budget
     payload
         .entry("updated_at".to_string())
         .or_insert_with(|| Value::String(now.to_string()));
-    for field in ["category", "period_type", "amount", "start_date"] {
+    for field in ["category", "period_type", "amount_cents", "start_date"] {
         if missing_required_field(&payload, field) {
             return Err(DbError::InvalidOperation(format!(
                 "missing required budget field: {field}"
             )));
         }
     }
+    validate_budget_amount_cents(&payload)?;
     Ok(payload)
 }
 
@@ -176,14 +177,23 @@ fn normalize_update_payload(
             )));
         }
     }
+    if payload.contains_key("amount_cents") {
+        validate_budget_amount_cents(&payload)?;
+    }
     Ok(payload)
+}
+
+fn validate_budget_amount_cents(payload: &BudgetRecord) -> DbResult<()> {
+    record_i64(payload, "amount_cents")
+        .map(|_| ())
+        .ok_or_else(|| DbError::InvalidOperation("invalid budget amount_cents".to_string()))
 }
 
 fn should_copy_existing_sub_category(payload: &BudgetRecord) -> bool {
     [
         "category",
         "period_type",
-        "amount",
+        "amount_cents",
         "start_date",
         "end_date",
     ]
@@ -192,7 +202,7 @@ fn should_copy_existing_sub_category(payload: &BudgetRecord) -> bool {
 }
 
 fn budget_import_has_required_name_and_amount(budget: &BudgetRecord) -> bool {
-    !missing_required_field(budget, "name") && !missing_required_field(budget, "amount")
+    !missing_required_field(budget, "name") && !missing_required_field(budget, "amount_cents")
 }
 
 fn filter_budget_execution_candidates(
@@ -262,10 +272,10 @@ fn dedupe_budget_execution_candidates(budgets: Vec<BudgetRecord>) -> Vec<BudgetR
         };
         let should_replace = selected.get(&key).is_none_or(|current| {
             (
-                record_f64(&budget, "amount").unwrap_or_default(),
+                record_i64(&budget, "amount_cents").unwrap_or_default(),
                 record_i64(&budget, "id").unwrap_or_default(),
             ) >= (
-                record_f64(current, "amount").unwrap_or_default(),
+                record_i64(current, "amount_cents").unwrap_or_default(),
                 record_i64(current, "id").unwrap_or_default(),
             )
         });
@@ -310,11 +320,11 @@ fn resolve_budget_execution_window(
 #[tracing::instrument(level = "debug", skip_all)]
 fn build_budget_execution_item(
     budget: &BudgetRecord,
-    spent: f64,
+    spent_cents: i64,
     category_context: &bill_analyser_core::budgets::BudgetCategoryContext,
     fallback_budget_type: i32,
 ) -> Value {
-    let budget_amount = record_f64(budget, "amount").unwrap_or_default();
+    let budget_amount_cents = record_i64(budget, "amount_cents").unwrap_or_default();
     let resolved_budget_type = record_i64(budget, "_resolved_budget_type")
         .and_then(|value| i32::try_from(value).ok())
         .unwrap_or(fallback_budget_type);
@@ -331,8 +341,8 @@ fn build_budget_execution_item(
         .and_then(value_to_i64)
         .map(|id| id.to_string())
         .unwrap_or_default();
-    let execution_rate = if budget_amount > 0.0 {
-        round2((spent / budget_amount) * 100.0)
+    let execution_rate = if budget_amount_cents > 0 {
+        round2((spent_cents as f64 / budget_amount_cents as f64) * 100.0)
     } else {
         0.0
     };
@@ -344,9 +354,9 @@ fn build_budget_execution_item(
         "category_info": category_info,
         "category_id": category_id,
         "period_type": record_text(budget, "period_type"),
-        "budget_amount": budget_amount,
-        "spent_amount": spent,
-        "remaining_amount": budget_amount - spent,
+        "budget_amount_cents": budget_amount_cents,
+        "spent_amount_cents": spent_cents,
+        "remaining_amount_cents": budget_amount_cents - spent_cents,
         "execution_rate": execution_rate,
         "type": resolved_budget_type,
         "alert_threshold": record_i64(budget, "alert_threshold").unwrap_or(80),
@@ -499,10 +509,6 @@ fn record_i64(record: &BudgetRecord, key: &str) -> Option<i64> {
     record.get(key).and_then(value_to_i64)
 }
 
-fn record_f64(record: &BudgetRecord, key: &str) -> Option<f64> {
-    record.get(key).and_then(value_to_f64)
-}
-
 fn value_string(value: Option<&Value>) -> String {
     match value {
         Some(Value::String(value)) => value.clone(),
@@ -516,16 +522,7 @@ fn value_to_i64(value: &Value) -> Option<i64> {
     match value {
         Value::Number(value) => value.as_i64(),
         Value::String(value) => value.trim().parse::<i64>().ok(),
-        Value::Bool(value) => Some(i64::from(*value)),
-        _ => None,
-    }
-}
-
-fn value_to_f64(value: &Value) -> Option<f64> {
-    match value {
-        Value::Number(value) => value.as_f64(),
-        Value::String(value) => value.trim().parse::<f64>().ok(),
-        Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
+        Value::Bool(_) => None,
         _ => None,
     }
 }
@@ -567,4 +564,121 @@ fn now_text() -> String {
         .naive_utc()
         .format("%Y-%m-%d %H:%M:%S")
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn budget_record(entries: impl IntoIterator<Item = (&'static str, Value)>) -> BudgetRecord {
+        entries
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value))
+            .collect()
+    }
+
+    #[test]
+    fn budget_create_update_and_import_helpers_require_explicit_cents() {
+        let payload = budget_record([
+            ("category", json!("餐饮")),
+            ("sub_category", json!(" 午餐 ")),
+            ("period_type", json!("monthly")),
+            ("amount_cents", json!(12345)),
+            ("start_date", json!("2026-06-01")),
+        ]);
+
+        let normalized =
+            normalize_create_payload(&payload, "2026-06-12 12:00:00").expect("create payload");
+        assert_eq!(normalized.get("amount_cents"), Some(&json!(12345)));
+        assert_eq!(normalized.get("sub_category"), Some(&json!("午餐")));
+        assert_eq!(normalized.get("enabled"), Some(&json!(true)));
+        assert!(budget_import_has_required_name_and_amount(&budget_record(
+            [("name", json!("餐饮预算")), ("amount_cents", json!(12345)),]
+        )));
+        assert!(!budget_import_has_required_name_and_amount(&budget_record(
+            [("name", json!("餐饮预算")), ("amount", json!(123.45)),]
+        )));
+
+        let existing = budget_record([("sub_category", json!("旧午餐"))]);
+        let update =
+            normalize_update_payload(&existing, &budget_record([("amount_cents", json!(23456))]))
+                .expect("update payload");
+        assert_eq!(update.get("amount_cents"), Some(&json!(23456)));
+        assert_eq!(update.get("sub_category"), Some(&json!("旧午餐")));
+
+        assert!(normalize_create_payload(
+            &budget_record([
+                ("category", json!("餐饮")),
+                ("period_type", json!("monthly")),
+                ("amount", json!(123.45)),
+                ("start_date", json!("2026-06-01")),
+            ]),
+            "2026-06-12 12:00:00",
+        )
+        .is_err());
+        assert!(normalize_create_payload(
+            &budget_record([
+                ("category", json!("餐饮")),
+                ("period_type", json!("monthly")),
+                ("amount_cents", json!(true)),
+                ("start_date", json!("2026-06-01")),
+            ]),
+            "2026-06-12 12:00:00",
+        )
+        .is_err());
+        assert_eq!(
+            record_i64(
+                &budget_record([("amount_cents", json!(true))]),
+                "amount_cents"
+            ),
+            None
+        );
+        assert!(normalize_update_payload(
+            &BudgetRecord::new(),
+            &budget_record([("amount_cents", json!(12.34))])
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn budget_execution_helpers_use_cents_for_selection_and_output() {
+        let lower = budget_record([
+            ("id", json!(1)),
+            ("category", json!("餐饮")),
+            ("sub_category", json!("午餐")),
+            ("period_type", json!("monthly")),
+            ("amount_cents", json!(1000)),
+            ("start_date", json!("2026-06-01")),
+        ]);
+        let higher = budget_record([
+            ("id", json!(2)),
+            ("category", json!("餐饮")),
+            ("sub_category", json!("午餐")),
+            ("period_type", json!("monthly")),
+            ("amount_cents", json!(2000)),
+            ("start_date", json!("2026-06-01")),
+            ("_resolved_budget_type", json!(3)),
+        ]);
+
+        let deduped = dedupe_budget_execution_candidates(vec![lower, higher.clone()]);
+        assert_eq!(deduped.len(), 1);
+        assert_eq!(deduped[0].get("id"), Some(&json!(2)));
+
+        let categories = vec![json!({
+            "id": 9,
+            "main_category": "餐饮",
+            "sub_category": "午餐",
+            "type": 3,
+            "icon": "meal",
+            "color": "#f80"
+        })];
+        let context = bill_analyser_core::budgets::build_budget_category_context(&categories);
+        let item = build_budget_execution_item(&higher, 1500, &context, 3);
+
+        assert_eq!(item["budget_amount_cents"], json!(2000));
+        assert_eq!(item["spent_amount_cents"], json!(1500));
+        assert_eq!(item["remaining_amount_cents"], json!(500));
+        assert_eq!(item["execution_rate"], json!(75.0));
+        assert_eq!(item["category_id"], json!("9"));
+    }
 }

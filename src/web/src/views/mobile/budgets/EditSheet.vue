@@ -234,9 +234,9 @@ const selectedCategoryDisplay = computed<string>(() => {
 });
 
 // `canSave` mirrors the desktop EditDialog invariants: a category is required
-// and amount must be positive.
+// and amount cents must be positive.
 const canSave = computed<boolean>(() => {
-    if (form.value.amount <= 0) {
+    if (form.value.amountCents <= 0) {
         return false;
     }
     return !!(form.value.categoryId || form.value.category);
@@ -265,19 +265,19 @@ function onAmountInput(event: Event): void {
     amountInYuanInput.value = raw;
     const parsed = parseFloat(raw);
     if (!Number.isFinite(parsed) || parsed < 0) {
-        form.value.amount = 0;
+        form.value.amountCents = 0;
         return;
     }
-    // Yuan → cents using the same ratio as Budget.amountInYuan (= amount / 100).
+    // Yuan input boundary -> cents using the same ratio as Budget.amountInYuan.
     // We round to avoid floating-point dust.
-    form.value.amount = Math.round(parsed * 100);
+    form.value.amountCents = Math.round(parsed * 100);
 }
 
 function resetForm(source: Budget | null, defaultType: BudgetType): void {
     const next = source ? Object.assign(new Budget(), source) : Budget.createNew(defaultType);
     form.value = next;
     // Display the yuan amount via the existing model getter.
-    amountInYuanInput.value = next.amount > 0 ? next.amountInYuan.toFixed(2) : '';
+    amountInYuanInput.value = next.amountCents > 0 ? next.amountInYuan.toFixed(2) : '';
 }
 
 function closeSheet(): void {

@@ -35,7 +35,7 @@ const baseItem = (): ImportPreviewIndexItem => ({
     comment: '',
     isManuallyAnnotated: false,
     selected: false,
-    sourceAmount: 0,
+    sourceAmountCents: 0,
     counterparty: '',
     paymentMethod: '',
     parserId: '',
@@ -126,9 +126,9 @@ describe('import preview index helpers', () => {
 
     test('sorts and slices ids for server-paged requests from the filtered global index', () => {
         const sorted = sortImportPreviewIndexItems([
-            { ...baseItem(), id: 1, time: 200, sourceAmount: 2000, comment: 'b' },
-            { ...baseItem(), id: 2, time: 100, sourceAmount: 3000, comment: 'c' },
-            { ...baseItem(), id: 3, time: 300, sourceAmount: 1000, comment: 'a' },
+            { ...baseItem(), id: 1, time: 200, sourceAmountCents: 2000, comment: 'b' },
+            { ...baseItem(), id: 2, time: 100, sourceAmountCents: 3000, comment: 'c' },
+            { ...baseItem(), id: 3, time: 300, sourceAmountCents: 1000, comment: 'a' },
         ], 'time', 'asc');
 
         expect(sorted.map(item => item.id)).toStrictEqual([2, 1, 3]);
@@ -145,7 +145,7 @@ describe('import preview index helpers', () => {
             id: 42,
             preview_date: '2026-05-01T00:00:00Z',
             type: 3,
-            source_amount: 1288,
+            source_amount_cents: 1288,
             category_id: 'c-food',
             actual_category_name: '餐饮',
             source_account_id: 'acc-1',
@@ -162,7 +162,7 @@ describe('import preview index helpers', () => {
             id: 42,
             time: new Date('2026-05-01T00:00:00Z').getTime() / 1000,
             type: 3,
-            sourceAmount: 1288,
+            sourceAmountCents: 1288,
             categoryId: 'c-food',
             actualCategoryName: '餐饮',
             sourceAccountId: 'acc-1',

@@ -689,7 +689,7 @@ const matchedImportConfig = ref<ImportConfigMatchResult | null>(null);
 const SERVER_PAGED_PREVIEW_SORTABLE_COLUMNS = new Set<string>([
     'time',
     'type',
-    'sourceAmount',
+    'sourceAmountCents',
     'counterparty',
     'paymentMethod',
     'comment'

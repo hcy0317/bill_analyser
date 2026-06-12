@@ -52,7 +52,7 @@ interface SankeyChartNodeItem {
     itemId: string;
     name: string;
     displayName: string;
-    totalAmount: number;
+    totalAmountCents: number;
     accountNetCashFlow?: number;
     percent?: number;
     depth: number;
@@ -133,7 +133,7 @@ const sankeyData = computed<SankeyChartData>(() => {
             continue;
         }
 
-        if (item.totalAmount === 0 && item.outflows.length === 0) {
+        if (item.totalAmountCents === 0 && item.outflows.length === 0) {
             continue;
         }
 
@@ -143,7 +143,7 @@ const sankeyData = computed<SankeyChartData>(() => {
             itemId: item.id,
             name: `${item.type}:${item.id}`,
             displayName: item.name,
-            totalAmount: Math.abs(item.totalAmount),
+            totalAmountCents: Math.abs(item.totalAmountCents),
             percent: item.percent,
             depth: depth
         };
@@ -161,7 +161,7 @@ const sankeyData = computed<SankeyChartData>(() => {
                     continue;
                 }
 
-                nodeItem.accountNetCashFlow = (nodeItem.accountNetCashFlow ?? 0) + outflowItem.amount;
+                nodeItem.accountNetCashFlow = (nodeItem.accountNetCashFlow ?? 0) + outflowItem.amountCents;
             }
         }
 
@@ -183,12 +183,12 @@ const sankeyData = computed<SankeyChartData>(() => {
                 if (!combinedOutflow) {
                     combinedOutflow = {
                         relatedItem: outflowItem.relatedItem,
-                        amount: 0
+                        amountCents: 0
                     };
                     combinedOutflows[key] = combinedOutflow;
                 }
 
-                combinedOutflow.amount += outflowItem.amount;
+                combinedOutflow.amountCents += outflowItem.amountCents;
             }
         }
 
@@ -209,7 +209,7 @@ const sankeyData = computed<SankeyChartData>(() => {
                 targetItemId: relatedItem.id,
                 target: `${relatedItem.type}:${relatedItem.id}`,
                 targetDisplayName: relatedItem.name,
-                value: Math.abs(outflowItem.amount)
+                value: Math.abs(outflowItem.amountCents)
             };
 
             links.push(linkItem);
@@ -238,7 +238,7 @@ const chartOptions = computed<object>(() => {
             formatter: (params: CallbackDataParams) => {
                 if (params.dataType === 'node') {
                     const dataItem = params.data as SankeyChartNodeItem;
-                    const value = dataItem.totalAmount;
+                    const value = dataItem.totalAmountCents;
                     const displayValue = formatAmountToLocalizedNumeralsWithCurrency(value, props.defaultCurrency);
                     let displayTypeName = '';
 

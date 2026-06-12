@@ -40,7 +40,7 @@ test.describe('desktop domain CRUD linkage', () => {
 
             await page.goto(desktopRoute('/budget/list', env), { waitUntil: 'domcontentloaded' });
             await expectPageAnchor(page, 'desktop.budgets.page');
-            await expectEntityVisibleOnPage(page, fixture.budget.name);
+            await expectEntityVisibleOnPage(page, fixture.category.name);
 
             await page.goto(desktopRoute('/template/list', env), { waitUntil: 'domcontentloaded' });
             await expectPageAnchor(page, 'desktop.templates.page');

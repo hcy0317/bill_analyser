@@ -55,7 +55,7 @@ pub use ai_ocr_llm::{
 };
 pub use error::{ErrorCode, RuntimeError};
 pub use import_learning::{
-    amount_bucket, build_composite_match_features, build_composite_match_hash,
+    amount_cents_bucket, build_composite_match_features, build_composite_match_hash,
     build_dataset_snapshot_payload, build_feature_payload, build_label_confirmation_counts,
     build_llm_preview_apply_plan, build_model_registry_payload, build_route_label,
     build_semantic_label, build_semantic_label_counts, composite_hash_from_features,
@@ -136,7 +136,8 @@ pub use matching::{
     DEFAULT_INVESTMENT_PRODUCT_KEYWORDS, EXPLICIT_INVESTMENT_TYPES, INVESTMENT_PAIR_LOOKBACK_DAYS,
     INVESTMENT_PAIR_TYPE, MANUAL_PAIR_SOURCE, MAX_RECURRING_GAP_RATIO,
     MAX_RECURRING_INTERVAL_VARIATION, MIN_RECURRING_OCCURRENCES, MIN_RECURRING_PATTERN_CONFIDENCE,
-    SUMMARY_KIND_ORDER, TRANSFER_AMOUNT_TOLERANCE, TRANSFER_PAIR_LOOKBACK_DAYS, TRANSFER_PAIR_TYPE,
+    SUMMARY_KIND_ORDER, TRANSFER_AMOUNT_TOLERANCE_CENTS, TRANSFER_PAIR_LOOKBACK_DAYS,
+    TRANSFER_PAIR_TYPE,
 };
 pub use ops::{
     backup_archive_summary_from_entries, backup_encryption_secret_configured,

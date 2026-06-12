@@ -23,7 +23,7 @@ describe('mobile HomePage onReceiptRecognitionChanged field mapping', () => {
         expect(handler).toContain('Math.round(result.amount * 100)');
         expect(handler).toContain("typeof result.amount === 'number' && Number.isFinite(result.amount)");
         // Push occurs inside the guarded branch, NOT unconditionally.
-        expect(handler).toMatch(/Number\.isFinite\(result\.amount\)\)\s*\{[\s\S]+?params\.push\(`amount=/);
+        expect(handler).toMatch(/Number\.isFinite\(result\.amount\)\)\s*\{[\s\S]+?params\.push\(`sourceAmountCents=/);
     });
 
     test('tradeTime ISO is parsed via Date.parse and converted to unix seconds, with NaN guard', () => {
@@ -56,8 +56,8 @@ describe('mobile HomePage onReceiptRecognitionChanged field mapping', () => {
         expect(handler).not.toContain('result.categoryId');
         expect(handler).not.toContain('result.sourceAccountId');
         expect(handler).not.toContain('result.destinationAccountId');
-        expect(handler).not.toContain('result.sourceAmount');
-        expect(handler).not.toContain('result.destinationAmount');
+        expect(handler).not.toContain('result.sourceAmountCents');
+        expect(handler).not.toContain('result.destinationAmountCents');
         expect(handler).not.toContain('result.tagIds');
         expect(handler).not.toContain('result.comment');
         expect(handler).not.toContain('result.time');

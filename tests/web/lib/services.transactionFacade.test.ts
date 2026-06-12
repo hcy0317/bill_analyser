@@ -48,8 +48,8 @@ function transactionCreateRequest(overrides: Partial<TransactionCreateRequest> =
         utcOffset: 480,
         sourceAccountId: 'wallet',
         destinationAccountId: '0',
-        sourceAmount: 1234,
-        destinationAmount: 0,
+        sourceAmountCents: 1234,
+        destinationAmountCents: 0,
         hideAmount: false,
         tagIds: ['tag-breakfast'],
         pictureIds: [],
@@ -68,8 +68,8 @@ function transactionModifyRequest(overrides: Partial<TransactionModifyRequest> =
         utcOffset: 480,
         sourceAccountId: 'wallet',
         destinationAccountId: '0',
-        sourceAmount: 1234,
-        destinationAmount: 0,
+        sourceAmountCents: 1234,
+        destinationAmountCents: 0,
         hideAmount: false,
         tagIds: ['tag-breakfast'],
         pictureIds: [],
@@ -105,12 +105,12 @@ describe('services transaction facade adapters', () => {
             accountIds: 'wallet,bank card',
             tagIds: 'tag-breakfast',
             tagFilterType: 1,
-            amountFilter: 'gte:100',
+            amountFilterCents: 'gte:100',
             keyword: 'coffee shop'
         });
 
         expect(axiosMock.get).toHaveBeenCalledWith(
-            'bills/?max_time=1777636800999&min_time=1777550400000&type=3&categoryIds=cat%2Ffood&accountIds=wallet%2Cbank%20card&tagIds=tag-breakfast&tagFilterType=1&amountFilter=gte%3A100&keyword=coffee%20shop&page_size=20&page=3&with_count=true'
+            'bills/?max_time=1777636800999&min_time=1777550400000&type=3&categoryIds=cat%2Ffood&accountIds=wallet%2Cbank%20card&tagIds=tag-breakfast&tagFilterType=1&amountFilterCents=gte%3A100&keyword=coffee%20shop&page_size=20&page=3&with_count=true'
         );
     });
 
@@ -123,12 +123,12 @@ describe('services transaction facade adapters', () => {
             accountIds: 'bank card',
             tagIds: 'tag/payroll',
             tagFilterType: 0,
-            amountFilter: 'lt:9999',
+            amountFilterCents: 'lt:9999',
             keyword: 'monthly payroll'
         });
 
         expect(axiosMock.get).toHaveBeenCalledWith(
-            'bills/by-month?year=2026&month=5&type=2&categoryIds=salary&accountIds=bank card&tagIds=tag/payroll&tagFilterType=0&amountFilter=lt%3A9999&keyword=monthly%20payroll'
+            'bills/by-month?year=2026&month=5&type=2&categoryIds=salary&accountIds=bank card&tagIds=tag/payroll&tagFilterType=0&amountFilterCents=lt%3A9999&keyword=monthly%20payroll'
         );
     });
 

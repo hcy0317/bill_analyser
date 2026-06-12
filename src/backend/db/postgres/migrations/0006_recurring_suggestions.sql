@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS recurring_suggestions (
     UNIQUE (user_id, pattern_hash)
 );
 
-COMMENT ON COLUMN recurring_suggestions.amount_cents IS 'amount stored in cents; API responses project this value back to frontend yuan amount';
+COMMENT ON COLUMN recurring_suggestions.amount_cents IS 'amount stored in cents; API responses expose this value as amountCents';
 
 CREATE INDEX IF NOT EXISTS idx_recurring_suggestions_user_status
     ON recurring_suggestions (user_id, status, confidence_score DESC, last_occurrence DESC);

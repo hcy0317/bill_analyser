@@ -94,12 +94,12 @@ const allSeries = computed<AccountBalanceTrendsChartDataItem[]>(() => {
         if (props.type === AccountBalanceTrendChartType.Candlestick.type) {
             // K线图数据格式: [开盘, 收盘, 最低, 最高]
             // 确保最低价和最高价包含开盘价和收盘价，避免柱体高度为0
-            const lowest = Math.min(item.openingBalance, item.closingBalance, item.minimumBalance);
-            const highest = Math.max(item.openingBalance, item.closingBalance, item.maximumBalance);
+            const lowest = Math.min(item.openingBalanceCents, item.closingBalanceCents, item.minimumBalanceCents);
+            const highest = Math.max(item.openingBalanceCents, item.closingBalanceCents, item.maximumBalanceCents);
 
             const candlestickData = [
-                item.openingBalance,
-                item.closingBalance,
+                item.openingBalanceCents,
+                item.closingBalanceCents,
                 lowest,
                 highest
             ];
@@ -107,7 +107,7 @@ const allSeries = computed<AccountBalanceTrendsChartDataItem[]>(() => {
 
             console.log(`[AccountBalanceTrendsChart] ${item.displayDate} K线数据: [开=${candlestickData[0]}, 收=${candlestickData[1]}, 低=${candlestickData[2]}, 高=${candlestickData[3]}], 高度=${highest - lowest}`);
         } else {
-            series.data.push(item.closingBalance);
+            series.data.push(item.closingBalanceCents);
         }
     }
 
@@ -190,27 +190,27 @@ const chartOptions = computed<object>(() => {
                     const displayItems: NameValue[] = [
                         {
                             name: tt('Opening Balance'),
-                            value: formatAmountToLocalizedNumeralsWithCurrency(dataItem.openingBalance, props.account.currency)
+                            value: formatAmountToLocalizedNumeralsWithCurrency(dataItem.openingBalanceCents, props.account.currency)
                         },
                         {
                             name: tt('Closing Balance'),
-                            value: formatAmountToLocalizedNumeralsWithCurrency(dataItem.closingBalance, props.account.currency)
+                            value: formatAmountToLocalizedNumeralsWithCurrency(dataItem.closingBalanceCents, props.account.currency)
                         },
                         {
                             name: tt('Minimum Balance'),
-                            value: formatAmountToLocalizedNumeralsWithCurrency(dataItem.minimumBalance, props.account.currency)
+                            value: formatAmountToLocalizedNumeralsWithCurrency(dataItem.minimumBalanceCents, props.account.currency)
                         },
                         {
                             name: tt('Maximum Balance'),
-                            value: formatAmountToLocalizedNumeralsWithCurrency(dataItem.maximumBalance, props.account.currency)
+                            value: formatAmountToLocalizedNumeralsWithCurrency(dataItem.maximumBalanceCents, props.account.currency)
                         },
                         {
                             name: tt('Median Balance'),
-                            value: formatAmountToLocalizedNumeralsWithCurrency(dataItem.medianBalance, props.account.currency)
+                            value: formatAmountToLocalizedNumeralsWithCurrency(dataItem.medianBalanceCents, props.account.currency)
                         },
                         {
                             name: tt('Average Balance'),
-                            value: formatAmountToLocalizedNumeralsWithCurrency(dataItem.averageBalance, props.account.currency)
+                            value: formatAmountToLocalizedNumeralsWithCurrency(dataItem.averageBalanceCents, props.account.currency)
                         }
                     ];
 

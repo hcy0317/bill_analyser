@@ -264,3 +264,40 @@ include!("jwt_totp_helpers.rs");
 include!("data_export_helpers.rs");
 include!("profile_payload_helpers.rs");
 include!("runtime_audit_helpers.rs");
+
+#[cfg(test)]
+mod data_export_helper_tests {
+    use super::*;
+
+    #[test]
+    fn user_data_export_serializes_explicit_amount_cents() {
+        let bundle = UserDataExportBundle {
+            bills: vec![[
+                ("id".to_string(), json!(1)),
+                ("date".to_string(), json!("2026-06-12")),
+                ("type".to_string(), json!("支出")),
+                ("amount_cents".to_string(), json!(-1234)),
+                ("main_category".to_string(), json!("餐饮")),
+                ("sub_category".to_string(), json!("午餐")),
+                ("source_account_id".to_string(), json!(10)),
+                ("destination_account_id".to_string(), json!(0)),
+                ("counterparty".to_string(), json!("食堂")),
+                ("payment_method".to_string(), json!("现金")),
+                ("description".to_string(), json!("午餐")),
+                ("comment".to_string(), json!("")),
+                ("created_at".to_string(), json!("2026-06-12T00:00:00Z")),
+                ("updated_at".to_string(), json!("2026-06-12T00:00:00Z")),
+            ]
+            .into_iter()
+            .collect()],
+            account_names: BTreeMap::from([(10, "现金账户".to_string())]),
+            tag_names_by_bill: BTreeMap::new(),
+        };
+
+        let csv = render_user_data_export(&bundle, b',').expect("csv");
+
+        assert!(csv.starts_with("id,date,type,amount_cents,"));
+        assert!(csv.contains("1,2026-06-12,支出,-1234,餐饮,午餐,现金账户,"));
+        assert!(!csv.starts_with("id,date,type,amount,"));
+    }
+}

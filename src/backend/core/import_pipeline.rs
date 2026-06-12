@@ -11,7 +11,7 @@ use serde_json::{json, Map, Number, Value};
 pub const IMPORT_PREVIEW_SORT_KEYS: &[&str] = &[
     "time",
     "type",
-    "sourceAmount",
+    "sourceAmountCents",
     "counterparty",
     "paymentMethod",
     "comment",
@@ -155,7 +155,7 @@ pub fn sort_import_preview_page_items(
     let sort_field = match normalized_sort_by {
         "time" => "preview_date",
         "type" => "preview_type",
-        "sourceAmount" => "preview_amount",
+        "sourceAmountCents" => "preview_amount_cents",
         "counterparty" => "preview_counterparty",
         "paymentMethod" => "preview_payment_method",
         "comment" => "preview_description",
@@ -166,18 +166,14 @@ pub fn sort_import_preview_page_items(
     sorted.sort_by_key(|item| integer_field(item, "id"));
     let descending = normalize_import_preview_page_sort_direction(sort_direction)
         == ImportPreviewSortDirection::Desc;
-    if sort_field == "preview_amount" {
+    if sort_field == "preview_amount_cents" {
         sorted.sort_by(|left, right| {
-            let left_key = float_field(left, sort_field);
-            let right_key = float_field(right, sort_field);
+            let left_key = integer_field(left, sort_field);
+            let right_key = integer_field(right, sort_field);
             if descending {
-                right_key
-                    .partial_cmp(&left_key)
-                    .unwrap_or(std::cmp::Ordering::Equal)
+                right_key.cmp(&left_key)
             } else {
-                left_key
-                    .partial_cmp(&right_key)
-                    .unwrap_or(std::cmp::Ordering::Equal)
+                left_key.cmp(&right_key)
             }
         });
     } else {
@@ -244,7 +240,7 @@ pub struct ImportPreviewFilterIndexItem {
     pub preview_date: String,
     #[serde(rename = "type")]
     pub frontend_type: i64,
-    pub source_amount: f64,
+    pub source_amount_cents: i64,
     pub category_id: String,
     pub actual_category_name: String,
     pub source_account_id: String,
@@ -321,7 +317,7 @@ pub fn build_import_preview_filter_index_item(
         id: integer_field_from_map(preview_item, "id"),
         preview_date: string_field_from_map(preview_item, "preview_date"),
         frontend_type: map_import_preview_type_to_frontend_value(preview_item.get("preview_type")),
-        source_amount: float_field_from_map(preview_item, "preview_amount"),
+        source_amount_cents: integer_field_from_map(preview_item, "preview_amount_cents"),
         category_id,
         actual_category_name,
         source_account_id,
@@ -1104,13 +1100,6 @@ fn integer_field_from_map(map: &Map<String, Value>, key: &str) -> i64 {
         Some(Value::Bool(true)) => 1,
         _ => 0,
     }
-}
-
-fn float_field(value: &Value, key: &str) -> f64 {
-    value
-        .as_object()
-        .map(|object| float_field_from_map(object, key))
-        .unwrap_or_default()
 }
 
 fn float_field_from_map(map: &Map<String, Value>, key: &str) -> f64 {

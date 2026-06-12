@@ -769,7 +769,7 @@ interface LearningRuleOverviewItem {
 
 interface RecurringRuleOverviewItem {
     name: string;
-    amount: number | null;
+    amountCents: number | null;
     frequency: string;
     nextDate: string | null;
     enabled: boolean;

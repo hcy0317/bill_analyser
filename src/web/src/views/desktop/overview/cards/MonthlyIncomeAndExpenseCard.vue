@@ -79,7 +79,7 @@ const hasAnyData = computed<boolean>(() => {
     }
 
     for (const item of props.data) {
-        if (item.incomeAmount > 0 || item.incomeAmount < 0 || item.expenseAmount > 0 || item.expenseAmount < 0) {
+        if (item.incomeAmountCents > 0 || item.incomeAmountCents < 0 || item.expenseAmountCents > 0 || item.expenseAmountCents < 0) {
             return true;
         }
     }
@@ -101,23 +101,23 @@ const chartOptions = computed<object>(() => {
             const monthShortName = formatUnixTimeToGregorianLikeShortMonth(item.monthStartTime);
 
             monthNames.push(monthShortName);
-            incomeAmounts.push(item.incomeAmount);
-            expenseAmounts.push(-item.expenseAmount);
+            incomeAmounts.push(item.incomeAmountCents);
+            expenseAmounts.push(-item.expenseAmountCents);
 
-            if (item.incomeAmount > maxAmount) {
-                maxAmount = item.incomeAmount;
+            if (item.incomeAmountCents > maxAmount) {
+                maxAmount = item.incomeAmountCents;
             }
 
-            if (-item.expenseAmount > maxAmount) {
-                maxAmount = -item.expenseAmount;
+            if (-item.expenseAmountCents > maxAmount) {
+                maxAmount = -item.expenseAmountCents;
             }
 
-            if (item.incomeAmount < minAmount) {
-                minAmount = item.incomeAmount;
+            if (item.incomeAmountCents < minAmount) {
+                minAmount = item.incomeAmountCents;
             }
 
-            if (-item.expenseAmount < minAmount) {
-                minAmount = -item.expenseAmount;
+            if (-item.expenseAmountCents < minAmount) {
+                minAmount = -item.expenseAmountCents;
             }
         }
     }
@@ -139,17 +139,17 @@ const chartOptions = computed<object>(() => {
                 color: props.isDarkMode ? '#eee' : '#333'
             },
             formatter: (params: CallbackDataParams[]) => {
-                let incomeAmount: string | null = null;
-                let expenseAmount: string | null = null;
+                let incomeText: string | null = null;
+                let expenseText: string | null = null;
 
                 for (const param of params) {
                     const dataIndex = param.dataIndex;
                     const data = props.data[dataIndex] as TransactionMonthlyIncomeAndExpenseData;
 
                     if (param.seriesId === 'seriesIncome') {
-                        incomeAmount = getDisplayIncomeAmount(data);
+                        incomeText = getDisplayIncomeAmount(data);
                     } else if (param.seriesId === 'seriesExpense') {
-                        expenseAmount = getDisplayExpenseAmount(data);
+                        expenseText = getDisplayExpenseAmount(data);
                     }
                 }
 
@@ -161,17 +161,17 @@ const chartOptions = computed<object>(() => {
                     `</thead>` +
                     `<tbody>` +
                     (
-                        incomeAmount !== null ?
+                        incomeText !== null ?
                         `<tr>` +
                         `<td><span class="overview-monthly-chart-tooltip-indicator bg-income me-1"></span><span class="me-4">${tt('Income')}</span></td>` +
-                        `<td><strong>${incomeAmount}</strong></td>` +
+                        `<td><strong>${incomeText}</strong></td>` +
                         `</tr>` : ''
                     )+
                     (
-                        expenseAmount !== null ?
+                        expenseText !== null ?
                         `<tr>` +
                         `<td><span class="overview-monthly-chart-tooltip-indicator bg-expense me-1"></span><span class="me-4">${tt('Expense')}</span></td>` +
-                        `<td><strong>${expenseAmount}</strong></td>` +
+                        `<td><strong>${expenseText}</strong></td>` +
                         `</tr>` : ''
                     ) +
                     `</tbody>` +
@@ -292,11 +292,11 @@ function getDisplayAmount(amount: number, incomplete: boolean): string {
 }
 
 function getDisplayIncomeAmount(data: TransactionMonthlyIncomeAndExpenseData): string {
-    return getDisplayAmount(data.incomeAmount, data.incompleteIncomeAmount);
+    return getDisplayAmount(data.incomeAmountCents, data.incompleteIncomeAmount);
 }
 
 function getDisplayExpenseAmount(data: TransactionMonthlyIncomeAndExpenseData): string {
-    return getDisplayAmount(data.expenseAmount, data.incompleteExpenseAmount);
+    return getDisplayAmount(data.expenseAmountCents, data.incompleteExpenseAmount);
 }
 
 function clickItem(e: ECElementEvent): void {

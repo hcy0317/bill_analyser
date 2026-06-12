@@ -153,7 +153,9 @@ pub fn detect_recurring_patterns_with_today(
             continue;
         };
         let transaction_type = value_to_string(object.get("type")).trim().to_string();
-        let amount_cents = (value_to_f64(object.get("amount")).abs() * 100.0).round() as i64;
+        let amount_cents = value_to_i64(object.get("amount_cents"))
+            .unwrap_or_default()
+            .abs();
         let counterparty = value_to_string(object.get("counterparty"))
             .trim()
             .to_string();
@@ -224,7 +226,7 @@ pub fn detect_recurring_patterns_with_today(
         if confidence < MIN_RECURRING_PATTERN_CONFIDENCE {
             continue;
         }
-        let sample = &group_bills[0].0;
+        let (sample, _, sample_amount_cents) = &group_bills[0];
         let counterparty = value_to_string(sample.get("counterparty"))
             .trim()
             .to_string();
@@ -250,7 +252,7 @@ pub fn detect_recurring_patterns_with_today(
             },
             description,
             transaction_type: value_to_string(sample.get("type")),
-            amount: value_to_f64(sample.get("amount")).abs(),
+            amount_cents: sample_amount_cents.abs(),
             source_account_id: value_to_i64(sample.get("source_account_id")),
             destination_account_id: value_to_string(sample.get("destination_account_id")),
             counterparty,
@@ -284,7 +286,7 @@ pub fn serialize_recurring_suggestion(item: &Map<String, Value>) -> Value {
         "name": value_to_string(item.get("name")),
         "description": value_to_string(item.get("description")),
         "type": value_to_string(item.get("type")),
-        "amount": value_to_f64(item.get("amount")),
+        "amountCents": value_to_i64(item.get("amount_cents")).unwrap_or(0),
         "sourceAccountId": item.get("source_account_id").cloned().unwrap_or(Value::Null),
         "destinationAccountId": item.get("destination_account_id").cloned().unwrap_or(Value::Null),
         "counterparty": value_to_string(item.get("counterparty")),

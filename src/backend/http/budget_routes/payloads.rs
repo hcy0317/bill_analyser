@@ -122,14 +122,18 @@ fn import_budget_records_from_payload(payload: &Value) -> RouteResult<Vec<Budget
             ))));
         };
         validate_import_budget_record(object, index)?;
-        records.push(object.clone());
+        let mut record = object.clone();
+        normalize_budget_amount_cents_field(&mut record);
+        records.push(record);
     }
     Ok(records)
 }
 
 fn validate_import_budget_record(payload: &BudgetRecord, index: usize) -> RouteResult<()> {
-    for field in ["period_type", "amount", "start_date"] {
-        if !payload.contains_key(field) {
+    let mut normalized_payload = payload.clone();
+    normalize_budget_amount_cents_field(&mut normalized_payload);
+    for field in ["period_type", "amount_cents", "start_date"] {
+        if !normalized_payload.contains_key(field) {
             return Err(Box::new(bad_request(format!(
                 "Missing required field at index {index}: {field}"
             ))));
@@ -160,7 +164,8 @@ fn validate_import_budget_record(payload: &BudgetRecord, index: usize) -> RouteR
 
 fn create_fields_from_payload(payload: &Value) -> RouteResult<BudgetRecord> {
     let mut fields = payload_object(payload)?.clone();
-    for field in ["period_type", "amount", "start_date"] {
+    normalize_budget_amount_cents_field(&mut fields);
+    for field in ["period_type", "amount_cents", "start_date"] {
         if missing_required_field(&fields, field) {
             return Err(Box::new(bad_request(format!(
                 "Missing required field: {field}"
@@ -201,6 +206,7 @@ fn update_fields_from_payload(
     existing_budget: &BudgetRecord,
 ) -> RouteResult<BudgetRecord> {
     let mut fields = payload_object(payload)?.clone();
+    normalize_budget_amount_cents_field(&mut fields);
     if let Some(period_type) = fields
         .get("period_type")
         .and_then(|value| value_string(Some(value)))
@@ -222,6 +228,12 @@ fn update_fields_from_payload(
         .map_err(|error| Box::new(bad_request(error)))?;
     fields.insert("updated_at".to_string(), Value::String(now_text()));
     Ok(fields)
+}
+
+fn normalize_budget_amount_cents_field(fields: &mut BudgetRecord) {
+    if let Some(value) = fields.remove("amountCents") {
+        fields.insert("amount_cents".to_string(), value);
+    }
 }
 
 fn payload_object(payload: &Value) -> RouteResult<&Map<String, Value>> {
@@ -315,19 +327,10 @@ fn non_empty_value_string(value: Option<&Value>) -> Option<String> {
     value_string(value)
 }
 
-fn forecast_amount(item: &Value) -> f64 {
-    item.get("forecast_amount")
-        .and_then(Value::as_f64)
+fn forecast_amount_cents(item: &Value) -> i64 {
+    item.get("forecast_amount_cents")
+        .and_then(Value::as_i64)
         .unwrap_or_default()
-}
-
-fn round2(value: f64) -> f64 {
-    let rounded = (value * 100.0).round() / 100.0;
-    if rounded.abs() < 0.005 {
-        0.0
-    } else {
-        rounded
-    }
 }
 
 fn non_empty_string(value: Option<&String>) -> Option<String> {

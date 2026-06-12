@@ -173,8 +173,8 @@ export class ImportTransaction implements ImportTransactionResponse {
     public destinationAccountId: string;
     public originalDestinationAccountName?: string;
     public originalDestinationAccountCurrency?: string;
-    public sourceAmount: number;
-    public destinationAmount: number;
+    public sourceAmountCents: number;
+    public destinationAmountCents: number;
     public tagIds: string[];
     public originalTagNames: string[];
     public comment: string;
@@ -241,8 +241,8 @@ export class ImportTransaction implements ImportTransactionResponse {
         this.destinationAccountId = response.destinationAccountId || '';
         this.originalDestinationAccountName = response.originalDestinationAccountName;
         this.originalDestinationAccountCurrency = response.originalDestinationAccountCurrency;
-        this.sourceAmount = response.sourceAmount;
-        this.destinationAmount = response.destinationAmount || 0;
+        this.sourceAmountCents = response.sourceAmountCents;
+        this.destinationAmountCents = response.destinationAmountCents || 0;
         this.tagIds = response.tagIds || [];
         this.originalTagNames = response.originalTagNames || [];
         this.comment = response.comment;
@@ -506,8 +506,8 @@ export class ImportTransaction implements ImportTransactionResponse {
             utcOffset: this.utcOffset,
             sourceAccountId: this.sourceAccountId,
             destinationAccountId: needsDestAccount ? this.destinationAccountId : '0',
-            sourceAmount: this.sourceAmount,
-            destinationAmount: needsDestAccount ? this.destinationAmount : 0,
+            sourceAmountCents: this.sourceAmountCents,
+            destinationAmountCents: needsDestAccount ? this.destinationAmountCents : 0,
             hideAmount: false,
             tagIds: this.tagIds,
             pictureIds: [],
@@ -558,8 +558,8 @@ export interface ImportTransactionRequestItem {
     readonly categoryName?: string;
     readonly sourceAccountName?: string;
     readonly destinationAccountName?: string;
-    readonly sourceAmount: string;
-    readonly destinationAmount?: string;
+    readonly sourceAmountCents: string;
+    readonly destinationAmountCents?: string;
     readonly geoLocation?: string;
     readonly tagNames?: string;
     readonly comment?: string;
@@ -577,8 +577,8 @@ export interface ImportTransactionResponse {
     readonly destinationAccountId?: string;
     readonly originalDestinationAccountName?: string;
     readonly originalDestinationAccountCurrency?: string;
-    readonly sourceAmount: number;
-    readonly destinationAmount?: number;
+    readonly sourceAmountCents: number;
+    readonly destinationAmountCents?: number;
     readonly tagIds: string[];
     readonly originalTagNames: string[];
     readonly comment: string;

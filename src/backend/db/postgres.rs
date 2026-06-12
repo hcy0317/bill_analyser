@@ -138,6 +138,10 @@ const ACCOUNT_RULE_SCOPE_CLEANUP_TABLES: &[&str] = &["account_rules"];
 
 const ACCOUNT_RULE_SCOPE_CLEANUP_INDEXES: &[&str] = &["idx_account_rules_user_enabled_priority"];
 
+const ACCOUNT_INITIAL_BALANCE_BACKFILL_TABLES: &[&str] = &["accounts"];
+
+const ACCOUNT_INITIAL_BALANCE_BACKFILL_INDEXES: &[&str] = &[];
+
 const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
     PostgresMigrationDescriptor {
         version: 1,
@@ -223,6 +227,13 @@ const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
         required_tables: ACCOUNT_RULE_SCOPE_CLEANUP_TABLES,
         required_indexes: ACCOUNT_RULE_SCOPE_CLEANUP_INDEXES,
     },
+    PostgresMigrationDescriptor {
+        version: 13,
+        file_name: "0013_account_initial_balance_cents_backfill.sql",
+        description: "backfill legacy yuan JSON money fields into explicit cents",
+        required_tables: ACCOUNT_INITIAL_BALANCE_BACKFILL_TABLES,
+        required_indexes: ACCOUNT_INITIAL_BALANCE_BACKFILL_INDEXES,
+    },
 ];
 
 pub fn postgres_migrations_dir() -> PathBuf {
@@ -254,7 +265,7 @@ mod tests {
     #[test]
     fn postgres_manifest_points_to_existing_initial_schema() {
         let manifest = postgres_migration_manifest();
-        assert_eq!(manifest.len(), 12);
+        assert_eq!(manifest.len(), 13);
         assert_eq!(manifest[0].version, 1);
         assert_eq!(manifest[0].file_name, POSTGRES_INITIAL_SCHEMA_FILE);
         for (index, descriptor) in manifest.iter().enumerate() {
@@ -317,6 +328,25 @@ mod tests {
         assert!(migration.contains("DROP COLUMN IF EXISTS transaction_type_scope"));
         assert!(migration.contains("DROP COLUMN IF EXISTS field_scope"));
         assert!(migration.contains("idx_account_rules_user_enabled_priority"));
+    }
+
+    #[test]
+    fn money_json_backfill_migration_converts_legacy_yuan_metadata() {
+        let migration = fs::read_to_string(
+            postgres_migrations_dir().join("0013_account_initial_balance_cents_backfill.sql"),
+        )
+        .unwrap();
+
+        assert!(migration.contains("initial_balance_cents"));
+        assert!(migration.contains("ROUND((metadata->>'initial_balance')::numeric * 100)::bigint"));
+        assert!(migration.contains("NOT (metadata ? 'initial_balance_cents')"));
+        assert!(migration.contains("destination_amount_cents"));
+        assert!(migration.contains("standard_payload->>'destination_amount'"));
+        assert!(migration.contains("standard_payload->>'destinationAmount'"));
+        assert!(migration.contains("preview_destination_amount_cents"));
+        assert!(migration.contains("preview_payload->>'destination_amount_cents'"));
+        assert!(migration.contains("preview_payload->>'destinationAmountCents'"));
+        assert!(migration.contains("preview_payload->>'preview_destination_amount'"));
     }
 
     #[test]

@@ -214,14 +214,14 @@
                                   :currency="account.currency"
                                   :flip-negative="account.isLiability"
                                   v-model:show="accountContext.showBalanceSheet"
-                                  v-model="account.balance"
+                                  v-model="account.balanceCents"
                 ></number-pad-sheet>
             </f7-list-item>
 
             <f7-list-item
                 class="account-edit-balancetime list-item-with-header-and-title"
                 link="#" no-chevron
-                v-show="account.balance"
+                v-show="account.balanceCents"
                 v-if="!editAccountId"
             >
                 <template #header>
@@ -468,14 +468,14 @@
                                       :currency="subAccount.currency"
                                       :flip-negative="account.isLiability"
                                       v-model:show="subAccountContexts[idx]!.showBalanceSheet"
-                                      v-model="subAccount.balance"
+                                      v-model="subAccount.balanceCents"
                     ></number-pad-sheet>
                 </f7-list-item>
 
                 <f7-list-item
                     class="account-edit-balancetime list-item-with-header-and-title"
                     link="#" no-chevron
-                    v-show="subAccount.balance"
+                    v-show="subAccount.balanceCents"
                     v-if="!editAccountId || isNewAccount(subAccount)"
                 >
                     <template #header>
@@ -631,7 +631,7 @@ const showDeleteActionSheet = ref<boolean>(false);
 const allCurrencies = computed<LocalizedCurrencyInfo[]>(() => getAllCurrencies());
 
 function formatAccountDisplayBalance(selectedAccount: Account): string {
-    const balance = account.value.isLiability ? -selectedAccount.balance : selectedAccount.balance;
+    const balance = account.value.isLiability ? -selectedAccount.balanceCents : selectedAccount.balanceCents;
     return formatAmountToLocalizedNumeralsWithCurrency(balance, selectedAccount.currency);
 }
 

@@ -325,7 +325,7 @@ function onReceiptRecognitionChanged(result: RecognizedReceiptImageResponse): vo
 
     if (typeof result.amount === 'number' && Number.isFinite(result.amount)) {
         const amountInCents = Math.round(result.amount * 100);
-        params.push(`amount=${amountInCents}`);
+        params.push(`sourceAmountCents=${amountInCents}`);
     }
 
     if (result.tradeTime) {

@@ -87,19 +87,22 @@ pub fn resolve_parent_budget_period(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn rollup_parent_amount(existing_parent_amount: f64, child_total: f64) -> f64 {
-    existing_parent_amount.max(child_total)
+pub fn rollup_parent_amount_cents(existing_parent_amount_cents: i64, child_total_cents: i64) -> i64 {
+    existing_parent_amount_cents.max(child_total_cents)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn rollup_yearly_child_total(
-    quarterly_amounts: &BTreeMap<u32, f64>,
-    monthly_totals_by_quarter: &BTreeMap<u32, f64>,
-) -> f64 {
-    let mut total = 0.0;
+pub fn rollup_yearly_child_total_cents(
+    quarterly_amounts_cents: &BTreeMap<u32, i64>,
+    monthly_totals_by_quarter_cents: &BTreeMap<u32, i64>,
+) -> i64 {
+    let mut total = 0_i64;
     for quarter in 1..=4 {
-        let quarterly = quarterly_amounts.get(&quarter).copied().unwrap_or_default();
-        let monthly = monthly_totals_by_quarter
+        let quarterly = quarterly_amounts_cents
+            .get(&quarter)
+            .copied()
+            .unwrap_or_default();
+        let monthly = monthly_totals_by_quarter_cents
             .get(&quarter)
             .copied()
             .unwrap_or_default();
@@ -246,9 +249,13 @@ pub fn build_budget_history_item_from_detail_with_context(
     #[cfg(not(coverage))]
     tracing::info!(domain = "budget", operation = "build_budget_history_item_from_detail_with_context", "business operation entered");
     let id = value_to_i64(detail.get("id")).unwrap_or_default();
-    let budget_amount = budget_item_amount(detail, "budget_amount");
-    let spent_amount = budget_item_amount(detail, "spent_amount");
-    let status = if spent_amount > budget_amount {
+    let budget_amount_cents = budget_item_amount_cents(detail, "budget_amount_cents");
+    let spent_amount_cents = budget_item_amount_cents(detail, "spent_amount_cents");
+    let remaining_amount_cents = detail
+        .get("remaining_amount_cents")
+        .and_then(|value| value_to_i64(Some(value)))
+        .unwrap_or(budget_amount_cents - spent_amount_cents);
+    let status = if spent_amount_cents > budget_amount_cents {
         "over_budget"
     } else {
         "within_budget"
@@ -259,10 +266,10 @@ pub fn build_budget_history_item_from_detail_with_context(
         "budget_id": id,
         "period_start": period.start_date,
         "period_end": period.end_date,
-        "budget_amount": round2(budget_amount),
-        "spent_amount": round2(spent_amount),
-        "remaining_amount": detail.get("remaining_amount").cloned().unwrap_or_else(|| json!(round2(budget_amount - spent_amount))),
-        "execution_rate": detail.get("execution_rate").cloned().unwrap_or_else(|| json!(if budget_amount > 0.0 { round2((spent_amount / budget_amount) * 100.0) } else { 0.0 })),
+        "budget_amount_cents": budget_amount_cents,
+        "spent_amount_cents": spent_amount_cents,
+        "remaining_amount_cents": remaining_amount_cents,
+        "execution_rate": detail.get("execution_rate").cloned().unwrap_or_else(|| json!(if budget_amount_cents > 0 { round2((spent_amount_cents as f64 / budget_amount_cents as f64) * 100.0) } else { 0.0 })),
         "status": status,
         "filter_summary": filter_summary,
         "calculated_at": "",

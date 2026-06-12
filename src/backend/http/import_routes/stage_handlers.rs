@@ -396,7 +396,7 @@ struct ImportIntelligenceRecurringTemplate {
     id: i64,
     name: String,
     bill_type: String,
-    amount: f64,
+    amount_cents: i64,
     account: String,
     counterparty: String,
     next_date: String,
@@ -823,7 +823,7 @@ async fn load_import_intelligence_recurring_templates(
                 id: row.try_get("id")?,
                 name: row.try_get("name")?,
                 bill_type: row.try_get::<Option<String>, _>("transaction_type")?.unwrap_or_default(),
-                amount: amount_minor as f64,
+                amount_cents: amount_minor,
                 account: source_account_id
                     .map(|value| value.to_string())
                     .or_else(|| optional_text_from_json(&metadata, "account"))
@@ -1247,7 +1247,9 @@ fn apply_learning_rule_match(
             counterparty_bucket: draft.preview_counterparty.clone(),
             payment_bucket: draft.preview_payment_method.clone(),
             description_bucket: draft.preview_description.clone(),
-            amount_bucket: Some(amount_bucket(Some(&json!(draft.preview_amount))).to_string()),
+            amount_bucket: Some(
+                amount_cents_bucket(Some(&json!(draft.preview_amount_cents))).to_string(),
+            ),
             transfer_protected,
             ..ImportLearningRecommendationKeyInput::default()
         },
@@ -1532,7 +1534,7 @@ fn recurring_template_match(
     }
     let mut score: f64 = 0.0;
     let mut reasons = Vec::new();
-    if recurring_amount_matches(draft.preview_amount, template.amount) {
+    if recurring_amount_matches(draft.preview_amount_cents, template.amount_cents) {
         score += 0.45;
         reasons.push("amount".to_string());
     } else {
@@ -1706,11 +1708,8 @@ fn recurring_type_matches(preview_type: &str, recurring_type: &str) -> bool {
         || preview_type.trim() == recurring_type
 }
 
-fn recurring_amount_matches(preview_amount: f64, template_amount: f64) -> bool {
-    let preview_cents = (preview_amount.abs() * 100.0).round() as i64;
-    let template_as_cents = template_amount.abs().round() as i64;
-    let template_yuan_as_cents = (template_amount.abs() * 100.0).round() as i64;
-    preview_cents == template_as_cents || preview_cents == template_yuan_as_cents
+fn recurring_amount_matches(preview_amount_cents: i64, template_amount_cents: i64) -> bool {
+    preview_amount_cents.abs() == template_amount_cents.abs()
 }
 
 fn recurring_account_matches(
@@ -1761,8 +1760,8 @@ fn import_preview_draft_from_row(row: &ImportPreviewRow) -> ImportPreviewDraft {
     ImportPreviewDraft {
         preview_date: row.preview_date.clone(),
         preview_type: row.preview_type.clone(),
-        preview_amount: row.preview_amount,
-        preview_destination_amount: row.preview_destination_amount,
+        preview_amount_cents: row.preview_amount_cents,
+        preview_destination_amount_cents: row.preview_destination_amount_cents,
         category_id: row.category_id,
         preview_main_category: row.preview_main_category.clone(),
         preview_sub_category: row.preview_sub_category.clone(),
@@ -3259,8 +3258,8 @@ mod tests {
             user_id: 1,
             preview_date: "2026-01-01 09:00:00".to_string(),
             preview_type: "收入".to_string(),
-            preview_amount: 1.23,
-            preview_destination_amount: 0.0,
+            preview_amount_cents: 123,
+            preview_destination_amount_cents: 0,
             category_id: Some(42),
             preview_main_category: "理财".to_string(),
             preview_sub_category: "理财收益".to_string(),

@@ -5,13 +5,13 @@ use bill_analyser_core::budgets::{
     build_budget_execution_summary, build_budget_export_response, build_budget_forecast_item,
     build_budget_forecast_item_from_input, build_budget_history_filter_summary,
     build_budget_history_item_from_detail, build_budget_period_scope, build_forecast_period_key,
-    calculate_avg_backtest_mape, calculate_budget_period_progress, calculate_forecast_amount,
+    calculate_avg_backtest_mape, calculate_budget_period_progress, calculate_forecast_amount_cents,
     calculate_forecast_backtest_mape, expand_forecast_history_window, get_budget_type_name,
     iter_budget_history_period_ranges, normalize_budget_category_type,
     normalize_budget_query_end_date, parse_budget_csv_int_list, parse_budget_json_int_list,
     resolve_budget_category_info, resolve_budget_category_type, resolve_budget_period_range,
-    resolve_forecast_budget_amount, resolve_forecast_confidence, resolve_forecast_trend,
-    resolve_parent_budget_period, rollup_parent_amount, rollup_yearly_child_total,
+    resolve_forecast_budget_amount_cents, resolve_forecast_confidence, resolve_forecast_trend,
+    resolve_parent_budget_period, rollup_parent_amount_cents, rollup_yearly_child_total_cents,
     select_budget_detail_items, select_budget_summary_items, validate_budget_date_range,
     validate_budget_period_args, validate_import_budget_item, BudgetForecastItemInput,
     BudgetHistoryFilterSummaryInput, BudgetPeriodScopeInput, BudgetRouteFilters,
@@ -129,7 +129,7 @@ fn route_period_scope_and_filter_parsing_match_budget_contract() {
 fn import_export_and_avg_mape_contracts_match_budget_routes() {
     let import_item = json!({
         "period_type": "monthly",
-        "amount": 1288.25,
+        "amount_cents": 128825,
         "start_date": "2026-05-01",
         "end_date": "2026-05-31",
         "category": "餐饮"
@@ -139,7 +139,7 @@ fn import_export_and_avg_mape_contracts_match_budget_routes() {
     assert!(validate_import_budget_item(
         &json!({
             "period_type": "weekly",
-            "amount": 1,
+            "amount_cents": 1,
             "start_date": "2026-06-02",
             "end_date": "2026-06-01",
             "category": "交通"
@@ -153,7 +153,7 @@ fn import_export_and_avg_mape_contracts_match_budget_routes() {
         "category": "餐饮",
         "sub_category": "外卖",
         "period_type": "monthly",
-        "amount": 800.0,
+        "amount_cents": 80000,
         "start_date": "2026-05-01",
         "end_date": "2026-05-31",
         "alert_threshold": 80,
@@ -181,9 +181,9 @@ fn execution_summary_avoids_double_counting_synchronized_primary_budget() {
             "sub_category": "",
             "period_type": "monthly",
             "start_date": "2026-05-01",
-            "budget_amount": 300.0,
-            "spent_amount": 120.0,
-            "remaining_amount": 180.0
+            "budget_amount_cents": 30000,
+            "spent_amount_cents": 12000,
+            "remaining_amount_cents": 18000
         }),
         json!({
             "id": 2,
@@ -191,9 +191,9 @@ fn execution_summary_avoids_double_counting_synchronized_primary_budget() {
             "sub_category": "外卖",
             "period_type": "monthly",
             "start_date": "2026-05-01",
-            "budget_amount": 100.0,
-            "spent_amount": 50.0,
-            "remaining_amount": 50.0
+            "budget_amount_cents": 10000,
+            "spent_amount_cents": 5000,
+            "remaining_amount_cents": 5000
         }),
         json!({
             "id": 3,
@@ -201,9 +201,9 @@ fn execution_summary_avoids_double_counting_synchronized_primary_budget() {
             "sub_category": "堂食",
             "period_type": "monthly",
             "start_date": "2026-05-01",
-            "budget_amount": 200.0,
-            "spent_amount": 70.0,
-            "remaining_amount": 130.0
+            "budget_amount_cents": 20000,
+            "spent_amount_cents": 7000,
+            "remaining_amount_cents": 13000
         }),
     ];
 
@@ -211,9 +211,9 @@ fn execution_summary_avoids_double_counting_synchronized_primary_budget() {
     assert_eq!(ids(&select_budget_summary_items(&items)), vec![1]);
 
     let summary = build_budget_execution_summary(&items);
-    assert_eq!(summary["total_budget"], 300.0);
-    assert_eq!(summary["total_spent"], 120.0);
-    assert_eq!(summary["total_remaining"], 180.0);
+    assert_eq!(summary["total_budget_cents"], 30000);
+    assert_eq!(summary["total_spent_cents"], 12000);
+    assert_eq!(summary["total_remaining_cents"], 18000);
     assert_eq!(summary["overall_execution_rate"], 40.0);
     assert_eq!(summary["count"], 1);
 }
@@ -227,8 +227,8 @@ fn execution_summary_preserves_manual_primary_headroom_and_ambiguous_primaries()
             "sub_category": "",
             "period_type": "monthly",
             "start_date": "2026-05-01",
-            "budget_amount": 500.0,
-            "spent_amount": 180.0
+            "budget_amount_cents": 50000,
+            "spent_amount_cents": 18000
         }),
         json!({
             "id": 11,
@@ -236,8 +236,8 @@ fn execution_summary_preserves_manual_primary_headroom_and_ambiguous_primaries()
             "sub_category": "地铁",
             "period_type": "monthly",
             "start_date": "2026-05-01",
-            "budget_amount": 100.0,
-            "spent_amount": 60.0
+            "budget_amount_cents": 10000,
+            "spent_amount_cents": 6000
         }),
     ];
     assert_eq!(ids(&select_budget_detail_items(&manual_primary)), vec![10]);
@@ -249,7 +249,7 @@ fn execution_summary_preserves_manual_primary_headroom_and_ambiguous_primaries()
             "sub_category": "",
             "period_type": "monthly",
             "start_date": "2026-05-01",
-            "budget_amount": 100.0
+            "budget_amount_cents": 10000
         }),
         json!({
             "id": 21,
@@ -257,7 +257,7 @@ fn execution_summary_preserves_manual_primary_headroom_and_ambiguous_primaries()
             "sub_category": "",
             "period_type": "monthly",
             "start_date": "2026-05-01",
-            "budget_amount": 120.0
+            "budget_amount_cents": 12000
         }),
         json!({
             "id": 22,
@@ -265,7 +265,7 @@ fn execution_summary_preserves_manual_primary_headroom_and_ambiguous_primaries()
             "sub_category": "电影",
             "period_type": "monthly",
             "start_date": "2026-05-01",
-            "budget_amount": 80.0
+            "budget_amount_cents": 8000
         }),
     ];
     assert_eq!(
@@ -284,8 +284,8 @@ fn execution_summary_preserves_manual_primary_headroom_and_ambiguous_primaries()
             "sub_category": "",
             "period_type": "monthly",
             "start_date": "2026-05-01",
-            "budget_amount": 100.005,
-            "spent_amount": 33.333
+            "budget_amount_cents": 10001,
+            "spent_amount_cents": 3333
         }),
         json!({
             "id": 31,
@@ -293,8 +293,8 @@ fn execution_summary_preserves_manual_primary_headroom_and_ambiguous_primaries()
             "sub_category": "",
             "period_type": "monthly",
             "start_date": "2026-05-01",
-            "budget_amount": 50.0,
-            "spent_amount": 10.0
+            "budget_amount_cents": 5000,
+            "spent_amount_cents": 1000
         }),
     ];
     assert_eq!(
@@ -303,9 +303,9 @@ fn execution_summary_preserves_manual_primary_headroom_and_ambiguous_primaries()
     );
 
     let decimal_summary = build_budget_execution_summary(&first_seen_groups);
-    assert_eq!(decimal_summary["total_budget"].as_f64().unwrap(), 150.005);
-    assert_eq!(decimal_summary["total_spent"].as_f64().unwrap(), 43.333);
-    assert_eq!(decimal_summary["overall_execution_rate"], 28.89);
+    assert_eq!(decimal_summary["total_budget_cents"], 15001);
+    assert_eq!(decimal_summary["total_spent_cents"], 4333);
+    assert_eq!(decimal_summary["overall_execution_rate"], 28.88);
 }
 
 #[test]
@@ -388,12 +388,15 @@ fn date_helpers_pin_query_end_window_history_and_parent_rollup_semantics() {
     assert_eq!(yearly_parent.start_date, "2026-01-01");
     assert_eq!(yearly_parent.end_date, "2026-12-31");
 
-    assert_eq!(rollup_parent_amount(500.0, 620.128), 620.128);
-    assert_eq!(rollup_parent_amount(700.0, 620.128), 700.0);
+    assert_eq!(rollup_parent_amount_cents(50000, 62013), 62013);
+    assert_eq!(rollup_parent_amount_cents(70000, 62013), 70000);
 
-    let quarterly = BTreeMap::from([(1, 1000.0), (2, 600.0)]);
-    let monthly = BTreeMap::from([(1, 900.0), (2, 750.125), (4, 100.0)]);
-    assert_eq!(rollup_yearly_child_total(&quarterly, &monthly), 1850.125);
+    let quarterly = BTreeMap::from([(1, 100000), (2, 60000)]);
+    let monthly = BTreeMap::from([(1, 90000), (2, 75013), (4, 10000)]);
+    assert_eq!(
+        rollup_yearly_child_total_cents(&quarterly, &monthly),
+        185013
+    );
 }
 
 #[test]
@@ -443,8 +446,8 @@ fn on_demand_history_item_and_forecast_helpers_preserve_budget_shapes() {
         "category": "餐饮",
         "sub_category": "外卖",
         "category_id": "3",
-        "budget_amount": 300.0,
-        "spent_amount": 360.0,
+        "budget_amount_cents": 30000,
+        "spent_amount_cents": 36000,
         "category_info": {"id": 3, "type": 3},
         "type": 3,
         "period_type": "monthly",
@@ -470,14 +473,14 @@ fn on_demand_history_item_and_forecast_helpers_preserve_budget_shapes() {
     assert_eq!(history_item["alert_threshold"], 90);
     assert_eq!(history_item["enabled"], 1);
 
-    let samples = [100.0, 120.0, 90.0, 150.0];
+    let samples = [10000, 12000, 9000, 15000];
     assert_eq!(
-        calculate_forecast_amount(&samples, "historical_average"),
-        Some(115.0)
+        calculate_forecast_amount_cents(&samples, "historical_average"),
+        Some(11500)
     );
     assert_eq!(
-        calculate_forecast_amount(&samples, "moving_average"),
-        Some(120.0)
+        calculate_forecast_amount_cents(&samples, "moving_average"),
+        Some(12000)
     );
     assert_eq!(
         calculate_forecast_backtest_mape(&samples, "moving_average"),
@@ -487,8 +490,8 @@ fn on_demand_history_item_and_forecast_helpers_preserve_budget_shapes() {
     assert_eq!(resolve_forecast_confidence(Some(15.0)), "medium");
     assert_eq!(resolve_forecast_confidence(None), "low");
     assert_eq!(resolve_forecast_trend(&samples), "up");
-    assert_eq!(resolve_forecast_budget_amount(500.0, 800.0), 500.0);
-    assert_eq!(resolve_forecast_budget_amount(0.0, 800.0), 800.0);
+    assert_eq!(resolve_forecast_budget_amount_cents(50000, 80000), 50000);
+    assert_eq!(resolve_forecast_budget_amount_cents(0, 80000), 80000);
 
     let period_labels = vec![
         "2026-02".to_string(),
@@ -499,17 +502,17 @@ fn on_demand_history_item_and_forecast_helpers_preserve_budget_shapes() {
     let forecast = build_budget_forecast_item_from_input(BudgetForecastItemInput {
         category: "餐饮",
         category_info: json!({"id": 3, "type": 3}),
-        amounts: &samples,
-        current_spent: 80.0,
-        primary_budget_amount: 0.0,
-        sub_budget_total: 110.0,
+        amounts_cents: &samples,
+        current_spent_cents: 8000,
+        primary_budget_amount_cents: 0,
+        sub_budget_total_cents: 11000,
         strategy: "moving_average",
         period_count: 6,
         period_labels: Some(&period_labels),
     });
     assert_eq!(forecast["category"], "餐饮");
-    assert_eq!(forecast["budget_amount"], 110.0);
-    assert_eq!(forecast["forecast_amount"], 120.0);
+    assert_eq!(forecast["budget_amount_cents"], 11000);
+    assert_eq!(forecast["forecast_amount_cents"], 12000);
     assert_eq!(forecast["projected_over_budget"], true);
     assert_eq!(forecast["forecast_strategy"], "moving_average");
     assert_eq!(
@@ -519,12 +522,12 @@ fn on_demand_history_item_and_forecast_helpers_preserve_budget_shapes() {
     assert_eq!(forecast["period_count"], 6);
     assert_eq!(
         forecast["periods"][0],
-        json!({"period": "2026-02", "amount": 100.0})
+        json!({"period": "2026-02", "amount_cents": 10000})
     );
     assert_eq!(forecast["trend"], "up");
 
     let default_forecast =
-        build_budget_forecast_item("交通", Value::Null, &samples, 50.0, 500.0, 0.0, "");
+        build_budget_forecast_item("交通", Value::Null, &samples, 5000, 50000, 0, "");
     assert_eq!(default_forecast["forecast_strategy"], "historical_average");
 }
 
@@ -595,7 +598,7 @@ fn validation_error_and_period_edge_contracts_are_pinned() {
     assert!(validate_import_budget_item(
         &json!({
             "period_type": "monthly",
-            "amount": 10,
+            "amount_cents": 10,
             "start_date": "2026-05-01",
             "category": ""
         }),
@@ -605,7 +608,7 @@ fn validation_error_and_period_edge_contracts_are_pinned() {
     assert!(validate_import_budget_item(
         &json!({
             "period_type": "bad",
-            "amount": 10,
+            "amount_cents": 10,
             "start_date": "2026-05-01",
             "category": "餐饮"
         }),
@@ -707,7 +710,7 @@ fn history_and_forecast_edge_branches_are_pinned() {
     assert_eq!(yearly[1].end_date, "2026-12-31");
 
     let within = build_budget_history_item_from_detail(
-        &json!({"id": 7, "category": "交通", "budget_amount": 300.0, "spent_amount": 200.0}),
+        &json!({"id": 7, "category": "交通", "budget_amount_cents": 30000, "spent_amount_cents": 20000}),
         &bill_analyser_core::budgets::BudgetPeriodRange {
             start_date: "2026-05-01".to_string(),
             end_date: "2026-05-31".to_string(),
@@ -715,15 +718,15 @@ fn history_and_forecast_edge_branches_are_pinned() {
     );
     assert_eq!(within["status"], "within_budget");
 
-    assert_eq!(calculate_forecast_amount(&[], "moving_average"), None);
+    assert_eq!(calculate_forecast_amount_cents(&[], "moving_average"), None);
     assert_eq!(
-        calculate_forecast_backtest_mape(&[0.0, 0.0], "moving_average"),
+        calculate_forecast_backtest_mape(&[0, 0], "moving_average"),
         None
     );
-    assert_eq!(resolve_forecast_trend(&[10.0]), "stable");
-    assert_eq!(resolve_forecast_trend(&[0.0, 5.0]), "stable");
-    assert_eq!(resolve_forecast_trend(&[100.0, 80.0]), "down");
-    assert_eq!(resolve_forecast_trend(&[100.0, 103.0]), "stable");
+    assert_eq!(resolve_forecast_trend(&[1000]), "stable");
+    assert_eq!(resolve_forecast_trend(&[0, 500]), "stable");
+    assert_eq!(resolve_forecast_trend(&[10000, 8000]), "down");
+    assert_eq!(resolve_forecast_trend(&[10000, 10300]), "stable");
 
     let only_secondary = vec![json!({
         "id": 70,
@@ -731,7 +734,7 @@ fn history_and_forecast_edge_branches_are_pinned() {
         "sub_category": "外卖",
         "period_type": "monthly",
         "start_date": "2026-05-01",
-        "budget_amount": 100.0
+        "budget_amount_cents": 10000
     })];
     assert_eq!(ids(&select_budget_detail_items(&only_secondary)), vec![70]);
 }

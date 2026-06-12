@@ -1,9 +1,9 @@
 // 中文导读：导入预览 draft 构造与 feedback 投影辅助。
 // 维护重点：把当前解析结果和 Postgres authoritative bill 候选转换成 import_preview_bills 可写 draft。
-// 不变式：金额输出保持预览层元单位，跨批候选仅生成待审核证据，不直接改写正式账单。
+// 不变式：金额输出保持整数分，跨批候选仅生成待审核证据，不直接改写正式账单。
 
 pub fn preview_draft_from_dedup_bill(bill: &DedupBill) -> ImportPreviewDraft {
-    let amount = money_to_yuan_f64(bill.amount);
+    let amount_cents = bill.amount.to_cents();
     let preview_payment_method =
         first_non_empty([bill.payment_method.as_str(), bill.parser_id.as_str()]);
     let no_income_expenditure = dedup_bill_has_no_income_expenditure_source(bill);
@@ -16,8 +16,11 @@ pub fn preview_draft_from_dedup_bill(bill: &DedupBill) -> ImportPreviewDraft {
     ImportPreviewDraft {
         preview_date: bill.date.clone(),
         preview_type: bill.transaction_type.clone(),
-        preview_amount: amount.abs(),
-        preview_destination_amount: preview_destination_amount_for_bill(bill, amount),
+        preview_amount_cents: amount_cents.abs(),
+        preview_destination_amount_cents: preview_destination_amount_cents_for_bill(
+            bill,
+            amount_cents,
+        ),
         preview_main_category: bill.main_category.clone(),
         preview_sub_category: bill.sub_category.clone(),
         preview_source_account_id: parse_positive_i64(&bill.source_account_id),
@@ -127,7 +130,7 @@ fn dedup_source_chain(bill: &DedupBill) -> Vec<Value> {
         "parser_id": bill.parser_id,
         "template_id": bill.template_id,
         "date": bill.date,
-        "amount": bill.amount.to_yuan_string(),
+        "amount_cents": bill.amount.to_cents(),
     }));
     for source in &bill.merged_from {
         chain.push(serde_json::json!({
@@ -135,7 +138,7 @@ fn dedup_source_chain(bill: &DedupBill) -> Vec<Value> {
             "source": source.source,
             "template_id": source.template_id,
             "date": source.date,
-            "amount": source.amount,
+            "source_amount_text": source.amount,
         }));
     }
     chain
@@ -220,7 +223,7 @@ pub fn preview_draft_from_history_duplicate(
     input: ImportHistoryDuplicatePreviewInput<'_>,
 ) -> ImportPreviewDraft {
     let history = &input.history_bill.bill;
-    let amount = money_to_yuan_f64(history.amount);
+    let amount_cents = history.amount.to_cents();
     let source_ids = input
         .imported_bill
         .dedup_source_ids()
@@ -239,7 +242,7 @@ pub fn preview_draft_from_history_duplicate(
             "parser_id": history.parser_id,
             "source": history.source,
             "date": history.date,
-            "amount": history.amount.to_yuan_string(),
+            "amount_cents": history.amount.to_cents(),
         },
         {
             "role": "import_duplicate",
@@ -247,15 +250,18 @@ pub fn preview_draft_from_history_duplicate(
             "parser_id": input.imported_bill.parser_id,
             "source": input.imported_bill.source_identifier(),
             "date": input.imported_bill.date,
-            "amount": input.imported_bill.amount.to_yuan_string(),
+            "amount_cents": input.imported_bill.amount.to_cents(),
         }
     ]);
 
     ImportPreviewDraft {
         preview_date: history.date.clone(),
         preview_type: history.transaction_type.clone(),
-        preview_amount: amount.abs(),
-        preview_destination_amount: preview_destination_amount_for_bill(history, amount),
+        preview_amount_cents: amount_cents.abs(),
+        preview_destination_amount_cents: preview_destination_amount_cents_for_bill(
+            history,
+            amount_cents,
+        ),
         preview_main_category: history.main_category.clone(),
         preview_sub_category: history.sub_category.clone(),
         preview_source_account_id: parse_positive_i64(&history.source_account_id),
@@ -337,8 +343,8 @@ pub fn preview_draft_from_history_transfer(
             "import_incoming",
         )
     };
-    let amount = money_to_yuan_f64(outgoing.amount);
-    let destination_amount = money_to_yuan_f64(incoming.amount).abs();
+    let amount_cents = outgoing.amount.to_cents();
+    let destination_amount_cents = incoming.amount.to_cents().abs();
     let source_ids = input
         .imported_bill
         .dedup_source_ids()
@@ -362,7 +368,7 @@ pub fn preview_draft_from_history_transfer(
             "parser_id": outgoing.parser_id,
             "source": outgoing.source_identifier(),
             "date": outgoing.date,
-            "amount": outgoing.amount.to_yuan_string(),
+            "amount_cents": outgoing.amount.to_cents(),
             "counterparty": outgoing.counterparty,
             "payment_method": outgoing.payment_method,
             "description": outgoing.description,
@@ -375,7 +381,7 @@ pub fn preview_draft_from_history_transfer(
             "parser_id": incoming.parser_id,
             "source": incoming.source_identifier(),
             "date": incoming.date,
-            "amount": incoming.amount.to_yuan_string(),
+            "amount_cents": incoming.amount.to_cents(),
             "counterparty": incoming.counterparty,
             "payment_method": incoming.payment_method,
             "description": incoming.description,
@@ -385,8 +391,8 @@ pub fn preview_draft_from_history_transfer(
     ImportPreviewDraft {
         preview_date: outgoing.date.clone(),
         preview_type: "转账".to_string(),
-        preview_amount: amount.abs(),
-        preview_destination_amount: destination_amount,
+        preview_amount_cents: amount_cents.abs(),
+        preview_destination_amount_cents: destination_amount_cents,
         preview_main_category: outgoing.main_category.clone(),
         preview_sub_category: outgoing.sub_category.clone(),
         preview_source_account_id: parse_positive_i64(&outgoing.source_account_id),
@@ -470,8 +476,8 @@ impl Default for ImportPreviewDraft {
         Self {
             preview_date: String::new(),
             preview_type: String::new(),
-            preview_amount: 0.0,
-            preview_destination_amount: 0.0,
+            preview_amount_cents: 0,
+            preview_destination_amount_cents: 0,
             category_id: None,
             preview_main_category: String::new(),
             preview_sub_category: String::new(),
@@ -616,6 +622,65 @@ mod preview_draft_tests {
         assert_eq!(
             draft.preview_matching_feedback["transfer"]["source_chain"][1]["description"],
             "wechat description"
+        );
+    }
+
+    #[test]
+    fn dedup_preview_draft_preserves_amount_cents_and_transfer_destination_cents() {
+        let bill = DedupBill {
+            transaction_type: "转账".to_string(),
+            destination_account_id: Some("2002".to_string()),
+            template_id: Some("901".to_string()),
+            merged_from: vec![bill_analyser_core::MergedBillSource {
+                source: "alipay".to_string(),
+                date: "2026-05-04 10:00:05".to_string(),
+                amount: Some("300.00".to_string()),
+                template_id: Some("902".to_string()),
+            }],
+            ..transfer_bill("icbc", "-300.00", "1001")
+        };
+
+        let draft = preview_draft_from_dedup_bill(&bill);
+
+        assert_eq!(draft.preview_amount_cents, 30000);
+        assert_eq!(draft.preview_destination_amount_cents, 30000);
+        assert_eq!(draft.preview_source_account_id, Some(1001));
+        assert_eq!(draft.preview_destination_account_id, Some(2002));
+        assert_eq!(
+            draft.preview_matching_feedback["dedup"]["source_chain"][0]["amount_cents"],
+            serde_json::json!(-30000)
+        );
+        assert_eq!(
+            draft.preview_matching_feedback["dedup"]["source_chain"][1]["source_amount_text"],
+            "300.00"
+        );
+    }
+
+    #[test]
+    fn history_duplicate_preview_preserves_current_bill_cents_payloads() {
+        let imported = transfer_bill("wechat", "-18.50", "2002");
+        let stored = history_row(transfer_bill("icbc", "-18.50", "1001"));
+
+        let draft = preview_draft_from_history_duplicate(ImportHistoryDuplicatePreviewInput {
+            imported_bill: &imported,
+            history_bill: &stored,
+            candidate_id: "candidate",
+            group_key: "group",
+            time_diff_seconds: 2,
+            score_percent: 96,
+            level: "high",
+            reason: "same_amount|same_day",
+        });
+
+        assert_eq!(draft.preview_amount_cents, 1850);
+        assert_eq!(draft.preview_destination_amount_cents, 0);
+        assert_eq!(
+            draft.preview_matching_feedback["dedup"]["source_chain"][0]["amount_cents"],
+            serde_json::json!(-1850)
+        );
+        assert_eq!(
+            draft.preview_matching_feedback["dedup"]["source_chain"][1]["amount_cents"],
+            serde_json::json!(-1850)
         );
     }
 }

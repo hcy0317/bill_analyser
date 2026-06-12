@@ -99,7 +99,7 @@ describe('statistics store service boundary', () => {
         const result = {
             startTime: 100,
             endTime: 200,
-            items: [{ categoryId: 'cat-food', accountId: 'cash', amount: -1234 }]
+            items: [{ categoryId: 'cat-food', accountId: 'cash', amountCents: -1234 }]
         };
         mockGetTransactionStatistics.mockReturnValue(statisticsEnvelope(result));
 
@@ -166,8 +166,8 @@ describe('statistics store service boundary', () => {
             day: 1,
             items: [{
                 accountId: 'cash',
-                accountOpeningBalance: 10025,
-                accountClosingBalance: 10941
+                accountOpeningBalanceCents: 10025,
+                accountClosingBalanceCents: 10941
             }]
         }];
         mockGetTransactionStatisticsAssetTrends.mockReturnValue(statisticsEnvelope(result));
@@ -186,7 +186,7 @@ describe('statistics store service boundary', () => {
             isUpToDate: true
         });
         expect(mockGetTransactionStatisticsAssetTrends).toHaveBeenCalledTimes(2);
-        expect(result[0]!.items[0]!.accountOpeningBalance).toBe(10025);
-        expect(result[0]!.items[0]!.accountClosingBalance).toBe(10941);
+        expect(result[0]!.items[0]!.accountOpeningBalanceCents).toBe(10025);
+        expect(result[0]!.items[0]!.accountClosingBalanceCents).toBe(10941);
     });
 });

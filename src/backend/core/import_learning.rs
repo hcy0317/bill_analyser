@@ -158,15 +158,15 @@ pub fn parse_composite_match_value(raw_value: Option<&Value>) -> Option<BTreeMap
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn amount_bucket(raw_amount: Option<&Value>) -> &'static str {
-    let amount = value_to_f64(raw_amount).abs();
-    if amount == 0.0 {
+pub fn amount_cents_bucket(raw_amount_cents: Option<&Value>) -> &'static str {
+    let amount_cents = raw_amount_cents.map(value_to_i64).unwrap_or_default().abs();
+    if amount_cents == 0 {
         "zero"
-    } else if amount < 20.0 {
+    } else if amount_cents < 2_000 {
         "lt20"
-    } else if amount < 100.0 {
+    } else if amount_cents < 10_000 {
         "lt100"
-    } else if amount < 500.0 {
+    } else if amount_cents < 50_000 {
         "lt500"
     } else {
         "gte500"
@@ -285,7 +285,7 @@ pub fn build_feature_payload(row: &Map<String, Value>) -> BTreeMap<String, Strin
         ),
         (
             "amount_bucket".to_string(),
-            amount_bucket(snapshot.get("preview_amount")).to_string(),
+            amount_cents_bucket(snapshot.get("preview_amount_cents")).to_string(),
         ),
         ("preview_type".to_string(), preview_type),
     ])
@@ -932,15 +932,6 @@ fn value_to_string(value: Option<&Value>) -> String {
         Some(Value::Number(number)) => number.to_string(),
         Some(Value::Bool(value)) => value.to_string(),
         _ => String::new(),
-    }
-}
-
-fn value_to_f64(value: Option<&Value>) -> f64 {
-    match value {
-        Some(Value::Number(number)) => number.as_f64().unwrap_or_default(),
-        Some(Value::String(text)) => text.trim().parse::<f64>().unwrap_or_default(),
-        Some(Value::Bool(true)) => 1.0,
-        _ => 0.0,
     }
 }
 

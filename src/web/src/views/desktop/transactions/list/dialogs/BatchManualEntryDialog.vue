@@ -153,8 +153,8 @@
                                 <td>
                                     <div class="batch-manual-entry-cell batch-manual-entry-cell--source-amount"
                                          :data-batch-row="index"
-                                         data-batch-field="sourceAmount"
-                                         @keydown.capture="onCellKeydown(index, 'sourceAmount', $event)">
+                                         data-batch-field="sourceAmountCents"
+                                         @keydown.capture="onCellKeydown(index, 'sourceAmountCents', $event)">
                                         <amount-input class="batch-manual-entry-input batch-manual-entry-input--excel batch-manual-entry-input--amount"
                                                       density="compact"
                                                       variant="plain"
@@ -164,7 +164,7 @@
                                                       :compact-currency-display="true"
                                                       :enable-formula="true"
                                                       :placeholder="tt('Amount')"
-                                                      v-model="row.transaction.sourceAmount"
+                                                      v-model="row.transaction.sourceAmountCents"
                                                       @update:model-value="onSourceAmountChanged(row)" />
                                     </div>
                                 </td>
@@ -206,8 +206,8 @@
                                 <td>
                                     <div class="batch-manual-entry-cell batch-manual-entry-cell--destination-amount"
                                          :data-batch-row="index"
-                                         data-batch-field="destinationAmount"
-                                         @keydown.capture="onCellKeydown(index, 'destinationAmount', $event)">
+                                         data-batch-field="destinationAmountCents"
+                                         @keydown.capture="onCellKeydown(index, 'destinationAmountCents', $event)">
                                         <amount-input v-if="requiresDestination(row.transaction)"
                                                       class="batch-manual-entry-input batch-manual-entry-input--excel batch-manual-entry-input--amount"
                                                       density="compact"
@@ -218,7 +218,7 @@
                                                       :compact-currency-display="true"
                                                       :enable-formula="true"
                                                       :placeholder="tt('Destination Amount')"
-                                                      v-model="row.transaction.destinationAmount"
+                                                      v-model="row.transaction.destinationAmountCents"
                                                       @update:model-value="onDestinationAmountChanged(row)" />
                                         <div v-else class="batch-manual-entry-empty-cell">—</div>
                                     </div>
@@ -333,7 +333,7 @@ interface BatchEntryRow {
     transaction: Transaction;
 }
 
-type BatchEntryFieldKey = 'time' | 'type' | 'category' | 'sourceAccount' | 'sourceAmount' | 'destinationAccount' | 'destinationAmount' | 'comment' | 'tags';
+type BatchEntryFieldKey = 'time' | 'type' | 'category' | 'sourceAccount' | 'sourceAmountCents' | 'destinationAccount' | 'destinationAmountCents' | 'comment' | 'tags';
 
 interface BatchManualEntryDialogOpenOptions {
     time?: number;
@@ -374,9 +374,9 @@ const BATCH_ENTRY_FIELD_ORDER: BatchEntryFieldKey[] = [
     'type',
     'category',
     'sourceAccount',
-    'sourceAmount',
+    'sourceAmountCents',
     'destinationAccount',
-    'destinationAmount',
+    'destinationAmountCents',
     'comment',
     'tags'
 ];
@@ -430,7 +430,7 @@ function createTransactionRow(options?: BatchManualEntryDialogOpenOptions): Batc
         transaction.tagIds = options.tagIds.split(',').map(item => item.trim()).filter(item => !!item);
     }
     if (type === TransactionType.Transfer || type === TransactionType.Investment) {
-        transaction.destinationAmount = transaction.sourceAmount;
+        transaction.destinationAmountCents = transaction.sourceAmountCents;
     }
 
     const rowId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -447,8 +447,8 @@ function createRowFromTransaction(source: Transaction): BatchEntryRow {
 
     transaction.sourceAccountId = source.sourceAccountId;
     transaction.destinationAccountId = source.destinationAccountId;
-    transaction.sourceAmount = source.sourceAmount;
-    transaction.destinationAmount = source.destinationAmount;
+    transaction.sourceAmountCents = source.sourceAmountCents;
+    transaction.destinationAmountCents = source.destinationAmountCents;
     transaction.hideAmount = source.hideAmount;
     transaction.tagIds = [...source.tagIds];
     transaction.comment = source.comment;
@@ -483,7 +483,7 @@ function requiresDestination(transaction: Transaction): boolean {
 
 function shouldSyncDestinationAmount(transaction: Transaction): boolean {
     return requiresDestination(transaction)
-        && (!transaction.destinationAmount || transaction.destinationAmount === transaction.sourceAmount);
+        && (!transaction.destinationAmountCents || transaction.destinationAmountCents === transaction.sourceAmountCents);
 }
 
 function setDestinationAmountSync(rowId: string, enabled: boolean): void {
@@ -503,10 +503,10 @@ function onTransactionTypeChanged(row: BatchEntryRow): void {
 
     if (!requiresDestination(transaction)) {
         transaction.destinationAccountId = '0';
-        transaction.destinationAmount = 0;
+        transaction.destinationAmountCents = 0;
         setDestinationAmountSync(row.id, false);
-    } else if (!transaction.destinationAmount && transaction.sourceAmount) {
-        transaction.destinationAmount = transaction.sourceAmount;
+    } else if (!transaction.destinationAmountCents && transaction.sourceAmountCents) {
+        transaction.destinationAmountCents = transaction.sourceAmountCents;
         setDestinationAmountSync(row.id, true);
     } else {
         setDestinationAmountSync(row.id, shouldSyncDestinationAmount(transaction));
@@ -526,7 +526,7 @@ function onCategoryChanged(transaction: Transaction, categoryId: string): void {
 
 function onSourceAmountChanged(row: BatchEntryRow): void {
     if (requiresDestination(row.transaction) && isDestinationAmountSync(row.id)) {
-        row.transaction.destinationAmount = row.transaction.sourceAmount;
+        row.transaction.destinationAmountCents = row.transaction.sourceAmountCents;
     }
 }
 
@@ -536,7 +536,7 @@ function onDestinationAmountChanged(row: BatchEntryRow): void {
         return;
     }
 
-    setDestinationAmountSync(row.id, row.transaction.destinationAmount === row.transaction.sourceAmount);
+    setDestinationAmountSync(row.id, row.transaction.destinationAmountCents === row.transaction.sourceAmountCents);
 }
 
 function getDestinationAccountLabel(transaction: Transaction): string {
@@ -572,13 +572,13 @@ function applyCommonFields(target: Transaction, source: Transaction, rowId: stri
 
     if (requiresDestination(source)) {
         target.destinationAccountId = source.destinationAccountId;
-        if (!target.destinationAmount || target.destinationAmount <= 0) {
-            target.destinationAmount = target.sourceAmount || source.destinationAmount || source.sourceAmount;
+        if (!target.destinationAmountCents || target.destinationAmountCents <= 0) {
+            target.destinationAmountCents = target.sourceAmountCents || source.destinationAmountCents || source.sourceAmountCents;
         }
         setDestinationAmountSync(rowId, shouldSyncDestinationAmount(target));
     } else {
         target.destinationAccountId = '0';
-        target.destinationAmount = 0;
+        target.destinationAmountCents = 0;
         setDestinationAmountSync(rowId, false);
     }
 
@@ -599,8 +599,8 @@ function fillEmptyCommonFields(target: Transaction, source: Transaction, rowId: 
         target.sourceAccountId = source.sourceAccountId;
     }
 
-    if (!target.sourceAmount || target.sourceAmount <= 0) {
-        target.sourceAmount = source.sourceAmount;
+    if (!target.sourceAmountCents || target.sourceAmountCents <= 0) {
+        target.sourceAmountCents = source.sourceAmountCents;
     }
 
     if ((!target.tagIds || target.tagIds.length === 0) && source.tagIds.length > 0) {
@@ -618,8 +618,8 @@ function fillEmptyCommonFields(target: Transaction, source: Transaction, rowId: 
         if (!target.destinationAccountId || target.destinationAccountId === '0') {
             target.destinationAccountId = source.destinationAccountId;
         }
-        if (!target.destinationAmount || target.destinationAmount <= 0) {
-            target.destinationAmount = source.destinationAmount || source.sourceAmount;
+        if (!target.destinationAmountCents || target.destinationAmountCents <= 0) {
+            target.destinationAmountCents = source.destinationAmountCents || source.sourceAmountCents;
         }
         setDestinationAmountSync(rowId, shouldSyncDestinationAmount(target));
     } else {
@@ -702,8 +702,8 @@ function isRowEmpty(row: BatchEntryRow): boolean {
     return !transaction.getCategoryId()
         && !transaction.sourceAccountId
         && !transaction.destinationAccountId
-        && !transaction.sourceAmount
-        && !transaction.destinationAmount
+        && !transaction.sourceAmountCents
+        && !transaction.destinationAmountCents
     && (!transaction.tagIds || transaction.tagIds.length === 0)
         && !transaction.comment;
 }
@@ -716,14 +716,14 @@ function isRowValid(row: BatchEntryRow): boolean {
     if (!transaction.sourceAccountId || transaction.sourceAccountId === '0') {
         return false;
     }
-    if (!transaction.sourceAmount || transaction.sourceAmount <= 0) {
+    if (!transaction.sourceAmountCents || transaction.sourceAmountCents <= 0) {
         return false;
     }
     if (requiresDestination(transaction)) {
         if (!transaction.destinationAccountId || transaction.destinationAccountId === '0') {
             return false;
         }
-        if (!transaction.destinationAmount || transaction.destinationAmount <= 0) {
+        if (!transaction.destinationAmountCents || transaction.destinationAmountCents <= 0) {
             return false;
         }
     }
@@ -741,14 +741,14 @@ function getRowIssues(row: BatchEntryRow): string[] {
     if (!transaction.sourceAccountId || transaction.sourceAccountId === '0') {
         issues.push(tt('Source Account'));
     }
-    if (!transaction.sourceAmount || transaction.sourceAmount <= 0) {
+    if (!transaction.sourceAmountCents || transaction.sourceAmountCents <= 0) {
         issues.push(tt('Amount'));
     }
     if (requiresDestination(transaction)) {
         if (!transaction.destinationAccountId || transaction.destinationAccountId === '0') {
             issues.push(tt('Destination Account'));
         }
-        if (!transaction.destinationAmount || transaction.destinationAmount <= 0) {
+        if (!transaction.destinationAmountCents || transaction.destinationAmountCents <= 0) {
             issues.push(tt('Destination Amount'));
         }
     }
@@ -769,7 +769,7 @@ function getAvailableFieldKeys(transaction: Transaction): BatchEntryFieldKey[] {
         return BATCH_ENTRY_FIELD_ORDER;
     }
 
-    return BATCH_ENTRY_FIELD_ORDER.filter(field => field !== 'destinationAccount' && field !== 'destinationAmount');
+    return BATCH_ENTRY_FIELD_ORDER.filter(field => field !== 'destinationAccount' && field !== 'destinationAmountCents');
 }
 
 function getFallbackFieldForTransaction(transaction: Transaction, fieldKey: BatchEntryFieldKey): BatchEntryFieldKey {
@@ -781,8 +781,8 @@ function getFallbackFieldForTransaction(transaction: Transaction, fieldKey: Batc
         return 'sourceAccount';
     }
 
-    if (fieldKey === 'destinationAmount') {
-        return 'sourceAmount';
+    if (fieldKey === 'destinationAmountCents') {
+        return 'sourceAmountCents';
     }
 
     return fieldKey;

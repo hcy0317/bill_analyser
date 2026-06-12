@@ -29,25 +29,25 @@ pub fn build_budget_execution_summary(items: &[Value]) -> Value {
     #[cfg(not(coverage))]
     tracing::info!(domain = "budget", operation = "build_budget_execution_summary", "business operation entered");
     let selected = select_budget_summary_items(items);
-    let total_budget = selected
+    let total_budget_cents = selected
         .iter()
-        .map(|item| budget_item_amount(item, "budget_amount"))
-        .sum::<f64>();
-    let total_spent = selected
+        .map(|item| budget_item_amount_cents(item, "budget_amount_cents"))
+        .sum::<i64>();
+    let total_spent_cents = selected
         .iter()
-        .map(|item| budget_item_amount(item, "spent_amount"))
-        .sum::<f64>();
-    let total_remaining = total_budget - total_spent;
-    let overall_execution_rate = if total_budget > 0.0 {
-        round2((total_spent / total_budget) * 100.0)
+        .map(|item| budget_item_amount_cents(item, "spent_amount_cents"))
+        .sum::<i64>();
+    let total_remaining_cents = total_budget_cents - total_spent_cents;
+    let overall_execution_rate = if total_budget_cents > 0 {
+        round2((total_spent_cents as f64 / total_budget_cents as f64) * 100.0)
     } else {
         0.0
     };
 
     json!({
-        "total_budget": total_budget,
-        "total_spent": total_spent,
-        "total_remaining": total_remaining,
+        "total_budget_cents": total_budget_cents,
+        "total_spent_cents": total_spent_cents,
+        "total_remaining_cents": total_remaining_cents,
         "overall_execution_rate": overall_execution_rate,
         "count": selected.len()
     })

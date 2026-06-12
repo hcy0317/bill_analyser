@@ -181,7 +181,7 @@ export function useTransactionEditPageBase(type: TransactionEditPageType, initMo
         const sourceAccount = allAccountsMap.value[transaction.value.sourceAccountId];
         const amountName = tt(sourceAmountName.value);
 
-        if (!sourceAccount || sourceAccount.currency === defaultCurrency.value || !transaction.value.sourceAmount || transaction.value.hideAmount) {
+        if (!sourceAccount || sourceAccount.currency === defaultCurrency.value || !transaction.value.sourceAmountCents || transaction.value.hideAmount) {
             return amountName;
         }
 
@@ -192,15 +192,15 @@ export function useTransactionEditPageBase(type: TransactionEditPageType, initMo
             return amountName;
         }
 
-        let amountInDefaultCurrency = getExchangedAmountByRate(transaction.value.sourceAmount, fromExchangeRate.rate, toExchangeRate.rate);
+        let amountInDefaultCurrencyCents = getExchangedAmountByRate(transaction.value.sourceAmountCents, fromExchangeRate.rate, toExchangeRate.rate);
 
-        if (!amountInDefaultCurrency) {
+        if (!amountInDefaultCurrencyCents) {
             return amountName;
         }
 
-        amountInDefaultCurrency = Math.trunc(amountInDefaultCurrency);
+        amountInDefaultCurrencyCents = Math.trunc(amountInDefaultCurrencyCents);
 
-        const displayAmountInDefaultCurrency = getDisplayAmount(amountInDefaultCurrency, transaction.value.hideAmount, defaultCurrency.value);
+        const displayAmountInDefaultCurrency = getDisplayAmount(amountInDefaultCurrencyCents, transaction.value.hideAmount, defaultCurrency.value);
         return amountName + ` (${displayAmountInDefaultCurrency})`;
     });
 
@@ -224,7 +224,7 @@ export function useTransactionEditPageBase(type: TransactionEditPageType, initMo
 
         const fromExchangeRate = exchangeRatesStore.latestExchangeRateMap[sourceAccount.currency];
         const toExchangeRate = exchangeRatesStore.latestExchangeRateMap[destinationAccount.currency];
-        const amountRate = getAdaptiveAmountRate(transaction.value.sourceAmount, transaction.value.destinationAmount, fromExchangeRate, toExchangeRate);
+        const amountRate = getAdaptiveAmountRate(transaction.value.sourceAmountCents, transaction.value.destinationAmountCents, fromExchangeRate, toExchangeRate);
 
         if (!amountRate) {
             return tt('Transfer In Amount');
@@ -361,9 +361,9 @@ export function useTransactionEditPageBase(type: TransactionEditPageType, initMo
         }
 
         if (swapAmount) {
-            const oldSourceAmount = transaction.value.sourceAmount;
-            transaction.value.sourceAmount = transaction.value.destinationAmount;
-            transaction.value.destinationAmount = oldSourceAmount;
+            const oldSourceAmount = transaction.value.sourceAmountCents;
+            transaction.value.sourceAmountCents = transaction.value.destinationAmountCents;
+            transaction.value.destinationAmountCents = oldSourceAmount;
         }
     }
 
@@ -379,7 +379,7 @@ export function useTransactionEditPageBase(type: TransactionEditPageType, initMo
         return transactionsStore.getTransactionPictureUrl(pictureInfo);
     }
 
-    watch(() => transaction.value.sourceAmount, (newValue, oldValue) => {
+    watch(() => transaction.value.sourceAmountCents, (newValue, oldValue) => {
         if (mode.value === TransactionEditPageMode.View || loading.value) {
             return;
         }
@@ -387,13 +387,13 @@ export function useTransactionEditPageBase(type: TransactionEditPageType, initMo
         transactionsStore.setTransactionSuitableDestinationAmount(transaction.value, oldValue, newValue);
     });
 
-    watch(() => transaction.value.destinationAmount, (newValue) => {
+    watch(() => transaction.value.destinationAmountCents, (newValue) => {
         if (mode.value === TransactionEditPageMode.View || loading.value) {
             return;
         }
 
         if (transaction.value.type === TransactionType.Expense || transaction.value.type === TransactionType.Income) {
-            transaction.value.sourceAmount = newValue;
+            transaction.value.sourceAmountCents = newValue;
         }
     });
 

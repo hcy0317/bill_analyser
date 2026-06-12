@@ -192,7 +192,7 @@
                                         <span class="statistics-subtitle">{{ tt('Total Income') }}</span>
                                         <span class="statistics-overview-amount ms-3 text-income"
                                               v-if="!initing && categoricalOverviewAnalysisData && categoricalOverviewAnalysisData.items && categoricalOverviewAnalysisData.items.length">
-                                            {{ getDisplayAmount(categoricalOverviewAnalysisData.totalIncome, defaultCurrency) }}
+                                            {{ getDisplayAmount(categoricalOverviewAnalysisData.totalIncomeCents, defaultCurrency) }}
                                         </span>
                                         <v-skeleton-loader class="skeleton-no-margin ms-3 mb-2"
                                                            width="120px" type="text" :loading="true"
@@ -200,7 +200,7 @@
                                         <span class="statistics-subtitle ms-3">{{ tt('Total Expense') }}</span>
                                         <span class="statistics-overview-amount ms-3 text-expense"
                                               v-if="!initing && categoricalOverviewAnalysisData && categoricalOverviewAnalysisData.items && categoricalOverviewAnalysisData.items.length">
-                                            {{ getDisplayAmount(categoricalOverviewAnalysisData.totalExpense, defaultCurrency) }}
+                                            {{ getDisplayAmount(categoricalOverviewAnalysisData.totalExpenseCents, defaultCurrency) }}
                                         </span>
                                         <v-skeleton-loader class="skeleton-no-margin ms-3 mb-2"
                                                            width="120px" type="text" :loading="true"
@@ -213,7 +213,7 @@
                                         <span class="statistics-overview-amount ms-3"
                                               :class="statisticsTextColor"
                                               v-if="!initing && categoricalAnalysisData && categoricalAnalysisData.items && categoricalAnalysisData.items.length">
-                                            {{ getDisplayAmount(categoricalAnalysisData.totalAmount, defaultCurrency) }}
+                                            {{ getDisplayAmount(categoricalAnalysisData.totalAmountCents, defaultCurrency) }}
                                         </span>
                                         <v-skeleton-loader class="skeleton-no-margin ms-3 mb-2"
                                                            width="120px" type="text" :loading="true"
@@ -258,7 +258,7 @@
                                             :default-currency="defaultCurrency"
                                             id-field="id"
                                             name-field="name"
-                                            value-field="totalAmount"
+                                            value-field="totalAmountCents"
                                             percent-field="percent"
                                             hidden-field="hidden"
                                             v-else-if="!initing"
@@ -305,7 +305,7 @@
                                                                 <span>{{ item.name }}</span>
                                                                 <small class="statistics-percent" v-if="showPercentInCategoricalChart && item.percent >= 0">{{ formatPercentToLocalizedNumerals(item.percent, 2, '&lt;0.01') }}</small>
                                                                 <v-spacer/>
-                                                                <span class="statistics-amount">{{ getDisplayAmount(item.totalAmount, defaultCurrency) }}</span>
+                                                                <span class="statistics-amount">{{ getDisplayAmount(item.totalAmountCents, defaultCurrency) }}</span>
                                                             </div>
                                                             <div>
                                                                 <v-progress-linear :color="item.color ? getTransactionCategoricalAnalysisDataItemDisplayColor(item) : 'primary'"
@@ -333,7 +333,7 @@
                                             :show-percent="showPercentInCategoricalChart"
                                             :default-currency="defaultCurrency"
                                             name-field="name"
-                                            value-field="totalAmount"
+                                            value-field="totalAmountCents"
                                             percent-field="percent"
                                             hidden-field="hidden"
                                             v-else-if="!initing"
@@ -366,7 +366,7 @@
                                             ref="monthlyTrendsChart"
                                             id-field="id"
                                             name-field="name"
-                                            value-field="totalAmount"
+                                            value-field="totalAmountCents"
                                             hidden-field="hidden"
                                             display-orders-field="displayOrders"
                                             v-else-if="!initing && trendsAnalysisData && trendsAnalysisData.items && trendsAnalysisData.items.length"
@@ -400,7 +400,7 @@
                                             ref="dailyTrendsChart"
                                             id-field="id"
                                             name-field="name"
-                                            value-field="totalAmount"
+                                            value-field="totalAmountCents"
                                             hidden-field="hidden"
                                             display-orders-field="displayOrders"
                                             v-else-if="!initing && assetTrendsData && assetTrendsData.items && assetTrendsData.items.length"
@@ -1210,7 +1210,7 @@ function exportResults(): void {
                 .filter(item => !item.hidden)
                 .map(item => [
                     item.name,
-                    formatAmountToWesternArabicNumeralsWithoutDigitGrouping(item.totalAmount),
+                    formatAmountToWesternArabicNumeralsWithoutDigitGrouping(item.totalAmountCents),
                     item.percent.toFixed(4)
                 ])
         });

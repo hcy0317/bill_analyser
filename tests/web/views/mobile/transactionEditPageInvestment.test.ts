@@ -26,7 +26,7 @@ describe('mobile EditPage.vue Investment branch parity (S2)', () => {
 
     test('renders destination amount input for Investment with Investment Amount label', () => {
         const source = readSource();
-        expect(source).toMatch(/Investment Amount[\s\S]+?transaction\.type === TransactionType\.Investment[\s\S]+?v-model="transaction\.destinationAmount"/);
+        expect(source).toMatch(/Investment Amount[\s\S]+?transaction\.type === TransactionType\.Investment[\s\S]+?v-model="transaction\.destinationAmountCents"/);
     });
 
     test('renders investment category picker bound to investmentCategoryId and CategoryType.Investment', () => {
@@ -55,6 +55,18 @@ describe('mobile EditPage.vue Investment branch parity (S2)', () => {
         const source = readSource();
         expect(source).toContain('queryType <= TransactionType.Investment');
         expect(source).not.toContain('queryType <= TransactionType.Transfer');
+    });
+
+    test('parses cents query parameters as strict integers', () => {
+        const source = readSource();
+        expect(source).toContain('const INTEGER_CENTS_PATTERN = /^[+-]?\\d+$/u;');
+        expect(source).toContain('function parseStrictQueryCents(value: unknown): number | undefined');
+        expect(source).toContain('Number.isSafeInteger(parsed) ? parsed : undefined');
+        expect(source).toContain("sourceAmountCents: parseStrictQueryCents(query['sourceAmountCents'])");
+        expect(source).toContain("destinationAmountCents: parseStrictQueryCents(query['destinationAmountCents'])");
+        expect(source).toContain("const initAmount: number | undefined = parseStrictQueryCents(query['sourceAmountCents']);");
+        expect(source).not.toContain("parseInt(query['sourceAmountCents'])");
+        expect(source).not.toContain("parseInt(query['destinationAmountCents'])");
     });
 
     test('does not regress existing Expense / Income / Transfer / ModifyBalance branches', () => {

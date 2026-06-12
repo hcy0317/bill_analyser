@@ -73,14 +73,14 @@ describe('mobile budgets EditSheet.vue source contract (S5)', () => {
             // new yuan/cents helper is introduced.
             expect(source).toContain('amountInYuan');
             // Save path multiplies parsed yuan by 100, mirroring the inverse
-            // of amountInYuan (= amount / 100).
+            // of amountInYuan (= amountCents / 100).
             expect(source).toMatch(/Math\.round\(parsed \* 100\)/);
         });
     });
 
     describe('save / delete contract', () => {
         test('save button is gated by canSave (positive amount + chosen category)', () => {
-            expect(source).toMatch(/form\.value\.amount <= 0/);
+            expect(source).toMatch(/form\.value\.amountCents <= 0/);
             expect(source).toMatch(/form\.value\.categoryId \|\| form\.value\.category/);
             expect(source).toMatch(/'disabled':\s*saving \|\| !canSave/);
         });

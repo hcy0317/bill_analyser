@@ -206,7 +206,7 @@ pub fn validate_import_budget_item(item: &Value, index: usize) -> Result<(), Str
         return Err(format!("第{index}条预算格式无效"));
     };
 
-    for required_field in ["period_type", "amount", "start_date"] {
+    for required_field in ["period_type", "amount_cents", "start_date"] {
         if !object.contains_key(required_field) || object[required_field].is_null() {
             return Err(format!("第{index}条预算缺少必填字段: {required_field}"));
         }

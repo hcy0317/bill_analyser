@@ -1,6 +1,6 @@
 // 中文导读：Postgres import staging 类型层，定义当前导入 session、preview 与学习/LLM DTO。
 // 维护重点：类型保持当前 v2 API 所需形状，存储实现由 Postgres adapter 负责。
-// 不变式：金额字段明确区分预览元单位与 standard row 分单位。
+// 不变式：导入预览与 standard row 金额字段统一使用整数分；外部 parser 模板保留原始元单位边界。
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportSessionDraft {
@@ -44,8 +44,8 @@ pub struct ImportSessionRow {
 pub struct ImportPreviewDraft {
     pub preview_date: String,
     pub preview_type: String,
-    pub preview_amount: f64,
-    pub preview_destination_amount: f64,
+    pub preview_amount_cents: i64,
+    pub preview_destination_amount_cents: i64,
     pub category_id: Option<i64>,
     pub preview_main_category: String,
     pub preview_sub_category: String,
@@ -195,8 +195,8 @@ pub struct ImportPreviewRow {
     pub user_id: i64,
     pub preview_date: String,
     pub preview_type: String,
-    pub preview_amount: f64,
-    pub preview_destination_amount: f64,
+    pub preview_amount_cents: i64,
+    pub preview_destination_amount_cents: i64,
     pub category_id: Option<i64>,
     pub preview_main_category: String,
     pub preview_sub_category: String,
@@ -225,7 +225,7 @@ pub struct ImportPreviewFilterIndexRow {
     pub id: i64,
     pub preview_date: String,
     pub preview_type: String,
-    pub preview_amount: f64,
+    pub preview_amount_cents: i64,
     pub category_id: Option<i64>,
     pub preview_main_category: String,
     pub preview_sub_category: String,

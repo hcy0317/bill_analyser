@@ -2121,9 +2121,9 @@ export function useI18n() {
                     let accountWithDisplaceBalance: AccountWithDisplayBalance;
 
                     if (showAccountBalance && account.isAsset) {
-                        accountWithDisplaceBalance = AccountWithDisplayBalance.fromAccount(account, getFormattedAmountWithCurrency(account.balance, account.currency));
+                        accountWithDisplaceBalance = AccountWithDisplayBalance.fromAccount(account, getFormattedAmountWithCurrency(account.balanceCents, account.currency));
                     } else if (showAccountBalance && account.isLiability) {
-                        accountWithDisplaceBalance = AccountWithDisplayBalance.fromAccount(account, getFormattedAmountWithCurrency(-account.balance, account.currency));
+                        accountWithDisplaceBalance = AccountWithDisplayBalance.fromAccount(account, getFormattedAmountWithCurrency(-account.balanceCents, account.currency));
                     } else {
                         accountWithDisplaceBalance = AccountWithDisplayBalance.fromAccount(account, DISPLAY_HIDDEN_AMOUNT);
                     }
@@ -2142,12 +2142,12 @@ export function useI18n() {
                 for (const accountBalance of accountsBalance) {
                     if (accountBalance.currency === defaultCurrency) {
                         if (accountBalance.isAsset) {
-                            totalBalance += accountBalance.balance;
+                            totalBalance += accountBalance.balanceCents;
                         } else if (accountBalance.isLiability) {
-                            totalBalance -= accountBalance.balance;
+                            totalBalance -= accountBalance.balanceCents;
                         }
                     } else {
-                        const balance = exchangeRatesStore.getExchangedAmount(accountBalance.balance, accountBalance.currency, defaultCurrency);
+                        const balance = exchangeRatesStore.getExchangedAmount(accountBalance.balanceCents, accountBalance.currency, defaultCurrency);
 
                         if (!isNumber(balance)) {
                             hasUnCalculatedAmount = true;

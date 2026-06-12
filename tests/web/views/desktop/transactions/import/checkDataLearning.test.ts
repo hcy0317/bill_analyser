@@ -2,9 +2,9 @@ import { describe, expect, test } from '@jest/globals';
 
 import {
     buildImportCheckLearningPreviewTextSyncPayload,
-    convertImportPreviewAmountToCents,
     hasImportCheckLearningExpectedStateDrift,
     hasImportCheckLearningTextDrift,
+    normalizeImportPreviewAmountCents,
     type ImportCheckLearningDecisionBaseline
 } from '@/views/desktop/transactions/import/checkDataLearning.ts';
 
@@ -60,9 +60,14 @@ describe('checkDataLearning helpers', () => {
         })).toBe(true);
     });
 
-    test('converts preview amounts from yuan to cents with fallback preservation', () => {
-        expect(convertImportPreviewAmountToCents(12.34, 999)).toBe(1234);
-        expect(convertImportPreviewAmountToCents(-8.01, 999)).toBe(801);
-        expect(convertImportPreviewAmountToCents(undefined, 999)).toBe(999);
+    test('normalizes preview cents with fallback preservation', () => {
+        expect(normalizeImportPreviewAmountCents(1234, 999)).toBe(1234);
+        expect(normalizeImportPreviewAmountCents(-801, 999)).toBe(801);
+        expect(normalizeImportPreviewAmountCents('802', 999)).toBe(802);
+        expect(normalizeImportPreviewAmountCents(undefined, 999)).toBe(999);
+        expect(normalizeImportPreviewAmountCents(12.34, 999)).toBe(999);
+        expect(normalizeImportPreviewAmountCents('12.34', 999)).toBe(999);
+        expect(normalizeImportPreviewAmountCents(true, 999)).toBe(999);
+        expect(normalizeImportPreviewAmountCents({}, 999)).toBe(999);
     });
 });

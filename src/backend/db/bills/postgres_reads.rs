@@ -1,5 +1,5 @@
 // 中文导读：PostgreSQL bills 读仓储，负责 当前交易列表与详情投影。
-// 维护重点：金额从 PostgreSQL 分转换成 current record 的元字段，handler 不复制 SQL。
+// 维护重点：金额从 PostgreSQL 分直接投影为显式 cents 字段，handler 不复制 SQL。
 // 不变式：所有查询必须按 user_id 过滤且忽略 is_deleted，不允许回退 non-Postgres。
 
 use bill_analyser_core::adapters::transaction::{
@@ -592,8 +592,7 @@ impl PostgresBillMutation {
     fn balance_deltas(&self) -> Vec<(i64, i64)> {
         let mut deltas = Vec::new();
         let amount = self.amount_cents.abs();
-        let destination_amount = destination_amount_yuan(&self.standard_payload)
-            .map(yuan_to_cents)
+        let destination_amount = destination_amount_cents(&self.standard_payload)
             .unwrap_or(amount)
             .abs();
         match self.transaction_type.as_str() {
@@ -628,7 +627,7 @@ async fn prepare_postgres_bill_mutation(
     let occurred_at = parse_postgres_bill_datetime(required_text(fields, "date")?)?;
     let transaction_type = canonical_transaction_type(&required_text(fields, "type")?);
     let direction = postgres_direction_for_type(&transaction_type).to_string();
-    let amount_cents = amount_cents_from_record(fields, "amount")?.abs();
+    let amount_cents = amount_cents_from_record(fields, "amount_cents")?.abs();
     let source_account_id = positive_value_i64(fields.get("source_account_id"));
     let destination_account_id = positive_value_i64(fields.get("destination_account_id"));
     let category_id = resolve_postgres_category_id_for_fields(pool, user_id, fields).await?;
@@ -649,11 +648,11 @@ async fn prepare_postgres_bill_mutation(
                 .unwrap_or_else(|| Value::String(String::new())),
         );
         payload.insert(
-            "destination_amount".to_string(),
+            "destination_amount_cents".to_string(),
             fields
-                .get("destination_amount")
+                .get("destination_amount_cents")
                 .cloned()
-                .unwrap_or_else(|| json_real(0.0)),
+                .unwrap_or_else(|| json_i64(0)),
         );
     }
     let source_hash = match optional_value_string(fields.get("hash")) {
@@ -911,9 +910,9 @@ fn required_text(record: &BillRecord, key: &str) -> DbResult<String> {
 fn amount_cents_from_record(record: &BillRecord, key: &str) -> DbResult<i64> {
     let value = record
         .get(key)
-        .and_then(value_to_f64)
+        .and_then(value_to_i64)
         .ok_or_else(|| DbError::InvalidOperation(format!("missing required bill field: {key}")))?;
-    Ok(yuan_to_cents(value))
+    Ok(value)
 }
 
 fn positive_value_i64(value: Option<&Value>) -> Option<i64> {
@@ -929,9 +928,15 @@ fn postgres_direction_for_type(transaction_type: &str) -> &'static str {
 }
 
 fn update_requires_hash_recalculation(fields: &BillRecord) -> bool {
-    ["date", "type", "amount", "counterparty", "description"]
-        .iter()
-        .any(|key| fields.contains_key(*key))
+    [
+        "date",
+        "type",
+        "amount_cents",
+        "counterparty",
+        "description",
+    ]
+    .iter()
+    .any(|key| fields.contains_key(*key))
 }
 
 fn push_bill_filters(
@@ -1014,16 +1019,16 @@ fn push_bill_filters(
         push_bind_list(builder, &tag_ids);
         builder.push("))");
     }
-    if let Some(value) = filters.min_amount {
+    if let Some(value) = filters.min_amount_cents {
         builder.push(" AND ABS(b.amount_cents) >= ");
-        builder.push_bind(yuan_to_cents(value));
+        builder.push_bind(value);
     }
-    if let Some(value) = filters.max_amount {
+    if let Some(value) = filters.max_amount_cents {
         builder.push(" AND ABS(b.amount_cents) <= ");
-        builder.push_bind(yuan_to_cents(value));
+        builder.push_bind(value);
     }
-    if let Some(value) = text_filter(filters.amount_filter.as_deref()) {
-        push_amount_filter(builder, &value);
+    if let Some(value) = text_filter(filters.amount_filter_cents.as_deref()) {
+        push_amount_filter_cents(builder, &value);
     }
 }
 
@@ -1066,22 +1071,23 @@ fn push_category_filters(builder: &mut QueryBuilder<'_, Postgres>, filters: &Bil
     builder.push(")");
 }
 
-fn push_amount_filter(builder: &mut QueryBuilder<'_, Postgres>, amount_filter: &str) {
-    let parts = amount_filter.split(':').collect::<Vec<_>>();
+fn push_amount_filter_cents(builder: &mut QueryBuilder<'_, Postgres>, amount_filter_cents: &str) {
+    let parts = amount_filter_cents.split(':').collect::<Vec<_>>();
     if parts.len() < 2 {
         return;
     }
-    let amount =
-        |index: usize| -> Option<i64> { parts.get(index)?.parse::<f64>().ok().map(yuan_to_cents) };
+    let amount_cents = |index: usize| -> Option<i64> {
+        parts.get(index)?.trim().parse::<i64>().ok()?.checked_abs()
+    };
     match parts[0].to_ascii_lowercase().as_str() {
-        "eq" => push_amount_condition(builder, " = ", amount(1)),
-        "ne" => push_amount_condition(builder, " != ", amount(1)),
-        "gt" => push_amount_condition(builder, " > ", amount(1)),
-        "lt" => push_amount_condition(builder, " < ", amount(1)),
-        "gte" => push_amount_condition(builder, " >= ", amount(1)),
-        "lte" => push_amount_condition(builder, " <= ", amount(1)),
+        "eq" => push_amount_condition(builder, " = ", amount_cents(1)),
+        "ne" => push_amount_condition(builder, " != ", amount_cents(1)),
+        "gt" => push_amount_condition(builder, " > ", amount_cents(1)),
+        "lt" => push_amount_condition(builder, " < ", amount_cents(1)),
+        "gte" => push_amount_condition(builder, " >= ", amount_cents(1)),
+        "lte" => push_amount_condition(builder, " <= ", amount_cents(1)),
         "between" => {
-            if let (Some(minimum), Some(maximum)) = (amount(1), amount(2)) {
+            if let (Some(minimum), Some(maximum)) = (amount_cents(1), amount_cents(2)) {
                 builder.push(" AND ABS(b.amount_cents) BETWEEN ");
                 builder.push_bind(minimum);
                 builder.push(" AND ");
@@ -1116,7 +1122,7 @@ fn push_bind_list(builder: &mut QueryBuilder<'_, Postgres>, values: &[i64]) {
 fn bill_record_from_postgres_row(row: PgRow) -> DbResult<BillRecord> {
     let standard_payload: Value = row.try_get("standard_payload")?;
     let amount_cents: i64 = row.try_get("amount_cents")?;
-    let destination_amount = destination_amount_yuan(&standard_payload);
+    let destination_amount_cents = destination_amount_cents(&standard_payload);
     let source_account_id = first_positive([
         row.try_get::<Option<i64>, _>("source_account_id")?,
         row.try_get::<Option<i64>, _>("account_id")?,
@@ -1134,7 +1140,7 @@ fn bill_record_from_postgres_row(row: PgRow) -> DbResult<BillRecord> {
         "type".to_string(),
         optional_string_value(row.try_get::<Option<String>, _>("transaction_type")?),
     );
-    record.insert("amount".to_string(), json_real(amount_cents as f64 / 100.0));
+    record.insert("amount_cents".to_string(), json_i64(amount_cents));
     record.insert(
         "counterparty".to_string(),
         optional_string_value(row.try_get::<Option<String>, _>("merchant")?),
@@ -1174,8 +1180,8 @@ fn bill_record_from_postgres_row(row: PgRow) -> DbResult<BillRecord> {
         json_i64(destination_account_id.unwrap_or_default()),
     );
     record.insert(
-        "destination_amount".to_string(),
-        json_real(destination_amount.unwrap_or_default()),
+        "destination_amount_cents".to_string(),
+        json_i64(destination_amount_cents.unwrap_or_default()),
     );
     record.insert(
         "category_id".to_string(),
@@ -1240,11 +1246,11 @@ fn category_names_from_path(path: Option<&str>, name: &str) -> (String, String) 
     }
 }
 
-fn destination_amount_yuan(payload: &Value) -> Option<f64> {
+fn destination_amount_cents(payload: &Value) -> Option<i64> {
     payload
-        .get("destination_amount")
-        .or_else(|| payload.get("destinationAmount"))
-        .and_then(value_to_f64)
+        .get("destination_amount_cents")
+        .or_else(|| payload.get("destinationAmountCents"))
+        .and_then(value_to_i64)
 }
 
 fn payload_string_value(payload: &Value, key: &str) -> Value {
@@ -1283,14 +1289,6 @@ fn value_to_i64(value: &Value) -> Option<i64> {
     }
 }
 
-fn value_to_f64(value: &Value) -> Option<f64> {
-    match value {
-        Value::Number(number) => number.as_f64(),
-        Value::String(text) => text.trim().parse::<f64>().ok(),
-        _ => None,
-    }
-}
-
 fn first_positive(values: [Option<i64>; 2]) -> Option<i64> {
     values.into_iter().flatten().find(|value| *value > 0)
 }
@@ -1313,25 +1311,23 @@ fn text_filter(value: Option<&str>) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-fn yuan_to_cents(value: f64) -> i64 {
-    (value.abs() * 100.0).round() as i64
-}
-
 fn postgres_initial_balance_money(metadata: &Value, balance_cents: i64) -> DbResult<Money> {
     let fallback = Money::from_cents(balance_cents);
-    match metadata.get("initial_balance") {
-        Some(Value::Number(number)) => number
-            .as_f64()
-            .map(|value| {
-                Money::from_yuan_str(&value.to_string())
-                    .map_err(|error| DbError::InvalidOperation(error.to_string()))
-            })
-            .transpose()
-            .map(|value| value.unwrap_or(fallback)),
-        Some(Value::String(text)) if !text.trim().is_empty() => Money::from_yuan_str(text.trim())
-            .map_err(|error| DbError::InvalidOperation(error.to_string())),
-        _ => Ok(fallback),
+    if let Some(value) = metadata.get("initial_balance_cents") {
+        return match value {
+            Value::Number(number) => number
+                .as_i64()
+                .map(Money::from_cents)
+                .map_or(Ok(fallback), Ok),
+            Value::String(text) if !text.trim().is_empty() => text
+                .trim()
+                .parse::<i64>()
+                .map(Money::from_cents)
+                .map_err(|error| DbError::InvalidOperation(error.to_string())),
+            _ => Ok(fallback),
+        };
     }
+    Ok(fallback)
 }
 
 fn optional_string_value(value: Option<String>) -> Value {
@@ -1342,10 +1338,6 @@ fn optional_string_value(value: Option<String>) -> Value {
 
 fn json_i64(value: i64) -> Value {
     json!(value)
-}
-
-fn json_real(value: f64) -> Value {
-    Number::from_f64(value).map_or(Value::Null, Value::Number)
 }
 
 fn insert_timestamp(record: &mut Map<String, Value>, key: &str, timestamp: DateTime<Utc>) {
@@ -1379,5 +1371,49 @@ mod tests {
 
         fields.insert("category_id".to_string(), json!(0));
         assert_eq!(explicit_category_id_from_fields(&fields), Some(43));
+    }
+
+    #[test]
+    fn amount_cents_fields_drive_hash_and_initial_balance_helpers() {
+        let fields = BillRecord::from_iter([("amount_cents".to_string(), json!(12345))]);
+        assert!(update_requires_hash_recalculation(&fields));
+
+        let legacy = BillRecord::from_iter([("amount".to_string(), json!(123.45))]);
+        assert!(!update_requires_hash_recalculation(&legacy));
+
+        assert_eq!(
+            destination_amount_cents(&json!({"destination_amount_cents": "54321"})),
+            Some(54321)
+        );
+        assert_eq!(
+            destination_amount_cents(&json!({"destination_amount": "543.21"})),
+            None
+        );
+        assert_eq!(
+            destination_amount_cents(&json!({"destinationAmount": 543.21})),
+            None
+        );
+        assert_eq!(
+            postgres_initial_balance_money(&json!({"initial_balance_cents": 98765}), 100)
+                .expect("number initial balance")
+                .to_cents(),
+            98765
+        );
+        assert_eq!(
+            postgres_initial_balance_money(&json!({"initial_balance_cents": "12345"}), 100)
+                .expect("text initial balance")
+                .to_cents(),
+            12345
+        );
+        assert!(
+            postgres_initial_balance_money(&json!({"initial_balance_cents": "12.34"}), 100)
+                .is_err()
+        );
+        assert_eq!(
+            postgres_initial_balance_money(&json!({"initial_balance": "12.34"}), 100)
+                .expect("legacy yuan initial balance is ignored at runtime")
+                .to_cents(),
+            100
+        );
     }
 }

@@ -190,7 +190,7 @@ pub async fn export_postgres_budgets(pool: &PostgresPool, user_id: UserId) -> Db
                 "category": field_or_null(row, "category"),
                 "sub_category": field_or_null(row, "sub_category"),
                 "period_type": field_or_null(row, "period_type"),
-                "amount": field_or_null(row, "amount"),
+                "amount_cents": field_or_null(row, "amount_cents"),
                 "start_date": field_or_null(row, "start_date"),
                 "end_date": field_or_null(row, "end_date"),
                 "alert_threshold": field_or_null(row, "alert_threshold"),
@@ -216,7 +216,9 @@ pub async fn import_postgres_budgets(
     for (index, budget) in budgets.iter().enumerate() {
         let row_number = index + 1;
         if !super::budget_import_has_required_name_and_amount(budget) {
-            errors.push(format!("第{row_number}条: 缺少必填字段(name或amount)"));
+            errors.push(format!(
+                "第{row_number}条: 缺少必填字段(name或amount_cents)"
+            ));
             error_count += 1;
             continue;
         }
@@ -323,19 +325,19 @@ pub async fn query_postgres_budget_forecast(
         }
         let amounts = recent_periods
             .iter()
-            .map(|item| item.amount)
+            .map(|item| item.amount_cents)
             .collect::<Vec<_>>();
         let period_labels = recent_periods
             .iter()
             .map(|item| item.period.clone())
             .collect::<Vec<_>>();
-        let current_spent = totals
+        let current_spent_cents = totals
             .periods
             .iter()
             .find(|item| item.period == target_period_key)
-            .map(|item| item.amount)
+            .map(|item| item.amount_cents)
             .unwrap_or_default();
-        let budget_amount = budget_map.get(&category).cloned().unwrap_or_default();
+        let budget_amount_cents = budget_map.get(&category).cloned().unwrap_or_default();
         let category_info = resolve_budget_category_info(
             &category_context,
             &category,
@@ -346,10 +348,10 @@ pub async fn query_postgres_budget_forecast(
             BudgetForecastItemInput {
                 category: &category,
                 category_info,
-                amounts: &amounts,
-                current_spent,
-                primary_budget_amount: budget_amount.primary,
-                sub_budget_total: budget_amount.sub_total,
+                amounts_cents: &amounts,
+                current_spent_cents,
+                primary_budget_amount_cents: budget_amount_cents.primary_cents,
+                sub_budget_total_cents: budget_amount_cents.sub_total_cents,
                 strategy: &filters.forecast_strategy,
                 period_count,
                 period_labels: Some(&period_labels),
@@ -358,16 +360,14 @@ pub async fn query_postgres_budget_forecast(
     }
     results.sort_by(|left, right| {
         let right_amount = right
-            .get("forecast_amount")
-            .and_then(value_to_f64)
+            .get("forecast_amount_cents")
+            .and_then(value_to_i64)
             .unwrap_or_default();
         let left_amount = left
-            .get("forecast_amount")
-            .and_then(value_to_f64)
+            .get("forecast_amount_cents")
+            .and_then(value_to_i64)
             .unwrap_or_default();
-        right_amount
-            .partial_cmp(&left_amount)
-            .unwrap_or(std::cmp::Ordering::Equal)
+        right_amount.cmp(&left_amount)
     });
     Ok(results)
 }
@@ -462,9 +462,12 @@ pub async fn create_postgres_budget_execution_snapshots(
         .execute(&mut *tx)
         .await?;
 
-        let budget_amount_cents = value_field_cents(snapshot, "budget_amount")?;
-        let spent_amount_cents = value_field_cents(snapshot, "spent_amount")?;
-        let remaining_amount_cents = value_field_cents(snapshot, "remaining_amount")?;
+        let budget_amount_cents =
+            value_field_i64(snapshot, "budget_amount_cents").unwrap_or_default();
+        let spent_amount_cents =
+            value_field_i64(snapshot, "spent_amount_cents").unwrap_or_default();
+        let remaining_amount_cents =
+            value_field_i64(snapshot, "remaining_amount_cents").unwrap_or_default();
         let status = if spent_amount_cents > budget_amount_cents {
             "over_budget"
         } else {
@@ -684,7 +687,7 @@ async fn get_postgres_budget_spent_amount(
     budget: &BudgetRecord,
     type_name: &str,
     filters: &BudgetExecutionFilters,
-) -> DbResult<f64> {
+) -> DbResult<i64> {
     let mut builder = QueryBuilder::<Postgres>::new(
         "SELECT COALESCE(SUM(ABS(amount_cents)), 0)::BIGINT AS spent_cents FROM bills b LEFT JOIN categories c ON c.user_id = b.user_id AND c.id = b.category_id WHERE b.user_id = ",
     );
@@ -740,7 +743,7 @@ async fn get_postgres_budget_spent_amount(
     }
     let row = builder.build().fetch_one(pool).await?;
     let spent_cents: i64 = row.try_get("spent_cents")?;
-    Ok(super::round2(spent_cents as f64 / 100.0))
+    Ok(spent_cents)
 }
 
 async fn query_postgres_budget_forecast_rows(
@@ -792,7 +795,7 @@ async fn query_postgres_budget_forecast_rows(
             Ok(BudgetForecastRow {
                 period: row.try_get("period")?,
                 category,
-                amount: super::round2(cents as f64 / 100.0),
+                amount_cents: cents,
             })
         })
         .collect::<Result<Vec<_>, sqlx::Error>>()
@@ -812,11 +815,11 @@ fn aggregate_postgres_budget_forecast_rows(
             .iter_mut()
             .find(|period| period.period == row.period)
         {
-            period.amount += row.amount;
+            period.amount_cents += row.amount_cents;
         } else {
             bucket.periods.push(BudgetForecastPeriodAmount {
                 period: row.period,
-                amount: row.amount,
+                amount_cents: row.amount_cents,
             });
         }
     }
@@ -877,9 +880,9 @@ async fn query_postgres_budget_forecast_budget_map(
         }
         let bucket = budget_map.entry(category).or_default();
         if sub_category.trim().is_empty() {
-            bucket.primary += amount_cents as f64 / 100.0;
+            bucket.primary_cents += amount_cents;
         } else {
-            bucket.sub_total += amount_cents as f64 / 100.0;
+            bucket.sub_total_cents += amount_cents;
         }
     }
     Ok(budget_map)
@@ -1017,13 +1020,13 @@ fn budget_history_record_from_postgres_row(row: PgRow) -> DbResult<BudgetRecord>
             optional_string_value(row.try_get::<Option<String>, _>(key)?),
         );
     }
-    for (key, column) in [
-        ("budget_amount", "budget_amount_cents"),
-        ("spent_amount", "spent_amount_cents"),
-        ("remaining_amount", "remaining_amount_cents"),
+    for key in [
+        "budget_amount_cents",
+        "spent_amount_cents",
+        "remaining_amount_cents",
     ] {
-        let cents: i64 = row.try_get(column)?;
-        record.insert(key.to_string(), json_real(cents as f64 / 100.0));
+        let cents: i64 = row.try_get(key)?;
+        record.insert(key.to_string(), json_i64(cents));
     }
     record.insert(
         "execution_rate".to_string(),
@@ -1096,7 +1099,7 @@ fn budget_record_from_postgres_row(row: PgRow) -> DbResult<BudgetRecord> {
             .unwrap_or(Value::Null),
     );
     let amount_cents: i64 = row.try_get("amount_cents")?;
-    record.insert("amount".to_string(), json_real(amount_cents as f64 / 100.0));
+    record.insert("amount_cents".to_string(), json_i64(amount_cents));
     record.insert(
         "alert_threshold".to_string(),
         json_i64(i64::from(row.try_get::<i32, _>("alert_threshold")?)),
@@ -1150,7 +1153,7 @@ fn value_to_i64(value: &Value) -> Option<i64> {
     match value {
         Value::Number(value) => value.as_i64(),
         Value::String(value) => value.trim().parse::<i64>().ok(),
-        Value::Bool(value) => Some(i64::from(*value)),
+        Value::Bool(_) => None,
         _ => None,
     }
 }
@@ -1245,7 +1248,7 @@ async fn insert_postgres_budget_on_tx(
     .bind(optional_text(payload.get("category")))
     .bind(normalize_sub_category(payload.get("sub_category")))
     .bind(required_text(payload, "period_type")?)
-    .bind(amount_cents_from_record(payload, "amount")?)
+    .bind(amount_cents_from_record(payload, "amount_cents")?)
     .bind(required_date(payload, "start_date")?)
     .bind(optional_date(payload.get("end_date"))?)
     .bind(i32_value(payload.get("alert_threshold")).unwrap_or(80))
@@ -1296,10 +1299,10 @@ async fn update_postgres_budget_on_tx(
                     .push("period_type = ")
                     .push_bind(required_text(payload, "period_type")?);
             }
-            "amount" => {
+            "amount_cents" => {
                 builder
                     .push("amount_cents = ")
-                    .push_bind(amount_cents_from_record(payload, "amount")?);
+                    .push_bind(amount_cents_from_record(payload, "amount_cents")?);
             }
             "start_date" => {
                 builder
@@ -1371,7 +1374,7 @@ async fn import_postgres_budget_row_on_tx(
         .bind(optional_text(budget.get("category")))
         .bind(normalize_sub_category(budget.get("sub_category")))
         .bind(optional_text(budget.get("period_type")).unwrap_or_else(|| "monthly".to_string()))
-        .bind(amount_cents_from_record(budget, "amount")?)
+        .bind(amount_cents_from_record(budget, "amount_cents")?)
         .bind(required_date(budget, "start_date")?)
         .bind(optional_date(budget.get("end_date"))?)
         .bind(i32_value(budget.get("alert_threshold")).unwrap_or(80))
@@ -1487,10 +1490,7 @@ async fn synchronize_postgres_period_parent_budget_for_group(
             "period_type".to_string(),
             Value::String(group_key.period_type),
         );
-        payload.insert(
-            "amount".to_string(),
-            Value::String(amount_text_from_cents(child_total)),
-        );
+        payload.insert("amount_cents".to_string(), json_i64(child_total));
         payload.insert(
             "start_date".to_string(),
             Value::String(group_key.start_date),
@@ -1549,10 +1549,7 @@ async fn synchronize_postgres_primary_budget_for_group(
             "period_type".to_string(),
             Value::String(group_key.period_type),
         );
-        payload.insert(
-            "amount".to_string(),
-            Value::String(amount_text_from_cents(sub_total)),
-        );
+        payload.insert("amount_cents".to_string(), json_i64(sub_total));
         payload.insert(
             "start_date".to_string(),
             Value::String(group_key.start_date),
@@ -1981,19 +1978,8 @@ fn value_field_f64(value: &Value, key: &str) -> Option<f64> {
         .and_then(value_to_f64)
 }
 
-fn value_field_cents(value: &Value, key: &str) -> DbResult<i64> {
-    value
-        .as_object()
-        .and_then(|object| object.get(key))
-        .map(amount_cents_from_value)
-        .transpose()
-        .map(|value| value.unwrap_or_default())
-}
-
 fn record_amount_cents(record: &BudgetRecord) -> Option<i64> {
-    record
-        .get("amount")
-        .and_then(|value| amount_cents_from_value(value).ok())
+    record.get("amount_cents").and_then(value_to_i64)
 }
 
 fn amount_cents_from_record(record: &BudgetRecord, key: &str) -> DbResult<i64> {
@@ -2005,62 +1991,20 @@ fn amount_cents_from_record(record: &BudgetRecord, key: &str) -> DbResult<i64> {
 
 fn amount_cents_from_value(value: &Value) -> DbResult<i64> {
     match value {
-        Value::Number(number) => decimal_text_to_cents(&number.to_string()),
-        Value::String(value) => decimal_text_to_cents(value),
-        Value::Bool(value) => Ok(if *value { 100 } else { 0 }),
+        Value::Number(number) => number
+            .as_i64()
+            .ok_or_else(|| DbError::InvalidOperation("invalid budget amount".to_string())),
+        Value::String(value) => value
+            .trim()
+            .parse::<i64>()
+            .map_err(|_| DbError::InvalidOperation("invalid budget amount".to_string())),
+        Value::Bool(_) => Err(DbError::InvalidOperation(
+            "invalid budget amount".to_string(),
+        )),
         _ => Err(DbError::InvalidOperation(
             "invalid budget amount".to_string(),
         )),
     }
-}
-
-fn decimal_text_to_cents(raw: &str) -> DbResult<i64> {
-    let raw = raw.trim();
-    if raw.is_empty() || raw.contains('e') || raw.contains('E') {
-        return Err(DbError::InvalidOperation(
-            "invalid budget amount".to_string(),
-        ));
-    }
-    let (negative, raw) = raw
-        .strip_prefix('-')
-        .map_or((false, raw), |value| (true, value));
-    let raw = raw.strip_prefix('+').unwrap_or(raw);
-    let (integer, fraction) = raw.split_once('.').unwrap_or((raw, ""));
-    let integer = if integer.is_empty() { "0" } else { integer };
-    if !integer.chars().all(|value| value.is_ascii_digit())
-        || !fraction.chars().all(|value| value.is_ascii_digit())
-    {
-        return Err(DbError::InvalidOperation(
-            "invalid budget amount".to_string(),
-        ));
-    }
-    let major = integer
-        .parse::<i128>()
-        .map_err(|_| DbError::InvalidOperation("invalid budget amount".to_string()))?;
-    let mut fraction_digits = fraction.chars().collect::<Vec<_>>();
-    while fraction_digits.len() < 3 {
-        fraction_digits.push('0');
-    }
-    let tens = fraction_digits[0].to_digit(10).unwrap_or_default() as i128;
-    let ones = fraction_digits[1].to_digit(10).unwrap_or_default() as i128;
-    let round_digit = fraction_digits[2].to_digit(10).unwrap_or_default();
-    let mut cents = major
-        .checked_mul(100)
-        .and_then(|value| value.checked_add(tens * 10 + ones))
-        .ok_or_else(|| DbError::InvalidOperation("invalid budget amount".to_string()))?;
-    if round_digit >= 5 {
-        cents += 1;
-    }
-    if negative {
-        cents = -cents;
-    }
-    i64::try_from(cents).map_err(|_| DbError::InvalidOperation("invalid budget amount".to_string()))
-}
-
-fn amount_text_from_cents(cents: i64) -> String {
-    let sign = if cents < 0 { "-" } else { "" };
-    let absolute = cents.abs();
-    format!("{sign}{}.{:02}", absolute / 100, absolute % 100)
 }
 
 fn push_postgres_i64_bind_list(builder: &mut QueryBuilder<'_, Postgres>, values: &[i64]) {
@@ -2143,6 +2087,8 @@ fn now_text() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::postgres::PgPoolOptions;
+    use std::{env, error::Error};
 
     #[test]
     fn category_names_from_path_splits_main_and_subcategory() {
@@ -2154,5 +2100,114 @@ mod tests {
             category_names_from_path(&None, "Food"),
             ("Food".to_string(), String::new())
         );
+    }
+
+    #[test]
+    fn budget_forecast_and_amount_helpers_preserve_cents() {
+        let (totals, period_count) = aggregate_postgres_budget_forecast_rows(vec![
+            BudgetForecastRow {
+                period: "2026-05".to_string(),
+                category: "餐饮".to_string(),
+                amount_cents: 1200,
+            },
+            BudgetForecastRow {
+                period: "2026-05".to_string(),
+                category: "餐饮".to_string(),
+                amount_cents: 300,
+            },
+            BudgetForecastRow {
+                period: "2026-06".to_string(),
+                category: "餐饮".to_string(),
+                amount_cents: 4500,
+            },
+        ]);
+
+        assert_eq!(period_count, 2);
+        let food = totals.get("餐饮").expect("food totals");
+        assert_eq!(food.periods[0].period, "2026-05");
+        assert_eq!(food.periods[0].amount_cents, 1500);
+        assert_eq!(food.periods[1].amount_cents, 4500);
+
+        let record = BudgetRecord::from_iter([("amount_cents".to_string(), json!("9876"))]);
+        assert_eq!(record_amount_cents(&record), Some(9876));
+        assert!(record_amount_cents(&BudgetRecord::from_iter([(
+            "amount_cents".to_string(),
+            json!(true)
+        )]))
+        .is_none());
+        assert!(amount_cents_from_value(&json!(true)).is_err());
+        assert_eq!(
+            amount_cents_from_value(&json!("12345")).expect("text cents"),
+            12345
+        );
+        assert!(amount_cents_from_value(&json!("12.34")).is_err());
+        assert!(amount_cents_from_record(&BudgetRecord::new(), "amount_cents").is_err());
+    }
+
+    #[tokio::test]
+    async fn postgres_row_projectors_emit_explicit_cents_when_database_available(
+    ) -> Result<(), Box<dyn Error>> {
+        let Ok(postgres_url) = env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+            return Ok(());
+        };
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&postgres_url)
+            .await?;
+
+        let budget_row = sqlx::query(
+            r#"
+            SELECT
+                1::BIGINT AS id,
+                2::BIGINT AS user_id,
+                '餐饮预算'::TEXT AS name,
+                '餐饮'::TEXT AS category,
+                '午餐'::TEXT AS sub_category,
+                'monthly'::TEXT AS period_type,
+                '2026-06-01'::DATE AS start_date,
+                NULL::DATE AS end_date,
+                12345::BIGINT AS amount_cents,
+                80::INT AS alert_threshold,
+                true AS enabled,
+                now() AS created_at,
+                now() AS updated_at
+            "#,
+        )
+        .fetch_one(&pool)
+        .await?;
+        let budget = budget_record_from_postgres_row(budget_row).expect("budget record");
+        assert_eq!(budget.get("amount_cents"), Some(&json!(12345)));
+        assert!(budget.get("amount").is_none());
+
+        let history_row = sqlx::query(
+            r#"
+            SELECT
+                10::BIGINT AS id,
+                1::BIGINT AS budget_id,
+                '2026-06-01'::DATE AS period_start,
+                '2026-06-30'::DATE AS period_end,
+                12345::BIGINT AS budget_amount_cents,
+                4500::BIGINT AS spent_amount_cents,
+                7845::BIGINT AS remaining_amount_cents,
+                36.45::DOUBLE PRECISION AS execution_rate,
+                'normal'::TEXT AS status,
+                'monthly'::TEXT AS filter_summary,
+                '餐饮预算'::TEXT AS name,
+                '餐饮'::TEXT AS category,
+                '午餐'::TEXT AS sub_category,
+                'monthly'::TEXT AS period_type,
+                now() AS calculated_at,
+                80::INT AS alert_threshold,
+                true AS enabled
+            "#,
+        )
+        .fetch_one(&pool)
+        .await?;
+        let history = budget_history_record_from_postgres_row(history_row).expect("history record");
+        assert_eq!(history.get("budget_amount_cents"), Some(&json!(12345)));
+        assert_eq!(history.get("spent_amount_cents"), Some(&json!(4500)));
+        assert_eq!(history.get("remaining_amount_cents"), Some(&json!(7845)));
+
+        Ok(())
     }
 }

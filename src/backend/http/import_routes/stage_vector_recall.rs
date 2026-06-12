@@ -272,7 +272,9 @@ fn apply_import_learning_vector_recall_hit(
             counterparty_bucket: draft.preview_counterparty.clone(),
             payment_bucket: draft.preview_payment_method.clone(),
             description_bucket: draft.preview_description.clone(),
-            amount_bucket: Some(amount_bucket(Some(&json!(draft.preview_amount))).to_string()),
+            amount_bucket: Some(
+                amount_cents_bucket(Some(&json!(draft.preview_amount_cents))).to_string(),
+            ),
             transfer_protected,
             ..ImportLearningRecommendationKeyInput::default()
         },

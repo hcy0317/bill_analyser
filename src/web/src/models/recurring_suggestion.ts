@@ -12,7 +12,7 @@ export interface RecurringSuggestion {
     name: string;
     description: string;
     type: string;
-    amount: number;
+    amountCents: number;
     sourceAccountId: number | null;
     destinationAccountId: string | null;
     counterparty: string;
@@ -65,6 +65,21 @@ function toNumber(value: unknown): number {
     return 0;
 }
 
+function toIntegerCents(value: unknown): number {
+    if (typeof value === 'number') {
+        return Number.isSafeInteger(value) ? value : 0;
+    }
+    if (typeof value === 'string') {
+        const text = value.trim();
+        if (!/^[+-]?\d+$/u.test(text)) {
+            return 0;
+        }
+        const n = Number(text);
+        return Number.isSafeInteger(n) ? n : 0;
+    }
+    return 0;
+}
+
 function toNullableNumber(value: unknown): number | null {
     if (value === null || value === undefined || value === '') return null;
     const n = toNumber(value);
@@ -95,7 +110,7 @@ function mapSuggestion(r: Record<string, unknown>): RecurringSuggestion {
         name: toStr(r['name']),
         description: toStr(r['description']),
         type: toStr(r['type']),
-        amount: toNumber(r['amount']),
+        amountCents: toIntegerCents(r['amountCents'] ?? r['amount_cents']),
         sourceAccountId: toNullableNumber(r['sourceAccountId']),
         destinationAccountId: r['destinationAccountId'] != null ? String(r['destinationAccountId']) : null,
         counterparty: toStr(r['counterparty']),

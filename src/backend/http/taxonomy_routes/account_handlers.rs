@@ -601,10 +601,8 @@ async fn sync_all_postgres_account_balances(
         let name: String = row.try_get("name")?;
         let old_balance_cents: i64 = row.try_get("balance_cents")?;
         let metadata: Value = row.try_get("metadata")?;
-        let initial_balance_cents = metadata
-            .get("initial_balance")
-            .and_then(value_to_yuan_cents)
-            .unwrap_or(old_balance_cents);
+        let initial_balance_cents =
+            metadata_initial_balance_cents(&metadata, old_balance_cents);
         let new_balance_cents = initial_balance_cents + deltas.get(&account_id).copied().unwrap_or(0);
         if new_balance_cents != old_balance_cents {
             sqlx::query(
@@ -625,9 +623,9 @@ async fn sync_all_postgres_account_balances(
             discrepancies.push(AccountBalanceDiscrepancy {
                 account_id,
                 name,
-                old_balance: old_balance_cents as f64 / 100.0,
-                new_balance: new_balance_cents as f64 / 100.0,
-                diff: (new_balance_cents - old_balance_cents) as f64 / 100.0,
+                old_balance_cents,
+                new_balance_cents,
+                diff_cents: new_balance_cents - old_balance_cents,
             });
         }
     }
@@ -799,16 +797,16 @@ fn postgres_bill_balance_deltas(
 ) -> Vec<(i64, i64)> {
     let mut deltas = Vec::new();
     let amount = amount_cents.abs();
-    let destination_amount = standard_payload
-        .get("destination_amount")
-        .and_then(value_to_yuan_cents)
+    let destination_amount_cents = standard_payload
+        .get("destination_amount_cents")
+        .and_then(value_to_cents)
         .unwrap_or(amount)
         .abs();
     match transaction_type {
         "income" => push_account_delta(&mut deltas, source_account_id, amount),
         "transfer" | "investment" => {
             push_account_delta(&mut deltas, source_account_id, -amount);
-            push_account_delta(&mut deltas, destination_account_id, destination_amount);
+            push_account_delta(&mut deltas, destination_account_id, destination_amount_cents);
         }
         _ => push_account_delta(&mut deltas, source_account_id, -amount),
     }
@@ -821,13 +819,17 @@ fn push_account_delta(deltas: &mut Vec<(i64, i64)>, account_id: Option<i64>, del
     }
 }
 
-fn value_to_yuan_cents(value: &Value) -> Option<i64> {
-    let text = match value {
-        Value::Number(number) => number.to_string(),
-        Value::String(text) => text.clone(),
-        _ => return None,
-    };
-    bill_analyser_core::Money::from_yuan_str(&text)
-        .ok()
-        .map(bill_analyser_core::Money::to_cents)
+fn value_to_cents(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(number) => number.as_i64(),
+        Value::String(text) => text.trim().parse::<i64>().ok(),
+        _ => None,
+    }
+}
+
+fn metadata_initial_balance_cents(metadata: &Value, fallback_cents: i64) -> i64 {
+    metadata
+        .get("initial_balance_cents")
+        .and_then(value_to_cents)
+        .unwrap_or(fallback_cents)
 }

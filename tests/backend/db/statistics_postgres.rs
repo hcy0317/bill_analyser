@@ -6,15 +6,15 @@ use bill_analyser_core::{
 };
 use bill_analyser_db::{
     query_postgres_asset_trends_payload, query_postgres_category_statistics_payload,
-    query_postgres_category_trends_payload, query_postgres_transaction_amount_period,
-    run_postgres_migrations, StatisticsBillFilters,
+    query_postgres_category_trends_payload, query_postgres_statistics_analyzer_report_payload,
+    query_postgres_transaction_amount_period, run_postgres_migrations, StatisticsBillFilters,
 };
 use chrono::NaiveDate;
 use serde_json::{json, Value};
 use sqlx::{postgres::PgConnectOptions, postgres::PgPoolOptions, Executor, Row};
 
 #[tokio::test]
-async fn statistics_postgres_queries_preserve_cents_yuan_and_transfer_boundaries(
+async fn statistics_postgres_queries_preserve_explicit_cents_and_transfer_boundaries(
 ) -> Result<(), Box<dyn Error>> {
     let Ok(postgres_url) = env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
         eprintln!(
@@ -106,8 +106,18 @@ async fn statistics_postgres_queries_preserve_cents_yuan_and_transfer_boundaries
     )
     .await?;
     assert_eq!(amounts.amounts[0].currency, "CNY");
-    assert_eq!(amounts.amounts[0].income_amount, 5678);
-    assert_eq!(amounts.amounts[0].expense_amount, 1234);
+    assert_eq!(amounts.amounts[0].income_amount_cents, 5678);
+    assert_eq!(amounts.amounts[0].expense_amount_cents, 1234);
+
+    let analyzer =
+        query_postgres_statistics_analyzer_report_payload(&pool, scoped_user_id, "year").await?;
+    assert_eq!(analyzer["summary"]["total_income_cents"], 5678);
+    assert_eq!(analyzer["summary"]["total_expense_cents"], -1234);
+    assert_eq!(analyzer["summary"]["net_income_cents"], 4444);
+    assert_eq!(analyzer["by_type"]["expense"]["total_cents"], -1234);
+    assert_eq!(analyzer["by_type"]["transfer"]["total_cents"], -2000);
+    assert_eq!(analyzer["trend"][0]["expense_cents"], -1234);
+    assert_eq!(analyzer["trend"][0]["net_cents"], 4444);
 
     let asset = query_postgres_asset_trends_payload(
         &pool,
@@ -119,6 +129,8 @@ async fn statistics_postgres_queries_preserve_cents_yuan_and_transfer_boundaries
     let first_day = &asset["items"][0];
     assert_json_asset_amount(first_day, cash_id, 10025, 10941);
     assert_json_asset_amount(first_day, bank_id, 50000, 53678);
+    let explicit_id = account_id(&pool, user_id, &format!("零钱包-{unique}")).await?;
+    assert_json_asset_amount(first_day, explicit_id, 1234, 1234);
     let cash_id_text = cash_id.to_string();
     assert!(asset["legend"]
         .as_array()
@@ -146,8 +158,10 @@ async fn seed_statistics_fixture(
             .await?
             .try_get("id")?;
 
-    let cash_id = insert_account(pool, user_id, &format!("现金-{unique}"), 123_456, 100.25).await?;
-    let bank_id = insert_account(pool, user_id, &format!("工资卡-{unique}"), 45_678, 500.0).await?;
+    let cash_id = insert_account(pool, user_id, &format!("现金-{unique}"), 123_456, 10_025).await?;
+    let bank_id =
+        insert_account(pool, user_id, &format!("工资卡-{unique}"), 45_678, 50_000).await?;
+    insert_explicit_initial_balance_account(pool, user_id, &format!("零钱包-{unique}")).await?;
     let breakfast_id = insert_category(pool, user_id, "早餐", "餐饮/早餐").await?;
     let salary_id = insert_category(pool, user_id, "主业", "工资/主业").await?;
     let transfer_id = insert_category(pool, user_id, "转账", "转账").await?;
@@ -193,7 +207,7 @@ async fn seed_statistics_fixture(
         "现金",
         json!({
             "main_category": "转账",
-            "destination_amount": 21.50
+            "destination_amount_cents": 2150
         }),
     )
     .await?;
@@ -201,12 +215,33 @@ async fn seed_statistics_fixture(
     Ok(user_id)
 }
 
+async fn insert_explicit_initial_balance_account(
+    pool: &bill_analyser_db::PostgresPool,
+    user_id: i64,
+    name: &str,
+) -> Result<i64, Box<dyn Error>> {
+    let id = sqlx::query(
+        r#"
+        INSERT INTO accounts (user_id, name, account_type, currency, balance_cents, metadata)
+        VALUES ($1, $2, 'cash', 'CNY', 9999, $3)
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(name)
+    .bind(json!({"initial_balance_cents": 1234, "icon": "wallet"}))
+    .fetch_one(pool)
+    .await?
+    .try_get("id")?;
+    Ok(id)
+}
+
 async fn insert_account(
     pool: &bill_analyser_db::PostgresPool,
     user_id: i64,
     name: &str,
     balance_cents: i64,
-    initial_balance_yuan: f64,
+    initial_balance_cents: i64,
 ) -> Result<i64, Box<dyn Error>> {
     let id = sqlx::query(
         r#"
@@ -218,7 +253,7 @@ async fn insert_account(
     .bind(user_id)
     .bind(name)
     .bind(balance_cents)
-    .bind(json!({"initial_balance": initial_balance_yuan, "icon": "wallet"}))
+    .bind(json!({"initial_balance_cents": initial_balance_cents, "icon": "wallet"}))
     .fetch_one(pool)
     .await?
     .try_get("id")?;
@@ -330,7 +365,7 @@ fn assert_statistic_amount(
             item.category_id == category_id.to_string() && item.account_id == account_id.to_string()
         })
         .unwrap_or_else(|| panic!("missing statistic item: {context}"));
-    assert_eq!(item.amount, expected, "{context}");
+    assert_eq!(item.amount_cents, expected, "{context}");
 }
 
 fn assert_json_statistic_amount(
@@ -351,7 +386,7 @@ fn assert_json_statistic_amount(
                 && item["accountId"].as_str() == Some(expected_account_id.as_str())
         })
         .unwrap_or_else(|| panic!("missing statistic item: {context}"));
-    assert_eq!(item["amount"], expected, "{context}");
+    assert_eq!(item["amountCents"], expected, "{context}");
 }
 
 fn assert_json_asset_amount(day: &Value, account_id: i64, opening: i64, closing: i64) {
@@ -362,6 +397,6 @@ fn assert_json_asset_amount(day: &Value, account_id: i64, opening: i64, closing:
         .iter()
         .find(|item| item["accountId"].as_str() == Some(expected_account_id.as_str()))
         .unwrap_or_else(|| panic!("missing asset trend item for account {account_id}"));
-    assert_eq!(item["accountOpeningBalance"], opening);
-    assert_eq!(item["accountClosingBalance"], closing);
+    assert_eq!(item["accountOpeningBalanceCents"], opening);
+    assert_eq!(item["accountClosingBalanceCents"], closing);
 }

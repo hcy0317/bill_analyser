@@ -15,8 +15,8 @@ fn settings_bundle_taxonomy_export_preserves_importable_refs_and_minor_units(
 ) -> Result<(), Box<dyn Error>> {
     let sections = export_taxonomy_sections(&json!({
         "accounts": [
-            {"id": 1, "name": "现金", "type": 1, "currency": "CNY", "balance": 12.34},
-            {"id": 2, "name": "工资卡", "type": 1, "currency": "CNY", "balance": 0}
+            {"id": 1, "name": "现金", "type": 1, "currency": "CNY", "balanceCents": 1234},
+            {"id": 2, "name": "工资卡", "type": 1, "currency": "CNY", "balanceCents": 0}
         ],
         "categories": [{
             "id": 3,
@@ -32,8 +32,8 @@ fn settings_bundle_taxonomy_export_preserves_importable_refs_and_minor_units(
             "type": 3,
             "categoryId": "3",
             "sourceAccountId": "1",
-            "sourceAmount": 1999,
-            "destinationAmount": 0,
+            "sourceAmountCents": 1999,
+            "destinationAmountCents": 0,
             "tagIds": ["7"]
         }],
         "scheduled": [{
@@ -44,8 +44,8 @@ fn settings_bundle_taxonomy_export_preserves_importable_refs_and_minor_units(
             "categoryId": "3",
             "sourceAccountId": "1",
             "destinationAccountId": "2",
-            "sourceAmount": 250000,
-            "destinationAmount": 250000,
+            "sourceAmountCents": 250000,
+            "destinationAmountCents": 250000,
             "tagIds": ["7"],
             "scheduledStartDate": "2026-06-01"
         }]
@@ -53,14 +53,14 @@ fn settings_bundle_taxonomy_export_preserves_importable_refs_and_minor_units(
 
     let account = &sections["accounts"][0];
     assert_eq!(account["externalRef"], "account:1");
-    assert_eq!(account["balance"], 12.34);
+    assert_eq!(account["balanceCents"], 1234);
 
     let template = &sections["transactionTemplates"][0];
     assert_eq!(template["sourceAccountRef"], "account:1");
     assert_eq!(template["sourceAccountName"], "现金");
     assert_eq!(template["categoryRef"], "category:3");
     assert_eq!(template["tagRefs"], json!(["tag:7"]));
-    assert_eq!(template["sourceAmount"], 1999);
+    assert_eq!(template["sourceAmountCents"], 1999);
     assert!(template.get("id").is_none());
     assert!(template.get("tagIds").is_none());
 
@@ -69,8 +69,8 @@ fn settings_bundle_taxonomy_export_preserves_importable_refs_and_minor_units(
     assert_eq!(scheduled["destinationAccountRef"], "account:2");
     assert_eq!(scheduled["categoryRef"], "category:3");
     assert_eq!(scheduled["tagRefs"], json!(["tag:7"]));
-    assert_eq!(scheduled["sourceAmount"], 250000);
-    assert_eq!(scheduled["destinationAmount"], 250000);
+    assert_eq!(scheduled["sourceAmountCents"], 250000);
+    assert_eq!(scheduled["destinationAmountCents"], 250000);
     assert!(scheduled.get("id").is_none());
     assert!(scheduled.get("tagIds").is_none());
 
@@ -78,9 +78,12 @@ fn settings_bundle_taxonomy_export_preserves_importable_refs_and_minor_units(
         "schemaVersion": 1,
         "sections": sections
     }))?;
-    assert_eq!(normalized["transactionTemplates"][0]["sourceAmount"], 1999);
     assert_eq!(
-        normalized["scheduledTransactions"][0]["destinationAmount"],
+        normalized["transactionTemplates"][0]["sourceAmountCents"],
+        1999
+    );
+    assert_eq!(
+        normalized["scheduledTransactions"][0]["destinationAmountCents"],
         250000
     );
     assert!(normalized["accountRecognitionRules"]
@@ -164,6 +167,99 @@ async fn settings_bundle_import_upserts_templates_when_postgres_available(
         3,
     )
     .await?;
+
+    let ambiguous_amount_bundle = json!({
+        "schemaVersion": 1,
+        "sections": {
+            "accounts": [{
+                "externalRef": format!("account:ambiguous-cash:{unique}"),
+                "name": format!("泛型现金-{unique}"),
+                "type": 1,
+                "currency": "CNY",
+                "balanceCents": 0
+            }],
+            "transactionCategories": [{
+                "externalRef": format!("category:ambiguous-lunch:{unique}"),
+                "type": 3,
+                "mainCategory": format!("泛型餐饮-{unique}"),
+                "subCategory": "午餐"
+            }],
+            "transactionTags": [{
+                "externalRef": format!("tag:ambiguous:{unique}"),
+                "name": format!("泛型标签-{unique}")
+            }],
+            "transactionTemplates": [{
+                "name": "泛型金额模板",
+                "type": 3,
+                "categoryRef": format!("category:ambiguous-lunch:{unique}"),
+                "sourceAccountRef": format!("account:ambiguous-cash:{unique}"),
+                "amount_cents": 9999,
+                "tagRefs": [format!("tag:ambiguous:{unique}")]
+            }],
+            "scheduledTransactions": [{
+                "name": "非法金额计划",
+                "type": 4,
+                "categoryRef": format!("category:ambiguous-lunch:{unique}"),
+                "sourceAccountRef": format!("account:ambiguous-cash:{unique}"),
+                "sourceAmountCents": true
+            }]
+        }
+    });
+    let ambiguous_import =
+        import_postgres_settings_bundle(&pool, &ambiguous_amount_bundle, user_id, false).await?;
+    assert_eq!(
+        ambiguous_import["sections"]["transactionTemplates"]["created"],
+        1
+    );
+    assert_eq!(
+        ambiguous_import["sections"]["scheduledTransactions"]["skipped"],
+        1
+    );
+    assert_template_row(&pool, user_id, 1, "泛型金额模板", 0, 0, false).await?;
+    let warnings = ambiguous_import["warnings"]
+        .as_array()
+        .expect("settings warnings");
+    assert!(warnings.iter().any(|warning| warning
+        .as_str()
+        .unwrap_or_default()
+        .contains("invalid sourceAmountCents")));
+
+    let invalid_account_name = format!("坏金额账户-{unique}");
+    let invalid_account_bundle = json!({
+        "schemaVersion": 1,
+        "sections": {
+            "accounts": [{
+                "externalRef": format!("account:invalid-cents:{unique}"),
+                "name": invalid_account_name,
+                "type": 1,
+                "currency": "CNY",
+                "balanceCents": "12.34",
+                "initialBalanceCents": true
+            }]
+        }
+    });
+    let invalid_account_import =
+        import_postgres_settings_bundle(&pool, &invalid_account_bundle, user_id, false).await?;
+    assert_eq!(invalid_account_import["sections"]["accounts"]["skipped"], 1);
+    let invalid_account_warnings = invalid_account_import["warnings"]
+        .as_array()
+        .expect("invalid account warnings");
+    assert!(invalid_account_warnings.iter().any(|warning| warning
+        .as_str()
+        .unwrap_or_default()
+        .contains("invalid balanceCents")));
+    assert!(invalid_account_warnings.iter().any(|warning| warning
+        .as_str()
+        .unwrap_or_default()
+        .contains("invalid initialBalanceCents")));
+    let invalid_account_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)::BIGINT FROM accounts WHERE user_id = $1 AND name = $2",
+    )
+    .bind(user_id)
+    .bind(&invalid_account_name)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(invalid_account_count, 0);
 
     let name_only_rule = json!({
         "schemaVersion": 1,
@@ -261,14 +357,14 @@ fn settings_bundle_payload(
                     "name": format!("现金-{unique}"),
                     "type": 1,
                     "currency": "CNY",
-                    "balance": 12.34
+                    "balanceCents": 1234
                 },
                 {
                     "externalRef": format!("account:bank:{unique}"),
                     "name": format!("工资卡-{unique}"),
                     "type": 1,
                     "currency": "CNY",
-                    "balance": 0
+                    "balanceCents": 0
                 }
             ],
             "transactionCategories": [{
@@ -286,8 +382,8 @@ fn settings_bundle_payload(
                 "type": 3,
                 "categoryRef": format!("category:lunch:{unique}"),
                 "sourceAccountRef": format!("account:cash:{unique}"),
-                "sourceAmount": template_amount,
-                "destinationAmount": 0,
+                "sourceAmountCents": template_amount,
+                "destinationAmountCents": 0,
                 "hideAmount": false,
                 "tagRefs": [format!("tag:project:{unique}")],
                 "comment": "工作日午餐",
@@ -300,8 +396,8 @@ fn settings_bundle_payload(
                 "categoryRef": format!("category:lunch:{unique}"),
                 "sourceAccountRef": format!("account:cash:{unique}"),
                 "destinationAccountRef": format!("account:bank:{unique}"),
-                "sourceAmount": scheduled_amount,
-                "destinationAmount": scheduled_amount,
+                "sourceAmountCents": scheduled_amount,
+                "destinationAmountCents": scheduled_amount,
                 "hideAmount": false,
                 "tagRefs": [format!("tag:project:{unique}")],
                 "scheduledFrequencyType": 3,

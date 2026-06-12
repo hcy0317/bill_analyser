@@ -61,8 +61,8 @@ fn record_to_frontend_value_with_related(
         main_category: record_text(&record, "main_category"),
         sub_category: record_text(&record, "sub_category"),
         date: record_text(&record, "date"),
-        amount: money_from_record(&record, "amount")?,
-        destination_amount: Some(money_from_record(&record, "destination_amount")?),
+        amount: money_from_record(&record, "amount_cents")?,
+        destination_amount: Some(money_from_record(&record, "destination_amount_cents")?),
         source_account_id: positive_record_i64(&record, "source_account_id"),
         destination_account_id: positive_record_i64(&record, "destination_account_id"),
         utc_offset: UtcOffsetMinutes::new(DEFAULT_UTC_OFFSET_MINUTES),
@@ -90,8 +90,8 @@ mod record_presenter_tests {
         record.insert("main_category".to_string(), json!("餐饮"));
         record.insert("sub_category".to_string(), json!("咖啡"));
         record.insert("date".to_string(), json!("2026-04-02 09:00:00"));
-        record.insert("amount".to_string(), json!(123.45));
-        record.insert("destination_amount".to_string(), json!(125.0));
+        record.insert("amount_cents".to_string(), json!(12345));
+        record.insert("destination_amount_cents".to_string(), json!(12500));
         record.insert("source_account_id".to_string(), json!(10));
         record.insert("destination_account_id".to_string(), json!(20));
         record.insert("description".to_string(), json!("B007 咖啡"));
@@ -109,9 +109,9 @@ mod record_presenter_tests {
         assert_eq!(value["subCategoryName"], "咖啡");
         assert_eq!(value["sourceAccountId"], "10");
         assert_eq!(value["destinationAccountId"], "20");
-        assert_eq!(value["amount"], 12345);
-        assert_eq!(value["sourceAmount"], 12345);
-        assert_eq!(value["destinationAmount"], 12500);
+        assert_eq!(value["amountCents"], 12345);
+        assert_eq!(value["sourceAmountCents"], 12345);
+        assert_eq!(value["destinationAmountCents"], 12500);
         assert_eq!(value["tagIds"], json!(["7"]));
         assert_eq!(value["tags"], json!([{"id": "7", "name": "咖啡标签"}]));
         assert_eq!(value["comment"], "B007 咖啡");

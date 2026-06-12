@@ -73,9 +73,9 @@
                             ></f7-progressbar>
                         </div>
                         <div class="budget-amount-row">
-                            <span class="budget-amount-spent">{{ formatAmount(group.totalSpent / 100) }}</span>
+                            <span class="budget-amount-spent">{{ formatAmount(group.totalSpentCents / 100) }}</span>
                             <span class="budget-amount-divider"> / </span>
-                            <span class="budget-amount-target">{{ formatAmount(group.totalAmount / 100) }}</span>
+                            <span class="budget-amount-target">{{ formatAmount(group.totalAmountCents / 100) }}</span>
                         </div>
                     </template>
                     <f7-swipeout-actions right v-if="getPrimaryBudgetForHeader(group)">

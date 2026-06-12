@@ -28,8 +28,8 @@ export interface SetTransactionOptions {
     categoryId?: string;
     accountId?: string;
     destinationAccountId?: string;
-    amount?: number;
-    destinationAmount?: number;
+    sourceAmountCents?: number;
+    destinationAmountCents?: number;
     tagIds?: string;
     comment?: string;
 }
@@ -48,12 +48,12 @@ export function setTransactionModelByTransaction(transaction: Transaction, trans
         }
     }
 
-    if (isDefined(options.amount)) {
-        transaction.sourceAmount = options.amount;
+    if (isDefined(options.sourceAmountCents)) {
+        transaction.sourceAmountCents = options.sourceAmountCents;
     }
 
-    if (isDefined(options.destinationAmount)) {
-        transaction.destinationAmount = options.destinationAmount;
+    if (isDefined(options.destinationAmountCents)) {
+        transaction.destinationAmountCents = options.destinationAmountCents;
     }
 
     if (allCategories[CategoryType.Expense] &&
@@ -218,12 +218,12 @@ export function setTransactionModelByTransaction(transaction: Transaction, trans
             transaction.destinationAccountId = '';
         }
 
-        transaction.sourceAmount = transaction2.sourceAmount;
+        transaction.sourceAmountCents = transaction2.sourceAmountCents;
 
-        if (transaction2.destinationAmount) {
-            transaction.destinationAmount = transaction2.destinationAmount;
+        if (transaction2.destinationAmountCents) {
+            transaction.destinationAmountCents = transaction2.destinationAmountCents;
         } else {
-            transaction.destinationAmount = 0;
+            transaction.destinationAmountCents = 0;
         }
 
         transaction.hideAmount = transaction2.hideAmount;

@@ -77,7 +77,7 @@ export interface TransactionListPartialFilter {
     accountIds?: string;
     tagIds?: string;
     tagFilterType?: number;
-    amountFilter?: string;
+    amountFilterCents?: string;
     keyword?: string;
 }
 
@@ -90,14 +90,14 @@ export interface TransactionListFilter extends TransactionListPartialFilter {
     accountIds: string;
     tagIds: string;
     tagFilterType: number;
-    amountFilter: string;
+    amountFilterCents: string;
     keyword: string;
 }
 
-export interface TransactionTotalAmount {
-    expense: number;
+export interface TransactionTotalAmountCents {
+    expenseCents: number;
     incompleteExpense: boolean;
-    income: number;
+    incomeCents: number;
     incompleteIncome: boolean;
 }
 
@@ -107,8 +107,8 @@ export interface TransactionMonthList {
     readonly yearDashMonth: TextualYearMonth;
     opened: boolean;
     readonly items: Transaction[];
-    readonly totalAmount: TransactionTotalAmount;
-    readonly dailyTotalAmounts: Record<string, TransactionTotalAmount>;
+    readonly totalAmountCents: TransactionTotalAmountCents;
+    readonly dailyTotalAmountsCents: Record<string, TransactionTotalAmountCents>;
 }
 
 const KNOWN_RECEIPT_IMAGE_ERROR_CODES: ReadonlySet<ReceiptImageErrorCode> = new Set<ReceiptImageErrorCode>([
@@ -338,7 +338,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
         accountIds: '',
         tagIds: '',
         tagFilterType: TransactionTagFilterType.Default.type,
-        amountFilter: '',
+        amountFilterCents: '',
         keyword: ''
     });
 
@@ -392,7 +392,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
                 if (index === 0 && transactions.value.length > 0) {
                     const lastMonthList = transactions.value[transactions.value.length - 1] as TransactionMonthList;
 
-                    if (lastMonthList.totalAmount.incompleteExpense || lastMonthList.totalAmount.incompleteIncome) {
+                    if (lastMonthList.totalAmountCents.incompleteExpense || lastMonthList.totalAmountCents.incompleteIncome) {
                         // calculate the total amount of last month which has incomplete total amount before starting to process a new request
                         calculateMonthTotalAmount(lastMonthList, defaultCurrency, transactionsFilter.value.accountIds, false);
                     }
@@ -426,13 +426,13 @@ export const useTransactionsStore = defineStore('transactions', () => {
                         yearDashMonth: transactionYearDashMonth,
                         opened: autoExpand,
                         items: [],
-                        totalAmount: {
-                            expense: 0,
+                        totalAmountCents: {
+                            expenseCents: 0,
                             incompleteExpense: true,
-                            income: 0,
+                            incomeCents: 0,
                             incompleteIncome: true
                         },
-                        dailyTotalAmounts: {}
+                        dailyTotalAmountsCents: {}
                     };
 
                     transactions.value.push(monthList);
@@ -531,7 +531,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
         let totalIncome = 0;
         let hasUnCalculatedTotalExpense = false;
         let hasUnCalculatedTotalIncome = false;
-        const dailyTotalAmounts: Record<string, TransactionTotalAmount> = {};
+        const dailyTotalAmountsCents: Record<string, TransactionTotalAmountCents> = {};
 
         const allAccountIdsMap: Record<string, boolean> = {};
         let totalAccountIdsCount = 0;
@@ -549,25 +549,25 @@ export const useTransactionsStore = defineStore('transactions', () => {
 
         for (const transaction of transactionMonthList.items) {
             const transactionDay = isNumber(transaction.gregorianCalendarDayOfMonth) ? transaction.gregorianCalendarDayOfMonth.toString() : '0';
-            let dailyTotalAmount = dailyTotalAmounts[transactionDay];
+            let dailyTotalAmount = dailyTotalAmountsCents[transactionDay];
 
             if (!dailyTotalAmount) {
                 dailyTotalAmount = {
-                    expense: 0,
+                    expenseCents: 0,
                     incompleteExpense: false,
-                    income: 0,
+                    incomeCents: 0,
                     incompleteIncome: false
                 };
-                dailyTotalAmounts[transactionDay] = dailyTotalAmount;
+                dailyTotalAmountsCents[transactionDay] = dailyTotalAmount;
             }
 
-            let amount = transaction.sourceAmount;
+            let amount = transaction.sourceAmountCents;
             let account = transaction.sourceAccount;
 
             if (totalAccountIdsCount > 0 && transaction.destinationAccount
                 && (!allAccountIdsMap[transaction.sourceAccount?.id || ''] && !allAccountIdsMap[transaction.sourceAccount?.parentId || ''])
                 && (allAccountIdsMap[transaction.destinationAccount.id] || allAccountIdsMap[transaction.destinationAccount.parentId])) {
-                amount = transaction.destinationAmount;
+                amount = transaction.destinationAmountCents;
                 account = transaction.destinationAccount;
             }
 
@@ -595,10 +595,10 @@ export const useTransactionsStore = defineStore('transactions', () => {
 
             if (transaction.type === TransactionType.Expense) {
                 totalExpense += amount;
-                dailyTotalAmount.expense += amount;
+                dailyTotalAmount.expenseCents += amount;
             } else if (transaction.type === TransactionType.Income) {
                 totalIncome += amount;
-                dailyTotalAmount.income += amount;
+                dailyTotalAmount.incomeCents += amount;
             } else if (transaction.type === TransactionType.Transfer && totalAccountIdsCount > 0) {
                 if (allAccountIdsMap[transaction.sourceAccountId] && allAccountIdsMap[transaction.destinationAccountId]) {
                     // 不做处理
@@ -610,28 +610,28 @@ export const useTransactionsStore = defineStore('transactions', () => {
                     // 不做处理
                 } else if (allAccountIdsMap[transaction.sourceAccountId] || (transaction.sourceAccount && allAccountIdsMap[transaction.sourceAccount.parentId])) {
                     totalExpense += amount;
-                    dailyTotalAmount.expense += amount;
+                    dailyTotalAmount.expenseCents += amount;
                 } else if (allAccountIdsMap[transaction.destinationAccountId] || (transaction.destinationAccount && allAccountIdsMap[transaction.destinationAccount.parentId])) {
                     totalIncome += amount;
-                    dailyTotalAmount.income += amount;
+                    dailyTotalAmount.incomeCents += amount;
                 }
             }
         }
 
-        transactionMonthList.totalAmount.expense = Math.trunc(totalExpense);
-        transactionMonthList.totalAmount.incompleteExpense = incomplete || hasUnCalculatedTotalExpense;
-        transactionMonthList.totalAmount.income = Math.trunc(totalIncome);
-        transactionMonthList.totalAmount.incompleteIncome = incomplete || hasUnCalculatedTotalIncome;
+        transactionMonthList.totalAmountCents.expenseCents = Math.trunc(totalExpense);
+        transactionMonthList.totalAmountCents.incompleteExpense = incomplete || hasUnCalculatedTotalExpense;
+        transactionMonthList.totalAmountCents.incomeCents = Math.trunc(totalIncome);
+        transactionMonthList.totalAmountCents.incompleteIncome = incomplete || hasUnCalculatedTotalIncome;
 
-        for (const day of keys(transactionMonthList.dailyTotalAmounts)) {
-            delete transactionMonthList.dailyTotalAmounts[day];
+        for (const day of keys(transactionMonthList.dailyTotalAmountsCents)) {
+            delete transactionMonthList.dailyTotalAmountsCents[day];
         }
 
-        for (const [day, dailyTotalAmount] of entries(dailyTotalAmounts)) {
-            transactionMonthList.dailyTotalAmounts[day] = {
-                expense: Math.trunc(dailyTotalAmount.expense),
+        for (const [day, dailyTotalAmount] of entries(dailyTotalAmountsCents)) {
+            transactionMonthList.dailyTotalAmountsCents[day] = {
+                expenseCents: Math.trunc(dailyTotalAmount.expenseCents),
                 incompleteExpense: incomplete || dailyTotalAmount.incompleteExpense,
-                income: Math.trunc(dailyTotalAmount.income),
+                incomeCents: Math.trunc(dailyTotalAmount.incomeCents),
                 incompleteIncome: incomplete || dailyTotalAmount.incompleteIncome
             };
         }
@@ -672,11 +672,11 @@ export const useTransactionsStore = defineStore('transactions', () => {
             return false;
         }
 
-        if (transaction.sourceAmount !== 0 && transaction.sourceAmount !== initAmount) {
+        if (transaction.sourceAmountCents !== 0 && transaction.sourceAmountCents !== initAmount) {
             return true;
         }
 
-        if (transaction.type === TransactionType.Transfer && transaction.destinationAmount !== 0) {
+        if (transaction.type === TransactionType.Transfer && transaction.destinationAmountCents !== 0) {
             return true;
         }
 
@@ -756,7 +756,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
 
     function setTransactionSuitableDestinationAmount(transaction: Transaction, oldValue: number, newValue: number): void {
         if (transaction.type === TransactionType.Expense || transaction.type === TransactionType.Income) {
-            transaction.destinationAmount = newValue;
+            transaction.destinationAmountCents = newValue;
         } else if (transaction.type === TransactionType.Transfer) {
             const sourceAccount = accountsStore.allAccountsMap[transaction.sourceAccountId];
             const destinationAccount = accountsStore.allAccountsMap[transaction.destinationAccountId];
@@ -779,9 +779,9 @@ export const useTransactionsStore = defineStore('transactions', () => {
                 }
             }
 
-            if ((!sourceAccount || !destinationAccount || transaction.destinationAmount === oldValue || transaction.destinationAmount === 0) &&
+            if ((!sourceAccount || !destinationAccount || transaction.destinationAmountCents === oldValue || transaction.destinationAmountCents === 0) &&
                 (TRANSACTION_MIN_AMOUNT <= newValue && newValue <= TRANSACTION_MAX_AMOUNT)) {
-                transaction.destinationAmount = newValue;
+                transaction.destinationAmountCents = newValue;
             }
         }
     }
@@ -803,7 +803,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
         transactionsFilter.value.accountIds = '';
         transactionsFilter.value.tagIds = '';
         transactionsFilter.value.tagFilterType = TransactionTagFilterType.Default.type;
-        transactionsFilter.value.amountFilter = '';
+        transactionsFilter.value.amountFilterCents = '';
         transactionsFilter.value.keyword = '';
         transactions.value = [];
         transactionsNextTimeId.value = 0;
@@ -866,10 +866,10 @@ export const useTransactionsStore = defineStore('transactions', () => {
             transactionsFilter.value.tagFilterType = TransactionTagFilterType.Default.type;
         }
 
-        if (filter && isString(filter.amountFilter)) {
-            transactionsFilter.value.amountFilter = filter.amountFilter;
+        if (filter && isString(filter.amountFilterCents)) {
+            transactionsFilter.value.amountFilterCents = filter.amountFilterCents;
         } else {
-            transactionsFilter.value.amountFilter = '';
+            transactionsFilter.value.amountFilterCents = '';
         }
 
         if (filter && isString(filter.keyword)) {
@@ -927,8 +927,8 @@ export const useTransactionsStore = defineStore('transactions', () => {
             changed = true;
         }
 
-        if (filter && isString(filter.amountFilter) && transactionsFilter.value.amountFilter !== filter.amountFilter) {
-            transactionsFilter.value.amountFilter = filter.amountFilter;
+        if (filter && isString(filter.amountFilterCents) && transactionsFilter.value.amountFilterCents !== filter.amountFilterCents) {
+            transactionsFilter.value.amountFilterCents = filter.amountFilterCents;
             changed = true;
         }
 
@@ -972,8 +972,8 @@ export const useTransactionsStore = defineStore('transactions', () => {
             querys.push('minTime=' + transactionsFilter.value.minTime);
         }
 
-        if (transactionsFilter.value.amountFilter) {
-            querys.push('amountFilter=' + encodeURIComponent(transactionsFilter.value.amountFilter));
+        if (transactionsFilter.value.amountFilterCents) {
+            querys.push('amountFilterCents=' + encodeURIComponent(transactionsFilter.value.amountFilterCents));
         }
 
         if (transactionsFilter.value.keyword) {
@@ -992,7 +992,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
             accountIds: transactionsFilter.value.accountIds,
             tagIds: transactionsFilter.value.tagIds,
             tagFilterType: transactionsFilter.value.tagFilterType,
-            amountFilter: transactionsFilter.value.amountFilter,
+            amountFilterCents: transactionsFilter.value.amountFilterCents,
             keyword: transactionsFilter.value.keyword
         };
     }
@@ -1029,7 +1029,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
                 accountIds: expandedAccountIds,  // 🆕 使用展开后的账户ID
                 tagIds: transactionsFilter.value.tagIds,
                 tagFilterType: transactionsFilter.value.tagFilterType,
-                amountFilter: transactionsFilter.value.amountFilter,
+                amountFilterCents: transactionsFilter.value.amountFilterCents,
                 keyword: transactionsFilter.value.keyword
             }).then(response => {
                 const data = response.data;
@@ -1120,7 +1120,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
                 accountIds: expandedAccountIds,  // 🆕 使用展开后的账户ID
                 tagIds: transactionsFilter.value.tagIds,
                 tagFilterType: transactionsFilter.value.tagFilterType,
-                amountFilter: transactionsFilter.value.amountFilter,
+                amountFilterCents: transactionsFilter.value.amountFilterCents,
                 keyword: transactionsFilter.value.keyword
             }).then(response => {
                 const data = response.data;

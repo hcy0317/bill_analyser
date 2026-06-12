@@ -7,6 +7,7 @@ import {
     getImportPreviewTransactionTypeLabel,
     type ImportPreviewTransactionDraft
 } from './importPreviewTransaction.ts';
+import { requireStrictIntegerCents } from './strictCents.ts';
 
 export interface BuildImportPreviewUpdateFromTransactionOptions {
     categoryPath: ImportPreviewResolvedCategoryPath | null;
@@ -19,8 +20,8 @@ export interface BuildImportPreviewUpdateFromTransactionOptions {
 export type ImportPreviewUpdatePayload = Record<string, unknown> & {
     id?: number;
     preview_type: string;
-    preview_amount: number;
-    preview_destination_amount: number;
+    preview_amount_cents: number;
+    preview_destination_amount_cents: number;
     preview_source_account_id: number | null;
     preview_destination_account_id: number | null;
     preview_recurring_id: number | null;
@@ -76,8 +77,11 @@ export function buildImportPreviewUpdateFromTransaction(
     const update: ImportPreviewUpdatePayload = {
         id: (transaction as ImportPreviewTransactionDraft)._previewId,
         preview_type: getImportPreviewTransactionTypeLabel(transaction.type),
-        preview_amount: transaction.sourceAmount / 100,
-        preview_destination_amount: transaction.destinationAmount / 100,
+        preview_amount_cents: requireStrictIntegerCents(transaction.sourceAmountCents, 'sourceAmountCents'),
+        preview_destination_amount_cents: requireStrictIntegerCents(
+            transaction.destinationAmountCents,
+            'destinationAmountCents'
+        ),
         preview_source_account_id: parseOptionalInteger(transaction.sourceAccountId),
         preview_destination_account_id: parseOptionalInteger(transaction.destinationAccountId),
         preview_recurring_id: parseOptionalInteger(transaction.recurringTemplateId),

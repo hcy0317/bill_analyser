@@ -6,7 +6,7 @@ use sqlx::{postgres::PgConnectOptions, postgres::PgPoolOptions, Executor};
 pub struct IsolatedPostgres {
     pub pool: PostgresPool,
     admin_pool: PostgresPool,
-    db_name: String,
+    pub db_name: String,
 }
 
 impl IsolatedPostgres {

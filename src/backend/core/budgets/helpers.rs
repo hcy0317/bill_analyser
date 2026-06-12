@@ -49,16 +49,16 @@ fn select_budget_items(items: &[Value], detail_mode: bool) -> Vec<Value> {
 fn primary_is_synchronized_shadow(primary: &Value, secondary: &[Value]) -> bool {
     let secondary_budget = secondary
         .iter()
-        .map(|item| budget_item_amount(item, "budget_amount"))
-        .sum::<f64>();
+        .map(|item| budget_item_amount_cents(item, "budget_amount_cents"))
+        .sum::<i64>();
     let secondary_spent = secondary
         .iter()
-        .map(|item| budget_item_amount(item, "spent_amount"))
-        .sum::<f64>();
-    (budget_item_amount(primary, "budget_amount") - secondary_budget).abs()
-        <= SYNCHRONIZED_PRIMARY_TOLERANCE
-        && (budget_item_amount(primary, "spent_amount") - secondary_spent).abs()
-            <= SYNCHRONIZED_PRIMARY_TOLERANCE
+        .map(|item| budget_item_amount_cents(item, "spent_amount_cents"))
+        .sum::<i64>();
+    (budget_item_amount_cents(primary, "budget_amount_cents") - secondary_budget).abs()
+        <= SYNCHRONIZED_PRIMARY_TOLERANCE_CENTS
+        && (budget_item_amount_cents(primary, "spent_amount_cents") - secondary_spent).abs()
+            <= SYNCHRONIZED_PRIMARY_TOLERANCE_CENTS
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -91,8 +91,8 @@ fn value_string(value: Option<&Value>) -> String {
     }
 }
 
-fn budget_item_amount(item: &Value, field: &str) -> f64 {
-    item.get(field).and_then(value_to_f64).unwrap_or_default()
+fn budget_item_amount_cents(item: &Value, field: &str) -> i64 {
+    value_to_i64(item.get(field)).unwrap_or_default()
 }
 
 fn value_to_i64(value: Option<&Value>) -> Option<i64> {
@@ -178,6 +178,20 @@ fn average(values: &[f64]) -> Option<f64> {
     } else {
         Some(values.iter().sum::<f64>() / values.len() as f64)
     }
+}
+
+fn average_cents(values: &[i64]) -> Option<i64> {
+    if values.is_empty() {
+        return None;
+    }
+    let total = values.iter().fold(0_i128, |sum, value| sum + i128::from(*value));
+    let len = i128::try_from(values.len()).ok()?;
+    let rounded = if total >= 0 {
+        (total + len / 2) / len
+    } else {
+        (total - len / 2) / len
+    };
+    i64::try_from(rounded).ok()
 }
 
 fn sorted_ids(values: Option<&[i64]>) -> Vec<i64> {

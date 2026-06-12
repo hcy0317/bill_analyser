@@ -91,7 +91,7 @@ fn preview_row_prompt_value(row: &ImportPreviewRow) -> Value {
     json!({
         "id": row.id,
         "date": row.preview_date,
-        "amount": row.preview_amount,
+        "amount_cents": row.preview_amount_cents,
         "type": row.preview_type,
         "counterparty": row.preview_counterparty,
         "description": row.preview_description,

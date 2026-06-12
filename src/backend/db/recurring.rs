@@ -280,7 +280,7 @@ pub async fn detect_and_save_postgres_recurring_suggestions(
             .bind(&pattern.name)
             .bind(&pattern.description)
             .bind(&pattern.transaction_type)
-            .bind(yuan_to_cents(pattern.amount))
+            .bind(pattern.amount_cents)
             .bind(pattern.source_account_id)
             .bind(optional_i64_from_text(&pattern.destination_account_id))
             .bind(&pattern.counterparty)
@@ -319,7 +319,7 @@ pub async fn detect_and_save_postgres_recurring_suggestions(
         .bind(&pattern.name)
         .bind(&pattern.description)
         .bind(&pattern.transaction_type)
-        .bind(yuan_to_cents(pattern.amount))
+        .bind(pattern.amount_cents)
         .bind(pattern.source_account_id)
         .bind(optional_i64_from_text(&pattern.destination_account_id))
         .bind(&pattern.counterparty)
@@ -544,7 +544,7 @@ fn postgres_recurring_suggestion_from_row(row: &PgRow) -> DbResult<Value> {
         "name": row.try_get::<String, _>("name")?,
         "description": row.try_get::<Option<String>, _>("description")?,
         "type": row.try_get::<String, _>("type")?,
-        "amount": amount_cents as f64 / 100.0,
+        "amount_cents": amount_cents,
         "source_account_id": row.try_get::<Option<i64>, _>("source_account_id")?,
         "destination_account_id": row.try_get::<Option<i64>, _>("destination_account_id")?,
         "counterparty": row.try_get::<Option<String>, _>("counterparty")?,
@@ -580,7 +580,7 @@ fn postgres_recent_bill_from_row(row: &PgRow) -> DbResult<Value> {
         "id": row.try_get::<i64, _>("id")?,
         "date": row.try_get::<chrono::DateTime<Utc>, _>("occurred_at")?.to_rfc3339_opts(SecondsFormat::Secs, true),
         "type": row.try_get::<Option<String>, _>("transaction_type")?.unwrap_or_default(),
-        "amount": amount_cents as f64 / 100.0,
+        "amount_cents": amount_cents,
         "counterparty": row.try_get::<Option<String>, _>("merchant")?.unwrap_or_default(),
         "description": row.try_get::<Option<String>, _>("description")?.unwrap_or_default(),
         "main_category": main_category,
@@ -740,11 +740,11 @@ fn postgres_recurring_template_from_row(row: &PgRow) -> DbResult<BillRecord> {
         pg_optional_string_json(row.try_get("destination_account_id")?),
     );
     record.insert(
-        "amount".to_string(),
+        "source_amount_cents".to_string(),
         json!(row.try_get::<i64, _>("source_amount_minor_units")?),
     );
     record.insert(
-        "destination_amount".to_string(),
+        "destination_amount_cents".to_string(),
         json!(row.try_get::<i64, _>("destination_amount_minor_units")?),
     );
     record.insert(
@@ -826,7 +826,9 @@ fn build_postgres_recurring_candidates_for_bill_data(
         return Vec::new();
     };
     let bill_type = pg_normalize_template_transaction_type(bill.get("type"));
-    let bill_amount_cents = (pg_record_f64(bill, "amount").abs() * 100.0).round() as i64;
+    let bill_amount_cents = pg_record_optional_i64(bill, "amount_cents")
+        .unwrap_or_default()
+        .abs();
     let bill_source_account = pg_record_text(bill, "source_account_id");
     let bill_destination_account = pg_record_text(bill, "destination_account_id");
     let mut candidates = Vec::new();
@@ -835,7 +837,9 @@ fn build_postgres_recurring_candidates_for_bill_data(
         if pg_normalize_template_transaction_type(recurring.get("type")) != bill_type {
             continue;
         }
-        let recurring_amount_cents = pg_recurring_f64(recurring, "amount").abs().round() as i64;
+        let recurring_amount_cents = pg_recurring_i64(recurring, "source_amount_cents")
+            .unwrap_or(0)
+            .abs();
         if recurring_amount_cents != bill_amount_cents {
             continue;
         }
@@ -926,12 +930,12 @@ fn serialize_postgres_recurring_template_row(row: &BillRecord) -> Map<String, Va
         pg_recurring_text(row, "counterparty").into(),
     );
     value.insert(
-        "sourceAmount".to_string(),
-        json!(pg_recurring_f64(row, "amount")),
+        "sourceAmountCents".to_string(),
+        json!(pg_recurring_i64(row, "source_amount_cents").unwrap_or(0)),
     );
     value.insert(
-        "destinationAmount".to_string(),
-        json!(pg_recurring_f64(row, "destination_amount")),
+        "destinationAmountCents".to_string(),
+        json!(pg_recurring_i64(row, "destination_amount_cents").unwrap_or(0)),
     );
     value.insert(
         "hideAmount".to_string(),
@@ -1156,20 +1160,12 @@ fn pg_record_optional_i64(record: &BillRecord, key: &str) -> Option<i64> {
     pg_value_i64(record.get(key)?)
 }
 
-fn pg_record_f64(record: &BillRecord, key: &str) -> f64 {
-    pg_value_f64(record.get(key).unwrap_or(&Value::Null))
-}
-
 fn pg_recurring_text(record: &BillRecord, key: &str) -> String {
     pg_record_text(record, key)
 }
 
 fn pg_recurring_i64(record: &BillRecord, key: &str) -> Option<i64> {
     pg_record_optional_i64(record, key)
-}
-
-fn pg_recurring_f64(record: &BillRecord, key: &str) -> f64 {
-    pg_record_f64(record, key)
 }
 
 fn pg_value_string(value: &Value) -> Option<String> {
@@ -1190,15 +1186,6 @@ fn pg_value_i64(value: &Value) -> Option<i64> {
         Value::String(value) => value.trim().parse::<i64>().ok(),
         Value::Bool(value) => Some(i64::from(*value)),
         Value::Null | Value::Array(_) | Value::Object(_) => None,
-    }
-}
-
-fn pg_value_f64(value: &Value) -> f64 {
-    match value {
-        Value::Number(value) => value.as_f64().unwrap_or(0.0),
-        Value::String(value) => value.trim().parse::<f64>().unwrap_or(0.0),
-        Value::Bool(value) => f64::from(*value as u8),
-        Value::Null | Value::Array(_) | Value::Object(_) => 0.0,
     }
 }
 
@@ -1244,14 +1231,73 @@ fn user_id_i64(user_id: UserId) -> DbResult<i64> {
         .map_err(|_| DbError::InvalidOperation("invalid user id".to_string()))
 }
 
-fn yuan_to_cents(value: f64) -> i64 {
-    (value * 100.0).round() as i64
-}
-
 fn optional_i64_from_text(value: &str) -> Option<i64> {
     value.trim().parse::<i64>().ok().filter(|value| *value > 0)
 }
 
 fn utc_today_text() -> String {
     Utc::now().date_naive().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(entries: impl IntoIterator<Item = (&'static str, Value)>) -> BillRecord {
+        entries
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value))
+            .collect()
+    }
+
+    #[test]
+    fn recurring_candidates_match_and_serialize_explicit_cents() {
+        let bill = record([
+            ("id", json!(100)),
+            ("date", json!("2026-06-12T09:00:00Z")),
+            ("type", json!("expense")),
+            ("amount_cents", json!(-12345)),
+            ("source_account_id", json!("11")),
+            ("destination_account_id", json!("0")),
+        ]);
+        let recurring = record([
+            ("id", json!(7)),
+            ("name", json!("月租")),
+            ("type", json!("expense")),
+            ("category", json!("9")),
+            ("account", json!("11")),
+            ("counterparty", json!("0")),
+            ("source_amount_cents", json!(12345)),
+            ("destination_amount_cents", json!(0)),
+            ("frequency", json!("monthly")),
+            ("start_date", json!("2026-01-12")),
+            ("next_date", json!("2026-06-12")),
+            ("utc_offset", json!(480)),
+            ("hide_amount", json!(0)),
+            ("display_order", json!(1)),
+            ("hidden", json!(0)),
+            ("scheduled_frequency_type", json!(2)),
+            ("tag", json!("1,2")),
+            ("comment", json!("备注")),
+        ]);
+
+        let candidates = build_postgres_recurring_candidates_for_bill_data(
+            &bill,
+            std::slice::from_ref(&recurring),
+            None,
+            3,
+        );
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0]["sourceAmountCents"], json!(12345));
+        assert_eq!(candidates[0]["destinationAmountCents"], json!(0));
+        assert!(candidates[0]["matchReasons"]
+            .as_array()
+            .expect("reasons")
+            .contains(&json!("amount")));
+
+        let serialized = serialize_postgres_recurring_template_row(&recurring);
+        assert_eq!(serialized.get("sourceAmountCents"), Some(&json!(12345)));
+        assert_eq!(serialized.get("destinationAmountCents"), Some(&json!(0)));
+        assert!(serialized.get("sourceAmount").is_none());
+    }
 }

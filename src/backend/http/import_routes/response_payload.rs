@@ -576,13 +576,7 @@ fn standard_bill_from_payload_value(value: &Value) -> StandardBill {
         copy_alias_if_missing(
             object,
             "amount",
-            &[
-                "source_amount",
-                "sourceAmount",
-                "金额",
-                "金额(元)",
-                "交易金额",
-            ],
+            &["金额", "金额(元)", "交易金额"],
         );
         copy_alias_if_missing(
             object,

@@ -106,8 +106,8 @@ const amount2Header = computed<string>(() => {
 });
 
 function getAmountFilterParameterCount(filterType: string): number {
-    const amountFilterType = AmountFilterType.valueOf(filterType);
-    return amountFilterType ? amountFilterType.paramCount : 0;
+    const amountFilterCentsType = AmountFilterType.valueOf(filterType);
+    return amountFilterCentsType ? amountFilterCentsType.paramCount : 0;
 }
 
 function init(): void {
@@ -138,24 +138,24 @@ function init(): void {
 
 function confirm(): void {
     const router = props.f7router;
-    let amountFilter = type.value;
+    let amountFilterCents = type.value;
 
     if (amountCount.value === 1) {
-        amountFilter += ':' + amount1.value;
+        amountFilterCents += ':' + amount1.value;
     } else if (amountCount.value === 2) {
         if (amount2.value < amount1.value) {
             showToast('Incorrect amount range');
             return;
         }
 
-        amountFilter += ':' + amount1.value + ':' + amount2.value;
+        amountFilterCents += ':' + amount1.value + ':' + amount2.value;
     } else {
         router.back();
         return;
     }
 
     const changed = transactionsStore.updateTransactionListFilter({
-        amountFilter: amountFilter
+        amountFilterCents: amountFilterCents
     });
 
     if (changed) {

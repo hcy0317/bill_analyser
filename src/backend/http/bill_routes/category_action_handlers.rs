@@ -348,7 +348,7 @@ fn match_category_for_bill(
 
 fn category_rule_type_filter(bill: &BillRecord) -> Vec<i32> {
     let bill_type = record_text(bill, "type").to_lowercase();
-    let amount = record_f64(bill, "amount").unwrap_or_default();
+    let amount_cents = record_i64(bill, "amount_cents").unwrap_or_default();
     let suppress_investment = bill_analyser_core::is_ordinary_bank_interest_income(bill, None);
 
     match bill_type.as_str() {
@@ -356,8 +356,8 @@ fn category_rule_type_filter(bill: &BillRecord) -> Vec<i32> {
         "收入" | "income" | "2" => income_category_types(suppress_investment),
         "转账" | "transfer" | "4" => vec![4],
         "投资" | "investment" | "5" => vec![5],
-        _ if amount < 0.0 => expense_category_types(suppress_investment),
-        _ if amount > 0.0 => income_category_types(suppress_investment),
+        _ if amount_cents < 0 => expense_category_types(suppress_investment),
+        _ if amount_cents > 0 => income_category_types(suppress_investment),
         _ => vec![2, 3, 4, 5],
     }
 }

@@ -26,8 +26,8 @@ async fn bills_postgres_queries_preserve_cents_filters_paging_and_user_scope(
     );
     assert_eq!(page.bills.len(), 2, "page_size bounds the first page");
     assert_eq!(page.bills[0]["id"], fixture.transfer_bill_id);
-    assert_eq!(page.bills[0]["amount"], 200.0);
-    assert_eq!(page.bills[0]["destination_amount"], 201.5);
+    assert_eq!(page.bills[0]["amount_cents"], 20000);
+    assert_eq!(page.bills[0]["destination_amount_cents"], 20150);
     assert_eq!(
         page.bills[0]["source_account_id"],
         fixture.wallet_account_id
@@ -54,7 +54,7 @@ async fn bills_postgres_queries_preserve_cents_filters_paging_and_user_scope(
                 sub: Some("咖啡".to_string()),
             }],
             tag_ids: vec![fixture.coffee_tag_id, 0],
-            amount_filter: Some("between:120:130".to_string()),
+            amount_filter_cents: Some("between:12000:13000".to_string()),
             keyword: Some("Cafe".to_string()),
             ..BillFilters::default()
         },
@@ -63,8 +63,8 @@ async fn bills_postgres_queries_preserve_cents_filters_paging_and_user_scope(
     assert_eq!(filtered.total, 1);
     let coffee = filtered.bills.first().expect("coffee bill");
     assert_eq!(coffee["id"], fixture.coffee_bill_id);
-    assert_eq!(coffee["amount"], 123.45);
-    assert_eq!(coffee["destination_amount"], 0.0);
+    assert_eq!(coffee["amount_cents"], 12345);
+    assert_eq!(coffee["destination_amount_cents"], 0);
     assert_eq!(coffee["main_category"], "餐饮");
     assert_eq!(coffee["sub_category"], "咖啡");
     assert_eq!(
@@ -78,7 +78,7 @@ async fn bills_postgres_queries_preserve_cents_filters_paging_and_user_scope(
         1,
         10,
         &BillFilters {
-            amount_filter: Some("gte:200".to_string()),
+            amount_filter_cents: Some("gte:20000".to_string()),
             ..BillFilters::default()
         },
     )
@@ -131,7 +131,7 @@ async fn create_bill_prefers_explicit_category_id_over_same_name_path() -> Resul
             fields: serde_json::Map::from_iter([
                 ("date".to_string(), json!("2026-05-01 09:00:00")),
                 ("type".to_string(), json!("支出")),
-                ("amount".to_string(), json!(12.34)),
+                ("amount_cents".to_string(), json!(1234)),
                 ("source_account_id".to_string(), json!(account_id)),
                 ("category_id".to_string(), json!(explicit_category_id)),
                 ("main_category".to_string(), json!("餐饮")),
@@ -221,7 +221,7 @@ async fn seed_bills_fixture(pool: &PostgresPool) -> Result<BillsFixture, Box<dyn
         transfer_category_id,
         "Bank Transfer",
         "内部转账",
-        json!({"destination_amount": 201.5}),
+        json!({"destination_amount_cents": 20150}),
         false,
     )
     .await?;

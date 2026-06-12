@@ -63,8 +63,8 @@ function normalizeHistoricalChartPoint(point: HistoricalCategoryChartPoint): His
         category: normalizeText(point.category),
         primaryCategory: normalizeText(point.primaryCategory),
         secondaryCategory: normalizeText(point.secondaryCategory),
-        budgetAmount: toNonNegativeFiniteNumber(point.budgetAmount),
-        spentAmount: toNonNegativeFiniteNumber(point.spentAmount),
+        budgetAmountCents: toNonNegativeFiniteNumber(point.budgetAmountCents),
+        spentAmountCents: toNonNegativeFiniteNumber(point.spentAmountCents),
         executionRate: toNonNegativeFiniteNumber(point.executionRate),
         color: normalizeText(point.color) || '#5470c6',
         groupOrder: toSortOrder(point.groupOrder),
@@ -168,10 +168,10 @@ function buildPrimaryBandsAndSlots(
                 label: item.secondaryCategory || item.category,
                 primaryKey: group.key,
                 secondaryKey: item.secondaryKey,
-                budgetAmount: item.budgetAmount,
-                spentAmount: item.spentAmount,
+                budgetAmountCents: item.budgetAmountCents,
+                spentAmountCents: item.spentAmountCents,
                 executionRate: item.executionRate,
-                labelAnchorAmount: Math.max(item.budgetAmount, item.spentAmount),
+                labelAnchorAmount: Math.max(item.budgetAmountCents, item.spentAmountCents),
                 color: item.color,
                 angle
             });
@@ -256,7 +256,7 @@ export function buildHistoricalPolarChartModel(
 
     const visibleGroups = buildVisiblePrimaryGroups(groups);
     const { primaryBands, slots, primaryPadAngle } = buildPrimaryBandsAndSlots(visibleGroups);
-    const maxAmount = Math.max(0, ...slots.flatMap(slot => [slot.budgetAmount, slot.spentAmount]));
+    const maxAmount = Math.max(0, ...slots.flatMap(slot => [slot.budgetAmountCents, slot.spentAmountCents]));
     const longestLabelLength = Math.max(0, ...slots.map(slot => slot.label.length));
     const amountBufferRatio = 0.1 + Math.min(0.16, longestLabelLength * 0.012);
     const interval = getHistoricalAmountAxisInterval(maxAmount > 0 ? maxAmount * (1 + amountBufferRatio) : 100);

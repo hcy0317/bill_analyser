@@ -382,6 +382,7 @@ async fn create_template_handler(
         let user_id = db_user_id(user_id);
         let template_id = match create_postgres_template(runtime.pool(), &body, user_id).await {
             Ok(value) => value,
+            Err(bill_analyser_db::DbError::InvalidOperation(message)) => return bad_request(message),
             Err(_) => return template_db_error_response(),
         };
         return match get_postgres_template_by_id(runtime.pool(), template_id, user_id, template_type)
@@ -440,6 +441,7 @@ async fn update_template_handler(
                 }
             }
             Ok(false) => not_found("Template not found"),
+            Err(bill_analyser_db::DbError::InvalidOperation(message)) => bad_request(message),
             Err(_) => template_db_error_response(),
         };
 }

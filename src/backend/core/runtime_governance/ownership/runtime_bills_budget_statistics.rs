@@ -44,7 +44,7 @@ pub(super) const ROUTES: &[EndpointOwnership] = &[
         state: RuntimeState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust bills_crud_runtime owns core create route with cents-to-yuan adapter semantics; the removed bills/crud_create_update.py route shell is deleted.",
+        notes: "Rust bills_crud_runtime owns core create route with explicit amount_cents semantics; the removed bills/crud_create_update.py route shell is deleted.",
     },
     EndpointOwnership {
         method: "POST",
@@ -251,7 +251,7 @@ pub(super) const ROUTES: &[EndpointOwnership] = &[
         state: RuntimeState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust budgets_crud_runtime owns core create route with yuan-style budget amount semantics; the removed budgets route package is deleted.",
+        notes: "Rust budgets_crud_runtime owns core create route with explicit amount_cents semantics; the removed budgets route package is deleted.",
     },
     EndpointOwnership {
         method: "POST",

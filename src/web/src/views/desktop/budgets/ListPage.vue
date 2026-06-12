@@ -296,14 +296,14 @@
                                                         <v-list-item v-bind="props" :disabled="loading" :prepend-icon="mdiCashMinus">
                                                             <v-list-item-title class="d-flex align-center justify-space-between">
                                                                 <span>{{ tt('Spent Amount') }}</span>
-                                                                <v-chip v-if="spentAmountFilter" size="x-small" color="primary" class="ms-2">
+                                                                <v-chip v-if="spentAmountFilterCents" size="x-small" color="primary" class="ms-2">
                                                                     {{ getSpentFilterLabel() }}
                                                                 </v-chip>
                                                             </v-list-item-title>
                                                         </v-list-item>
                                                     </template>
                                                     <v-list-item class="text-sm"
-                                                                 :class="{ 'list-item-selected': !spentAmountFilter }"
+                                                                 :class="{ 'list-item-selected': !spentAmountFilterCents }"
                                                                  @click="changeSpentFilter('')">
                                                         <v-list-item-title>{{ tt('All') }}</v-list-item-title>
                                                     </v-list-item>
@@ -339,14 +339,14 @@
                                                         <v-list-item v-bind="props" :disabled="loading" :prepend-icon="mdiCashPlus">
                                                             <v-list-item-title class="d-flex align-center justify-space-between">
                                                                 <span>{{ tt('Budget Amount') }}</span>
-                                                                <v-chip v-if="budgetAmountFilter" size="x-small" color="primary" class="ms-2">
+                                                                <v-chip v-if="budgetAmountFilterCents" size="x-small" color="primary" class="ms-2">
                                                                     {{ getBudgetFilterLabel() }}
                                                                 </v-chip>
                                                             </v-list-item-title>
                                                         </v-list-item>
                                                     </template>
                                                     <v-list-item class="text-sm"
-                                                                 :class="{ 'list-item-selected': !budgetAmountFilter }"
+                                                                 :class="{ 'list-item-selected': !budgetAmountFilterCents }"
                                                                  @click="changeBudgetFilter('')">
                                                         <v-list-item-title>{{ tt('All') }}</v-list-item-title>
                                                     </v-list-item>
@@ -438,11 +438,11 @@
                                 <div class="d-flex align-center flex-wrap ga-6">
                                     <div class="d-flex align-center">
                                         <span class="budget-summary-label me-2">{{ tt('Total Budget') }}:</span>
-                                        <span class="budget-summary-amount text-expense">{{ formatAmount(filteredSummary.totalBudget / 100) }}</span>
+                                        <span class="budget-summary-amount text-expense">{{ formatAmount(filteredSummary.totalBudgetCents / 100) }}</span>
                                     </div>
                                     <div class="d-flex align-center">
                                         <span class="budget-summary-label me-2">{{ tt('Total Spent') }}:</span>
-                                        <span class="budget-summary-amount text-income">{{ formatAmount(filteredSummary.totalSpent / 100) }}</span>
+                                        <span class="budget-summary-amount text-income">{{ formatAmount(filteredSummary.totalSpentCents / 100) }}</span>
                                     </div>
                                     <div class="d-flex align-center">
                                         <span class="budget-summary-label me-2">{{ tt('Overall Execution Rate') }}:</span>
@@ -472,10 +472,10 @@
                                             <v-chip v-if="executionRateFilter" closable size="small" @click:close="executionRateFilter = null">
                                                 {{ tt('Execution Rate') }}: {{ executionRateFilter.label }}
                                             </v-chip>
-                                            <v-chip v-if="spentAmountFilter" closable size="small" @click:close="spentAmountFilter = ''">
+                                            <v-chip v-if="spentAmountFilterCents" closable size="small" @click:close="spentAmountFilterCents = ''">
                                                 {{ getSpentFilterDisplayName() }}
                                             </v-chip>
-                                            <v-chip v-if="budgetAmountFilter" closable size="small" @click:close="budgetAmountFilter = ''">
+                                            <v-chip v-if="budgetAmountFilterCents" closable size="small" @click:close="budgetAmountFilterCents = ''">
                                                 {{ getBudgetFilterDisplayName() }}
                                             </v-chip>
                                         </div>
@@ -800,7 +800,7 @@ const props = defineProps<{
 // 组件引用
 // ============================================================================
 
-const { tt, getAllDateRanges, formatDateRange } = useI18n();
+const { tt, getAllDateRanges, formatDateRange, formatAmountToLocalizedNumeralsWithCurrency } = useI18n();
 const display = useDisplay();
 const theme = useTheme();
 const router = useRouter();
@@ -875,8 +875,8 @@ const categoryFilter = ref<string | null>(null);
 const accountFilter = ref<string[]>([]);
 const tagFilter = ref<string[]>([]);
 const executionRateFilter = ref<RangeFilter | null>(null);
-const spentAmountFilter = ref<string>('');  // 格式: 'filterType:value1:value2'
-const budgetAmountFilter = ref<string>('');  // 格式: 'filterType:value1:value2'
+const spentAmountFilterCents = ref<string>('');  // 格式: 'filterType:value1:value2'
+const budgetAmountFilterCents = ref<string>('');  // 格式: 'filterType:value1:value2'
 
 // 筛选对话框
 const showFilterAccountDialog = ref<boolean>(false);
@@ -895,8 +895,8 @@ interface FilterPreset {
     accountFilter: string[];
     tagFilter: string[];
     executionRateFilter: RangeFilter | null;
-    spentAmountFilter: string;
-    budgetAmountFilter: string;
+    spentAmountFilterCents: string;
+    budgetAmountFilterCents: string;
 }
 
 const filterPresets = ref<FilterPreset[]>([]);
@@ -1043,19 +1043,19 @@ const filteredBudgets = computed<Budget[]>(() => {
         });
     }
 
-    // 按已花费筛选（使用新的字符串格式）
-    if (spentAmountFilter.value) {
-        const parsed = parseAmountFilter(spentAmountFilter.value);
+    // 按已花费筛选（filterType 后的值均为整数分）
+    if (spentAmountFilterCents.value) {
+        const parsed = parseAmountFilterCents(spentAmountFilterCents.value);
         if (parsed) {
-            budgets = budgets.filter(b => matchAmountFilter(b.spentAmountInYuan, parsed));
+            budgets = budgets.filter(b => matchAmountFilterCents(b.spentAmountCents, parsed));
         }
     }
 
-    // 按预算金额筛选（使用新的字符串格式）
-    if (budgetAmountFilter.value) {
-        const parsed = parseAmountFilter(budgetAmountFilter.value);
+    // 按预算金额筛选（filterType 后的值均为整数分）
+    if (budgetAmountFilterCents.value) {
+        const parsed = parseAmountFilterCents(budgetAmountFilterCents.value);
         if (parsed) {
-            budgets = budgets.filter(b => matchAmountFilter(b.amountInYuan, parsed));
+            budgets = budgets.filter(b => matchAmountFilterCents(b.amountCents, parsed));
         }
     }
 
@@ -1119,12 +1119,12 @@ const groupedBudgets = computed<BudgetGroup[]>(() => {
                 categoryColor: categoryColor,
                 primaryBudgets: [],
                 subBudgets: [],
-                totalAmount: 0,
-                totalSpent: 0,
-                subTotalAmount: 0,
-                subTotalSpent: 0,
-                primaryAmount: 0,
-                primarySpent: 0,
+                totalAmountCents: 0,
+                totalSpentCents: 0,
+                subTotalAmountCents: 0,
+                subTotalSpentCents: 0,
+                primaryAmountCents: 0,
+                primarySpentCents: 0,
                 isCollapsed: collapsedCategories.value.has(categoryKey)
             });
         }
@@ -1134,14 +1134,14 @@ const groupedBudgets = computed<BudgetGroup[]>(() => {
         // 判断是一级分类预算还是二级分类预算
         if (!budget.subCategory) {
             group.primaryBudgets.push(budget);
-            group.primaryAmount += budget.amount;
-            group.primarySpent += budget.spentAmount;
+            group.primaryAmountCents += budget.amountCents;
+            group.primarySpentCents += budget.spentAmountCents;
         } else {
             // 二级分类预算
             group.subBudgets.push(budget);
             // 累加二级分类的金额和花费
-            group.subTotalAmount += budget.amount;
-            group.subTotalSpent += budget.spentAmount;
+            group.subTotalAmountCents += budget.amountCents;
+            group.subTotalSpentCents += budget.spentAmountCents;
         }
     }
 
@@ -1152,21 +1152,21 @@ const groupedBudgets = computed<BudgetGroup[]>(() => {
     // 3. 已花费金额：优先使用一级分类的已花费，否则使用二级之和
     for (const group of groups.values()) {
         if (group.primaryBudgets.length > 1) {
-            group.totalAmount = group.primaryAmount + group.subTotalAmount;
-            group.totalSpent = group.primarySpent + group.subTotalSpent;
+            group.totalAmountCents = group.primaryAmountCents + group.subTotalAmountCents;
+            group.totalSpentCents = group.primarySpentCents + group.subTotalSpentCents;
         } else if (group.primaryBudgets.length > 0) {
             // 有一级分类预算：使用一级分类的预算金额
-            group.totalAmount = group.primaryAmount;
+            group.totalAmountCents = group.primaryAmountCents;
             // 已花费：如果一级分类有值就用一级的，否则用二级之和
-            group.totalSpent = group.primarySpent > 0 ? group.primarySpent : group.subTotalSpent;
+            group.totalSpentCents = group.primarySpentCents > 0 ? group.primarySpentCents : group.subTotalSpentCents;
         } else if (group.subBudgets.length > 0) {
             // 只有二级分类预算：使用二级之和
-            group.totalAmount = group.subTotalAmount;
-            group.totalSpent = group.subTotalSpent;
+            group.totalAmountCents = group.subTotalAmountCents;
+            group.totalSpentCents = group.subTotalSpentCents;
         } else {
             // 既没有一级也没有二级：金额为0
-            group.totalAmount = 0;
-            group.totalSpent = 0;
+            group.totalAmountCents = 0;
+            group.totalSpentCents = 0;
         }
     }
 
@@ -1287,7 +1287,7 @@ const allTransactionTags = computed(() => transactionTagsStore.allTransactionTag
 
 const hasActiveFilters = computed<boolean>(() => {
     return !!(categoryFilter.value || executionRateFilter.value ||
-              spentAmountFilter.value || budgetAmountFilter.value ||
+              spentAmountFilterCents.value || budgetAmountFilterCents.value ||
               accountFilter.value.length > 0 || tagFilter.value.length > 0);
 });
 
@@ -1355,19 +1355,19 @@ const displayForecasts = computed(() => {
  * 抬头汇总：按当前筛选后的可见分组聚合，避免全量预算总和
  */
 const filteredSummary = computed(() => {
-    let totalBudget = 0;
-    let totalSpent = 0;
+    let totalBudgetCents = 0;
+    let totalSpentCents = 0;
 
     for (const group of groupedBudgets.value) {
-        totalBudget += group.totalAmount;
-        totalSpent += group.totalSpent;
+        totalBudgetCents += group.totalAmountCents;
+        totalSpentCents += group.totalSpentCents;
     }
 
-    const totalExecutionRate = totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0;
+    const totalExecutionRate = totalBudgetCents > 0 ? (totalSpentCents / totalBudgetCents) * 100 : 0;
 
     return {
-        totalBudget,
-        totalSpent,
+        totalBudgetCents,
+        totalSpentCents,
         totalExecutionRate
     };
 });
@@ -1738,15 +1738,15 @@ const historicalCategoryChartData = computed<{ categories: string[]; points: His
     const groupedByPeriodAndPrimary = new Map<string, {
         primaryCategory: string;
         groupOrder: number;
-        primaryBudgetAmount: number;
-        primarySpentAmount: number;
-        secondaryBudgetAmount: number;
-        secondarySpentAmount: number;
+        primaryBudgetAmountCents: number;
+        primarySpentAmountCents: number;
+        secondaryBudgetAmountCents: number;
+        secondarySpentAmountCents: number;
         secondaryItems: Map<string, {
             displayCategory: string;
             secondaryCategory: string;
-            budgetAmount: number;
-            spentAmount: number;
+            budgetAmountCents: number;
+            spentAmountCents: number;
             itemOrder: number;
         }>;
     }>();
@@ -1760,18 +1760,18 @@ const historicalCategoryChartData = computed<{ categories: string[]; points: His
 
         const primaryCategory = String(item.category || '').trim() || tt('Uncategorized');
         const secondaryCategory = String(item.subCategory || '').trim();
-        const budgetAmount = normalizeHistoryAmountCents(item.budgetAmount);
-        const spentAmount = normalizeHistoryAmountCents(item.spentAmount);
+        const budgetAmountCents = normalizeHistoryAmountCents(item.budgetAmountCents);
+        const spentAmountCents = normalizeHistoryAmountCents(item.spentAmountCents);
         const periodPrimaryKey = `${resolvedPeriod.key}::${primaryCategory}`;
 
         if (!groupedByPeriodAndPrimary.has(periodPrimaryKey)) {
             groupedByPeriodAndPrimary.set(periodPrimaryKey, {
                 primaryCategory,
                 groupOrder: categoryOrderMap[primaryCategory] ?? Number.MAX_SAFE_INTEGER,
-                primaryBudgetAmount: 0,
-                primarySpentAmount: 0,
-                secondaryBudgetAmount: 0,
-                secondarySpentAmount: 0,
+                primaryBudgetAmountCents: 0,
+                primarySpentAmountCents: 0,
+                secondaryBudgetAmountCents: 0,
+                secondarySpentAmountCents: 0,
                 secondaryItems: new Map()
             });
         }
@@ -1779,8 +1779,8 @@ const historicalCategoryChartData = computed<{ categories: string[]; points: His
         const summary = groupedByPeriodAndPrimary.get(periodPrimaryKey)!;
 
         if (!secondaryCategory) {
-            summary.primaryBudgetAmount += budgetAmount;
-            summary.primarySpentAmount += spentAmount;
+            summary.primaryBudgetAmountCents += budgetAmountCents;
+            summary.primarySpentAmountCents += spentAmountCents;
             continue;
         }
 
@@ -1789,25 +1789,25 @@ const historicalCategoryChartData = computed<{ categories: string[]; points: His
             summary.secondaryItems.set(secondaryKey, {
                 displayCategory: secondaryCategory,
                 secondaryCategory,
-                budgetAmount: 0,
-                spentAmount: 0,
+                budgetAmountCents: 0,
+                spentAmountCents: 0,
                 itemOrder: subCategoryOrderMap[secondaryKey] ?? 0
             });
         }
 
         const secondarySummary = summary.secondaryItems.get(secondaryKey)!;
-        secondarySummary.budgetAmount += budgetAmount;
-        secondarySummary.spentAmount += spentAmount;
-        summary.secondaryBudgetAmount += budgetAmount;
-        summary.secondarySpentAmount += spentAmount;
+        secondarySummary.budgetAmountCents += budgetAmountCents;
+        secondarySummary.spentAmountCents += spentAmountCents;
+        summary.secondaryBudgetAmountCents += budgetAmountCents;
+        summary.secondarySpentAmountCents += spentAmountCents;
     }
 
     const grouped = new Map<string, {
         displayCategory: string;
         primaryCategory: string;
         secondaryCategory: string;
-        budgetAmount: number;
-        spentAmount: number;
+        budgetAmountCents: number;
+        spentAmountCents: number;
         groupOrder: number;
         itemOrder: number;
     }>();
@@ -1815,37 +1815,37 @@ const historicalCategoryChartData = computed<{ categories: string[]; points: His
     for (const summary of groupedByPeriodAndPrimary.values()) {
         if (historicalBudgetLevel.value === 'primary') {
             const groupKey = summary.primaryCategory;
-            const hasPrimaryBudget = summary.primaryBudgetAmount > 0 || summary.primarySpentAmount > 0;
-            const budgetAmount = hasPrimaryBudget ? summary.primaryBudgetAmount : summary.secondaryBudgetAmount;
-            const spentAmount = hasPrimaryBudget
-                ? (summary.primarySpentAmount > 0 ? summary.primarySpentAmount : summary.secondarySpentAmount)
-                : summary.secondarySpentAmount;
+            const hasPrimaryBudget = summary.primaryBudgetAmountCents > 0 || summary.primarySpentAmountCents > 0;
+            const budgetAmountCents = hasPrimaryBudget ? summary.primaryBudgetAmountCents : summary.secondaryBudgetAmountCents;
+            const spentAmountCents = hasPrimaryBudget
+                ? (summary.primarySpentAmountCents > 0 ? summary.primarySpentAmountCents : summary.secondarySpentAmountCents)
+                : summary.secondarySpentAmountCents;
 
             if (!grouped.has(groupKey)) {
                 grouped.set(groupKey, {
                     displayCategory: summary.primaryCategory,
                     primaryCategory: summary.primaryCategory,
                     secondaryCategory: '',
-                    budgetAmount: 0,
-                    spentAmount: 0,
+                    budgetAmountCents: 0,
+                    spentAmountCents: 0,
                     groupOrder: summary.groupOrder,
                     itemOrder: 0
                 });
             }
 
             const primarySummary = grouped.get(groupKey)!;
-            primarySummary.budgetAmount += budgetAmount;
-            primarySummary.spentAmount += spentAmount;
+            primarySummary.budgetAmountCents += budgetAmountCents;
+            primarySummary.spentAmountCents += spentAmountCents;
             continue;
         }
 
         const visibleSecondaryEntries = Array.from(summary.secondaryItems.entries())
-            .filter(([, secondarySummary]) => secondarySummary.budgetAmount > 0 || secondarySummary.spentAmount > 0);
+            .filter(([, secondarySummary]) => secondarySummary.budgetAmountCents > 0 || secondarySummary.spentAmountCents > 0);
         const secondaryEntries: Array<[string, {
             displayCategory: string;
             secondaryCategory: string;
-            budgetAmount: number;
-            spentAmount: number;
+            budgetAmountCents: number;
+            spentAmountCents: number;
             itemOrder: number;
         }]> = visibleSecondaryEntries.length > 0
             ? visibleSecondaryEntries
@@ -1854,14 +1854,14 @@ const historicalCategoryChartData = computed<{ categories: string[]; points: His
                 {
                     displayCategory: summary.primaryCategory,
                     secondaryCategory: summary.primaryCategory,
-                    budgetAmount: summary.primaryBudgetAmount,
-                    spentAmount: summary.primarySpentAmount,
+                    budgetAmountCents: summary.primaryBudgetAmountCents,
+                    spentAmountCents: summary.primarySpentAmountCents,
                     itemOrder: 0
                 }
             ]];
 
         for (const [secondaryKey, secondarySummary] of secondaryEntries) {
-            if (secondarySummary.budgetAmount <= 0 && secondarySummary.spentAmount <= 0) {
+            if (secondarySummary.budgetAmountCents <= 0 && secondarySummary.spentAmountCents <= 0) {
                 continue;
             }
 
@@ -1870,16 +1870,16 @@ const historicalCategoryChartData = computed<{ categories: string[]; points: His
                     displayCategory: secondarySummary.displayCategory,
                     primaryCategory: summary.primaryCategory,
                     secondaryCategory: secondarySummary.secondaryCategory,
-                    budgetAmount: 0,
-                    spentAmount: 0,
+                    budgetAmountCents: 0,
+                    spentAmountCents: 0,
                     groupOrder: summary.groupOrder,
                     itemOrder: secondarySummary.itemOrder
                 });
             }
 
             const groupedSecondarySummary = grouped.get(secondaryKey)!;
-            groupedSecondarySummary.budgetAmount += secondarySummary.budgetAmount;
-            groupedSecondarySummary.spentAmount += secondarySummary.spentAmount;
+            groupedSecondarySummary.budgetAmountCents += secondarySummary.budgetAmountCents;
+            groupedSecondarySummary.spentAmountCents += secondarySummary.spentAmountCents;
         }
     }
 
@@ -1887,10 +1887,10 @@ const historicalCategoryChartData = computed<{ categories: string[]; points: His
     let colorIdx = 0;
 
     for (const [, summary] of grouped) {
-        const budgetAmount = summary.budgetAmount / 100;
-        const spentAmount = summary.spentAmount / 100;
-        const executionRate = summary.budgetAmount > 0
-            ? (summary.spentAmount / summary.budgetAmount) * 100
+        const budgetAmountCents = summary.budgetAmountCents;
+        const spentAmountCents = summary.spentAmountCents;
+        const executionRate = summary.budgetAmountCents > 0
+            ? (summary.spentAmountCents / summary.budgetAmountCents) * 100
             : 0;
         const subCategoryKey = `${summary.primaryCategory}::${summary.secondaryCategory}`;
         const color: string = (historicalBudgetLevel.value === 'secondary'
@@ -1904,8 +1904,8 @@ const historicalCategoryChartData = computed<{ categories: string[]; points: His
             category: summary.displayCategory,
             primaryCategory: summary.primaryCategory,
             secondaryCategory: summary.secondaryCategory,
-            budgetAmount,
-            spentAmount,
+            budgetAmountCents,
+            spentAmountCents,
             executionRate: Number(executionRate.toFixed(1)),
             color,
             groupOrder: summary.groupOrder,
@@ -2336,50 +2336,54 @@ function isDateInRange(budget: Budget, startDate: Date, endDate: Date): boolean 
 }
 
 /**
- * 解析金额筛选字符串
- * 格式: 'filterType:value1' 或 'filterType:value1:value2'
+ * 解析金额筛选字符串，filterType 后的金额值均为整数分。
+ * 格式: 'filterType:value1Cents' 或 'filterType:value1Cents:value2Cents'
  */
-function parseAmountFilter(filter: string): { type: string; value1: number; value2?: number } | null {
+function parseAmountFilterCents(filter: string): { type: string; value1Cents: number; value2Cents?: number } | null {
     if (!filter) return null;
     const parts = filter.split(':');
     if (parts.length < 2) return null;
 
     const type = parts[0] || '';
     const value1Str = parts[1] || '';
-    const value1 = parseFloat(value1Str);
+    const value1Cents = parseInt(value1Str, 10);
 
-    if (isNaN(value1)) return null;
+    if (!Number.isInteger(value1Cents)) return null;
 
     if (parts.length >= 3) {
         const value2Str = parts[2] || '';
-        const value2 = parseFloat(value2Str);
-        if (isNaN(value2)) return null;
-        return { type, value1, value2 };
+        const value2Cents = parseInt(value2Str, 10);
+        if (!Number.isInteger(value2Cents)) return null;
+        return { type, value1Cents, value2Cents };
     }
 
-    return { type, value1 };
+    return { type, value1Cents };
 }
 
 /**
  * 匹配金额筛选条件
  */
-function matchAmountFilter(amount: number, filter: { type: string; value1: number; value2?: number }): boolean {
+function matchAmountFilterCents(amountCents: number, filter: { type: string; value1Cents: number; value2Cents?: number }): boolean {
     switch (filter.type) {
         case 'gt': // Greater than
-            return amount > filter.value1;
+            return amountCents > filter.value1Cents;
         case 'lt': // Less than
-            return amount < filter.value1;
+            return amountCents < filter.value1Cents;
         case 'eq': // Equal to
-            return Math.abs(amount - filter.value1) < 0.01;
+            return amountCents === filter.value1Cents;
         case 'ne': // Not equal to
-            return Math.abs(amount - filter.value1) >= 0.01;
+            return amountCents !== filter.value1Cents;
         case 'bt': // Between
-            return filter.value2 !== undefined && amount >= filter.value1 && amount <= filter.value2;
+            return filter.value2Cents !== undefined && amountCents >= filter.value1Cents && amountCents <= filter.value2Cents;
         case 'nb': // Not between
-            return filter.value2 !== undefined && (amount < filter.value1 || amount > filter.value2);
+            return filter.value2Cents !== undefined && (amountCents < filter.value1Cents || amountCents > filter.value2Cents);
         default:
             return true;
     }
+}
+
+function formatFilterAmountCents(amountCents: number): string {
+    return formatAmountToLocalizedNumeralsWithCurrency(amountCents, defaultCurrency.value);
 }
 
 /**
@@ -2525,62 +2529,62 @@ function changeSpentFilter(filterType: string): void {
     currentSpentFilterType.value = '';
 
     if (!filterType) {
-        spentAmountFilter.value = '';
+        spentAmountFilterCents.value = '';
         return;
     }
 
     const amountCount = getAmountFilterParameterCount(filterType);
     if (!amountCount) return;
 
-    let amountFilter = filterType;
+    let amountFilterCents = filterType;
 
     if (amountCount === 1) {
-        amountFilter += ':' + currentSpentFilterValue1.value;
+        amountFilterCents += ':' + currentSpentFilterValue1.value;
     } else if (amountCount === 2) {
         if (currentSpentFilterValue2.value < currentSpentFilterValue1.value) {
             snackbar.value?.showMessage(tt('Incorrect amount range'));
             return;
         }
-        amountFilter += ':' + currentSpentFilterValue1.value + ':' + currentSpentFilterValue2.value;
+        amountFilterCents += ':' + currentSpentFilterValue1.value + ':' + currentSpentFilterValue2.value;
     } else {
         return;
     }
 
-    spentAmountFilter.value = amountFilter;
+    spentAmountFilterCents.value = amountFilterCents;
 }
 
 /**
  * 获取已花费筛选器的显示名称
  */
 function getSpentFilterDisplayName(): string {
-    if (!spentAmountFilter.value) return tt('Spent');
+    if (!spentAmountFilterCents.value) return tt('Spent');
 
-    const parsed = parseAmountFilter(spentAmountFilter.value);
+    const parsed = parseAmountFilterCents(spentAmountFilterCents.value);
     if (!parsed) return tt('Spent');
 
     const filterType = AmountFilterType.valueOf(parsed.type);
     if (!filterType) return tt('Spent');
 
     const typeName = tt(filterType.name);
-    if (parsed.value2 !== undefined) {
-        return `${typeName} ¥${parsed.value1}~¥${parsed.value2}`;
+    if (parsed.value2Cents !== undefined) {
+        return `${typeName} ${formatFilterAmountCents(parsed.value1Cents)}~${formatFilterAmountCents(parsed.value2Cents)}`;
     }
-    return `${typeName} ¥${parsed.value1}`;
+    return `${typeName} ${formatFilterAmountCents(parsed.value1Cents)}`;
 }
 
 /**
  * 获取已花费筛选器的简短标签（用于更多设置菜单）
  */
 function getSpentFilterLabel(): string {
-    if (!spentAmountFilter.value) return '';
-    const parsed = parseAmountFilter(spentAmountFilter.value);
+    if (!spentAmountFilterCents.value) return '';
+    const parsed = parseAmountFilterCents(spentAmountFilterCents.value);
     if (!parsed) return '';
     const filterType = AmountFilterType.valueOf(parsed.type);
     if (!filterType) return '';
-    if (parsed.value2 !== undefined) {
-        return `¥${parsed.value1}~¥${parsed.value2}`;
+    if (parsed.value2Cents !== undefined) {
+        return `${formatFilterAmountCents(parsed.value1Cents)}~${formatFilterAmountCents(parsed.value2Cents)}`;
     }
-    return `${tt(filterType.name)} ¥${parsed.value1}`;
+    return `${tt(filterType.name)} ${formatFilterAmountCents(parsed.value1Cents)}`;
 }
 
 // ============================================================================
@@ -2605,62 +2609,62 @@ function changeBudgetFilter(filterType: string): void {
     currentBudgetFilterType.value = '';
 
     if (!filterType) {
-        budgetAmountFilter.value = '';
+        budgetAmountFilterCents.value = '';
         return;
     }
 
     const amountCount = getAmountFilterParameterCount(filterType);
     if (!amountCount) return;
 
-    let amountFilter = filterType;
+    let amountFilterCents = filterType;
 
     if (amountCount === 1) {
-        amountFilter += ':' + currentBudgetFilterValue1.value;
+        amountFilterCents += ':' + currentBudgetFilterValue1.value;
     } else if (amountCount === 2) {
         if (currentBudgetFilterValue2.value < currentBudgetFilterValue1.value) {
             snackbar.value?.showMessage(tt('Incorrect amount range'));
             return;
         }
-        amountFilter += ':' + currentBudgetFilterValue1.value + ':' + currentBudgetFilterValue2.value;
+        amountFilterCents += ':' + currentBudgetFilterValue1.value + ':' + currentBudgetFilterValue2.value;
     } else {
         return;
     }
 
-    budgetAmountFilter.value = amountFilter;
+    budgetAmountFilterCents.value = amountFilterCents;
 }
 
 /**
  * 获取总预算筛选器的显示名称
  */
 function getBudgetFilterDisplayName(): string {
-    if (!budgetAmountFilter.value) return tt('Budget');
+    if (!budgetAmountFilterCents.value) return tt('Budget');
 
-    const parsed = parseAmountFilter(budgetAmountFilter.value);
+    const parsed = parseAmountFilterCents(budgetAmountFilterCents.value);
     if (!parsed) return tt('Budget');
 
     const filterType = AmountFilterType.valueOf(parsed.type);
     if (!filterType) return tt('Budget');
 
     const typeName = tt(filterType.name);
-    if (parsed.value2 !== undefined) {
-        return `${typeName} ¥${parsed.value1}~¥${parsed.value2}`;
+    if (parsed.value2Cents !== undefined) {
+        return `${typeName} ${formatFilterAmountCents(parsed.value1Cents)}~${formatFilterAmountCents(parsed.value2Cents)}`;
     }
-    return `${typeName} ¥${parsed.value1}`;
+    return `${typeName} ${formatFilterAmountCents(parsed.value1Cents)}`;
 }
 
 /**
  * 获取总预算筛选器的简短标签（用于更多设置菜单）
  */
 function getBudgetFilterLabel(): string {
-    if (!budgetAmountFilter.value) return '';
-    const parsed = parseAmountFilter(budgetAmountFilter.value);
+    if (!budgetAmountFilterCents.value) return '';
+    const parsed = parseAmountFilterCents(budgetAmountFilterCents.value);
     if (!parsed) return '';
     const filterType = AmountFilterType.valueOf(parsed.type);
     if (!filterType) return '';
-    if (parsed.value2 !== undefined) {
-        return `¥${parsed.value1}~¥${parsed.value2}`;
+    if (parsed.value2Cents !== undefined) {
+        return `${formatFilterAmountCents(parsed.value1Cents)}~${formatFilterAmountCents(parsed.value2Cents)}`;
     }
-    return `${tt(filterType.name)} ¥${parsed.value1}`;
+    return `${tt(filterType.name)} ${formatFilterAmountCents(parsed.value1Cents)}`;
 }
 
 /**
@@ -2669,8 +2673,8 @@ function getBudgetFilterLabel(): string {
 function clearAllFilters(): void {
     categoryFilter.value = null;
     executionRateFilter.value = null;
-    spentAmountFilter.value = '';
-    budgetAmountFilter.value = '';
+    spentAmountFilterCents.value = '';
+    budgetAmountFilterCents.value = '';
     currentSpentFilterType.value = '';
     currentSpentFilterValue1.value = 0;
     currentSpentFilterValue2.value = 0;
@@ -2699,8 +2703,8 @@ function savePreset(): void {
         accountFilter: [...accountFilter.value],
         tagFilter: [...tagFilter.value],
         executionRateFilter: executionRateFilter.value,
-        spentAmountFilter: spentAmountFilter.value,
-        budgetAmountFilter: budgetAmountFilter.value
+        spentAmountFilterCents: spentAmountFilterCents.value,
+        budgetAmountFilterCents: budgetAmountFilterCents.value
     };
 
     filterPresets.value.push(preset);
@@ -2718,8 +2722,8 @@ function loadPreset(preset: FilterPreset): void {
     accountFilter.value = [...preset.accountFilter];
     tagFilter.value = [...preset.tagFilter];
     executionRateFilter.value = preset.executionRateFilter;
-    spentAmountFilter.value = preset.spentAmountFilter;
-    budgetAmountFilter.value = preset.budgetAmountFilter;
+    spentAmountFilterCents.value = preset.spentAmountFilterCents;
+    budgetAmountFilterCents.value = preset.budgetAmountFilterCents;
     snackbar.value?.showMessage(tt('Preset loaded'));
 }
 
@@ -2855,8 +2859,8 @@ function getExecutionRateColorClass(rate: number): string {
 function getGroupExecutionRate(group: BudgetGroup): number {
     // 如果有一级分类预算
     const primaryBudget = getPrimaryBudgetForHeader(group);
-    if (group.primaryBudgets.length > 1 && group.totalAmount > 0) {
-        return (group.totalSpent / group.totalAmount) * 100;
+    if (group.primaryBudgets.length > 1 && group.totalAmountCents > 0) {
+        return (group.totalSpentCents / group.totalAmountCents) * 100;
     }
     if (primaryBudget) {
         // 如果一级分类预算有执行率（后端已计算），使用它
@@ -2864,14 +2868,14 @@ function getGroupExecutionRate(group: BudgetGroup): number {
             return primaryBudget.executionRate;
         }
         // 否则按“总已花费 / 一级预算金额”计算
-        if (group.primaryAmount > 0) {
-            return (group.totalSpent / group.primaryAmount) * 100;
+        if (group.primaryAmountCents > 0) {
+            return (group.totalSpentCents / group.primaryAmountCents) * 100;
         }
     }
 
     // 没有一级分类预算，使用二级分类汇总计算
-    if (group.totalAmount > 0) {
-        return (group.totalSpent / group.totalAmount) * 100;
+    if (group.totalAmountCents > 0) {
+        return (group.totalSpentCents / group.totalAmountCents) * 100;
     }
 
     return 0;
@@ -3202,7 +3206,7 @@ function addPrimaryBudget(group: BudgetGroup): void {
     newBudget.periodType = getCurrentPeriodType();
     newBudget.category = group.category;
     newBudget.subCategory = '';  // 一级分类预算的子分类为空
-    newBudget.amount = group.totalAmount;  // 初始金额设为当前汇总金额
+    newBudget.amountCents = group.totalAmountCents;  // 初始金额设为当前汇总金额
     newBudget.categoryIcon = group.categoryIcon;
     newBudget.categoryColor = group.categoryColor;
     editDialog.value?.open({ budget: newBudget, type: activeBudgetType.value, usePrimaryCategoryOnly: true });

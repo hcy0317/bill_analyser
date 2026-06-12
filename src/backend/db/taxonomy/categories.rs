@@ -16,5 +16,5 @@ pub struct CategoryStatistic {
     pub main_category: String,
     pub sub_category: String,
     pub count: i64,
-    pub total_amount: f64,
+    pub total_amount_cents: i64,
 }

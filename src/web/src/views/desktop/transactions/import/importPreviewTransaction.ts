@@ -10,6 +10,7 @@ import {
     type ImportPreviewCategoryMap,
     type ImportPreviewRecord
 } from './importPreview.ts';
+import { normalizeStrictAbsoluteCents } from './strictCents.ts';
 
 export type ImportPreviewTransactionDraft = ImportTransaction & {
     _previewId?: number;
@@ -100,8 +101,8 @@ export function buildImportTransactionFromPreviewRecord(
     options: BuildImportTransactionFromPreviewRecordOptions
 ): ImportTransaction {
     const type = getImportPreviewTransactionTypeNumber(item.preview_type) ?? TransactionType.Expense;
-    const amountInCents = Math.round(Math.abs(item.preview_amount || 0) * 100);
-    const destAmountInCents = Math.round(Math.abs(item.preview_destination_amount || 0) * 100);
+    const amountInCents = normalizeStrictAbsoluteCents(item.preview_amount_cents, 0);
+    const destAmountInCents = normalizeStrictAbsoluteCents(item.preview_destination_amount_cents, 0);
     const mainCategory = item.preview_main_category || '';
     const subCategory = item.preview_sub_category || '';
     const categoryId = resolveImportPreviewCategoryId(item, options.categoriesById)
@@ -134,8 +135,8 @@ export function buildImportTransactionFromPreviewRecord(
         originalSourceAccountName: item.preview_payment_method || '',
         originalSourceAccountCurrency: 'CNY',
         destinationAccountId,
-        sourceAmount: amountInCents,
-        destinationAmount: (type === TransactionType.Transfer || type === TransactionType.Investment)
+        sourceAmountCents: amountInCents,
+        destinationAmountCents: (type === TransactionType.Transfer || type === TransactionType.Investment)
             ? destAmountInCents || amountInCents
             : amountInCents,
         tagIds: [],

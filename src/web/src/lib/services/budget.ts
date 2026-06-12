@@ -38,14 +38,25 @@ interface BudgetForecastQueryRequest extends BudgetExecutionQueryRequest {
     forecastStrategy?: string
 }
 
-function toBudgetAmountInCents(value: unknown): number {
-    const amount = Number(value ?? 0);
-
-    if (Number.isNaN(amount)) {
+function toBudgetAmountCents(value: unknown): number {
+    if (value === null || value === undefined || typeof value === 'boolean') {
         return 0;
     }
 
-    return Math.round(amount * 100);
+    if (typeof value === 'number') {
+        return Number.isSafeInteger(value) ? value : 0;
+    }
+
+    if (typeof value === 'string') {
+        const normalized = value.trim();
+        if (!/^[+-]?\d+$/.test(normalized)) {
+            return 0;
+        }
+        const parsed = Number(normalized);
+        return Number.isSafeInteger(parsed) ? parsed : 0;
+    }
+
+    return 0;
 }
 
 function normalizeRestBudgetType(value: unknown): BudgetType | null {
@@ -82,7 +93,7 @@ export function mapRestBudgetToFrontend(item: any, fallbackType = BudgetType.Exp
         subCategory: item?.subCategory || item?.sub_category || '',
         categoryId: String(item?.categoryId || item?.category_id || categoryInfo?.id || ''),
         periodType: item?.periodType || item?.period_type || BudgetPeriodType.Monthly,
-        amount: toBudgetAmountInCents(item?.amount ?? item?.budget_amount ?? 0),
+        amountCents: toBudgetAmountCents(item?.amountCents ?? item?.amount_cents ?? 0),
         startDate: item?.startDate || item?.start_date || '',
         endDate: item?.endDate || item?.end_date || '',
         alertThreshold: item?.alertThreshold ?? item?.alert_threshold ?? DEFAULT_BUDGET_ALERT_THRESHOLD,
@@ -90,8 +101,8 @@ export function mapRestBudgetToFrontend(item: any, fallbackType = BudgetType.Exp
         type: item?.type ?? fallbackType,
         createdAt: item?.createdAt || item?.created_at || '',
         updatedAt: item?.updatedAt || item?.updated_at || '',
-        spentAmount: item?.spentAmount ?? toBudgetAmountInCents(item?.spent_amount ?? 0),
-        remainingAmount: item?.remainingAmount ?? toBudgetAmountInCents(item?.remaining_amount ?? 0),
+        spentAmountCents: toBudgetAmountCents(item?.spentAmountCents ?? item?.spent_amount_cents ?? 0),
+        remainingAmountCents: toBudgetAmountCents(item?.remainingAmountCents ?? item?.remaining_amount_cents ?? 0),
         executionRate: item?.executionRate ?? item?.execution_rate ?? 0,
         categoryName: item?.categoryName || item?.category || '',
         categoryIcon: item?.categoryIcon || categoryInfo?.icon || '',
@@ -225,8 +236,8 @@ export function mapRestExecutionToFrontend(restResult: any): any {
     const summary = restResult?.summary || {};
 
     return {
-        totalBudget: toBudgetAmountInCents(summary?.total_budget ?? 0),
-        totalSpent: toBudgetAmountInCents(summary?.total_spent ?? 0),
+        totalBudgetCents: toBudgetAmountCents(summary?.totalBudgetCents ?? summary?.total_budget_cents ?? 0),
+        totalSpentCents: toBudgetAmountCents(summary?.totalSpentCents ?? summary?.total_spent_cents ?? 0),
         totalExecutionRate: summary?.overall_execution_rate ?? 0,
         categories: items.map((item: any) => ({
             budgetId: String(item?.id || ''),
@@ -234,12 +245,12 @@ export function mapRestExecutionToFrontend(restResult: any): any {
             categoryName: item?.sub_category ? `${item.category}-${item.sub_category}` : (item?.category || ''),
             categoryIcon: item?.category_info?.icon || '',
             categoryColor: item?.category_info?.color || '',
-            budgetAmount: toBudgetAmountInCents(item?.budget_amount ?? 0),
-            spentAmount: toBudgetAmountInCents(item?.spent_amount ?? 0),
-            remainingAmount: toBudgetAmountInCents(item?.remaining_amount ?? 0),
+            budgetAmountCents: toBudgetAmountCents(item?.budgetAmountCents ?? item?.budget_amount_cents ?? 0),
+            spentAmountCents: toBudgetAmountCents(item?.spentAmountCents ?? item?.spent_amount_cents ?? 0),
+            remainingAmountCents: toBudgetAmountCents(item?.remainingAmountCents ?? item?.remaining_amount_cents ?? 0),
             executionRate: item?.execution_rate ?? 0,
             alertThreshold: item?.alert_threshold ?? DEFAULT_BUDGET_ALERT_THRESHOLD,
-            isOverBudget: Number(item?.spent_amount ?? 0) > Number(item?.budget_amount ?? 0),
+            isOverBudget: toBudgetAmountCents(item?.spentAmountCents ?? item?.spent_amount_cents ?? 0) > toBudgetAmountCents(item?.budgetAmountCents ?? item?.budget_amount_cents ?? 0),
             alertTriggered: Number(item?.execution_rate ?? 0) >= Number(item?.alert_threshold ?? DEFAULT_BUDGET_ALERT_THRESHOLD)
         })),
         periodStart: restResult?.periodStart || restResult?.period_start || '',
@@ -253,21 +264,27 @@ export function mapRestForecastToFrontend(restResult: any): any {
 
     return {
         forecasts: items.map((item: any) => {
-            const forecastAmount = toBudgetAmountInCents(item?.forecast_amount ?? item?.forecastAmount ?? 0);
-            const historicalAverage = toBudgetAmountInCents(item?.average_amount ?? item?.averageAmount ?? 0);
-            const currentSpent = toBudgetAmountInCents(
-                item?.current_spent ?? item?.periods?.[item?.periods?.length - 1]?.amount ?? item?.total_amount ?? item?.totalAmount ?? 0
+            const projectedTotalCents = toBudgetAmountCents(item?.forecastAmountCents ?? item?.forecast_amount_cents ?? 0);
+            const historicalAverageCents = toBudgetAmountCents(item?.averageAmountCents ?? item?.average_amount_cents ?? 0);
+            const currentSpentCents = toBudgetAmountCents(
+                item?.currentSpentCents
+                    ?? item?.current_spent_cents
+                    ?? item?.periods?.[item?.periods?.length - 1]?.amountCents
+                    ?? item?.periods?.[item?.periods?.length - 1]?.amount_cents
+                    ?? item?.totalAmountCents
+                    ?? item?.total_amount_cents
+                    ?? 0
             );
-            const budgetAmount = toBudgetAmountInCents(item?.budget_amount ?? item?.budgetAmount ?? 0);
+            const budgetAmountCents = toBudgetAmountCents(item?.budgetAmountCents ?? item?.budget_amount_cents ?? 0);
 
             return {
                 categoryId: String(item?.category_info?.id || item?.categoryId || ''),
                 categoryName: item?.category || item?.categoryName || '',
-                historicalAverage,
-                currentSpent,
-                projectedTotal: forecastAmount,
-                budgetAmount,
-                projectedOverBudget: !!(item?.projected_over_budget ?? item?.projectedOverBudget ?? (budgetAmount > 0 && forecastAmount > budgetAmount)),
+                historicalAverageCents,
+                currentSpentCents,
+                projectedTotalCents,
+                budgetAmountCents,
+                projectedOverBudget: !!(item?.projected_over_budget ?? item?.projectedOverBudget ?? (budgetAmountCents > 0 && projectedTotalCents > budgetAmountCents)),
                 trend: item?.trend || 'stable',
                 samplePeriods: item?.sample_periods ?? item?.samplePeriods ?? 0,
                 strategyExplanation: item?.strategy_explanation || item?.strategyExplanation || '',
@@ -275,7 +292,7 @@ export function mapRestForecastToFrontend(restResult: any): any {
                 confidence: item?.confidence || 'low',
                 periods: Array.isArray(item?.periods) ? item.periods.map((period: any) => ({
                     period: period?.period || '',
-                    amount: toBudgetAmountInCents(period?.amount ?? 0)
+                    amountCents: toBudgetAmountCents(period?.amountCents ?? period?.amount_cents ?? 0)
                 })) : []
             };
         }),
@@ -307,9 +324,9 @@ export function mapRestHistoryToFrontend(restResult: any): any {
                 periodType: item?.period_type || item?.periodType || BudgetPeriodType.Monthly,
                 periodStart: item?.period_start || item?.periodStart || '',
                 periodEnd: item?.period_end || item?.periodEnd || '',
-                budgetAmount: toBudgetAmountInCents(item?.budget_amount ?? item?.budgetAmount ?? 0),
-                spentAmount: toBudgetAmountInCents(item?.spent_amount ?? item?.spentAmount ?? 0),
-                remainingAmount: toBudgetAmountInCents(item?.remaining_amount ?? item?.remainingAmount ?? 0),
+                budgetAmountCents: toBudgetAmountCents(item?.budgetAmountCents ?? item?.budget_amount_cents ?? 0),
+                spentAmountCents: toBudgetAmountCents(item?.spentAmountCents ?? item?.spent_amount_cents ?? 0),
+                remainingAmountCents: toBudgetAmountCents(item?.remainingAmountCents ?? item?.remaining_amount_cents ?? 0),
                 executionRate: item?.execution_rate ?? item?.executionRate ?? 0,
                 status: item?.status || '',
                 filterSummary: item?.filter_summary || item?.filterSummary || '',
@@ -330,7 +347,7 @@ export function mapBudgetRequestToRest(req: any): any {
         category: req?.category || '',
         sub_category: req?.subCategory || '',
         period_type: req?.periodType || BudgetPeriodType.Monthly,
-        amount: Number(req?.amount ?? 0) / 100,
+        amount_cents: toBudgetAmountCents(req?.amountCents ?? 0),
         start_date: req?.startDate,
         end_date: req?.endDate,
         alert_threshold: req?.alertThreshold ?? DEFAULT_BUDGET_ALERT_THRESHOLD,
@@ -339,17 +356,14 @@ export function mapBudgetRequestToRest(req: any): any {
 }
 
 export function mapImportedBudgetToRest(budget: any): any {
-    const amount = Number(budget?.amount ?? 0);
-    const usesFrontendShape = Object.prototype.hasOwnProperty.call(budget || {}, 'periodType')
-        || Object.prototype.hasOwnProperty.call(budget || {}, 'subCategory')
-        || Object.prototype.hasOwnProperty.call(budget || {}, 'startDate');
+    const amountCents = toBudgetAmountCents(budget?.amountCents ?? budget?.amount_cents ?? 0);
 
     return {
         name: budget?.name || '',
         category: budget?.category || '',
         sub_category: budget?.subCategory || budget?.sub_category || '',
         period_type: budget?.periodType || budget?.period_type || BudgetPeriodType.Monthly,
-        amount: usesFrontendShape ? amount / 100 : amount,
+        amount_cents: amountCents,
         start_date: budget?.startDate || budget?.start_date,
         end_date: budget?.endDate || budget?.end_date,
         alert_threshold: budget?.alertThreshold ?? budget?.alert_threshold ?? DEFAULT_BUDGET_ALERT_THRESHOLD,

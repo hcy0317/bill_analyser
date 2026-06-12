@@ -22,7 +22,7 @@
                     <template v-if="pair.leftBill">
                         <div class="text-body-2">{{ pair.leftBill.description }}</div>
                         <div class="text-caption text-grey">
-                            {{ formatAmount(pair.leftBill.amount) }} · {{ pair.leftBill.date }}
+                            {{ formatAmount(pair.leftBill.amountCents) }} · {{ pair.leftBill.date }}
                         </div>
                     </template>
                     <span v-else class="text-grey">ID: {{ pair.leftBillId }}</span>
@@ -31,7 +31,7 @@
                     <template v-if="pair.rightBill">
                         <div class="text-body-2">{{ pair.rightBill.description }}</div>
                         <div class="text-caption text-grey">
-                            {{ formatAmount(pair.rightBill.amount) }} · {{ pair.rightBill.date }}
+                            {{ formatAmount(pair.rightBill.amountCents) }} · {{ pair.rightBill.date }}
                         </div>
                     </template>
                     <span v-else class="text-grey">ID: {{ pair.rightBillId }}</span>
@@ -96,8 +96,8 @@ function pairTypeLabel(pairType: string): string {
     }
 }
 
-function formatAmount(amount: number): string {
-    return amount.toFixed(2);
+function formatAmount(amountCents: number): string {
+    return (amountCents / 100).toFixed(2);
 }
 </script>
 

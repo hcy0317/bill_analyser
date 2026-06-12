@@ -144,8 +144,8 @@ pub async fn query_postgres_transaction_amount_period(
     let row = sqlx::query(
         r#"
         SELECT
-            COALESCE(SUM(CASE WHEN lower(trim(transaction_type)) IN ('income', '收入', '2') THEN ABS(amount_cents) ELSE 0 END), 0)::BIGINT AS income_amount,
-            COALESCE(SUM(CASE WHEN lower(trim(transaction_type)) IN ('expense', '支出', '3') THEN ABS(amount_cents) ELSE 0 END), 0)::BIGINT AS expense_amount
+            COALESCE(SUM(CASE WHEN lower(trim(transaction_type)) IN ('income', '收入', '2') THEN ABS(amount_cents) ELSE 0 END), 0)::BIGINT AS income_amount_cents,
+            COALESCE(SUM(CASE WHEN lower(trim(transaction_type)) IN ('expense', '支出', '3') THEN ABS(amount_cents) ELSE 0 END), 0)::BIGINT AS expense_amount_cents
         FROM bills
         WHERE user_id = $1
           AND is_deleted = false
@@ -164,8 +164,8 @@ pub async fn query_postgres_transaction_amount_period(
         end_time,
         amounts: vec![TransactionAmountBucket {
             currency: "CNY".to_string(),
-            income_amount: row.try_get("income_amount")?,
-            expense_amount: row.try_get("expense_amount")?,
+            income_amount_cents: row.try_get("income_amount_cents")?,
+            expense_amount_cents: row.try_get("expense_amount_cents")?,
         }],
     })
 }
@@ -646,14 +646,16 @@ async fn load_postgres_statistics_bills(
     rows.into_iter()
         .map(|row| {
             let payload: Value = row.try_get("standard_payload")?;
+            let bill_type = row
+                .try_get::<Option<String>, _>("transaction_type")?
+                .unwrap_or_default();
             let amount_cents: i64 = row.try_get("amount_cents")?;
+            let amount_cents = signed_postgres_statistics_amount_cents(&bill_type, amount_cents);
             Ok(StatisticsBillInput {
                 id: row.try_get("id")?,
                 date: postgres_timestamp_text(row.try_get("occurred_at")?),
-                bill_type: row
-                    .try_get::<Option<String>, _>("transaction_type")?
-                    .unwrap_or_default(),
-                amount_yuan: decimal_number_text(amount_cents as f64 / 100.0),
+                bill_type,
+                amount_cents,
                 channel: row
                     .try_get::<Option<String>, _>("payment_method")?
                     .unwrap_or_default(),
@@ -666,11 +668,10 @@ async fn load_postgres_statistics_bills(
                         .or(row.try_get::<Option<i64>, _>("transfer_target_account_id")?),
                 ),
                 destination_account: String::new(),
-                destination_amount_yuan: payload
-                    .get("destination_amount")
-                    .or_else(|| payload.get("destinationAmount"))
-                    .and_then(postgres_value_to_f64)
-                    .map(decimal_number_text),
+                destination_amount_cents: payload
+                    .get("destination_amount_cents")
+                    .or_else(|| payload.get("destinationAmountCents"))
+                    .and_then(postgres_value_to_i64),
                 main_category: row
                     .try_get::<Option<String>, _>("main_category")?
                     .unwrap_or_default(),
@@ -735,10 +736,7 @@ async fn load_postgres_statistics_accounts(
         .map(|row| {
             let metadata: Value = row.try_get("metadata")?;
             let balance_cents: i64 = row.try_get("balance_cents")?;
-            let initial_balance_yuan = metadata
-                .get("initial_balance")
-                .and_then(postgres_value_to_f64)
-                .unwrap_or(balance_cents as f64 / 100.0);
+            let initial_balance_cents = postgres_initial_balance_cents(&metadata, balance_cents);
             Ok(StatisticsAccountInput {
                 id: row.try_get("id")?,
                 name: row
@@ -748,8 +746,8 @@ async fn load_postgres_statistics_accounts(
                     .try_get::<Option<String>, _>("account_type")?
                     .unwrap_or_default(),
                 hidden: !row.try_get::<bool, _>("is_active")?,
-                balance_yuan: decimal_number_text(balance_cents as f64 / 100.0),
-                initial_balance_yuan: decimal_number_text(initial_balance_yuan),
+                balance_cents,
+                initial_balance_cents,
                 currency: row.try_get("currency")?,
                 icon: metadata
                     .get("icon")
@@ -795,7 +793,7 @@ async fn load_postgres_calendar_recurring_rules(
                 name: row
                     .try_get::<Option<String>, _>("name")?
                     .unwrap_or_default(),
-                amount_yuan: decimal_number_text(amount_minor as f64 / 100.0),
+                amount_cents: amount_minor,
                 bill_type: row
                     .try_get::<Option<String>, _>("transaction_type")?
                     .unwrap_or_default(),
@@ -817,7 +815,7 @@ async fn load_postgres_account_balance_deltas_before(
     pool: &PostgresPool,
     user_id: i64,
     start_date: NaiveDate,
-) -> DbResult<BTreeMap<i64, String>> {
+) -> DbResult<BTreeMap<i64, i64>> {
     let filters = StatisticsBillFilters {
         end_date: Some((start_date - chrono::Duration::days(1)).to_string()),
         ..StatisticsBillFilters::default()
@@ -832,8 +830,7 @@ async fn load_postgres_account_balance_deltas_before(
     for account_id in account_ids {
         let mut cents = 0_i64;
         for bill in &bills {
-            let amount = bill.amount_yuan.parse::<f64>().unwrap_or_default().abs();
-            let amount_cents = (amount * 100.0).round() as i64;
+            let amount_cents = bill.amount_cents.abs();
             if is_income_type(&bill.bill_type) && bill.source_account_id == Some(account_id) {
                 cents += amount_cents;
             } else if is_expense_type(&bill.bill_type) && bill.source_account_id == Some(account_id)
@@ -845,17 +842,15 @@ async fn load_postgres_account_balance_deltas_before(
                 }
                 if bill.destination_account_id == Some(account_id) {
                     let destination_cents = bill
-                        .destination_amount_yuan
-                        .as_deref()
-                        .and_then(|value| value.parse::<f64>().ok())
-                        .map(|value| (value.abs() * 100.0).round() as i64)
+                        .destination_amount_cents
+                        .map(i64::abs)
                         .filter(|value| *value != 0)
                         .unwrap_or(amount_cents);
                     cents += destination_cents;
                 }
             }
         }
-        deltas.insert(account_id, decimal_number_text(cents as f64 / 100.0));
+        deltas.insert(account_id, cents);
     }
     Ok(deltas)
 }
@@ -898,6 +893,35 @@ fn postgres_value_to_f64(value: &Value) -> Option<f64> {
         Value::String(text) => text.trim().parse::<f64>().ok(),
         _ => None,
     }
+}
+
+fn postgres_value_to_i64(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(number) => number
+            .as_i64()
+            .or_else(|| number.as_u64().and_then(|value| i64::try_from(value).ok())),
+        Value::String(text) => text.trim().parse::<i64>().ok(),
+        _ => None,
+    }
+}
+
+fn signed_postgres_statistics_amount_cents(transaction_type: &str, amount_cents: i64) -> i64 {
+    let normalized = transaction_type.trim().to_ascii_lowercase();
+    let amount = amount_cents.abs();
+    match normalized.as_str() {
+        "income" | "收入" | "2" => amount,
+        "expense" | "支出" | "3" | "transfer" | "转账" | "4" | "investment" | "投资" | "5" => {
+            -amount
+        }
+        _ => amount_cents,
+    }
+}
+
+fn postgres_initial_balance_cents(metadata: &Value, balance_cents: i64) -> i64 {
+    metadata
+        .get("initial_balance_cents")
+        .and_then(postgres_value_to_i64)
+        .unwrap_or(balance_cents)
 }
 
 fn postgres_timestamp_text(timestamp: DateTime<Utc>) -> String {

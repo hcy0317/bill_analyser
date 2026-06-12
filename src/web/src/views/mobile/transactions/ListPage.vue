@@ -63,7 +63,7 @@
                 <span :class="{ 'tabbar-item-changed': query.accountIds }">{{ queryAccountName }}</span>
             </f7-link>
             <f7-link popover-open=".more-popover-menu">
-                <f7-icon f7="ellipsis_vertical" :class="{ 'tabbar-item-changed': query.type > 0 || query.amountFilter || query.tagIds }"></f7-icon>
+                <f7-icon f7="ellipsis_vertical" :class="{ 'tabbar-item-changed': query.type > 0 || query.amountFilterCents || query.tagIds }"></f7-icon>
             </f7-link>
         </f7-toolbar>
 
@@ -73,7 +73,7 @@
                                   :default-currency="false"
                                   :min-date="transactionCalendarMinDate"
                                   :max-date="transactionCalendarMaxDate"
-                                  :dailyTotalAmounts="currentMonthTransactionData?.dailyTotalAmounts"
+                                  :daily-total-amounts-cents="currentMonthTransactionData?.dailyTotalAmountsCents"
                                   v-model="currentCalendarDate"></transaction-calendar>
         </f7-block>
 
@@ -385,19 +385,19 @@
                 <f7-list-item group-title>
                     <small>{{ tt('Amount') }}</small>
                 </f7-list-item>
-                <f7-list-item :class="{ 'list-item-selected': !query.amountFilter }" :title="tt('All')" @click="changeAmountFilter('')">
+                <f7-list-item :class="{ 'list-item-selected': !query.amountFilterCents }" :title="tt('All')" @click="changeAmountFilter('')">
                     <template #after>
-                        <f7-icon class="list-item-checked-icon" f7="checkmark_alt" v-if="!query.amountFilter"></f7-icon>
+                        <f7-icon class="list-item-checked-icon" f7="checkmark_alt" v-if="!query.amountFilterCents"></f7-icon>
                     </template>
                 </f7-list-item>
                 <f7-list-item :key="filterType.type"
-                              :class="{ 'list-item-selected': query.amountFilter && query.amountFilter.startsWith(`${filterType.type}:`) }"
+                              :class="{ 'list-item-selected': query.amountFilterCents && query.amountFilterCents.startsWith(`${filterType.type}:`) }"
                               :title="tt(filterType.name)"
                               v-for="filterType in AmountFilterType.values()"
                               @click="changeAmountFilter(filterType.type)">
                     <template #after>
-                        <span class="margin-inline-end-half" v-if="query.amountFilter && query.amountFilter.startsWith(`${filterType.type}:`)">{{ queryAmount }}</span>
-                        <f7-icon class="list-item-checked-icon" f7="checkmark_alt" v-if="query.amountFilter && query.amountFilter.startsWith(`${filterType.type}:`)"></f7-icon>
+                        <span class="margin-inline-end-half" v-if="query.amountFilterCents && query.amountFilterCents.startsWith(`${filterType.type}:`)">{{ queryAmount }}</span>
+                        <f7-icon class="list-item-checked-icon" f7="checkmark_alt" v-if="query.amountFilterCents && query.amountFilterCents.startsWith(`${filterType.type}:`)"></f7-icon>
                     </template>
                 </f7-list-item>
 
@@ -641,13 +641,13 @@ const transactions = computed<TransactionMonthList[]>(() => {
                 yearDashMonth: currentMonthTransactionData.value.yearDashMonth,
                 opened: true,
                 items: transactions,
-                totalAmount: {
-                    income: 0,
-                    expense: 0,
+                totalAmountCents: {
+                    incomeCents: 0,
+                    expenseCents: 0,
                     incompleteIncome: false,
                     incompleteExpense: false
                 },
-                dailyTotalAmounts: {}
+                dailyTotalAmountsCents: {}
             };
 
             return [dailyTransactionList];
@@ -1128,18 +1128,18 @@ function changeKeywordFilter(keyword: string): void {
 }
 
 function changeAmountFilter(filterType: string): void {
-    if (query.value.amountFilter === filterType) {
+    if (query.value.amountFilterCents === filterType) {
         return;
     }
 
     if (filterType) {
         showMorePopover.value = false;
-        props.f7router.navigate(`/transaction/filter/amount?type=${filterType}&value=${query.value.amountFilter}`);
+        props.f7router.navigate(`/transaction/filter/amount?type=${filterType}&value=${query.value.amountFilterCents}`);
         return;
     }
 
     const changed = transactionsStore.updateTransactionListFilter({
-        amountFilter: filterType
+        amountFilterCents: filterType
     });
 
     showMorePopover.value = false;

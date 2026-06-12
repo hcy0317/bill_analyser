@@ -106,18 +106,24 @@ fn safe_int(value: Option<&Value>, default: i64) -> i64 {
     }
 }
 
-fn safe_float(value: Option<&Value>, default: f64) -> f64 {
+fn safe_minor_units(value: Option<&Value>, default: i64) -> i64 {
+    value.and_then(strict_minor_units).unwrap_or(default)
+}
+
+fn strict_minor_units(value: &Value) -> Option<i64> {
     match value {
-        Some(Value::Number(number)) => number.as_f64().unwrap_or(default),
-        Some(Value::String(text)) => text.trim().parse::<f64>().unwrap_or(default),
-        Some(Value::Bool(flag)) => {
-            if *flag {
-                1.0
+        Value::Number(number) => number
+            .as_i64()
+            .or_else(|| number.as_u64().and_then(|value| i64::try_from(value).ok())),
+        Value::String(text) => {
+            let text = text.trim();
+            if text.is_empty() {
+                None
             } else {
-                0.0
+                text.parse::<i64>().ok()
             }
         }
-        _ => default,
+        Value::Null | Value::Bool(_) | Value::Array(_) | Value::Object(_) => None,
     }
 }
 

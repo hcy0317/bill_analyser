@@ -27,8 +27,8 @@ const SAMPLE_POINTS: HistoricalCategoryChartPoint[] = [
         category: '早餐',
         primaryCategory: '餐饮',
         secondaryCategory: '早餐',
-        budgetAmount: 800,
-        spentAmount: 620,
+        budgetAmountCents: 800,
+        spentAmountCents: 620,
         executionRate: 77.5,
         color: '#5470c6',
         groupOrder: 1,
@@ -38,8 +38,8 @@ const SAMPLE_POINTS: HistoricalCategoryChartPoint[] = [
         category: '午餐',
         primaryCategory: '餐饮',
         secondaryCategory: '午餐',
-        budgetAmount: 1500,
-        spentAmount: 1300,
+        budgetAmountCents: 1500,
+        spentAmountCents: 1300,
         executionRate: 86.7,
         color: '#5470c6',
         groupOrder: 1,
@@ -49,8 +49,8 @@ const SAMPLE_POINTS: HistoricalCategoryChartPoint[] = [
         category: '地铁',
         primaryCategory: '交通',
         secondaryCategory: '地铁',
-        budgetAmount: 500,
-        spentAmount: 260,
+        budgetAmountCents: 500,
+        spentAmountCents: 260,
         executionRate: 52,
         color: '#91cc75',
         groupOrder: 2,
@@ -60,8 +60,8 @@ const SAMPLE_POINTS: HistoricalCategoryChartPoint[] = [
         category: '打车',
         primaryCategory: '交通',
         secondaryCategory: '打车',
-        budgetAmount: 700,
-        spentAmount: 820,
+        budgetAmountCents: 700,
+        spentAmountCents: 820,
         executionRate: 117.1,
         color: '#91cc75',
         groupOrder: 2,
@@ -304,8 +304,8 @@ describe('historyPolarChart helpers', () => {
                 category: '早餐',
                 primaryCategory: '餐饮',
                 secondaryCategory: '早餐',
-                budgetAmount: 1000,
-                spentAmount: 800,
+                budgetAmountCents: 1000,
+                spentAmountCents: 800,
                 executionRate: 80,
                 color: '#5470c6',
                 groupOrder: 1,
@@ -315,8 +315,8 @@ describe('historyPolarChart helpers', () => {
                 category: '大额',
                 primaryCategory: '居住',
                 secondaryCategory: '大额',
-                budgetAmount: 3000,
-                spentAmount: 3000,
+                budgetAmountCents: 3000,
+                spentAmountCents: 3000,
                 executionRate: 100,
                 color: '#91cc75',
                 groupOrder: 2,
@@ -422,8 +422,8 @@ describe('historyPolarChart helpers', () => {
                 category: '早餐',
                 primaryCategory: '餐饮',
                 secondaryCategory: '早餐',
-                budgetAmount: 1000,
-                spentAmount: 800,
+                budgetAmountCents: 1000,
+                spentAmountCents: 800,
                 executionRate: 80,
                 color: '#5470c6',
                 groupOrder: 1,
@@ -433,8 +433,8 @@ describe('historyPolarChart helpers', () => {
                 category: '大额',
                 primaryCategory: '居住',
                 secondaryCategory: '大额',
-                budgetAmount: 3000,
-                spentAmount: 3000,
+                budgetAmountCents: 3000,
+                spentAmountCents: 3000,
                 executionRate: 100,
                 color: '#91cc75',
                 groupOrder: 2,
@@ -682,8 +682,8 @@ describe('historyPolarChart helpers', () => {
                 category: '基金申购',
                 primaryCategory: '基金',
                 secondaryCategory: '基金申购',
-                budgetAmount: 2000,
-                spentAmount: 1200,
+                budgetAmountCents: 2000,
+                spentAmountCents: 1200,
                 executionRate: 60,
                 color: '#ffb300',
                 groupOrder: 1,
@@ -693,8 +693,8 @@ describe('historyPolarChart helpers', () => {
                 category: '股票',
                 primaryCategory: '股票',
                 secondaryCategory: '股票',
-                budgetAmount: 1600,
-                spentAmount: 900,
+                budgetAmountCents: 1600,
+                spentAmountCents: 900,
                 executionRate: 56.3,
                 color: '#26a69a',
                 groupOrder: 2,
@@ -761,8 +761,8 @@ describe('historyPolarChart helpers', () => {
                 category: '房地产',
                 primaryCategory: '投资',
                 secondaryCategory: '房地产',
-                budgetAmount: 300,
-                spentAmount: 300,
+                budgetAmountCents: 300,
+                spentAmountCents: 300,
                 executionRate: 0,
                 color: '#ffb300',
                 groupOrder: 1,
@@ -898,8 +898,8 @@ describe('historyPolarChart helpers', () => {
                 category: '其他',
                 primaryCategory: '  ',
                 secondaryCategory: '',
-                budgetAmount: 10,
-                spentAmount: 5,
+                budgetAmountCents: 10,
+                spentAmountCents: 5,
                 executionRate: 50,
                 color: 'bad-color',
                 groupOrder: 1,
@@ -922,8 +922,8 @@ describe('historyPolarChart helpers', () => {
                 category: '异常项',
                 primaryCategory: '异常项',
                 secondaryCategory: '',
-                budgetAmount: Number.POSITIVE_INFINITY,
-                spentAmount: Number.NaN,
+                budgetAmountCents: Number.POSITIVE_INFINITY,
+                spentAmountCents: Number.NaN,
                 executionRate: Number.NaN,
                 color: undefined,
                 groupOrder: Number.NaN,
@@ -947,8 +947,8 @@ describe('historyPolarChart helpers', () => {
         } | undefined;
 
         expect(model.slots[0]).toMatchObject({
-            budgetAmount: 0,
-            spentAmount: 0,
+            budgetAmountCents: 0,
+            spentAmountCents: 0,
             executionRate: 0,
             color: '#5470c6'
         });
@@ -967,8 +967,8 @@ describe('historyPolarChart helpers', () => {
                 category: '香蕉',
                 primaryCategory: '餐饮',
                 secondaryCategory: '',
-                budgetAmount: 100,
-                spentAmount: 50,
+                budgetAmountCents: 100,
+                spentAmountCents: 50,
                 executionRate: 50,
                 color: '#5470c6',
                 groupOrder: 1,
@@ -978,8 +978,8 @@ describe('historyPolarChart helpers', () => {
                 category: '苹果',
                 primaryCategory: '餐饮',
                 secondaryCategory: '',
-                budgetAmount: 120,
-                spentAmount: 60,
+                budgetAmountCents: 120,
+                spentAmountCents: 60,
                 executionRate: 50,
                 color: '#5470c6',
                 groupOrder: 1,
@@ -989,8 +989,8 @@ describe('historyPolarChart helpers', () => {
                 category: '地铁',
                 primaryCategory: '交通',
                 secondaryCategory: '',
-                budgetAmount: 90,
-                spentAmount: 40,
+                budgetAmountCents: 90,
+                spentAmountCents: 40,
                 executionRate: 44.4,
                 color: '#91cc75',
                 groupOrder: 1,
@@ -1003,13 +1003,13 @@ describe('historyPolarChart helpers', () => {
     });
 
     test('buildHistoricalPolarChartModel selects stable amount-axis intervals across interval bands', () => {
-        const buildSinglePointModel = (budgetAmount: number) => buildHistoricalPolarChartModel([
+        const buildSinglePointModel = (budgetAmountCents: number) => buildHistoricalPolarChartModel([
             {
                 category: '单项',
                 primaryCategory: '测试',
                 secondaryCategory: '单项',
-                budgetAmount,
-                spentAmount: budgetAmount / 2,
+                budgetAmountCents,
+                spentAmountCents: budgetAmountCents / 2,
                 executionRate: 50,
                 color: '#5470c6',
                 groupOrder: 1,
@@ -1059,6 +1059,9 @@ describe('historyPolarChart helpers', () => {
                 updateAnimation?: Record<string, unknown>;
                 children?: Array<Record<string, unknown>>;
             }>;
+            tooltip: {
+                formatter?: (params: { dataIndex?: number }) => string;
+            };
             series: Array<Record<string, unknown>>;
         };
 
@@ -1146,7 +1149,10 @@ describe('historyPolarChart helpers', () => {
         expect(option.radiusAxis[1]?.max).toBe(1);
         expect(option.radiusAxis[0]?.axisLabel?.show).toBe(false);
         expect(option.radiusAxis[0]?.axisLabel?.margin).toBe(10);
-        expect(option.radiusAxis[0]?.axisLabel?.formatter?.(120)).toBe('¥120.00');
+        expect(option.radiusAxis[0]?.axisLabel?.formatter?.(120)).toBe('¥1.20');
+        expect(option.tooltip.formatter?.({ dataIndex: 1 })).toContain('预算金额: ¥15.00');
+        expect(option.tooltip.formatter?.({ dataIndex: 1 })).toContain('已花费: ¥13.00');
+        expect(option.tooltip.formatter?.({ dataIndex: 1 })).not.toContain('¥1500.00');
         expect(amountGridLineSeries?.id).toBe('amount-grid-lines');
         expect(amountGridLineSeries?.type).toBe('custom');
         expect(amountGridLineSeries?.animation).toBe(true);
@@ -1400,8 +1406,8 @@ describe('historyPolarChart helpers', () => {
                 category: '早餐',
                 primaryCategory: '餐饮',
                 secondaryCategory: '早餐',
-                budgetAmount: 1000,
-                spentAmount: 800,
+                budgetAmountCents: 1000,
+                spentAmountCents: 800,
                 executionRate: 80,
                 color: '#5470c6',
                 groupOrder: 1,
@@ -1411,8 +1417,8 @@ describe('historyPolarChart helpers', () => {
                 category: '大额',
                 primaryCategory: '居住',
                 secondaryCategory: '大额',
-                budgetAmount: 3000,
-                spentAmount: 3000,
+                budgetAmountCents: 3000,
+                spentAmountCents: 3000,
                 executionRate: 100,
                 color: '#91cc75',
                 groupOrder: 2,
@@ -1586,8 +1592,8 @@ describe('historyPolarChart helpers', () => {
                 category: '早餐',
                 primaryCategory: '餐饮',
                 secondaryCategory: '早餐',
-                budgetAmount: 1000,
-                spentAmount: 800,
+                budgetAmountCents: 1000,
+                spentAmountCents: 800,
                 executionRate: 80,
                 color: '#5470c6',
                 groupOrder: 1,
@@ -1597,8 +1603,8 @@ describe('historyPolarChart helpers', () => {
                 category: '大额',
                 primaryCategory: '居住',
                 secondaryCategory: '大额',
-                budgetAmount: 3000,
-                spentAmount: 3000,
+                budgetAmountCents: 3000,
+                spentAmountCents: 3000,
                 executionRate: 100,
                 color: '#91cc75',
                 groupOrder: 2,
@@ -1667,8 +1673,8 @@ describe('historyPolarChart helpers', () => {
             category: `项${index}`,
             primaryCategory: '全部',
             secondaryCategory: `项${index}`,
-            budgetAmount: 100 + index,
-            spentAmount: 50 + index,
+            budgetAmountCents: 100 + index,
+            spentAmountCents: 50 + index,
             executionRate: 50,
             color: '#5470c6',
             groupOrder: 1,
@@ -1969,7 +1975,8 @@ describe('historyPolarChart helpers', () => {
         expect(primaryLabels).toBeDefined();
         expect(primaryLabels?.data).toStrictEqual([]);
         expect(option.radiusAxis[0]?.axisLabel?.color).toBe('#888');
-        expect(option.tooltip.formatter({ dataIndex: 0 })).toContain('预算金额: ¥800.00');
+        expect(option.tooltip.formatter({ dataIndex: 0 })).toContain('预算金额: ¥8.00');
+        expect(option.tooltip.formatter({ dataIndex: 0 })).not.toContain('¥800.00');
         expect(option.tooltip.formatter({ dataIndex: 99 })).toBe('');
     });
 
@@ -1979,8 +1986,8 @@ describe('historyPolarChart helpers', () => {
                 category: '其他',
                 primaryCategory: '杂项',
                 secondaryCategory: '其他',
-                budgetAmount: 120,
-                spentAmount: 60,
+                budgetAmountCents: 120,
+                spentAmountCents: 60,
                 executionRate: 50,
                 color: 'bad-color',
                 groupOrder: 1,

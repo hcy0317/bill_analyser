@@ -14,9 +14,9 @@ export interface HistoricalBudgetCategoryRow {
     secondaryCategory: string;
     displayCategory: string;
     isPrimaryRow: boolean;
-    budgetAmount: number;
-    spentAmount: number;
-    remainingAmount: number;
+    budgetAmountCents: number;
+    spentAmountCents: number;
+    remainingAmountCents: number;
     executionRate: number;
     color: string;
     primaryColor: string;
@@ -32,8 +32,8 @@ export interface HistoricalBudgetPeriodGroup {
     label: string;
     startDate: string;
     endDate: string;
-    totalBudget: number;
-    totalSpent: number;
+    totalBudgetCents: number;
+    totalSpentCents: number;
     totalExecutionRate: number;
     itemCount: number;
     rows: HistoricalBudgetCategoryRow[];
@@ -158,17 +158,17 @@ function resolveHistoricalPeriodByDate(
 interface AggregatedSecondary {
     primaryCategory: string;
     secondaryCategory: string;
-    budgetAmount: number;
-    spentAmount: number;
+    budgetAmountCents: number;
+    spentAmountCents: number;
     displayOrder: number;
 }
 
 interface AggregatedPrimary {
     primaryCategory: string;
-    primaryBudgetAmount: number;
-    primarySpentAmount: number;
-    aggregatedSecondaryBudget: number;
-    aggregatedSecondarySpent: number;
+    primaryBudgetAmountCents: number;
+    primarySpentAmountCents: number;
+    aggregatedSecondaryBudgetCents: number;
+    aggregatedSecondarySpentCents: number;
     displayOrder: number;
     secondaries: Map<string, AggregatedSecondary>;
 }
@@ -237,18 +237,18 @@ export function buildHistoricalBudgetPeriodGroups({
         const periodEntry = accumulator.get(period.key)!;
         const primaryCategory = String(item.category || '').trim() || uncategorizedLabel;
         const secondaryCategory = String(item.subCategory || '').trim();
-        const budgetAmount = normalizeAmount(item.budgetAmount);
-        const spentAmount = normalizeAmount(item.spentAmount);
+        const budgetAmountCents = normalizeAmount(item.budgetAmountCents);
+        const spentAmountCents = normalizeAmount(item.spentAmountCents);
         const primaryMeta = categoryMeta[primaryCategory];
         const primaryDisplayOrder = primaryMeta?.displayOrder ?? Number.MAX_SAFE_INTEGER;
 
         if (!periodEntry.primaries.has(primaryCategory)) {
             periodEntry.primaries.set(primaryCategory, {
                 primaryCategory,
-                primaryBudgetAmount: 0,
-                primarySpentAmount: 0,
-                aggregatedSecondaryBudget: 0,
-                aggregatedSecondarySpent: 0,
+                primaryBudgetAmountCents: 0,
+                primarySpentAmountCents: 0,
+                aggregatedSecondaryBudgetCents: 0,
+                aggregatedSecondarySpentCents: 0,
                 displayOrder: primaryDisplayOrder,
                 secondaries: new Map()
             });
@@ -257,8 +257,8 @@ export function buildHistoricalBudgetPeriodGroups({
         const primaryEntry = periodEntry.primaries.get(primaryCategory)!;
 
         if (!secondaryCategory) {
-            primaryEntry.primaryBudgetAmount += budgetAmount;
-            primaryEntry.primarySpentAmount += spentAmount;
+            primaryEntry.primaryBudgetAmountCents += budgetAmountCents;
+            primaryEntry.primarySpentAmountCents += spentAmountCents;
             continue;
         }
 
@@ -268,17 +268,17 @@ export function buildHistoricalBudgetPeriodGroups({
             primaryEntry.secondaries.set(secondaryCategory, {
                 primaryCategory,
                 secondaryCategory,
-                budgetAmount: 0,
-                spentAmount: 0,
+                budgetAmountCents: 0,
+                spentAmountCents: 0,
                 displayOrder: secondaryDisplayOrder
             });
         }
 
         const secondaryEntry = primaryEntry.secondaries.get(secondaryCategory)!;
-        secondaryEntry.budgetAmount += budgetAmount;
-        secondaryEntry.spentAmount += spentAmount;
-        primaryEntry.aggregatedSecondaryBudget += budgetAmount;
-        primaryEntry.aggregatedSecondarySpent += spentAmount;
+        secondaryEntry.budgetAmountCents += budgetAmountCents;
+        secondaryEntry.spentAmountCents += spentAmountCents;
+        primaryEntry.aggregatedSecondaryBudgetCents += budgetAmountCents;
+        primaryEntry.aggregatedSecondarySpentCents += spentAmountCents;
     }
 
     const isLegendSelected = (key: string): boolean => {
@@ -328,13 +328,13 @@ export function buildHistoricalBudgetPeriodGroups({
                     continue;
                 }
 
-                const hasPrimaryBudget = primary.primaryBudgetAmount > 0 || primary.primarySpentAmount > 0;
-                const budgetAmount = hasPrimaryBudget ? primary.primaryBudgetAmount : primary.aggregatedSecondaryBudget;
-                const spentAmount = hasPrimaryBudget
-                    ? (primary.primarySpentAmount > 0 ? primary.primarySpentAmount : primary.aggregatedSecondarySpent)
-                    : primary.aggregatedSecondarySpent;
+                const hasPrimaryBudget = primary.primaryBudgetAmountCents > 0 || primary.primarySpentAmountCents > 0;
+                const budgetAmountCents = hasPrimaryBudget ? primary.primaryBudgetAmountCents : primary.aggregatedSecondaryBudgetCents;
+                const spentAmountCents = hasPrimaryBudget
+                    ? (primary.primarySpentAmountCents > 0 ? primary.primarySpentAmountCents : primary.aggregatedSecondarySpentCents)
+                    : primary.aggregatedSecondarySpentCents;
 
-                if (budgetAmount <= 0 && spentAmount <= 0) {
+                if (budgetAmountCents <= 0 && spentAmountCents <= 0) {
                     continue;
                 }
 
@@ -344,8 +344,8 @@ export function buildHistoricalBudgetPeriodGroups({
                     secondaryCategory: '',
                     displayCategory: primary.primaryCategory,
                     isPrimaryRow: true,
-                    budgetAmount,
-                    spentAmount,
+                    budgetAmountCents,
+                    spentAmountCents,
                     color: primaryColor,
                     primaryColor,
                     primaryIcon,
@@ -366,7 +366,7 @@ export function buildHistoricalBudgetPeriodGroups({
             });
 
             const visibleSecondaries = sortedSecondaries.filter(secondary => {
-                if (secondary.budgetAmount <= 0 && secondary.spentAmount <= 0) {
+                if (secondary.budgetAmountCents <= 0 && secondary.spentAmountCents <= 0) {
                     return false;
                 }
                 return isLegendSelected(`${primary.primaryCategory}::${secondary.secondaryCategory}`);
@@ -379,7 +379,7 @@ export function buildHistoricalBudgetPeriodGroups({
 
                 const fallbackKey = `${primary.primaryCategory}::${primary.primaryCategory}`;
                 const fallbackVisible = isLegendSelected(fallbackKey);
-                if (!fallbackVisible || (primary.primaryBudgetAmount <= 0 && primary.primarySpentAmount <= 0)) {
+                if (!fallbackVisible || (primary.primaryBudgetAmountCents <= 0 && primary.primarySpentAmountCents <= 0)) {
                     continue;
                 }
 
@@ -389,8 +389,8 @@ export function buildHistoricalBudgetPeriodGroups({
                     secondaryCategory: '',
                     displayCategory: primary.primaryCategory,
                     isPrimaryRow: true,
-                    budgetAmount: primary.primaryBudgetAmount,
-                    spentAmount: primary.primarySpentAmount,
+                    budgetAmountCents: primary.primaryBudgetAmountCents,
+                    spentAmountCents: primary.primarySpentAmountCents,
                     color: primaryColor,
                     primaryColor,
                     primaryIcon,
@@ -408,16 +408,16 @@ export function buildHistoricalBudgetPeriodGroups({
             for (const secondary of visibleSecondaries) {
                 const subMeta = primaryMeta?.subCategories?.[secondary.secondaryCategory];
                 const subColor = getColor(subMeta?.color) ?? primaryColor;
-                childBudgetTotal += secondary.budgetAmount;
-                childSpentTotal += secondary.spentAmount;
+                childBudgetTotal += secondary.budgetAmountCents;
+                childSpentTotal += secondary.spentAmountCents;
                 childRows.push({
                     key: `secondary::${primary.primaryCategory}::${secondary.secondaryCategory}`,
                     primaryCategory: primary.primaryCategory,
                     secondaryCategory: secondary.secondaryCategory,
                     displayCategory: secondary.secondaryCategory,
                     isPrimaryRow: false,
-                    budgetAmount: secondary.budgetAmount,
-                    spentAmount: secondary.spentAmount,
+                    budgetAmountCents: secondary.budgetAmountCents,
+                    spentAmountCents: secondary.spentAmountCents,
                     color: subColor,
                     primaryColor,
                     primaryIcon,
@@ -428,11 +428,11 @@ export function buildHistoricalBudgetPeriodGroups({
                 });
             }
 
-            const primaryRowBudget = primary.primaryBudgetAmount > 0
-                ? primary.primaryBudgetAmount
+            const primaryRowBudget = primary.primaryBudgetAmountCents > 0
+                ? primary.primaryBudgetAmountCents
                 : childBudgetTotal;
-            const primaryRowSpent = primary.primarySpentAmount > 0
-                ? primary.primarySpentAmount
+            const primaryRowSpent = primary.primarySpentAmountCents > 0
+                ? primary.primarySpentAmountCents
                 : childSpentTotal;
 
             rows.push({
@@ -441,8 +441,8 @@ export function buildHistoricalBudgetPeriodGroups({
                 secondaryCategory: '',
                 displayCategory: primary.primaryCategory,
                 isPrimaryRow: true,
-                budgetAmount: primaryRowBudget,
-                spentAmount: primaryRowSpent,
+                budgetAmountCents: primaryRowBudget,
+                spentAmountCents: primaryRowSpent,
                 color: primaryColor,
                 primaryColor,
                 primaryIcon,
@@ -457,8 +457,8 @@ export function buildHistoricalBudgetPeriodGroups({
             continue;
         }
 
-        const totalBudget = rows.reduce((sum, row) => sum + row.budgetAmount, 0);
-        const totalSpent = rows.reduce((sum, row) => sum + row.spentAmount, 0);
+        const totalBudgetCents = rows.reduce((sum, row) => sum + row.budgetAmountCents, 0);
+        const totalSpentCents = rows.reduce((sum, row) => sum + row.spentAmountCents, 0);
         const itemCount = rows.reduce((sum, row) => sum + 1 + row.childRows.length, 0);
         const finalRows: HistoricalBudgetCategoryRow[] = rows.map(row => ({
             key: row.key,
@@ -466,32 +466,32 @@ export function buildHistoricalBudgetPeriodGroups({
             secondaryCategory: row.secondaryCategory,
             displayCategory: row.displayCategory,
             isPrimaryRow: row.isPrimaryRow,
-            budgetAmount: row.budgetAmount,
-            spentAmount: row.spentAmount,
+            budgetAmountCents: row.budgetAmountCents,
+            spentAmountCents: row.spentAmountCents,
             color: row.color,
             primaryColor: row.primaryColor,
             primaryIcon: row.primaryIcon,
             primaryIconColor: row.primaryIconColor,
             secondaryIcon: row.secondaryIcon,
             secondaryIconColor: row.secondaryIconColor,
-            remainingAmount: Math.max(0, row.budgetAmount - row.spentAmount),
-            executionRate: row.budgetAmount > 0 ? Number(((row.spentAmount / row.budgetAmount) * 100).toFixed(1)) : 0,
+            remainingAmountCents: Math.max(0, row.budgetAmountCents - row.spentAmountCents),
+            executionRate: row.budgetAmountCents > 0 ? Number(((row.spentAmountCents / row.budgetAmountCents) * 100).toFixed(1)) : 0,
             childRows: row.childRows.map((child): HistoricalBudgetCategoryRow => ({
                 key: child.key,
                 primaryCategory: child.primaryCategory,
                 secondaryCategory: child.secondaryCategory,
                 displayCategory: child.displayCategory,
                 isPrimaryRow: child.isPrimaryRow,
-                budgetAmount: child.budgetAmount,
-                spentAmount: child.spentAmount,
+                budgetAmountCents: child.budgetAmountCents,
+                spentAmountCents: child.spentAmountCents,
                 color: child.color,
                 primaryColor: child.primaryColor,
                 primaryIcon: child.primaryIcon,
                 primaryIconColor: child.primaryIconColor,
                 secondaryIcon: child.secondaryIcon,
                 secondaryIconColor: child.secondaryIconColor,
-                remainingAmount: Math.max(0, child.budgetAmount - child.spentAmount),
-                executionRate: child.budgetAmount > 0 ? Number(((child.spentAmount / child.budgetAmount) * 100).toFixed(1)) : 0,
+                remainingAmountCents: Math.max(0, child.budgetAmountCents - child.spentAmountCents),
+                executionRate: child.budgetAmountCents > 0 ? Number(((child.spentAmountCents / child.budgetAmountCents) * 100).toFixed(1)) : 0,
                 childRows: []
             }))
         }));
@@ -501,10 +501,10 @@ export function buildHistoricalBudgetPeriodGroups({
             label: periodEntry.label,
             startDate: periodEntry.startDate,
             endDate: periodEntry.endDate,
-            totalBudget,
-            totalSpent,
-            totalExecutionRate: totalBudget > 0
-                ? Number(((totalSpent / totalBudget) * 100).toFixed(1))
+            totalBudgetCents,
+            totalSpentCents,
+            totalExecutionRate: totalBudgetCents > 0
+                ? Number(((totalSpentCents / totalBudgetCents) * 100).toFixed(1))
                 : 0,
             itemCount,
             rows: finalRows
@@ -520,8 +520,8 @@ interface HistoricalBudgetGroupRowAccumulator {
     secondaryCategory: string;
     displayCategory: string;
     isPrimaryRow: boolean;
-    budgetAmount: number;
-    spentAmount: number;
+    budgetAmountCents: number;
+    spentAmountCents: number;
     color: string;
     primaryColor: string;
     primaryIcon: string | undefined;

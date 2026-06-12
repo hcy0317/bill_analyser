@@ -32,7 +32,7 @@ describe('mobile transaction EditPage picture OCR source contract', () => {
         expect(source).toContain('transactionsStore.recognizeReceiptImage({ imageFile: pictureFile })');
         expect(source).toContain('applyReceiptDraftAutoFillToTransaction(transaction.value, result);');
         expect(helperSource).toContain('receiptDraftAmountToCents(field)');
-        expect(helperSource).toContain('transaction.sourceAmount = Math.round(result.amount * 100)');
+        expect(helperSource).toContain('transaction.sourceAmountCents = Math.round(result.amount * 100)');
     });
 
     test('shows OCR draft candidates without auto-applying them', () => {

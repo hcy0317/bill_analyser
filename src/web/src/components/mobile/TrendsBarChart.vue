@@ -74,13 +74,13 @@
                          style="margin-top: 4px"
                          :key="dataIdx"
                          v-for="(data, dataIdx) in item.items"
-                         v-show="data.totalAmount > 0">
+                         v-show="data.totalAmountCents > 0">
                         <div class="full-line display-flex flex-direction-row">
-                            <div class="display-inline-flex" :style="{ 'width': (item.percent * data.totalAmount / item.maxAmount) + '%' }">
+                            <div class="display-inline-flex" :style="{ 'width': (item.percent * data.totalAmountCents / item.maxAmount) + '%' }">
                                 <f7-progressbar :progress="100" :style="{ '--f7-progressbar-progress-color': (data.color ? data.color : '') } "></f7-progressbar>
                             </div>
-                            <div class="display-inline-flex" :style="{ 'width': (100.0 - item.percent * data.totalAmount / item.maxAmount) + '%' }"
-                                 v-if="item.percent * data.totalAmount / item.maxAmount < 100.0">
+                            <div class="display-inline-flex" :style="{ 'width': (100.0 - item.percent * data.totalAmountCents / item.maxAmount) + '%' }"
+                                 v-if="item.percent * data.totalAmountCents / item.maxAmount < 100.0">
                                 <f7-progressbar :progress="0"></f7-progressbar>
                             </div>
                         </div>
@@ -89,16 +89,16 @@
             </template>
 
             <template #after>
-                <span v-if="stacked || item.items.length <= 1">{{ formatAmountToLocalizedNumeralsWithCurrency(item.totalAmount, defaultCurrency) }}</span>
+                <span v-if="stacked || item.items.length <= 1">{{ formatAmountToLocalizedNumeralsWithCurrency(item.totalAmountCents, defaultCurrency) }}</span>
             </template>
 
             <template #inner-end>
                 <div class="statistics-item-end" v-if="stacked || item.items.length <= 1">
                     <div class="statistics-percent-line statistics-multi-percent-line display-flex">
-                        <div class="display-inline-flex" :style="{ 'width': (item.percent * data.totalAmount / item.totalPositiveAmount) + '%' }"
+                        <div class="display-inline-flex" :style="{ 'width': (item.percent * data.totalAmountCents / item.totalPositiveAmountCents) + '%' }"
                              :key="dataIdx"
                              v-for="(data, dataIdx) in item.items"
-                             v-show="data.totalAmount > 0">
+                             v-show="data.totalAmountCents > 0">
                             <f7-progressbar :progress="100" :style="{ '--f7-progressbar-progress-color': (data.color ? data.color : '') } "></f7-progressbar>
                         </div>
                         <div class="display-inline-flex" :style="{ 'width': (100.0 - item.percent) + '%' }"
@@ -164,7 +164,7 @@ interface TrendsBarChartLegend {
 }
 
 interface TrendsBarChartDataAmount extends SortableTransactionStatisticDataItem, TrendsBarChartLegend {
-    totalAmount: number;
+    totalAmountCents: number;
 }
 
 interface TrendsBarChartDataItem {
@@ -172,8 +172,8 @@ interface TrendsBarChartDataItem {
     dateRange: UnixTimeRange;
     displayDateRange: string;
     items: TrendsBarChartDataAmount[];
-    totalAmount: number;
-    totalPositiveAmount: number;
+    totalAmountCents: number;
+    totalPositiveAmountCents: number;
     maxAmount: number;
     percent: number;
 }
@@ -288,15 +288,15 @@ const allDisplayDataItems = computed<TrendsBarChartData>(() => {
             if (dateRangeItemMap[dateRangeKey]) {
                 if (isNumber(value)) {
                     if (props.dataAggregationType === ChartDataAggregationType.Sum) {
-                        dateRangeItemMap[dateRangeKey]!.totalAmount += value;
+                        dateRangeItemMap[dateRangeKey]!.totalAmountCents += value;
                     } else if (props.dataAggregationType === ChartDataAggregationType.Last) {
-                        dateRangeItemMap[dateRangeKey]!.totalAmount = value;
+                        dateRangeItemMap[dateRangeKey]!.totalAmountCents = value;
                     }
                 }
             } else {
                 const allDataItems: TrendsBarChartDataAmount[] = allDateRangeItemsMap[dateRangeKey] || [];
                 const finalDataItem: TrendsBarChartDataAmount = Object.assign({}, legend, {
-                    totalAmount: isNumber(value) ? value : 0
+                    totalAmountCents: isNumber(value) ? value : 0
                 });
 
                 allDataItems.push(finalDataItem);
@@ -307,7 +307,7 @@ const allDisplayDataItems = computed<TrendsBarChartData>(() => {
     }
 
     const finalDataItems: TrendsBarChartDataItem[] = [];
-    let maxTotalAmount = 0;
+    let maxTotalAmountCents = 0;
 
     for (const dateRange of allDateRanges.value) {
         let dateRangeKey = '';
@@ -339,26 +339,26 @@ const allDisplayDataItems = computed<TrendsBarChartData>(() => {
         }
 
         const dataItems = allDateRangeItemsMap[dateRangeKey] || [];
-        let totalAmount = 0;
-        let totalPositiveAmount = 0;
+        let totalAmountCents = 0;
+        let totalPositiveAmountCents = 0;
         let maxAmount = 0;
 
         sortStatisticsItems(dataItems, props.sortingType);
 
         for (const dataItem of dataItems) {
-            if (dataItem.totalAmount > 0) {
-                totalPositiveAmount += dataItem.totalAmount;
+            if (dataItem.totalAmountCents > 0) {
+                totalPositiveAmountCents += dataItem.totalAmountCents;
             }
 
-            totalAmount += dataItem.totalAmount;
+            totalAmountCents += dataItem.totalAmountCents;
 
-            if (dataItem.totalAmount > maxAmount) {
-                maxAmount = dataItem.totalAmount;
+            if (dataItem.totalAmountCents > maxAmount) {
+                maxAmount = dataItem.totalAmountCents;
             }
         }
 
-        if (totalAmount > maxTotalAmount) {
-            maxTotalAmount = totalAmount;
+        if (totalAmountCents > maxTotalAmountCents) {
+            maxTotalAmountCents = totalAmountCents;
         }
 
         const finalDataItem: TrendsBarChartDataItem = {
@@ -366,8 +366,8 @@ const allDisplayDataItems = computed<TrendsBarChartData>(() => {
             dateRange: dateRange,
             displayDateRange: displayDateRange,
             items: dataItems,
-            totalAmount: totalAmount,
-            totalPositiveAmount: totalPositiveAmount,
+            totalAmountCents: totalAmountCents,
+            totalPositiveAmountCents: totalPositiveAmountCents,
             maxAmount: maxAmount,
             percent: 0.0
         };
@@ -376,8 +376,8 @@ const allDisplayDataItems = computed<TrendsBarChartData>(() => {
     }
 
     for (const finalDataItem of finalDataItems) {
-        if (maxTotalAmount > 0 && finalDataItem.totalAmount > 0) {
-            finalDataItem.percent = 100.0 * finalDataItem.totalAmount / maxTotalAmount;
+        if (maxTotalAmountCents > 0 && finalDataItem.totalAmountCents > 0) {
+            finalDataItem.percent = 100.0 * finalDataItem.totalAmountCents / maxTotalAmountCents;
         } else {
             finalDataItem.percent = 0.0;
         }

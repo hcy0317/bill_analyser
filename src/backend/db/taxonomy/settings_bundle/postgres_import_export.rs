@@ -1,6 +1,6 @@
 // 中文导读：PostgreSQL authority 设置包导入路径，复用设置包 schema/ref 解析并用 Postgres 事务承载 preview rollback。
 // 维护重点：保持 user-scope、幂等 upsert 和引用重映射；不要回退到 non-Postgres runtime。
-// 不变式：dry_run 必须 rollback；真实导入必须按用户事务提交；账户余额从设置包元单位写入分单位，模板金额保持当前交易 DTO 分单位。
+// 不变式：dry_run 必须 rollback；真实导入必须按用户事务提交；设置包机器金额字段必须使用显式 cents/minor units。
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_postgres_settings_bundle(
@@ -251,14 +251,20 @@ async fn upsert_postgres_settings_account(
         warnings.push("Skipped account without name".to_string());
         return Ok(None);
     }
-
-    let normalized = normalize_account_import(&json!({
+    let normalized = match normalize_account_import(&json!({
         "item": item,
         "ref_map": ref_map,
-    }));
+    })) {
+        Ok(normalized) => normalized,
+        Err(account_warnings) => {
+            section.skipped += 1;
+            warnings.extend(account_warnings);
+            return Ok(None);
+        }
+    };
     let parent_id = safe_int(normalized.get("parent_id"), 0);
     let metadata = postgres_account_metadata(&normalized, parent_id);
-    let balance_cents = settings_yuan_to_cents(safe_float(normalized.get("balance"), 0.0));
+    let balance_cents = safe_int(normalized.get("balance_cents"), 0);
 
     if let Some(account_id) = existing
         .by_key
@@ -337,8 +343,8 @@ fn postgres_account_metadata(normalized: &Value, parent_id: i64) -> Value {
         );
     }
     metadata.insert(
-        "initial_balance".to_string(),
-        json!(safe_float(normalized.get("initial_balance"), 0.0)),
+        "initial_balance_cents".to_string(),
+        json!(safe_int(normalized.get("initial_balance_cents"), 0)),
     );
     if parent_id > 0 {
         metadata.insert("parent_id".to_string(), Value::Number(parent_id.into()));
@@ -826,14 +832,10 @@ fn settings_template_values_from_item(
         category_id: settings_optional_text(payload.get("category")),
         source_account_id,
         destination_account_id,
-        source_amount_minor_units: settings_round_minor_units(get_any(
-            item,
-            &["sourceAmount", "source_amount", "amount"],
-        )),
-        destination_amount_minor_units: settings_round_minor_units(get_any(
-            item,
-            &["destinationAmount", "destination_amount"],
-        )),
+        source_amount_minor_units: settings_strict_minor_units(payload.get("source_amount_cents")),
+        destination_amount_minor_units: settings_strict_minor_units(
+            payload.get("destination_amount_cents"),
+        ),
         hide_amount: safe_int(payload.get("hide_amount"), 0) != 0,
         tag_ids: settings_template_tag_ids(payload),
         comment: settings_optional_text(payload.get("comment")),
@@ -1323,56 +1325,8 @@ fn settings_template_tag_ids(payload: &Value) -> Value {
     )
 }
 
-fn settings_round_minor_units(value: Option<&Value>) -> i64 {
-    let Some(value) = value else {
-        return 0;
-    };
-    settings_round_decimal_text_to_i64(&json_to_display_string(value)).unwrap_or_default()
-}
-
-fn settings_round_decimal_text_to_i64(text: &str) -> Option<i64> {
-    settings_decimal_text_to_scaled_i64(text, 0)
-}
-
-fn settings_decimal_text_to_scaled_i64(text: &str, scale: usize) -> Option<i64> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let (negative, magnitude) = trimmed
-        .strip_prefix('-')
-        .map_or((false, trimmed), |rest| (true, rest));
-    let magnitude = magnitude.strip_prefix('+').unwrap_or(magnitude);
-    let mut parts = magnitude.splitn(2, '.');
-    let integer = parts.next()?.parse::<i64>().ok()?;
-    let multiplier = 10_i64.checked_pow(u32::try_from(scale).ok()?)?;
-    let fraction = parts.next().unwrap_or_default();
-    let mut scaled_fraction = 0_i64;
-    let mut consumed = 0_usize;
-    let mut round_digit = '0';
-    for digit in fraction.chars().filter(char::is_ascii_digit) {
-        if consumed < scale {
-            scaled_fraction = scaled_fraction
-                .checked_mul(10)?
-                .checked_add(i64::from(digit.to_digit(10)?))?;
-            consumed += 1;
-        } else {
-            round_digit = digit;
-            break;
-        }
-    }
-    for _ in consumed..scale {
-        scaled_fraction = scaled_fraction.checked_mul(10)?;
-    }
-    let scaled = integer
-        .checked_mul(multiplier)?
-        .checked_add(scaled_fraction)?
-        .checked_add(i64::from(round_digit >= '5'))?;
-    Some(if negative { -scaled } else { scaled })
-}
-
-fn settings_yuan_to_cents(value: f64) -> i64 {
-    (value * 100.0).round() as i64
+fn settings_strict_minor_units(value: Option<&Value>) -> i64 {
+    value.and_then(strict_minor_units).unwrap_or_default()
 }
 
 fn settings_i64_to_i32(value: i64) -> i32 {
@@ -1416,8 +1370,8 @@ mod postgres_settings_template_import_tests {
                 "categoryRef": "category:3",
                 "sourceAccountRef": "account:1",
                 "destinationAccountName": "现金",
-                "sourceAmount": "1234.5",
-                "destinationAmount": "88.49",
+                "sourceAmountCents": 1235,
+                "destinationAmountCents": 88,
                 "hideAmount": true,
                 "tagRefs": ["tag:7"],
                 "comment": "常用午餐",
@@ -1460,7 +1414,7 @@ mod postgres_settings_template_import_tests {
                 "templateType": 1,
                 "name": "房租计划",
                 "sourceAccountRef": "account:1",
-                "sourceAmount": 250000,
+                "sourceAmountCents": 250000,
                 "scheduledFrequencyType": 3,
                 "scheduledFrequency": "1",
                 "scheduledStartDate": "2026-06-01",
@@ -1500,7 +1454,7 @@ mod postgres_settings_template_import_tests {
                 "name": "缺失分类",
                 "categoryRef": "category:missing",
                 "sourceAccountRef": "account:1",
-                "sourceAmount": 1999
+                "sourceAmountCents": 1999
             }),
             1,
             1,
@@ -1519,6 +1473,39 @@ mod postgres_settings_template_import_tests {
         assert!(warnings
             .iter()
             .all(|warning| !warning.contains("not supported")));
+    }
+
+    #[test]
+    fn settings_template_values_skip_invalid_explicit_minor_units() {
+        let (account_ref_map, category_ref_map, tag_ref_map) = ref_maps();
+        let mut section = SectionCounts::default();
+        let mut warnings = Vec::new();
+
+        let values = settings_template_values_from_item(
+            &json!({
+                "name": "坏金额模板",
+                "categoryRef": "category:3",
+                "sourceAccountRef": "account:1",
+                "sourceAmountCents": true,
+                "destinationAmountCents": "12.34"
+            }),
+            1,
+            1,
+            &account_ref_map,
+            &category_ref_map,
+            &tag_ref_map,
+            &mut section,
+            &mut warnings,
+        );
+
+        assert!(values.is_none());
+        assert_eq!(section.skipped, 1);
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains("invalid sourceAmountCents")));
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains("invalid destinationAmountCents")));
     }
 
     #[test]
@@ -1548,8 +1535,8 @@ mod postgres_settings_template_import_tests {
                 "categoryId": "3",
                 "sourceAccountId": "1",
                 "destinationAccountId": "0",
-                "sourceAmount": 1234,
-                "destinationAmount": 0,
+                "sourceAmountCents": 1234,
+                "destinationAmountCents": 0,
                 "hideAmount": false,
                 "tagIds": ["7"],
                 "comment": "工作日午餐",
@@ -1563,8 +1550,8 @@ mod postgres_settings_template_import_tests {
                 "categoryId": "3",
                 "sourceAccountId": "1",
                 "destinationAccountId": "0",
-                "sourceAmount": 250000,
-                "destinationAmount": 0,
+                "sourceAmountCents": 250000,
+                "destinationAmountCents": 0,
                 "hideAmount": false,
                 "tagIds": ["7"],
                 "scheduledFrequencyType": 3,
@@ -1626,9 +1613,10 @@ mod postgres_settings_template_import_tests {
     }
 
     #[test]
-    fn settings_template_minor_units_are_not_yuan_scaled() {
-        assert_eq!(settings_round_minor_units(Some(&json!(1999))), 1999);
-        assert_eq!(settings_round_minor_units(Some(&json!("18.5"))), 19);
-        assert_eq!(settings_round_minor_units(Some(&json!("-18.5"))), -19);
+    fn settings_template_minor_units_are_strict_integers() {
+        assert_eq!(settings_strict_minor_units(Some(&json!(1999))), 1999);
+        assert_eq!(settings_strict_minor_units(Some(&json!("1999"))), 1999);
+        assert_eq!(settings_strict_minor_units(Some(&json!("18.5"))), 0);
+        assert_eq!(settings_strict_minor_units(Some(&json!(true))), 0);
     }
 }

@@ -128,9 +128,9 @@ fn format_account_balance_discrepancy(discrepancy: AccountBalanceDiscrepancy) ->
     json!({
         "account_id": discrepancy.account_id,
         "name": discrepancy.name,
-        "old_balance": json_number(discrepancy.old_balance),
-        "new_balance": json_number(discrepancy.new_balance),
-        "diff": json_number(discrepancy.diff),
+        "oldBalanceCents": discrepancy.old_balance_cents,
+        "newBalanceCents": discrepancy.new_balance_cents,
+        "diffCents": discrepancy.diff_cents,
     })
 }
 
@@ -138,12 +138,7 @@ fn frontend_account_to_backend(payload: &Value) -> Result<Map<String, Value>, St
     let Some(object) = payload.as_object() else {
         return Err("Account payload must be an object".to_string());
     };
-    let balance_cents = object
-        .get("balance")
-        .or_else(|| object.get("initial_balance"))
-        .and_then(value_as_f64)
-        .unwrap_or_default();
-    let balance_yuan = round2(balance_cents / 100.0);
+    let balance_cents = account_balance_cents_value(object)?;
     let hidden = object
         .get("hidden")
         .map(value_truthy)
@@ -187,8 +182,14 @@ fn frontend_account_to_backend(payload: &Value) -> Result<Map<String, Value>, St
         "currency".to_string(),
         Value::String(string_or_default(object.get("currency"), "CNY")),
     );
-    result.insert("balance".to_string(), json_number(balance_yuan));
-    result.insert("initial_balance".to_string(), json_number(balance_yuan));
+    result.insert(
+        "balance_cents".to_string(),
+        Value::Number(Number::from(balance_cents)),
+    );
+    result.insert(
+        "initial_balance_cents".to_string(),
+        Value::Number(Number::from(balance_cents)),
+    );
     result.insert(
         "comment".to_string(),
         Value::String(string_or_default(object.get("comment"), "")),
@@ -227,6 +228,42 @@ fn frontend_account_to_backend(payload: &Value) -> Result<Map<String, Value>, St
         );
     }
     Ok(result)
+}
+
+fn account_balance_cents_value(object: &Map<String, Value>) -> Result<i64, String> {
+    for field in [
+        "balanceCents",
+        "balance_cents",
+        "initialBalanceCents",
+        "initial_balance_cents",
+    ] {
+        if let Some(value) = object.get(field) {
+            return strict_account_cents_value(value, field);
+        }
+    }
+    Ok(0)
+}
+
+fn strict_account_cents_value(value: &Value, field: &str) -> Result<i64, String> {
+    match value {
+        Value::Number(number) => number
+            .as_i64()
+            .or_else(|| number.as_u64().and_then(|value| i64::try_from(value).ok()))
+            .ok_or_else(|| format!("{field} must be integer cents")),
+        Value::String(text) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                Err(format!("{field} must be integer cents"))
+            } else {
+                trimmed
+                    .parse::<i64>()
+                    .map_err(|_| format!("{field} must be integer cents"))
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Array(_) | Value::Object(_) => {
+            Err(format!("{field} must be integer cents"))
+        }
+    }
 }
 
 fn backend_account_to_frontend(mut account: AccountRecord) -> Map<String, Value> {
@@ -270,8 +307,8 @@ fn backend_account_to_frontend(mut account: AccountRecord) -> Map<String, Value>
         Value::String(string_or_default(account.get("currency"), "CNY")),
     );
     result.insert(
-        "balance".to_string(),
-        Value::Number(Number::from(yuan_to_cents(account.get("balance")))),
+        "balanceCents".to_string(),
+        Value::Number(Number::from(account_balance_cents(&account))),
     );
     result.insert(
         "comment".to_string(),
@@ -317,6 +354,14 @@ fn backend_account_to_frontend(mut account: AccountRecord) -> Map<String, Value>
     }
 
     result
+}
+
+fn account_balance_cents(account: &AccountRecord) -> i64 {
+    account
+        .get("balanceCents")
+        .or_else(|| account.get("balance_cents"))
+        .and_then(value_as_i64)
+        .unwrap_or_default()
 }
 
 fn normalize_frontend_account_type(value: Option<&Value>) -> i64 {
@@ -536,11 +581,15 @@ mod tests {
         account.insert("name".to_string(), Value::String("支付宝（三方主账户）".to_string()));
         account.insert("type".to_string(), Value::Number(Number::from(2)));
         account.insert("category".to_string(), Value::Number(Number::from(4)));
+        account.insert("balance_cents".to_string(), Value::Number(Number::from(1234)));
+        account.insert("balance".to_string(), Value::Number(Number::from(99)));
 
         let frontend = backend_account_to_frontend(account);
 
         assert_eq!(frontend.get("type").and_then(Value::as_i64), Some(2));
         assert_eq!(frontend.get("category").and_then(Value::as_i64), Some(4));
+        assert_eq!(frontend.get("balanceCents").and_then(Value::as_i64), Some(1234));
+        assert!(frontend.get("balance").is_none());
     }
 
     #[test]
@@ -641,5 +690,60 @@ mod tests {
                 "{name} should map to category {expected_category}"
             );
         }
+    }
+
+    #[test]
+    fn frontend_account_to_backend_uses_explicit_cents_fields() {
+        let backend = frontend_account_to_backend(&json!({
+            "name": "招商银行",
+            "balanceCents": 123456,
+            "visible": false,
+            "displayOrder": 3
+        }))
+        .expect("backend payload");
+
+        assert_eq!(backend.get("balance_cents"), Some(&json!(123456)));
+        assert_eq!(backend.get("initial_balance_cents"), Some(&json!(123456)));
+        assert_eq!(backend.get("hidden"), Some(&json!(true)));
+        assert!(backend.get("balance").is_none());
+
+        let fallback = frontend_account_to_backend(&json!({
+            "name": "期初资产",
+            "initialBalanceCents": "654321"
+        }))
+        .expect("fallback payload");
+        assert_eq!(fallback.get("balance_cents"), Some(&json!(654321)));
+        assert_eq!(fallback.get("initial_balance_cents"), Some(&json!(654321)));
+
+        for (field, value) in [
+            ("balanceCents", json!("12.34")),
+            ("balance_cents", json!(18.49)),
+            ("initialBalanceCents", json!(true)),
+            ("initial_balance_cents", json!({"cents": 1})),
+        ] {
+            let mut payload = Map::new();
+            payload.insert("name".to_string(), json!("坏账户"));
+            payload.insert(field.to_string(), value);
+            let error = frontend_account_to_backend(&Value::Object(payload))
+            .expect_err("invalid explicit cents should be rejected");
+            assert!(error.contains(field), "{error}");
+            assert!(error.contains("integer cents"), "{error}");
+        }
+    }
+
+    #[test]
+    fn balance_discrepancy_response_uses_explicit_cents_names() {
+        let value = format_account_balance_discrepancy(AccountBalanceDiscrepancy {
+            account_id: 7,
+            name: "招商银行".to_string(),
+            old_balance_cents: 1000,
+            new_balance_cents: 1250,
+            diff_cents: 250,
+        });
+
+        assert_eq!(value["oldBalanceCents"], json!(1000));
+        assert_eq!(value["newBalanceCents"], json!(1250));
+        assert_eq!(value["diffCents"], json!(250));
+        assert!(value.get("oldBalance").is_none());
     }
 }

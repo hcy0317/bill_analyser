@@ -2,8 +2,8 @@ export interface HistoricalCategoryChartPoint {
     category: string;
     primaryCategory: string;
     secondaryCategory: string;
-    budgetAmount: number;
-    spentAmount: number;
+    budgetAmountCents: number;
+    spentAmountCents: number;
     executionRate: number;
     color: string;
     groupOrder: number;
@@ -19,8 +19,8 @@ export interface HistoricalChartSlot {
     label: string;
     primaryKey: string;
     secondaryKey: string;
-    budgetAmount: number;
-    spentAmount: number;
+    budgetAmountCents: number;
+    spentAmountCents: number;
     executionRate: number;
     labelAnchorAmount: number;
     color: string;

@@ -39,23 +39,11 @@ fn positive_record_i64(record: &Map<String, Value>, key: &str) -> Option<i64> {
     record_i64(record, key).filter(|value| *value > 0)
 }
 
-fn record_f64(record: &Map<String, Value>, key: &str) -> bill_analyser_db::DbResult<f64> {
-    match record.get(key) {
-        Some(Value::Number(number)) => number.as_f64().ok_or_else(|| {
-            bill_analyser_db::DbError::InvalidOperation(format!("invalid numeric field: {key}"))
-        }),
-        Some(Value::String(text)) => text.trim().parse::<f64>().map_err(|_| {
-            bill_analyser_db::DbError::InvalidOperation(format!("invalid numeric field: {key}"))
-        }),
-        _ => Err(bill_analyser_db::DbError::InvalidOperation(format!(
-            "missing numeric field: {key}"
-        ))),
-    }
-}
-
 fn money_from_record(record: &Map<String, Value>, key: &str) -> bill_analyser_db::DbResult<Money> {
-    let value = record_f64(record, key)?;
-    Money::from_yuan_str(&finite_float_text(value)).map_err(runtime_error)
+    let value = record_i64(record, key).ok_or_else(|| {
+        bill_analyser_db::DbError::InvalidOperation(format!("missing integer cents field: {key}"))
+    })?;
+    Ok(Money::from_cents(value))
 }
 
 fn frontend_tag_from_value(value: &Value) -> Option<FrontendTransactionTag> {
@@ -76,24 +64,11 @@ fn date_from_timestamp(value: i64) -> Option<String> {
         .map(|date| date.with_timezone(&Local).format("%Y-%m-%d").to_string())
 }
 
-fn json_number(value: f64) -> Value {
-    Number::from_f64(value).map_or(Value::Null, Value::Number)
-}
-
 fn is_non_empty_value(value: &Value) -> bool {
     match value {
         Value::Null => false,
         Value::String(text) => !text.trim().is_empty(),
         _ => true,
-    }
-}
-
-fn finite_float_text(value: f64) -> String {
-    let text = value.to_string();
-    if value.is_finite() && !text.contains('.') && !text.contains('e') && !text.contains('E') {
-        format!("{text}.0")
-    } else {
-        text
     }
 }
 
@@ -110,11 +85,6 @@ mod value_helper_tests {
         assert_eq!(value_string(Some(&json!(true))), Some("true".to_string()));
         assert_eq!(value_to_i64(&json!("12")), Some(12));
         assert_eq!(value_to_i64(&json!({})), None);
-
-        let mut invalid_record = Map::new();
-        invalid_record.insert("amount".to_string(), Value::String("not-a-number".to_string()));
-        assert!(record_f64(&invalid_record, "amount").is_err());
-        assert!(record_f64(&Map::new(), "amount").is_err());
 
         assert_eq!(
             frontend_tag_from_value(&json!({"id": true, "name": false}))

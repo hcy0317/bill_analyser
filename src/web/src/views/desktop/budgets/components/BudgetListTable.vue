@@ -82,11 +82,11 @@
                                 </div>
                                 <div class="budget-amounts d-flex align-center justify-end ms-auto" style="min-width: 150px;">
                                     <span class="budget-spent text-body-2">
-                                        {{ formatAmount(group.totalSpent / 100) }}
+                                        {{ formatAmount(group.totalSpentCents / 100) }}
                                     </span>
                                     <span class="budget-separator text-body-2 text-medium-emphasis mx-1">/</span>
                                     <span class="budget-total text-body-2 text-medium-emphasis">
-                                        {{ formatAmount(group.totalAmount / 100) }}
+                                        {{ formatAmount(group.totalAmountCents / 100) }}
                                     </span>
                                 </div>
                             </div>

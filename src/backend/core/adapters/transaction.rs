@@ -26,7 +26,7 @@ const WINDOWS_DEVICE_FILES: &[&str] = &[
 pub const EXPORT_COLUMNS: &[(&str, &str)] = &[
     ("date", "date"),
     ("type", "type"),
-    ("amount", "amount"),
+    ("amount_cents", "amount_cents"),
     ("counterparty", "counterparty"),
     ("description", "description"),
     ("payment_method", "payment_method"),
@@ -34,7 +34,7 @@ pub const EXPORT_COLUMNS: &[(&str, &str)] = &[
     ("sub_category", "sub_category"),
     ("source_account_id", "source_account_id"),
     ("destination_account_id", "destination_account_id"),
-    ("destination_amount", "destination_amount"),
+    ("destination_amount_cents", "destination_amount_cents"),
 ];
 pub const EXPORT_TEXT_KEYS: &[&str] = &[
     "date",
@@ -55,7 +55,7 @@ pub const BILL_CREATE_COLUMNS: &[&str] = &[
     "user_id",
     "date",
     "type",
-    "amount",
+    "amount_cents",
     "counterparty",
     "description",
     "payment_method",
@@ -67,7 +67,7 @@ pub const BILL_CREATE_COLUMNS: &[&str] = &[
     "updated_at",
     "source_account_id",
     "destination_account_id",
-    "destination_amount",
+    "destination_amount_cents",
     "created_from_template",
     "created_from_recurring",
     "import_history_id",
@@ -75,7 +75,7 @@ pub const BILL_CREATE_COLUMNS: &[&str] = &[
 pub const BILL_UPDATE_COLUMNS: &[&str] = &[
     "date",
     "type",
-    "amount",
+    "amount_cents",
     "counterparty",
     "description",
     "payment_method",
@@ -85,7 +85,7 @@ pub const BILL_UPDATE_COLUMNS: &[&str] = &[
     "hash",
     "source_account_id",
     "destination_account_id",
-    "destination_amount",
+    "destination_amount_cents",
     "created_from_template",
     "created_from_recurring",
     "import_history_id",
@@ -93,7 +93,7 @@ pub const BILL_UPDATE_COLUMNS: &[&str] = &[
 pub const ROUTE_ALLOWED_BATCH_UPDATE_FIELDS: &[&str] = &[
     "date",
     "type",
-    "amount",
+    "amount_cents",
     "counterparty",
     "description",
     "payment_method",
@@ -101,7 +101,7 @@ pub const ROUTE_ALLOWED_BATCH_UPDATE_FIELDS: &[&str] = &[
     "sub_category",
     "source_account_id",
     "destination_account_id",
-    "destination_amount",
+    "destination_amount_cents",
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -148,9 +148,9 @@ pub struct FrontendTransactionView {
     pub utc_offset: i32,
     pub source_account_id: String,
     pub destination_account_id: String,
-    pub amount: i64,
-    pub source_amount: i64,
-    pub destination_amount: i64,
+    pub amount_cents: i64,
+    pub source_amount_cents: i64,
+    pub destination_amount_cents: i64,
     pub hide_amount: bool,
     pub tag_ids: Vec<String>,
     pub tags: Vec<FrontendTransactionTag>,
@@ -287,11 +287,11 @@ pub struct ReconciliationResult {
     pub account_name: String,
     pub start_time: i64,
     pub end_time: i64,
-    pub opening_balance: i64,
-    pub closing_balance: i64,
-    pub total_inflows: i64,
-    pub total_outflows: i64,
-    pub net_flow: i64,
+    pub opening_balance_cents: i64,
+    pub closing_balance_cents: i64,
+    pub total_inflows_cents: i64,
+    pub total_outflows_cents: i64,
+    pub net_flow_cents: i64,
     pub transactions: Vec<Value>,
     pub item_count: usize,
 }
@@ -334,10 +334,12 @@ pub fn frontend_transaction_mutation_to_backend(
     _utc_offset: UtcOffsetMinutes,
 ) -> Result<(Map<String, Value>, BillMutationMetadata), RuntimeError> {
     let transaction_type = frontend_transaction_type_from_value(frontend_data.get("type"))?;
-    let source_amount = Money::from_cents(frontend_amount_cents(frontend_data.get("sourceAmount")));
+    let source_amount = Money::from_cents(frontend_amount_cents(
+        frontend_data.get("sourceAmountCents"),
+    )?);
     let destination_amount = Money::from_cents(frontend_amount_cents(
-        frontend_data.get("destinationAmount"),
-    ));
+        frontend_data.get("destinationAmountCents"),
+    )?);
     let amount = match transaction_type {
         Some(
             TransactionType::Expense | TransactionType::Transfer | TransactionType::Investment,
@@ -373,10 +375,13 @@ pub fn frontend_transaction_mutation_to_backend(
         ),
     );
     backend_data.insert("date".to_string(), Value::String(date));
-    backend_data.insert("amount".to_string(), money_to_yuan_json(amount));
     backend_data.insert(
-        "destination_amount".to_string(),
-        money_to_yuan_json(destination_amount),
+        "amount_cents".to_string(),
+        Value::Number(Number::from(amount.to_cents())),
+    );
+    backend_data.insert(
+        "destination_amount_cents".to_string(),
+        Value::Number(Number::from(destination_amount.to_cents())),
     );
     backend_data.insert(
         "source_account_id".to_string(),
@@ -1077,11 +1082,11 @@ pub fn build_reconciliation_transactions(
                 return None;
             };
             transaction_map.insert(
-                "accountOpeningBalance".to_string(),
+                "accountOpeningBalanceCents".to_string(),
                 Value::Number(Number::from(balance.opening.to_cents())),
             );
             transaction_map.insert(
-                "accountClosingBalance".to_string(),
+                "accountClosingBalanceCents".to_string(),
                 Value::Number(Number::from(balance.closing.to_cents())),
             );
             Some(transaction)
@@ -1108,11 +1113,11 @@ pub fn reconciliation_result_payload(
         account_name: account_name.into(),
         start_time: params.start_time,
         end_time: params.end_time,
-        opening_balance: summary.opening_balance.to_cents(),
-        closing_balance: summary.closing_balance.to_cents(),
-        total_inflows: summary.total_inflows.to_cents(),
-        total_outflows: summary.total_outflows.to_cents(),
-        net_flow: money_from_i128_cents(net_flow)?.to_cents(),
+        opening_balance_cents: summary.opening_balance.to_cents(),
+        closing_balance_cents: summary.closing_balance.to_cents(),
+        total_inflows_cents: summary.total_inflows.to_cents(),
+        total_outflows_cents: summary.total_outflows.to_cents(),
+        net_flow_cents: money_from_i128_cents(net_flow)?.to_cents(),
         item_count: transactions.len(),
         transactions,
     };
@@ -1213,9 +1218,9 @@ pub fn frontend_transaction_from_backend(bill: &BackendTransactionView) -> Front
         utc_offset: bill.utc_offset.as_i32(),
         source_account_id: account_id_string(bill.source_account_id),
         destination_account_id: account_id_string(bill.destination_account_id),
-        amount,
-        source_amount: amount,
-        destination_amount: cents_abs_i64(destination_amount),
+        amount_cents: amount,
+        source_amount_cents: amount,
+        destination_amount_cents: cents_abs_i64(destination_amount),
         hide_amount: bill.hide_amount,
         tag_ids,
         tags: bill.tags.clone(),
@@ -1376,7 +1381,10 @@ fn value_to_i64(raw_value: Option<&Value>, default: i64) -> Result<i64, RuntimeE
     };
     match value {
         Value::Null => Ok(default),
-        Value::Bool(value) => Ok(i64::from(*value)),
+        Value::Bool(_) => Err(RuntimeError::new(
+            ErrorCode::InvalidInput,
+            "invalid integer value",
+        )),
         Value::Number(number) => parse_json_integer_text(&number.to_string()),
         Value::String(text) if text.trim().is_empty() => Ok(default),
         Value::String(text) => text
@@ -1390,8 +1398,8 @@ fn value_to_i64(raw_value: Option<&Value>, default: i64) -> Result<i64, RuntimeE
     }
 }
 
-fn frontend_amount_cents(raw_value: Option<&Value>) -> i64 {
-    value_to_i64(raw_value, 0).unwrap_or(0)
+fn frontend_amount_cents(raw_value: Option<&Value>) -> Result<i64, RuntimeError> {
+    value_to_i64(raw_value, 0)
 }
 
 fn json_value_is_truthy(value: &Value) -> bool {
@@ -1450,11 +1458,6 @@ fn non_empty_map_string(map: &Map<String, Value>, key: &str) -> Option<String> {
 
 fn map_i64(map: &Map<String, Value>, key: &str) -> Result<i64, RuntimeError> {
     value_to_i64(map.get(key), 0)
-}
-
-fn money_to_yuan_json(amount: Money) -> Value {
-    serde_json::from_str(&amount.to_yuan_string())
-        .expect("money yuan string should serialize as JSON number")
 }
 
 fn money_from_i128_cents(cents: i128) -> Result<Money, RuntimeError> {

@@ -83,14 +83,14 @@
                 link="#" no-chevron
                 :class="sourceAmountClass"
                 :header="sourceAmountTitle"
-                :title="getDisplayAmount(transaction.sourceAmount, transaction.hideAmount, sourceAccountCurrency)"
+                :title="getDisplayAmount(transaction.sourceAmountCents, transaction.hideAmount, sourceAccountCurrency)"
                 @click="showSourceAmountSheet = true"
             >
                 <number-pad-sheet :min-value="TRANSACTION_MIN_AMOUNT"
                                   :max-value="TRANSACTION_MAX_AMOUNT"
                                   :currency="sourceAccountCurrency"
                                   v-model:show="showSourceAmountSheet"
-                                  v-model="transaction.sourceAmount"
+                                  v-model="transaction.sourceAmountCents"
                 ></number-pad-sheet>
             </f7-list-item>
 
@@ -99,7 +99,7 @@
                 link="#" no-chevron
                 :class="destinationAmountClass"
                 :header="transferInAmountTitle"
-                :title="getDisplayAmount(transaction.destinationAmount, transaction.hideAmount, destinationAccountCurrency)"
+                :title="getDisplayAmount(transaction.destinationAmountCents, transaction.hideAmount, destinationAccountCurrency)"
                 @click="showDestinationAmountSheet = true"
                 v-if="transaction.type === TransactionType.Transfer"
             >
@@ -107,7 +107,7 @@
                                   :max-value="TRANSACTION_MAX_AMOUNT"
                                   :currency="destinationAccountCurrency"
                                   v-model:show="showDestinationAmountSheet"
-                                  v-model="transaction.destinationAmount"
+                                  v-model="transaction.destinationAmountCents"
                 ></number-pad-sheet>
             </f7-list-item>
 
@@ -116,7 +116,7 @@
                 link="#" no-chevron
                 :class="destinationAmountClass"
                 :header="tt('Investment Amount')"
-                :title="getDisplayAmount(transaction.destinationAmount, transaction.hideAmount, destinationAccountCurrency)"
+                :title="getDisplayAmount(transaction.destinationAmountCents, transaction.hideAmount, destinationAccountCurrency)"
                 @click="showDestinationAmountSheet = true"
                 v-if="transaction.type === TransactionType.Investment"
             >
@@ -124,7 +124,7 @@
                                   :max-value="TRANSACTION_MAX_AMOUNT"
                                   :currency="destinationAccountCurrency"
                                   v-model:show="showDestinationAmountSheet"
-                                  v-model="transaction.destinationAmount"
+                                  v-model="transaction.destinationAmountCents"
                 ></number-pad-sheet>
             </f7-list-item>
 
@@ -611,6 +611,7 @@ const props = defineProps<{
 
 const query = props.f7route.query;
 const pageTypeAndMode = getPageTypeNameMode();
+const INTEGER_CENTS_PATTERN = /^[+-]?\d+$/u;
 
 const {
     tt,
@@ -716,6 +717,18 @@ const showTransactionPictures = ref<boolean>(pageTypeAndMode?.type === Transacti
 
 const isDarkMode = computed<boolean>(() => environmentsStore.framework7DarkMode || false);
 
+function parseStrictQueryCents(value: unknown): number | undefined {
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+    const text = value.trim();
+    if (!INTEGER_CENTS_PATTERN.test(text)) {
+        return undefined;
+    }
+    const parsed = Number(text);
+    return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
 const sourceAmountClass = computed<Record<string, boolean>>(() => {
     const classes: Record<string, boolean> = {
         'readonly': mode.value === TransactionEditPageMode.View,
@@ -724,7 +737,7 @@ const sourceAmountClass = computed<Record<string, boolean>>(() => {
         'text-color-primary': transaction.value.type === TransactionType.Transfer
     };
 
-    classes[getFontClassByAmount(transaction.value.sourceAmount)] = true;
+    classes[getFontClassByAmount(transaction.value.sourceAmountCents)] = true;
 
     return classes;
 });
@@ -734,7 +747,7 @@ const destinationAmountClass = computed<Record<string, boolean>>(() => {
         'readonly': mode.value === TransactionEditPageMode.View
     };
 
-    classes[getFontClassByAmount(transaction.value.destinationAmount)] = true;
+    classes[getFontClassByAmount(transaction.value.destinationAmountCents)] = true;
 
     return classes;
 });
@@ -1109,8 +1122,8 @@ function init(): void {
                 categoryId: query['categoryId'],
                 accountId: query['accountId'],
                 destinationAccountId: query['destinationAccountId'],
-                amount: query['amount'] ? parseInt(query['amount']) : undefined,
-                destinationAmount: query['destinationAmount'] ? parseInt(query['destinationAmount']) : undefined,
+                sourceAmountCents: parseStrictQueryCents(query['sourceAmountCents']),
+                destinationAmountCents: parseStrictQueryCents(query['destinationAmountCents']),
                 tagIds: query['tagIds'],
                 comment: query['comment']
             },
@@ -1223,7 +1236,7 @@ function save(): void {
             });
         };
 
-        if (transaction.value.sourceAmount === 0) {
+        if (transaction.value.sourceAmountCents === 0) {
             showConfirm('Are you sure you want to save this transaction with a zero amount?', () => {
                 doSubmit();
             });
@@ -1472,7 +1485,7 @@ function onPageBeforeOut(): void {
         return;
     }
 
-    const initAmount: number | undefined = query['amount'] ? parseInt(query['amount']) : undefined;
+    const initAmount: number | undefined = parseStrictQueryCents(query['sourceAmountCents']);
 
     if (settingsStore.appSettings.autoSaveTransactionDraft === 'confirmation') {
         if (transactionsStore.isTransactionDraftModified(transaction.value, initAmount, query['categoryId'], query['accountId'], query['tagIds'], firstVisibleAccountId.value)) {

@@ -88,8 +88,8 @@ describe('import preview transaction helper', () => {
             preview_type: '转账',
             suggested_preview_type: '投资',
             preview_date: '2026-06-01T00:00:00Z',
-            preview_amount: -12.34,
-            preview_destination_amount: 0,
+            preview_amount_cents: -1234,
+            preview_destination_amount_cents: 0,
             preview_source_account_id: 101,
             preview_destination_account_id: 202,
             preview_description: '账户互转备注',
@@ -124,8 +124,8 @@ describe('import preview transaction helper', () => {
         expect(transaction.utcOffset).toBe(480);
         expect(transaction.sourceAccountId).toBe('101');
         expect(transaction.destinationAccountId).toBe('202');
-        expect(transaction.sourceAmount).toBe(1234);
-        expect(transaction.destinationAmount).toBe(1234);
+        expect(transaction.sourceAmountCents).toBe(1234);
+        expect(transaction.destinationAmountCents).toBe(1234);
         expect(transaction.comment).toBe('账户互转备注');
         expect(transaction.counterparty).toBe('Alice');
         expect(transaction.paymentMethod).toBe('招商银行');
@@ -147,8 +147,8 @@ describe('import preview transaction helper', () => {
             category_id: 'expenseSub',
             preview_type: '支出',
             preview_date: 'not-a-date',
-            preview_amount: 2.345,
-            preview_destination_amount: 99,
+            preview_amount_cents: 235,
+            preview_destination_amount_cents: 9900,
             preview_main_category: '餐饮',
             preview_sub_category: '咖啡',
             matching: {
@@ -171,8 +171,8 @@ describe('import preview transaction helper', () => {
         expect(transaction.originalCategoryName).toBe('咖啡');
         expect(transaction.time).toBe(12345);
         expect(transaction.utcOffset).toBe(0);
-        expect(transaction.sourceAmount).toBe(235);
-        expect(transaction.destinationAmount).toBe(235);
+        expect(transaction.sourceAmountCents).toBe(235);
+        expect(transaction.destinationAmountCents).toBe(235);
         expect(transaction.parserId).toBe('alipay');
         expect(transaction.parserTags).toStrictEqual(['parser:alipay']);
     });
@@ -182,8 +182,8 @@ describe('import preview transaction helper', () => {
             id: 77,
             category_id: 'investmentParent',
             preview_type: '投资',
-            preview_amount: 10,
-            preview_destination_amount: 12.5,
+            preview_amount_cents: 1000,
+            preview_destination_amount_cents: 1250,
             preview_date: '2026-06-02T00:00:00Z'
         }, 0, {
             categoriesById,
@@ -191,7 +191,29 @@ describe('import preview transaction helper', () => {
         });
 
         expect(transaction.type).toBe(TransactionType.Investment);
-        expect(transaction.sourceAmount).toBe(1000);
-        expect(transaction.destinationAmount).toBe(1250);
+        expect(transaction.sourceAmountCents).toBe(1000);
+        expect(transaction.destinationAmountCents).toBe(1250);
+    });
+
+    test.each([
+        ['decimal number', 12.34],
+        ['decimal string', '12.34'],
+        ['boolean', true],
+        ['object', {}]
+    ])('does not truncate invalid preview cents from backend payloads: %s', (_name, value) => {
+        const transaction = buildImportTransactionFromPreviewRecord({
+            id: 78,
+            category_id: 'investmentParent',
+            preview_type: '投资',
+            preview_amount_cents: value as number,
+            preview_destination_amount_cents: value as number,
+            preview_date: '2026-06-02T00:00:00Z'
+        }, 0, {
+            categoriesById,
+            timeZone: 'UTC'
+        });
+
+        expect(transaction.sourceAmountCents).toBe(0);
+        expect(transaction.destinationAmountCents).toBe(0);
     });
 });

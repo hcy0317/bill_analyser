@@ -43,8 +43,8 @@ export interface ImportPreviewRecord {
     preview_type?: string;
     suggested_preview_type?: string;
     preview_date?: string;
-    preview_amount?: number;
-    preview_destination_amount?: number;
+    preview_amount_cents?: number;
+    preview_destination_amount_cents?: number;
     preview_main_category?: string;
     preview_sub_category?: string;
     preview_source_account_id?: number;

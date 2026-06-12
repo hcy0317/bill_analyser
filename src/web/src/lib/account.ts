@@ -156,7 +156,7 @@ export function getAllFilteredAccountsBalance(categorizedAccounts: Record<number
 
             if (account.type === AccountType.SingleAccount.type) {
                 ret.push({
-                    balance: account.balance,
+                    balanceCents: account.balanceCents,
                     isAsset: !!account.isAsset,
                     isLiability: !!account.isLiability,
                     currency: account.currency
@@ -168,7 +168,7 @@ export function getAllFilteredAccountsBalance(categorizedAccounts: Record<number
                     }
 
                     ret.push({
-                        balance: subAccount.balance,
+                        balanceCents: subAccount.balanceCents,
                         isAsset: !!subAccount.isAsset,
                         isLiability: !!subAccount.isLiability,
                         currency: subAccount.currency

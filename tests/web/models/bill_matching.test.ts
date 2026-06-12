@@ -8,7 +8,8 @@ import {
     getBillMatchingCandidateBillTitle,
     isBillMatchingCandidateReviewActionSupported,
     normalizeBillMatchingCandidatesResponse,
-    normalizeBillMatchingFeedbackResponse
+    normalizeBillMatchingFeedbackResponse,
+    normalizeMatchingPairsResponse
 } from '@/models/bill_matching.ts';
 
 describe('bill_matching model helpers', () => {
@@ -34,7 +35,7 @@ describe('bill_matching model helpers', () => {
                     bill: {
                         id: 202,
                         type: '投资',
-                        amount: 166,
+                        amountCents: 16600,
                         date: '2026-07-14 12:02:00',
                         description: '蚂蚁财富 手工投资配对 卖出',
                         counterparty: '蚂蚁财富',
@@ -208,10 +209,10 @@ describe('bill_matching model helpers', () => {
                 level: 'high',
                 reason: 'same_amount',
                 summary: '原始信息：支付宝收款',
-                bill: {
-                    id: 202,
-                    type: '收入',
-                    amount: 88.5,
+                    bill: {
+                        id: 202,
+                        type: '收入',
+                        amountCents: 8850,
                     date: '2026-05-20',
                     description: '支付宝收款',
                     counterparty: '张三',
@@ -235,7 +236,7 @@ describe('bill_matching model helpers', () => {
         expect(getBillMatchingCandidateBillAmountCents(candidate)).toBe(8850);
     });
 
-    test('normalizes snake-case bill fields and rounds yuan display amounts to cents', () => {
+    test('normalizes snake-case bill fields and preserves explicit cents amounts', () => {
         const response = normalizeBillMatchingCandidatesResponse({
             billId: 101,
             linkedPair: null,
@@ -249,7 +250,7 @@ describe('bill_matching model helpers', () => {
                 bill: {
                     id: '202',
                     type: 4,
-                    amount: '88.505',
+                    amount_cents: '8851',
                     date: '2026-05-21',
                     description: '内部转账',
                     counterparty: '银行卡',
@@ -272,7 +273,7 @@ describe('bill_matching model helpers', () => {
         expect(candidate.bill).toMatchObject({
             id: 202,
             type: '4',
-            amount: 88.505,
+            amountCents: 8851,
             paymentMethod: '网银',
             mainCategory: '转账',
             subCategory: '内部',
@@ -280,6 +281,50 @@ describe('bill_matching model helpers', () => {
             destinationAccountId: 34
         });
         expect(getBillMatchingCandidateBillAmountCents(candidate)).toBe(8851);
+    });
+
+    test.each([
+        ['decimal number', 12.34],
+        ['decimal string', '12.34'],
+        ['boolean', true],
+        ['object', {}]
+    ])('rejects non-integer candidate bill cents: %s', (_name, value) => {
+        const response = normalizeBillMatchingCandidatesResponse({
+            billId: 101,
+            linkedPair: null,
+            candidates: [{
+                candidateId: 'bill:101:transfer:202',
+                kind: 'transfer',
+                bill: {
+                    id: 202,
+                    amountCents: value,
+                    destinationAmountCents: value
+                }
+            }]
+        });
+        const bill = response.candidates[0]!.bill!;
+
+        expect(bill.amountCents).toBe(0);
+        expect(bill.destinationAmountCents).toBe(0);
+        expect(getBillMatchingCandidateBillAmountCents(response.candidates[0]!)).toBe(0);
+    });
+
+    test.each([
+        ['decimal number', 12.34],
+        ['decimal string', '12.34'],
+        ['boolean', true],
+        ['object', {}]
+    ])('rejects non-integer pair bill cents: %s', (_name, value) => {
+        const response = normalizeMatchingPairsResponse({
+            pairs: [{
+                id: 1,
+                leftBill: { id: 10, amountCents: value },
+                rightBill: { id: 11, amount_cents: value }
+            }]
+        });
+
+        expect(response.pairs[0]!.leftBill!.amountCents).toBe(0);
+        expect(response.pairs[0]!.rightBill!.amountCents).toBe(0);
     });
 
     test('keeps historical duplicate candidates actionable with persisted reconciliation actions', () => {

@@ -36,8 +36,8 @@ export function sortStatisticsItems<T extends SortableTransactionStatisticDataIt
         });
     } else {
         items.sort(function (data1, data2) {
-            if (data1.totalAmount !== data2.totalAmount) {
-                return data2.totalAmount - data1.totalAmount; // desc
+            if (data1.totalAmountCents !== data2.totalAmountCents) {
+                return data2.totalAmountCents - data1.totalAmountCents; // desc
             }
 
             return data1.name.localeCompare(data2.name, undefined, { // asc

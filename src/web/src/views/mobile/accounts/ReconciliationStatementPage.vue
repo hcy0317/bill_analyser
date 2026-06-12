@@ -590,7 +590,7 @@ function editTransaction(transaction: TransactionReconciliationStatementResponse
 }
 
 function updateClosingBalance(balance?: number): void {
-    let currentClosingBalance = reconciliationStatements.value?.closingBalance ?? 0;
+    let currentClosingBalance = reconciliationStatements.value?.closingBalanceCents ?? 0;
 
     if (isCurrentLiabilityAccount.value) {
         currentClosingBalance = -currentClosingBalance;
@@ -629,7 +629,7 @@ function updateClosingBalance(balance?: number): void {
     }
 
     params.push(`type=${newTransactionType}`);
-    params.push(`amount=${newTransactionAmount}`);
+    params.push(`sourceAmountCents=${newTransactionAmount}`);
     params.push(`accountId=${accountId.value}`);
     params.push(`noTransactionDraft=true`);
 

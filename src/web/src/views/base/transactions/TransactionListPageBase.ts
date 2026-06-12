@@ -208,20 +208,20 @@ export function useTransactionListPageBase() {
     });
 
     const queryAmount = computed<string>(() => {
-        if (!query.value.amountFilter) {
+        if (!query.value.amountFilterCents) {
             return '';
         }
 
-        const amountFilterItems = query.value.amountFilter.split(':');
+        const amountFilterCentsItems = query.value.amountFilterCents.split(':');
 
-        if (amountFilterItems.length < 2) {
+        if (amountFilterCentsItems.length < 2) {
             return '';
         }
 
         const displayAmount: string[] = [];
 
-        for (let i = 1; i < amountFilterItems.length; i++) {
-            displayAmount.push(formatAmountToLocalizedNumeralsWithCurrency(parseInt(amountFilterItems[i] as string), false));
+        for (let i = 1; i < amountFilterCentsItems.length; i++) {
+            displayAmount.push(formatAmountToLocalizedNumeralsWithCurrency(parseInt(amountFilterCentsItems[i] as string), false));
         }
 
         return displayAmount.join(' ~ ');
@@ -295,28 +295,28 @@ export function useTransactionListPageBase() {
     function getDisplayAmount(transaction: Transaction): string {
         if (queryAllFilterAccountIdsCount.value < 1) {
             if (transaction.sourceAccount) {
-                return formatAmount(transaction.sourceAmount, transaction.hideAmount, transaction.sourceAccount.currency);
+                return formatAmount(transaction.sourceAmountCents, transaction.hideAmount, transaction.sourceAccount.currency);
             }
         } else if (queryAllFilterAccountIdsCount.value === 1) {
             if (transaction.sourceAccount && (queryAllFilterAccountIds.value[transaction.sourceAccount.id] || queryAllFilterAccountIds.value[transaction.sourceAccount.parentId])) {
-                return formatAmount(transaction.sourceAmount, transaction.hideAmount, transaction.sourceAccount.currency);
+                return formatAmount(transaction.sourceAmountCents, transaction.hideAmount, transaction.sourceAccount.currency);
             } else if (transaction.destinationAccount && (queryAllFilterAccountIds.value[transaction.destinationAccount.id] || queryAllFilterAccountIds.value[transaction.destinationAccount.parentId])) {
-                return formatAmount(transaction.destinationAmount, transaction.hideAmount, transaction.destinationAccount.currency);
+                return formatAmount(transaction.destinationAmountCents, transaction.hideAmount, transaction.destinationAccount.currency);
             }
         } else { // queryAllFilterAccountIdsCount.value > 1
             if (transaction.sourceAccount && transaction.destinationAccount) {
                 if ((queryAllFilterAccountIds.value[transaction.sourceAccount.id] || queryAllFilterAccountIds.value[transaction.sourceAccount.parentId])
                     && !queryAllFilterAccountIds.value[transaction.destinationAccount.id] && !queryAllFilterAccountIds.value[transaction.destinationAccount.parentId]) {
-                    return formatAmount(transaction.sourceAmount, transaction.hideAmount, transaction.sourceAccount.currency);
+                    return formatAmount(transaction.sourceAmountCents, transaction.hideAmount, transaction.sourceAccount.currency);
                 } else if ((queryAllFilterAccountIds.value[transaction.destinationAccount.id] || queryAllFilterAccountIds.value[transaction.destinationAccount.parentId])
                     && !queryAllFilterAccountIds.value[transaction.sourceAccount.id] && !queryAllFilterAccountIds.value[transaction.sourceAccount.parentId]) {
-                    return formatAmount(transaction.destinationAmount, transaction.hideAmount, transaction.destinationAccount.currency);
+                    return formatAmount(transaction.destinationAmountCents, transaction.hideAmount, transaction.destinationAccount.currency);
                 }
             }
         }
 
         if (transaction.sourceAccount) {
-            return formatAmount(transaction.sourceAmount, transaction.hideAmount, transaction.sourceAccount.currency);
+            return formatAmount(transaction.sourceAmountCents, transaction.hideAmount, transaction.sourceAccount.currency);
         }
 
         return '';
@@ -385,9 +385,9 @@ export function useTransactionListPageBase() {
         });
     }
 
-    function changeAmountFilter(amountFilter: string): void {
+    function changeAmountFilter(amountFilterCents: string): void {
         transactionsStore.updateTransactionListFilter({
-            amountFilter: amountFilter
+            amountFilterCents: amountFilterCents
         });
     }
 

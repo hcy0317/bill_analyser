@@ -134,7 +134,7 @@ fn import_reconciliation_key_for_bill(bill: &DedupBill) -> String {
     format!(
         "fallback:{}|{}|{}|{}",
         bill.date,
-        bill.amount.to_yuan_string(),
+        bill.amount.to_cents(),
         bill.parser_id,
         bill.counterparty
     )

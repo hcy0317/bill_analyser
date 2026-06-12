@@ -20,10 +20,10 @@
                      v-model="dateTime">
         <template #day="{ day, date }">
             <div class="transaction-calendar-daily-amounts">
-                <span :class="dayHasTransactionClass && dailyTotalAmounts && dailyTotalAmounts[day] ? dayHasTransactionClass : undefined">{{ getDisplayDay(date) }}</span>
+                <span :class="dayHasTransactionClass && dailyTotalAmountsCents && dailyTotalAmountsCents[day] ? dayHasTransactionClass : undefined">{{ getDisplayDay(date) }}</span>
                 <span class="transaction-calendar-alternate-date" v-if="alternateDates && alternateDates[`${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`]">{{ alternateDates[`${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`] }}</span>
-                <span class="transaction-calendar-daily-amount text-income" v-if="dailyTotalAmounts && dailyTotalAmounts[day] && dailyTotalAmounts[day].income">{{ getDisplayMonthTotalAmount(dailyTotalAmounts[day].income, defaultCurrency, '', dailyTotalAmounts[day].incompleteIncome) }}</span>
-                <span class="transaction-calendar-daily-amount text-expense" v-if="dailyTotalAmounts && dailyTotalAmounts[day] && dailyTotalAmounts[day].expense">{{ getDisplayMonthTotalAmount(dailyTotalAmounts[day].expense, defaultCurrency, '', dailyTotalAmounts[day].incompleteExpense) }}</span>
+                <span class="transaction-calendar-daily-amount text-income" v-if="dailyTotalAmountsCents && dailyTotalAmountsCents[day] && dailyTotalAmountsCents[day].incomeCents">{{ getDisplayMonthTotalAmount(dailyTotalAmountsCents[day].incomeCents, defaultCurrency, '', dailyTotalAmountsCents[day].incompleteIncome) }}</span>
+                <span class="transaction-calendar-daily-amount text-expense" v-if="dailyTotalAmountsCents && dailyTotalAmountsCents[day] && dailyTotalAmountsCents[day].expenseCents">{{ getDisplayMonthTotalAmount(dailyTotalAmountsCents[day].expenseCents, defaultCurrency, '', dailyTotalAmountsCents[day].incompleteExpense) }}</span>
             </div>
         </template>
     </vue-date-picker>
@@ -34,7 +34,7 @@ import { computed, } from 'vue';
 import { useI18n } from '@/locales/helpers.ts';
 
 import { useUserStore } from '@/stores/user.ts';
-import type { TransactionTotalAmount } from '@/stores/transaction.ts';
+import type { TransactionTotalAmountCents } from '@/stores/transaction.ts';
 
 import type { CalendarAlternateDate, TextualYearMonthDay, WeekDayValue } from '@/core/datetime.ts';
 import { INCOMPLETE_AMOUNT_SUFFIX } from '@/consts/numeral.ts';
@@ -56,7 +56,7 @@ const props = defineProps<{
     minDate: Date;
     maxDate: Date;
     weekDayNameType?: 'long' | 'short';
-    dailyTotalAmounts?: Record<string, TransactionTotalAmount>;
+    dailyTotalAmountsCents?: Record<string, TransactionTotalAmountCents>;
     readonly?: boolean;
     calendarClass?: string;
     dayHasTransactionClass?: string;
@@ -108,7 +108,7 @@ const alternateDates = computed<Record<TextualYearMonthDay, string> | undefined>
 
 function noTransactionInMonthDay(date: Date): boolean {
     const dateTime = parseDateTimeFromUnixTime(getActualUnixTimeForStore(getUnixTimeFromLocalDatetime(date), getTimezoneOffsetMinutes(), getBrowserTimezoneOffsetMinutes()));
-    return !props.dailyTotalAmounts || !props.dailyTotalAmounts[dateTime.getGregorianCalendarDay()];
+    return !props.dailyTotalAmountsCents || !props.dailyTotalAmountsCents[dateTime.getGregorianCalendarDay()];
 }
 
 function getDisplayMonthTotalAmount(amount: number, currency: string | false, symbol: string, incomplete: boolean): string {

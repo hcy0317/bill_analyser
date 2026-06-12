@@ -98,7 +98,7 @@ fn format_category_statistics_response(statistics: Vec<CategoryStatistic>) -> Va
             .entry(statistic.main_category.clone())
             .or_insert_with(|| {
                 json!({
-                    "total_amount": 0.0,
+                    "totalAmountCents": 0,
                     "count": 0,
                     "sub_categories": {}
                 })
@@ -107,14 +107,14 @@ fn format_category_statistics_response(statistics: Vec<CategoryStatistic>) -> Va
             continue;
         };
 
-        let total_amount = entry_object
-            .get("total_amount")
-            .and_then(value_as_f64)
+        let total_amount_cents = entry_object
+            .get("totalAmountCents")
+            .and_then(value_as_i64)
             .unwrap_or_default()
-            + statistic.total_amount.abs();
+            + statistic.total_amount_cents.abs();
         entry_object.insert(
-            "total_amount".to_string(),
-            json_number(round2(total_amount)),
+            "totalAmountCents".to_string(),
+            Value::Number(Number::from(total_amount_cents)),
         );
 
         let count = entry_object
@@ -134,7 +134,7 @@ fn format_category_statistics_response(statistics: Vec<CategoryStatistic>) -> Va
             sub_categories.insert(
                 statistic.sub_category.clone(),
                 json!({
-                    "total_amount": round2(statistic.total_amount.abs()),
+                    "totalAmountCents": statistic.total_amount_cents.abs(),
                     "count": statistic.count
                 }),
             );

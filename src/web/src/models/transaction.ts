@@ -22,8 +22,8 @@ export class Transaction implements TransactionInfoResponse {
     public utcOffset: number;
     public sourceAccountId: string;
     public destinationAccountId: string;
-    public sourceAmount: number;
-    public destinationAmount: number;
+    public sourceAmountCents: number;
+    public destinationAmountCents: number;
     public hideAmount: boolean;
     public tagIds: string[];
     public comment: string;
@@ -41,7 +41,7 @@ export class Transaction implements TransactionInfoResponse {
     private _gregorianCalendarDayOfMonth?: number = undefined; // only for displaying transaction in transaction list
     private _displayDayOfWeek?: WeekDay = undefined; // only for displaying transaction in transaction list
 
-    protected constructor(id: string, timeSequenceId: string, type: number, categoryId: string, time: number, timeZone: string | undefined, utcOffset: number, sourceAccountId: string, destinationAccountId: string, sourceAmount: number, destinationAmount: number, hideAmount: boolean, tagIds: string[], comment: string, editable: boolean) {
+    protected constructor(id: string, timeSequenceId: string, type: number, categoryId: string, time: number, timeZone: string | undefined, utcOffset: number, sourceAccountId: string, destinationAccountId: string, sourceAmountCents: number, destinationAmountCents: number, hideAmount: boolean, tagIds: string[], comment: string, editable: boolean) {
         this.id = id;
         this.timeSequenceId = timeSequenceId;
         this.type = type;
@@ -50,8 +50,8 @@ export class Transaction implements TransactionInfoResponse {
         this.utcOffset = utcOffset;
         this.sourceAccountId = sourceAccountId;
         this.destinationAccountId = destinationAccountId;
-        this.sourceAmount = sourceAmount;
-        this.destinationAmount = destinationAmount;
+        this.sourceAmountCents = sourceAmountCents;
+        this.destinationAmountCents = destinationAmountCents;
         this.hideAmount = hideAmount;
         this.tagIds = tagIds;
         this.comment = comment;
@@ -249,7 +249,7 @@ export class Transaction implements TransactionInfoResponse {
     }
 
     public toCreateRequest(clientSessionId: string, actualTime?: number): TransactionCreateRequest {
-        // ⚠️ 关键修复: 投资类型也需要传递destinationAccountId和destinationAmount
+        // ⚠️ 关键修复: 投资类型也需要传递destinationAccountId和destinationAmountCents
         const needsDestination = this.type === TransactionType.Transfer || this.type === TransactionType.Investment;
 
         return {
@@ -259,8 +259,8 @@ export class Transaction implements TransactionInfoResponse {
             utcOffset: this.utcOffset,
             sourceAccountId: this.sourceAccountId,
             destinationAccountId: needsDestination ? this.destinationAccountId : '0',
-            sourceAmount: this.sourceAmount,
-            destinationAmount: needsDestination ? this.destinationAmount : 0,
+            sourceAmountCents: this.sourceAmountCents,
+            destinationAmountCents: needsDestination ? this.destinationAmountCents : 0,
             hideAmount: this.hideAmount,
             tagIds: this.tagIds,
             pictureIds: this.getPictureIds(),
@@ -285,8 +285,8 @@ export class Transaction implements TransactionInfoResponse {
             utcOffset: this.utcOffset,
             sourceAccountId: this.sourceAccountId,
             destinationAccountId: this.type === TransactionType.Transfer || this.type === TransactionType.Investment ? this.destinationAccountId : '0',
-            sourceAmount: this.sourceAmount,
-            destinationAmount: this.type === TransactionType.Transfer || this.type === TransactionType.Investment ? this.destinationAmount : 0,
+            sourceAmountCents: this.sourceAmountCents,
+            destinationAmountCents: this.type === TransactionType.Transfer || this.type === TransactionType.Investment ? this.destinationAmountCents : 0,
             hideAmount: this.hideAmount,
             tagIds: this.tagIds,
             pictureIds: this.getPictureIds(),
@@ -310,9 +310,9 @@ export class Transaction implements TransactionInfoResponse {
             type: this.type,
             categoryId: this.getCategoryId(),
             sourceAccountId: this.sourceAccountId,
-            sourceAmount: this.sourceAmount,
+            sourceAmountCents: this.sourceAmountCents,
             destinationAccountId: needsDestination ? this.destinationAccountId : '0',
-            destinationAmount: needsDestination ? this.destinationAmount : 0,
+            destinationAmountCents: needsDestination ? this.destinationAmountCents : 0,
             hideAmount: this.hideAmount,
             tagIds: this.tagIds,
             pictures: this.pictures,
@@ -331,8 +331,8 @@ export class Transaction implements TransactionInfoResponse {
             utcOffset, // utcOffset
             '', // sourceAccountId
             '', // destinationAccountId
-            0, // sourceAmount
-            0, // destinationAmount
+            0, // sourceAmountCents
+            0, // destinationAmountCents
             false, // hideAmount
             [], // tagIds
             '', // comment
@@ -351,8 +351,8 @@ export class Transaction implements TransactionInfoResponse {
             transactionResponse.utcOffset,
             transactionResponse.sourceAccountId,
             transactionResponse.destinationAccountId,
-            transactionResponse.sourceAmount,
-            transactionResponse.destinationAmount,
+            transactionResponse.sourceAmountCents,
+            transactionResponse.destinationAmountCents,
             transactionResponse.hideAmount,
             transactionResponse.tagIds,
             transactionResponse.comment,
@@ -434,8 +434,8 @@ export class Transaction implements TransactionInfoResponse {
             0, // utcOffset
             transactionDraft.sourceAccountId ?? '', // sourceAccountId
             transactionDraft.destinationAccountId ?? '', // destinationAccountId
-            transactionDraft.sourceAmount ?? 0, // sourceAmount
-            transactionDraft.destinationAmount ?? 0, // destinationAmount
+            transactionDraft.sourceAmountCents ?? 0, // sourceAmountCents
+            transactionDraft.destinationAmountCents ?? 0, // destinationAmountCents
             transactionDraft.hideAmount ?? false, // hideAmount
             transactionDraft.tagIds ?? [], // tagIds
             transactionDraft.comment ?? '', // comment
@@ -482,9 +482,9 @@ export interface TransactionDraft {
     readonly type?: number;
     readonly categoryId?: string;
     readonly sourceAccountId?: string;
-    readonly sourceAmount?: number;
+    readonly sourceAmountCents?: number;
     readonly destinationAccountId?: string;
-    readonly destinationAmount?: number;
+    readonly destinationAmountCents?: number;
     readonly hideAmount?: boolean;
     readonly tagIds?: string[];
     readonly pictures?: TransactionPictureInfoBasicResponse[];
@@ -503,8 +503,8 @@ export interface TransactionCreateRequest {
     readonly utcOffset: number;
     readonly sourceAccountId: string;
     readonly destinationAccountId: string;
-    readonly sourceAmount: number;
-    readonly destinationAmount: number;
+    readonly sourceAmountCents: number;
+    readonly destinationAmountCents: number;
     readonly hideAmount: boolean;
     readonly tagIds: string[];
     readonly pictureIds: string[];
@@ -521,8 +521,8 @@ export interface TransactionModifyRequest {
     readonly utcOffset: number;
     readonly sourceAccountId: string;
     readonly destinationAccountId: string;
-    readonly sourceAmount: number;
-    readonly destinationAmount: number;
+    readonly sourceAmountCents: number;
+    readonly destinationAmountCents: number;
     readonly hideAmount: boolean;
     readonly tagIds: string[];
     readonly pictureIds: string[];
@@ -556,7 +556,7 @@ export interface TransactionListByMaxTimeRequest {
     readonly accountIds: string;
     readonly tagIds: string;
     readonly tagFilterType: number;
-    readonly amountFilter: string;
+    readonly amountFilterCents: string;
     readonly keyword: string;
 }
 
@@ -568,7 +568,7 @@ export interface TransactionListInMonthByPageRequest {
     readonly accountIds: string;
     readonly tagIds: string;
     readonly tagFilterType: number;
-    readonly amountFilter: string;
+    readonly amountFilterCents: string;
     readonly keyword: string;
 }
 
@@ -592,8 +592,8 @@ export interface TransactionInfoResponse {
     readonly sourceAccount?: AccountInfoResponse;
     readonly destinationAccountId: string;
     readonly destinationAccount?: AccountInfoResponse;
-    readonly sourceAmount: number;
-    readonly destinationAmount: number;
+    readonly sourceAmountCents: number;
+    readonly destinationAmountCents: number;
     readonly hideAmount: boolean;
     readonly tagIds: string[];
     readonly tags?: TransactionTagInfoResponse[];
@@ -725,16 +725,17 @@ export interface TransactionInfoPageWrapperResponse2 {
 }
 
 export interface TransactionReconciliationStatementResponseItem extends TransactionInfoResponse {
-    readonly accountOpeningBalance: number;
-    readonly accountClosingBalance: number;
+    readonly accountOpeningBalanceCents: number;
+    readonly accountClosingBalanceCents: number;
 }
 
 export interface TransactionReconciliationStatementResponse {
     readonly transactions: TransactionReconciliationStatementResponseItem[];
-    readonly totalInflows: number;
-    readonly totalOutflows: number;
-    readonly openingBalance: number;
-    readonly closingBalance: number;
+    readonly totalInflowsCents: number;
+    readonly totalOutflowsCents: number;
+    readonly openingBalanceCents: number;
+    readonly closingBalanceCents: number;
+    readonly netFlowCents: number;
 }
 
 export interface TransactionPageWrapper {
@@ -753,8 +754,8 @@ export interface TransactionStatisticResponseItem {
     readonly accountId: string;
     readonly relatedAccountId?: string;
     readonly relatedAccountType?: number;
-    readonly amount: number;
-    readonly openingAmount?: number;
+    readonly amountCents: number;
+    readonly openingAmountCents?: number;
 }
 
 export interface TransactionStatisticTrendsResponseItem {
@@ -772,8 +773,8 @@ export interface TransactionStatisticAssetTrendsResponseItem extends YearMonthDa
 
 export interface TransactionStatisticAssetTrendsResponseDataItem {
     readonly accountId: string;
-    readonly accountOpeningBalance: number;
-    readonly accountClosingBalance: number;
+    readonly accountOpeningBalanceCents: number;
+    readonly accountClosingBalanceCents: number;
 }
 
 export interface YearMonthDataItem extends Year1BasedMonth, Record<string, unknown> {}
@@ -791,15 +792,15 @@ export interface YearMonthDayItems<T extends YearMonthDay> extends Record<string
 export interface SortableTransactionStatisticDataItem {
     readonly name: string;
     readonly displayOrders: number[];
-    readonly totalAmount: number;
+    readonly totalAmountCents: number;
 }
 
 export interface TransactionStatisticResponseItemWithInfo extends TransactionStatisticResponseItem {
     categoryId: string;
     accountId: string;
     relatedAccountId?: string;
-    amount: number;
-    openingAmount?: number;
+    amountCents: number;
+    openingAmountCents?: number;
     account?: Account;
     primaryAccount?: Account;
     relatedAccount?: Account;
@@ -807,8 +808,8 @@ export interface TransactionStatisticResponseItemWithInfo extends TransactionSta
     relatedAccountType?: number;
     category?: TransactionCategory;
     primaryCategory?: TransactionCategory;
-    amountInDefaultCurrency: number | null;
-    openingAmountInDefaultCurrency?: number | null;
+    amountInDefaultCurrencyCents: number | null;
+    openingAmountInDefaultCurrencyCents?: number | null;
 }
 
 export interface TransactionStatisticResponseWithInfo {
@@ -840,12 +841,12 @@ export interface TransactionStatisticDataItemBase extends SortableTransactionSta
     readonly color: string;
     readonly hidden: boolean;
     readonly displayOrders: number[];
-    readonly totalAmount: number;
+    readonly totalAmountCents: number;
 }
 
 export interface TransactionCategoricalOverviewAnalysisData {
-    readonly totalIncome: number;
-    readonly totalExpense: number;
+    readonly totalIncomeCents: number;
+    readonly totalExpenseCents: number;
     readonly items: TransactionCategoricalOverviewAnalysisDataItem[];
 }
 
@@ -867,19 +868,19 @@ export interface TransactionCategoricalOverviewAnalysisDataItem extends Sortable
     readonly hidden: boolean;
     readonly inflows: TransactionCategoricalOverviewAnalysisDataItemOutflowItem[];
     readonly outflows: TransactionCategoricalOverviewAnalysisDataItemOutflowItem[];
-    totalAmount: number;
-    totalNonNegativeAmount: number;
+    totalAmountCents: number;
+    totalNonNegativeAmountCents: number;
     includeInPercent?: boolean;
     percent?: number;
 }
 
 export interface TransactionCategoricalOverviewAnalysisDataItemOutflowItem {
     readonly relatedItem: TransactionCategoricalOverviewAnalysisDataItem;
-    amount: number;
+    amountCents: number;
 }
 
 export interface TransactionCategoricalAnalysisData {
-    readonly totalAmount: number;
+    readonly totalAmountCents: number;
     readonly items: TransactionCategoricalAnalysisDataItem[];
 }
 
@@ -898,7 +899,7 @@ export interface TransactionTrendsAnalysisDataItem extends Record<string, unknow
 export interface TransactionTrendsAnalysisDataAmount extends Record<string, unknown>, Year1BasedMonth {
     readonly year: number;
     readonly month1base: number;
-    readonly totalAmount: number;
+    readonly totalAmountCents: number;
 }
 
 export interface TransactionAssetTrendsAnalysisData {
@@ -913,8 +914,8 @@ export interface TransactionAssetTrendsAnalysisDataAmount extends Record<string,
     readonly year: number;
     readonly month: number;
     readonly day: number;
-    readonly totalAmount: number;
-    readonly totalOpeningAmount?: number;
+    readonly totalAmountCents: number;
+    readonly totalOpeningAmountCents?: number;
 }
 
 export type TransactionAmountsResponse = PartialRecord<TransactionAmountsRequestType, TransactionAmountsResponseItem>;
@@ -927,8 +928,8 @@ export interface TransactionAmountsResponseItem {
 
 export interface TransactionAmountsResponseItemAmountInfo {
     readonly currency: string;
-    readonly incomeAmount: number;
-    readonly expenseAmount: number;
+    readonly incomeAmountCents: number;
+    readonly expenseAmountCents: number;
 }
 
 export type TransactionOverviewResponse = PartialRecord<TransactionAmountsRequestType, TransactionOverviewResponseItem>;
@@ -943,8 +944,8 @@ export interface TransactionOverviewDisplayTimeItem {
 
 export interface TransactionOverviewResponseItem {
     readonly valid: boolean;
-    readonly incomeAmount: number;
-    readonly expenseAmount: number;
+    readonly incomeAmountCents: number;
+    readonly expenseAmountCents: number;
     readonly incompleteIncomeAmount: boolean;
     readonly incompleteExpenseAmount: boolean;
     readonly amounts?: TransactionAmountsResponseItemAmountInfo[];
@@ -952,8 +953,8 @@ export interface TransactionOverviewResponseItem {
 
 export interface TransactionMonthlyIncomeAndExpenseData {
     readonly monthStartTime: number;
-    readonly incomeAmount: number;
-    readonly expenseAmount: number;
+    readonly incomeAmountCents: number;
+    readonly expenseAmountCents: number;
     readonly incompleteIncomeAmount: boolean;
     readonly incompleteExpenseAmount: boolean;
 }

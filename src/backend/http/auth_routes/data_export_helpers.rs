@@ -58,8 +58,8 @@ fn build_user_data_export_filters(
             .get("keyword")
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty()),
-        amount_filter: query
-            .get("amount_filter")
+        amount_filter_cents: query
+            .get("amount_filter_cents")
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty()),
         account_ids: query
@@ -132,7 +132,7 @@ fn render_user_data_export(
         "id",
         "date",
         "type",
-        "amount",
+        "amount_cents",
         "main_category",
         "sub_category",
         "source_account",
@@ -151,7 +151,7 @@ fn render_user_data_export(
             export_value(bill.get("id"), "id"),
             export_value(bill.get("date"), "date"),
             export_value(bill.get("type"), "type"),
-            export_value(bill.get("amount"), "amount"),
+            export_value(bill.get("amount_cents"), "amount_cents"),
             export_value(bill.get("main_category"), "main_category"),
             export_value(bill.get("sub_category"), "sub_category"),
             export_account_name(

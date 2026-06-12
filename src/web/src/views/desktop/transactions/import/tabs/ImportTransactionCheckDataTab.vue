@@ -186,7 +186,7 @@
                 </two-column-select>
             </div>
         </template>
-        <template #item.sourceAmount="{ item }">
+        <template #item.sourceAmountCents="{ item }">
             <!-- 非编辑状态：显示金额 -->
             <div class="d-flex align-center" v-if="editingTransaction !== item" :key="`amount-view-${item.index}`">
                 <span>{{ getTransactionDisplayAmount(item) }}</span>
@@ -201,7 +201,7 @@
                               :show-currency="true"
                               :disabled="!!disabled"
                               :placeholder="tt('Amount')"
-                              v-model="item.sourceAmount"/>
+                              v-model="item.sourceAmountCents"/>
                 <v-icon class="icon-with-direction mx-1" size="13" :icon="mdiArrowRight" v-if="requiresDestinationAccount(item) && item.sourceAccountId !== item.destinationAccountId"></v-icon>
                 <amount-input density="compact" variant="plain"
                               persistent-placeholder
@@ -209,7 +209,7 @@
                               :show-currency="true"
                               :disabled="!!disabled"
                               :placeholder="tt('Destination Amount')"
-                              v-model="item.destinationAmount"
+                              v-model="item.destinationAmountCents"
                               v-if="requiresDestinationAccount(item) && item.sourceAccountId !== item.destinationAccountId"/>
             </div>
         </template>
@@ -898,9 +898,9 @@ import {
 } from '../checkDataFilters.ts';
 import {
     buildImportCheckLearningPreviewTextSyncPayload,
-    convertImportPreviewAmountToCents,
     hasImportCheckLearningExpectedStateDrift,
     hasImportCheckLearningTextDrift,
+    normalizeImportPreviewAmountCents,
     type ImportCheckLearningDecisionBaseline
 } from '../checkDataLearning.ts';
 import {
@@ -2193,8 +2193,14 @@ function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData
     }
     item.sourceAccountId = previewData.preview_source_account_id ? String(previewData.preview_source_account_id) : '';
     item.destinationAccountId = previewData.preview_destination_account_id ? String(previewData.preview_destination_account_id) : '';
-    item.sourceAmount = convertImportPreviewAmountToCents(previewData.preview_amount, item.sourceAmount || 0);
-    item.destinationAmount = convertImportPreviewAmountToCents(previewData.preview_destination_amount, item.destinationAmount || 0);
+    item.sourceAmountCents = normalizeImportPreviewAmountCents(
+        previewData.preview_amount_cents,
+        item.sourceAmountCents || 0
+    );
+    item.destinationAmountCents = normalizeImportPreviewAmountCents(
+        previewData.preview_destination_amount_cents,
+        item.destinationAmountCents || 0
+    );
 
     item.suggestedType = getImportPreviewTransactionTypeNumber(previewData.suggested_preview_type);
     item.transferSuggestionScore = Number(previewData.transfer_suggestion_score || 0);
@@ -4563,7 +4569,7 @@ const importTransactionHeaders = computed<object[]>(() => {
         { value: 'parserId', title: tt('Signals'), sortable: isImportTransactionColumnSortable('parserId'), nowrap: true, maxWidth: 260 },
         { value: 'type', title: tt('Type'), sortable: isImportTransactionColumnSortable('type'), nowrap: true, maxWidth: 140 },
         { value: 'actualCategoryName', title: tt('Category'), sortable: isImportTransactionColumnSortable('actualCategoryName'), nowrap: true },
-        { value: 'sourceAmount', title: tt('Amount'), sortable: isImportTransactionColumnSortable('sourceAmount'), nowrap: true },
+        { value: 'sourceAmountCents', title: tt('Amount'), sortable: isImportTransactionColumnSortable('sourceAmountCents'), nowrap: true },
         { value: 'actualSourceAccountName', title: tt('Account'), sortable: isImportTransactionColumnSortable('actualSourceAccountName'), nowrap: true },
         { value: 'geoLocation', title: tt('Geographic Location'), sortable: isImportTransactionColumnSortable('geoLocation'), nowrap: true },
         { value: 'tagIds', title: tt('Tags'), sortable: isImportTransactionColumnSortable('tagIds'), nowrap: true },
@@ -4832,7 +4838,7 @@ function getTransactionDisplayAmount(transaction: ImportTransaction): string {
         currency = allAccountsMap.value[transaction.sourceAccountId]!.currency;
     }
 
-    return getDisplayCurrency(transaction.sourceAmount, currency);
+    return getDisplayCurrency(transaction.sourceAmountCents, currency);
 }
 
 function getTransactionDisplayDestinationAmount(transaction: ImportTransaction): string {
@@ -4847,7 +4853,7 @@ function getTransactionDisplayDestinationAmount(transaction: ImportTransaction):
         currency = allAccountsMap.value[transaction.destinationAccountId]!.currency;
     }
 
-    return getDisplayCurrency(transaction.destinationAmount, currency);
+    return getDisplayCurrency(transaction.destinationAmountCents, currency);
 }
 
 function getSourceAccountTitle(transaction: ImportTransaction): string {
@@ -5707,15 +5713,15 @@ function convertTransactionType(fromType: TransactionType, toType: TransactionTy
 
         if (importTransaction.type === TransactionType.Transfer) {
             importTransaction.destinationAccountId = allAccountsMapByName.value[importTransaction.originalDestinationAccountName || '']?.id || '0';
-            importTransaction.destinationAmount = importTransaction.sourceAmount;
+            importTransaction.destinationAmountCents = importTransaction.sourceAmountCents;
         } else {
             if (fromType === TransactionType.Transfer && toType === TransactionType.Income) {
                 importTransaction.sourceAccountId = importTransaction.destinationAccountId;
-                importTransaction.sourceAmount = importTransaction.destinationAmount;
+                importTransaction.sourceAmountCents = importTransaction.destinationAmountCents;
             }
 
             importTransaction.destinationAccountId = '0';
-            importTransaction.destinationAmount = 0;
+            importTransaction.destinationAmountCents = 0;
         }
 
         importTransaction.isManuallyAnnotated = true;

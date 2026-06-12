@@ -29,8 +29,8 @@ function makeTransaction(overrides: Partial<ImportTransaction> = {}): ImportPrev
         originalSourceAccountName: '招商银行',
         originalSourceAccountCurrency: 'CNY',
         destinationAccountId: '202',
-        sourceAmount: 1234,
-        destinationAmount: 5678,
+        sourceAmountCents: 1234,
+        destinationAmountCents: 5678,
         tagIds: [],
         originalTagNames: [],
         comment: '',
@@ -61,8 +61,8 @@ describe('import preview update helper', () => {
         expect(update).toEqual({
             id: 42,
             preview_type: '转账',
-            preview_amount: 12.34,
-            preview_destination_amount: 56.78,
+            preview_amount_cents: 1234,
+            preview_destination_amount_cents: 5678,
             preview_source_account_id: 101,
             preview_destination_account_id: 202,
             preview_recurring_id: 44,
@@ -109,6 +109,28 @@ describe('import preview update helper', () => {
         expect(update).not.toHaveProperty('clear_llm_decision');
         expect(update).not.toHaveProperty('clear_actionable_suggestions');
         expect(update.selected).toBe(false);
+    });
+
+    test.each([
+        ['decimal number', { sourceAmountCents: 12.34 }],
+        ['decimal string', { sourceAmountCents: '12.34' as unknown as number }],
+        ['boolean', { sourceAmountCents: true as unknown as number }],
+        ['object', { sourceAmountCents: {} as unknown as number }]
+    ])('rejects non-integer source cents in preview update payloads: %s', (_name, overrides) => {
+        expect(() => buildImportPreviewUpdateFromTransaction(makeTransaction(overrides), {
+            categoryPath
+        })).toThrow('sourceAmountCents must be integer cents.');
+    });
+
+    test.each([
+        ['decimal number', { destinationAmountCents: 12.34 }],
+        ['decimal string', { destinationAmountCents: '12.34' as unknown as number }],
+        ['boolean', { destinationAmountCents: true as unknown as number }],
+        ['object', { destinationAmountCents: {} as unknown as number }]
+    ])('rejects non-integer destination cents in preview update payloads: %s', (_name, overrides) => {
+        expect(() => buildImportPreviewUpdateFromTransaction(makeTransaction(overrides), {
+            categoryPath
+        })).toThrow('destinationAmountCents must be integer cents.');
     });
 
     test('extracts positive preview ids from transactions and preview update records only', () => {

@@ -184,7 +184,7 @@ fn record_to_reconciliation_bill(
         id: record_i64(record, "id").unwrap_or_default().to_string(),
         date: record_text(record, "date"),
         transaction_type: frontend_transaction_type_from_backend(&record_text(record, "type")).ok(),
-        amount: money_from_record(record, "amount")?,
+        amount: money_from_record(record, "amount_cents")?,
         source_account_id: positive_record_i64(record, "source_account_id"),
         destination_account_id: positive_record_i64(record, "destination_account_id"),
     })

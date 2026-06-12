@@ -36,7 +36,7 @@ Rust HTTP 主入口在开始监听前会对配置的 PostgreSQL 运行 `src/back
 
 当前 HTTP route 覆盖登录、注册、邮箱验证、密码重置、refresh token、token session、logout、2FA、profile、user-data 统计与导出、交易清空、账户/分类/标签/模板主数据、分类规则、账户规则、设置包导入导出、账单列表与详情、手工交易、批量交易、账单导出、分类 quick-add/refresh、周期模板候选与绑定、matching pairs、净值快照、日历事件、预算 CRUD/导出/导入/执行/预测/快照、统计金额概览、分类统计、分类趋势、资产趋势、分类饼图、商户排行、Analyzer/insights、汇率读取与用户自定义汇率、备份文件 list/create/download/delete/verify/cleanup、备份任务与 cloud sync 元数据。
 
-金额在数据库中使用明确的 minor units 字段；前端/API 的元/分转换只在 DTO 转换边界完成。预算 API 的 `amount` 继续使用元单位导出/导入并由仓储写入预算金额字段；交易模板 DTO 与设置包中的 `sourceAmount`、`destinationAmount` 保持分单位并写入 `transaction_templates.*_minor_units`，避免设置包导入时二次乘以 100。
+金额在数据库、Rust core/DB/HTTP DTO、REST API、前端模型、services、stores 与测试中统一使用整数分或显式 minor units 字段。后端 JSON 使用 `*_cents` / `*_minor_units`，前端 JSON 和模型使用 `*Cents` / `*MinorUnits`；预算、账户、交易、导入预览、统计、对账、matching、交易模板、周期模板与设置包都不再用裸 `amount`、`balance`、`sourceAmount`、`destinationAmount` 表达金额。元单位只存在于用户输入/展示格式化，以及 parser、OCR、LLM、原始导入源等外部边界；进入业务 DTO 前立即归一化为整数分。
 
 ## 导入链路
 
@@ -62,7 +62,7 @@ multipart 上传并行执行 dedicated parser 检测，每个文件必须且只�
 
 ## 预算与统计
 
-预算按月/季/年层级同步，删除主预算或最后一个子预算时会清理派生父周期预算。预算 CRUD、导出、导入、执行、预测和快照按同一层级、筛选、账户/标签上下文与名称更新语义执行，并把 API 元单位金额写入 minor units 列。统计链路由 Rust 读取账户、分类、汇率和资产趋势数据，并保持前端图表契约。
+预算按月/季/年层级同步，删除主预算或最后一个子预算时会清理派生父周期预算。预算 CRUD、导出、导入、执行、预测和快照按同一层级、筛选、账户/标签上下文与名称更新语义执行，并通过 `amount_cents` / `amountCents` 写入 minor units 列。统计链路由 Rust 读取账户、分类、汇率和资产趋势数据，所有金额响应字段均使用显式 cents/minor units 字段，前端图表只在展示时格式化为元。
 
 ## 认证与备份
 

@@ -31,7 +31,8 @@ fn build_historical_candidate_bill_snapshot(
         "id": value_to_i64(candidate_bill.get("id")).unwrap_or(0),
         "date": value_to_string(candidate_bill.get("date")),
         "type": value_to_string(candidate_bill.get("type")),
-        "amount": value_to_f64(candidate_bill.get("amount")),
+        "amountCents": bill_amount_cents(candidate_bill),
+        "destinationAmountCents": value_to_i64(candidate_bill.get("destination_amount_cents")).unwrap_or_default(),
         "counterparty": value_to_string(candidate_bill.get("counterparty")),
         "description": value_to_string(candidate_bill.get("description")),
         "payment_method": value_to_string(candidate_bill.get("payment_method")),
@@ -199,8 +200,8 @@ fn build_candidate_preview(preview: &Map<String, Value>) -> Value {
     json!({
         "preview_date": preview.get("preview_date").cloned().unwrap_or(json!("")),
         "preview_type": preview.get("preview_type").cloned().unwrap_or(json!("")),
-        "preview_amount": preview.get("preview_amount").cloned().unwrap_or(json!(0)),
-        "preview_destination_amount": preview.get("preview_destination_amount").cloned().unwrap_or(json!(0)),
+        "preview_amount_cents": preview.get("preview_amount_cents").cloned().unwrap_or(json!(0)),
+        "preview_destination_amount_cents": preview.get("preview_destination_amount_cents").cloned().unwrap_or(json!(0)),
         "preview_main_category": preview.get("preview_main_category").cloned().unwrap_or(json!("")),
         "preview_sub_category": preview.get("preview_sub_category").cloned().unwrap_or(json!("")),
         "preview_source_account_id": preview.get("preview_source_account_id").cloned().unwrap_or(Value::Null),
@@ -233,8 +234,8 @@ fn serialize_bill_snapshot(snapshot: &Map<String, Value>) -> Value {
         "id": value_to_i64(snapshot.get("id")).unwrap_or(0),
         "date": value_to_string(snapshot.get("date")),
         "type": value_to_string(snapshot.get("type")),
-        "amount": value_to_f64(snapshot.get("amount")),
-        "destinationAmount": value_to_f64(snapshot.get("destination_amount")),
+        "amountCents": bill_amount_cents(snapshot),
+        "destinationAmountCents": value_to_i64(snapshot.get("destination_amount_cents")).unwrap_or_default(),
         "counterparty": value_to_string(snapshot.get("counterparty")),
         "description": value_to_string(snapshot.get("description")),
         "paymentMethod": value_to_string(snapshot.get("payment_method")),
@@ -359,6 +360,10 @@ fn value_to_i64(value: Option<&Value>) -> Option<i64> {
         Some(Value::Bool(false)) => Some(0),
         _ => None,
     }
+}
+
+fn bill_amount_cents(bill: &Map<String, Value>) -> i64 {
+    value_to_i64(bill.get("amount_cents")).unwrap_or_default()
 }
 
 fn value_to_f64(value: Option<&Value>) -> f64 {

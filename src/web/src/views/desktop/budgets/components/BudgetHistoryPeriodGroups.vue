@@ -35,8 +35,8 @@
                             {{ selectedHistoricalPeriodKey === group.key ? tt('Clear Selection') : tt('Filter by Period') }}
                         </v-btn>
                         <span class="ms-auto text-caption text-medium-emphasis">{{ tt('Items') }}: {{ group.itemCount }}</span>
-                        <span class="text-caption text-medium-emphasis">{{ tt('Budget') }}: {{ formatAmount(group.totalBudget / 100) }}</span>
-                        <span class="text-caption text-medium-emphasis">{{ tt('Spent') }}: {{ formatAmount(group.totalSpent / 100) }}</span>
+                        <span class="text-caption text-medium-emphasis">{{ tt('Budget') }}: {{ formatAmount(group.totalBudgetCents / 100) }}</span>
+                        <span class="text-caption text-medium-emphasis">{{ tt('Spent') }}: {{ formatAmount(group.totalSpentCents / 100) }}</span>
                         <span class="text-caption font-weight-medium" :class="getExecutionRateColorClass(group.totalExecutionRate)">
                             {{ group.totalExecutionRate.toFixed(1) }}%
                         </span>
@@ -92,11 +92,11 @@
                                                 </div>
                                                 <div class="budget-amounts d-flex align-center justify-end ms-auto" style="min-width: 150px;">
                                                     <span class="budget-spent text-body-2">
-                                                        {{ formatAmount(row.spentAmount / 100) }}
+                                                        {{ formatAmount(row.spentAmountCents / 100) }}
                                                     </span>
                                                     <span class="budget-separator text-body-2 text-medium-emphasis mx-1">/</span>
                                                     <span class="budget-total text-body-2 text-medium-emphasis">
-                                                        {{ formatAmount(row.budgetAmount / 100) }}
+                                                        {{ formatAmount(row.budgetAmountCents / 100) }}
                                                     </span>
                                                 </div>
                                             </div>
@@ -148,11 +148,11 @@
                                                 </div>
                                                 <div class="budget-amounts d-flex align-center justify-end ms-auto" style="min-width: 150px;">
                                                     <span class="budget-spent text-body-2">
-                                                        {{ formatAmount(child.spentAmount / 100) }}
+                                                        {{ formatAmount(child.spentAmountCents / 100) }}
                                                     </span>
                                                     <span class="budget-separator text-body-2 text-medium-emphasis mx-1">/</span>
                                                     <span class="budget-total text-body-2 text-medium-emphasis">
-                                                        {{ formatAmount(child.budgetAmount / 100) }}
+                                                        {{ formatAmount(child.budgetAmountCents / 100) }}
                                                     </span>
                                                 </div>
                                             </div>

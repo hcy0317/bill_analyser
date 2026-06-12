@@ -23,7 +23,7 @@ use bill_analyser_core::{
         TRANSACTION_SCOPE_EXPENSE, TRANSACTION_SCOPE_INCOME, TRANSACTION_SCOPE_INVESTMENT,
         TRANSACTION_SCOPE_TRANSFER,
     },
-    amount_bucket, attach_import_preview_matching_payload, build_composite_match_features,
+    amount_cents_bucket, attach_import_preview_matching_payload, build_composite_match_features,
     build_import_learning_recommendation_key, build_import_learning_vector_recall_queries,
     build_import_preview_filter_index_item, build_learning_rule_result_summary,
     build_llm_candidate_list_response, build_llm_candidate_reject_response,

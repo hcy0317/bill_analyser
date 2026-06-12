@@ -106,7 +106,7 @@ async fn matching_postgres_manual_pairs_feedback_and_unprojected_materialization
         .first()
         .expect("manual pair listed");
     assert_eq!(listed_pair["id"], pair_id);
-    assert_eq!(listed_pair["leftBill"]["amount"], 15.75);
+    assert_eq!(listed_pair["leftBill"]["amountCents"], 1575);
     assert_eq!(listed_pair["leftBill"]["mainCategory"], "转账");
     assert_eq!(listed_pair["leftBill"]["subCategory"], "转出");
     assert_eq!(
@@ -117,7 +117,7 @@ async fn matching_postgres_manual_pairs_feedback_and_unprojected_materialization
         listed_pair["leftBill"]["destinationAccountId"],
         fixture.bank_account_id
     );
-    assert_eq!(listed_pair["rightBill"]["amount"], 15.75);
+    assert_eq!(listed_pair["rightBill"]["amountCents"], 1575);
 
     insert_feedback_events(pool, &fixture, pair_id).await?;
     let feedback =

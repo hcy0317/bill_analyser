@@ -28,6 +28,7 @@ use bill_analyser_core::adapters::transaction::{
     ReconciliationBill, ReconciliationCategoryRecord, ReconciliationOpeningBalanceSnapshot,
 };
 use bill_analyser_core::primitives::{Money, TransactionType, UtcOffsetMinutes};
+use bill_analyser_core::ErrorCode;
 use chrono::Local;
 use serde_json::json;
 use std::path::Path;
@@ -89,9 +90,12 @@ fn backend_transaction_view_serializes_for_frontend_adapter() {
     assert_eq!(value["utcOffset"], 480);
     assert_eq!(value["sourceAccountId"], "3");
     assert_eq!(value["destinationAccountId"], "0");
-    assert_eq!(value["amount"], 1234);
-    assert_eq!(value["sourceAmount"], 1234);
-    assert_eq!(value["destinationAmount"], 1234);
+    assert_eq!(value["amountCents"], 1234);
+    assert_eq!(value["sourceAmountCents"], 1234);
+    assert_eq!(value["destinationAmountCents"], 1234);
+    assert!(value.get("amount").is_none());
+    assert!(value.get("sourceAmount").is_none());
+    assert!(value.get("destinationAmount").is_none());
     assert_eq!(value["hideAmount"], true);
     assert_eq!(value["tagIds"], json!(["11", "12"]));
     assert_eq!(
@@ -109,7 +113,7 @@ fn backend_transaction_view_serializes_for_frontend_adapter() {
 }
 
 #[test]
-fn transfer_destination_amount_uses_backend_destination_yuan_when_present() {
+fn transfer_destination_amount_uses_backend_destination_cents_when_present() {
     let bill = BackendTransactionView {
         id: "99".to_string(),
         transaction_type: TransactionType::Transfer,
@@ -123,8 +127,8 @@ fn transfer_destination_amount_uses_backend_destination_yuan_when_present() {
     let value = serde_json::to_value(frontend_transaction_from_backend(&bill)).unwrap();
 
     assert_eq!(value["type"], 4);
-    assert_eq!(value["sourceAmount"], 8800);
-    assert_eq!(value["destinationAmount"], 8750);
+    assert_eq!(value["sourceAmountCents"], 8800);
+    assert_eq!(value["destinationAmountCents"], 8750);
     assert_eq!(value["sourceAccountId"], "1");
     assert_eq!(value["destinationAccountId"], "2");
 }
@@ -141,8 +145,8 @@ fn zero_destination_amount_falls_back_to_source_amount() {
 
     let value = serde_json::to_value(frontend_transaction_from_backend(&bill)).unwrap();
 
-    assert_eq!(value["amount"], 1990);
-    assert_eq!(value["destinationAmount"], 1990);
+    assert_eq!(value["amountCents"], 1990);
+    assert_eq!(value["destinationAmountCents"], 1990);
 }
 
 #[test]
@@ -209,8 +213,8 @@ fn frontend_mutation_to_backend_and_create_defaults_match_current_write_adapter(
     let frontend = json!({
         "type": 3,
         "time": 1_735_758_245,
-        "sourceAmount": 1234,
-        "destinationAmount": 0,
+        "sourceAmountCents": 1234,
+        "destinationAmountCents": 0,
         "sourceAccountId": "0",
         "destinationAccountId": "",
         "categoryId": 7,
@@ -224,8 +228,10 @@ fn frontend_mutation_to_backend_and_create_defaults_match_current_write_adapter(
 
     assert_eq!(backend["type"], "支出");
     assert_eq!(backend["date"], "2025-01-02 03:04:05");
-    assert_eq!(backend["amount"], -12.34);
-    assert_eq!(backend["destination_amount"], 0.0);
+    assert_eq!(backend["amount_cents"], -1234);
+    assert_eq!(backend["destination_amount_cents"], 0);
+    assert!(backend.get("amount").is_none());
+    assert!(backend.get("destination_amount").is_none());
     assert_eq!(backend["source_account_id"], 0);
     assert_eq!(backend["destination_account_id"], 0);
     assert_eq!(backend["description"], "早餐");
@@ -242,25 +248,31 @@ fn frontend_mutation_to_backend_and_create_defaults_match_current_write_adapter(
     assert_eq!(backend["source_account_id"], 9);
 
     let millisecond_frontend =
-        json!({"type": 2, "time": 1_735_758_245_000i64, "sourceAmount": 2500});
+        json!({"type": 2, "time": 1_735_758_245_000i64, "sourceAmountCents": 2500});
     let (backend_from_millis, _) =
         frontend_transaction_mutation_to_backend(&millisecond_frontend, UtcOffsetMinutes::new(480))
             .unwrap();
     assert_eq!(backend_from_millis["type"], "收入");
     assert_eq!(backend_from_millis["date"], "2025-01-02 03:04:05");
-    assert_eq!(backend_from_millis["amount"], 25.0);
+    assert_eq!(backend_from_millis["amount_cents"], 2500);
 
     let (backend_ignoring_offset, _) =
         frontend_transaction_mutation_to_backend(&frontend, UtcOffsetMinutes::new(0)).unwrap();
     assert_eq!(backend_ignoring_offset["date"], "2025-01-02 03:04:05");
 
-    let (bad_amount_backend, _) = frontend_transaction_mutation_to_backend(
-        &json!({"type": 3, "sourceAmount": "bad", "destinationAmount": {"bad": true}}),
+    let bad_amount_error = frontend_transaction_mutation_to_backend(
+        &json!({"type": 3, "sourceAmountCents": "bad", "destinationAmountCents": {"bad": true}}),
         UtcOffsetMinutes::new(480),
     )
-    .unwrap();
-    assert_eq!(bad_amount_backend["amount"], 0.0);
-    assert_eq!(bad_amount_backend["destination_amount"], 0.0);
+    .expect_err("invalid explicit cents are rejected");
+    assert_eq!(bad_amount_error.code, ErrorCode::InvalidInput);
+
+    let bool_amount_error = frontend_transaction_mutation_to_backend(
+        &json!({"type": 3, "sourceAmountCents": true}),
+        UtcOffsetMinutes::new(480),
+    )
+    .expect_err("boolean cents are rejected");
+    assert_eq!(bool_amount_error.code, ErrorCode::InvalidInput);
 }
 
 #[test]
@@ -338,9 +350,9 @@ fn batch_create_items_and_update_field_guards_match_route_and_db_contracts() {
         "transactions[0] must be an object"
     );
 
-    validate_bill_create_fields(["date", "type", "amount", "counterparty"]).unwrap();
-    validate_bill_update_fields(["description", "destination_amount"]).unwrap();
-    validate_batch_route_update_fields(["amount", "source_account_id"]).unwrap();
+    validate_bill_create_fields(["date", "type", "amount_cents", "counterparty"]).unwrap();
+    validate_bill_update_fields(["description", "destination_amount_cents"]).unwrap();
+    validate_batch_route_update_fields(["amount_cents", "source_account_id"]).unwrap();
     assert_eq!(
         validate_bill_create_fields(["z_field", "date", "a_field", "z_field"])
             .unwrap_err()
@@ -433,7 +445,7 @@ fn batch_create_items_and_update_field_guards_match_route_and_db_contracts() {
         json!({"success": true, "result": {"deleted_count": 2}})
     );
     assert_eq!(
-        batch_update_balance_sync_account_ids(["amount", "source_account_id"]),
+        batch_update_balance_sync_account_ids(["amount_cents", "source_account_id"]),
         Vec::<i64>::new()
     );
 }
@@ -865,11 +877,11 @@ fn reconciliation_summary_transactions_and_payload_pin_current_balance_trace() {
     );
     assert_eq!(transactions.len(), 4);
     assert_eq!(transactions[0]["id"], "expense");
-    assert_eq!(transactions[0]["accountOpeningBalance"], 3200);
-    assert_eq!(transactions[0]["accountClosingBalance"], 2400);
+    assert_eq!(transactions[0]["accountOpeningBalanceCents"], 3200);
+    assert_eq!(transactions[0]["accountClosingBalanceCents"], 2400);
     assert_eq!(transactions[1]["id"], "transfer-in");
-    assert_eq!(transactions[1]["accountOpeningBalance"], 2400);
-    assert_eq!(transactions[1]["accountClosingBalance"], 2900);
+    assert_eq!(transactions[1]["accountOpeningBalanceCents"], 2400);
+    assert_eq!(transactions[1]["accountClosingBalanceCents"], 2900);
 
     let params = parse_reconciliation_query(Some("1"), Some(0), Some(0), None, None, None).unwrap();
     let payload =
@@ -878,11 +890,11 @@ fn reconciliation_summary_transactions_and_payload_pin_current_balance_trace() {
     assert_eq!(payload["accountName"], "现金账户");
     assert_eq!(payload["startTime"], 0);
     assert_eq!(payload["endTime"], 0);
-    assert_eq!(payload["openingBalance"], 2000);
-    assert_eq!(payload["closingBalance"], 2900);
-    assert_eq!(payload["totalInflows"], 1700);
-    assert_eq!(payload["totalOutflows"], 800);
-    assert_eq!(payload["netFlow"], 900);
+    assert_eq!(payload["openingBalanceCents"], 2000);
+    assert_eq!(payload["closingBalanceCents"], 2900);
+    assert_eq!(payload["totalInflowsCents"], 1700);
+    assert_eq!(payload["totalOutflowsCents"], 800);
+    assert_eq!(payload["netFlowCents"], 900);
     assert_eq!(payload["itemCount"], 4);
     assert_eq!(payload["transactions"][0]["id"], "expense");
 

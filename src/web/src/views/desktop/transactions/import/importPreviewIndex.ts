@@ -15,7 +15,7 @@ import {
 export interface ImportPreviewIndexItem extends ImportCheckVisibleTransactionLike {
     id: number;
     selected: boolean;
-    sourceAmount: number;
+    sourceAmountCents: number;
     counterparty: string;
     paymentMethod: string;
     parserId: string;
@@ -256,7 +256,7 @@ export interface ImportPreviewIndexResponseItem {
     id: number;
     preview_date?: string;
     type?: number;
-    source_amount?: number;
+    source_amount_cents?: number;
     category_id?: string;
     actual_category_name?: string;
     source_account_id?: string;
@@ -287,7 +287,7 @@ export interface ImportPreviewIndexResponseItem {
 export const SERVER_PAGED_SORTABLE_COLUMNS = new Set<string>([
     'time',
     'type',
-    'sourceAmount',
+    'sourceAmountCents',
     'counterparty',
     'paymentMethod',
     'comment'
@@ -314,7 +314,7 @@ export function mapImportPreviewIndexResponseItem(item: ImportPreviewIndexRespon
         comment: item.comment || '',
         isManuallyAnnotated: !!item.is_manually_annotated,
         selected: !!item.selected,
-        sourceAmount: Number(item.source_amount || 0),
+        sourceAmountCents: Number(item.source_amount_cents || 0),
         counterparty: item.counterparty || '',
         paymentMethod: item.payment_method || '',
         parserId: item.parser_source || '',
@@ -593,8 +593,8 @@ export function sortImportPreviewIndexItems(
             case 'type':
                 compareResult = compareNumber(Number(left.item.type || 0), Number(right.item.type || 0));
                 break;
-            case 'sourceAmount':
-                compareResult = compareNumber(Number(left.item.sourceAmount || 0), Number(right.item.sourceAmount || 0));
+            case 'sourceAmountCents':
+                compareResult = compareNumber(Number(left.item.sourceAmountCents || 0), Number(right.item.sourceAmountCents || 0));
                 break;
             case 'counterparty':
                 compareResult = compareString(left.item.counterparty || '', right.item.counterparty || '');

@@ -3,8 +3,10 @@ use std::{env, error::Error, fs, str::FromStr};
 use bill_analyser_db::{
     create_postgres_account, postgres_migrations_dir, run_postgres_migrations,
     taxonomy::postgres_reads::{
-        create_postgres_account_rule, list_postgres_account_rules, update_postgres_account_rule,
+        create_postgres_account_rule, create_postgres_template, list_postgres_account_rules,
+        update_postgres_account_rule, update_postgres_template,
     },
+    update_postgres_account, DbError,
 };
 use serde_json::json;
 use sqlx::{postgres::PgConnectOptions, postgres::PgPoolOptions, Executor, Row};
@@ -41,17 +43,82 @@ async fn account_rule_repository_ignores_deprecated_scope_payload_without_column
             .fetch_one(&pool)
             .await?
             .try_get("id")?;
+    let error = create_postgres_account(
+        &pool,
+        &json!({
+            "name": format!("非法余额账户-{unique}"),
+            "type": "1",
+            "currency": "CNY",
+            "balanceCents": "18.5"
+        }),
+        user_id,
+    )
+    .await
+    .expect_err("decimal balance cents should be rejected");
+    assert_invalid_cents_error(error, "balanceCents");
+
     let account_id = create_postgres_account(
         &pool,
         &json!({
             "name": format!("工资卡-{unique}"),
             "type": "1",
             "currency": "CNY",
-            "balance": 0
+            "balance_cents": 0
         }),
         user_id,
     )
     .await?;
+    let error = update_postgres_account(
+        &pool,
+        account_id,
+        &json!({
+            "name": format!("工资卡-{unique}"),
+            "type": "1",
+            "currency": "CNY",
+            "balanceCents": 18.49
+        }),
+        user_id,
+    )
+    .await
+    .expect_err("decimal account update cents should be rejected");
+    assert_invalid_cents_error(error, "balanceCents");
+
+    let error = create_postgres_template(
+        &pool,
+        &json!({
+            "templateType": 1,
+            "name": format!("非法模板-{unique}"),
+            "sourceAmountCents": "18.5"
+        }),
+        user_id,
+    )
+    .await
+    .expect_err("decimal template create cents should be rejected");
+    assert_invalid_cents_error(error, "sourceAmountCents");
+    let template_id = create_postgres_template(
+        &pool,
+        &json!({
+            "templateType": 1,
+            "name": format!("合法模板-{unique}"),
+            "sourceAmountCents": 1234,
+            "destinationAmountCents": 0
+        }),
+        user_id,
+    )
+    .await?;
+    let error = update_postgres_template(
+        &pool,
+        template_id,
+        &json!({
+            "name": format!("合法模板-{unique}"),
+            "destinationAmountCents": true
+        }),
+        user_id,
+        Some(1),
+    )
+    .await
+    .expect_err("boolean template update cents should be rejected");
+    assert_invalid_cents_error(error, "destinationAmountCents");
 
     let rule_id = create_postgres_account_rule(
         &pool,
@@ -138,6 +205,16 @@ async fn account_rule_repository_ignores_deprecated_scope_payload_without_column
     Ok(())
 }
 
+fn assert_invalid_cents_error(error: DbError, field: &str) {
+    match error {
+        DbError::InvalidOperation(message) => {
+            assert!(message.contains(field), "{message}");
+            assert!(message.contains("integer cents"), "{message}");
+        }
+        other => panic!("expected invalid cents error, got {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn account_rule_scope_cleanup_migrates_existing_database_with_original_initial_schema(
 ) -> Result<(), Box<dyn Error>> {
@@ -189,7 +266,7 @@ async fn account_rule_scope_cleanup_migrates_existing_database_with_original_ini
             "name": format!("迁移账户-{unique}"),
             "type": "1",
             "currency": "CNY",
-            "balance": 0
+            "balance_cents": 0
         }),
         user_id,
     )

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use bill_analyser_core::{
-    amount_bucket, build_composite_match_features, build_composite_match_hash,
+    amount_cents_bucket, build_composite_match_features, build_composite_match_hash,
     build_dataset_snapshot_payload, build_feature_payload,
     build_import_learning_recommendation_key, build_label_confirmation_counts,
     build_llm_preview_apply_plan, build_model_registry_payload, build_route_label,
@@ -231,7 +231,7 @@ fn feature_labels_samples_and_tokens_match_dual_head_training_contract() {
         "annotated_category_id": "12",
         "annotated_source_account_id": 3,
         "annotated_destination_account_id": null,
-        "source_snapshot_json": {"preview_amount": "-18.6", "preview_type": "expense"}
+        "source_snapshot_json": {"preview_amount_cents": -1860, "preview_type": "expense"}
     });
     let row_map = row.as_object().unwrap();
 
@@ -239,11 +239,11 @@ fn feature_labels_samples_and_tokens_match_dual_head_training_contract() {
         normalize_learning_text(Some(&json!("  WeChat   Pay  "))),
         "wechat pay"
     );
-    assert_eq!(amount_bucket(Some(&json!(0))), "zero");
-    assert_eq!(amount_bucket(Some(&json!(19.99))), "lt20");
-    assert_eq!(amount_bucket(Some(&json!(99.99))), "lt100");
-    assert_eq!(amount_bucket(Some(&json!(499.99))), "lt500");
-    assert_eq!(amount_bucket(Some(&json!(500))), "gte500");
+    assert_eq!(amount_cents_bucket(Some(&json!(0))), "zero");
+    assert_eq!(amount_cents_bucket(Some(&json!(1999))), "lt20");
+    assert_eq!(amount_cents_bucket(Some(&json!(9999))), "lt100");
+    assert_eq!(amount_cents_bucket(Some(&json!(49999))), "lt500");
+    assert_eq!(amount_cents_bucket(Some(&json!(50000))), "gte500");
     assert_eq!(build_semantic_label(row_map), "type=支出|category=12");
     assert_eq!(build_route_label(row_map), "source=3|destination=0");
     assert_eq!(
@@ -271,7 +271,7 @@ fn feature_labels_samples_and_tokens_match_dual_head_training_contract() {
         "payment_method": "零钱",
         "annotated_type": "收入",
         "annotated_category_id": 12,
-        "source_snapshot_json": {"preview_amount": 5, "preview_type": "   "}
+        "source_snapshot_json": {"preview_amount_cents": 500, "preview_type": "   "}
     });
     assert_eq!(
         build_feature_payload(row_with_blank_snapshot_type.as_object().unwrap())["preview_type"],

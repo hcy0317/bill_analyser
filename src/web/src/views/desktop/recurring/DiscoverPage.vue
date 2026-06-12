@@ -65,9 +65,9 @@
                             </v-chip>
                         </template>
 
-                        <template #item.amount="{ item }">
+                        <template #item.amountCents="{ item }">
                             <span :class="item.type === 'expense' ? 'text-error' : 'text-success'">
-                                {{ item.type === 'expense' ? '-' : '+' }}{{ formatAmount(item.amount) }}
+                                {{ item.type === 'expense' ? '-' : '+' }}{{ formatAmount(item.amountCents) }}
                             </span>
                         </template>
 
@@ -160,7 +160,7 @@ const filteredSuggestions = computed(() => {
 const tableHeaders = computed(() => [
     { title: tt('Name'), key: 'name', sortable: true },
     { title: tt('Type'), key: 'type', sortable: true, width: 80 },
-    { title: tt('Amount'), key: 'amount', sortable: true, width: 100 },
+    { title: tt('Amount'), key: 'amountCents', sortable: true, width: 100 },
     { title: tt('Frequency'), key: 'frequency', sortable: true, width: 100 },
     { title: tt('Confidence'), key: 'confidenceScore', sortable: true, width: 100 },
     { title: tt('Samples'), key: 'sampleCount', sortable: true, width: 100 },
@@ -170,8 +170,8 @@ const tableHeaders = computed(() => [
     { title: tt('Actions'), key: 'actions', sortable: false, width: 90 },
 ]);
 
-function formatAmount(amount: number): string {
-    return amount.toFixed(2);
+function formatAmount(amountCents: number): string {
+    return (amountCents / 100).toFixed(2);
 }
 
 function statusColor(status: string): string {

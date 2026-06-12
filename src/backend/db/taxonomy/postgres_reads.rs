@@ -1,6 +1,6 @@
 // 中文导读：PostgreSQL taxonomy 读仓储，提供硬切换后的账户、分类和标签列表投影。
 // 维护重点：这里把 PostgreSQL authoritative schema 映射回当前 HTTP/前端 DTO，避免 handler 复制 SQL。
-// 不变式：只读路径必须按 user_id 过滤；金额字段从 Postgres 分显式转换为 current repository 的元投影。
+// 不变式：只读路径必须按 user_id 过滤；金额字段从 Postgres 分显式投影为当前 cents DTO。
 
 use std::collections::BTreeSet;
 
@@ -112,7 +112,14 @@ pub async fn update_postgres_account(
         return Ok(false);
     };
 
-    let metadata = account_metadata_from_payload(Some(&existing.try_get("metadata")?), payload);
+    let metadata = account_metadata_from_payload(Some(&existing.try_get("metadata")?), payload)?;
+    let balance_cents = optional_strict_minor_units(
+        payload
+            .get("balanceCents")
+            .or_else(|| payload.get("balance_cents")),
+        "balanceCents",
+    )?
+    .unwrap_or_default();
     let changed = sqlx::query(
         r#"
         UPDATE accounts
@@ -131,7 +138,7 @@ pub async fn update_postgres_account(
     .bind(value_text(payload.get("name")).unwrap_or_default())
     .bind(value_text(payload.get("type")))
     .bind(value_text(payload.get("currency")).unwrap_or_else(|| "CNY".to_string()))
-    .bind(yuan_value_to_cents(payload.get("balance")).unwrap_or_default())
+    .bind(balance_cents)
     .bind(!payload.get("hidden").is_some_and(value_truthy))
     .bind(i64_to_i32(
         int_value(payload.get("display_order")).unwrap_or_default(),
@@ -444,7 +451,7 @@ pub async fn query_postgres_category_statistics(
                     .try_get::<Option<String>, _>("sub_category")?
                     .unwrap_or_default(),
                 count: row.try_get("count")?,
-                total_amount: total_amount_cents as f64 / 100.0,
+                total_amount_cents,
             })
         })
         .collect()
@@ -940,18 +947,38 @@ async fn list_postgres_rules_overview_recurring_rules(
             let scheduled_frequency_type: Option<i32> = row.try_get("scheduled_frequency_type")?;
             let enabled: bool = row.try_get("enabled")?;
             let next_date: Option<String> = row.try_get("scheduled_next_date")?;
-            Ok(json!({
-                "id": id,
-                "name": name,
-                "amount": amount_minor as f64 / 100.0,
-                "frequency": scheduled_frequency
-                    .or_else(|| scheduled_frequency_type.map(|value| value.to_string())),
-                "enabled": enabled,
-                "nextDate": next_date,
-                "source": "recurring",
-            }))
+            Ok(rules_overview_recurring_rule_payload(
+                id,
+                name,
+                amount_minor,
+                scheduled_frequency,
+                scheduled_frequency_type,
+                enabled,
+                next_date,
+            ))
         })
         .collect()
+}
+
+fn rules_overview_recurring_rule_payload(
+    id: i64,
+    name: String,
+    amount_minor: i64,
+    scheduled_frequency: Option<String>,
+    scheduled_frequency_type: Option<i32>,
+    enabled: bool,
+    next_date: Option<String>,
+) -> Value {
+    json!({
+        "id": id,
+        "name": name,
+        "amountCents": amount_minor,
+        "frequency": scheduled_frequency
+            .or_else(|| scheduled_frequency_type.map(|value| value.to_string())),
+        "enabled": enabled,
+        "nextDate": next_date,
+        "source": "recurring",
+    })
 }
 
 pub async fn list_postgres_account_rules(
@@ -1482,7 +1509,7 @@ pub async fn create_postgres_template(
 ) -> DbResult<i64> {
     let template_type = int_value(payload.get("templateType")).unwrap_or(1);
     let display_order = next_template_display_order(pool, user_id, template_type).await?;
-    let values = template_values_from_payload(payload, template_type, display_order, None);
+    let values = template_values_from_payload(payload, template_type, display_order, None)?;
     let row = sqlx::query(
         r#"
         INSERT INTO transaction_templates (
@@ -1547,7 +1574,7 @@ pub async fn update_postgres_template(
         return Ok(false);
     };
     let resolved_type = int_value(existing.get("templateType")).unwrap_or(1);
-    let values = template_values_from_payload(payload, resolved_type, 0, Some(&existing));
+    let values = template_values_from_payload(payload, resolved_type, 0, Some(&existing))?;
     let changed = sqlx::query(
         r#"
         UPDATE transaction_templates
@@ -1835,16 +1862,13 @@ fn account_from_postgres_row(row: PgRow) -> DbResult<AccountRecord> {
         metadata_value_or_default(&metadata, "color", Value::String(String::new())),
     );
     account.insert(
-        "balance".to_string(),
-        json_number(balance_cents as f64 / 100.0),
+        "balanceCents".to_string(),
+        Value::Number(Number::from(balance_cents)),
     );
+    let initial_balance_cents = metadata_initial_balance_cents(&metadata, balance_cents);
     account.insert(
-        "initial_balance".to_string(),
-        metadata_value_or_default(
-            &metadata,
-            "initial_balance",
-            json_number(balance_cents as f64 / 100.0),
-        ),
+        "initialBalanceCents".to_string(),
+        Value::Number(Number::from(initial_balance_cents)),
     );
     account.insert("hidden".to_string(), Value::Bool(!is_active));
     insert_i64(
@@ -1980,13 +2004,13 @@ fn template_from_postgres_row(row: PgRow) -> DbResult<TemplateRecord> {
         string_or_default(row.try_get("destination_account_id")?, "0"),
     );
     template.insert(
-        "sourceAmount".to_string(),
+        "sourceAmountCents".to_string(),
         Value::Number(Number::from(
             row.try_get::<i64, _>("source_amount_minor_units")?,
         )),
     );
     template.insert(
-        "destinationAmount".to_string(),
+        "destinationAmountCents".to_string(),
         Value::Number(Number::from(
             row.try_get::<i64, _>("destination_amount_minor_units")?,
         )),
@@ -2157,10 +2181,6 @@ fn normalize_template_transaction_type(value: Option<&str>) -> i64 {
     }
 }
 
-fn json_number(value: f64) -> Value {
-    Number::from_f64(value).map_or(Value::Null, Value::Number)
-}
-
 fn template_select_sql(where_clause: &str) -> String {
     format!(
         r#"
@@ -2176,6 +2196,23 @@ fn template_select_sql(where_clause: &str) -> String {
         {where_clause}
         "#
     )
+}
+
+fn metadata_initial_balance_cents(metadata: &Value, fallback_cents: i64) -> i64 {
+    metadata
+        .get("initial_balance_cents")
+        .and_then(strict_cents_value)
+        .unwrap_or(fallback_cents)
+}
+
+fn strict_cents_value(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(number) => number
+            .as_i64()
+            .or_else(|| number.as_u64().and_then(|value| i64::try_from(value).ok())),
+        Value::String(text) => text.trim().parse::<i64>().ok(),
+        Value::Null | Value::Bool(_) | Value::Array(_) | Value::Object(_) => None,
+    }
 }
 
 fn category_select_sql(where_clause: &str) -> String {
@@ -2230,7 +2267,14 @@ async fn insert_postgres_account(
             "account name already exists: {name}"
         )));
     }
-    let metadata = account_metadata_from_payload(None, payload);
+    let metadata = account_metadata_from_payload(None, payload)?;
+    let balance_cents = optional_strict_minor_units(
+        payload
+            .get("balanceCents")
+            .or_else(|| payload.get("balance_cents")),
+        "balanceCents",
+    )?
+    .unwrap_or_default();
     let row = sqlx::query(
         r#"
         INSERT INTO accounts (
@@ -2245,7 +2289,7 @@ async fn insert_postgres_account(
     .bind(name)
     .bind(value_text(payload.get("type")))
     .bind(value_text(payload.get("currency")).unwrap_or_else(|| "CNY".to_string()))
-    .bind(yuan_value_to_cents(payload.get("balance")).unwrap_or_default())
+    .bind(balance_cents)
     .bind(!payload.get("hidden").is_some_and(value_truthy))
     .bind(i64_to_i32(
         int_value(payload.get("display_order")).unwrap_or_default(),
@@ -2300,14 +2344,14 @@ fn template_values_from_payload(
     template_type: i64,
     create_display_order: i64,
     existing: Option<&TemplateRecord>,
-) -> TemplateValues {
+) -> DbResult<TemplateValues> {
     let display_order = payload
         .get("displayOrder")
         .and_then(|value| int_value(Some(value)))
         .or_else(|| existing.and_then(|record| int_value(record.get("displayOrder"))))
         .unwrap_or(create_display_order);
     let scheduled = template_type == 2;
-    TemplateValues {
+    Ok(TemplateValues {
         name: value_text(payload.get("name"))
             .or_else(|| existing.and_then(|record| value_text(record.get("name"))))
             .unwrap_or_default(),
@@ -2318,20 +2362,26 @@ fn template_values_from_payload(
             .or_else(|| Some("0".to_string())),
         destination_account_id: optional_text_field(payload, existing, "destinationAccountId")
             .or_else(|| Some("0".to_string())),
-        source_amount_minor_units: payload
-            .get("sourceAmount")
-            .map(rounded_minor_units)
-            .or_else(|| {
-                existing.and_then(|record| record.get("sourceAmount").map(rounded_minor_units))
-            })
-            .unwrap_or_default(),
-        destination_amount_minor_units: payload
-            .get("destinationAmount")
-            .map(rounded_minor_units)
-            .or_else(|| {
-                existing.and_then(|record| record.get("destinationAmount").map(rounded_minor_units))
-            })
-            .unwrap_or_default(),
+        source_amount_minor_units: optional_strict_minor_units(
+            payload.get("sourceAmountCents"),
+            "sourceAmountCents",
+        )?
+        .or_else(|| {
+            existing
+                .and_then(|record| record.get("sourceAmountCents"))
+                .and_then(strict_cents_value)
+        })
+        .unwrap_or_default(),
+        destination_amount_minor_units: optional_strict_minor_units(
+            payload.get("destinationAmountCents"),
+            "destinationAmountCents",
+        )?
+        .or_else(|| {
+            existing
+                .and_then(|record| record.get("destinationAmountCents"))
+                .and_then(strict_cents_value)
+        })
+        .unwrap_or_default(),
         hide_amount: payload
             .get("hideAmount")
             .map(value_truthy)
@@ -2392,7 +2442,7 @@ fn template_values_from_payload(
             .and_then(|value| int_value(Some(value)))
             .or_else(|| existing.and_then(|record| int_value(record.get("utcOffset"))))
             .unwrap_or_default(),
-    }
+    })
 }
 
 fn optional_text_field(
@@ -2439,7 +2489,7 @@ fn account_select_sql(where_clause: &str) -> String {
     )
 }
 
-fn account_metadata_from_payload(existing: Option<&Value>, payload: &Value) -> Value {
+fn account_metadata_from_payload(existing: Option<&Value>, payload: &Value) -> DbResult<Value> {
     let mut metadata = existing
         .and_then(Value::as_object)
         .cloned()
@@ -2450,14 +2500,23 @@ fn account_metadata_from_payload(existing: Option<&Value>, payload: &Value) -> V
         "color",
         "comment",
         "parent_id",
-        "initial_balance",
         "credit_card_statement_date",
     ] {
         if let Some(value) = payload.get(key) {
             metadata.insert(key.to_string(), value.clone());
         }
     }
-    Value::Object(metadata)
+    if let Some(value) = payload
+        .get("initialBalanceCents")
+        .or_else(|| payload.get("initial_balance_cents"))
+    {
+        let initial_balance_cents = strict_minor_units_value(value, "initialBalanceCents")?;
+        metadata.insert(
+            "initial_balance_cents".to_string(),
+            Value::Number(Number::from(initial_balance_cents)),
+        );
+    }
+    Ok(Value::Object(metadata))
 }
 
 fn metadata_with_parent_id(metadata: Value, parent_id: Option<i64>) -> Value {
@@ -2811,58 +2870,16 @@ fn account_rule_candidate_from_record(record: AccountRuleRecord) -> DbResult<Acc
     })
 }
 
-fn rounded_minor_units(value: &Value) -> i64 {
-    let text = value_text(Some(value)).unwrap_or_default();
-    round_decimal_text_to_i64(&text).unwrap_or_default()
+fn optional_strict_minor_units(value: Option<&Value>, field: &str) -> DbResult<Option<i64>> {
+    value
+        .map(|value| strict_minor_units_value(value, field))
+        .transpose()
 }
 
-fn yuan_value_to_cents(value: Option<&Value>) -> Option<i64> {
-    let text = value_text(value)?;
-    decimal_text_to_scaled_i64(&text, 2)
-}
-
-fn round_decimal_text_to_i64(text: &str) -> Option<i64> {
-    decimal_text_to_scaled_i64(text, 0)
-}
-
-fn decimal_text_to_scaled_i64(text: &str, scale: usize) -> Option<i64> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let (negative, magnitude) = trimmed
-        .strip_prefix('-')
-        .map_or((false, trimmed), |rest| (true, rest));
-    let magnitude = magnitude.strip_prefix('+').unwrap_or(magnitude);
-    let mut parts = magnitude.splitn(2, '.');
-    let integer = parts.next()?.parse::<i64>().ok()?;
-    let multiplier = 10_i64.checked_pow(u32::try_from(scale).ok()?)?;
-    let fraction = parts.next().unwrap_or_default();
-    let mut scaled_fraction = 0_i64;
-    let mut consumed = 0_usize;
-    let mut round_digit = '0';
-    for digit in fraction
-        .chars()
-        .filter(|character| character.is_ascii_digit())
-    {
-        if consumed < scale {
-            scaled_fraction = scaled_fraction
-                .checked_mul(10)?
-                .checked_add(i64::from(digit.to_digit(10)?))?;
-            consumed += 1;
-        } else {
-            round_digit = digit;
-            break;
-        }
-    }
-    for _ in consumed..scale {
-        scaled_fraction = scaled_fraction.checked_mul(10)?;
-    }
-    let scaled = integer
-        .checked_mul(multiplier)?
-        .checked_add(scaled_fraction)?
-        .checked_add(i64::from(round_digit >= '5'))?;
-    Some(if negative { -scaled } else { scaled })
+fn strict_minor_units_value(value: &Value, field: &str) -> DbResult<i64> {
+    strict_cents_value(value).ok_or_else(|| {
+        DbError::InvalidOperation(format!("{field} must be integer cents/minor units"))
+    })
 }
 
 fn i64_to_i32(value: i64) -> i32 {
@@ -2878,6 +2895,8 @@ fn i64_to_i32(value: i64) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::postgres::PgPoolOptions;
+    use std::{env, error::Error};
 
     #[test]
     fn category_names_from_postgres_path_preserve_current_main_and_sub_fields() {
@@ -2920,11 +2939,25 @@ mod tests {
     }
 
     #[test]
-    fn postgres_template_minor_units_round_without_float_precision() {
-        assert_eq!(round_decimal_text_to_i64("18.49"), Some(18));
-        assert_eq!(round_decimal_text_to_i64("18.5"), Some(19));
-        assert_eq!(round_decimal_text_to_i64("-18.5"), Some(-19));
-        assert_eq!(round_decimal_text_to_i64("1999"), Some(1999));
+    fn explicit_minor_units_require_strict_integer_values() {
+        assert_eq!(
+            strict_minor_units_value(&serde_json::json!(1999), "sourceAmountCents")
+                .expect("integer cents"),
+            1999
+        );
+        assert_eq!(
+            strict_minor_units_value(&serde_json::json!("1999"), "sourceAmountCents")
+                .expect("integer string cents"),
+            1999
+        );
+        for value in [
+            serde_json::json!(18.49),
+            serde_json::json!("18.5"),
+            serde_json::json!(true),
+            serde_json::json!({}),
+        ] {
+            assert!(strict_minor_units_value(&value, "sourceAmountCents").is_err());
+        }
     }
 
     #[test]
@@ -3015,5 +3048,166 @@ mod tests {
         assert!(!candidate.regex_enabled);
         assert!(candidate.enabled);
         assert_eq!(candidate.priority, 5);
+    }
+
+    #[test]
+    fn account_metadata_and_template_values_use_explicit_cents_fields() {
+        assert_eq!(
+            metadata_initial_balance_cents(&json!({"initial_balance": "12.34"}), 100),
+            100
+        );
+        assert_eq!(
+            metadata_initial_balance_cents(&json!({"initial_balance_cents": "1234"}), 100),
+            1234
+        );
+
+        let metadata = account_metadata_from_payload(
+            None,
+            &json!({
+                "initialBalanceCents": 4567,
+                "balance": 99.99,
+                "comment": "开户"
+            }),
+        )
+        .expect("metadata cents");
+        assert_eq!(metadata["initial_balance_cents"], json!(4567));
+        assert!(metadata.get("initial_balance").is_none());
+        assert!(
+            account_metadata_from_payload(None, &json!({"initialBalanceCents": "1.5"})).is_err()
+        );
+        assert!(
+            account_metadata_from_payload(None, &json!({"initial_balance_cents": true})).is_err()
+        );
+
+        let values = template_values_from_payload(
+            &json!({
+                "name": "月租",
+                "sourceAmountCents": 12345,
+                "destinationAmountCents": 54321,
+                "hideAmount": true
+            }),
+            2,
+            7,
+            None,
+        )
+        .expect("template cents");
+        assert_eq!(values.source_amount_minor_units, 12345);
+        assert_eq!(values.destination_amount_minor_units, 54321);
+        assert!(values.hide_amount);
+        assert!(
+            template_values_from_payload(&json!({"sourceAmountCents": 12.34}), 1, 8, None).is_err()
+        );
+        assert!(template_values_from_payload(
+            &json!({"destinationAmountCents": "12.34"}),
+            1,
+            8,
+            None
+        )
+        .is_err());
+        assert!(
+            template_values_from_payload(&json!({"sourceAmountCents": true}), 1, 8, None).is_err()
+        );
+
+        let existing = TemplateRecord::from_iter([
+            ("sourceAmountCents".to_string(), json!(111)),
+            ("destinationAmountCents".to_string(), json!("222")),
+        ]);
+        let fallback =
+            template_values_from_payload(&json!({"name": "月租"}), 1, 8, Some(&existing))
+                .expect("existing strict cents");
+        assert_eq!(fallback.source_amount_minor_units, 111);
+        assert_eq!(fallback.destination_amount_minor_units, 222);
+    }
+
+    #[test]
+    fn rules_overview_recurring_payload_uses_explicit_cents() {
+        let payload = rules_overview_recurring_rule_payload(
+            7,
+            "月租".to_string(),
+            12345,
+            None,
+            Some(2),
+            true,
+            Some("2026-06-12".to_string()),
+        );
+
+        assert_eq!(payload["amountCents"], json!(12345));
+        assert!(payload.get("amount").is_none());
+        assert_eq!(payload["frequency"], json!("2"));
+    }
+
+    #[tokio::test]
+    async fn account_and_template_row_projectors_emit_explicit_cents_when_database_available(
+    ) -> Result<(), Box<dyn Error>> {
+        let Ok(postgres_url) = env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+            return Ok(());
+        };
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&postgres_url)
+            .await?;
+
+        let account_row = sqlx::query(
+            r##"
+            SELECT
+                1::BIGINT AS id,
+                2::BIGINT AS user_id,
+                '招商银行'::TEXT AS name,
+                'bank'::TEXT AS account_type,
+                'CNY'::TEXT AS currency,
+                123456::BIGINT AS balance_cents,
+                true AS is_active,
+                3::INT AS display_order,
+                '{"category":2,"initial_balance_cents":654321,"icon":"card","color":"#fff"}'::jsonb AS metadata,
+                now() AS created_at,
+                now() AS updated_at,
+                '招商卡'::TEXT AS payment_method
+            "##,
+        )
+        .fetch_one(&pool)
+        .await?;
+        let account = account_from_postgres_row(account_row).expect("account record");
+        assert_eq!(account.get("balanceCents"), Some(&json!(123456)));
+        assert_eq!(account.get("initialBalanceCents"), Some(&json!(654321)));
+        assert!(account.get("balance").is_none());
+
+        let template_row = sqlx::query(
+            r#"
+            SELECT
+                7::BIGINT AS id,
+                2::INT AS template_type,
+                '月租'::TEXT AS name,
+                NULL::TEXT AS description,
+                'expense'::TEXT AS transaction_type,
+                '9'::TEXT AS category_id,
+                '11'::TEXT AS source_account_id,
+                '0'::TEXT AS destination_account_id,
+                12345::BIGINT AS source_amount_minor_units,
+                0::BIGINT AS destination_amount_minor_units,
+                false AS hide_amount,
+                '[]'::jsonb AS tag_ids,
+                NULL::TEXT AS comment,
+                NULL::TEXT AS scheduled_frequency,
+                NULL::INT AS scheduled_frequency_type,
+                NULL::TEXT AS scheduled_start_date,
+                NULL::TEXT AS scheduled_end_date,
+                NULL::TEXT AS scheduled_next_date,
+                true AS enabled,
+                false AS auto_create,
+                1::INT AS display_order,
+                false AS hidden,
+                480::INT AS utc_offset,
+                now() AS created_at,
+                now() AS updated_at
+            "#,
+        )
+        .fetch_one(&pool)
+        .await?;
+        let template = template_from_postgres_row(template_row).expect("template record");
+        assert_eq!(template.get("sourceAmountCents"), Some(&json!(12345)));
+        assert_eq!(template.get("destinationAmountCents"), Some(&json!(0)));
+        assert!(template.get("sourceAmount").is_none());
+
+        Ok(())
     }
 }

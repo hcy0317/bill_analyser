@@ -20,7 +20,8 @@ export interface BillMatchingPairSummary {
 export interface BillMatchingCandidateBillSummary {
     id: number;
     type: string;
-    amount: number;
+    amountCents: number;
+    destinationAmountCents: number;
     date: string;
     description: string;
     counterparty: string;
@@ -86,6 +87,23 @@ function toNumber(value: unknown): number {
         if (Number.isFinite(parsedValue)) {
             return parsedValue;
         }
+    }
+
+    return 0;
+}
+
+function toIntegerCents(value: unknown): number {
+    if (typeof value === 'number') {
+        return Number.isSafeInteger(value) ? value : 0;
+    }
+
+    if (typeof value === 'string') {
+        const text = value.trim();
+        if (!/^[+-]?\d+$/u.test(text)) {
+            return 0;
+        }
+        const parsedValue = Number(text);
+        return Number.isSafeInteger(parsedValue) ? parsedValue : 0;
     }
 
     return 0;
@@ -160,7 +178,10 @@ export function normalizeBillMatchingCandidatesResponse(
                 bill: billRecord ? {
                     id: toNumber(billRecord['id']),
                     type: toStringOrNumber(billRecord['type']),
-                    amount: toNumber(billRecord['amount']),
+                    amountCents: toIntegerCents(billRecord['amountCents'] ?? billRecord['amount_cents']),
+                    destinationAmountCents: toIntegerCents(
+                        billRecord['destinationAmountCents'] ?? billRecord['destination_amount_cents']
+                    ),
                     date: toStringValue(billRecord['date']),
                     description: toStringValue(billRecord['description']),
                     counterparty: toStringValue(billRecord['counterparty']),
@@ -260,13 +281,13 @@ export function getBillMatchingCandidateBillSubtitleParts(candidate: BillMatchin
 }
 
 export function getBillMatchingCandidateBillAmountCents(candidate: BillMatchingCandidate): number | null {
-    const amount = candidate.bill?.amount;
+    const amount = candidate.bill?.amountCents;
 
-    if (typeof amount !== 'number' || !Number.isFinite(amount)) {
+    if (typeof amount !== 'number' || !Number.isSafeInteger(amount)) {
         return null;
     }
 
-    return Math.round(amount * 100);
+    return amount;
 }
 
 export function isBillMatchingCandidateReviewActionSupported(candidate: BillMatchingCandidate): boolean {
@@ -327,7 +348,7 @@ export function buildBillMatchingViewState(
 export interface BillMatchingPairBillSummary {
     id: number;
     type: string;
-    amount: number;
+    amountCents: number;
     date: string;
     description: string;
     counterparty: string;
@@ -385,7 +406,7 @@ export function normalizeMatchingPairsResponse(
                 return {
                     id: toNumber(record['id']),
                     type: toStringValue(record['type']),
-                    amount: toNumber(record['amount']),
+                    amountCents: toIntegerCents(record['amountCents'] ?? record['amount_cents']),
                     date: toStringValue(record['date']),
                     description: toStringValue(record['description']),
                     counterparty: toStringValue(record['counterparty']),

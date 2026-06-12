@@ -37,13 +37,13 @@ export const useAccountsStore = defineStore('accounts', () => {
     let syncAllAccountBalancesPromise: Promise<{
         totalAccounts: number;
         syncedAccounts: number;
-        discrepancies: Array<{
-            accountId: number;
-            name: string;
-            oldBalance: number;
-            newBalance: number;
-            diff: number;
-        }>;
+            discrepancies: Array<{
+                accountId: number;
+                name: string;
+                oldBalanceCents: number;
+                newBalanceCents: number;
+                diffCents: number;
+            }>;
         errors: string[];
     }> | null = null;
 
@@ -479,9 +479,9 @@ export const useAccountsStore = defineStore('accounts', () => {
 
         for (const accountBalance of accountsBalance) {
             if (accountBalance.currency === userStore.currentUserDefaultCurrency) {
-                netAssets += accountBalance.balance;
+                netAssets += accountBalance.balanceCents;
             } else {
-                const balance = exchangeRatesStore.getExchangedAmount(accountBalance.balance, accountBalance.currency, userStore.currentUserDefaultCurrency);
+                const balance = exchangeRatesStore.getExchangedAmount(accountBalance.balanceCents, accountBalance.currency, userStore.currentUserDefaultCurrency);
 
                 if (!isNumber(balance)) {
                     hasUnCalculatedAmount = true;
@@ -515,9 +515,9 @@ export const useAccountsStore = defineStore('accounts', () => {
 
         for (const accountBalance of accountsBalance) {
             if (accountBalance.currency === userStore.currentUserDefaultCurrency) {
-                totalAssets += accountBalance.balance;
+                totalAssets += accountBalance.balanceCents;
             } else {
-                const balance = exchangeRatesStore.getExchangedAmount(accountBalance.balance, accountBalance.currency, userStore.currentUserDefaultCurrency);
+                const balance = exchangeRatesStore.getExchangedAmount(accountBalance.balanceCents, accountBalance.currency, userStore.currentUserDefaultCurrency);
 
                 if (!isNumber(balance)) {
                     hasUnCalculatedAmount = true;
@@ -551,9 +551,9 @@ export const useAccountsStore = defineStore('accounts', () => {
 
         for (const accountBalance of accountsBalance) {
             if (accountBalance.currency === userStore.currentUserDefaultCurrency) {
-                totalLiabilities -= accountBalance.balance;
+                totalLiabilities -= accountBalance.balanceCents;
             } else {
-                const balance = exchangeRatesStore.getExchangedAmount(accountBalance.balance, accountBalance.currency, userStore.currentUserDefaultCurrency);
+                const balance = exchangeRatesStore.getExchangedAmount(accountBalance.balanceCents, accountBalance.currency, userStore.currentUserDefaultCurrency);
 
                 if (!isNumber(balance)) {
                     hasUnCalculatedAmount = true;
@@ -586,14 +586,14 @@ export const useAccountsStore = defineStore('accounts', () => {
         for (const accountBalance of accountsBalance) {
             if (accountBalance.currency === userStore.currentUserDefaultCurrency) {
                 if (accountBalance.isAsset) {
-                    totalBalance += accountBalance.balance;
+                    totalBalance += accountBalance.balanceCents;
                 } else if (accountBalance.isLiability) {
-                    totalBalance -= accountBalance.balance;
+                    totalBalance -= accountBalance.balanceCents;
                 } else {
-                    totalBalance += accountBalance.balance;
+                    totalBalance += accountBalance.balanceCents;
                 }
             } else {
-                const balance = exchangeRatesStore.getExchangedAmount(accountBalance.balance, accountBalance.currency, userStore.currentUserDefaultCurrency);
+                const balance = exchangeRatesStore.getExchangedAmount(accountBalance.balanceCents, accountBalance.currency, userStore.currentUserDefaultCurrency);
 
                 if (!isNumber(balance)) {
                     hasUnCalculatedAmount = true;
@@ -627,11 +627,11 @@ export const useAccountsStore = defineStore('accounts', () => {
 
         if (showAccountBalance) {
             if (account.isAsset) {
-                return account.balance;
+                return account.balanceCents;
             } else if (account.isLiability) {
-                return -account.balance;
+                return -account.balanceCents;
             } else {
-                return account.balance;
+                return account.balanceCents;
             }
         } else {
             return DISPLAY_HIDDEN_AMOUNT;
@@ -696,14 +696,14 @@ export const useAccountsStore = defineStore('accounts', () => {
 
             if (subAccount.currency === resultCurrency) {
                 if (subAccount.isAsset) {
-                    totalBalance += subAccount.balance;
+                    totalBalance += subAccount.balanceCents;
                 } else if (subAccount.isLiability) {
-                    totalBalance -= subAccount.balance;
+                    totalBalance -= subAccount.balanceCents;
                 } else {
-                    totalBalance += subAccount.balance;
+                    totalBalance += subAccount.balanceCents;
                 }
             } else {
-                const balance = exchangeRatesStore.getExchangedAmount(subAccount.balance, subAccount.currency, resultCurrency);
+                const balance = exchangeRatesStore.getExchangedAmount(subAccount.balanceCents, subAccount.currency, resultCurrency);
 
                 if (!isNumber(balance)) {
                     hasUnCalculatedAmount = true;
@@ -1096,9 +1096,9 @@ export const useAccountsStore = defineStore('accounts', () => {
         discrepancies: Array<{
             accountId: number;
             name: string;
-            oldBalance: number;
-            newBalance: number;
-            diff: number;
+            oldBalanceCents: number;
+            newBalanceCents: number;
+            diffCents: number;
         }>;
         errors: string[];
     }> {
@@ -1135,9 +1135,9 @@ export const useAccountsStore = defineStore('accounts', () => {
                     discrepancies: result.discrepancies.map(d => ({
                         accountId: d.account_id,
                         name: d.name,
-                        oldBalance: d.old_balance,
-                        newBalance: d.new_balance,
-                        diff: d.diff
+                        oldBalanceCents: d.oldBalanceCents,
+                        newBalanceCents: d.newBalanceCents,
+                        diffCents: d.diffCents
                     })),
                     errors: result.errors
                 });

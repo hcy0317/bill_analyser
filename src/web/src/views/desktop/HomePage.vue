@@ -114,8 +114,8 @@
                     <income-expense-overview-card
                         :loading="loadingOverview" :disabled="loadingOverview" :icon="mdiCalendarTodayOutline"
                         :title="tt('Today')"
-                        :expense-amount="transactionOverview.today && transactionOverview.today.valid ? getDisplayExpenseAmount(transactionOverview.today) : ''"
-                        :income-amount="transactionOverview.today && transactionOverview.today.valid ? getDisplayIncomeAmount(transactionOverview.today) : ''"
+                        :expense-text="transactionOverview.today && transactionOverview.today.valid ? getDisplayExpenseAmount(transactionOverview.today) : ''"
+                        :income-text="transactionOverview.today && transactionOverview.today.valid ? getDisplayIncomeAmount(transactionOverview.today) : ''"
                         :datetime="displayDateRange?.today?.displayTime || ''"
                     >
                         <template #menus>
@@ -130,8 +130,8 @@
                     <income-expense-overview-card
                         :loading="loadingOverview" :disabled="loadingOverview" :icon="mdiCalendarWeekOutline"
                         :title="tt('This Week')"
-                        :expense-amount="transactionOverview.thisWeek && transactionOverview.thisWeek.valid ? getDisplayExpenseAmount(transactionOverview.thisWeek) : ''"
-                        :income-amount="transactionOverview.thisWeek && transactionOverview.thisWeek.valid ? getDisplayIncomeAmount(transactionOverview.thisWeek) : ''"
+                        :expense-text="transactionOverview.thisWeek && transactionOverview.thisWeek.valid ? getDisplayExpenseAmount(transactionOverview.thisWeek) : ''"
+                        :income-text="transactionOverview.thisWeek && transactionOverview.thisWeek.valid ? getDisplayIncomeAmount(transactionOverview.thisWeek) : ''"
                         :datetime="displayDateRange?.thisWeek?.startTime + '-' + displayDateRange?.thisWeek?.endTime"
                     >
                         <template #menus>
@@ -146,8 +146,8 @@
                     <income-expense-overview-card
                         :loading="loadingOverview" :disabled="loadingOverview" :icon="mdiCalendarMonthOutline"
                         :title="tt('This Month')"
-                        :expense-amount="transactionOverview.thisMonth && transactionOverview.thisMonth.valid ? getDisplayExpenseAmount(transactionOverview.thisMonth) : ''"
-                        :income-amount="transactionOverview.thisMonth && transactionOverview.thisMonth.valid ? getDisplayIncomeAmount(transactionOverview.thisMonth) : ''"
+                        :expense-text="transactionOverview.thisMonth && transactionOverview.thisMonth.valid ? getDisplayExpenseAmount(transactionOverview.thisMonth) : ''"
+                        :income-text="transactionOverview.thisMonth && transactionOverview.thisMonth.valid ? getDisplayIncomeAmount(transactionOverview.thisMonth) : ''"
                         :datetime="displayDateRange?.thisMonth?.startTime + '-' + displayDateRange?.thisMonth?.endTime"
                     >
                         <template #menus>
@@ -162,8 +162,8 @@
                     <income-expense-overview-card
                         :loading="loadingOverview" :disabled="loadingOverview" :icon="mdiLayersTripleOutline"
                         :title="tt('This Year')"
-                        :expense-amount="transactionOverview.thisYear && transactionOverview.thisYear.valid ? getDisplayExpenseAmount(transactionOverview.thisYear) : ''"
-                        :income-amount="transactionOverview.thisYear && transactionOverview.thisYear.valid ? getDisplayIncomeAmount(transactionOverview.thisYear) : ''"
+                        :expense-text="transactionOverview.thisYear && transactionOverview.thisYear.valid ? getDisplayExpenseAmount(transactionOverview.thisYear) : ''"
+                        :income-text="transactionOverview.thisYear && transactionOverview.thisYear.valid ? getDisplayIncomeAmount(transactionOverview.thisYear) : ''"
                         :datetime="displayDateRange?.thisYear?.displayTime || ''"
                     >
                         <template #menus>
@@ -292,8 +292,8 @@ const monthlyIncomeAndExpenseData = computed<TransactionMonthlyIncomeAndExpenseD
 
         data.push({
             monthStartTime: dateRange.startTime,
-            incomeAmount: item?.incomeAmount || 0,
-            expenseAmount: item?.expenseAmount || 0,
+            incomeAmountCents: item?.incomeAmountCents || 0,
+            expenseAmountCents: item?.expenseAmountCents || 0,
             incompleteIncomeAmount: item ? item.incompleteIncomeAmount : true,
             incompleteExpenseAmount: item ? item.incompleteExpenseAmount : true
         });

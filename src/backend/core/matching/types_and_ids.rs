@@ -11,7 +11,7 @@ pub const MANUAL_PAIR_SOURCE: &str = "manual";
 pub const TRANSFER_PAIR_LOOKBACK_DAYS: i64 = 3;
 pub const HISTORICAL_TRANSFER_PAIR_TIME_TOLERANCE_SECONDS: i64 = 300;
 pub const INVESTMENT_PAIR_LOOKBACK_DAYS: i64 = 3;
-pub const TRANSFER_AMOUNT_TOLERANCE: f64 = 0.01;
+pub const TRANSFER_AMOUNT_TOLERANCE_CENTS: i64 = 1;
 pub const MIN_RECURRING_OCCURRENCES: usize = 3;
 pub const MAX_RECURRING_GAP_RATIO: f64 = 2.0;
 pub const MAX_RECURRING_INTERVAL_VARIATION: f64 = 0.5;
@@ -293,7 +293,7 @@ pub struct RecurringPattern {
     pub description: String,
     #[serde(rename = "type")]
     pub transaction_type: String,
-    pub amount: f64,
+    pub amount_cents: i64,
     pub source_account_id: Option<i64>,
     pub destination_account_id: String,
     pub counterparty: String,

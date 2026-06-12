@@ -170,7 +170,7 @@
                         </span>
                     </div>
                 </template>
-                <template #item.sourceAmount="{ item }">
+                <template #item.sourceAmountCents="{ item }">
                     <span :class="{ 'text-expense': item.type === TransactionType.Expense, 'text-income': item.type === TransactionType.Income }">{{ getDisplaySourceAmount(item) }}</span>
                     <v-icon class="icon-with-direction mx-1" size="13" :icon="mdiArrowRight" v-if="item.type === TransactionType.Transfer && item.sourceAccountId !== item.destinationAccountId && getDisplaySourceAmount(item) !== getDisplayDestinationAmount(item)"></v-icon>
                     <span v-if="item.type === TransactionType.Transfer && item.sourceAccountId !== item.destinationAccountId && getDisplaySourceAmount(item) !== getDisplayDestinationAmount(item)">{{ getDisplayDestinationAmount(item) }}</span>
@@ -380,7 +380,7 @@ const dataTableHeaders = computed<object[]>(() => {
     headers.push({ key: 'time', value: 'time', title: tt('Transaction Time'), sortable: true, nowrap: true });
     headers.push({ key: 'type', value: 'type', title: tt('Type'), sortable: true, nowrap: true });
     headers.push({ key: 'categoryId', value: 'categoryId', title: tt('Category'), sortable: true, nowrap: true });
-    headers.push({ key: 'sourceAmount', value: 'sourceAmount', title: tt('Amount'), sortable: true, nowrap: true });
+    headers.push({ key: 'sourceAmountCents', value: 'sourceAmountCents', title: tt('Amount'), sortable: true, nowrap: true });
     headers.push({ key: 'sourceAccountId', value: 'sourceAccountId', title: tt('Account'), sortable: true, nowrap: true });
     headers.push({ key: 'accountBalance', value: 'accountBalance', title: tt(accountBalanceName), sortable: true, nowrap: true });
     headers.push({ key: 'comment', value: 'comment', title: tt('Description'), sortable: true, nowrap: true });
@@ -514,7 +514,7 @@ function addTransaction(): void {
 }
 
 function updateClosingBalance(): void {
-    let currentClosingBalance = reconciliationStatements.value?.closingBalance ?? 0;
+    let currentClosingBalance = reconciliationStatements.value?.closingBalanceCents ?? 0;
 
     if (isCurrentLiabilityAccount.value) {
         currentClosingBalance = -currentClosingBalance;
@@ -551,7 +551,7 @@ function updateClosingBalance(): void {
         editDialog.value?.open({
             time: newTransactionTime,
             type: newTransactionType,
-            amount: newTransactionAmount,
+            sourceAmountCents: newTransactionAmount,
             accountId: accountId.value,
             noTransactionDraft: true
         }).then(result => {

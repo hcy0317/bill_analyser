@@ -28,12 +28,16 @@ fn date(value: &str) -> NaiveDate {
     NaiveDate::parse_from_str(value, "%Y-%m-%d").expect("test date")
 }
 
+fn cents(value: &str) -> i64 {
+    (value.parse::<f64>().expect("test amount") * 100.0).round() as i64
+}
+
 fn bill(id: i64, date: &str, bill_type: &str, amount: &str) -> StatisticsBillInput {
     StatisticsBillInput {
         id: Some(id),
         date: date.to_string(),
         bill_type: bill_type.to_string(),
-        amount_yuan: amount.to_string(),
+        amount_cents: cents(amount),
         channel: "现金".to_string(),
         source_account_id: Some(10),
         main_category: "餐饮".to_string(),
@@ -49,8 +53,8 @@ fn account(id: i64, name: &str, balance: &str) -> StatisticsAccountInput {
         id,
         name: name.to_string(),
         account_type: "cash".to_string(),
-        balance_yuan: balance.to_string(),
-        initial_balance_yuan: balance.to_string(),
+        balance_cents: cents(balance),
+        initial_balance_cents: cents(balance),
         currency: Some("CNY".to_string()),
         ..Default::default()
     }
@@ -133,7 +137,7 @@ fn category_statistics_and_trend_contracts_preserve_cents_signs_and_empty_months
         id: Some(3),
         date: "2026-03-02T10:00:00".to_string(),
         bill_type: "转账".to_string(),
-        amount_yuan: "3.00".to_string(),
+        amount_cents: 300,
         channel: "现金".to_string(),
         source_account_id: Some(999),
         destination_account: "银行卡".to_string(),
@@ -149,7 +153,7 @@ fn category_statistics_and_trend_contracts_preserve_cents_signs_and_empty_months
         vec![CategoryStatisticItem {
             category_id: "1".to_string(),
             account_id: "10".to_string(),
-            amount: -1650,
+            amount_cents: -1650,
         }]
     );
     assert_eq!(
@@ -159,7 +163,7 @@ fn category_statistics_and_trend_contracts_preserve_cents_signs_and_empty_months
             "result": {
                 "startTime": 1740787200,
                 "endTime": 1740873599,
-                "items": [{"categoryId": "1", "accountId": "10", "amount": -1650}],
+                "items": [{"categoryId": "1", "accountId": "10", "amountCents": -1650}],
             },
         })
     );
@@ -174,19 +178,19 @@ fn category_statistics_and_trend_contracts_preserve_cents_signs_and_empty_months
     assert_eq!(trend.len(), 2);
     assert_eq!(trend[0].year, 2026);
     assert_eq!(trend[0].month, 3);
-    assert_eq!(trend[0].items[0].amount, -1650);
+    assert_eq!(trend[0].items[0].amount_cents, -1650);
     assert!(trend[1].items.is_empty());
 }
 
 #[test]
 fn asset_trends_contract_preserves_balance_math_and_filters_empty_legends() {
     let mut cash = account(10, "现金", "100.00");
-    cash.initial_balance_yuan = "100.00".to_string();
+    cash.initial_balance_cents = 10000;
     let mut bank = account(20, "银行卡", "50.00");
-    bank.initial_balance_yuan = "50.00".to_string();
+    bank.initial_balance_cents = 5000;
     let zero = account(30, "空账户", "0.00");
     let accounts = vec![cash, bank, zero];
-    let balances_before = BTreeMap::from([(10, "5.00".to_string())]);
+    let balances_before = BTreeMap::from([(10, 500)]);
     let bills = vec![
         StatisticsBillInput {
             source_account_id: Some(10),
@@ -199,7 +203,7 @@ fn asset_trends_contract_preserves_balance_math_and_filters_empty_legends() {
         StatisticsBillInput {
             source_account_id: Some(20),
             destination_account_id: Some(10),
-            destination_amount_yuan: Some("16.00".to_string()),
+            destination_amount_cents: Some(1600),
             ..bill(3, "2026-03-01T10:00:00", "转账", "15.00")
         },
     ];
@@ -215,17 +219,17 @@ fn asset_trends_contract_preserves_balance_math_and_filters_empty_legends() {
     assert_asset_day(
         &trends[0],
         json!([
-            {"accountId": "10", "accountOpeningBalance": 10500, "accountClosingBalance": 11100},
-            {"accountId": "20", "accountOpeningBalance": 5000, "accountClosingBalance": 5500},
-            {"accountId": "30", "accountOpeningBalance": 0, "accountClosingBalance": 0},
+            {"accountId": "10", "accountOpeningBalanceCents": 10500, "accountClosingBalanceCents": 11100},
+            {"accountId": "20", "accountOpeningBalanceCents": 5000, "accountClosingBalanceCents": 5500},
+            {"accountId": "30", "accountOpeningBalanceCents": 0, "accountClosingBalanceCents": 0},
         ]),
     );
     assert_asset_day(
         &trends[1],
         json!([
-            {"accountId": "10", "accountOpeningBalance": 11100, "accountClosingBalance": 11100},
-            {"accountId": "20", "accountOpeningBalance": 5500, "accountClosingBalance": 5500},
-            {"accountId": "30", "accountOpeningBalance": 0, "accountClosingBalance": 0},
+            {"accountId": "10", "accountOpeningBalanceCents": 11100, "accountClosingBalanceCents": 11100},
+            {"accountId": "20", "accountOpeningBalanceCents": 5500, "accountClosingBalanceCents": 5500},
+            {"accountId": "30", "accountOpeningBalanceCents": 0, "accountClosingBalanceCents": 0},
         ]),
     );
 
@@ -341,14 +345,14 @@ fn basic_statistics_collection_contracts_preserve_current_route_shapes() {
         .collect::<Vec<_>>();
     let pie = build_category_pie_data(&expense_bills);
     assert_eq!(pie[0].name, "餐饮");
-    assert_eq!(pie[0].value, 25.0);
+    assert_eq!(pie[0].value_cents, 2500);
     assert_eq!(pie[1].name, "");
-    assert_eq!(pie[1].value, 1.45);
+    assert_eq!(pie[1].value_cents, 145);
 
     let merchants = build_top_merchants_data(&bills, 2);
     assert_eq!(merchants.len(), 2);
     assert_eq!(merchants[0].name, "早餐店");
-    assert_eq!(merchants[0].amount, 25.0);
+    assert_eq!(merchants[0].amount_cents, 2500);
     assert_eq!(merchants[0].count, 2);
     assert_eq!(merchants[1].name, "地铁");
 
@@ -360,8 +364,8 @@ fn basic_statistics_collection_contracts_preserve_current_route_shapes() {
 
     let amounts = build_transaction_amount_period_result(1740787200, 1740873599, &bills);
     assert_eq!(amounts.amounts[0].currency, "CNY");
-    assert_eq!(amounts.amounts[0].income_amount, 1001);
-    assert_eq!(amounts.amounts[0].expense_amount, 2645);
+    assert_eq!(amounts.amounts[0].income_amount_cents, 1001);
+    assert_eq!(amounts.amounts[0].expense_amount_cents, 2645);
     assert_eq!(
         build_transaction_amounts_response(&BTreeMap::from([("range".to_string(), amounts)])),
         json!({
@@ -370,7 +374,7 @@ fn basic_statistics_collection_contracts_preserve_current_route_shapes() {
                 "range": {
                     "startTime": 1740787200,
                     "endTime": 1740873599,
-                    "amounts": [{"currency": "CNY", "incomeAmount": 1001, "expenseAmount": 2645}],
+                    "amounts": [{"currency": "CNY", "incomeAmountCents": 1001, "expenseAmountCents": 2645}],
                 },
             },
         })
@@ -378,11 +382,11 @@ fn basic_statistics_collection_contracts_preserve_current_route_shapes() {
 
     assert_eq!(
         build_statistics_trend_response(&json!({
-            "trends": [{"period": "2026-03", "income": 100.125, "expense": 50.555, "net": 49.57}]
+            "trends": [{"period": "2026-03", "incomeCents": 10013, "expenseCents": 5056, "netCents": 4957}]
         })),
         json!({
             "success": true,
-            "data": [{"date": "2026-03", "income": 100.13, "expense": 50.56, "net": 49.57}]
+            "data": [{"date": "2026-03", "incomeCents": 10013, "expenseCents": 5056, "netCents": 4957}]
         })
     );
 }
@@ -394,13 +398,13 @@ fn networth_calendar_insights_and_chart_shapes_match_current_runtime() {
     let mut hidden = account(30, "隐藏账户", "999.00");
     hidden.hidden = true;
     let snapshot = build_net_worth_snapshot(&[account(10, "现金", "100.00"), liability, hidden]);
-    assert_eq!(snapshot.total_assets, 100.0);
-    assert_eq!(snapshot.total_liabilities, 20.0);
-    assert_eq!(snapshot.net_worth, 80.0);
+    assert_eq!(snapshot.total_assets_cents, 10000);
+    assert_eq!(snapshot.total_liabilities_cents, 2000);
+    assert_eq!(snapshot.net_worth_cents, 8000);
     assert_eq!(snapshot.account_count, 2);
     assert_eq!(
-        build_net_worth_snapshot_response(&snapshot)["data"]["netWorth"],
-        json!(80.0)
+        build_net_worth_snapshot_response(&snapshot)["data"]["netWorthCents"],
+        json!(8000)
     );
 
     let calendar = build_calendar_events_data(
@@ -412,7 +416,7 @@ fn networth_calendar_insights_and_chart_shapes_match_current_runtime() {
         &[RecurringRuleInput {
             id: Some(77),
             name: "房租".to_string(),
-            amount_yuan: "2000.00".to_string(),
+            amount_cents: 200000,
             bill_type: "支出".to_string(),
             frequency: "weekly".to_string(),
             next_date: "2026-03-02".to_string(),
@@ -421,9 +425,9 @@ fn networth_calendar_insights_and_chart_shapes_match_current_runtime() {
         date("2026-03-10"),
     );
     assert_eq!(calendar.events[0].date, "2026-03-01");
-    assert_eq!(calendar.events[0].income, 5.0);
-    assert_eq!(calendar.events[0].expense, 18.5);
-    assert_eq!(calendar.events[0].net, -13.5);
+    assert_eq!(calendar.events[0].income_cents, 500);
+    assert_eq!(calendar.events[0].expense_cents, 1850);
+    assert_eq!(calendar.events[0].net_cents, -1350);
     assert_eq!(calendar.recurring_projections.len(), 2);
     assert_eq!(
         build_calendar_events_response(&calendar)["data"]["recurringProjections"][0]["type"],
@@ -454,21 +458,21 @@ fn networth_calendar_insights_and_chart_shapes_match_current_runtime() {
         .any(|item| item["type"] == "large_transaction" && item["category"] == "奢侈"));
 
     let report = json!({
-        "summary": {"total_income": 120.125, "total_expense": -35.567},
+        "summary": {"total_income_cents": 12013, "total_expense_cents": -3557},
         "total_records": 3,
-        "by_category": {"餐饮": {"total": -35.567}},
-        "by_type": {"支出": {"total": -35.567}},
-        "trend": [{"date": "2026-03-01", "income": 1, "expense": 2, "net": -1}],
-        "top_expenses": [{"amount": 35.567}],
-        "top_income": [{"amount": 120.125}],
+        "by_category": {"餐饮": {"total_cents": -3557}},
+        "by_type": {"支出": {"total_cents": -3557}},
+        "trend": [{"date": "2026-03-01", "income_cents": 100, "expense_cents": 200, "net_cents": -100}],
+        "top_expenses": [{"amount_cents": 3557}],
+        "top_income": [{"amount_cents": 12013}],
         "period": "month",
         "start_date": "2026-03-01",
         "end_date": "2026-03-31",
     });
     let overview = build_overview_result_from_report(&report);
-    assert_eq!(overview["total_income"], 120.13);
-    assert_eq!(overview["total_expense"], 35.57);
-    assert_eq!(overview["net_income"], 84.56);
+    assert_eq!(overview["total_income_cents"], 12013);
+    assert_eq!(overview["total_expense_cents"], 3557);
+    assert_eq!(overview["net_income_cents"], 8456);
     assert_eq!(
         build_statistics_report_chart_plan(&report),
         vec![
@@ -486,17 +490,21 @@ fn networth_calendar_insights_and_chart_shapes_match_current_runtime() {
     let analyzer_bills = vec![
         bill(20, "2026-03-01T08:00:00", "支出", "-12.34"),
         bill(21, "2026-03-02T08:00:00", "收入", "100.00"),
+        bill(22, "2026-03-03T08:00:00", "支出", "-50.00"),
     ];
     let analyzer_report =
         build_statistics_analyzer_report("month", &analyzer_range, &analyzer_bills, "now");
-    assert_eq!(analyzer_report["summary"]["total_income"], 100.0);
-    assert_eq!(analyzer_report["summary"]["total_expense"], -12.34);
-    assert_eq!(analyzer_report["by_category"]["餐饮"]["count"], 2);
+    assert_eq!(analyzer_report["summary"]["total_income_cents"], 10000);
+    assert_eq!(analyzer_report["summary"]["total_expense_cents"], -6234);
+    assert_eq!(analyzer_report["summary"]["net_income_cents"], 3766);
+    assert_eq!(analyzer_report["by_category"]["餐饮"]["count"], 3);
     assert_eq!(analyzer_report["top_expenses"][0]["category"], "餐饮");
+    assert_eq!(analyzer_report["top_expenses"][0]["amount_cents"], -5000);
 
     let bucket = build_statistics_analyzer_trend_bucket("2026-03", &analyzer_bills);
-    assert_eq!(bucket.income, 100.0);
-    assert_eq!(bucket.expense, -12.34);
+    assert_eq!(bucket.income_cents, 10000);
+    assert_eq!(bucket.expense_cents, -6234);
+    assert_eq!(bucket.net_cents, 3766);
     assert_eq!(
         build_statistics_analyzer_trends_result("month", Some("餐饮"), &[bucket])["category"],
         "餐饮"
@@ -504,12 +512,12 @@ fn networth_calendar_insights_and_chart_shapes_match_current_runtime() {
     assert_eq!(
         build_statistics_analyzer_comparison_result("month", "category", &analyzer_bills)
             ["comparison"][0]["count"],
-        2
+        3
     );
     assert_eq!(
         build_statistics_analyzer_category_result("month", Some("餐饮"), &analyzer_bills)
             ["sub_categories"][0]["percentage"],
-        0.0
+        100.0
     );
 }
 
@@ -531,7 +539,7 @@ fn anomaly_bill(
         id: Some(id),
         date: date.to_string(),
         bill_type: "支出".to_string(),
-        amount_yuan: amount.to_string(),
+        amount_cents: cents(amount),
         main_category: main_category.to_string(),
         counterparty: counterparty.to_string(),
         ..Default::default()

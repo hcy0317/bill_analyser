@@ -352,8 +352,8 @@ function open({ budget: budgetData, type, usePrimaryCategoryOnly: usePrimaryOnly
     budget.value = Object.assign(new Budget(), budgetData);
     originalBudget.value = budgetData;
 
-    // 设置金额（budget.amount已经是分，直接使用，AmountInput会正确显示为元）
-    budgetAmountInCents.value = budget.value.amount;
+    // 设置金额（budget.amountCents 已经是分，直接使用，AmountInput 会正确显示为元）
+    budgetAmountInCents.value = budget.value.amountCents;
 
     // 如果是新建且指定了类型
     if (type !== undefined && !budget.value.id) {
@@ -466,7 +466,7 @@ async function save(): Promise<void> {
     }
 
     // AmountInput返回的值已经是分(cents)，直接使用
-    budget.value.amount = budgetAmountInCents.value;
+    budget.value.amountCents = budgetAmountInCents.value;
 
     // 转换日期
     if (startDateTime.value) {
@@ -496,7 +496,7 @@ async function save(): Promise<void> {
         category: budget.value.category,
         subCategory: budget.value.subCategory,
         categoryId: budget.value.categoryId,
-        amount: budget.value.amount,
+        amountCents: budget.value.amountCents,
         periodType: budget.value.periodType,
         startDate: budget.value.startDate,
         endDate: budget.value.endDate

@@ -199,9 +199,9 @@ export const useBudgetStore = defineStore('budget', () => {
                 budget.updateExecution(exec);
             } else {
                 // 重置执行数据
-                budget.spentAmount = 0;
+                budget.spentAmountCents = 0;
                 budget.executionRate = 0;
-                budget.remainingAmount = budget.amount;
+                budget.remainingAmountCents = budget.amountCents;
                 budget.isOverBudget = false;
                 budget.alertTriggered = false;
             }

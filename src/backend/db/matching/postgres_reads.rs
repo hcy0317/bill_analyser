@@ -458,7 +458,7 @@ fn bill_snapshot_from_row(row: &PgRow, prefix: &str) -> MatchingResult<Value> {
         "type": try_get_optional::<String>(row, &format!("{prefix}_transaction_type"))
             .map_err(DbError::from)?
             .unwrap_or_default(),
-        "amount": amount_cents as f64 / 100.0,
+        "amountCents": amount_cents,
         "counterparty": try_get_optional::<String>(row, &format!("{prefix}_merchant"))
             .map_err(DbError::from)?
             .unwrap_or_default(),

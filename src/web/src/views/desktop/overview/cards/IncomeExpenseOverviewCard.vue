@@ -16,11 +16,11 @@
             </v-btn>
         </v-card-text>
         <v-card-text class="mt-1 pb-1">
-            <div class="font-weight-semibold text-truncate text-h4 text-income me-2 mb-2" v-if="!loading || incomeAmount">{{ incomeAmount }}</div>
-            <v-skeleton-loader class="skeleton-no-margin mt-4 mb-8" type="text" width="120px" :loading="true" v-else-if="loading && !incomeAmount"></v-skeleton-loader>
-            <div class="text-truncate text-h5 text-expense" v-if="!loading || expenseAmount">{{ expenseAmount }}</div>
-            <v-skeleton-loader class="skeleton-no-margin mb-1" style="padding-bottom: 2px" type="text" width="120px" :loading="true" v-else-if="loading && !expenseAmount"></v-skeleton-loader>
-            <div class="text-truncate text-h5 mt-2 mb-7" style="padding-bottom: 2px" v-if="!loading && !incomeAmount && !expenseAmount">{{ tt('No data') }}</div>
+            <div class="font-weight-semibold text-truncate text-h4 text-income me-2 mb-2" v-if="!loading || incomeText">{{ incomeText }}</div>
+            <v-skeleton-loader class="skeleton-no-margin mt-4 mb-8" type="text" width="120px" :loading="true" v-else-if="loading && !incomeText"></v-skeleton-loader>
+            <div class="text-truncate text-h5 text-expense" v-if="!loading || expenseText">{{ expenseText }}</div>
+            <v-skeleton-loader class="skeleton-no-margin mb-1" style="padding-bottom: 2px" type="text" width="120px" :loading="true" v-else-if="loading && !expenseText"></v-skeleton-loader>
+            <div class="text-truncate text-h5 mt-2 mb-7" style="padding-bottom: 2px" v-if="!loading && !incomeText && !expenseText">{{ tt('No data') }}</div>
         </v-card-text>
         <v-card-text class="mt-6">
             <span class="text-caption">{{ datetime }}</span>
@@ -40,8 +40,8 @@ defineProps<{
     disabled: boolean;
     icon: string;
     title: string;
-    expenseAmount: string;
-    incomeAmount: string;
+    expenseText: string;
+    incomeText: string;
     datetime: string;
 }>();
 
