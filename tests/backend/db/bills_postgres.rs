@@ -1,8 +1,8 @@
 use std::error::Error;
 
 use bill_analyser_db::{
-    get_postgres_bill_by_id, get_postgres_bill_tags, query_postgres_bills, BillCategoryFilter,
-    BillFilters, PostgresPool,
+    create_postgres_bill, get_postgres_bill_by_id, get_postgres_bill_tags, query_postgres_bills,
+    BillCategoryFilter, BillCreateDraft, BillFilters, PostgresPool,
 };
 use serde_json::{json, Value};
 use sqlx::Row;
@@ -105,6 +105,51 @@ async fn bills_postgres_queries_preserve_cents_filters_paging_and_user_scope(
             json!({"id": fixture.coffee_tag_id.to_string(), "name": "咖啡标签", "color": "#663300", "icon": "coffee"})
         ]
     );
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn create_bill_prefers_explicit_category_id_over_same_name_path() -> Result<(), Box<dyn Error>>
+{
+    let Some(test_db) =
+        postgres_test_support::isolated_postgres_database("bill_category_id_contract").await?
+    else {
+        return Ok(());
+    };
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "bill-category-id-contract").await?;
+    let account_id = insert_account(pool, user_id, "现金钱包").await?;
+    let explicit_category_id = insert_category(pool, user_id, "理财收益", "理财/理财收益").await?;
+    let path_category_id = insert_category(pool, user_id, "咖啡", "餐饮/咖啡").await?;
+
+    let bill_id = create_postgres_bill(
+        pool,
+        user_id,
+        &BillCreateDraft {
+            fields: serde_json::Map::from_iter([
+                ("date".to_string(), json!("2026-05-01 09:00:00")),
+                ("type".to_string(), json!("支出")),
+                ("amount".to_string(), json!(12.34)),
+                ("source_account_id".to_string(), json!(account_id)),
+                ("category_id".to_string(), json!(explicit_category_id)),
+                ("main_category".to_string(), json!("餐饮")),
+                ("sub_category".to_string(), json!("咖啡")),
+                ("counterparty".to_string(), json!("显式分类")),
+                ("description".to_string(), json!("category_id must win")),
+                ("payment_method".to_string(), json!("现金")),
+            ]),
+            tag_ids: Vec::new(),
+        },
+    )
+    .await?;
+
+    let bill = get_postgres_bill_by_id(pool, user_id, bill_id)
+        .await?
+        .expect("created bill");
+    assert_eq!(bill["category_id"], explicit_category_id.to_string());
+    assert_ne!(bill["category_id"], path_category_id.to_string());
 
     test_db.cleanup().await?;
     Ok(())

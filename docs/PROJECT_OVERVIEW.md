@@ -40,7 +40,7 @@ Rust HTTP 主入口在开始监听前会对配置的 PostgreSQL 运行 `src/back
 
 ## 导入链路
 
-导入链路由 Rust 完成 parser-first 上传、JSON parse、session/source/template/standard-row staging、dedup、转账 materialization、分类规则、recurring/learning/LLM decision、账户规则匹配、preview page、preview update/reclassify、confirm 与 cleanup。多文件 staging 与 preview row 落库使用分块批量写入；preview 分页、筛选、排序和跨页选择由 PostgreSQL 在 `import_preview_rows` 上执行，前端只保留当前页交互草稿。
+导入链路由 Rust 完成 parser-first 上传、JSON parse、session/source/template/standard-row staging、dedup、转账 materialization、分类规则、recurring/learning/LLM decision、账户规则匹配、preview page、preview update/reclassify、confirm 与 cleanup。多文件 staging 与 preview row 落库使用分块批量写入；preview 分页、筛选、排序和跨页选择由 PostgreSQL 在 `import_preview_rows` 上执行，跨页选择会保留“全部/有效/无效/需标注”子集语义，前端只保留当前页交互草稿。预览分类的 canonical `category_id` 会贯穿 draft、payload、mutation、筛选、confirm 和最终 bill 创建；正式账单创建收到显式 `category_id` 时优先按 user-scoped category id 校验，只有旧调用未提供 id 时才回退到分类 path/name 解析。
 
 multipart 上传并行执行 dedicated parser 检测，每个文件必须且只能命中一个 dedicated parser 才会进入标准账单解析。stage2 phase precedence 为：同批/跨批 dedup 与转账 materialization 先形成预览基底，分类规则与内置分类兜底先确定类型/分类并写入 `category_id`，recurring 与可自动应用的 learning projection 可继续改写类型、分类或显式账户，账户规则最后消费稳定后的预览类型、转账/投资上下文和仍为空的账户字段。确定性规则链未命中时，通过 Weaviate 召回派生 learning 建议。Weaviate metadata 本身不会触发自动改写。
 

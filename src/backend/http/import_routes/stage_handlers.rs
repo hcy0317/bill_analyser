@@ -2278,16 +2278,34 @@ pub async fn import_preview_selection_runtime_handler(
         preview_ids: Vec::new(),
         filters: filters.clone(),
     };
-    let selection_mode = match action.as_str() {
-        "select_none" => ImportPreviewSelectionMode::Deselect,
-        "invert" => ImportPreviewSelectionMode::Invert,
-        _ => ImportPreviewSelectionMode::Select,
+    let (selection_mode, selection_target) = match action.as_str() {
+        "select_valid" => (
+            ImportPreviewSelectionMode::Select,
+            ImportPreviewSelectionTarget::Valid,
+        ),
+        "select_invalid" | "select_needs_annotation" => (
+            ImportPreviewSelectionMode::Select,
+            ImportPreviewSelectionTarget::NeedsReview,
+        ),
+        "select_none" => (
+            ImportPreviewSelectionMode::Deselect,
+            ImportPreviewSelectionTarget::All,
+        ),
+        "invert" => (
+            ImportPreviewSelectionMode::Invert,
+            ImportPreviewSelectionTarget::All,
+        ),
+        _ => (
+            ImportPreviewSelectionMode::Select,
+            ImportPreviewSelectionTarget::All,
+        ),
     };
     let updated = match update_session_preview_selection_by_query(
         runtime.connection(),
         &session_id,
         user_id,
         selection_mode,
+        selection_target,
         &selection_request,
     ) {
         Ok(updated) => updated,

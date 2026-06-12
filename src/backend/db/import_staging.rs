@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sqlx::{postgres::PgRow, Postgres, QueryBuilder, Row};
 
-use crate::{create_postgres_bill, BillCreateDraft, DbError, DbResult, PostgresPool};
+use crate::{create_postgres_bill, BillCreateDraft, BillRecord, DbError, DbResult, PostgresPool};
 
 const LLM_MEMORY_PROMPT_TEXT_MAX_BYTES: usize = 16_384;
 const IMPORT_STAGING_BULK_INSERT_CHUNK_SIZE: usize = 500;
@@ -696,10 +696,7 @@ fn push_preview_query_predicates(
         push_account_predicate(query, alias, &value);
     }
     if let Some(value) = normalized_filter(filters.tag.as_deref()) {
-        query.push(" AND ");
-        query.push(alias);
-        query.push(".preview_payload->>'preview_parser_tags' ILIKE ");
-        query.push_bind(like_pattern(&value));
+        push_tag_predicate(query, alias, &value);
     }
     if let Some(value) = normalized_filter(filters.signal.as_deref()) {
         query.push(" AND (");
@@ -717,10 +714,7 @@ fn push_preview_query_predicates(
         query.push_bind(pattern);
     }
     if let Some(value) = normalized_filter(filters.annotation.as_deref()) {
-        query.push(" AND ");
-        query.push(alias);
-        query.push(".preview_payload#>>'{preview_matching_feedback,annotation}' ILIKE ");
-        query.push_bind(like_pattern(&value));
+        push_annotation_predicate(query, alias, &value);
     }
     if let Some(value) = normalized_filter(filters.description.as_deref()) {
         query.push(" AND (");
@@ -782,7 +776,7 @@ fn push_ilike_predicate(query: &mut QueryBuilder<'_, Postgres>, column: &str, va
 }
 
 fn push_category_predicate(query: &mut QueryBuilder<'_, Postgres>, alias: &str, value: &str) {
-    if matches!(value, "__none__" | "__invalid__") {
+    if value == "__none__" {
         query.push(" AND ");
         query.push(alias);
         query.push(".category_id IS NULL AND COALESCE(");
@@ -790,6 +784,11 @@ fn push_category_predicate(query: &mut QueryBuilder<'_, Postgres>, alias: &str, 
         query.push(".preview_payload->>'preview_main_category', '') = '' AND COALESCE(");
         query.push(alias);
         query.push(".preview_payload->>'preview_sub_category', '') = ''");
+        return;
+    }
+    if value == "__invalid__" {
+        query.push(" AND ");
+        push_preview_missing_category_condition(query, alias);
         return;
     }
     query.push(" AND (");
@@ -808,12 +807,19 @@ fn push_category_predicate(query: &mut QueryBuilder<'_, Postgres>, alias: &str, 
 }
 
 fn push_account_predicate(query: &mut QueryBuilder<'_, Postgres>, alias: &str, value: &str) {
-    if matches!(value, "__none__" | "__invalid__") {
+    if value == "__none__" {
         query.push(" AND ");
         query.push(alias);
         query.push(".account_id IS NULL AND ");
         query.push(alias);
-        query.push(".transfer_target_account_id IS NULL");
+        query.push(".transfer_target_account_id IS NULL AND COALESCE(");
+        query.push(alias);
+        query.push(".payment_method, '') = ''");
+        return;
+    }
+    if value == "__invalid__" {
+        query.push(" AND ");
+        push_preview_account_filter_invalid_condition(query, alias);
         return;
     }
     query.push(" AND (");
@@ -825,6 +831,164 @@ fn push_account_predicate(query: &mut QueryBuilder<'_, Postgres>, alias: &str, v
     query.push(".transfer_target_account_id::text = ");
     query.push_bind(value.to_string());
     query.push(")");
+}
+
+fn push_tag_predicate(query: &mut QueryBuilder<'_, Postgres>, alias: &str, value: &str) {
+    if matches!(value, "__none__" | "__invalid__") {
+        query.push(" AND ");
+        push_preview_empty_parser_tags_condition(query, alias);
+        return;
+    }
+    query.push(" AND ");
+    query.push(alias);
+    query.push(".preview_payload->>'preview_parser_tags' ILIKE ");
+    query.push_bind(like_pattern(value));
+}
+
+fn push_annotation_predicate(query: &mut QueryBuilder<'_, Postgres>, alias: &str, value: &str) {
+    match value {
+        "needs-review" => {
+            query.push(" AND ");
+            push_preview_current_review_condition(query, alias);
+        }
+        "no-issues" => {
+            query.push(" AND NOT ");
+            push_preview_current_review_condition(query, alias);
+        }
+        _ => {
+            query.push(" AND ");
+            query.push(alias);
+            query.push(".preview_payload#>>'{preview_matching_feedback,annotation}' ILIKE ");
+            query.push_bind(like_pattern(value));
+        }
+    }
+}
+
+fn push_preview_selection_target_predicates(
+    query: &mut QueryBuilder<'_, Postgres>,
+    target: ImportPreviewSelectionTarget,
+    alias: &str,
+) {
+    match target {
+        ImportPreviewSelectionTarget::All => {}
+        ImportPreviewSelectionTarget::Valid => {
+            query.push(" AND NOT ");
+            push_preview_current_review_condition(query, alias);
+        }
+        ImportPreviewSelectionTarget::NeedsReview => {
+            query.push(" AND ");
+            push_preview_current_review_condition(query, alias);
+        }
+    }
+}
+
+fn push_preview_current_review_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
+    query.push("(");
+    push_preview_missing_category_condition(query, alias);
+    query.push(" OR ");
+    push_preview_missing_source_account_condition(query, alias);
+    query.push(" OR ");
+    push_preview_missing_destination_account_condition(query, alias);
+    query.push(" OR ");
+    push_preview_same_transfer_accounts_condition(query, alias);
+    query.push(")");
+}
+
+fn push_preview_missing_category_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
+    query.push("(");
+    push_preview_category_required_type_condition(query, alias);
+    query.push(" AND ");
+    query.push(alias);
+    query.push(".category_id IS NULL)");
+}
+
+fn push_preview_missing_source_account_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+) {
+    query.push(alias);
+    query.push(".account_id IS NULL");
+}
+
+fn push_preview_missing_destination_account_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+) {
+    query.push("(");
+    push_preview_destination_account_type_condition(query, alias);
+    query.push(" AND ");
+    query.push(alias);
+    query.push(".transfer_target_account_id IS NULL)");
+}
+
+fn push_preview_same_transfer_accounts_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+) {
+    query.push("(");
+    push_preview_destination_account_type_condition(query, alias);
+    query.push(" AND ");
+    query.push(alias);
+    query.push(".account_id IS NOT NULL AND ");
+    query.push(alias);
+    query.push(".transfer_target_account_id IS NOT NULL AND ");
+    query.push(alias);
+    query.push(".account_id = ");
+    query.push(alias);
+    query.push(".transfer_target_account_id)");
+}
+
+fn push_preview_category_required_type_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+) {
+    query.push("lower(");
+    query.push(alias);
+    query.push(".transaction_type) IN ('收入', 'income', '2', '支出', 'expense', '3', '转账', 'transfer', '4', '投资', 'investment', '5')");
+}
+
+fn push_preview_destination_account_type_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+) {
+    query.push("lower(");
+    query.push(alias);
+    query.push(".transaction_type) IN ('转账', 'transfer', '4', '投资', 'investment', '5')");
+}
+
+fn push_preview_transfer_filter_type_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+) {
+    query.push("lower(");
+    query.push(alias);
+    query.push(".transaction_type) IN ('转账', 'transfer', '4')");
+}
+
+fn push_preview_account_filter_invalid_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+) {
+    query.push("((");
+    query.push("NOT (");
+    push_preview_transfer_filter_type_condition(query, alias);
+    query.push(") AND ");
+    query.push(alias);
+    query.push(".account_id IS NULL) OR (");
+    push_preview_transfer_filter_type_condition(query, alias);
+    query.push(" AND (");
+    query.push(alias);
+    query.push(".account_id IS NULL OR ");
+    query.push(alias);
+    query.push(".transfer_target_account_id IS NULL)))");
+}
+
+fn push_preview_empty_parser_tags_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
+    query.push("(COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(");
+    query.push(alias);
+    query.push(".preview_payload->'preview_parser_tags') = 'array' THEN ");
+    query.push(alias);
+    query.push(".preview_payload->'preview_parser_tags' ELSE '[]'::jsonb END), 0) = 0)");
 }
 
 pub fn get_preview_by_ids(
@@ -1016,13 +1180,14 @@ pub fn update_session_preview_selection_by_query(
     session_id: &str,
     user_id: UserId,
     mode: ImportPreviewSelectionMode,
+    target: ImportPreviewSelectionTarget,
     request: &ImportPreviewPageRequest,
 ) -> DbResult<usize> {
     block_on_db(async move {
         let session_db_id = session_db_id(pool, session_id, user_id).await?;
         let user_id_i64 = user_id_i64(user_id)?;
         let mut query =
-            build_preview_selection_update_query(session_db_id, user_id_i64, mode, request);
+            build_preview_selection_update_query(session_db_id, user_id_i64, mode, target, request);
         let changed = query.build().execute(pool).await?.rows_affected();
         Ok(usize::try_from(changed).unwrap_or(usize::MAX))
     })
@@ -1032,6 +1197,7 @@ fn build_preview_selection_update_query(
     session_db_id: i64,
     user_id: i64,
     mode: ImportPreviewSelectionMode,
+    target: ImportPreviewSelectionTarget,
     request: &ImportPreviewPageRequest,
 ) -> QueryBuilder<'static, Postgres> {
     let mut query = QueryBuilder::<Postgres>::new("UPDATE import_preview_rows p SET selected = ");
@@ -1061,6 +1227,7 @@ fn build_preview_selection_update_query(
     query.push(" AND p.user_id = ");
     query.push_bind(user_id);
     push_preview_query_predicates(&mut query, &request.filters, "p");
+    push_preview_selection_target_predicates(&mut query, target, "p");
     if !request.preview_ids.is_empty() {
         query.push(" AND p.id IN (");
         let mut separated = query.separated(", ");
@@ -1740,36 +1907,7 @@ pub fn confirm_preview_to_bills_with_ack(
                 ));
                 continue;
             }
-            let mut fields = Map::new();
-            fields.insert("date".to_string(), json!(preview.preview_date));
-            fields.insert("type".to_string(), json!(preview.preview_type));
-            fields.insert("amount".to_string(), json!(preview.preview_amount));
-            fields.insert(
-                "counterparty".to_string(),
-                json!(preview.preview_counterparty),
-            );
-            fields.insert(
-                "description".to_string(),
-                json!(preview.preview_description),
-            );
-            fields.insert(
-                "payment_method".to_string(),
-                json!(preview.preview_payment_method),
-            );
-            fields.insert(
-                "main_category".to_string(),
-                json!(preview.preview_main_category),
-            );
-            fields.insert(
-                "sub_category".to_string(),
-                json!(preview.preview_sub_category),
-            );
-            if let Some(value) = preview.preview_source_account_id {
-                fields.insert("source_account_id".to_string(), json!(value));
-            }
-            if let Some(value) = preview.preview_destination_account_id {
-                fields.insert("destination_account_id".to_string(), json!(value));
-            }
+            let fields = bill_create_fields_from_preview(&preview);
             match create_postgres_bill(
                 pool,
                 user_id_i64,
@@ -1797,6 +1935,43 @@ pub fn confirm_preview_to_bills_with_ack(
         )?;
         Ok(result)
     })
+}
+
+fn bill_create_fields_from_preview(preview: &ImportPreviewRow) -> BillRecord {
+    let mut fields = Map::new();
+    fields.insert("date".to_string(), json!(preview.preview_date));
+    fields.insert("type".to_string(), json!(preview.preview_type));
+    fields.insert("amount".to_string(), json!(preview.preview_amount));
+    fields.insert(
+        "counterparty".to_string(),
+        json!(preview.preview_counterparty),
+    );
+    fields.insert(
+        "description".to_string(),
+        json!(preview.preview_description),
+    );
+    fields.insert(
+        "payment_method".to_string(),
+        json!(preview.preview_payment_method),
+    );
+    fields.insert(
+        "main_category".to_string(),
+        json!(preview.preview_main_category),
+    );
+    fields.insert(
+        "sub_category".to_string(),
+        json!(preview.preview_sub_category),
+    );
+    if let Some(value) = preview.category_id {
+        fields.insert("category_id".to_string(), json!(value));
+    }
+    if let Some(value) = preview.preview_source_account_id {
+        fields.insert("source_account_id".to_string(), json!(value));
+    }
+    if let Some(value) = preview.preview_destination_account_id {
+        fields.insert("destination_account_id".to_string(), json!(value));
+    }
+    fields
 }
 
 pub fn clear_session_data(
@@ -3448,24 +3623,31 @@ fn category_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bool
     let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) else {
         return true;
     };
-    if matches!(filter, "__none__" | "__invalid__") {
+    if filter == "__none__" {
         return row.category_id.is_none()
             && row.preview_main_category.trim().is_empty()
             && row.preview_sub_category.trim().is_empty();
     }
+    if filter == "__invalid__" {
+        return preview_has_missing_category_issue(row);
+    }
     row.category_id
         .is_some_and(|category_id| category_id.to_string() == filter)
-        || text_filter_matches(Some(filter), &row.preview_main_category)
-        || text_filter_matches(Some(filter), &row.preview_sub_category)
+        || row.preview_main_category == filter
+        || row.preview_sub_category == filter
 }
 
 fn account_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bool {
     let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) else {
         return true;
     };
-    if matches!(filter, "__none__" | "__invalid__") {
+    if filter == "__none__" {
         return row.preview_source_account_id.is_none()
-            && row.preview_destination_account_id.is_none();
+            && row.preview_destination_account_id.is_none()
+            && row.preview_payment_method.trim().is_empty();
+    }
+    if filter == "__invalid__" {
+        return preview_account_filter_invalid_matches(row);
     }
     let source = row.preview_source_account_id.map(|value| value.to_string());
     let destination = row
@@ -3486,6 +3668,9 @@ fn tag_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bool {
     let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) else {
         return true;
     };
+    if matches!(filter, "__none__" | "__invalid__") {
+        return row.preview_parser_tags.is_empty();
+    }
     row.preview_parser_tags
         .iter()
         .any(|tag| tag.eq_ignore_ascii_case(filter) || text_filter_matches(Some(filter), tag))
@@ -3503,6 +3688,12 @@ fn annotation_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bo
     let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) else {
         return true;
     };
+    if filter == "needs-review" {
+        return preview_requires_review(row);
+    }
+    if filter == "no-issues" {
+        return !preview_requires_review(row);
+    }
     let filter = filter.to_ascii_lowercase();
     row.preview_matching_feedback
         .get("annotation")
@@ -3573,10 +3764,70 @@ fn preview_type_sort_rank(value: &str) -> u8 {
 }
 
 fn preview_requires_review(preview: &ImportPreviewRow) -> bool {
-    preview.preview_type == "转账"
-        && (preview.preview_source_account_id.is_none()
-            || preview.preview_destination_account_id.is_none()
-            || preview.preview_source_account_id == preview.preview_destination_account_id)
+    preview_has_missing_category_issue(preview)
+        || preview_has_missing_source_account_issue(preview)
+        || preview_has_missing_destination_account_issue(preview)
+        || preview_has_same_transfer_accounts_issue(preview)
+}
+
+fn preview_has_missing_category_issue(preview: &ImportPreviewRow) -> bool {
+    preview_category_required(&preview.preview_type) && preview.category_id.is_none()
+}
+
+fn preview_has_missing_source_account_issue(preview: &ImportPreviewRow) -> bool {
+    preview.preview_source_account_id.is_none()
+}
+
+fn preview_has_missing_destination_account_issue(preview: &ImportPreviewRow) -> bool {
+    preview_destination_account_required(&preview.preview_type)
+        && preview.preview_destination_account_id.is_none()
+}
+
+fn preview_has_same_transfer_accounts_issue(preview: &ImportPreviewRow) -> bool {
+    preview_destination_account_required(&preview.preview_type)
+        && preview.preview_source_account_id.is_some()
+        && preview.preview_destination_account_id.is_some()
+        && preview.preview_source_account_id == preview.preview_destination_account_id
+}
+
+fn preview_account_filter_invalid_matches(preview: &ImportPreviewRow) -> bool {
+    if preview_transfer_filter_type(&preview.preview_type) {
+        return preview.preview_source_account_id.is_none()
+            || preview.preview_destination_account_id.is_none();
+    }
+    preview.preview_source_account_id.is_none()
+}
+
+fn preview_category_required(preview_type: &str) -> bool {
+    matches!(
+        preview_type.trim().to_ascii_lowercase().as_str(),
+        "收入"
+            | "income"
+            | "2"
+            | "支出"
+            | "expense"
+            | "3"
+            | "转账"
+            | "transfer"
+            | "4"
+            | "投资"
+            | "investment"
+            | "5"
+    )
+}
+
+fn preview_destination_account_required(preview_type: &str) -> bool {
+    matches!(
+        preview_type.trim().to_ascii_lowercase().as_str(),
+        "转账" | "transfer" | "4" | "投资" | "investment" | "5"
+    )
+}
+
+fn preview_transfer_filter_type(preview_type: &str) -> bool {
+    matches!(
+        preview_type.trim().to_ascii_lowercase().as_str(),
+        "转账" | "transfer" | "4"
+    )
 }
 
 fn set_feedback_review_status(mut feedback: Value, key: &str, status: &str) -> Value {
@@ -3871,6 +4122,54 @@ mod import_preview_query_tests {
             rows.into_iter().map(|row| row.id).collect::<Vec<_>>(),
             vec![3]
         );
+
+        let mut named_without_identity = preview_row(4);
+        named_without_identity.category_id = None;
+        named_without_identity.preview_main_category = "理财".to_string();
+        named_without_identity.preview_sub_category = "理财收益".to_string();
+        let invalid_filters = ImportPreviewQueryFilters {
+            category: Some("__invalid__".to_string()),
+            ..ImportPreviewQueryFilters::default()
+        };
+        let rows = apply_preview_filters(vec![named_without_identity], &invalid_filters);
+        assert_eq!(
+            rows.into_iter().map(|row| row.id).collect::<Vec<_>>(),
+            vec![4]
+        );
+    }
+
+    #[test]
+    fn preview_filters_preserve_account_tag_and_annotation_sentinels() {
+        let mut valid = preview_row(1);
+        valid.category_id = Some(42);
+        valid.preview_source_account_id = Some(11);
+        valid.preview_parser_tags = vec!["工资".to_string()];
+
+        let mut invalid = preview_row(2);
+        invalid.preview_source_account_id = None;
+        invalid.preview_parser_tags.clear();
+
+        let invalid_filters = ImportPreviewQueryFilters {
+            account: Some("__invalid__".to_string()),
+            tag: Some("__invalid__".to_string()),
+            annotation: Some("needs-review".to_string()),
+            ..ImportPreviewQueryFilters::default()
+        };
+        let rows = apply_preview_filters(vec![valid.clone(), invalid.clone()], &invalid_filters);
+        assert_eq!(
+            rows.into_iter().map(|row| row.id).collect::<Vec<_>>(),
+            vec![2]
+        );
+
+        let no_issue_filters = ImportPreviewQueryFilters {
+            annotation: Some("no-issues".to_string()),
+            ..ImportPreviewQueryFilters::default()
+        };
+        let rows = apply_preview_filters(vec![valid, invalid], &no_issue_filters);
+        assert_eq!(
+            rows.into_iter().map(|row| row.id).collect::<Vec<_>>(),
+            vec![1]
+        );
     }
 
     #[test]
@@ -3960,6 +4259,30 @@ mod import_preview_query_tests {
     }
 
     #[test]
+    fn preview_sql_query_builder_preserves_invalid_sentinel_semantics() {
+        let filters = ImportPreviewQueryFilters {
+            category: Some("__invalid__".to_string()),
+            account: Some("__invalid__".to_string()),
+            tag: Some("__invalid__".to_string()),
+            annotation: Some("needs-review".to_string()),
+            ..ImportPreviewQueryFilters::default()
+        };
+        let mut query = QueryBuilder::<Postgres>::new(
+            "SELECT p.* FROM import_preview_rows p WHERE p.session_id = ",
+        );
+        query.push_bind(1_i64);
+        push_preview_query_predicates(&mut query, &filters, "p");
+
+        let sql = query.build().sql().to_string();
+
+        assert!(sql.contains("lower(p.transaction_type) IN ('收入'"));
+        assert!(sql.contains("p.category_id IS NULL"));
+        assert!(sql.contains("NOT (lower(p.transaction_type) IN ('转账'"));
+        assert!(sql.contains("jsonb_array_length"));
+        assert!(sql.contains("p.transfer_target_account_id IS NULL"));
+    }
+
+    #[test]
     fn preview_page_result_builder_filters_sorts_and_pages_rows() {
         let mut first = preview_row(1);
         first.preview_selected = true;
@@ -4005,6 +4328,20 @@ mod import_preview_query_tests {
     }
 
     #[test]
+    fn bill_create_fields_from_preview_preserves_category_identity() {
+        let mut row = preview_row(1);
+        row.category_id = Some(42);
+        row.preview_main_category = "理财".to_string();
+        row.preview_sub_category = "理财收益".to_string();
+
+        let fields = bill_create_fields_from_preview(&row);
+
+        assert_eq!(fields.get("category_id"), Some(&json!(42)));
+        assert_eq!(fields.get("main_category"), Some(&json!("理财")));
+        assert_eq!(fields.get("sub_category"), Some(&json!("理财收益")));
+    }
+
+    #[test]
     fn preview_selection_update_query_covers_modes_filters_and_ids() {
         let request = ImportPreviewPageRequest {
             preview_ids: vec![11, 12],
@@ -4020,6 +4357,7 @@ mod import_preview_query_tests {
             1,
             2,
             ImportPreviewSelectionMode::Select,
+            ImportPreviewSelectionTarget::All,
             &request,
         );
         let select_sql = select_query.build().sql().to_string();
@@ -4033,6 +4371,7 @@ mod import_preview_query_tests {
             1,
             2,
             ImportPreviewSelectionMode::Deselect,
+            ImportPreviewSelectionTarget::All,
             &ImportPreviewPageRequest::default(),
         );
         let deselect_sql = deselect_query.build().sql().to_string();
@@ -4042,10 +4381,33 @@ mod import_preview_query_tests {
             1,
             2,
             ImportPreviewSelectionMode::Invert,
+            ImportPreviewSelectionTarget::All,
             &ImportPreviewPageRequest::default(),
         );
         let invert_sql = invert_query.build().sql().to_string();
         assert!(invert_sql.contains("NOT p.selected"));
+
+        let mut needs_review_query = build_preview_selection_update_query(
+            1,
+            2,
+            ImportPreviewSelectionMode::Select,
+            ImportPreviewSelectionTarget::NeedsReview,
+            &ImportPreviewPageRequest::default(),
+        );
+        let needs_review_sql = needs_review_query.build().sql().to_string();
+        assert!(needs_review_sql.contains("p.category_id IS NULL"));
+        assert!(needs_review_sql.contains("p.account_id IS NULL"));
+        assert!(needs_review_sql.contains("p.transfer_target_account_id IS NULL"));
+
+        let mut valid_query = build_preview_selection_update_query(
+            1,
+            2,
+            ImportPreviewSelectionMode::Select,
+            ImportPreviewSelectionTarget::Valid,
+            &ImportPreviewPageRequest::default(),
+        );
+        let valid_sql = valid_query.build().sql().to_string();
+        assert!(valid_sql.contains("AND NOT ("));
     }
 
     #[test]
@@ -4198,6 +4560,7 @@ mod import_preview_query_tests {
         let mut row = preview_row(1);
         row.preview_source_account_id = None;
         row.preview_destination_account_id = None;
+        row.preview_payment_method.clear();
         row.preview_matching_feedback = json!([
             {"learning": ["needs_review", {"reason": "manual"}]},
             12,

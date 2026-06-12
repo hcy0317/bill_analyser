@@ -681,6 +681,9 @@ async fn resolve_postgres_category_id_for_fields(
     user_id: i64,
     fields: &BillRecord,
 ) -> DbResult<Option<i64>> {
+    if let Some(category_id) = explicit_category_id_from_fields(fields) {
+        return resolve_postgres_category_id_by_id(pool, user_id, category_id).await;
+    }
     let Some(main_category) = optional_value_string(fields.get("main_category")) else {
         return Ok(None);
     };
@@ -714,6 +717,32 @@ async fn resolve_postgres_category_id_for_fields(
     .await?
     .map(|row| row.try_get("id").map_err(DbError::from))
     .transpose()
+}
+
+async fn resolve_postgres_category_id_by_id(
+    pool: &PostgresPool,
+    user_id: i64,
+    category_id: i64,
+) -> DbResult<Option<i64>> {
+    sqlx::query(
+        r#"
+        SELECT id
+        FROM categories
+        WHERE user_id = $1 AND id = $2 AND is_active = true
+        LIMIT 1
+        "#,
+    )
+    .bind(user_id)
+    .bind(category_id)
+    .fetch_optional(pool)
+    .await?
+    .map(|row| row.try_get("id").map_err(DbError::from))
+    .transpose()
+}
+
+fn explicit_category_id_from_fields(fields: &BillRecord) -> Option<i64> {
+    positive_value_i64(fields.get("category_id"))
+        .or_else(|| positive_value_i64(fields.get("categoryId")))
 }
 
 async fn replace_postgres_bill_tags(
@@ -1329,4 +1358,26 @@ fn insert_timestamp(record: &mut Map<String, Value>, key: &str, timestamp: DateT
                 .to_string(),
         ),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn explicit_category_id_from_fields_accepts_canonical_identity_keys() {
+        let mut fields = BillRecord::new();
+        assert_eq!(explicit_category_id_from_fields(&fields), None);
+
+        fields.insert("category_id".to_string(), json!(42));
+        assert_eq!(explicit_category_id_from_fields(&fields), Some(42));
+
+        fields.clear();
+        fields.insert("categoryId".to_string(), json!("43"));
+        assert_eq!(explicit_category_id_from_fields(&fields), Some(43));
+
+        fields.insert("category_id".to_string(), json!(0));
+        assert_eq!(explicit_category_id_from_fields(&fields), Some(43));
+    }
 }

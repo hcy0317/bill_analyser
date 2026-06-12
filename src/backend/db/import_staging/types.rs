@@ -270,6 +270,13 @@ pub enum ImportPreviewSelectionMode {
     Invert,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportPreviewSelectionTarget {
+    All,
+    Valid,
+    NeedsReview,
+}
+
 impl Default for ImportPreviewPageRequest {
     fn default() -> Self {
         Self {

@@ -86,9 +86,9 @@ use bill_analyser_db::{
     ImportPreviewLlmReviewRequest, ImportPreviewLlmSuggestion, ImportPreviewPageRequest,
     ImportPreviewPatch, ImportPreviewPatchField, ImportPreviewPatchValue,
     ImportPreviewQueryFilters, ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate,
-    ImportPreviewRow, ImportPreviewSelectionMode, ImportSessionDraft, ImportSessionStatusUpdate,
-    ImportSourceDraft, ImportStandardRowDraft, LlmCandidateDraft, LlmConfigDraft, LlmConfigUpdate,
-    PostgresPool, PostgresRepositoryRuntime,
+    ImportPreviewRow, ImportPreviewSelectionMode, ImportPreviewSelectionTarget, ImportSessionDraft,
+    ImportSessionStatusUpdate, ImportSourceDraft, ImportStandardRowDraft, LlmCandidateDraft,
+    LlmConfigDraft, LlmConfigUpdate, PostgresPool, PostgresRepositoryRuntime,
 };
 use bill_analyser_parsers::{
     parse_dedicated_import_bytes_with_decision, parser_source_label, post_process_raw_bills,

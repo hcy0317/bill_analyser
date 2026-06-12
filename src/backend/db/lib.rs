@@ -142,9 +142,9 @@ pub use import_staging::{
     ImportPreviewPageRequest, ImportPreviewPageResult, ImportPreviewPatch, ImportPreviewPatchField,
     ImportPreviewPatchValue, ImportPreviewQueryFilters, ImportPreviewRecurringCandidate,
     ImportPreviewRecurringMatchUpdate, ImportPreviewRow, ImportPreviewSelectionMode,
-    ImportSessionDraft, ImportSessionRow, ImportSessionStatusUpdate, ImportSourceDraft,
-    ImportSourceRow, ImportStandardRow, ImportStandardRowDraft, LlmMemoryEventDraft,
-    LlmMemoryEventRow,
+    ImportPreviewSelectionTarget, ImportSessionDraft, ImportSessionRow, ImportSessionStatusUpdate,
+    ImportSourceDraft, ImportSourceRow, ImportStandardRow, ImportStandardRowDraft,
+    LlmMemoryEventDraft, LlmMemoryEventRow,
 };
 pub use llm::{
     accept_postgres_llm_candidate, activate_postgres_llm_config, count_postgres_llm_candidates,
