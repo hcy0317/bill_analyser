@@ -5032,6 +5032,15 @@ async function applyServerPagedSelection(action: ServerPagedSelectionAction): Pr
         return false;
     }
 
+    if (serverPagedSelectionBusy.value) {
+        return true;
+    }
+
+    const selectionSnapshot = importTransactions.value.map(transaction => ({
+        transaction,
+        selected: transaction.selected
+    }));
+    applySelectionActionToLocalTransactions(action, importTransactions.value);
     serverPagedSelectionBusy.value = true;
     try {
         const token = getCurrentToken();
@@ -5061,7 +5070,6 @@ async function applyServerPagedSelection(action: ServerPagedSelectionAction): Pr
         }
 
         serverPagedSelectionMetadataOverride.value = result.data?.metadata || null;
-        applySelectionActionToLocalTransactions(action, importTransactions.value);
         serverPagedDrafts.value = new Map();
         serverPagedSelectionBaselines.value = new Map();
         recordServerPagedSelectionBaselines(importTransactions.value);
@@ -5070,6 +5078,9 @@ async function applyServerPagedSelection(action: ServerPagedSelectionAction): Pr
             force: true
         });
     } catch (error) {
+        for (const { transaction, selected } of selectionSnapshot) {
+            transaction.selected = selected;
+        }
         snackbar.value?.showError(getActionErrorMessage(error, 'Failed to update preview selection'));
     } finally {
         serverPagedSelectionBusy.value = false;

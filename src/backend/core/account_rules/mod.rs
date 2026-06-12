@@ -5,7 +5,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::category_rules::match_rule_expression;
+use crate::category_rules::{
+    compile_rule_expression, match_rule_expression, RuleExpressionNodeDto,
+};
 
 pub const ACCOUNT_ROLE_ANY: &str = "any";
 pub const ACCOUNT_ROLE_SOURCE: &str = "source";
@@ -182,29 +184,31 @@ pub fn match_account_rules(
             continue;
         }
         let field_values = context.contextual_field_values();
-        let combined_text = field_values
-            .iter()
-            .map(|(_, value)| value.as_str())
-            .filter(|value| !value.trim().is_empty())
-            .collect::<Vec<_>>()
-            .join(" ");
-        if combined_text.is_empty()
-            || !match_rule_expression(&combined_text, &rule.rule_expression, rule.regex_enabled)
-        {
-            continue;
-        }
         let matched_fields = field_values
             .iter()
             .filter(|(_, value)| {
                 !value.trim().is_empty()
-                    && match_rule_expression(value, &rule.rule_expression, rule.regex_enabled)
+                    && match_account_rule_expression(
+                        value,
+                        &rule.rule_expression,
+                        rule.regex_enabled,
+                    )
             })
             .map(|(field, _)| field.clone())
             .collect::<Vec<_>>();
+        let fallback_used = matched_fields.is_empty()
+            && account_rule_cross_field_match(
+                &field_values,
+                &rule.rule_expression,
+                rule.regex_enabled,
+            );
+        if matched_fields.is_empty() && !fallback_used {
+            continue;
+        }
         return Some(AccountRuleMatch {
             account_id: rule.account_id,
             rule_id: rule.rule_id,
-            fallback_used: matched_fields.is_empty(),
+            fallback_used,
             matched_fields,
             priority: rule.priority,
             account_role_scope: requested_role_scope.clone(),
@@ -212,6 +216,147 @@ pub fn match_account_rules(
         });
     }
     None
+}
+
+fn match_account_rule_expression(text: &str, expr: &str, regex_enabled: bool) -> bool {
+    if regex_enabled {
+        return match_rule_expression(text, expr, true);
+    }
+    let compiled = compile_rule_expression(expr, false);
+    if compiled.is_empty || text.trim().is_empty() {
+        return false;
+    }
+    compiled
+        .expression_ast
+        .as_ref()
+        .is_some_and(|expression_ast| match_account_rule_expression_node(text, expression_ast))
+}
+
+fn match_account_rule_expression_node(text: &str, node: &RuleExpressionNodeDto) -> bool {
+    match node.kind.as_str() {
+        "all" => {
+            !node.children.is_empty()
+                && node
+                    .children
+                    .iter()
+                    .all(|child| match_account_rule_expression_node(text, child))
+        }
+        "any" => node
+            .children
+            .iter()
+            .any(|child| match_account_rule_expression_node(text, child)),
+        "not" => {
+            node.children.len() == 1 && !match_account_rule_expression_node(text, &node.children[0])
+        }
+        "clause" if node.operator == "OR" => node
+            .patterns
+            .iter()
+            .any(|pattern| account_rule_plain_pattern_matches(text, pattern)),
+        "clause" if node.operator == "AND" => {
+            !node.patterns.is_empty()
+                && node
+                    .patterns
+                    .iter()
+                    .all(|pattern| account_rule_plain_pattern_matches(text, pattern))
+        }
+        "clause" if node.operator == "NOT" => !node
+            .patterns
+            .iter()
+            .any(|pattern| account_rule_plain_pattern_matches(text, pattern)),
+        _ => false,
+    }
+}
+
+fn account_rule_cross_field_match(
+    field_values: &[(String, String)],
+    expr: &str,
+    regex_enabled: bool,
+) -> bool {
+    let values = field_values
+        .iter()
+        .map(|(_, value)| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        return false;
+    }
+    let combined_text = values.join(" ");
+    if regex_enabled {
+        return match_rule_expression(&combined_text, expr, true);
+    }
+    let compiled = compile_rule_expression(expr, false);
+    if compiled.is_empty || compiled.and_patterns.is_empty() || !compiled.or_blocks.is_empty() {
+        return false;
+    }
+    if compiled.not_patterns.iter().any(|pattern| {
+        values
+            .iter()
+            .any(|value| account_rule_plain_pattern_matches(value, pattern))
+    }) {
+        return false;
+    }
+    compiled.and_patterns.iter().all(|pattern| {
+        values
+            .iter()
+            .any(|value| account_rule_plain_pattern_matches(value, pattern))
+    })
+}
+
+fn account_rule_plain_pattern_matches(text: &str, pattern: &str) -> bool {
+    let pattern = normalize_account_rule_match_piece(pattern);
+    if pattern.is_empty() {
+        return false;
+    }
+    let text = normalize_account_rule_match_piece(text);
+    if text == pattern {
+        return true;
+    }
+    account_rule_match_tokens(&text)
+        .into_iter()
+        .any(|token| token == pattern)
+}
+
+fn normalize_account_rule_match_piece(value: &str) -> String {
+    value.trim().to_lowercase()
+}
+
+fn account_rule_match_tokens(value: &str) -> Vec<String> {
+    value
+        .split(|ch: char| {
+            ch.is_whitespace()
+                || matches!(
+                    ch,
+                    ',' | '，'
+                        | ';'
+                        | '；'
+                        | ':'
+                        | '：'
+                        | '/'
+                        | '\\'
+                        | '|'
+                        | '('
+                        | ')'
+                        | '（'
+                        | '）'
+                        | '['
+                        | ']'
+                        | '【'
+                        | '】'
+                        | '{'
+                        | '}'
+                        | '<'
+                        | '>'
+                        | '《'
+                        | '》'
+                        | '-'
+                        | '_'
+                        | '+'
+                )
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
 }
 
 impl AccountRuleMatchContext {
@@ -304,8 +449,12 @@ fn json_value_text(value: &Value) -> String {
 mod tests {
     use serde_json::json;
 
+    use crate::category_rules::RuleExpressionNodeDto;
+
     use super::{
-        match_account_rules, normalize_account_role_scope, normalize_account_rule_field_scope,
+        account_rule_cross_field_match, account_rule_plain_pattern_matches,
+        match_account_rule_expression, match_account_rule_expression_node, match_account_rules,
+        normalize_account_role_scope, normalize_account_rule_field_scope,
         normalize_transaction_type_scope, AccountRuleCandidate, AccountRuleMatchContext,
         ACCOUNT_ROLE_SOURCE, FIELD_COUNTERPARTY, FIELD_DESCRIPTION, FIELD_EXPENSE_COUNTERPARTY,
         FIELD_EXPENSE_DESCRIPTION, FIELD_EXPENSE_PAYMENT_METHOD, FIELD_INCOME_COUNTERPARTY,
@@ -443,6 +592,162 @@ mod tests {
         assert_eq!(matched.account_id, 70);
         assert!(matched.fallback_used);
         assert!(matched.matched_fields.is_empty());
+    }
+
+    #[test]
+    fn account_rule_matching_does_not_match_embedded_pos_channel_text() {
+        let context = AccountRuleMatchContext {
+            payment_method: "本行POS".to_string(),
+            description: "消费".to_string(),
+            ..AccountRuleMatchContext::default()
+        };
+        let rules = vec![AccountRuleCandidate {
+            rule_id: 11,
+            account_id: 110,
+            rule_expression: "OR={本行}".to_string(),
+            regex_enabled: false,
+            enabled: true,
+            priority: 1,
+        }];
+
+        let matched = match_account_rules(
+            &rules,
+            &context,
+            ACCOUNT_ROLE_SOURCE,
+            TRANSACTION_SCOPE_EXPENSE,
+        );
+        assert!(matched.is_none());
+    }
+
+    #[test]
+    fn account_rule_expression_matching_covers_plain_regex_and_not_edges() {
+        assert!(match_account_rule_expression(
+            "招商银行",
+            "OR={招商.*}",
+            true
+        ));
+        assert!(!match_account_rule_expression("", "OR={招商银行}", false));
+        assert!(match_account_rule_expression(
+            "支付宝 余额宝",
+            "AND={支付宝,余额宝}",
+            false,
+        ));
+        assert!(!match_account_rule_expression(
+            "支付宝 退款",
+            "AND={支付宝}+NOT={退款}",
+            false,
+        ));
+        assert!(!match_account_rule_expression(
+            "支付宝",
+            "AND={支付宝,余额宝}",
+            false,
+        ));
+        assert!(match_account_rule_expression(
+            "招商银行",
+            "OR={招商银行,工资卡}",
+            false,
+        ));
+    }
+
+    #[test]
+    fn account_rule_expression_node_covers_ast_branches() {
+        let merchant_clause = RuleExpressionNodeDto {
+            kind: "clause".to_string(),
+            operator: "OR".to_string(),
+            patterns: vec!["招商银行".to_string()],
+            children: Vec::new(),
+        };
+        let card_clause = RuleExpressionNodeDto {
+            kind: "clause".to_string(),
+            operator: "AND".to_string(),
+            patterns: vec!["工资卡".to_string()],
+            children: Vec::new(),
+        };
+        let not_clause = RuleExpressionNodeDto {
+            kind: "clause".to_string(),
+            operator: "NOT".to_string(),
+            patterns: vec!["退款".to_string()],
+            children: Vec::new(),
+        };
+        let all_node = RuleExpressionNodeDto {
+            kind: "all".to_string(),
+            operator: String::new(),
+            patterns: Vec::new(),
+            children: vec![merchant_clause.clone(), card_clause.clone()],
+        };
+        let any_node = RuleExpressionNodeDto {
+            kind: "any".to_string(),
+            operator: String::new(),
+            patterns: Vec::new(),
+            children: vec![merchant_clause.clone(), card_clause.clone()],
+        };
+        let not_node = RuleExpressionNodeDto {
+            kind: "not".to_string(),
+            operator: String::new(),
+            patterns: Vec::new(),
+            children: vec![merchant_clause.clone()],
+        };
+
+        assert!(match_account_rule_expression_node(
+            "招商银行 工资卡",
+            &all_node
+        ));
+        assert!(match_account_rule_expression_node("招商银行", &any_node));
+        assert!(match_account_rule_expression_node("支付宝", &not_node));
+        assert!(match_account_rule_expression_node("支付宝", &not_clause));
+        assert!(!match_account_rule_expression_node(
+            "招商银行",
+            &RuleExpressionNodeDto {
+                kind: "unknown".to_string(),
+                operator: String::new(),
+                patterns: Vec::new(),
+                children: Vec::new(),
+            },
+        ));
+        assert!(!match_account_rule_expression_node(
+            "招商银行",
+            &RuleExpressionNodeDto {
+                kind: "all".to_string(),
+                operator: String::new(),
+                patterns: Vec::new(),
+                children: Vec::new(),
+            },
+        ));
+    }
+
+    #[test]
+    fn account_rule_cross_field_match_rejects_empty_or_ambiguous_rules() {
+        let fields = vec![
+            (FIELD_COUNTERPARTY.to_string(), "支付宝".to_string()),
+            (FIELD_DESCRIPTION.to_string(), "余额宝".to_string()),
+        ];
+
+        assert!(account_rule_cross_field_match(
+            &fields,
+            "AND={支付宝,余额宝}",
+            false,
+        ));
+        assert!(!account_rule_cross_field_match(
+            &fields,
+            "AND={支付宝}+NOT={余额宝}",
+            false,
+        ));
+        assert!(!account_rule_cross_field_match(
+            &fields,
+            "OR={支付宝}",
+            false
+        ));
+        assert!(!account_rule_cross_field_match(
+            &[(FIELD_COUNTERPARTY.to_string(), String::new())],
+            "AND={支付宝}",
+            false,
+        ));
+        assert!(account_rule_cross_field_match(
+            &fields,
+            "AND={支付宝,余额宝}",
+            true,
+        ));
+        assert!(!account_rule_plain_pattern_matches("支付宝", ""));
     }
 
     #[test]

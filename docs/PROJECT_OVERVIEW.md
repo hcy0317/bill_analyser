@@ -40,13 +40,13 @@ Rust HTTP 主入口在开始监听前会对配置的 PostgreSQL 运行 `src/back
 
 ## 导入链路
 
-导入链路由 Rust 完成 parser-first 上传、JSON parse、session/source/template/standard-row staging、dedup、转账 materialization、分类规则、recurring/learning/LLM decision、账户规则匹配、preview page、preview update/reclassify、confirm 与 cleanup。
+导入链路由 Rust 完成 parser-first 上传、JSON parse、session/source/template/standard-row staging、dedup、转账 materialization、分类规则、recurring/learning/LLM decision、账户规则匹配、preview page、preview update/reclassify、confirm 与 cleanup。多文件 staging 与 preview row 落库使用分块批量写入；preview 分页、筛选、排序和跨页选择由 PostgreSQL 在 `import_preview_rows` 上执行，前端只保留当前页交互草稿。
 
-multipart 上传并行执行 dedicated parser 检测，每个文件必须且只能命中一个 dedicated parser 才会进入标准账单解析。stage2 phase precedence 为：同批/跨批 dedup 与转账 materialization 先形成预览基底，分类规则与内置分类兜底先确定类型/分类，recurring 与可自动应用的 learning projection 可继续改写类型、分类或显式账户，账户规则最后消费稳定后的预览类型、转账/投资上下文和仍为空的账户字段。确定性规则链未命中时，通过 Weaviate 召回派生 learning 建议。Weaviate metadata 本身不会触发自动改写。
+multipart 上传并行执行 dedicated parser 检测，每个文件必须且只能命中一个 dedicated parser 才会进入标准账单解析。stage2 phase precedence 为：同批/跨批 dedup 与转账 materialization 先形成预览基底，分类规则与内置分类兜底先确定类型/分类并写入 `category_id`，recurring 与可自动应用的 learning projection 可继续改写类型、分类或显式账户，账户规则最后消费稳定后的预览类型、转账/投资上下文和仍为空的账户字段。确定性规则链未命中时，通过 Weaviate 召回派生 learning 建议。Weaviate metadata 本身不会触发自动改写。
 
 导入 staging 写入前统一规范化账单日期文本：常规日期/时间、银行 Excel 日期序列，以及“日期 + 小数日时间”会转换为标准 `YYYY-MM-DD HH:MM:SS` 文本再进入 PostgreSQL 时间字段。
 
-账户识别以 `account_rules` 为权威；前端账户 DTO 不包含别名字段，账户规则以账户、表达式、优先级、启停状态为当前合同。`account_rules` 当前迁移后 schema 不再包含旧 `account_role_scope`、`transaction_type_scope` 与 `field_scope` 持久化列；旧 payload、query 或 settings bundle 中携带这些字段时只在 API/导入边界产生兼容 warning 并被忽略。导入运行时按稳定后的账单类型、账户角色和上下文字段包决定匹配目标。账户 API 在 DTO 边界把恢复数据或旧式数据中缺失的账户类型、账户分类归一成当前前端分类合同；缺失分类会优先保留显式值，再按账户名称、图标和旧式类型推断，不用统一现金兜底覆盖已恢复账户。
+账户识别以 `account_rules` 为权威；前端账户 DTO 不包含别名字段，账户规则以账户、表达式、优先级、启停状态为当前合同。`account_rules` 当前迁移后 schema 不再包含旧 `account_role_scope`、`transaction_type_scope` 与 `field_scope` 持久化列；旧 payload、query 或 settings bundle 中携带这些字段时只在 API/导入边界产生兼容 warning 并被忽略。导入运行时按稳定后的账单类型、账户角色和上下文字段包决定匹配目标；非正则账户规则只匹配规范化后的完整 token，避免“本行”误匹配“本行POS”等渠道文本。账户 API 在 DTO 边界把恢复数据或旧式数据中缺失的账户类型、账户分类归一成当前前端分类合同；缺失分类会优先保留显式值，再按账户名称、图标和旧式类型推断，不用统一现金兜底覆盖已恢复账户。
 
 ## 分类与规则中心
 

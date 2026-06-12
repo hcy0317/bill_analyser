@@ -373,8 +373,7 @@ fn apply_category_id_to_preview_patch(
     };
 
     let Some(category_id) = value_to_i64(value).filter(|value| *value > 0) else {
-        set_preview_patch_text_change(patch, ImportPreviewPatchField::MainCategory, String::new());
-        set_preview_patch_text_change(patch, ImportPreviewPatchField::SubCategory, String::new());
+        clear_category_id_on_preview_patch(patch);
         return Ok(());
     };
 
@@ -382,6 +381,26 @@ fn apply_category_id_to_preview_patch(
         return Err(import_v2_error_response(400, "Invalid category"));
     };
 
+    apply_loaded_category_to_preview_patch(patch, category_id, category);
+    Ok(())
+}
+
+fn clear_category_id_on_preview_patch(patch: &mut ImportPreviewPatch) {
+    patch
+        .changes
+        .retain(|(field, _)| *field != ImportPreviewPatchField::CategoryId);
+    patch
+        .changes
+        .push((ImportPreviewPatchField::CategoryId, ImportPreviewPatchValue::Null));
+    set_preview_patch_text_change(patch, ImportPreviewPatchField::MainCategory, String::new());
+    set_preview_patch_text_change(patch, ImportPreviewPatchField::SubCategory, String::new());
+}
+
+fn apply_loaded_category_to_preview_patch(
+    patch: &mut ImportPreviewPatch,
+    category_id: i64,
+    category: PreviewPayloadCategory,
+) {
     if let Some(preview_type) = preview_payload_category_type_name(category.type_code) {
         set_preview_patch_text_change(
             patch,
@@ -389,6 +408,13 @@ fn apply_category_id_to_preview_patch(
             preview_type.to_string(),
         );
     }
+    patch
+        .changes
+        .retain(|(field, _)| *field != ImportPreviewPatchField::CategoryId);
+    patch.changes.push((
+        ImportPreviewPatchField::CategoryId,
+        ImportPreviewPatchValue::Integer(category_id),
+    ));
     set_preview_patch_text_change(
         patch,
         ImportPreviewPatchField::MainCategory,
@@ -399,7 +425,6 @@ fn apply_category_id_to_preview_patch(
         ImportPreviewPatchField::SubCategory,
         category.sub_category,
     );
-    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -409,13 +434,25 @@ struct PreviewPayloadCategory {
     sub_category: String,
 }
 
+impl From<ImportPreviewCategoryLookup> for PreviewPayloadCategory {
+    fn from(category: ImportPreviewCategoryLookup) -> Self {
+        Self {
+            type_code: category.type_code,
+            main_category: category.main_category,
+            sub_category: category.sub_category,
+        }
+    }
+}
+
 #[tracing::instrument(level = "debug", skip_all)]
 fn load_preview_payload_category(
-    _connection: &Connection,
-    _user_id: UserId,
-    _category_id: i64,
+    connection: &Connection,
+    user_id: UserId,
+    category_id: i64,
 ) -> Result<Option<PreviewPayloadCategory>, ImportV2RouteResponse> {
-    Ok(None)
+    get_import_preview_category_by_id(connection, user_id, category_id)
+        .map(|category| category.map(Into::into))
+        .map_err(db_error_response)
 }
 
 fn set_preview_patch_text_change(
@@ -436,6 +473,149 @@ fn preview_payload_category_type_name(type_code: Option<i64>) -> Option<&'static
         Some(4) => Some("转账"),
         Some(5) => Some("投资"),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod preview_mutation_helper_tests {
+    use super::*;
+
+    fn change_value(
+        patch: &ImportPreviewPatch,
+        target: ImportPreviewPatchField,
+    ) -> Option<&ImportPreviewPatchValue> {
+        patch
+            .changes
+            .iter()
+            .rev()
+            .find_map(|(field, value)| (*field == target).then_some(value))
+    }
+
+    #[test]
+    fn category_id_patch_clear_removes_identity_and_category_names() {
+        let mut patch = ImportPreviewPatch::new(7)
+            .with_change(
+                ImportPreviewPatchField::CategoryId,
+                ImportPreviewPatchValue::Integer(99),
+            )
+            .with_change(
+                ImportPreviewPatchField::MainCategory,
+                ImportPreviewPatchValue::Text("旧主类".to_string()),
+            )
+            .with_change(
+                ImportPreviewPatchField::SubCategory,
+                ImportPreviewPatchValue::Text("旧子类".to_string()),
+            );
+
+        clear_category_id_on_preview_patch(&mut patch);
+
+        assert!(matches!(
+            change_value(&patch, ImportPreviewPatchField::CategoryId),
+            Some(ImportPreviewPatchValue::Null)
+        ));
+        assert_eq!(
+            change_value(&patch, ImportPreviewPatchField::MainCategory),
+            Some(&ImportPreviewPatchValue::Text(String::new()))
+        );
+        assert_eq!(
+            change_value(&patch, ImportPreviewPatchField::SubCategory),
+            Some(&ImportPreviewPatchValue::Text(String::new()))
+        );
+        assert_eq!(
+            patch.changes
+                .iter()
+                .filter(|(field, _)| *field == ImportPreviewPatchField::CategoryId)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn category_id_patch_apply_uses_canonical_category_identity() {
+        let mut patch = ImportPreviewPatch::new(7)
+            .with_change(
+                ImportPreviewPatchField::CategoryId,
+                ImportPreviewPatchValue::Integer(1),
+            )
+            .with_change(
+                ImportPreviewPatchField::Type,
+                ImportPreviewPatchValue::Text("支出".to_string()),
+            );
+        let category = PreviewPayloadCategory {
+            type_code: Some(2),
+            main_category: "理财".to_string(),
+            sub_category: "理财收益".to_string(),
+        };
+
+        apply_loaded_category_to_preview_patch(&mut patch, 42, category);
+
+        assert_eq!(
+            change_value(&patch, ImportPreviewPatchField::CategoryId),
+            Some(&ImportPreviewPatchValue::Integer(42))
+        );
+        assert_eq!(
+            change_value(&patch, ImportPreviewPatchField::Type),
+            Some(&ImportPreviewPatchValue::Text("收入".to_string()))
+        );
+        assert_eq!(
+            change_value(&patch, ImportPreviewPatchField::MainCategory),
+            Some(&ImportPreviewPatchValue::Text("理财".to_string()))
+        );
+        assert_eq!(
+            change_value(&patch, ImportPreviewPatchField::SubCategory),
+            Some(&ImportPreviewPatchValue::Text("理财收益".to_string()))
+        );
+        assert_eq!(
+            patch.changes
+                .iter()
+                .filter(|(field, _)| *field == ImportPreviewPatchField::CategoryId)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn preview_payload_category_maps_from_db_lookup() {
+        let category = PreviewPayloadCategory::from(ImportPreviewCategoryLookup {
+            type_code: Some(5),
+            main_category: "投资".to_string(),
+            sub_category: "理财收益".to_string(),
+        });
+
+        assert_eq!(category.type_code, Some(5));
+        assert_eq!(category.main_category, "投资");
+        assert_eq!(category.sub_category, "理财收益");
+    }
+
+    #[tokio::test]
+    async fn category_id_patch_ignores_missing_value_and_clears_invalid_value() {
+        let connection =
+            PostgresPool::connect_lazy("postgres://localhost/bill_analyser_test").expect("lazy pool");
+        let mut patch = ImportPreviewPatch::new(7);
+        let object = Map::new();
+
+        apply_category_id_to_preview_patch(
+            &connection,
+            UserId::new(1).expect("user id"),
+            &object,
+            &mut patch,
+        )
+        .expect("missing category id is ignored");
+        assert!(patch.changes.is_empty());
+
+        let mut object = Map::new();
+        object.insert("categoryId".to_string(), json!(0));
+        apply_category_id_to_preview_patch(
+            &connection,
+            UserId::new(1).expect("user id"),
+            &object,
+            &mut patch,
+        )
+        .expect("invalid category id clears category");
+        assert!(patch.changes.iter().any(|(field, value)| {
+            *field == ImportPreviewPatchField::CategoryId
+                && *value == ImportPreviewPatchValue::Null
+        }));
     }
 }
 

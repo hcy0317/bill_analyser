@@ -24,7 +24,21 @@ export function formatTimeoutSeconds(timeoutMs: number): string {
 
 export async function fetchImportStage(url: string, init: RequestInit, stageLabel: string, timeoutMs = DEFAULT_UPLOAD_API_TIMEOUT): Promise<Response> {
     const controller = new AbortController();
+    const externalSignal = init.signal;
+    let externalAborted = false;
+    const abortFromExternalSignal = () => {
+        externalAborted = true;
+        controller.abort();
+    };
     const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+    if (externalSignal) {
+        if (externalSignal.aborted) {
+            abortFromExternalSignal();
+        } else {
+            externalSignal.addEventListener('abort', abortFromExternalSignal, { once: true });
+        }
+    }
 
     try {
         return await fetch(url, {
@@ -33,10 +47,14 @@ export async function fetchImportStage(url: string, init: RequestInit, stageLabe
         });
     } catch (error) {
         if (isAbortError(error)) {
+            if (externalAborted) {
+                throw error;
+            }
             throw new Error(`${stageLabel}客户端等待超时（${formatTimeoutSeconds(timeoutMs)}），请检查后端 parser/import 日志确认是否仍在解析或写入`);
         }
         throw error;
     } finally {
         window.clearTimeout(timeoutId);
+        externalSignal?.removeEventListener('abort', abortFromExternalSignal);
     }
 }

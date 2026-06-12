@@ -500,7 +500,8 @@ import {
 } from './checkDataMatching.ts';
 import {
     extractApiErrorMessage,
-    fetchImportStage
+    fetchImportStage,
+    isAbortError
 } from './importDialogApi.ts';
 
 import { ref, computed, nextTick, useTemplateRef, watch } from 'vue';
@@ -680,6 +681,8 @@ const pendingInitialCheckDataPageRequest = ref<{
     sortBy: string;
     sortDirection: 'asc' | 'desc';
 } | null>(null);
+let previewPageRequestSequence = 0;
+let previewPageAbortController: AbortController | null = null;
 const parsedFileDelimiter = ref<string>('');
 const matchedImportConfig = ref<ImportConfigMatchResult | null>(null);
 
@@ -960,6 +963,7 @@ watch(
 );
 
 function open(): Promise<void> {
+    abortPendingPreviewPageRequest();
     // v6.52: 清理之前可能残留的导入会话数据
     // 确保每次打开导入对话框时 bills_parser_template 和 bills_preview 表都是干净的
     if (serverSessionId.value) {
@@ -1418,6 +1422,12 @@ function appendPreviewPageFilters(
     }
 }
 
+function abortPendingPreviewPageRequest(): void {
+    previewPageRequestSequence += 1;
+    previewPageAbortController?.abort();
+    previewPageAbortController = null;
+}
+
 async function fetchPreviewPage(
     page: number = 1,
     pageSize: number = 10,
@@ -1452,32 +1462,62 @@ async function fetchPreviewPage(
     }
     appendPreviewPageFilters(searchParams, sortOptions.filters);
 
-    const response = await fetchImportStage(
-        `/api/bills/import/v2/preview/${encodeURIComponent(serverSessionId.value)}?${searchParams.toString()}`,
-        {
-            method: 'GET',
-            headers,
-        },
-        '预览分页加载'
-    );
+    const sessionId = serverSessionId.value;
+    const requestSequence = previewPageRequestSequence + 1;
+    previewPageRequestSequence = requestSequence;
+    previewPageAbortController?.abort();
+    const controller = new AbortController();
+    previewPageAbortController = controller;
 
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`获取预览分页失败: ${errorText}`);
+    try {
+        const response = await fetchImportStage(
+            `/api/bills/import/v2/preview/${encodeURIComponent(sessionId)}?${searchParams.toString()}`,
+            {
+                method: 'GET',
+                headers,
+                signal: controller.signal,
+            },
+            '预览分页加载'
+        );
+
+        if (requestSequence !== previewPageRequestSequence
+            || controller.signal.aborted
+            || sessionId !== serverSessionId.value) {
+            return;
+        }
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`获取预览分页失败: ${errorText}`);
+        }
+
+        const result = await response.json();
+        if (requestSequence !== previewPageRequestSequence
+            || controller.signal.aborted
+            || sessionId !== serverSessionId.value) {
+            return;
+        }
+        if (!result.success) {
+            throw new Error(result.error || '获取预览分页失败');
+        }
+
+        const previewData = Array.isArray(result.data?.preview) ? result.data.preview as ImportPreviewRecord[] : [];
+        importTransactions.value = previewData.map((item, idx) => convertPreviewToImportTransaction(item, idx));
+        previewTotalCount.value = Number(result.data?.total || 0);
+        previewMetadata.value = (result.data?.metadata || null) as ImportPreviewMetadata | null;
+        logger.info(
+            `[三阶段导入-预览分页] 加载 page=${normalizedPage}, page_size=${normalizedPageSize}, sort_by=${normalizedSortBy || 'default'}, sort_direction=${normalizedSortDirection}, filters=${Object.keys(sortOptions.filters || {}).length}, rows=${previewData.length}, total=${previewTotalCount.value}`
+        );
+    } catch (error) {
+        if (isAbortError(error)) {
+            return;
+        }
+        throw error;
+    } finally {
+        if (requestSequence === previewPageRequestSequence) {
+            previewPageAbortController = null;
+        }
     }
-
-    const result = await response.json();
-    if (!result.success) {
-        throw new Error(result.error || '获取预览分页失败');
-    }
-
-    const previewData = Array.isArray(result.data?.preview) ? result.data.preview as ImportPreviewRecord[] : [];
-    importTransactions.value = previewData.map((item, idx) => convertPreviewToImportTransaction(item, idx));
-    previewTotalCount.value = Number(result.data?.total || 0);
-    previewMetadata.value = (result.data?.metadata || null) as ImportPreviewMetadata | null;
-    logger.info(
-        `[三阶段导入-预览分页] 加载 page=${normalizedPage}, page_size=${normalizedPageSize}, sort_by=${normalizedSortBy || 'default'}, sort_direction=${normalizedSortDirection}, filters=${Object.keys(sortOptions.filters || {}).length}, rows=${previewData.length}, total=${previewTotalCount.value}`
-    );
 }
 
 async function onCheckDataPageRequested(
@@ -1508,6 +1548,9 @@ async function onCheckDataPageRequested(
             filters: sortOptions?.filters,
         });
     } catch (error) {
+        if (isAbortError(error)) {
+            return;
+        }
         logger.error('[三阶段导入-预览分页] Check Data 加载失败:', error);
         snackbar.value?.showError(`导入失败: ${error}`);
     }

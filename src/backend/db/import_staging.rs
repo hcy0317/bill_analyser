@@ -19,6 +19,7 @@ use sqlx::{postgres::PgRow, Postgres, QueryBuilder, Row};
 use crate::{create_postgres_bill, BillCreateDraft, DbError, DbResult, PostgresPool};
 
 const LLM_MEMORY_PROMPT_TEXT_MAX_BYTES: usize = 16_384;
+const IMPORT_STAGING_BULK_INSERT_CHUNK_SIZE: usize = 500;
 
 include!("import_staging/types.rs");
 include!("import_staging/ledger_types.rs");
@@ -220,9 +221,7 @@ pub fn insert_preview_bills_batch(
         }
         let session_db_id = session_db_id(pool, session_id, user_id).await?;
         let user_id = user_id_i64(user_id)?;
-        for draft in drafts {
-            insert_preview_row_async(pool, session_db_id, user_id, draft).await?;
-        }
+        insert_preview_rows_batch_async(pool, session_db_id, user_id, drafts).await?;
         update_session_preview_count(pool, session_db_id, user_id).await?;
         Ok(drafts.len())
     })
@@ -386,19 +385,27 @@ pub fn insert_parser_templates_batch(
                 .unwrap_or("auto"),
         )
         .await?;
-        for (index, draft) in drafts.iter().enumerate() {
-            insert_standard_row_from_parser_template(
-                pool,
-                session_db_id,
+        let rows = standard_row_batch_values_from_parser_templates(source_id, drafts);
+        insert_standard_rows_batch_async(pool, session_db_id, user_id_i64, &rows).await?;
+        Ok(drafts.len())
+    })
+}
+
+fn standard_row_batch_values_from_parser_templates(
+    source_id: i64,
+    drafts: &[ImportParserTemplateDraft],
+) -> Vec<StandardRowBatchValue> {
+    drafts
+        .iter()
+        .enumerate()
+        .map(|(index, draft)| {
+            standard_row_batch_value_from_parser_template(
                 source_id,
-                user_id_i64,
                 i64::try_from(index).unwrap_or(i64::MAX),
                 draft,
             )
-            .await?;
-        }
-        Ok(drafts.len())
-    })
+        })
+        .collect()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -540,12 +547,62 @@ pub fn query_preview_page_by_session(
     user_id: UserId,
     request: &ImportPreviewPageRequest,
 ) -> DbResult<ImportPreviewPageResult> {
-    let mut rows = if request.preview_ids.is_empty() {
-        get_preview_by_session(pool, session_id, user_id, false)?
-    } else {
-        get_preview_by_ids(pool, session_id, &request.preview_ids, user_id)?
-    };
-    rows = apply_preview_filters(rows, &request.filters);
+    if !request.preview_ids.is_empty() {
+        let rows = get_preview_by_ids(pool, session_id, &request.preview_ids, user_id)?;
+        return Ok(build_preview_page_result_from_rows(rows, request));
+    }
+
+    block_on_db(async move {
+        let session_db_id = session_db_id(pool, session_id, user_id).await?;
+        let user_id_i64 = user_id_i64(user_id)?;
+        let total =
+            count_preview_rows_by_query(pool, session_db_id, user_id_i64, &request.filters).await?;
+        let page = request.page.max(1);
+        let page_size = request.page_size.max(1);
+        let offset = page.saturating_sub(1).saturating_mul(page_size);
+        let mut query = build_preview_page_query(
+            session_db_id,
+            user_id_i64,
+            &request.filters,
+            &request.sort_by,
+            &request.sort_direction,
+            page_size,
+            offset,
+        );
+        let rows = query.build().fetch_all(pool).await?;
+        let page_rows = rows
+            .iter()
+            .map(preview_from_pg_row)
+            .collect::<DbResult<Vec<_>>>()?;
+        Ok(ImportPreviewPageResult {
+            rows: page_rows,
+            total: usize::try_from(total).unwrap_or(usize::MAX),
+            page,
+            page_size,
+            metadata: build_preview_metadata(usize::try_from(total).unwrap_or(usize::MAX)),
+        })
+    })
+}
+
+async fn count_preview_rows_by_query(
+    pool: &PostgresPool,
+    session_db_id: i64,
+    user_id: i64,
+    filters: &ImportPreviewQueryFilters,
+) -> DbResult<i64> {
+    let mut query = build_preview_count_query(session_db_id, user_id, filters);
+    query
+        .build_query_scalar()
+        .fetch_one(pool)
+        .await
+        .map_err(Into::into)
+}
+
+fn build_preview_page_result_from_rows(
+    rows: Vec<ImportPreviewRow>,
+    request: &ImportPreviewPageRequest,
+) -> ImportPreviewPageResult {
+    let mut rows = apply_preview_filters(rows, &request.filters);
     sort_preview_rows(&mut rows, &request.sort_by, &request.sort_direction);
     let total = rows.len();
     let page = request.page.max(1);
@@ -556,13 +613,218 @@ pub fn query_preview_page_by_session(
         .skip(start)
         .take(page_size)
         .collect::<Vec<_>>();
-    Ok(ImportPreviewPageResult {
+    ImportPreviewPageResult {
         rows: page_rows,
         total,
         page,
         page_size,
         metadata: build_preview_metadata(total),
-    })
+    }
+}
+
+fn build_preview_count_query(
+    session_db_id: i64,
+    user_id: i64,
+    filters: &ImportPreviewQueryFilters,
+) -> QueryBuilder<'static, Postgres> {
+    let mut query = QueryBuilder::<Postgres>::new(
+        "SELECT COUNT(*)::BIGINT FROM import_preview_rows p WHERE p.session_id = ",
+    );
+    query.push_bind(session_db_id);
+    query.push(" AND p.user_id = ");
+    query.push_bind(user_id);
+    push_preview_query_predicates(&mut query, filters, "p");
+    query
+}
+
+fn build_preview_page_query(
+    session_db_id: i64,
+    user_id: i64,
+    filters: &ImportPreviewQueryFilters,
+    sort_by: &str,
+    sort_direction: &str,
+    page_size: usize,
+    offset: usize,
+) -> QueryBuilder<'static, Postgres> {
+    let mut query = QueryBuilder::<Postgres>::new(
+        "SELECT p.*, s.session_key FROM import_preview_rows p JOIN import_sessions s ON s.id = p.session_id WHERE p.session_id = ",
+    );
+    query.push_bind(session_db_id);
+    query.push(" AND p.user_id = ");
+    query.push_bind(user_id);
+    push_preview_query_predicates(&mut query, filters, "p");
+    push_preview_order_by(&mut query, sort_by, sort_direction);
+    query.push(" LIMIT ");
+    query.push_bind(i64::try_from(page_size).unwrap_or(i64::MAX).max(1));
+    query.push(" OFFSET ");
+    query.push_bind(i64::try_from(offset).unwrap_or(i64::MAX));
+    query
+}
+
+fn push_preview_query_predicates(
+    query: &mut QueryBuilder<'_, Postgres>,
+    filters: &ImportPreviewQueryFilters,
+    alias: &str,
+) {
+    let column = |name: &str| format!("{alias}.{name}");
+    if filters.selected_only {
+        query.push(" AND ");
+        query.push(column("selected"));
+        query.push(" = true");
+    }
+    if let Some(value) = normalized_filter(filters.min_datetime.as_deref()) {
+        query.push(" AND ");
+        query.push(column("occurred_at"));
+        query.push(" >= ");
+        query.push_bind(normalize_bill_date_text(&value));
+        query.push("::timestamptz");
+    }
+    if let Some(value) = normalized_filter(filters.max_datetime.as_deref()) {
+        query.push(" AND ");
+        query.push(column("occurred_at"));
+        query.push(" <= ");
+        query.push_bind(normalize_bill_date_text(&value));
+        query.push("::timestamptz");
+    }
+    if let Some(value) = normalized_filter(filters.transaction_type.as_deref()) {
+        push_ilike_predicate(query, &column("transaction_type"), &value);
+    }
+    if let Some(value) = normalized_filter(filters.category.as_deref()) {
+        push_category_predicate(query, alias, &value);
+    }
+    if let Some(value) = normalized_filter(filters.account.as_deref()) {
+        push_account_predicate(query, alias, &value);
+    }
+    if let Some(value) = normalized_filter(filters.tag.as_deref()) {
+        query.push(" AND ");
+        query.push(alias);
+        query.push(".preview_payload->>'preview_parser_tags' ILIKE ");
+        query.push_bind(like_pattern(&value));
+    }
+    if let Some(value) = normalized_filter(filters.signal.as_deref()) {
+        query.push(" AND (");
+        query.push(alias);
+        query.push(".preview_payload->'preview_matching_feedback'");
+        let pattern = match value.split_once(':') {
+            Some((family, status)) => {
+                query.push("->");
+                query.push_bind(family.trim().to_string());
+                like_pattern(status.trim())
+            }
+            None => like_pattern(&value),
+        };
+        query.push(")::text ILIKE ");
+        query.push_bind(pattern);
+    }
+    if let Some(value) = normalized_filter(filters.annotation.as_deref()) {
+        query.push(" AND ");
+        query.push(alias);
+        query.push(".preview_payload#>>'{preview_matching_feedback,annotation}' ILIKE ");
+        query.push_bind(like_pattern(&value));
+    }
+    if let Some(value) = normalized_filter(filters.description.as_deref()) {
+        query.push(" AND (");
+        query.push(column("description"));
+        query.push(" ILIKE ");
+        query.push_bind(like_pattern(&value));
+        query.push(" OR ");
+        query.push(alias);
+        query.push(".preview_payload->>'preview_description' ILIKE ");
+        query.push_bind(like_pattern(&value));
+        query.push(")");
+    }
+}
+
+fn push_preview_order_by(
+    query: &mut QueryBuilder<'_, Postgres>,
+    sort_by: &str,
+    sort_direction: &str,
+) {
+    let direction = if sort_direction.eq_ignore_ascii_case("desc") {
+        "DESC"
+    } else {
+        "ASC"
+    };
+    query.push(" ORDER BY ");
+    match sort_by {
+        "amount" | "preview_amount" | "sourceAmount" => query.push("p.amount_cents"),
+        "counterparty" => query.push("COALESCE(p.merchant, '')"),
+        "type" => query.push(
+            "CASE lower(p.transaction_type) WHEN '收入' THEN 0 WHEN 'income' THEN 0 WHEN '2' THEN 0 WHEN '支出' THEN 1 WHEN 'expense' THEN 1 WHEN '3' THEN 1 WHEN '转账' THEN 2 WHEN 'transfer' THEN 2 WHEN '4' THEN 2 WHEN '投资' THEN 3 WHEN 'investment' THEN 3 WHEN '5' THEN 3 ELSE 4 END",
+        ),
+        "paymentMethod" => query.push("COALESCE(p.payment_method, '')"),
+        "comment" => query.push("COALESCE(p.description, '')"),
+        "time" => query.push("p.occurred_at"),
+        _ => query.push("p.occurred_at"),
+    };
+    query.push(" ");
+    query.push(direction);
+    query.push(", p.id ");
+    query.push(direction);
+}
+
+fn normalized_filter(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn like_pattern(value: &str) -> String {
+    format!("%{value}%")
+}
+
+fn push_ilike_predicate(query: &mut QueryBuilder<'_, Postgres>, column: &str, value: &str) {
+    query.push(" AND ");
+    query.push(column);
+    query.push(" ILIKE ");
+    query.push_bind(like_pattern(value));
+}
+
+fn push_category_predicate(query: &mut QueryBuilder<'_, Postgres>, alias: &str, value: &str) {
+    if matches!(value, "__none__" | "__invalid__") {
+        query.push(" AND ");
+        query.push(alias);
+        query.push(".category_id IS NULL AND COALESCE(");
+        query.push(alias);
+        query.push(".preview_payload->>'preview_main_category', '') = '' AND COALESCE(");
+        query.push(alias);
+        query.push(".preview_payload->>'preview_sub_category', '') = ''");
+        return;
+    }
+    query.push(" AND (");
+    query.push(alias);
+    query.push(".category_id::text = ");
+    query.push_bind(value.to_string());
+    query.push(" OR ");
+    query.push(alias);
+    query.push(".preview_payload->>'preview_main_category' ILIKE ");
+    query.push_bind(like_pattern(value));
+    query.push(" OR ");
+    query.push(alias);
+    query.push(".preview_payload->>'preview_sub_category' ILIKE ");
+    query.push_bind(like_pattern(value));
+    query.push(")");
+}
+
+fn push_account_predicate(query: &mut QueryBuilder<'_, Postgres>, alias: &str, value: &str) {
+    if matches!(value, "__none__" | "__invalid__") {
+        query.push(" AND ");
+        query.push(alias);
+        query.push(".account_id IS NULL AND ");
+        query.push(alias);
+        query.push(".transfer_target_account_id IS NULL");
+        return;
+    }
+    query.push(" AND (");
+    query.push(alias);
+    query.push(".account_id::text = ");
+    query.push_bind(value.to_string());
+    query.push(" OR ");
+    query.push(alias);
+    query.push(".transfer_target_account_id::text = ");
+    query.push_bind(value.to_string());
+    query.push(")");
 }
 
 pub fn get_preview_by_ids(
@@ -627,6 +889,7 @@ pub fn get_preview_filter_index_by_session(
             preview_date: row.preview_date,
             preview_type: row.preview_type,
             preview_amount: row.preview_amount,
+            category_id: row.category_id,
             preview_main_category: row.preview_main_category,
             preview_sub_category: row.preview_sub_category,
             preview_source_account_id: row.preview_source_account_id,
@@ -752,15 +1015,61 @@ pub fn update_session_preview_selection_by_query(
     pool: &PostgresPool,
     session_id: &str,
     user_id: UserId,
-    selected: bool,
+    mode: ImportPreviewSelectionMode,
     request: &ImportPreviewPageRequest,
 ) -> DbResult<usize> {
-    let ids = query_preview_page_by_session(pool, session_id, user_id, request)?
-        .rows
-        .into_iter()
-        .map(|row| row.id)
-        .collect::<Vec<_>>();
-    update_preview_selection(pool, &ids, selected, user_id)
+    block_on_db(async move {
+        let session_db_id = session_db_id(pool, session_id, user_id).await?;
+        let user_id_i64 = user_id_i64(user_id)?;
+        let mut query =
+            build_preview_selection_update_query(session_db_id, user_id_i64, mode, request);
+        let changed = query.build().execute(pool).await?.rows_affected();
+        Ok(usize::try_from(changed).unwrap_or(usize::MAX))
+    })
+}
+
+fn build_preview_selection_update_query(
+    session_db_id: i64,
+    user_id: i64,
+    mode: ImportPreviewSelectionMode,
+    request: &ImportPreviewPageRequest,
+) -> QueryBuilder<'static, Postgres> {
+    let mut query = QueryBuilder::<Postgres>::new("UPDATE import_preview_rows p SET selected = ");
+    match mode {
+        ImportPreviewSelectionMode::Select => {
+            query.push_bind(true);
+            query.push(
+                ", preview_payload = jsonb_set(p.preview_payload, '{preview_selected}', to_jsonb(",
+            );
+            query.push_bind(true);
+            query.push("::boolean), true)");
+        }
+        ImportPreviewSelectionMode::Deselect => {
+            query.push_bind(false);
+            query.push(
+                ", preview_payload = jsonb_set(p.preview_payload, '{preview_selected}', to_jsonb(",
+            );
+            query.push_bind(false);
+            query.push("::boolean), true)");
+        }
+        ImportPreviewSelectionMode::Invert => {
+            query.push("NOT p.selected, preview_payload = jsonb_set(p.preview_payload, '{preview_selected}', to_jsonb(NOT p.selected), true)");
+        }
+    }
+    query.push(", updated_at = now(), version = version + 1 WHERE p.session_id = ");
+    query.push_bind(session_db_id);
+    query.push(" AND p.user_id = ");
+    query.push_bind(user_id);
+    push_preview_query_predicates(&mut query, &request.filters, "p");
+    if !request.preview_ids.is_empty() {
+        query.push(" AND p.id IN (");
+        let mut separated = query.separated(", ");
+        for id in &request.preview_ids {
+            separated.push_bind(*id);
+        }
+        separated.push_unseparated(")");
+    }
+    query
 }
 
 pub fn batch_update_preview_classification(
@@ -1874,16 +2183,12 @@ async fn insert_standard_rows_and_parser_payloads(
     source_ids: &std::collections::BTreeMap<i64, i64>,
 ) -> DbResult<usize> {
     if !standard_row_drafts.is_empty() {
-        for (index, draft) in standard_row_drafts.iter().enumerate() {
-            let source_id = source_ids
-                .get(&draft.source_index)
-                .or_else(|| source_ids.values().next())
-                .copied()
-                .ok_or_else(|| DbError::InvalidOperation("import source missing".to_string()))?;
-            let parser_draft = parser_drafts.get(index);
-            insert_standard_row(pool, session_db_id, source_id, user_id, draft, parser_draft)
-                .await?;
-        }
+        let rows = standard_row_batch_values_from_standard_row_drafts(
+            parser_drafts,
+            standard_row_drafts,
+            source_ids,
+        )?;
+        insert_standard_rows_batch_async(pool, session_db_id, user_id, &rows).await?;
         return Ok(standard_row_drafts.len());
     }
     let source_id = source_ids
@@ -1891,18 +2196,166 @@ async fn insert_standard_rows_and_parser_payloads(
         .next()
         .copied()
         .ok_or_else(|| DbError::InvalidOperation("import source missing".to_string()))?;
-    for (index, draft) in parser_drafts.iter().enumerate() {
-        insert_standard_row_from_parser_template(
-            pool,
-            session_db_id,
-            source_id,
-            user_id,
-            i64::try_from(index).unwrap_or(i64::MAX),
-            draft,
-        )
-        .await?;
-    }
+    let rows = standard_row_batch_values_from_parser_templates(source_id, parser_drafts);
+    insert_standard_rows_batch_async(pool, session_db_id, user_id, &rows).await?;
     Ok(parser_drafts.len())
+}
+
+fn standard_row_batch_values_from_standard_row_drafts(
+    parser_drafts: &[ImportParserTemplateDraft],
+    standard_row_drafts: &[ImportStandardRowDraft],
+    source_ids: &std::collections::BTreeMap<i64, i64>,
+) -> DbResult<Vec<StandardRowBatchValue>> {
+    standard_row_drafts
+        .iter()
+        .enumerate()
+        .map(|(index, draft)| {
+            let source_id = source_ids
+                .get(&draft.source_index)
+                .or_else(|| source_ids.values().next())
+                .copied()
+                .ok_or_else(|| DbError::InvalidOperation("import source missing".to_string()))?;
+            let parser_draft = parser_drafts.get(index);
+            Ok(standard_row_batch_value_from_standard_row(
+                source_id,
+                draft,
+                parser_draft,
+            ))
+        })
+        .collect()
+}
+
+struct StandardRowBatchValue {
+    source_id: i64,
+    source_row_index: i64,
+    occurred_at: String,
+    amount_cents: i64,
+    direction: String,
+    transaction_type: String,
+    merchant: String,
+    payment_method: String,
+    description: String,
+    parser_payload: String,
+    standard_payload: String,
+}
+
+fn standard_row_batch_value_from_standard_row(
+    source_id: i64,
+    draft: &ImportStandardRowDraft,
+    parser_draft: Option<&ImportParserTemplateDraft>,
+) -> StandardRowBatchValue {
+    StandardRowBatchValue {
+        source_id,
+        source_row_index: draft.source_row_index,
+        occurred_at: normalize_bill_date_text(&draft.occurred_at),
+        amount_cents: draft.amount_cents,
+        direction: draft.direction.clone(),
+        transaction_type: draft.transaction_type.clone(),
+        merchant: draft.merchant.clone(),
+        payment_method: draft.payment_method.clone(),
+        description: draft.description.clone(),
+        parser_payload: parser_payload_from_standard_row(draft, parser_draft).to_string(),
+        standard_payload: draft.standard_payload.to_string(),
+    }
+}
+
+fn standard_row_batch_value_from_parser_template(
+    source_id: i64,
+    source_row_index: i64,
+    draft: &ImportParserTemplateDraft,
+) -> StandardRowBatchValue {
+    let amount = Money::from_yuan_str(&finite_float_text(draft.parser_amount))
+        .unwrap_or(Money::ZERO)
+        .to_cents()
+        .abs();
+    let row = ImportStandardRowDraft {
+        source_index: 0,
+        source_row_index,
+        occurred_at: draft.parser_date.clone(),
+        amount_cents: amount,
+        direction: if draft.parser_type == "收入" || draft.parser_type == "income" {
+            "income".to_string()
+        } else {
+            "expense".to_string()
+        },
+        transaction_type: draft.parser_type.clone(),
+        merchant: draft.parser_counterparty.clone(),
+        payment_method: draft.parser_payment_method.clone(),
+        description: draft.parser_description.clone(),
+        parser_payload: parser_payload_from_parser_template(draft),
+        standard_payload: json!({
+            "parser_original_type": draft.parser_original_type,
+            "parser_original_category": draft.parser_original_category,
+            "parser_account_id": draft.parser_account_id,
+        }),
+    };
+    standard_row_batch_value_from_standard_row(source_id, &row, Some(draft))
+}
+
+async fn insert_standard_rows_batch_async(
+    pool: &PostgresPool,
+    session_db_id: i64,
+    user_id: i64,
+    rows: &[StandardRowBatchValue],
+) -> DbResult<usize> {
+    for chunk in rows.chunks(IMPORT_STAGING_BULK_INSERT_CHUNK_SIZE) {
+        let mut query = build_standard_rows_insert_query(session_db_id, user_id, chunk);
+        query.build().execute(pool).await?;
+    }
+    Ok(rows.len())
+}
+
+fn build_standard_rows_insert_query<'a>(
+    session_db_id: i64,
+    user_id: i64,
+    rows: &'a [StandardRowBatchValue],
+) -> QueryBuilder<'a, Postgres> {
+    let mut query = QueryBuilder::<Postgres>::new(
+        r#"
+        INSERT INTO import_standard_rows (
+            session_id, source_id, user_id, source_row_index, occurred_at,
+            amount_cents, direction, transaction_type, merchant, payment_method,
+            description, parser_payload, standard_payload, created_at, updated_at
+        )
+        "#,
+    );
+    query.push_values(rows, |mut row, value| {
+        row.push_bind(session_db_id)
+            .push_bind(value.source_id)
+            .push_bind(user_id)
+            .push_bind(value.source_row_index)
+            .push_bind(&value.occurred_at)
+            .push("::timestamptz")
+            .push_bind(value.amount_cents)
+            .push_bind(&value.direction)
+            .push_bind(&value.transaction_type)
+            .push_bind(&value.merchant)
+            .push_bind(&value.payment_method)
+            .push_bind(&value.description)
+            .push_bind(&value.parser_payload)
+            .push("::jsonb")
+            .push_bind(&value.standard_payload)
+            .push("::jsonb")
+            .push("now()")
+            .push("now()");
+    });
+    query.push(
+        r#"
+        ON CONFLICT (source_id, source_row_index) DO UPDATE SET
+            occurred_at = excluded.occurred_at,
+            amount_cents = excluded.amount_cents,
+            direction = excluded.direction,
+            transaction_type = excluded.transaction_type,
+            merchant = excluded.merchant,
+            payment_method = excluded.payment_method,
+            description = excluded.description,
+            parser_payload = excluded.parser_payload,
+            standard_payload = excluded.standard_payload,
+            updated_at = now(),
+            version = import_standard_rows.version + 1
+        "#,
+    );
+    query
 }
 
 async fn insert_standard_row(
@@ -2007,43 +2460,178 @@ async fn insert_preview_row_async(
     } else {
         "expense"
     };
-    let id = sqlx::query(
+    let mut query = build_preview_row_insert_returning_query(
+        session_db_id,
+        user_id,
+        draft,
+        payload.to_string(),
+        amount_cents,
+        direction,
+    );
+    let id = query.build().fetch_one(pool).await?.try_get("id")?;
+    Ok(id)
+}
+
+fn build_preview_row_insert_returning_query(
+    session_db_id: i64,
+    user_id: i64,
+    draft: &ImportPreviewDraft,
+    preview_payload: String,
+    amount_cents: i64,
+    direction: &str,
+) -> QueryBuilder<'static, Postgres> {
+    let mut query = QueryBuilder::<Postgres>::new(
         r#"
         INSERT INTO import_preview_rows (
             session_id, user_id, page_sort_key, operation_kind, selected,
             signal_summary, merged_source_ids, occurred_at, amount_cents,
-            direction, transaction_type, account_id, transfer_target_account_id,
+            direction, transaction_type, account_id, transfer_target_account_id, category_id,
             merchant, payment_method, description, preview_payload, created_at, updated_at
         ) VALUES (
-            $1,$2,$3,'insert',$4,'[]'::jsonb,$5,$6::timestamptz,$7,
-            $8,$9,$10,$11,$12,$13,$14,$15::jsonb,now(),now()
-        )
-        RETURNING id
         "#,
-    )
-    .bind(session_db_id)
-    .bind(user_id)
-    .bind(format!(
+    );
+    query.push_bind(session_db_id);
+    query.push(", ");
+    query.push_bind(user_id);
+    query.push(", ");
+    query.push_bind(format!(
         "{}:{}",
         normalize_bill_date_text(&draft.preview_date),
         draft.preview_counterparty
-    ))
-    .bind(draft.preview_selected)
-    .bind(&draft.dedup_source_ids)
-    .bind(normalize_bill_date_text(&draft.preview_date))
-    .bind(amount_cents)
-    .bind(direction)
-    .bind(&draft.preview_type)
-    .bind(draft.preview_source_account_id)
-    .bind(draft.preview_destination_account_id)
-    .bind(&draft.preview_counterparty)
-    .bind(&draft.preview_payment_method)
-    .bind(&draft.preview_description)
-    .bind(payload.to_string())
-    .fetch_one(pool)
-    .await?
-    .try_get("id")?;
-    Ok(id)
+    ));
+    query.push(", 'insert', ");
+    query.push_bind(draft.preview_selected);
+    query.push(", '[]'::jsonb, ");
+    query.push_bind(draft.dedup_source_ids.clone());
+    query.push(", ");
+    query.push_bind(normalize_bill_date_text(&draft.preview_date));
+    query.push("::timestamptz, ");
+    query.push_bind(amount_cents);
+    query.push(", ");
+    query.push_bind(direction.to_string());
+    query.push(", ");
+    query.push_bind(draft.preview_type.clone());
+    query.push(", ");
+    query.push_bind(draft.preview_source_account_id);
+    query.push(", ");
+    query.push_bind(draft.preview_destination_account_id);
+    query.push(", ");
+    query.push_bind(draft.category_id);
+    query.push(", ");
+    query.push_bind(draft.preview_counterparty.clone());
+    query.push(", ");
+    query.push_bind(draft.preview_payment_method.clone());
+    query.push(", ");
+    query.push_bind(draft.preview_description.clone());
+    query.push(", ");
+    query.push_bind(preview_payload);
+    query.push("::jsonb, now(), now()) RETURNING id");
+    query
+}
+
+struct PreviewRowBatchValue {
+    page_sort_key: String,
+    selected: bool,
+    merged_source_ids: Vec<i64>,
+    occurred_at: String,
+    amount_cents: i64,
+    direction: String,
+    transaction_type: String,
+    account_id: Option<i64>,
+    transfer_target_account_id: Option<i64>,
+    category_id: Option<i64>,
+    merchant: String,
+    payment_method: String,
+    description: String,
+    preview_payload: String,
+}
+
+fn preview_row_batch_value_from_draft(draft: &ImportPreviewDraft) -> PreviewRowBatchValue {
+    let payload = preview_payload_from_draft(draft);
+    let amount_cents = Money::from_yuan_str(&finite_float_text(draft.preview_amount))
+        .unwrap_or(Money::ZERO)
+        .to_cents()
+        .abs();
+    let occurred_at = normalize_bill_date_text(&draft.preview_date);
+    PreviewRowBatchValue {
+        page_sort_key: format!("{}:{}", occurred_at, draft.preview_counterparty),
+        selected: draft.preview_selected,
+        merged_source_ids: draft.dedup_source_ids.clone(),
+        occurred_at,
+        amount_cents,
+        direction: if draft.preview_type == "收入" || draft.preview_type == "income" {
+            "income".to_string()
+        } else {
+            "expense".to_string()
+        },
+        transaction_type: draft.preview_type.clone(),
+        account_id: draft.preview_source_account_id,
+        transfer_target_account_id: draft.preview_destination_account_id,
+        category_id: draft.category_id,
+        merchant: draft.preview_counterparty.clone(),
+        payment_method: draft.preview_payment_method.clone(),
+        description: draft.preview_description.clone(),
+        preview_payload: payload.to_string(),
+    }
+}
+
+async fn insert_preview_rows_batch_async(
+    pool: &PostgresPool,
+    session_db_id: i64,
+    user_id: i64,
+    drafts: &[ImportPreviewDraft],
+) -> DbResult<usize> {
+    let rows = drafts
+        .iter()
+        .map(preview_row_batch_value_from_draft)
+        .collect::<Vec<_>>();
+    for chunk in rows.chunks(IMPORT_STAGING_BULK_INSERT_CHUNK_SIZE) {
+        let mut query = build_preview_rows_insert_query(session_db_id, user_id, chunk);
+        query.build().execute(pool).await?;
+    }
+    Ok(rows.len())
+}
+
+fn build_preview_rows_insert_query<'a>(
+    session_db_id: i64,
+    user_id: i64,
+    rows: &'a [PreviewRowBatchValue],
+) -> QueryBuilder<'a, Postgres> {
+    let mut query = QueryBuilder::<Postgres>::new(
+        r#"
+        INSERT INTO import_preview_rows (
+            session_id, user_id, page_sort_key, operation_kind, selected,
+            signal_summary, merged_source_ids, occurred_at, amount_cents,
+            direction, transaction_type, account_id, transfer_target_account_id, category_id,
+            merchant, payment_method, description, preview_payload, created_at, updated_at
+        )
+        "#,
+    );
+    query.push_values(rows, |mut row, value| {
+        row.push_bind(session_db_id)
+            .push_bind(user_id)
+            .push_bind(&value.page_sort_key)
+            .push_bind("insert")
+            .push_bind(value.selected)
+            .push("'[]'::jsonb")
+            .push_bind(&value.merged_source_ids)
+            .push_bind(&value.occurred_at)
+            .push("::timestamptz")
+            .push_bind(value.amount_cents)
+            .push_bind(&value.direction)
+            .push_bind(&value.transaction_type)
+            .push_bind(value.account_id)
+            .push_bind(value.transfer_target_account_id)
+            .push_bind(value.category_id)
+            .push_bind(&value.merchant)
+            .push_bind(&value.payment_method)
+            .push_bind(&value.description)
+            .push_bind(&value.preview_payload)
+            .push("::jsonb")
+            .push("now()")
+            .push("now()");
+    });
+    query
 }
 
 async fn load_preview_rows(
@@ -2138,43 +2726,70 @@ async fn apply_preview_patch_async(
     } else {
         "expense"
     };
-    let changed = sqlx::query(
+    let mut query = build_preview_row_update_query(
+        &preview,
+        payload.to_string(),
+        amount_cents,
+        direction,
+        patch.preview_id,
+        session_db_id,
+        user_id,
+    );
+    let changed = query.build().execute(pool).await?.rows_affected();
+    Ok(changed > 0)
+}
+
+fn build_preview_row_update_query(
+    preview: &ImportPreviewRow,
+    preview_payload: String,
+    amount_cents: i64,
+    direction: &str,
+    preview_id: i64,
+    session_db_id: i64,
+    user_id: i64,
+) -> QueryBuilder<'static, Postgres> {
+    let mut query = QueryBuilder::<Postgres>::new(
         r#"
         UPDATE import_preview_rows
-        SET selected = $1,
-            occurred_at = $2::timestamptz,
-            amount_cents = $3,
-            direction = $4,
-            transaction_type = $5,
-            account_id = $6,
-            transfer_target_account_id = $7,
-            merchant = $8,
-            payment_method = $9,
-            description = $10,
-            preview_payload = $11::jsonb,
+        SET selected =
+        "#,
+    );
+    query.push_bind(preview.preview_selected);
+    query.push(", occurred_at = ");
+    query.push_bind(normalize_bill_date_text(&preview.preview_date));
+    query.push("::timestamptz, amount_cents = ");
+    query.push_bind(amount_cents);
+    query.push(", direction = ");
+    query.push_bind(direction.to_string());
+    query.push(", transaction_type = ");
+    query.push_bind(preview.preview_type.clone());
+    query.push(", account_id = ");
+    query.push_bind(preview.preview_source_account_id);
+    query.push(", transfer_target_account_id = ");
+    query.push_bind(preview.preview_destination_account_id);
+    query.push(", category_id = ");
+    query.push_bind(preview.category_id);
+    query.push(", merchant = ");
+    query.push_bind(preview.preview_counterparty.clone());
+    query.push(", payment_method = ");
+    query.push_bind(preview.preview_payment_method.clone());
+    query.push(", description = ");
+    query.push_bind(preview.preview_description.clone());
+    query.push(", preview_payload = ");
+    query.push_bind(preview_payload);
+    query.push(
+        r#"::jsonb,
             updated_at = now(),
             version = version + 1
-        WHERE id = $12 AND session_id = $13 AND user_id = $14
         "#,
-    )
-    .bind(preview.preview_selected)
-    .bind(normalize_bill_date_text(&preview.preview_date))
-    .bind(amount_cents)
-    .bind(direction)
-    .bind(&preview.preview_type)
-    .bind(preview.preview_source_account_id)
-    .bind(preview.preview_destination_account_id)
-    .bind(&preview.preview_counterparty)
-    .bind(&preview.preview_payment_method)
-    .bind(&preview.preview_description)
-    .bind(payload.to_string())
-    .bind(patch.preview_id)
-    .bind(session_db_id)
-    .bind(user_id)
-    .execute(pool)
-    .await?
-    .rows_affected();
-    Ok(changed > 0)
+    );
+    query.push(" WHERE id = ");
+    query.push_bind(preview_id);
+    query.push(" AND session_id = ");
+    query.push_bind(session_db_id);
+    query.push(" AND user_id = ");
+    query.push_bind(user_id);
+    query
 }
 
 async fn get_import_learning_lifecycle_view_async(
@@ -2360,6 +2975,9 @@ fn preview_from_pg_row(row: &PgRow) -> DbResult<ImportPreviewRow> {
         preview_amount,
         preview_destination_amount: payload_f64(&payload, "preview_destination_amount")
             .unwrap_or_default(),
+        category_id: payload_i64(&payload, "category_id")
+            .or_else(|| payload_i64(&payload, "categoryId"))
+            .or_else(|| row.try_get::<Option<i64>, _>("category_id").ok().flatten()),
         preview_main_category: payload_text(&payload, "preview_main_category").unwrap_or_default(),
         preview_sub_category: payload_text(&payload, "preview_sub_category").unwrap_or_default(),
         preview_source_account_id: payload_i64(&payload, "preview_source_account_id")
@@ -2515,6 +3133,8 @@ fn preview_payload_from_draft(draft: &ImportPreviewDraft) -> Value {
         "preview_type": draft.preview_type,
         "preview_amount": draft.preview_amount,
         "preview_destination_amount": draft.preview_destination_amount,
+        "category_id": draft.category_id,
+        "categoryId": draft.category_id,
         "preview_main_category": draft.preview_main_category,
         "preview_sub_category": draft.preview_sub_category,
         "preview_source_account_id": draft.preview_source_account_id,
@@ -2567,6 +3187,16 @@ fn apply_patch_value_to_preview(
         (ImportPreviewPatchField::SubCategory, ImportPreviewPatchValue::Text(value)) => {
             preview.preview_sub_category = value.clone();
             payload_set(payload, "preview_sub_category", json!(value));
+        }
+        (ImportPreviewPatchField::CategoryId, ImportPreviewPatchValue::Integer(value)) => {
+            preview.category_id = Some(value);
+            payload_set(payload, "category_id", json!(value));
+            payload_set(payload, "categoryId", json!(value));
+        }
+        (ImportPreviewPatchField::CategoryId, ImportPreviewPatchValue::Null) => {
+            preview.category_id = None;
+            payload_set(payload, "category_id", Value::Null);
+            payload_set(payload, "categoryId", Value::Null);
         }
         (ImportPreviewPatchField::SourceAccountId, ImportPreviewPatchValue::Integer(value)) => {
             preview.preview_source_account_id = Some(value);
@@ -2705,23 +3335,138 @@ fn apply_preview_filters(
 ) -> Vec<ImportPreviewRow> {
     rows.into_iter()
         .filter(|row| {
-            text_filter_matches(filters.transaction_type.as_deref(), &row.preview_type)
+            datetime_filter_matches(
+                filters.min_datetime.as_deref(),
+                filters.max_datetime.as_deref(),
+                row,
+            ) && selected_filter_matches(filters.selected_only, row)
+                && text_filter_matches(filters.transaction_type.as_deref(), &row.preview_type)
                 && category_filter_matches(filters.category.as_deref(), row)
                 && account_filter_matches(filters.account.as_deref(), row)
+                && tag_filter_matches(filters.tag.as_deref(), row)
+                && signal_filter_matches(filters.signal.as_deref(), row)
+                && annotation_filter_matches(filters.annotation.as_deref(), row)
                 && text_filter_matches(filters.description.as_deref(), &row.preview_description)
         })
         .collect()
 }
 
+pub fn get_import_preview_category_by_id(
+    pool: &PostgresPool,
+    user_id: UserId,
+    category_id: i64,
+) -> DbResult<Option<ImportPreviewCategoryLookup>> {
+    block_on_db(async move {
+        let row = sqlx::query(import_preview_category_lookup_sql())
+            .bind(category_id)
+            .bind(user_id_i64(user_id)?)
+            .fetch_optional(pool)
+            .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let name = row.try_get::<String, _>("name")?;
+        let path = row
+            .try_get::<Option<String>, _>("path")?
+            .unwrap_or_default();
+        let category_type = row.try_get::<Option<String>, _>("category_type")?;
+        Ok(Some(import_preview_category_lookup_from_values(
+            &name,
+            &path,
+            category_type.as_deref(),
+        )))
+    })
+}
+
+fn import_preview_category_lookup_sql() -> &'static str {
+    r#"
+        SELECT name, category_type, path
+        FROM categories
+        WHERE id = $1 AND user_id = $2 AND is_active = true
+    "#
+    .trim()
+}
+
+fn import_preview_category_lookup_from_values(
+    name: &str,
+    path: &str,
+    category_type: Option<&str>,
+) -> ImportPreviewCategoryLookup {
+    let (main_category, sub_category) = preview_category_names_from_path(path, name);
+    let type_code = category_type.and_then(preview_category_type_code);
+    ImportPreviewCategoryLookup {
+        type_code,
+        main_category,
+        sub_category,
+    }
+}
+
+fn preview_category_names_from_path(path: &str, name: &str) -> (String, String) {
+    let parts = path
+        .split('/')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    match parts.as_slice() {
+        [] => (name.to_string(), String::new()),
+        [main] => ((*main).to_string(), String::new()),
+        [main, rest @ ..] => ((*main).to_string(), rest.join("/")),
+    }
+}
+
+fn preview_category_type_code(value: &str) -> Option<i64> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "2" | "income" | "收入" => Some(2),
+        "3" | "expense" | "支出" => Some(3),
+        "4" | "transfer" | "转账" => Some(4),
+        "5" | "investment" | "投资" => Some(5),
+        _ => None,
+    }
+}
+
+fn datetime_filter_matches(
+    min_datetime: Option<&str>,
+    max_datetime: Option<&str>,
+    row: &ImportPreviewRow,
+) -> bool {
+    let preview_date = normalize_bill_date_text(&row.preview_date);
+    min_datetime
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_none_or(|value| preview_date.as_str() >= value)
+        && max_datetime
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none_or(|value| preview_date.as_str() <= value)
+}
+
+fn selected_filter_matches(selected_only: bool, row: &ImportPreviewRow) -> bool {
+    !selected_only || row.preview_selected
+}
+
 fn category_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bool {
-    text_filter_matches(filter, &row.preview_main_category)
-        || text_filter_matches(filter, &row.preview_sub_category)
+    let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+    if matches!(filter, "__none__" | "__invalid__") {
+        return row.category_id.is_none()
+            && row.preview_main_category.trim().is_empty()
+            && row.preview_sub_category.trim().is_empty();
+    }
+    row.category_id
+        .is_some_and(|category_id| category_id.to_string() == filter)
+        || text_filter_matches(Some(filter), &row.preview_main_category)
+        || text_filter_matches(Some(filter), &row.preview_sub_category)
 }
 
 fn account_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bool {
     let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) else {
         return true;
     };
+    if matches!(filter, "__none__" | "__invalid__") {
+        return row.preview_source_account_id.is_none()
+            && row.preview_destination_account_id.is_none();
+    }
     let source = row.preview_source_account_id.map(|value| value.to_string());
     let destination = row
         .preview_destination_account_id
@@ -2737,12 +3482,73 @@ fn text_filter_matches(filter: Option<&str>, value: &str) -> bool {
     value.to_lowercase().contains(&filter.to_lowercase())
 }
 
+fn tag_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bool {
+    let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+    row.preview_parser_tags
+        .iter()
+        .any(|tag| tag.eq_ignore_ascii_case(filter) || text_filter_matches(Some(filter), tag))
+}
+
+fn signal_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bool {
+    let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+    let filter = filter.to_ascii_lowercase();
+    preview_feedback_contains_signal(&row.preview_matching_feedback, &filter)
+}
+
+fn annotation_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bool {
+    let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+    let filter = filter.to_ascii_lowercase();
+    row.preview_matching_feedback
+        .get("annotation")
+        .is_some_and(|value| json_value_contains_text(value, &filter))
+}
+
+fn preview_feedback_contains_signal(feedback: &Value, filter: &str) -> bool {
+    match filter.split_once(':') {
+        Some((family, status)) => feedback
+            .get(family)
+            .is_some_and(|value| json_value_contains_text(value, status)),
+        None => json_value_contains_text(feedback, filter),
+    }
+}
+
+fn json_value_contains_text(value: &Value, needle: &str) -> bool {
+    match value {
+        Value::String(text) => text.to_ascii_lowercase().contains(needle),
+        Value::Array(items) => items
+            .iter()
+            .any(|item| json_value_contains_text(item, needle)),
+        Value::Object(object) => object
+            .values()
+            .any(|item| json_value_contains_text(item, needle)),
+        Value::Number(number) => number.to_string().contains(needle),
+        Value::Bool(value) => value.to_string().contains(needle),
+        Value::Null => false,
+    }
+}
+
 fn sort_preview_rows(rows: &mut [ImportPreviewRow], sort_by: &str, sort_direction: &str) {
     let descending = sort_direction.eq_ignore_ascii_case("desc");
     rows.sort_by(|left, right| {
         let order = match sort_by {
-            "amount" | "preview_amount" => left.preview_amount.total_cmp(&right.preview_amount),
+            "amount" | "preview_amount" | "sourceAmount" => {
+                left.preview_amount.total_cmp(&right.preview_amount)
+            }
             "counterparty" => left.preview_counterparty.cmp(&right.preview_counterparty),
+            "type" => preview_type_sort_rank(&left.preview_type)
+                .cmp(&preview_type_sort_rank(&right.preview_type))
+                .then(left.preview_type.cmp(&right.preview_type)),
+            "paymentMethod" => left
+                .preview_payment_method
+                .cmp(&right.preview_payment_method),
+            "comment" => left.preview_description.cmp(&right.preview_description),
+            "time" => left.preview_date.cmp(&right.preview_date),
             _ => left
                 .preview_date
                 .cmp(&right.preview_date)
@@ -2754,6 +3560,16 @@ fn sort_preview_rows(rows: &mut [ImportPreviewRow], sort_by: &str, sort_directio
             order
         }
     });
+}
+
+fn preview_type_sort_rank(value: &str) -> u8 {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "收入" | "income" | "2" => 0,
+        "支出" | "expense" | "3" => 1,
+        "转账" | "transfer" | "4" => 2,
+        "投资" | "investment" | "5" => 3,
+        _ => 4,
+    }
 }
 
 fn preview_requires_review(preview: &ImportPreviewRow) -> bool {
@@ -2931,4 +3747,611 @@ fn first_non_empty(values: impl IntoIterator<Item = impl AsRef<str>>) -> String 
         .map(|value| value.as_ref().trim().to_string())
         .find(|value| !value.is_empty())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod import_preview_query_tests {
+    use super::*;
+    use sqlx::Execute;
+
+    fn preview_row(id: i64) -> ImportPreviewRow {
+        ImportPreviewRow {
+            id,
+            session_id: "session".to_string(),
+            user_id: 1,
+            preview_date: "2026-01-01 09:00:00".to_string(),
+            preview_type: "支出".to_string(),
+            preview_amount: 10.0,
+            preview_destination_amount: 0.0,
+            category_id: None,
+            preview_main_category: "餐饮".to_string(),
+            preview_sub_category: "午餐".to_string(),
+            preview_source_account_id: Some(11),
+            preview_destination_account_id: None,
+            preview_counterparty: "商户".to_string(),
+            preview_payment_method: "付款卡".to_string(),
+            preview_description: "默认备注".to_string(),
+            preview_parser_id: "fixture".to_string(),
+            preview_parser_tags: vec!["parser:fixture".to_string()],
+            preview_recurring_id: None,
+            preview_recurring_name: String::new(),
+            preview_recurring_candidate_count: 0,
+            preview_recurring_match_score: 0.0,
+            preview_recurring_match_reasons: String::new(),
+            preview_recurring_matched_date: String::new(),
+            preview_selected: true,
+            dedup_type: String::new(),
+            dedup_source_ids: Vec::new(),
+            preview_matching_feedback: json!({}),
+            created_at: "2026-01-01 09:00:00".to_string(),
+        }
+    }
+
+    #[test]
+    fn preview_filters_cover_server_paged_contract_fields() {
+        let mut first = preview_row(1);
+        first.preview_date = "2026-01-10 10:00:00".to_string();
+        first.preview_description = "含 手续费".to_string();
+        first.preview_parser_tags = vec!["银行".to_string(), "工资".to_string()];
+        first.preview_matching_feedback = json!({
+            "annotation": {"status": "missing_category"},
+            "learning": {"review_status": "needs_review"}
+        });
+
+        let mut second = preview_row(2);
+        second.preview_date = "2026-02-01 10:00:00".to_string();
+        second.preview_selected = false;
+        second.preview_parser_tags = vec!["微信".to_string()];
+        second.preview_matching_feedback = json!({
+            "annotation": {"status": "ok"},
+            "learning": {"review_status": "none"}
+        });
+
+        let filters = ImportPreviewQueryFilters {
+            min_datetime: Some("2026-01-01 00:00:00".to_string()),
+            max_datetime: Some("2026-01-31 23:59:59".to_string()),
+            tag: Some("工资".to_string()),
+            signal: Some("learning:needs_review".to_string()),
+            annotation: Some("missing_category".to_string()),
+            description: Some("手续费".to_string()),
+            selected_only: true,
+            ..ImportPreviewQueryFilters::default()
+        };
+
+        let rows = apply_preview_filters(vec![first, second], &filters);
+        assert_eq!(
+            rows.into_iter().map(|row| row.id).collect::<Vec<_>>(),
+            vec![1]
+        );
+    }
+
+    #[test]
+    fn preview_category_filter_uses_persisted_category_identity() {
+        let mut matched = preview_row(1);
+        matched.category_id = Some(42);
+        matched.preview_main_category = "理财".to_string();
+        matched.preview_sub_category = "理财收益".to_string();
+
+        let mut same_name_wrong_identity = preview_row(2);
+        same_name_wrong_identity.category_id = Some(99);
+        same_name_wrong_identity.preview_main_category = "理财".to_string();
+        same_name_wrong_identity.preview_sub_category = "理财收益".to_string();
+
+        let mut missing = preview_row(3);
+        missing.category_id = None;
+        missing.preview_main_category.clear();
+        missing.preview_sub_category.clear();
+
+        let id_filters = ImportPreviewQueryFilters {
+            category: Some("42".to_string()),
+            ..ImportPreviewQueryFilters::default()
+        };
+        let rows = apply_preview_filters(
+            vec![
+                matched.clone(),
+                same_name_wrong_identity.clone(),
+                missing.clone(),
+            ],
+            &id_filters,
+        );
+        assert_eq!(
+            rows.into_iter().map(|row| row.id).collect::<Vec<_>>(),
+            vec![1]
+        );
+
+        let missing_filters = ImportPreviewQueryFilters {
+            category: Some("__none__".to_string()),
+            ..ImportPreviewQueryFilters::default()
+        };
+        let rows = apply_preview_filters(
+            vec![matched, same_name_wrong_identity, missing],
+            &missing_filters,
+        );
+        assert_eq!(
+            rows.into_iter().map(|row| row.id).collect::<Vec<_>>(),
+            vec![3]
+        );
+    }
+
+    #[test]
+    fn preview_bulk_insert_value_preserves_amount_and_category_identity() {
+        let draft = ImportPreviewDraft {
+            preview_date: "2026-01-01 09:00:00".to_string(),
+            preview_type: "收入".to_string(),
+            preview_amount: 12.34,
+            category_id: Some(42),
+            preview_main_category: "理财".to_string(),
+            preview_sub_category: "理财收益".to_string(),
+            preview_counterparty: "基金平台".to_string(),
+            preview_payment_method: "招商卡".to_string(),
+            preview_description: "收益".to_string(),
+            preview_selected: true,
+            dedup_source_ids: vec![7, 8],
+            ..ImportPreviewDraft::default()
+        };
+
+        let value = preview_row_batch_value_from_draft(&draft);
+        let payload: Value = serde_json::from_str(&value.preview_payload).expect("valid payload");
+
+        assert_eq!(value.amount_cents, 1234);
+        assert_eq!(value.direction, "income");
+        assert_eq!(value.category_id, Some(42));
+        assert_eq!(value.merged_source_ids, vec![7, 8]);
+        assert_eq!(payload["category_id"], json!(42));
+        assert_eq!(payload["categoryId"], json!(42));
+    }
+
+    #[test]
+    fn preview_sql_query_builder_covers_server_filter_and_sort_contract() {
+        let filters = ImportPreviewQueryFilters {
+            min_datetime: Some("2026-01-01".to_string()),
+            max_datetime: Some("2026-01-31".to_string()),
+            transaction_type: Some("支出".to_string()),
+            category: Some("42".to_string()),
+            account: Some("__none__".to_string()),
+            tag: Some("工资".to_string()),
+            signal: Some("learning:needs_review".to_string()),
+            annotation: Some("missing_category".to_string()),
+            description: Some("手续费".to_string()),
+            selected_only: true,
+        };
+        let mut query = build_preview_page_query(1, 2, &filters, "sourceAmount", "desc", 50, 100);
+
+        let built = query.build();
+        let sql = built.sql();
+
+        assert!(sql.contains("JOIN import_sessions"));
+        assert!(sql.contains("p.selected = true"));
+        assert!(sql.contains("p.category_id::text"));
+        assert!(sql.contains("p.account_id IS NULL"));
+        assert!(sql.contains("preview_matching_feedback'->"));
+        assert!(sql.contains("ORDER BY p.amount_cents DESC"));
+        assert!(sql.contains("LIMIT"));
+        assert!(sql.contains("OFFSET"));
+
+        let mut count_query = build_preview_count_query(1, 2, &filters);
+        let count_sql = count_query.build().sql().to_string();
+        assert!(count_sql.contains("SELECT COUNT(*)::BIGINT"));
+        assert!(count_sql.contains("p.selected = true"));
+    }
+
+    #[test]
+    fn preview_sql_query_builder_covers_none_category_and_account_id_filters() {
+        let filters = ImportPreviewQueryFilters {
+            category: Some("__none__".to_string()),
+            account: Some("11".to_string()),
+            signal: Some("learning".to_string()),
+            ..ImportPreviewQueryFilters::default()
+        };
+        let mut query = QueryBuilder::<Postgres>::new(
+            "SELECT p.* FROM import_preview_rows p WHERE p.session_id = ",
+        );
+        query.push_bind(1_i64);
+        push_preview_query_predicates(&mut query, &filters, "p");
+        push_preview_order_by(&mut query, "type", "asc");
+
+        let built = query.build();
+        let sql = built.sql();
+
+        assert!(sql.contains("p.category_id IS NULL"));
+        assert!(sql.contains("p.account_id::text"));
+        assert!(sql.contains("preview_matching_feedback')::text ILIKE"));
+        assert!(sql.contains("CASE lower(p.transaction_type)"));
+    }
+
+    #[test]
+    fn preview_page_result_builder_filters_sorts_and_pages_rows() {
+        let mut first = preview_row(1);
+        first.preview_selected = true;
+        first.preview_amount = 30.0;
+        first.preview_description = "保留 3".to_string();
+
+        let mut second = preview_row(2);
+        second.preview_selected = false;
+        second.preview_amount = 40.0;
+        second.preview_description = "过滤".to_string();
+
+        let mut third = preview_row(3);
+        third.preview_selected = true;
+        third.preview_amount = 10.0;
+        third.preview_description = "保留 1".to_string();
+
+        let request = ImportPreviewPageRequest {
+            page: 2,
+            page_size: 1,
+            sort_by: "sourceAmount".to_string(),
+            sort_direction: "desc".to_string(),
+            filters: ImportPreviewQueryFilters {
+                selected_only: true,
+                ..ImportPreviewQueryFilters::default()
+            },
+            ..ImportPreviewPageRequest::default()
+        };
+
+        let result = build_preview_page_result_from_rows(vec![third, second, first], &request);
+
+        assert_eq!(result.total, 2);
+        assert_eq!(result.page, 2);
+        assert_eq!(result.page_size, 1);
+        assert_eq!(
+            result
+                .rows
+                .into_iter()
+                .map(|row| row.id)
+                .collect::<Vec<_>>(),
+            vec![3]
+        );
+        assert_eq!(result.metadata.counts.total, 2);
+    }
+
+    #[test]
+    fn preview_selection_update_query_covers_modes_filters_and_ids() {
+        let request = ImportPreviewPageRequest {
+            preview_ids: vec![11, 12],
+            filters: ImportPreviewQueryFilters {
+                category: Some("42".to_string()),
+                selected_only: true,
+                ..ImportPreviewQueryFilters::default()
+            },
+            ..ImportPreviewPageRequest::default()
+        };
+
+        let mut select_query = build_preview_selection_update_query(
+            1,
+            2,
+            ImportPreviewSelectionMode::Select,
+            &request,
+        );
+        let select_sql = select_query.build().sql().to_string();
+        assert!(select_sql.contains("UPDATE import_preview_rows p SET selected ="));
+        assert!(select_sql.contains("jsonb_set"));
+        assert!(select_sql.contains("p.selected = true"));
+        assert!(select_sql.contains("p.category_id::text"));
+        assert!(select_sql.contains("p.id IN"));
+
+        let mut deselect_query = build_preview_selection_update_query(
+            1,
+            2,
+            ImportPreviewSelectionMode::Deselect,
+            &ImportPreviewPageRequest::default(),
+        );
+        let deselect_sql = deselect_query.build().sql().to_string();
+        assert!(deselect_sql.contains("to_jsonb($"));
+
+        let mut invert_query = build_preview_selection_update_query(
+            1,
+            2,
+            ImportPreviewSelectionMode::Invert,
+            &ImportPreviewPageRequest::default(),
+        );
+        let invert_sql = invert_query.build().sql().to_string();
+        assert!(invert_sql.contains("NOT p.selected"));
+    }
+
+    #[test]
+    fn standard_row_bulk_insert_value_preserves_parser_payload_and_amount() {
+        let draft = ImportParserTemplateDraft {
+            parser_date: "2026-01-01 09:00:00".to_string(),
+            parser_amount: -19.88,
+            parser_type: "支出".to_string(),
+            parser_description: "午餐".to_string(),
+            parser_id: "fixture".to_string(),
+            parser_counterparty: "餐厅".to_string(),
+            parser_payment_method: "招商卡".to_string(),
+            parser_original_type: "消费".to_string(),
+            parser_original_category: "餐饮".to_string(),
+            parser_account_id: "11".to_string(),
+            ..ImportParserTemplateDraft::default()
+        };
+
+        let value = standard_row_batch_value_from_parser_template(5, 3, &draft);
+        let parser_payload: Value =
+            serde_json::from_str(&value.parser_payload).expect("valid parser payload");
+
+        assert_eq!(value.source_id, 5);
+        assert_eq!(value.source_row_index, 3);
+        assert_eq!(value.amount_cents, 1988);
+        assert_eq!(value.direction, "expense");
+        assert_eq!(parser_payload["parser_id"], json!("fixture"));
+
+        let values = standard_row_batch_values_from_parser_templates(5, &[draft]);
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].source_row_index, 0);
+        assert_eq!(values[0].parser_payload, value.parser_payload);
+    }
+
+    #[test]
+    fn standard_row_batch_values_from_drafts_use_source_fallback_and_parser_payload() {
+        let parser_draft = ImportParserTemplateDraft {
+            parser_id: "wechat_pay".to_string(),
+            parser_original_type: "交易".to_string(),
+            parser_original_category: "餐饮".to_string(),
+            parser_account_id: "card-1".to_string(),
+            ..ImportParserTemplateDraft::default()
+        };
+        let standard_row = ImportStandardRowDraft {
+            source_index: 99,
+            source_row_index: 3,
+            occurred_at: "2026-01-01 09:00:00".to_string(),
+            amount_cents: 1234,
+            direction: "expense".to_string(),
+            transaction_type: "支出".to_string(),
+            merchant: "餐厅".to_string(),
+            payment_method: "招商卡".to_string(),
+            description: "午餐".to_string(),
+            parser_payload: json!({"raw": true}),
+            standard_payload: json!({"normalized": true}),
+        };
+        let mut source_ids = std::collections::BTreeMap::new();
+        source_ids.insert(0, 100);
+
+        let values = standard_row_batch_values_from_standard_row_drafts(
+            &[parser_draft],
+            &[standard_row],
+            &source_ids,
+        )
+        .expect("source fallback value");
+
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].source_id, 100);
+        assert_eq!(values[0].source_row_index, 3);
+        let parser_payload: Value =
+            serde_json::from_str(&values[0].parser_payload).expect("parser payload json");
+        let standard_payload: Value =
+            serde_json::from_str(&values[0].standard_payload).expect("standard payload json");
+        assert_eq!(parser_payload["parser_id"], json!("wechat_pay"));
+        assert_eq!(parser_payload["parser_original_category"], json!("餐饮"));
+        assert_eq!(standard_payload["normalized"], json!(true));
+
+        let missing = standard_row_batch_values_from_standard_row_drafts(&[], &[], &source_ids);
+        assert_eq!(missing.expect("empty standard rows").len(), 0);
+        let missing_source = standard_row_batch_values_from_standard_row_drafts(
+            &[],
+            &[ImportStandardRowDraft {
+                source_index: 1,
+                source_row_index: 0,
+                occurred_at: String::new(),
+                amount_cents: 0,
+                direction: String::new(),
+                transaction_type: String::new(),
+                merchant: String::new(),
+                payment_method: String::new(),
+                description: String::new(),
+                parser_payload: json!({}),
+                standard_payload: json!({}),
+            }],
+            &std::collections::BTreeMap::new(),
+        );
+        assert!(missing_source.is_err());
+    }
+
+    #[test]
+    fn preview_patch_value_updates_category_identity_in_row_and_payload() {
+        let mut row = preview_row(1);
+        let mut payload = json!({});
+
+        apply_patch_value_to_preview(
+            &mut row,
+            &mut payload,
+            ImportPreviewPatchField::CategoryId,
+            ImportPreviewPatchValue::Integer(42),
+        );
+
+        assert_eq!(row.category_id, Some(42));
+        assert_eq!(payload["category_id"], json!(42));
+        assert_eq!(payload["categoryId"], json!(42));
+
+        apply_patch_value_to_preview(
+            &mut row,
+            &mut payload,
+            ImportPreviewPatchField::CategoryId,
+            ImportPreviewPatchValue::Null,
+        );
+
+        assert_eq!(row.category_id, None);
+        assert_eq!(payload["category_id"], Value::Null);
+        assert_eq!(payload["categoryId"], Value::Null);
+    }
+
+    #[test]
+    fn preview_category_lookup_helpers_preserve_type_path_and_sql_contract() {
+        let lookup =
+            import_preview_category_lookup_from_values("理财收益", "理财/理财收益", Some("income"));
+
+        assert_eq!(lookup.type_code, Some(2));
+        assert_eq!(lookup.main_category, "理财");
+        assert_eq!(lookup.sub_category, "理财收益");
+        assert!(import_preview_category_lookup_sql().contains("FROM categories"));
+        assert!(import_preview_category_lookup_sql().contains("is_active = true"));
+
+        let fallback = import_preview_category_lookup_from_values("未分类", "", Some("unknown"));
+        assert_eq!(fallback.type_code, None);
+        assert_eq!(fallback.main_category, "未分类");
+        assert!(fallback.sub_category.is_empty());
+
+        let single = preview_category_names_from_path("理财", "理财");
+        assert_eq!(single, ("理财".to_string(), String::new()));
+    }
+
+    #[test]
+    fn preview_filter_helpers_cover_none_account_and_nested_feedback_edges() {
+        let mut row = preview_row(1);
+        row.preview_source_account_id = None;
+        row.preview_destination_account_id = None;
+        row.preview_matching_feedback = json!([
+            {"learning": ["needs_review", {"reason": "manual"}]},
+            12,
+            true,
+            null
+        ]);
+
+        assert!(account_filter_matches(Some("__none__"), &row));
+        assert!(signal_filter_matches(Some("manual"), &row));
+        assert!(signal_filter_matches(Some("12"), &row));
+        assert!(signal_filter_matches(Some("true"), &row));
+        assert!(!signal_filter_matches(Some("missing"), &row));
+    }
+
+    #[test]
+    fn bulk_insert_query_builders_preserve_insert_shapes() {
+        let preview_draft = ImportPreviewDraft {
+            preview_date: "2026-01-01 09:00:00".to_string(),
+            preview_type: "支出".to_string(),
+            preview_amount: 10.0,
+            category_id: Some(42),
+            preview_counterparty: "商户".to_string(),
+            preview_payment_method: "招商卡".to_string(),
+            preview_description: "备注".to_string(),
+            dedup_source_ids: vec![1, 2],
+            ..ImportPreviewDraft::default()
+        };
+        let preview_values = vec![preview_row_batch_value_from_draft(&preview_draft)];
+        let mut preview_builder = build_preview_rows_insert_query(1, 2, &preview_values);
+        let preview_query = preview_builder.build();
+        let preview_sql = preview_query.sql();
+        assert!(preview_sql.contains("INSERT INTO import_preview_rows"));
+        assert!(preview_sql.contains("category_id"));
+        assert!(preview_sql.contains("preview_payload"));
+
+        let parser_draft = ImportParserTemplateDraft {
+            parser_date: "2026-01-01 09:00:00".to_string(),
+            parser_amount: 10.0,
+            parser_type: "收入".to_string(),
+            parser_id: "fixture".to_string(),
+            ..ImportParserTemplateDraft::default()
+        };
+        let standard_values = vec![standard_row_batch_value_from_parser_template(
+            3,
+            4,
+            &parser_draft,
+        )];
+        let mut standard_builder = build_standard_rows_insert_query(1, 2, &standard_values);
+        let standard_query = standard_builder.build();
+        let standard_sql = standard_query.sql();
+        assert!(standard_sql.contains("INSERT INTO import_standard_rows"));
+        assert!(standard_sql.contains("ON CONFLICT (source_id, source_row_index)"));
+        assert!(standard_sql.contains("standard_payload"));
+        let mut single_insert_builder = build_preview_row_insert_returning_query(
+            1,
+            2,
+            &preview_draft,
+            json!({"category_id": 42}).to_string(),
+            1000,
+            "expense",
+        );
+        let single_insert_sql = single_insert_builder.build().sql().to_string();
+        assert!(single_insert_sql.contains("INSERT INTO import_preview_rows"));
+        assert!(single_insert_sql.contains("category_id"));
+        assert!(single_insert_sql.contains("RETURNING id"));
+
+        let mut preview = preview_row(7);
+        preview.category_id = Some(42);
+        let mut update_builder = build_preview_row_update_query(
+            &preview,
+            json!({"category_id": 42}).to_string(),
+            1000,
+            "expense",
+            7,
+            1,
+            2,
+        );
+        let update_sql = update_builder.build().sql().to_string();
+        assert!(update_sql.contains("UPDATE import_preview_rows"));
+        assert!(update_sql.contains("category_id ="));
+        assert!(update_sql.contains("WHERE id ="));
+    }
+
+    #[test]
+    fn preview_sort_accepts_frontend_server_paged_keys() {
+        let mut earlier = preview_row(1);
+        earlier.preview_date = "2026-01-01 09:00:00".to_string();
+        earlier.preview_type = "支出".to_string();
+        earlier.preview_amount = 30.0;
+        earlier.preview_payment_method = "B卡".to_string();
+        earlier.preview_description = "bbb".to_string();
+
+        let mut later = preview_row(2);
+        later.preview_date = "2026-01-02 09:00:00".to_string();
+        later.preview_type = "收入".to_string();
+        later.preview_amount = 10.0;
+        later.preview_payment_method = "A卡".to_string();
+        later.preview_description = "aaa".to_string();
+
+        let mut rows = vec![earlier.clone(), later.clone()];
+        sort_preview_rows(&mut rows, "time", "desc");
+        assert_eq!(
+            rows.iter().map(|row| row.id).collect::<Vec<_>>(),
+            vec![2, 1]
+        );
+
+        let mut rows = vec![earlier.clone(), later.clone()];
+        sort_preview_rows(&mut rows, "sourceAmount", "asc");
+        assert_eq!(
+            rows.iter().map(|row| row.id).collect::<Vec<_>>(),
+            vec![2, 1]
+        );
+
+        let mut rows = vec![earlier.clone(), later.clone()];
+        sort_preview_rows(&mut rows, "type", "asc");
+        assert_eq!(
+            rows.iter().map(|row| row.id).collect::<Vec<_>>(),
+            vec![2, 1]
+        );
+
+        let mut rows = vec![earlier.clone(), later.clone()];
+        sort_preview_rows(&mut rows, "paymentMethod", "asc");
+        assert_eq!(
+            rows.iter().map(|row| row.id).collect::<Vec<_>>(),
+            vec![2, 1]
+        );
+
+        let mut rows = vec![earlier, later];
+        sort_preview_rows(&mut rows, "comment", "asc");
+        assert_eq!(
+            rows.iter().map(|row| row.id).collect::<Vec<_>>(),
+            vec![2, 1]
+        );
+
+        let mut fallback_earlier = preview_row(1);
+        fallback_earlier.preview_date = "2026-01-01 09:00:00".to_string();
+        let mut fallback_later = preview_row(2);
+        fallback_later.preview_date = "2026-01-02 09:00:00".to_string();
+        let mut rows = vec![fallback_later, fallback_earlier];
+        sort_preview_rows(&mut rows, "unknown", "asc");
+        assert_eq!(
+            rows.iter().map(|row| row.id).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+
+        let mut transfer = preview_row(1);
+        transfer.preview_type = "转账".to_string();
+        let mut investment = preview_row(2);
+        investment.preview_type = "投资".to_string();
+        let mut rows = vec![investment, transfer];
+        sort_preview_rows(&mut rows, "type", "asc");
+        assert_eq!(
+            rows.iter().map(|row| row.id).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+    }
 }

@@ -937,6 +937,7 @@ where
         if !rule.main_category.trim().is_empty() || !rule.sub_category.trim().is_empty() {
             draft.preview_main_category = rule.main_category.clone();
             draft.preview_sub_category = rule.sub_category.clone();
+            draft.category_id = Some(rule.category_id);
             normalize_preview_type_for_category(draft, rule.category_type);
             matching_feedback_object_mut(draft).insert(
                 "category_rule".to_string(),
@@ -994,6 +995,7 @@ fn apply_builtin_category_rule_fallback(
 
         draft.preview_main_category = category.main_category.clone();
         draft.preview_sub_category = category.sub_category.clone();
+        draft.category_id = Some(category.id);
         normalize_preview_type_for_category(draft, category.type_code);
         matching_feedback_object_mut(draft).insert(
             "category_rule".to_string(),
@@ -1047,6 +1049,7 @@ fn persist_stage2_actionable_baseline(draft: &mut ImportPreviewDraft) {
 fn import_preview_stage2_snapshot(draft: &ImportPreviewDraft) -> Value {
     json!({
         "preview_type": draft.preview_type,
+        "category_id": draft.category_id,
         "preview_main_category": draft.preview_main_category,
         "preview_sub_category": draft.preview_sub_category,
         "preview_source_account_id": draft.preview_source_account_id,
@@ -1058,6 +1061,7 @@ fn import_preview_stage2_snapshot(draft: &ImportPreviewDraft) -> Value {
 fn import_preview_transfer_applied_snapshot(draft: &ImportPreviewDraft) -> Value {
     json!({
         "preview_type": draft.preview_type,
+        "category_id": draft.category_id,
         "preview_main_category": draft.preview_main_category,
         "preview_sub_category": draft.preview_sub_category,
         "preview_source_account_id": draft.preview_source_account_id,
@@ -1332,6 +1336,7 @@ fn apply_learning_rule_projection(
     if let Some(category) = learned_category {
         draft.preview_main_category = category.main_category.clone();
         draft.preview_sub_category = category.sub_category.clone();
+        draft.category_id = Some(category.id);
         normalize_preview_type_for_category(draft, category.type_code);
     }
     if let Some(account_id) = rule.learned_source_account_id {
@@ -1387,6 +1392,7 @@ fn apply_transfer_default_category(
     };
     draft.preview_main_category = category.main_category.clone();
     draft.preview_sub_category = category.sub_category.clone();
+    draft.category_id = Some(category.id);
     true
 }
 
@@ -1399,6 +1405,12 @@ fn preview_category_matches_type(
     let sub_category = draft.preview_sub_category.trim();
     if main_category.is_empty() && sub_category.is_empty() {
         return false;
+    }
+
+    if let Some(category_id) = draft.category_id {
+        return categories
+            .iter()
+            .any(|category| category.id == category_id && category.type_code == expected_type);
     }
 
     categories.iter().any(|category| {
@@ -1751,6 +1763,7 @@ fn import_preview_draft_from_row(row: &ImportPreviewRow) -> ImportPreviewDraft {
         preview_type: row.preview_type.clone(),
         preview_amount: row.preview_amount,
         preview_destination_amount: row.preview_destination_amount,
+        category_id: row.category_id,
         preview_main_category: row.preview_main_category.clone(),
         preview_sub_category: row.preview_sub_category.clone(),
         preview_source_account_id: row.preview_source_account_id,
@@ -1787,6 +1800,10 @@ fn import_preview_patch_from_draft(preview_id: i64, draft: &ImportPreviewDraft) 
         (
             ImportPreviewPatchField::SubCategory,
             ImportPreviewPatchValue::Text(draft.preview_sub_category.clone()),
+        ),
+        (
+            ImportPreviewPatchField::CategoryId,
+            optional_i64_patch_value(draft.category_id),
         ),
         (
             ImportPreviewPatchField::SourceAccountId,
@@ -2261,12 +2278,16 @@ pub async fn import_preview_selection_runtime_handler(
         preview_ids: Vec::new(),
         filters: filters.clone(),
     };
-    let selected = !matches!(action.as_str(), "select_none");
+    let selection_mode = match action.as_str() {
+        "select_none" => ImportPreviewSelectionMode::Deselect,
+        "invert" => ImportPreviewSelectionMode::Invert,
+        _ => ImportPreviewSelectionMode::Select,
+    };
     let updated = match update_session_preview_selection_by_query(
         runtime.connection(),
         &session_id,
         user_id,
-        selected,
+        selection_mode,
         &selection_request,
     ) {
         Ok(updated) => updated,
@@ -3150,5 +3171,105 @@ mod tests {
             response.body["error"],
             "Rust import route runtime DB error"
         );
+    }
+
+    #[test]
+    fn preview_category_type_validation_prefers_canonical_category_id() {
+        let categories = vec![
+            ImportIntelligenceCategory {
+                id: 42,
+                type_code: 2,
+                main_category: "理财".to_string(),
+                sub_category: "理财收益".to_string(),
+            },
+            ImportIntelligenceCategory {
+                id: 99,
+                type_code: 3,
+                main_category: "理财".to_string(),
+                sub_category: "理财收益".to_string(),
+            },
+        ];
+        let draft = ImportPreviewDraft {
+            category_id: Some(42),
+            preview_main_category: "理财".to_string(),
+            preview_sub_category: "理财收益".to_string(),
+            ..ImportPreviewDraft::default()
+        };
+
+        assert!(preview_category_matches_type(&draft, &categories, 2));
+        assert!(!preview_category_matches_type(&draft, &categories, 3));
+    }
+
+    #[test]
+    fn import_preview_patch_from_draft_carries_canonical_category_id() {
+        let draft = ImportPreviewDraft {
+            category_id: Some(42),
+            preview_main_category: "理财".to_string(),
+            preview_sub_category: "理财收益".to_string(),
+            ..ImportPreviewDraft::default()
+        };
+
+        let patch = import_preview_patch_from_draft(7, &draft);
+
+        assert!(patch.changes.iter().any(|(field, value)| {
+            *field == ImportPreviewPatchField::CategoryId
+                && *value == ImportPreviewPatchValue::Integer(42)
+        }));
+    }
+
+    #[test]
+    fn preview_snapshots_and_row_draft_preserve_canonical_category_id() {
+        let draft = ImportPreviewDraft {
+            preview_type: "收入".to_string(),
+            category_id: Some(42),
+            preview_main_category: "理财".to_string(),
+            preview_sub_category: "理财收益".to_string(),
+            preview_source_account_id: Some(7),
+            preview_destination_account_id: Some(8),
+            ..ImportPreviewDraft::default()
+        };
+
+        let stage2 = import_preview_stage2_snapshot(&draft);
+        let transfer = import_preview_transfer_applied_snapshot(&draft);
+
+        assert_eq!(stage2["category_id"], json!(42));
+        assert_eq!(transfer["category_id"], json!(42));
+
+        let row = ImportPreviewRow {
+            id: 7,
+            session_id: "session".to_string(),
+            user_id: 1,
+            preview_date: "2026-01-01 09:00:00".to_string(),
+            preview_type: "收入".to_string(),
+            preview_amount: 1.23,
+            preview_destination_amount: 0.0,
+            category_id: Some(42),
+            preview_main_category: "理财".to_string(),
+            preview_sub_category: "理财收益".to_string(),
+            preview_source_account_id: Some(7),
+            preview_destination_account_id: Some(8),
+            preview_counterparty: "基金平台".to_string(),
+            preview_payment_method: "招商卡".to_string(),
+            preview_description: "收益".to_string(),
+            preview_parser_id: "fixture".to_string(),
+            preview_parser_tags: vec!["tag".to_string()],
+            preview_recurring_id: None,
+            preview_recurring_name: String::new(),
+            preview_recurring_candidate_count: 0,
+            preview_recurring_match_score: 0.0,
+            preview_recurring_match_reasons: String::new(),
+            preview_recurring_matched_date: String::new(),
+            preview_selected: true,
+            dedup_type: String::new(),
+            dedup_source_ids: vec![1],
+            preview_matching_feedback: json!({}),
+            created_at: "2026-01-01 09:00:00".to_string(),
+        };
+
+        let row_draft = import_preview_draft_from_row(&row);
+
+        assert_eq!(row_draft.category_id, Some(42));
+        assert_eq!(row_draft.preview_main_category, "理财");
+        assert_eq!(row_draft.preview_sub_category, "理财收益");
     }
 }

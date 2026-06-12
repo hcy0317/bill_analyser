@@ -472,6 +472,7 @@ impl Default for ImportPreviewDraft {
             preview_type: String::new(),
             preview_amount: 0.0,
             preview_destination_amount: 0.0,
+            category_id: None,
             preview_main_category: String::new(),
             preview_sub_category: String::new(),
             preview_source_account_id: None,

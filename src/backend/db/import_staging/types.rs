@@ -46,6 +46,7 @@ pub struct ImportPreviewDraft {
     pub preview_type: String,
     pub preview_amount: f64,
     pub preview_destination_amount: f64,
+    pub category_id: Option<i64>,
     pub preview_main_category: String,
     pub preview_sub_category: String,
     pub preview_source_account_id: Option<i64>,
@@ -196,6 +197,7 @@ pub struct ImportPreviewRow {
     pub preview_type: String,
     pub preview_amount: f64,
     pub preview_destination_amount: f64,
+    pub category_id: Option<i64>,
     pub preview_main_category: String,
     pub preview_sub_category: String,
     pub preview_source_account_id: Option<i64>,
@@ -224,6 +226,7 @@ pub struct ImportPreviewFilterIndexRow {
     pub preview_date: String,
     pub preview_type: String,
     pub preview_amount: f64,
+    pub category_id: Option<i64>,
     pub preview_main_category: String,
     pub preview_sub_category: String,
     pub preview_source_account_id: Option<i64>,
@@ -251,6 +254,20 @@ pub struct ImportPreviewPageRequest {
     pub sort_direction: String,
     pub preview_ids: Vec<i64>,
     pub filters: ImportPreviewQueryFilters,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportPreviewCategoryLookup {
+    pub type_code: Option<i64>,
+    pub main_category: String,
+    pub sub_category: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportPreviewSelectionMode {
+    Select,
+    Deselect,
+    Invert,
 }
 
 impl Default for ImportPreviewPageRequest {
@@ -327,6 +344,7 @@ pub enum ImportPreviewPatchField {
     DestinationAmount,
     MainCategory,
     SubCategory,
+    CategoryId,
     SourceAccountId,
     DestinationAccountId,
     Counterparty,
