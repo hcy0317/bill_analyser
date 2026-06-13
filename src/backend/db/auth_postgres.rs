@@ -1370,8 +1370,10 @@ pub async fn create_postgres_registered_user_with_defaults(
     };
     transaction.commit().await.map_err(postgres_auth_error)?;
 
-    let minimal_default_seed = ensure_postgres_category_rule_defaults(pool, user_id).await?;
-    let default_seed = selected_default_seed.unwrap_or(minimal_default_seed);
+    let default_seed = match selected_default_seed {
+        Some(summary) => summary,
+        None => ensure_postgres_category_rule_defaults(pool, user_id).await?,
+    };
     create_postgres_auth_log(
         pool,
         &AuthLogDraft {

@@ -52,6 +52,11 @@ async fn registration_standard_daily_defaults_are_opt_in_idempotent_and_importab
     assert_eq!(opt_in.default_seed.rules_missing_targets, 0);
 
     assert_seeded_accounts_and_rules(pool, opt_in.user_id).await?;
+    assert_eq!(
+        legacy_minimal_category_rule_count(pool, opt_in.user_id).await?,
+        0,
+        "standard_daily_v1 opt-in should not run post-commit legacy defaults"
+    );
 
     let repeated =
         seed_postgres_standard_daily_defaults_for_user(pool, opt_in.user_id, &opt_in_draft).await?;
@@ -81,6 +86,10 @@ async fn registration_standard_daily_defaults_are_opt_in_idempotent_and_importab
     assert_eq!(
         standard_daily_category_rule_count(pool, opt_out.user_id).await?,
         0
+    );
+    assert!(
+        legacy_minimal_category_rule_count(pool, opt_out.user_id).await? > 0,
+        "opt-out registration keeps the legacy minimal defaults"
     );
 
     let bundle = export_seeded_settings_bundle(pool, opt_in.user_id).await?;
@@ -186,6 +195,24 @@ async fn assert_seeded_accounts_and_rules(
     assert_eq!(wechat_rule_count, 1);
 
     Ok(())
+}
+
+async fn legacy_minimal_category_rule_count(
+    pool: &PostgresPool,
+    user_id: i64,
+) -> Result<i64, Box<dyn Error>> {
+    Ok(sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)::BIGINT
+        FROM category_rules
+        WHERE user_id = $1
+          AND name LIKE 'default:%'
+          AND name NOT LIKE 'default:standard_daily_v1:%'
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?)
 }
 
 async fn standard_daily_account_rule_count(
