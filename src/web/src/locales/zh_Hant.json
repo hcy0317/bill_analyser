@@ -2890,5 +2890,7 @@
     "LLM preview recommendation completed, but no suggestions were generated": "LLM 預覽推薦已完成，但未生成建議",
     "Are you sure you want to delete this budget?": "確定要刪除此預算嗎？",
     "Loading": "載入中",
-    "All categories hidden": "所有分類均已隱藏"
+    "All categories hidden": "所有分類均已隱藏",
+    "Use Mainland China daily defaults": "使用大陸日常帳本預設包",
+    "Adds accounts, categories and matching rules for WeChat, Alipay, bank cards and household bills": "新增適配微信、支付寶、銀行卡和家庭帳單的帳戶、分類與匹配規則"
 }

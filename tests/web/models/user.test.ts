@@ -104,7 +104,25 @@ describe('User model helpers', () => {
             language: 'zh-CN',
             defaultCurrency: 'CNY',
             firstDayOfWeek: 1,
-            categories: undefined
+            categories: undefined,
+            defaultPackage: undefined
+        });
+
+        expect(user.toRegisterRequest(undefined, 'standard_daily_v1')).toMatchObject({
+            username: 'register-user',
+            defaultPackage: 'standard_daily_v1'
+        });
+
+        expect(user.toRegisterRequest(undefined, 'none')).toStrictEqual({
+            username: 'register-user',
+            email: 'register@example.com',
+            nickname: '注册用户',
+            password: 'secret',
+            language: 'zh-CN',
+            defaultCurrency: 'CNY',
+            firstDayOfWeek: 1,
+            categories: undefined,
+            defaultPackage: undefined
         });
 
         expect(user.toProfileUpdateRequest('old-secret')).toMatchObject({

@@ -10,6 +10,7 @@ pub mod app_settings;
 pub mod auth;
 pub mod auth_postgres;
 pub mod auth_registration;
+pub mod auth_registration_defaults;
 pub mod backup;
 pub mod backup_postgres;
 pub mod bills;
@@ -63,8 +64,8 @@ pub use auth_postgres::{
     update_postgres_user_password_hash,
 };
 pub use auth_registration::{
-    RegisterDefaultSeedSummary, RegisterPresetCategory, RegisterPresetSubCategory,
-    RegisterUserDraft, RegisterUserResult,
+    RegisterDefaultSeedPackage, RegisterDefaultSeedSummary, RegisterPresetCategory,
+    RegisterPresetSubCategory, RegisterUserDraft, RegisterUserResult,
 };
 pub use backup::{
     BackupAuditLogDraft, BackupJobDraft, BackupJobRow, BackupRecordDraft, BackupRecordRow,

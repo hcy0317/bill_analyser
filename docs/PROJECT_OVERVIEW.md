@@ -68,6 +68,8 @@ multipart 上传并行执行 dedicated parser 检测，每个文件必须且只�
 
 认证运行态校验 Bearer access token 签名、过期时间和 PostgreSQL token session。登录、注册、邮箱验证、密码重置、refresh、logout、2FA、profile、cloud settings、external auth、user-data statistics/export/clear 直接读写 PostgreSQL 表。敏感动作通过当前密码、操作密码或签名 step-up token 校验，并写入认证或业务审计。
 
+注册请求支持可选 `defaultPackage`。缺失、`null` 或 `none` 保持旧注册行为；`standard_daily_v1` 会在注册事务内一次性写入面向中国大陆个人/家庭账单的默认账户、交易分类、分类规则和账户识别规则，并在注册响应中返回 `defaultSeed` 写入摘要。桌面端和移动端注册页都提供独立 opt-in 开关；未勾选的新用户和所有现有用户不会自动写入这套默认包。该默认包写入的数据仍走当前 taxonomy/settings 主链，可随设置包导出并导入到其他账号。
+
 备份运行态负责本地 zip/Fernet 文件 I/O、公开名生成、文件 list/create/download/delete/verify/cleanup、job list/save 与 cloud sync 元数据；记录、任务和审计元数据写入 `backup_records`、`backup_jobs`、`backup_audit_logs`。
 
 ## LLM/OCR

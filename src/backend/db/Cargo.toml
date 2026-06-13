@@ -47,6 +47,10 @@ name = "account_rules_postgres"
 path = "../../../tests/backend/db/account_rules_postgres.rs"
 
 [[test]]
+name = "registration_defaults_postgres"
+path = "../../../tests/backend/db/registration_defaults_postgres.rs"
+
+[[test]]
 name = "import_staging"
 path = "../../../tests/backend/db/import_staging.rs"
 

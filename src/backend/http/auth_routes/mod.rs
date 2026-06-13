@@ -54,8 +54,9 @@ use bill_analyser_db::{
     update_postgres_user_password_hash, ApplicationCloudSettingDraft, ApplicationCloudSettingRow,
     AuthLogDraft, AuthLoginUserRow, AuthUserProfileRow, AuthUserProfileUpdate, BillCategoryFilter,
     BillFilters, CreateTokenSessionDraft, DbError, ExternalAuthRow, PostgresRepositoryRuntime,
-    PostgresUserDataAuditEvent, RegisterPresetCategory, RegisterPresetSubCategory,
-    RegisterUserDraft, TokenSessionRow, UserDataExportBundle, UserDataExportCategory,
+    PostgresUserDataAuditEvent, RegisterDefaultSeedPackage, RegisterDefaultSeedSummary,
+    RegisterPresetCategory, RegisterPresetSubCategory, RegisterUserDraft, TokenSessionRow,
+    UserDataExportBundle, UserDataExportCategory,
 };
 use chrono::{Duration as ChronoDuration, Local, NaiveDateTime, TimeZone, Utc};
 use qrcodegen::{QrCode, QrCodeEcc};
@@ -299,5 +300,78 @@ mod data_export_helper_tests {
         assert!(csv.starts_with("id,date,type,amount_cents,"));
         assert!(csv.contains("1,2026-06-12,支出,-1234,餐饮,午餐,现金账户,"));
         assert!(!csv.starts_with("id,date,type,amount,"));
+    }
+
+    #[test]
+    fn register_default_package_parser_accepts_only_supported_selectors() {
+        assert_eq!(
+            register_default_package_from_body(&Map::new()).expect("missing default package"),
+            RegisterDefaultSeedPackage::None
+        );
+
+        let mut body = Map::new();
+        body.insert("defaultPackage".to_string(), Value::Null);
+        assert_eq!(
+            register_default_package_from_body(&body).expect("null default package"),
+            RegisterDefaultSeedPackage::None
+        );
+
+        body.insert("defaultPackage".to_string(), json!("none"));
+        assert_eq!(
+            register_default_package_from_body(&body).expect("none default package"),
+            RegisterDefaultSeedPackage::None
+        );
+
+        body.insert("defaultPackage".to_string(), json!("standard_daily_v1"));
+        assert_eq!(
+            register_default_package_from_body(&body).expect("standard package"),
+            RegisterDefaultSeedPackage::StandardDailyV1
+        );
+
+        body.insert("defaultPackage".to_string(), json!("cyansl0t-local"));
+        let error = register_default_package_from_body(&body).expect_err("unknown package");
+        assert_eq!(error.status, 400);
+
+        body.insert("defaultPackage".to_string(), json!(true));
+        let error = register_default_package_from_body(&body).expect_err("non-string package");
+        assert_eq!(error.status, 400);
+    }
+
+    #[test]
+    fn register_default_seed_response_uses_public_camel_case_contract() {
+        let summary = RegisterDefaultSeedSummary {
+            package: Some("standard_daily_v1".to_string()),
+            categories_created: 11,
+            categories_skipped: 1,
+            rules_created: 22,
+            rules_skipped: 2,
+            rules_missing_categories: 0,
+            accounts_created: 7,
+            accounts_skipped: 2,
+            account_rules_created: 9,
+            account_rules_skipped: 0,
+            rules_missing_targets: 0,
+        };
+
+        let value = register_default_seed_response(&summary).expect("seed response");
+
+        assert_eq!(value["package"], "standard_daily_v1");
+        assert_eq!(value["categoriesCreated"], 11);
+        assert_eq!(value["categoriesSkipped"], 1);
+        assert_eq!(value["categoryRulesCreated"], 22);
+        assert_eq!(value["categoryRulesSkipped"], 2);
+        assert_eq!(value["accountsCreated"], 7);
+        assert_eq!(value["accountsSkipped"], 2);
+        assert_eq!(value["accountRulesCreated"], 9);
+        assert_eq!(value["accountRulesSkipped"], 0);
+        assert_eq!(value["rulesMissingTargets"], 0);
+        assert!(value.get("rulesCreated").is_none());
+
+        assert!(
+            register_default_seed_response(&RegisterDefaultSeedSummary::empty(
+                RegisterDefaultSeedPackage::None
+            ))
+            .is_none()
+        );
     }
 }

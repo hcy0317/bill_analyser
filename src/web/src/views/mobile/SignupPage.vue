@@ -128,6 +128,12 @@
             <f7-list-item :title="tt('Use preset transaction categories')" link="#" @click="showPresetCategories = true">
                 <f7-toggle :checked="usePresetCategories" @toggle:change="usePresetCategories = $event"></f7-toggle>
             </f7-list-item>
+            <f7-list-item
+                :title="tt('Use Mainland China daily defaults')"
+                :footer="tt('Adds accounts, categories and matching rules for WeChat, Alipay, bank cards and household bills')"
+            >
+                <f7-toggle :checked="useStandardDailyPackage" @toggle:change="useStandardDailyPackage = $event"></f7-toggle>
+            </f7-list-item>
         </f7-list>
 
         <f7-popup push :close-on-escape="false" :opened="showPresetCategories"
@@ -234,6 +240,7 @@ const {
 const rootStore = useRootStore();
 
 const usePresetCategories = ref<boolean>(false);
+const useStandardDailyPackage = ref<boolean>(false);
 const showLanguagePopup = ref<boolean>(false);
 const showDefaultCurrencyPopup = ref<boolean>(false);
 const showFirstDayOfWeekPopup = ref<boolean>(false);
@@ -268,7 +275,8 @@ function submit(): void {
 
     rootStore.register({
         user: user.value,
-        presetCategories: presetCategories
+        presetCategories: presetCategories,
+        defaultPackage: useStandardDailyPackage.value ? 'standard_daily_v1' : undefined
     }).then(response => {
         if (!isUserLogined()) {
             submitting.value = false;

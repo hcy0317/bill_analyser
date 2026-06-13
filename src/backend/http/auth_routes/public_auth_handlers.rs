@@ -80,6 +80,10 @@ async fn register_handler(
     if let Err(message) = state.config.auth_password_policy.validate(password) {
         return auth_rest_error_response(AuthRestError::new(400, "Invalid password", message));
     }
+    let default_package = match register_default_package_from_body(&body) {
+        Ok(value) => value,
+        Err(error) => return auth_rest_error_response(error),
+    };
 
     let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
     let ip_address = login_client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
@@ -134,6 +138,7 @@ async fn register_handler(
             request_user_agent,
             ip_address,
             created_at,
+            default_package,
         )
         .await;
 }
@@ -265,6 +270,7 @@ async fn register_postgres_response(
     request_user_agent: String,
     ip_address: String,
     created_at: String,
+    default_package: RegisterDefaultSeedPackage,
 ) -> Response {
     let runtime = match open_postgres_runtime(state) {
         Ok(value) => value,
@@ -337,6 +343,7 @@ async fn register_postgres_response(
             created_at: created_at.clone(),
         },
         &register_preset_categories_from_body(body),
+        default_package,
         &AuthLogDraft {
             user_id: None,
             username: username.clone(),
@@ -354,18 +361,40 @@ async fn register_postgres_response(
         Ok(value) => value,
         Err(_) => return db_error_response(),
     };
+    let mut result = json!({
+        "user_id": register_result.user_id,
+        "username": username,
+        "email": email,
+        "needVerifyEmail": state.config.auth_require_email_verification,
+        "presetCategoriesSaved": register_result.preset_categories_saved,
+        "presetAccountsSaved": register_result.preset_accounts_saved,
+        "message": "Registration successful",
+    });
+    if let Some(default_seed) = register_default_seed_response(&register_result.default_seed) {
+        if let Some(object) = result.as_object_mut() {
+            object.insert("defaultSeed".to_string(), default_seed);
+        }
+    }
     success_result(
         StatusCode::OK,
-        json!({
-            "user_id": register_result.user_id,
-            "username": username,
-            "email": email,
-            "needVerifyEmail": state.config.auth_require_email_verification,
-            "presetCategoriesSaved": register_result.preset_categories_saved,
-            "presetAccountsSaved": register_result.preset_accounts_saved,
-            "message": "Registration successful",
-        }),
+        result,
     )
+}
+
+fn register_default_seed_response(summary: &RegisterDefaultSeedSummary) -> Option<Value> {
+    let package = summary.package.as_ref()?;
+    Some(json!({
+        "package": package,
+        "categoriesCreated": summary.categories_created,
+        "categoriesSkipped": summary.categories_skipped,
+        "categoryRulesCreated": summary.rules_created,
+        "categoryRulesSkipped": summary.rules_skipped,
+        "accountsCreated": summary.accounts_created,
+        "accountsSkipped": summary.accounts_skipped,
+        "accountRulesCreated": summary.account_rules_created,
+        "accountRulesSkipped": summary.account_rules_skipped,
+        "rulesMissingTargets": summary.rules_missing_targets,
+    }))
 }
 
 async fn login_postgres_response(

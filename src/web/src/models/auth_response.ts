@@ -14,4 +14,19 @@ export interface AuthResponse {
 export interface RegisterResponse extends AuthResponse {
     readonly needVerifyEmail: boolean;
     readonly presetCategoriesSaved: boolean;
+    readonly presetAccountsSaved?: boolean;
+    readonly defaultSeed?: RegisterDefaultSeedSummary;
+}
+
+export interface RegisterDefaultSeedSummary {
+    readonly package: string;
+    readonly categoriesCreated: number;
+    readonly categoriesSkipped: number;
+    readonly categoryRulesCreated: number;
+    readonly categoryRulesSkipped: number;
+    readonly accountsCreated: number;
+    readonly accountsSkipped: number;
+    readonly accountRulesCreated: number;
+    readonly accountRulesSkipped: number;
+    readonly rulesMissingTargets: number;
 }

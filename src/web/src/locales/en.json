@@ -3177,5 +3177,7 @@
     "LLM preview recommendation completed, but no suggestions were generated": "LLM preview recommendation completed, but no suggestions were generated",
     "Are you sure you want to delete this budget?": "Are you sure you want to delete this budget?",
     "Loading": "Loading",
-    "All categories hidden": "All categories hidden"
+    "All categories hidden": "All categories hidden",
+    "Use Mainland China daily defaults": "Use Mainland China daily defaults",
+    "Adds accounts, categories and matching rules for WeChat, Alipay, bank cards and household bills": "Adds accounts, categories and matching rules for WeChat, Alipay, bank cards and household bills"
 }

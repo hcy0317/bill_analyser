@@ -192,6 +192,26 @@ fn register_preset_categories_from_body(body: &Map<String, Value>) -> Vec<Regist
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+fn register_default_package_from_body(
+    body: &Map<String, Value>,
+) -> Result<RegisterDefaultSeedPackage, AuthRestError> {
+    let Some(value) = body.get("defaultPackage") else {
+        return Ok(RegisterDefaultSeedPackage::None);
+    };
+    if value.is_null() {
+        return Ok(RegisterDefaultSeedPackage::None);
+    }
+    let Some(text) = value.as_str() else {
+        return Err(AuthRestError::invalid_request(
+            "defaultPackage must be none or standard_daily_v1",
+        ));
+    };
+    RegisterDefaultSeedPackage::from_optional_name(Some(text)).map_err(|_| {
+        AuthRestError::invalid_request("defaultPackage must be none or standard_daily_v1")
+    })
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
 fn parse_expires_in_seconds(body: &Map<String, Value>) -> RouteResult<i64> {
     let Some(value) = body.get("expiresInSeconds") else {
         return Ok(0);

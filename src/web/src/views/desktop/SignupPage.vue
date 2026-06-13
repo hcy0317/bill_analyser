@@ -125,12 +125,19 @@
                                 <p class="text-sm mt-2 mb-2">{{ tt('Set whether to use preset transaction categories') }}</p>
 
                                 <v-row>
-                                    <v-col cols="12" sm="6">
+                                    <v-col cols="12" md="4">
                                         <v-switch class="mb-2" :disabled="submitting || navigateToHomePage"
                                                   :label="tt('Use Preset Transaction Categories')"
                                                   v-model="usePresetCategories"/>
                                     </v-col>
-                                    <v-col cols="12" sm="6" class="text-end-sm">
+                                    <v-col cols="12" md="4">
+                                        <v-switch class="mb-2" :disabled="submitting || navigateToHomePage"
+                                                  :label="tt('Use Mainland China daily defaults')"
+                                                  :hint="tt('Adds accounts, categories and matching rules for WeChat, Alipay, bank cards and household bills')"
+                                                  persistent-hint
+                                                  v-model="useStandardDailyPackage"/>
+                                    </v-col>
+                                    <v-col cols="12" md="4" class="text-end-sm">
                                         <language-select-button :disabled="submitting || navigateToHomePage"
                                                                 :use-model-value="true" v-model="currentLocale" />
                                     </v-col>
@@ -258,6 +265,7 @@ const snackbar = useTemplateRef<SnackBarType>('snackbar');
 
 const currentStep = ref<string>('basicSetting');
 const usePresetCategories = ref<boolean>(false);
+const useStandardDailyPackage = ref<boolean>(false);
 const finalResultMessage = ref<string | null>(null);
 const navigateToHomePage = ref<boolean>(false);
 
@@ -336,7 +344,8 @@ function submit(): void {
 
     rootStore.register({
         user: user.value,
-        presetCategories: presetCategories
+        presetCategories: presetCategories,
+        defaultPackage: useStandardDailyPackage.value ? 'standard_daily_v1' : undefined
     }).then(response => {
         if (!isUserLogined()) {
             submitting.value = false;

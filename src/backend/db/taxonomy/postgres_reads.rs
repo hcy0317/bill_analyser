@@ -758,13 +758,9 @@ pub async fn ensure_postgres_category_rule_defaults(
     pool: &PostgresPool,
     user_id: i64,
 ) -> DbResult<RegisterDefaultSeedSummary> {
-    let mut summary = RegisterDefaultSeedSummary {
-        categories_created: 0,
-        categories_skipped: 0,
-        rules_created: 0,
-        rules_skipped: 0,
-        rules_missing_categories: 0,
-    };
+    let mut summary = RegisterDefaultSeedSummary::empty(
+        crate::auth_registration::RegisterDefaultSeedPackage::None,
+    );
 
     for category in DEFAULT_DAILY_CATEGORIES {
         let parent_payload = json!({
@@ -803,7 +799,7 @@ pub async fn ensure_postgres_category_rule_defaults(
             get_postgres_category_by_name(pool, rule.main_category, rule.sub_category, user_id)
                 .await?
         else {
-            summary.rules_missing_categories += 1;
+            summary.note_missing_category();
             continue;
         };
         if postgres_category_rule_name_exists(pool, user_id, rule.name).await? {
@@ -811,7 +807,7 @@ pub async fn ensure_postgres_category_rule_defaults(
             continue;
         }
         let Some(category_id) = int_value(category.get("id")) else {
-            summary.rules_missing_categories += 1;
+            summary.note_missing_category();
             continue;
         };
         let payload = json!({

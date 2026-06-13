@@ -84,7 +84,10 @@ export class User {
         this.investmentExcludeKeywords = [...normalized.investmentExcludeKeywords];
     }
 
-    public toRegisterRequest(categories?: LocalizedPresetCategory[]): UserRegisterRequest {
+    public toRegisterRequest(
+        categories?: LocalizedPresetCategory[],
+        defaultPackage?: RegisterDefaultPackage
+    ): UserRegisterRequest {
         return {
             username: this.username,
             email: this.email,
@@ -93,7 +96,8 @@ export class User {
             language: this.language,
             defaultCurrency: this.defaultCurrency,
             firstDayOfWeek: this.firstDayOfWeek,
-            categories: categories
+            categories: categories,
+            defaultPackage: defaultPackage === 'standard_daily_v1' ? defaultPackage : undefined
         };
     }
 
@@ -214,6 +218,8 @@ export interface UserLoginRequest {
     readonly password: string;
 }
 
+export type RegisterDefaultPackage = 'none' | 'standard_daily_v1';
+
 export interface UserRegisterRequest {
     readonly username: string;
     readonly email: string;
@@ -223,6 +229,7 @@ export interface UserRegisterRequest {
     readonly defaultCurrency: string;
     readonly firstDayOfWeek: number;
     readonly categories?: LocalizedPresetCategory[];
+    readonly defaultPackage?: RegisterDefaultPackage;
 }
 
 export interface UserVerifyEmailResponse {

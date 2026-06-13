@@ -16,6 +16,7 @@ import type { AuthResponse, RegisterResponse } from '@/models/auth_response.ts';
 import type {
     User,
     UserLoginRequest,
+    RegisterDefaultPackage,
     UserResendVerifyEmailRequest,
     UserVerifyEmailResponse,
     UserProfileUpdateRequest,
@@ -371,9 +372,17 @@ export const useRootStore = defineStore('root', () => {
         });
     }
 
-    function register({ user, presetCategories }: { user: User, presetCategories?: LocalizedPresetCategory[] }): Promise<RegisterResponse> {
+    function register({
+        user,
+        presetCategories,
+        defaultPackage
+    }: {
+        user: User,
+        presetCategories?: LocalizedPresetCategory[],
+        defaultPackage?: RegisterDefaultPackage
+    }): Promise<RegisterResponse> {
         return new Promise((resolve, reject) => {
-            services.register(user.toRegisterRequest(presetCategories)).then(response => {
+            services.register(user.toRegisterRequest(presetCategories, defaultPackage)).then(response => {
                 const data = response.data;
 
                 if (!data || !data.success || !data.result) {
