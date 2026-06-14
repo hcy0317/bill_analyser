@@ -142,6 +142,10 @@ const ACCOUNT_INITIAL_BALANCE_BACKFILL_TABLES: &[&str] = &["accounts"];
 
 const ACCOUNT_INITIAL_BALANCE_BACKFILL_INDEXES: &[&str] = &[];
 
+const RECURRING_SUGGESTION_COMMENT_TABLES: &[&str] = &["recurring_suggestions"];
+
+const RECURRING_SUGGESTION_COMMENT_INDEXES: &[&str] = &["idx_recurring_suggestions_user_status"];
+
 const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
     PostgresMigrationDescriptor {
         version: 1,
@@ -234,6 +238,13 @@ const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
         required_tables: ACCOUNT_INITIAL_BALANCE_BACKFILL_TABLES,
         required_indexes: ACCOUNT_INITIAL_BALANCE_BACKFILL_INDEXES,
     },
+    PostgresMigrationDescriptor {
+        version: 14,
+        file_name: "0014_recurring_suggestion_amount_cents_comment.sql",
+        description: "document recurring suggestion amount_cents as the explicit API cents contract",
+        required_tables: RECURRING_SUGGESTION_COMMENT_TABLES,
+        required_indexes: RECURRING_SUGGESTION_COMMENT_INDEXES,
+    },
 ];
 
 pub fn postgres_migrations_dir() -> PathBuf {
@@ -265,7 +276,7 @@ mod tests {
     #[test]
     fn postgres_manifest_points_to_existing_initial_schema() {
         let manifest = postgres_migration_manifest();
-        assert_eq!(manifest.len(), 13);
+        assert_eq!(manifest.len(), 14);
         assert_eq!(manifest[0].version, 1);
         assert_eq!(manifest[0].file_name, POSTGRES_INITIAL_SCHEMA_FILE);
         for (index, descriptor) in manifest.iter().enumerate() {
@@ -431,6 +442,44 @@ mod tests {
             assert!(schema.contains(index), "missing index {index}");
         }
         assert!(schema.contains("amount stored in cents"));
+    }
+
+    #[test]
+    fn recurring_suggestion_amount_comment_change_is_forward_migration_only() {
+        let original_migration =
+            fs::read_to_string(postgres_migrations_dir().join("0006_recurring_suggestions.sql"))
+                .unwrap();
+        let comment_migration = fs::read_to_string(
+            postgres_migrations_dir().join("0014_recurring_suggestion_amount_cents_comment.sql"),
+        )
+        .unwrap();
+
+        assert!(original_migration.contains(
+            "amount stored in cents; API responses project this value back to frontend yuan amount"
+        ));
+        assert!(comment_migration
+            .contains("amount stored in cents; API responses expose this value as amountCents"));
+    }
+
+    #[tokio::test]
+    async fn recurring_suggestion_migration_checksum_matches_applied_contract() {
+        let migrator = sqlx::migrate::Migrator::new(postgres_migrations_dir())
+            .await
+            .expect("migrations load");
+        let migration = migrator
+            .iter()
+            .find(|migration| migration.version == 6)
+            .expect("recurring suggestions migration exists");
+        let checksum = migration
+            .checksum
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+
+        assert_eq!(
+            checksum,
+            "25d94b1891c87b2f4e0179392418b0408bd1474f96bd083427872611985f485791c0082bbd321e5151c17ac74f93b1f8"
+        );
     }
 
     #[test]
