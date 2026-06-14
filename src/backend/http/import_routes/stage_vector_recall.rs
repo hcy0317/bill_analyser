@@ -10,6 +10,8 @@ struct ImportLearningVectorRecallResult {
     hits: Vec<WeaviateImportLearningRecallHit>,
 }
 
+const IMPORT_VECTOR_RECALL_MAX_CONCURRENCY: usize = 8;
+
 async fn apply_import_learning_vector_recall_chain(
     connection: &Connection,
     config: &HttpShellConfig,
@@ -90,21 +92,52 @@ fn run_import_learning_vector_recall_blocking(
                 .map_err(|error| error.to_string())?;
             runtime.block_on(async move {
                 let mut results = Vec::new();
+                let mut errors = 0usize;
+                let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(
+                    IMPORT_VECTOR_RECALL_MAX_CONCURRENCY,
+                ));
+                let mut tasks = tokio::task::JoinSet::new();
                 for request in requests {
-                    let recall_request = WeaviateImportLearningRecallRequest {
-                        user_id,
-                        features: request.features,
-                        transaction_type_scope: request.transaction_type_scope,
-                        limit: WEAVIATE_RECALL_DEFAULT_LIMIT,
-                    };
-                    match recall_import_learning_candidates(&config, &recall_request).await {
-                        Ok(hits) if hits.is_empty() => {}
-                        Ok(hits) => results.push(ImportLearningVectorRecallResult {
-                            draft_index: request.draft_index,
-                            hits,
-                        }),
-                        Err(error) => return Err(error.to_string()),
+                    let config = config.clone();
+                    let semaphore = semaphore.clone();
+                    tasks.spawn(async move {
+                        let _permit = semaphore
+                            .acquire_owned()
+                            .await
+                            .map_err(|error| error.to_string())?;
+                        let recall_request = WeaviateImportLearningRecallRequest {
+                            user_id,
+                            features: request.features,
+                            transaction_type_scope: request.transaction_type_scope,
+                            limit: WEAVIATE_RECALL_DEFAULT_LIMIT,
+                        };
+                        recall_import_learning_candidates(&config, &recall_request)
+                            .await
+                            .map(|hits| ImportLearningVectorRecallResult {
+                                draft_index: request.draft_index,
+                                hits,
+                            })
+                            .map_err(|error| error.to_string())
+                    });
+                }
+                while let Some(joined) = tasks.join_next().await {
+                    match joined {
+                        Ok(Ok(result)) if result.hits.is_empty() => {}
+                        Ok(Ok(result)) => results.push(result),
+                        Ok(Err(_)) | Err(_) => errors += 1,
                     }
+                }
+                results.sort_by_key(|result| result.draft_index);
+                if errors > 0 && results.is_empty() {
+                    return Err(format!("{} recall requests failed", errors));
+                }
+                if errors > 0 {
+                    tracing::warn!(
+                        domain = "import_parser",
+                        operation = "import_learning_vector_recall",
+                        failed_requests = errors,
+                        "some import learning vector recall requests failed"
+                    );
                 }
                 Ok::<_, String>(results)
             })
@@ -351,4 +384,82 @@ fn apply_import_learning_vector_recall_hit(
         }),
     );
     Some(())
+}
+
+#[cfg(test)]
+mod vector_recall_tests {
+    use super::*;
+    use bill_analyser_core::WEAVIATE_DEFAULT_COLLECTION_PREFIX;
+    use std::time::Duration;
+
+    fn unreachable_weaviate_config() -> crate::config_weaviate::WeaviateRuntimeConfig {
+        crate::config_weaviate::WeaviateRuntimeConfig {
+            enabled: true,
+            endpoint: Some("http://127.0.0.1:9".to_string()),
+            api_key: None,
+            collection_prefix: WEAVIATE_DEFAULT_COLLECTION_PREFIX.to_string(),
+            timeout: Duration::from_millis(10),
+            retry_attempts: 0,
+            batch_size: 1,
+            vector_dimensions: 4,
+        }
+    }
+
+    fn disabled_weaviate_config() -> crate::config_weaviate::WeaviateRuntimeConfig {
+        crate::config_weaviate::WeaviateRuntimeConfig {
+            enabled: false,
+            endpoint: None,
+            api_key: None,
+            collection_prefix: WEAVIATE_DEFAULT_COLLECTION_PREFIX.to_string(),
+            timeout: Duration::from_millis(10),
+            retry_attempts: 0,
+            batch_size: 1,
+            vector_dimensions: 4,
+        }
+    }
+
+    #[test]
+    fn vector_recall_worker_handles_empty_request_batch() {
+        let (status, results) =
+            run_import_learning_vector_recall_blocking(unreachable_weaviate_config(), 1, Vec::new());
+
+        assert_eq!(status, "searched");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn vector_recall_worker_skips_empty_hits_without_degrading() {
+        let (status, results) = run_import_learning_vector_recall_blocking(
+            disabled_weaviate_config(),
+            1,
+            vec![ImportLearningVectorRecallRequestDraft {
+                draft_index: 7,
+                features: BTreeMap::from([("counterparty".to_string(), "商户".to_string())]),
+                transaction_type_scope: "支出".to_string(),
+            }],
+        );
+
+        assert_eq!(status, "searched");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn vector_recall_worker_degrades_when_all_requests_fail() {
+        let (status, results) = run_import_learning_vector_recall_blocking(
+            unreachable_weaviate_config(),
+            1,
+            vec![ImportLearningVectorRecallRequestDraft {
+                draft_index: 7,
+                features: BTreeMap::from([
+                    ("counterparty".to_string(), "商户".to_string()),
+                    ("description".to_string(), "早餐".to_string()),
+                    ("payment_method".to_string(), "支付宝".to_string()),
+                ]),
+                transaction_type_scope: "支出".to_string(),
+            }],
+        );
+
+        assert!(status.starts_with("degraded:"), "status={status}");
+        assert!(results.is_empty());
+    }
 }

@@ -1,8 +1,9 @@
 use std::error::Error;
 
 use bill_analyser_db::{
-    create_postgres_bill, get_postgres_bill_by_id, get_postgres_bill_tags, query_postgres_bills,
-    BillCategoryFilter, BillCreateDraft, BillFilters, PostgresPool,
+    batch_create_postgres_bills, create_postgres_bill, get_postgres_bill_by_id,
+    get_postgres_bill_tags, query_postgres_bills, BillCategoryFilter, BillCreateDraft, BillFilters,
+    PostgresPool,
 };
 use serde_json::{json, Value};
 use sqlx::Row;
@@ -150,6 +151,258 @@ async fn create_bill_prefers_explicit_category_id_over_same_name_path() -> Resul
         .expect("created bill");
     assert_eq!(bill["category_id"], explicit_category_id.to_string());
     assert_ne!(bill["category_id"], path_category_id.to_string());
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn create_bill_persists_camel_category_id_as_canonical_identity() -> Result<(), Box<dyn Error>>
+{
+    let Some(test_db) =
+        postgres_test_support::isolated_postgres_database("bill_camel_category_id_contract")
+            .await?
+    else {
+        return Ok(());
+    };
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "bill-camel-category-id-contract").await?;
+    let account_id = insert_account(pool, user_id, "现金钱包").await?;
+    let category_id = insert_category(pool, user_id, "咖啡", "餐饮/咖啡").await?;
+
+    let bill_id = create_postgres_bill(
+        pool,
+        user_id,
+        &BillCreateDraft {
+            fields: serde_json::Map::from_iter([
+                ("date".to_string(), json!("2026-05-01 09:00:00")),
+                ("type".to_string(), json!("支出")),
+                ("amount_cents".to_string(), json!(1234)),
+                ("source_account_id".to_string(), json!(account_id)),
+                ("categoryId".to_string(), json!(category_id)),
+                ("counterparty".to_string(), json!("camel 分类")),
+                ("description".to_string(), json!("categoryId must persist")),
+            ]),
+            tag_ids: Vec::new(),
+        },
+    )
+    .await?;
+
+    let bill = get_postgres_bill_by_id(pool, user_id, bill_id)
+        .await?
+        .expect("created bill");
+    assert_eq!(bill["category_id"], category_id.to_string());
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn batch_create_rolls_back_all_bills_when_any_identity_is_invalid(
+) -> Result<(), Box<dyn Error>> {
+    let Some(test_db) =
+        postgres_test_support::isolated_postgres_database("bill_batch_identity_contract").await?
+    else {
+        return Ok(());
+    };
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "bill-batch-identity-contract").await?;
+    let account_id = insert_account(pool, user_id, "现金钱包").await?;
+    let category_id = insert_category(pool, user_id, "咖啡", "餐饮/咖啡").await?;
+
+    let valid = BillCreateDraft {
+        fields: serde_json::Map::from_iter([
+            ("date".to_string(), json!("2026-05-01 09:00:00")),
+            ("type".to_string(), json!("支出")),
+            ("amount_cents".to_string(), json!(1234)),
+            ("source_account_id".to_string(), json!(account_id)),
+            ("category_id".to_string(), json!(category_id)),
+            ("counterparty".to_string(), json!("有效账单")),
+            ("description".to_string(), json!("must rollback")),
+        ]),
+        tag_ids: Vec::new(),
+    };
+    let invalid = BillCreateDraft {
+        fields: serde_json::Map::from_iter([
+            ("date".to_string(), json!("2026-05-02 09:00:00")),
+            ("type".to_string(), json!("支出")),
+            ("amount_cents".to_string(), json!(5678)),
+            ("source_account_id".to_string(), json!(account_id)),
+            ("category_id".to_string(), json!(9_999_999_i64)),
+            ("counterparty".to_string(), json!("无效分类")),
+            ("description".to_string(), json!("must fail")),
+        ]),
+        tag_ids: Vec::new(),
+    };
+
+    let error = batch_create_postgres_bills(pool, user_id, &[valid, invalid])
+        .await
+        .expect_err("invalid category fails the batch");
+    assert!(
+        error.to_string().contains("category not found"),
+        "unexpected error: {error}"
+    );
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*)::BIGINT FROM bills WHERE user_id = $1")
+        .bind(user_id)
+        .fetch_one(pool)
+        .await?;
+    assert_eq!(count, 0, "valid row must be rolled back with invalid row");
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn create_bill_rejects_invalid_account_and_category_identity() -> Result<(), Box<dyn Error>> {
+    let Some(test_db) =
+        postgres_test_support::isolated_postgres_database("bill_invalid_identity_contract").await?
+    else {
+        return Ok(());
+    };
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "bill-invalid-identity-contract").await?;
+    let account_id = insert_account(pool, user_id, "现金钱包").await?;
+    let income_category_id =
+        insert_category_with_type(pool, user_id, "工资", "income", "收入/工资").await?;
+
+    let invalid_source = create_postgres_bill(
+        pool,
+        user_id,
+        &BillCreateDraft {
+            fields: serde_json::Map::from_iter([
+                ("date".to_string(), json!("2026-05-01 09:00:00")),
+                ("type".to_string(), json!("支出")),
+                ("amount_cents".to_string(), json!(1234)),
+                ("source_account_id".to_string(), json!(9_999_999_i64)),
+                ("counterparty".to_string(), json!("无效账户")),
+                ("description".to_string(), json!("must fail")),
+            ]),
+            tag_ids: Vec::new(),
+        },
+    )
+    .await
+    .expect_err("invalid source account is rejected");
+    assert!(
+        invalid_source
+            .to_string()
+            .contains("source_account_id not found"),
+        "unexpected error: {invalid_source}"
+    );
+
+    let same_transfer_accounts = create_postgres_bill(
+        pool,
+        user_id,
+        &BillCreateDraft {
+            fields: serde_json::Map::from_iter([
+                ("date".to_string(), json!("2026-05-01 10:00:00")),
+                ("type".to_string(), json!("转账")),
+                ("amount_cents".to_string(), json!(1234)),
+                ("source_account_id".to_string(), json!(account_id)),
+                ("destination_account_id".to_string(), json!(account_id)),
+                ("counterparty".to_string(), json!("同账户转账")),
+                ("description".to_string(), json!("must fail")),
+            ]),
+            tag_ids: Vec::new(),
+        },
+    )
+    .await
+    .expect_err("same transfer accounts are rejected");
+    assert!(
+        same_transfer_accounts
+            .to_string()
+            .contains("source and destination accounts must differ"),
+        "unexpected error: {same_transfer_accounts}"
+    );
+
+    let category_mismatch = create_postgres_bill(
+        pool,
+        user_id,
+        &BillCreateDraft {
+            fields: serde_json::Map::from_iter([
+                ("date".to_string(), json!("2026-05-01 11:00:00")),
+                ("type".to_string(), json!("支出")),
+                ("amount_cents".to_string(), json!(1234)),
+                ("source_account_id".to_string(), json!(account_id)),
+                ("category_id".to_string(), json!(income_category_id)),
+                ("counterparty".to_string(), json!("分类类型错误")),
+                ("description".to_string(), json!("must fail")),
+            ]),
+            tag_ids: Vec::new(),
+        },
+    )
+    .await
+    .expect_err("category type mismatch is rejected");
+    assert!(
+        category_mismatch
+            .to_string()
+            .contains("category type mismatch"),
+        "unexpected error: {category_mismatch}"
+    );
+
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*)::BIGINT FROM bills WHERE user_id = $1")
+        .bind(user_id)
+        .fetch_one(pool)
+        .await?;
+    assert_eq!(count, 0);
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn create_bill_drops_destination_account_for_non_transfer_types() -> Result<(), Box<dyn Error>>
+{
+    let Some(test_db) =
+        postgres_test_support::isolated_postgres_database("bill_non_transfer_destination_contract")
+            .await?
+    else {
+        return Ok(());
+    };
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "bill-non-transfer-destination-contract").await?;
+    let other_user_id = insert_user(pool, "bill-non-transfer-destination-other").await?;
+    let account_id = insert_account(pool, user_id, "现金钱包").await?;
+    let other_account_id = insert_account(pool, other_user_id, "别人账户").await?;
+    let category_id = insert_category(pool, user_id, "咖啡", "餐饮/咖啡").await?;
+
+    let bill_id = create_postgres_bill(
+        pool,
+        user_id,
+        &BillCreateDraft {
+            fields: serde_json::Map::from_iter([
+                ("date".to_string(), json!("2026-05-01 12:00:00")),
+                ("type".to_string(), json!("支出")),
+                ("amount_cents".to_string(), json!(1234)),
+                ("source_account_id".to_string(), json!(account_id)),
+                (
+                    "destination_account_id".to_string(),
+                    json!(other_account_id),
+                ),
+                ("destinationAccountId".to_string(), json!(other_account_id)),
+                ("category_id".to_string(), json!(category_id)),
+                ("counterparty".to_string(), json!("普通支出")),
+                (
+                    "description".to_string(),
+                    json!("destination account must be dropped"),
+                ),
+            ]),
+            tag_ids: Vec::new(),
+        },
+    )
+    .await?;
+
+    let row = sqlx::query(
+        "SELECT transfer_target_account_id, standard_payload FROM bills WHERE id = $1 AND user_id = $2",
+    )
+    .bind(bill_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    let transfer_target_account_id: Option<i64> = row.try_get("transfer_target_account_id")?;
+    let standard_payload: Value = row.try_get("standard_payload")?;
+    assert_eq!(transfer_target_account_id, None);
+    assert!(standard_payload.get("destination_account_id").is_none());
+    assert!(standard_payload.get("destinationAccountId").is_none());
 
     test_db.cleanup().await?;
     Ok(())
@@ -307,10 +560,21 @@ async fn insert_category(
     name: &str,
     path: &str,
 ) -> Result<i64, Box<dyn Error>> {
+    insert_category_with_type(pool, user_id, name, "expense", path).await
+}
+
+async fn insert_category_with_type(
+    pool: &PostgresPool,
+    user_id: i64,
+    name: &str,
+    category_type: &str,
+    path: &str,
+) -> Result<i64, Box<dyn Error>> {
     Ok(
-        sqlx::query("INSERT INTO categories (user_id, name, category_type, path) VALUES ($1, $2, 'expense', $3) RETURNING id")
+        sqlx::query("INSERT INTO categories (user_id, name, category_type, path) VALUES ($1, $2, $3, $4) RETURNING id")
             .bind(user_id)
             .bind(name)
+            .bind(category_type)
             .bind(path)
             .fetch_one(pool)
             .await?

@@ -412,18 +412,47 @@ function namedFilterValue(
     return String(valueLabels[value] ?? value);
 }
 
+function identityFilterValue(
+    value: string | null | undefined,
+    valueLabels: Record<string, string | number | undefined> = {}
+): string | undefined {
+    if (value === null) {
+        return undefined;
+    }
+
+    if (value === undefined) {
+        return PREVIEW_FILTER_INVALID_VALUE;
+    }
+
+    if (value === '') {
+        return PREVIEW_FILTER_NONE_VALUE;
+    }
+
+    if (value === PREVIEW_FILTER_INVALID_VALUE || value === PREVIEW_FILTER_NONE_VALUE) {
+        return value;
+    }
+
+    const mappedValue = valueLabels[value];
+    if (mappedValue === undefined || mappedValue === null || String(mappedValue).trim() === '') {
+        return undefined;
+    }
+
+    return String(mappedValue);
+}
+
 export function buildImportPreviewServerQueryFilters(
     filters: ImportCheckDataFilterLike,
     context: {
-        accountIdByName?: Record<string, string | number | undefined>;
+        categoryValueByLabel?: Record<string, string | number | undefined>;
+        accountValueByLabel?: Record<string, string | number | undefined>;
     } = {}
 ): ImportPreviewServerQueryFilters {
     const query: ImportPreviewServerQueryFilters = {};
     const minDatetime = formatPreviewServerFilterDatetime(filters.minDatetime);
     const maxDatetime = formatPreviewServerFilterDatetime(filters.maxDatetime);
     const transactionType = previewTypeFilterValue(filters.transactionType);
-    const category = namedFilterValue(filters.category);
-    const account = namedFilterValue(filters.account, context.accountIdByName);
+    const category = identityFilterValue(filters.category, context.categoryValueByLabel);
+    const account = identityFilterValue(filters.account, context.accountValueByLabel);
     const tag = namedFilterValue(filters.tag);
     const description = namedFilterValue(filters.description);
 

@@ -118,17 +118,6 @@ function getImportPreviewTransactionType(previewType?: string): TransactionType 
     }
 }
 
-function categoryMatchesPreviewType(
-    category: ImportPreviewCategoryLike | undefined,
-    previewTransactionType: TransactionType | null
-): boolean {
-    if (!category || previewTransactionType === null || typeof category.type !== 'number') {
-        return true;
-    }
-
-    return category.type === previewTransactionType;
-}
-
 export function resolveImportPreviewCategoryPath(
     categoryId: number | string | null | undefined,
     categoriesById: ImportPreviewCategoryMap
@@ -186,41 +175,6 @@ export function resolveImportPreviewCategoryId(
         )
     ) {
         return persistedCategoryId;
-    }
-
-    const mainCategory = previewData.preview_main_category || '';
-    const subCategory = previewData.preview_sub_category || '';
-    if (!mainCategory && !subCategory) {
-        return '';
-    }
-
-    for (const [categoryId, category] of Object.entries(categoriesById)) {
-        if (!category) {
-            continue;
-        }
-
-        if (!categoryMatchesPreviewType(category, previewTransactionType)) {
-            continue;
-        }
-
-        if (subCategory) {
-            if (category.name !== subCategory || !category.parentId || category.parentId === '0') {
-                continue;
-            }
-
-            const parentCategory = categoriesById[category.parentId];
-            if (
-                parentCategory?.name === mainCategory
-                && categoryMatchesPreviewType(parentCategory, previewTransactionType)
-            ) {
-                return categoryId;
-            }
-            continue;
-        }
-
-        if (mainCategory && category.name === mainCategory && (!category.parentId || category.parentId === '0')) {
-            return categoryId;
-        }
     }
 
     return '';

@@ -2,6 +2,7 @@
 // 维护重点：只实现 Postgres 当前运行态；不读取历史 non-Postgres 数据，不提供历史 staging schema 路径。
 // 不变式：外部 session key 映射到 Postgres import_sessions.id，所有查询必须 user scoped。
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 
 use bill_analyser_core::{
@@ -16,10 +17,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sqlx::{postgres::PgRow, Postgres, QueryBuilder, Row};
 
-use crate::{create_postgres_bill, BillCreateDraft, BillRecord, DbError, DbResult, PostgresPool};
+use crate::{
+    bills::postgres_reads::batch_create_postgres_bills_in_transaction, BillCreateDraft, BillRecord,
+    DbError, DbResult, PostgresPool,
+};
 
 const LLM_MEMORY_PROMPT_TEXT_MAX_BYTES: usize = 16_384;
 const IMPORT_STAGING_BULK_INSERT_CHUNK_SIZE: usize = 500;
+const IMPORT_PREVIEW_FACET_LIMIT: i64 = 100;
 
 include!("import_staging/types.rs");
 include!("import_staging/ledger_types.rs");
@@ -204,7 +209,8 @@ pub fn insert_preview_bill(
     block_on_db(async move {
         let session_db_id = session_db_id(pool, session_id, user_id).await?;
         let user_id = user_id_i64(user_id)?;
-        insert_preview_row_async(pool, session_db_id, user_id, draft).await
+        let identity_maps = load_import_identity_maps(pool, user_id).await?;
+        insert_preview_row_async(pool, session_db_id, user_id, draft, &identity_maps).await
     })
 }
 
@@ -574,12 +580,20 @@ pub fn query_preview_page_by_session(
             .iter()
             .map(preview_from_pg_row)
             .collect::<DbResult<Vec<_>>>()?;
+        let metadata = build_preview_metadata_for_query(
+            pool,
+            session_db_id,
+            user_id_i64,
+            &request.filters,
+            usize::try_from(total).unwrap_or(usize::MAX),
+        )
+        .await?;
         Ok(ImportPreviewPageResult {
             rows: page_rows,
             total: usize::try_from(total).unwrap_or(usize::MAX),
             page,
             page_size,
-            metadata: build_preview_metadata(usize::try_from(total).unwrap_or(usize::MAX)),
+            metadata,
         })
     })
 }
@@ -793,19 +807,14 @@ fn push_category_predicate(query: &mut QueryBuilder<'_, Postgres>, alias: &str, 
         push_preview_missing_category_condition(query, alias);
         return;
     }
-    query.push(" AND (");
+    let Some(category_id) = parse_positive_identity_filter_id(value) else {
+        query.push(" AND FALSE");
+        return;
+    };
+    query.push(" AND ");
     query.push(alias);
-    query.push(".category_id::text = ");
-    query.push_bind(value.to_string());
-    query.push(" OR ");
-    query.push(alias);
-    query.push(".preview_payload->>'preview_main_category' ILIKE ");
-    query.push_bind(like_pattern(value));
-    query.push(" OR ");
-    query.push(alias);
-    query.push(".preview_payload->>'preview_sub_category' ILIKE ");
-    query.push_bind(like_pattern(value));
-    query.push(")");
+    query.push(".category_id = ");
+    query.push_bind(category_id);
 }
 
 fn push_account_predicate(query: &mut QueryBuilder<'_, Postgres>, alias: &str, value: &str) {
@@ -824,15 +833,23 @@ fn push_account_predicate(query: &mut QueryBuilder<'_, Postgres>, alias: &str, v
         push_preview_account_filter_invalid_condition(query, alias);
         return;
     }
+    let Some(account_id) = parse_positive_identity_filter_id(value) else {
+        query.push(" AND FALSE");
+        return;
+    };
     query.push(" AND (");
     query.push(alias);
-    query.push(".account_id::text = ");
-    query.push_bind(value.to_string());
+    query.push(".account_id = ");
+    query.push_bind(account_id);
     query.push(" OR ");
     query.push(alias);
-    query.push(".transfer_target_account_id::text = ");
-    query.push_bind(value.to_string());
+    query.push(".transfer_target_account_id = ");
+    query.push_bind(account_id);
     query.push(")");
+}
+
+fn parse_positive_identity_filter_id(value: &str) -> Option<i64> {
+    value.trim().parse::<i64>().ok().filter(|id| *id > 0)
 }
 
 fn push_tag_predicate(query: &mut QueryBuilder<'_, Postgres>, alias: &str, value: &str) {
@@ -893,23 +910,49 @@ fn push_preview_current_review_condition(query: &mut QueryBuilder<'_, Postgres>,
     push_preview_missing_destination_account_condition(query, alias);
     query.push(" OR ");
     push_preview_same_transfer_accounts_condition(query, alias);
+    query.push(" OR ");
+    push_preview_identity_feedback_condition(query, alias);
     query.push(")");
+}
+
+fn push_preview_identity_feedback_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
+    query.push("(jsonb_typeof(");
+    query.push(alias);
+    query.push(".preview_payload#>'{preview_matching_feedback,identity_validation,issues}') = 'array' AND jsonb_array_length(");
+    query.push(alias);
+    query.push(".preview_payload#>'{preview_matching_feedback,identity_validation,issues}') > 0)");
 }
 
 fn push_preview_missing_category_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
     query.push("(");
     push_preview_category_required_type_condition(query, alias);
     query.push(" AND ");
+    query.push("(");
     query.push(alias);
-    query.push(".category_id IS NULL)");
+    query.push(".category_id IS NULL OR NOT EXISTS (SELECT 1 FROM categories c WHERE c.user_id = ");
+    query.push(alias);
+    query.push(".user_id AND c.id = ");
+    query.push(alias);
+    query.push(".category_id AND c.is_active = true) OR EXISTS (SELECT 1 FROM categories c WHERE c.user_id = ");
+    query.push(alias);
+    query.push(".user_id AND c.id = ");
+    query.push(alias);
+    query.push(".category_id AND c.is_active = true AND ");
+    push_preview_category_type_mismatch_condition(query, alias, "c");
+    query.push(")))");
 }
 
 fn push_preview_missing_source_account_condition(
     query: &mut QueryBuilder<'_, Postgres>,
     alias: &str,
 ) {
+    query.push("(");
     query.push(alias);
-    query.push(".account_id IS NULL");
+    query.push(".account_id IS NULL OR NOT EXISTS (SELECT 1 FROM accounts a WHERE a.user_id = ");
+    query.push(alias);
+    query.push(".user_id AND a.id = ");
+    query.push(alias);
+    query.push(".account_id AND a.is_active = true))");
 }
 
 fn push_preview_missing_destination_account_condition(
@@ -918,9 +961,13 @@ fn push_preview_missing_destination_account_condition(
 ) {
     query.push("(");
     push_preview_destination_account_type_condition(query, alias);
-    query.push(" AND ");
+    query.push(" AND (");
     query.push(alias);
-    query.push(".transfer_target_account_id IS NULL)");
+    query.push(".transfer_target_account_id IS NULL OR NOT EXISTS (SELECT 1 FROM accounts a WHERE a.user_id = ");
+    query.push(alias);
+    query.push(".user_id AND a.id = ");
+    query.push(alias);
+    query.push(".transfer_target_account_id AND a.is_active = true)))");
 }
 
 fn push_preview_same_transfer_accounts_condition(
@@ -958,31 +1005,98 @@ fn push_preview_destination_account_type_condition(
     query.push(".transaction_type) IN ('转账', 'transfer', '4', '投资', 'investment', '5')");
 }
 
-fn push_preview_transfer_filter_type_condition(
+fn push_preview_category_type_mismatch_condition(
     query: &mut QueryBuilder<'_, Postgres>,
-    alias: &str,
+    preview_alias: &str,
+    category_alias: &str,
 ) {
-    query.push("lower(");
-    query.push(alias);
-    query.push(".transaction_type) IN ('转账', 'transfer', '4')");
+    query.push("NOT (");
+    query.push(category_alias);
+    query.push(".category_type IS NULL OR trim(");
+    query.push(category_alias);
+    query.push(".category_type) = '' OR lower(");
+    query.push(category_alias);
+    query.push(".category_type) IN ('0', '1', 'all', '通用') OR (");
+    push_preview_category_type_match_arm(
+        query,
+        preview_alias,
+        category_alias,
+        2,
+        &["收入", "income", "2"],
+    );
+    query.push(") OR (");
+    push_preview_category_type_match_arm(
+        query,
+        preview_alias,
+        category_alias,
+        3,
+        &["支出", "expense", "3"],
+    );
+    query.push(") OR (");
+    push_preview_category_type_match_arm(
+        query,
+        preview_alias,
+        category_alias,
+        4,
+        &["转账", "transfer", "4"],
+    );
+    query.push(") OR (");
+    push_preview_category_type_match_arm(
+        query,
+        preview_alias,
+        category_alias,
+        5,
+        &["投资", "investment", "5"],
+    );
+    query.push("))");
+}
+
+fn push_preview_category_type_match_arm(
+    query: &mut QueryBuilder<'_, Postgres>,
+    preview_alias: &str,
+    category_alias: &str,
+    category_type: i64,
+    preview_type_values: &[&str],
+) {
+    let category_alias = sanitize_sql_alias(category_alias);
+    let preview_alias = sanitize_sql_alias(preview_alias);
+    let category_name = match category_type {
+        2 => "income",
+        3 => "expense",
+        4 => "transfer",
+        5 => "investment",
+        _ => "",
+    };
+    query.push(format!(
+        "lower({category_alias}.category_type) IN ('{category_type}', '{category_name}') AND lower("
+    ));
+    query.push(preview_alias);
+    query.push(".transaction_type) IN (");
+    let mut preview_values = query.separated(", ");
+    for value in preview_type_values {
+        preview_values.push_bind((*value).to_string());
+    }
+    preview_values.push_unseparated(")");
+}
+
+fn sanitize_sql_alias(alias: &str) -> &str {
+    match alias {
+        "p" | "c" | "a" => alias,
+        _ => "p",
+    }
 }
 
 fn push_preview_account_filter_invalid_condition(
     query: &mut QueryBuilder<'_, Postgres>,
     alias: &str,
 ) {
-    query.push("((");
-    query.push("NOT (");
-    push_preview_transfer_filter_type_condition(query, alias);
-    query.push(") AND ");
-    query.push(alias);
-    query.push(".account_id IS NULL) OR (");
-    push_preview_transfer_filter_type_condition(query, alias);
-    query.push(" AND (");
-    query.push(alias);
-    query.push(".account_id IS NULL OR ");
-    query.push(alias);
-    query.push(".transfer_target_account_id IS NULL)))");
+    query.push("(");
+    push_preview_missing_source_account_condition(query, alias);
+    query.push(" OR ");
+    push_preview_missing_destination_account_condition(query, alias);
+    query.push(" OR ");
+    push_preview_same_transfer_accounts_condition(query, alias);
+    query.push(")");
 }
 
 fn push_preview_empty_parser_tags_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
@@ -1105,9 +1219,12 @@ pub fn replace_preview_selection_with_patches(
     block_on_db(async move {
         let session_db_id = session_db_id(pool, session_id, user_id).await?;
         let user_id_i64 = user_id_i64(user_id)?;
+        let identity_maps = load_import_identity_maps(pool, user_id_i64).await?;
         let mut changed = 0usize;
         for patch in patches {
-            if apply_preview_patch_async(pool, session_db_id, user_id_i64, patch).await? {
+            if apply_preview_patch_async(pool, session_db_id, user_id_i64, patch, &identity_maps)
+                .await?
+            {
                 changed += 1;
             }
         }
@@ -1887,54 +2004,70 @@ pub fn confirm_preview_to_bills_with_ack(
 ) -> DbResult<ConfirmPreviewResult> {
     block_on_db(async move {
         let user_id_i64 = user_id_i64(user_id)?;
-        let previews = load_preview_rows(
-            pool,
-            session_db_id(pool, session_id, user_id).await?,
-            user_id_i64,
-            true,
-        )
-        .await?;
+        let session_db_id = session_db_id(pool, session_id, user_id).await?;
+        let previews = load_preview_rows(pool, session_db_id, user_id_i64, true).await?;
         let mut result = ConfirmPreviewResult {
             confirmed_count: 0,
             skipped_count: 0,
             duplicate_count: 0,
             errors: Vec::new(),
         };
-        for preview in previews {
-            if preview_requires_review(&preview) {
-                result.skipped_count += 1;
-                result.errors.push(format!(
-                    "preview {} requires review before confirm",
-                    preview.id
-                ));
-                continue;
-            }
-            let fields = bill_create_fields_from_preview(&preview);
-            match create_postgres_bill(
-                pool,
-                user_id_i64,
-                &BillCreateDraft {
-                    fields,
-                    tag_ids: Vec::new(),
-                },
-            )
-            .await
-            {
-                Ok(_) => result.confirmed_count += 1,
-                Err(error) => result.errors.push(error.to_string()),
-            }
+        let identity_maps = load_import_identity_maps(pool, user_id_i64).await?;
+        let identity_errors = previews
+            .iter()
+            .flat_map(|preview| preview_identity_error_messages(preview, &identity_maps))
+            .collect::<Vec<_>>();
+        if !identity_errors.is_empty() {
+            return Err(DbError::InvalidOperation(format!(
+                "import preview identity validation failed: {}",
+                identity_errors.join("; ")
+            )));
         }
-        update_import_session_status(
-            pool,
-            &ImportSessionStatusUpdate {
-                session_id: session_id.to_string(),
-                user_id,
-                status: "confirmed".to_string(),
-                total_parsed: None,
-                total_preview: None,
-                total_confirmed: Some(i64::try_from(result.confirmed_count).unwrap_or(i64::MAX)),
-            },
-        )?;
+        let review_errors = previews
+            .iter()
+            .filter(|preview| preview_requires_review(preview))
+            .map(|preview| format!("preview {} requires review before confirm", preview.id))
+            .collect::<Vec<_>>();
+        if !review_errors.is_empty() {
+            return Err(DbError::InvalidOperation(format!(
+                "import preview requires review: {}",
+                review_errors.join("; ")
+            )));
+        }
+        let drafts = previews
+            .iter()
+            .map(|preview| BillCreateDraft {
+                fields: bill_create_fields_from_preview(preview),
+                tag_ids: Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        let mut tx = pool.begin().await?;
+        let created_bill_ids =
+            batch_create_postgres_bills_in_transaction(pool, &mut tx, user_id_i64, &drafts).await?;
+        result.confirmed_count = created_bill_ids.len();
+        let session_updated = sqlx::query(
+            r#"
+            UPDATE import_sessions
+            SET status = $3,
+                total_confirmed = $4,
+                updated_at = now(),
+                version = version + 1
+            WHERE id = $1 AND user_id = $2
+            "#,
+        )
+        .bind(session_db_id)
+        .bind(user_id_i64)
+        .bind("confirmed")
+        .bind(i64::try_from(result.confirmed_count).unwrap_or(i64::MAX))
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if session_updated != 1 {
+            return Err(DbError::InvalidOperation(format!(
+                "import session not found: {session_id}"
+            )));
+        }
+        tx.commit().await?;
         Ok(result)
     })
 }
@@ -2103,25 +2236,28 @@ pub fn insert_import_decision_groups_batch(
             .fetch_one(pool)
             .await?
             .try_get("id")?;
-            for member in &draft.members {
-                sqlx::query(
+            if !draft.members.is_empty() {
+                let mut query = QueryBuilder::<Postgres>::new(
                     r#"
                     INSERT INTO import_decision_group_members (
                         group_id, preview_row_id, standard_row_id, history_bill_id,
                         member_role, parser_name, metadata, created_at
-                    ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,now())
-                    ON CONFLICT DO NOTHING
+                    )
                     "#,
-                )
-                .bind(group_id)
-                .bind(member.preview_row_id)
-                .bind(member.standard_row_id)
-                .bind(member.history_bill_id)
-                .bind(&member.member_role)
-                .bind(&member.parser_name)
-                .bind(member.metadata.to_string())
-                .execute(pool)
-                .await?;
+                );
+                query.push_values(&draft.members, |mut row, member| {
+                    row.push_bind(group_id)
+                        .push_bind(member.preview_row_id)
+                        .push_bind(member.standard_row_id)
+                        .push_bind(member.history_bill_id)
+                        .push_bind(&member.member_role)
+                        .push_bind(&member.parser_name)
+                        .push_bind(member.metadata.to_string())
+                        .push_unseparated("::jsonb")
+                        .push("now()");
+                });
+                query.push(" ON CONFLICT DO NOTHING");
+                query.build().execute(pool).await?;
             }
             inserted += 1;
         }
@@ -2633,8 +2769,11 @@ async fn insert_preview_row_async(
     session_db_id: i64,
     user_id: i64,
     draft: &ImportPreviewDraft,
+    identity_maps: &ImportIdentityMaps,
 ) -> DbResult<i64> {
-    let payload = preview_payload_from_draft(draft);
+    let mut draft = draft.clone();
+    apply_identity_validation_to_draft(&mut draft, identity_maps);
+    let payload = preview_payload_from_draft(&draft);
     let amount_cents = draft.preview_amount_cents.abs();
     let direction = if draft.preview_type == "收入" || draft.preview_type == "income" {
         "income"
@@ -2644,7 +2783,7 @@ async fn insert_preview_row_async(
     let mut query = build_preview_row_insert_returning_query(
         session_db_id,
         user_id,
-        draft,
+        &draft,
         payload.to_string(),
         amount_cents,
         direction,
@@ -2753,12 +2892,290 @@ fn preview_row_batch_value_from_draft(draft: &ImportPreviewDraft) -> PreviewRowB
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct ImportIdentityMaps {
+    active_accounts: BTreeSet<i64>,
+    active_categories: BTreeMap<i64, Option<i64>>,
+}
+
+async fn load_import_identity_maps(
+    pool: &PostgresPool,
+    user_id: i64,
+) -> DbResult<ImportIdentityMaps> {
+    let account_rows =
+        sqlx::query("SELECT id FROM accounts WHERE user_id = $1 AND is_active = true")
+            .bind(user_id)
+            .fetch_all(pool)
+            .await?;
+    let category_rows = sqlx::query(
+        "SELECT id, category_type FROM categories WHERE user_id = $1 AND is_active = true",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut maps = ImportIdentityMaps::default();
+    for row in account_rows {
+        maps.active_accounts.insert(row.try_get("id")?);
+    }
+    for row in category_rows {
+        let id = row.try_get::<i64, _>("id")?;
+        let category_type = row
+            .try_get::<Option<String>, _>("category_type")?
+            .as_deref()
+            .and_then(preview_category_type_code);
+        maps.active_categories.insert(id, category_type);
+    }
+    Ok(maps)
+}
+
+fn apply_identity_validation_to_draft(
+    draft: &mut ImportPreviewDraft,
+    identity_maps: &ImportIdentityMaps,
+) {
+    let issues = normalize_identity_values(
+        &draft.preview_type,
+        &mut draft.category_id,
+        &mut draft.preview_source_account_id,
+        &mut draft.preview_destination_account_id,
+        identity_maps,
+    );
+    set_identity_validation_feedback(&mut draft.preview_matching_feedback, &issues);
+    if !issues.is_empty() {
+        draft.preview_selected = false;
+    }
+}
+
+fn apply_identity_validation_to_preview(
+    preview: &mut ImportPreviewRow,
+    payload: &mut Value,
+    identity_maps: &ImportIdentityMaps,
+) {
+    let issues = normalize_identity_values(
+        &preview.preview_type,
+        &mut preview.category_id,
+        &mut preview.preview_source_account_id,
+        &mut preview.preview_destination_account_id,
+        identity_maps,
+    );
+    payload_set(
+        payload,
+        "category_id",
+        preview.category_id.map_or(Value::Null, Value::from),
+    );
+    payload_set(
+        payload,
+        "categoryId",
+        preview.category_id.map_or(Value::Null, Value::from),
+    );
+    payload_set(
+        payload,
+        "preview_source_account_id",
+        preview
+            .preview_source_account_id
+            .map_or(Value::Null, Value::from),
+    );
+    payload_set(
+        payload,
+        "preview_destination_account_id",
+        preview
+            .preview_destination_account_id
+            .map_or(Value::Null, Value::from),
+    );
+    set_identity_validation_feedback(&mut preview.preview_matching_feedback, &issues);
+    if !issues.is_empty() {
+        preview.preview_selected = false;
+        payload_set(payload, "preview_selected", Value::Bool(false));
+    }
+}
+
+fn normalize_identity_values(
+    preview_type: &str,
+    category_id: &mut Option<i64>,
+    source_account_id: &mut Option<i64>,
+    destination_account_id: &mut Option<i64>,
+    identity_maps: &ImportIdentityMaps,
+) -> Vec<Value> {
+    let mut issues = Vec::new();
+    if preview_category_required(preview_type) {
+        match *category_id {
+            Some(id) if id > 0 => match identity_maps.active_categories.get(&id) {
+                Some(category_type)
+                    if category_type_matches_preview_type(*category_type, preview_type) => {}
+                Some(_) => {
+                    issues.push(identity_issue("category_id", "type_mismatch", Some(id)));
+                    *category_id = None;
+                }
+                None => {
+                    issues.push(identity_issue(
+                        "category_id",
+                        "not_active_or_not_found",
+                        Some(id),
+                    ));
+                    *category_id = None;
+                }
+            },
+            Some(id) => {
+                issues.push(identity_issue("category_id", "non_positive", Some(id)));
+                *category_id = None;
+            }
+            None => issues.push(identity_issue("category_id", "missing", None)),
+        }
+    } else if category_id.is_some_and(|id| id <= 0) {
+        issues.push(identity_issue("category_id", "non_positive", *category_id));
+        *category_id = None;
+    }
+
+    match *source_account_id {
+        Some(id) if id > 0 && identity_maps.active_accounts.contains(&id) => {}
+        Some(id) if id > 0 => {
+            issues.push(identity_issue(
+                "source_account_id",
+                "not_active_or_not_found",
+                Some(id),
+            ));
+            *source_account_id = None;
+        }
+        Some(id) => {
+            issues.push(identity_issue(
+                "source_account_id",
+                "non_positive",
+                Some(id),
+            ));
+            *source_account_id = None;
+        }
+        None => issues.push(identity_issue("source_account_id", "missing", None)),
+    }
+
+    if preview_destination_account_required(preview_type) {
+        match *destination_account_id {
+            Some(id) if id > 0 && identity_maps.active_accounts.contains(&id) => {}
+            Some(id) if id > 0 => {
+                issues.push(identity_issue(
+                    "destination_account_id",
+                    "not_active_or_not_found",
+                    Some(id),
+                ));
+                *destination_account_id = None;
+            }
+            Some(id) => {
+                issues.push(identity_issue(
+                    "destination_account_id",
+                    "non_positive",
+                    Some(id),
+                ));
+                *destination_account_id = None;
+            }
+            None => issues.push(identity_issue("destination_account_id", "missing", None)),
+        }
+    } else if destination_account_id.is_some() {
+        let reason = if destination_account_id.is_some_and(|id| id <= 0) {
+            "non_positive"
+        } else {
+            "not_allowed_for_type"
+        };
+        issues.push(identity_issue(
+            "destination_account_id",
+            reason,
+            *destination_account_id,
+        ));
+        *destination_account_id = None;
+    }
+
+    if preview_destination_account_required(preview_type)
+        && source_account_id.is_some()
+        && destination_account_id.is_some()
+        && source_account_id == destination_account_id
+    {
+        issues.push(identity_issue(
+            "destination_account_id",
+            "same_as_source_account",
+            *destination_account_id,
+        ));
+        *destination_account_id = None;
+    }
+
+    issues
+}
+
+fn identity_issue(field: &str, reason: &str, value: Option<i64>) -> Value {
+    json!({
+        "field": field,
+        "reason": reason,
+        "value": value,
+    })
+}
+
+fn set_identity_validation_feedback(feedback: &mut Value, issues: &[Value]) {
+    if !feedback.is_object() {
+        *feedback = json!({});
+    }
+    let object = feedback.as_object_mut().expect("feedback object");
+    if issues.is_empty() {
+        object.remove("identity_validation");
+        return;
+    }
+    object.insert(
+        "identity_validation".to_string(),
+        json!({
+            "review_status": "requires_identity_review",
+            "issues": issues,
+        }),
+    );
+}
+
+fn category_type_matches_preview_type(category_type: Option<i64>, preview_type: &str) -> bool {
+    let Some(category_type) = category_type else {
+        return true;
+    };
+    if matches!(category_type, 0 | 1) {
+        return true;
+    }
+    preview_category_type_code(preview_type)
+        .is_none_or(|preview_type| preview_type == category_type)
+}
+
+fn preview_identity_error_messages(
+    preview: &ImportPreviewRow,
+    identity_maps: &ImportIdentityMaps,
+) -> Vec<String> {
+    let mut category_id = preview.category_id;
+    let mut source_account_id = preview.preview_source_account_id;
+    let mut destination_account_id = preview.preview_destination_account_id;
+    normalize_identity_values(
+        &preview.preview_type,
+        &mut category_id,
+        &mut source_account_id,
+        &mut destination_account_id,
+        identity_maps,
+    )
+    .into_iter()
+    .map(|issue| {
+        let field = issue
+            .get("field")
+            .and_then(Value::as_str)
+            .unwrap_or("identity");
+        let reason = issue
+            .get("reason")
+            .and_then(Value::as_str)
+            .unwrap_or("invalid");
+        let value = issue.get("value").cloned().unwrap_or(Value::Null);
+        format!("preview {} {field} {reason} value={value}", preview.id)
+    })
+    .collect()
+}
+
 async fn insert_preview_rows_batch_async(
     pool: &PostgresPool,
     session_db_id: i64,
     user_id: i64,
     drafts: &[ImportPreviewDraft],
 ) -> DbResult<usize> {
+    let identity_maps = load_import_identity_maps(pool, user_id).await?;
+    let mut drafts = drafts.to_vec();
+    for draft in &mut drafts {
+        apply_identity_validation_to_draft(draft, &identity_maps);
+    }
     let rows = drafts
         .iter()
         .map(preview_row_batch_value_from_draft)
@@ -2862,6 +3279,7 @@ async fn apply_preview_patch_async(
     session_db_id: i64,
     user_id: i64,
     patch: &ImportPreviewPatch,
+    identity_maps: &ImportIdentityMaps,
 ) -> DbResult<bool> {
     let Some(row) = sqlx::query(
         "SELECT p.*, s.session_key FROM import_preview_rows p JOIN import_sessions s ON s.id = p.session_id WHERE p.id = $1 AND p.session_id = $2 AND p.user_id = $3",
@@ -2890,6 +3308,7 @@ async fn apply_preview_patch_async(
     if patch.clear_llm_decision {
         clear_feedback_key(&mut preview.preview_matching_feedback, "llm");
     }
+    apply_identity_validation_to_preview(&mut preview, &mut payload, identity_maps);
     payload_set(
         &mut payload,
         "preview_matching_feedback",
@@ -3507,6 +3926,131 @@ fn build_preview_metadata(total: usize) -> ImportPreviewMetadata {
     }
 }
 
+async fn build_preview_metadata_for_query(
+    pool: &PostgresPool,
+    session_db_id: i64,
+    user_id: i64,
+    filters: &ImportPreviewQueryFilters,
+    total: usize,
+) -> DbResult<ImportPreviewMetadata> {
+    let mut metadata = build_preview_metadata(total);
+    metadata.counts.selected = count_preview_rows_by_query(
+        pool,
+        session_db_id,
+        user_id,
+        &selected_count_filters(filters),
+    )
+    .await
+    .map(|value| usize::try_from(value).unwrap_or(usize::MAX))?;
+    metadata.counts.selected_invalid =
+        count_selected_invalid_preview_rows(pool, session_db_id, user_id, filters).await?;
+    metadata.facets.categories =
+        query_preview_category_facets(pool, session_db_id, user_id, filters).await?;
+    metadata.facets.accounts =
+        query_preview_account_facets(pool, session_db_id, user_id, filters).await?;
+    metadata.facets.tags = query_preview_tag_facets(pool, session_db_id, user_id, filters).await?;
+    Ok(metadata)
+}
+
+fn selected_count_filters(filters: &ImportPreviewQueryFilters) -> ImportPreviewQueryFilters {
+    let mut filters = filters.clone();
+    filters.selected_only = true;
+    filters
+}
+
+async fn count_selected_invalid_preview_rows(
+    pool: &PostgresPool,
+    session_db_id: i64,
+    user_id: i64,
+    filters: &ImportPreviewQueryFilters,
+) -> DbResult<usize> {
+    let mut filters = selected_count_filters(filters);
+    filters.annotation = Some("needs-review".to_string());
+    count_preview_rows_by_query(pool, session_db_id, user_id, &filters)
+        .await
+        .map(|value| usize::try_from(value).unwrap_or(usize::MAX))
+}
+
+async fn query_preview_category_facets(
+    pool: &PostgresPool,
+    session_db_id: i64,
+    user_id: i64,
+    filters: &ImportPreviewQueryFilters,
+) -> DbResult<Vec<ImportPreviewFacetEntry>> {
+    let mut facet_filters = filters.clone();
+    facet_filters.category = None;
+    let mut query = QueryBuilder::<Postgres>::new(
+        "SELECT p.category_id::text AS value, COALESCE(NULLIF(c.path, ''), c.name, p.category_id::text) AS label, COUNT(*)::BIGINT AS count FROM import_preview_rows p JOIN categories c ON c.user_id = p.user_id AND c.id = p.category_id AND c.is_active = true WHERE p.session_id = ",
+    );
+    query.push_bind(session_db_id);
+    query.push(" AND p.user_id = ");
+    query.push_bind(user_id);
+    query.push(" AND p.category_id IS NOT NULL");
+    push_preview_query_predicates(&mut query, &facet_filters, "p");
+    query.push(" GROUP BY p.category_id, c.path, c.name ORDER BY count DESC, label ASC LIMIT ");
+    query.push_bind(IMPORT_PREVIEW_FACET_LIMIT);
+    query_preview_facets(query, pool).await
+}
+
+async fn query_preview_account_facets(
+    pool: &PostgresPool,
+    session_db_id: i64,
+    user_id: i64,
+    filters: &ImportPreviewQueryFilters,
+) -> DbResult<Vec<ImportPreviewFacetEntry>> {
+    let mut facet_filters = filters.clone();
+    facet_filters.account = None;
+    let mut query = QueryBuilder::<Postgres>::new(
+        "SELECT account_values.account_id::text AS value, COALESCE(a.name, account_values.account_id::text) AS label, COUNT(*)::BIGINT AS count FROM import_preview_rows p CROSS JOIN LATERAL (VALUES (p.account_id), (p.transfer_target_account_id)) AS account_values(account_id) JOIN accounts a ON a.user_id = p.user_id AND a.id = account_values.account_id AND a.is_active = true WHERE p.session_id = ",
+    );
+    query.push_bind(session_db_id);
+    query.push(" AND p.user_id = ");
+    query.push_bind(user_id);
+    query.push(" AND account_values.account_id IS NOT NULL");
+    push_preview_query_predicates(&mut query, &facet_filters, "p");
+    query.push(" GROUP BY account_values.account_id, a.name ORDER BY count DESC, label ASC LIMIT ");
+    query.push_bind(IMPORT_PREVIEW_FACET_LIMIT);
+    query_preview_facets(query, pool).await
+}
+
+async fn query_preview_tag_facets(
+    pool: &PostgresPool,
+    session_db_id: i64,
+    user_id: i64,
+    filters: &ImportPreviewQueryFilters,
+) -> DbResult<Vec<ImportPreviewFacetEntry>> {
+    let mut facet_filters = filters.clone();
+    facet_filters.tag = None;
+    let mut query = QueryBuilder::<Postgres>::new(
+        "SELECT tag_values.tag AS value, tag_values.tag AS label, COUNT(*)::BIGINT AS count FROM import_preview_rows p CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(p.preview_payload->'preview_parser_tags') = 'array' THEN p.preview_payload->'preview_parser_tags' ELSE '[]'::jsonb END) AS tag_values(tag) WHERE p.session_id = ",
+    );
+    query.push_bind(session_db_id);
+    query.push(" AND p.user_id = ");
+    query.push_bind(user_id);
+    query.push(" AND trim(tag_values.tag) <> ''");
+    push_preview_query_predicates(&mut query, &facet_filters, "p");
+    query.push(" GROUP BY tag_values.tag ORDER BY count DESC, label ASC LIMIT ");
+    query.push_bind(IMPORT_PREVIEW_FACET_LIMIT);
+    query_preview_facets(query, pool).await
+}
+
+async fn query_preview_facets(
+    mut query: QueryBuilder<'_, Postgres>,
+    pool: &PostgresPool,
+) -> DbResult<Vec<ImportPreviewFacetEntry>> {
+    let rows = query.build().fetch_all(pool).await?;
+    rows.into_iter()
+        .map(|row| {
+            let count = row.try_get::<i64, _>("count")?;
+            Ok(ImportPreviewFacetEntry {
+                value: row.try_get("value")?,
+                label: row.try_get::<Option<String>, _>("label")?,
+                count: usize::try_from(count).unwrap_or(usize::MAX),
+            })
+        })
+        .collect()
+}
+
 fn apply_preview_filters(
     rows: Vec<ImportPreviewRow>,
     filters: &ImportPreviewQueryFilters,
@@ -3632,12 +4176,11 @@ fn category_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bool
             && row.preview_sub_category.trim().is_empty();
     }
     if filter == "__invalid__" {
-        return preview_has_missing_category_issue(row);
+        return preview_has_missing_category_issue(row)
+            || preview_identity_issue_matches_field(row, "category_id");
     }
     row.category_id
         .is_some_and(|category_id| category_id.to_string() == filter)
-        || row.preview_main_category == filter
-        || row.preview_sub_category == filter
 }
 
 fn account_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bool {
@@ -3772,6 +4315,7 @@ fn preview_requires_review(preview: &ImportPreviewRow) -> bool {
         || preview_has_missing_source_account_issue(preview)
         || preview_has_missing_destination_account_issue(preview)
         || preview_has_same_transfer_accounts_issue(preview)
+        || preview_has_identity_validation_issue(preview)
 }
 
 fn preview_has_missing_category_issue(preview: &ImportPreviewRow) -> bool {
@@ -3794,12 +4338,35 @@ fn preview_has_same_transfer_accounts_issue(preview: &ImportPreviewRow) -> bool 
         && preview.preview_source_account_id == preview.preview_destination_account_id
 }
 
+fn preview_has_identity_validation_issue(preview: &ImportPreviewRow) -> bool {
+    preview
+        .preview_matching_feedback
+        .pointer("/identity_validation/issues")
+        .and_then(Value::as_array)
+        .is_some_and(|issues| !issues.is_empty())
+}
+
 fn preview_account_filter_invalid_matches(preview: &ImportPreviewRow) -> bool {
-    if preview_transfer_filter_type(&preview.preview_type) {
-        return preview.preview_source_account_id.is_none()
-            || preview.preview_destination_account_id.is_none();
-    }
-    preview.preview_source_account_id.is_none()
+    preview_has_missing_source_account_issue(preview)
+        || preview_has_missing_destination_account_issue(preview)
+        || preview_has_same_transfer_accounts_issue(preview)
+        || preview_identity_issue_matches_field(preview, "source_account_id")
+        || preview_identity_issue_matches_field(preview, "destination_account_id")
+}
+
+fn preview_identity_issue_matches_field(preview: &ImportPreviewRow, expected_field: &str) -> bool {
+    preview
+        .preview_matching_feedback
+        .pointer("/identity_validation/issues")
+        .and_then(Value::as_array)
+        .is_some_and(|issues| {
+            issues.iter().any(|issue| {
+                issue
+                    .get("field")
+                    .and_then(Value::as_str)
+                    .is_some_and(|field| field == expected_field)
+            })
+        })
 }
 
 fn preview_category_required(preview_type: &str) -> bool {
@@ -3824,13 +4391,6 @@ fn preview_destination_account_required(preview_type: &str) -> bool {
     matches!(
         preview_type.trim().to_ascii_lowercase().as_str(),
         "转账" | "transfer" | "4" | "投资" | "investment" | "5"
-    )
-}
-
-fn preview_transfer_filter_type(preview_type: &str) -> bool {
-    matches!(
-        preview_type.trim().to_ascii_lowercase().as_str(),
-        "转账" | "transfer" | "4"
     )
 }
 
@@ -4110,6 +4670,19 @@ mod import_preview_query_tests {
             vec![1]
         );
 
+        let label_filters = ImportPreviewQueryFilters {
+            category: Some("理财".to_string()),
+            ..ImportPreviewQueryFilters::default()
+        };
+        let rows = apply_preview_filters(
+            vec![matched.clone(), same_name_wrong_identity.clone()],
+            &label_filters,
+        );
+        assert!(
+            rows.is_empty(),
+            "category filter must not match preview labels without canonical category id"
+        );
+
         let missing_filters = ImportPreviewQueryFilters {
             category: Some("__none__".to_string()),
             ..ImportPreviewQueryFilters::default()
@@ -4222,7 +4795,9 @@ mod import_preview_query_tests {
 
         assert!(sql.contains("JOIN import_sessions"));
         assert!(sql.contains("p.selected = true"));
-        assert!(sql.contains("p.category_id::text"));
+        assert!(sql.contains("p.category_id = "));
+        assert!(!sql.contains("preview_main_category"));
+        assert!(!sql.contains("preview_sub_category"));
         assert!(sql.contains("p.account_id IS NULL"));
         assert!(sql.contains("preview_matching_feedback'->"));
         assert!(sql.contains("ORDER BY p.amount_cents DESC"));
@@ -4254,9 +4829,30 @@ mod import_preview_query_tests {
         let sql = built.sql();
 
         assert!(sql.contains("p.category_id IS NULL"));
-        assert!(sql.contains("p.account_id::text"));
+        assert!(sql.contains("p.account_id = "));
+        assert!(sql.contains("p.transfer_target_account_id = "));
         assert!(sql.contains("preview_matching_feedback')::text ILIKE"));
         assert!(sql.contains("CASE lower(p.transaction_type)"));
+    }
+
+    #[test]
+    fn preview_sql_query_builder_rejects_raw_identity_label_filters() {
+        let filters = ImportPreviewQueryFilters {
+            category: Some("餐饮".to_string()),
+            account: Some("现金钱包".to_string()),
+            ..ImportPreviewQueryFilters::default()
+        };
+        let mut query = QueryBuilder::<Postgres>::new(
+            "SELECT p.* FROM import_preview_rows p WHERE p.session_id = ",
+        );
+        query.push_bind(1_i64);
+        push_preview_query_predicates(&mut query, &filters, "p");
+
+        let sql = query.build().sql().to_string();
+
+        assert!(sql.contains("AND FALSE"));
+        assert!(!sql.contains("category_id::text"));
+        assert!(!sql.contains("account_id::text"));
     }
 
     #[test]
@@ -4278,9 +4874,167 @@ mod import_preview_query_tests {
 
         assert!(sql.contains("lower(p.transaction_type) IN ('收入'"));
         assert!(sql.contains("p.category_id IS NULL"));
-        assert!(sql.contains("NOT (lower(p.transaction_type) IN ('转账'"));
+        assert!(sql.contains("NOT EXISTS (SELECT 1 FROM categories c"));
+        assert!(sql.contains("NOT EXISTS (SELECT 1 FROM accounts a"));
         assert!(sql.contains("jsonb_array_length"));
         assert!(sql.contains("p.transfer_target_account_id IS NULL"));
+        assert!(sql.contains("identity_validation"));
+    }
+
+    #[test]
+    fn identity_validation_feedback_makes_preview_require_review() {
+        let mut row = preview_row(1);
+        row.category_id = Some(42);
+        row.preview_matching_feedback = json!({
+            "identity_validation": {
+                "review_status": "requires_identity_review",
+                "issues": [
+                    {"field": "category_id", "reason": "not_active_or_not_found", "value": 42}
+                ]
+            }
+        });
+
+        assert!(preview_requires_review(&row));
+
+        let filters = ImportPreviewQueryFilters {
+            category: Some("__invalid__".to_string()),
+            ..ImportPreviewQueryFilters::default()
+        };
+        let rows = apply_preview_filters(vec![row], &filters);
+        assert_eq!(
+            rows.into_iter().map(|row| row.id).collect::<Vec<_>>(),
+            vec![1]
+        );
+    }
+
+    #[test]
+    fn identity_validation_clears_invalid_draft_ids_and_records_issues() {
+        let mut draft = ImportPreviewDraft {
+            preview_type: "转账".to_string(),
+            category_id: Some(42),
+            preview_source_account_id: Some(11),
+            preview_destination_account_id: Some(11),
+            preview_selected: true,
+            ..ImportPreviewDraft::default()
+        };
+        let mut maps = ImportIdentityMaps::default();
+        maps.active_categories.insert(42, Some(3));
+        maps.active_accounts.insert(11);
+
+        apply_identity_validation_to_draft(&mut draft, &maps);
+
+        assert_eq!(draft.category_id, None);
+        assert_eq!(draft.preview_destination_account_id, None);
+        assert!(!draft.preview_selected);
+        let issues = draft
+            .preview_matching_feedback
+            .pointer("/identity_validation/issues")
+            .and_then(Value::as_array)
+            .expect("identity issues");
+        assert!(issues.iter().any(|issue| {
+            issue["field"] == json!("category_id") && issue["reason"] == json!("type_mismatch")
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue["field"] == json!("destination_account_id")
+                && issue["reason"] == json!("same_as_source_account")
+        }));
+    }
+
+    #[test]
+    fn identity_validation_records_non_positive_and_missing_identity_edges() {
+        let maps = ImportIdentityMaps::default();
+
+        let mut expense = ImportPreviewDraft {
+            preview_type: "支出".to_string(),
+            category_id: Some(-1),
+            preview_source_account_id: Some(0),
+            preview_selected: true,
+            ..ImportPreviewDraft::default()
+        };
+        apply_identity_validation_to_draft(&mut expense, &maps);
+        assert_eq!(expense.category_id, None);
+        assert_eq!(expense.preview_source_account_id, None);
+        assert!(!expense.preview_selected);
+        let expense_issues = expense
+            .preview_matching_feedback
+            .pointer("/identity_validation/issues")
+            .and_then(Value::as_array)
+            .expect("expense issues");
+        assert!(expense_issues.iter().any(|issue| {
+            issue["field"] == json!("category_id") && issue["reason"] == json!("non_positive")
+        }));
+        assert!(expense_issues.iter().any(|issue| {
+            issue["field"] == json!("source_account_id") && issue["reason"] == json!("non_positive")
+        }));
+
+        let mut income = ImportPreviewDraft {
+            preview_type: "收入".to_string(),
+            category_id: Some(0),
+            preview_source_account_id: None,
+            preview_selected: true,
+            ..ImportPreviewDraft::default()
+        };
+        apply_identity_validation_to_draft(&mut income, &maps);
+        let income_issues = income
+            .preview_matching_feedback
+            .pointer("/identity_validation/issues")
+            .and_then(Value::as_array)
+            .expect("income issues");
+        assert!(income_issues.iter().any(|issue| {
+            issue["field"] == json!("category_id") && issue["reason"] == json!("non_positive")
+        }));
+        assert!(income_issues.iter().any(|issue| {
+            issue["field"] == json!("source_account_id") && issue["reason"] == json!("missing")
+        }));
+
+        let mut transfer = ImportPreviewDraft {
+            preview_type: "转账".to_string(),
+            category_id: None,
+            preview_source_account_id: None,
+            preview_destination_account_id: Some(-2),
+            preview_selected: true,
+            ..ImportPreviewDraft::default()
+        };
+        apply_identity_validation_to_draft(&mut transfer, &maps);
+        let transfer_issues = transfer
+            .preview_matching_feedback
+            .pointer("/identity_validation/issues")
+            .and_then(Value::as_array)
+            .expect("transfer issues");
+        assert!(transfer_issues.iter().any(|issue| {
+            issue["field"] == json!("category_id") && issue["reason"] == json!("missing")
+        }));
+        assert!(transfer_issues.iter().any(|issue| {
+            issue["field"] == json!("destination_account_id")
+                && issue["reason"] == json!("non_positive")
+        }));
+
+        let mut expense_with_destination = ImportPreviewDraft {
+            preview_type: "支出".to_string(),
+            category_id: Some(42),
+            preview_source_account_id: Some(11),
+            preview_destination_account_id: Some(12),
+            preview_selected: true,
+            ..ImportPreviewDraft::default()
+        };
+        let mut valid_maps = ImportIdentityMaps::default();
+        valid_maps.active_categories.insert(42, Some(3));
+        valid_maps.active_accounts.extend([11, 12]);
+        apply_identity_validation_to_draft(&mut expense_with_destination, &valid_maps);
+        assert_eq!(
+            expense_with_destination.preview_destination_account_id,
+            None
+        );
+        assert!(!expense_with_destination.preview_selected);
+        let destination_issues = expense_with_destination
+            .preview_matching_feedback
+            .pointer("/identity_validation/issues")
+            .and_then(Value::as_array)
+            .expect("destination issues");
+        assert!(destination_issues.iter().any(|issue| {
+            issue["field"] == json!("destination_account_id")
+                && issue["reason"] == json!("not_allowed_for_type")
+        }));
     }
 
     #[test]
@@ -4365,7 +5119,7 @@ mod import_preview_query_tests {
         assert!(select_sql.contains("UPDATE import_preview_rows p SET selected ="));
         assert!(select_sql.contains("jsonb_set"));
         assert!(select_sql.contains("p.selected = true"));
-        assert!(select_sql.contains("p.category_id::text"));
+        assert!(select_sql.contains("p.category_id = "));
         assert!(select_sql.contains("p.id IN"));
 
         let mut deselect_query = build_preview_selection_update_query(

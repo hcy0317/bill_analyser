@@ -146,6 +146,16 @@ const RECURRING_SUGGESTION_COMMENT_TABLES: &[&str] = &["recurring_suggestions"];
 
 const RECURRING_SUGGESTION_COMMENT_INDEXES: &[&str] = &["idx_recurring_suggestions_user_status"];
 
+const IMPORT_PREVIEW_FILTER_INDEX_TABLES: &[&str] = &["import_preview_rows"];
+
+const IMPORT_PREVIEW_FILTER_INDEXES: &[&str] = &[
+    "idx_import_preview_rows_session_category",
+    "idx_import_preview_rows_session_account",
+    "idx_import_preview_rows_session_transfer_account",
+    "idx_import_preview_rows_session_selected",
+    "idx_import_preview_rows_session_type",
+];
+
 const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
     PostgresMigrationDescriptor {
         version: 1,
@@ -245,6 +255,13 @@ const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
         required_tables: RECURRING_SUGGESTION_COMMENT_TABLES,
         required_indexes: RECURRING_SUGGESTION_COMMENT_INDEXES,
     },
+    PostgresMigrationDescriptor {
+        version: 15,
+        file_name: "0015_import_preview_filter_indexes.sql",
+        description: "add import preview filter and facet indexes for server-paged review",
+        required_tables: IMPORT_PREVIEW_FILTER_INDEX_TABLES,
+        required_indexes: IMPORT_PREVIEW_FILTER_INDEXES,
+    },
 ];
 
 pub fn postgres_migrations_dir() -> PathBuf {
@@ -276,7 +293,7 @@ mod tests {
     #[test]
     fn postgres_manifest_points_to_existing_initial_schema() {
         let manifest = postgres_migration_manifest();
-        assert_eq!(manifest.len(), 14);
+        assert_eq!(manifest.len(), 15);
         assert_eq!(manifest[0].version, 1);
         assert_eq!(manifest[0].file_name, POSTGRES_INITIAL_SCHEMA_FILE);
         for (index, descriptor) in manifest.iter().enumerate() {
@@ -459,6 +476,18 @@ mod tests {
         ));
         assert!(comment_migration
             .contains("amount stored in cents; API responses expose this value as amountCents"));
+    }
+
+    #[test]
+    fn import_preview_filter_migration_contains_required_indexes() {
+        let migration = fs::read_to_string(
+            postgres_migrations_dir().join("0015_import_preview_filter_indexes.sql"),
+        )
+        .unwrap();
+
+        for index in IMPORT_PREVIEW_FILTER_INDEXES {
+            assert!(migration.contains(index), "missing index {index}");
+        }
     }
 
     #[tokio::test]

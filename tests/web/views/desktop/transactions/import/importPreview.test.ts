@@ -4,11 +4,15 @@ import path from 'node:path';
 import { describe, expect, test } from '@jest/globals';
 
 import { CategoryType } from '@/core/category.ts';
+import { TransactionType } from '@/core/transaction.ts';
+import type { ImportTransaction } from '@/models/imported_transaction.ts';
 import {
     resolveImportPreviewCategoryId,
     resolveImportPreviewDefaultTransferCategoryId,
     resolveImportPreviewCategoryPath
 } from '@/views/desktop/transactions/import/importPreview.ts';
+import { buildImportPreviewServerQueryFilters } from '@/views/desktop/transactions/import/importPreviewIndex.ts';
+import { buildImportPreviewUpdateFromTransaction } from '@/views/desktop/transactions/import/importPreviewUpdates.ts';
 
 function readSource(relativePath: string): string {
     return fs.readFileSync(path.resolve(process.cwd(), relativePath), 'utf-8').replace(/\r\n/g, '\n');
@@ -37,6 +41,18 @@ const categoriesById = {
     }
 };
 
+const baseServerFilters = {
+    minDatetime: null,
+    maxDatetime: null,
+    transactionType: null,
+    category: null,
+    account: null,
+    tag: null,
+    signal: null,
+    annotation: null,
+    description: null
+};
+
 describe('import preview category resolution', () => {
     test('prefers persisted preview category id over same-name fallback matches', () => {
         expect(resolveImportPreviewCategoryId({
@@ -47,13 +63,13 @@ describe('import preview category resolution', () => {
         }, categoriesById)).toBe('11');
     });
 
-    test('falls back by name only when the category hierarchy exists', () => {
+    test('does not fall back by name when canonical category identity is invalid', () => {
         expect(resolveImportPreviewCategoryId({
             id: 2,
             category_id: 999,
             preview_main_category: '餐饮',
             preview_sub_category: '咖啡'
-        }, categoriesById)).toBe('11');
+        }, categoriesById)).toBe('');
 
         expect(resolveImportPreviewCategoryId({
             id: 3,
@@ -75,7 +91,7 @@ describe('import preview category resolution', () => {
             category_id: ' 0 ',
             preview_main_category: '餐饮',
             preview_sub_category: '咖啡'
-        }, categoriesById)).toBe('11');
+        }, categoriesById)).toBe('');
     });
 
     test('returns empty when no preview category names are available', () => {
@@ -88,7 +104,7 @@ describe('import preview category resolution', () => {
         }, categoriesById)).toBe('');
     });
 
-    test('skips empty category slots and supports top-level main-category fallback', () => {
+    test('does not resolve top-level categories from display names', () => {
         expect(resolveImportPreviewCategoryId({
             id: 7,
             preview_main_category: '餐饮',
@@ -96,10 +112,10 @@ describe('import preview category resolution', () => {
         }, {
             ...categoriesById,
             emptySlot: undefined
-        })).toBe('10');
+        })).toBe('');
     });
 
-    test('skips undefined category entries before resolving a nested fallback match', () => {
+    test('does not resolve nested categories from display names', () => {
         expect(resolveImportPreviewCategoryId({
             id: 8,
             preview_main_category: '餐饮',
@@ -107,10 +123,10 @@ describe('import preview category resolution', () => {
         }, {
             emptySlot: undefined,
             ...categoriesById
-        })).toBe('11');
+        })).toBe('');
     });
 
-    test('keeps scanning top-level categories until a later main-category match is found', () => {
+    test('does not scan same-name top-level categories without canonical identity', () => {
         expect(resolveImportPreviewCategoryId({
             id: 9,
             preview_main_category: '咖啡',
@@ -123,7 +139,7 @@ describe('import preview category resolution', () => {
                 parentId: '0'
             },
             ...categoriesById
-        })).toBe('12');
+        })).toBe('');
     });
 
     test('does not resolve same-name categories from another transaction type', () => {
@@ -160,7 +176,7 @@ describe('import preview category resolution', () => {
             preview_type: '转账',
             preview_main_category: '账户互转',
             preview_sub_category: '咖啡'
-        }, typedCategoriesById)).toBe('transferSub');
+        }, typedCategoriesById)).toBe('');
 
         expect(resolveImportPreviewCategoryId({
             id: 11,
@@ -257,6 +273,68 @@ describe('import preview category resolution', () => {
             undefined,
             'missing'
         )).toBe('');
+    });
+});
+
+describe('import preview identity-safe update/query payloads', () => {
+    test('server query maps category labels to stable ids and preserves sentinels', () => {
+        expect(buildImportPreviewServerQueryFilters({
+            ...baseServerFilters,
+            category: '餐饮/咖啡',
+            account: '招商卡',
+            tag: undefined
+        }, {
+            categoryValueByLabel: {'餐饮/咖啡': '11'},
+            accountValueByLabel: {'招商卡': '21'}
+        })).toEqual({
+            category: '11',
+            account: '21',
+            tag: '__invalid__'
+        });
+
+        expect(buildImportPreviewServerQueryFilters({
+            ...baseServerFilters,
+            category: '',
+            account: null,
+            tag: ''
+        })).toEqual({
+            category: '__none__',
+            tag: '__none__'
+        });
+    });
+
+    test('preview update payload drops zero and non-map-backed account ids', () => {
+        const transaction = {
+            _previewId: 99,
+            type: TransactionType.Expense,
+            sourceAmountCents: 1234,
+            destinationAmountCents: 0,
+            sourceAccountId: '0',
+            destinationAccountId: '404',
+            recurringTemplateId: '0',
+            recurringTemplateName: '',
+            recurringCandidateCount: 0,
+            recurringMatchScore: 0,
+            recurringMatchReasons: '',
+            recurringMatchedDate: '',
+            selected: true
+        } as unknown as ImportTransaction;
+
+        const update = buildImportPreviewUpdateFromTransaction(transaction, {
+            categoryPath: {
+                id: '11',
+                mainCategory: '餐饮',
+                subCategory: '咖啡',
+                displayCategory: '咖啡',
+                type: TransactionType.Expense
+            },
+            validAccountIds: new Set(['21'])
+        });
+
+        expect(update.category_id).toBe(11);
+        expect(update.preview_source_account_id).toBeNull();
+        expect(update.preview_destination_account_id).toBeNull();
+        expect(update.preview_recurring_id).toBeNull();
     });
 });
 

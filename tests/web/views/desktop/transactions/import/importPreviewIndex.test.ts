@@ -286,7 +286,7 @@ describe('import preview index helpers', () => {
             annotation: 'needs-review',
             description: '早餐',
         }, {
-            accountIdByName: {
+            accountValueByLabel: {
                 支付宝: '200'
             }
         });
@@ -301,5 +301,53 @@ describe('import preview index helpers', () => {
             annotation: 'needs-review',
             description: '早餐'
         });
+    });
+
+    test('omits unmapped identity filter labels instead of sending raw category or account text', () => {
+        const filters = buildImportPreviewServerQueryFilters({
+            minDatetime: null,
+            maxDatetime: null,
+            transactionType: null,
+            category: '餐饮/咖啡',
+            account: '支付宝',
+            tag: 'parser:alipay',
+            signal: null,
+            annotation: null,
+            description: null,
+        }, {
+            categoryValueByLabel: {},
+            accountValueByLabel: {}
+        });
+
+        expect(filters).not.toHaveProperty('category');
+        expect(filters).not.toHaveProperty('account');
+        expect(filters.tag).toBe('parser:alipay');
+    });
+
+    test('serializes only facet-backed identity filter labels and preserves sentinels', () => {
+        const filters = buildImportPreviewServerQueryFilters({
+            minDatetime: null,
+            maxDatetime: null,
+            transactionType: null,
+            category: '',
+            account: '支付宝',
+            tag: null,
+            signal: null,
+            annotation: null,
+            description: null,
+        }, {
+            categoryValueByLabel: {
+                '餐饮/咖啡': '11'
+            },
+            accountValueByLabel: {
+                支付宝: '200'
+            }
+        });
+
+        expect(filters).toMatchObject({
+            category: PREVIEW_FILTER_NONE_VALUE,
+            account: '200'
+        });
+        expect(filters).not.toHaveProperty('tag');
     });
 });

@@ -2016,6 +2016,7 @@ async function submit(): Promise<void> {
 
                     return buildImportPreviewUpdateFromTransaction(t, {
                         categoryPath,
+                        validAccountIds: new Set(Object.keys(accountsStore.allAccountsMap)),
                         clearTransferDecision: !!(t as ImportPreviewTransactionDraft)._shouldClearTransferDecision
                     });
                 });

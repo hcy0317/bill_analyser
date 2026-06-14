@@ -88,10 +88,23 @@ async fn apply_postgres_category_id(
         .await
         .map_err(|_| Box::new(db_error_response()))?;
     if let Some((main, sub)) = category {
-        fields.insert("main_category".to_string(), Value::String(main));
-        fields.insert("sub_category".to_string(), Value::String(sub));
+        apply_resolved_postgres_category_fields(fields, category_id, main, sub);
     }
     Ok(())
+}
+
+fn apply_resolved_postgres_category_fields(
+    fields: &mut Map<String, Value>,
+    category_id: i64,
+    main: String,
+    sub: String,
+) {
+    fields.insert(
+        "category_id".to_string(),
+        Value::Number(Number::from(category_id)),
+    );
+    fields.insert("main_category".to_string(), Value::String(main));
+    fields.insert("sub_category".to_string(), Value::String(sub));
 }
 
 fn payload_object(payload: &Value) -> RouteResult<&Map<String, Value>> {
@@ -188,9 +201,6 @@ fn ensure_create_defaults(fields: &mut Map<String, Value>) {
         .entry("payment_method".to_string())
         .or_insert_with(|| Value::String("manual".to_string()));
     fields
-        .entry("destination_account_id".to_string())
-        .or_insert_with(|| Value::Number(Number::from(0)));
-    fields
         .entry("destination_amount_cents".to_string())
         .or_insert_with(|| Value::Number(Number::from(0)));
 }
@@ -256,6 +266,26 @@ fn parse_csv_i64(value: Option<&String>) -> Vec<i64> {
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_positive_i64(value: &str) -> Option<i64> {
     value.trim().parse::<i64>().ok().filter(|value| *value > 0)
+}
+
+#[cfg(test)]
+mod payload_helper_tests {
+    use super::*;
+
+    #[test]
+    fn resolved_postgres_category_fields_preserve_canonical_category_id() {
+        let mut fields = Map::new();
+        apply_resolved_postgres_category_fields(
+            &mut fields,
+            42,
+            "餐饮".to_string(),
+            "咖啡".to_string(),
+        );
+
+        assert_eq!(fields.get("category_id"), Some(&json!(42)));
+        assert_eq!(fields.get("main_category"), Some(&json!("餐饮")));
+        assert_eq!(fields.get("sub_category"), Some(&json!("咖啡")));
+    }
 }
 
 fn value_to_positive_i64(value: &Value) -> Option<i64> {

@@ -11,6 +11,7 @@ import { requireStrictIntegerCents } from './strictCents.ts';
 
 export interface BuildImportPreviewUpdateFromTransactionOptions {
     categoryPath: ImportPreviewResolvedCategoryPath | null;
+    validAccountIds?: ReadonlySet<string>;
     clearTransferDecision?: boolean;
     clearLearningDecision?: boolean;
     clearLlmDecision?: boolean;
@@ -37,14 +38,24 @@ export type ImportPreviewUpdatePayload = Record<string, unknown> & {
     selected: boolean;
 };
 
-function parseOptionalInteger(value: string | number | null | undefined): number | null {
+function parseOptionalInteger(
+    value: string | number | null | undefined,
+    validIds?: ReadonlySet<string>
+): number | null {
     if (typeof value === 'number' && Number.isFinite(value)) {
-        return Math.trunc(value);
+        const normalizedValue = Math.trunc(value);
+        if (normalizedValue <= 0 || (validIds && !validIds.has(String(normalizedValue)))) {
+            return null;
+        }
+        return normalizedValue;
     }
 
     if (typeof value === 'string' && value.trim()) {
         const parsedValue = parseInt(value, 10);
-        return Number.isNaN(parsedValue) ? null : parsedValue;
+        if (Number.isNaN(parsedValue) || parsedValue <= 0 || (validIds && !validIds.has(String(parsedValue)))) {
+            return null;
+        }
+        return parsedValue;
     }
 
     return null;
@@ -82,8 +93,8 @@ export function buildImportPreviewUpdateFromTransaction(
             transaction.destinationAmountCents,
             'destinationAmountCents'
         ),
-        preview_source_account_id: parseOptionalInteger(transaction.sourceAccountId),
-        preview_destination_account_id: parseOptionalInteger(transaction.destinationAccountId),
+        preview_source_account_id: parseOptionalInteger(transaction.sourceAccountId, options.validAccountIds),
+        preview_destination_account_id: parseOptionalInteger(transaction.destinationAccountId, options.validAccountIds),
         preview_recurring_id: parseOptionalInteger(transaction.recurringTemplateId),
         preview_recurring_name: transaction.recurringTemplateName || '',
         preview_recurring_candidate_count: transaction.recurringCandidateCount || 0,

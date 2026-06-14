@@ -3175,6 +3175,7 @@ function buildPreviewUpdates(options: { selectedOnly: boolean }): Record<string,
 
         return buildImportPreviewUpdateFromTransaction(transaction, {
             categoryPath,
+            validAccountIds: new Set(Object.keys(allAccountsMap.value)),
             clearTransferDecision,
             clearLearningDecision,
             clearLlmDecision,
@@ -3392,7 +3393,9 @@ function applyCreatedCategoryToTransaction(importTransaction: ImportTransaction,
         return;
     }
 
-    importTransaction.categoryId = category.id;
+    if (!assignCategoryIdIfKnown(importTransaction, category.id)) {
+        return;
+    }
     importTransaction.actualCategoryName = category.name;
     importTransaction.originalCategoryName = category.name;
     importTransaction.isManuallyAnnotated = true;
@@ -3410,11 +3413,15 @@ function applyCreatedAccountToTransaction(
     }
 
     if (target === 'source') {
-        importTransaction.sourceAccountId = account.id;
+        if (!assignSourceAccountIdIfKnown(importTransaction, account.id)) {
+            return;
+        }
         importTransaction.actualSourceAccountName = account.name;
         importTransaction.originalSourceAccountName = account.name;
     } else {
-        importTransaction.destinationAccountId = account.id;
+        if (!assignDestinationAccountIdIfKnown(importTransaction, account.id)) {
+            return;
+        }
         importTransaction.actualDestinationAccountName = account.name;
         importTransaction.originalDestinationAccountName = account.name;
     }
@@ -3649,8 +3656,12 @@ function applyBatchCategory(): void {
         if (!importTransaction.selected) continue;
 
         // 更新交易类型和分类ID
+        const previousType = importTransaction.type;
         importTransaction.type = batchCategoryType.value;
-        importTransaction.categoryId = batchCategoryId.value;
+        if (!assignCategoryIdIfKnown(importTransaction, batchCategoryId.value)) {
+            importTransaction.type = previousType;
+            continue;
+        }
 
         // 更新分类名称显示
         const category = allCategoriesMap.value[batchCategoryId.value];
@@ -3685,7 +3696,9 @@ function applyBatchAccount(): void {
         if (!importTransaction.selected) continue;
 
         // 更新账户ID
-        importTransaction.sourceAccountId = batchAccountId.value;
+        if (!assignSourceAccountIdIfKnown(importTransaction, batchAccountId.value)) {
+            continue;
+        }
 
         // 更新账户名称显示
         const account = allAccountsMap.value[batchAccountId.value];
@@ -3745,19 +3758,42 @@ function metadataAccountFacetLabels(entries: ImportPreviewFacetEntry[] | undefin
     return objectFieldToArrayItem(labels);
 }
 
-function buildAccountIdByName(): Record<string, string> {
-    const accountIds: Record<string, string> = {};
-    for (const account of allAccounts.value) {
-        if (account?.name) {
-            accountIds[account.name] = String(account.id);
-        }
+function buildFacetValueByLabel(
+    entries: ImportPreviewFacetEntry[] | undefined,
+    labelOf: (entry: ImportPreviewFacetEntry) => string = entry => String(entry.label || entry.value || '').trim()
+): Record<string, string> {
+    const values: Record<string, string> = {};
+    const ambiguousLabels: Record<string, boolean> = {};
+    if (!Array.isArray(entries)) {
+        return values;
     }
-    return accountIds;
+    for (const entry of entries) {
+        const value = String(entry.value || '').trim();
+        const label = labelOf(entry);
+        if (!value || !label || ambiguousLabels[label]) {
+            continue;
+        }
+        if (values[label] && values[label] !== value) {
+            delete values[label];
+            ambiguousLabels[label] = true;
+            continue;
+        }
+        values[label] = value;
+    }
+    return values;
+}
+
+function buildAccountFacetValueByLabel(entries: ImportPreviewFacetEntry[] | undefined): Record<string, string> {
+    return buildFacetValueByLabel(entries, entry => {
+        const account = allAccountsMap.value[String(entry.value || '')];
+        return String(account?.name || entry.label || entry.value || '').trim();
+    });
 }
 
 function buildServerPreviewQueryFilters(): ImportPreviewServerQueryFilters {
     return buildImportPreviewServerQueryFilters(filters.value, {
-        accountIdByName: buildAccountIdByName()
+        categoryValueByLabel: buildFacetValueByLabel(previewMetadata.value.facets?.categories),
+        accountValueByLabel: buildAccountFacetValueByLabel(previewMetadata.value.facets?.accounts)
     });
 }
 
@@ -5274,6 +5310,59 @@ function updateTransactionData(transaction: ImportTransaction): void {
 
 }
 
+function isKnownAccountId(accountId: string | number | null | undefined): boolean {
+    const normalizedAccountId = String(accountId || '').trim();
+    return !!normalizedAccountId && normalizedAccountId !== '0' && !!allAccountsMap.value[normalizedAccountId];
+}
+
+function isKnownCategoryIdForType(
+    categoryId: string | number | null | undefined,
+    transactionType: TransactionType
+): boolean {
+    const normalizedCategoryId = String(categoryId || '').trim();
+    if (!normalizedCategoryId || normalizedCategoryId === '0') {
+        return false;
+    }
+    const categoryPath = resolveImportPreviewCategoryPath(normalizedCategoryId, allCategoriesMap.value);
+    return !!categoryPath && (categoryPath.type === null || categoryPath.type === transactionType);
+}
+
+function assignCategoryIdIfKnown(
+    transaction: ImportTransaction,
+    categoryId: string | number | null | undefined
+): boolean {
+    const normalizedCategoryId = String(categoryId || '').trim();
+    if (!isKnownCategoryIdForType(normalizedCategoryId, transaction.type)) {
+        return false;
+    }
+    transaction.categoryId = normalizedCategoryId;
+    return true;
+}
+
+function assignSourceAccountIdIfKnown(
+    transaction: ImportTransaction,
+    accountId: string | number | null | undefined
+): boolean {
+    const normalizedAccountId = String(accountId || '').trim();
+    if (!isKnownAccountId(normalizedAccountId)) {
+        return false;
+    }
+    transaction.sourceAccountId = normalizedAccountId;
+    return true;
+}
+
+function assignDestinationAccountIdIfKnown(
+    transaction: ImportTransaction,
+    accountId: string | number | null | undefined
+): boolean {
+    const normalizedAccountId = String(accountId || '').trim();
+    if (!isKnownAccountId(normalizedAccountId)) {
+        return false;
+    }
+    transaction.destinationAccountId = normalizedAccountId;
+    return true;
+}
+
 function showBatchReplaceDialog(type: BatchReplaceDialogDataType, allSourceTagItems?: NameValue[]): void {
     if (isEditing.value) {
         return;
@@ -5306,26 +5395,21 @@ function showBatchReplaceDialog(type: BatchReplaceDialogDataType, allSourceTagIt
 
                 if (type === 'expenseCategory') {
                     if (importTransaction.type === TransactionType.Expense) {
-                        importTransaction.categoryId = result.targetItem as string;
-                        updated = true;
+                        updated = assignCategoryIdIfKnown(importTransaction, result.targetItem);
                     }
                 } else if (type === 'incomeCategory') {
                     if (importTransaction.type === TransactionType.Income) {
-                        importTransaction.categoryId = result.targetItem as string;
-                        updated = true;
+                        updated = assignCategoryIdIfKnown(importTransaction, result.targetItem);
                     }
                 } else if (type === 'transferCategory') {
                     if (importTransaction.type === TransactionType.Transfer) {
-                        importTransaction.categoryId = result.targetItem as string;
-                        updated = true;
+                        updated = assignCategoryIdIfKnown(importTransaction, result.targetItem);
                     }
                 } else if (type === 'account') {
-                    importTransaction.sourceAccountId = result.targetItem as string;
-                    updated = true;
+                    updated = assignSourceAccountIdIfKnown(importTransaction, result.targetItem);
                 } else if (type === 'destinationAccount') {
                     if (importTransaction.type === TransactionType.Transfer) {
-                        importTransaction.destinationAccountId = result.targetItem as string;
-                        updated = true;
+                        updated = assignDestinationAccountIdIfKnown(importTransaction, result.targetItem);
                     }
                 } else if (type === 'tag') {
                     const removeIndex: number[] = [];
@@ -5469,14 +5553,11 @@ function showReplaceInvalidItemDialog(type: BatchReplaceDialogDataType, invalidI
 
                     if (importTransaction.type !== TransactionType.ModifyBalance && originalCategoryName === result.sourceItem && (!categoryId || categoryId === '0' || !allCategoriesMap.value[categoryId])) {
                         if (type === 'expenseCategory' && importTransaction.type === TransactionType.Expense) {
-                            importTransaction.categoryId = result.targetItem as string;
-                            updated = true;
+                            updated = assignCategoryIdIfKnown(importTransaction, result.targetItem);
                         } else if (type === 'incomeCategory' && importTransaction.type === TransactionType.Income) {
-                            importTransaction.categoryId = result.targetItem as string;
-                            updated = true;
+                            updated = assignCategoryIdIfKnown(importTransaction, result.targetItem);
                         } else if (type === 'transferCategory' && importTransaction.type === TransactionType.Transfer) {
-                            importTransaction.categoryId = result.targetItem as string;
-                            updated = true;
+                            updated = assignCategoryIdIfKnown(importTransaction, result.targetItem);
                         }
                     }
                 } else if (type === 'account') {
@@ -5486,13 +5567,11 @@ function showReplaceInvalidItemDialog(type: BatchReplaceDialogDataType, invalidI
                     const originalDestinationAccountName = importTransaction.originalDestinationAccountName;
 
                     if (originalSourceAccountName === result.sourceItem && (!sourceAccountId || sourceAccountId === '0' || !allAccountsMap.value[sourceAccountId])) {
-                        importTransaction.sourceAccountId = result.targetItem as string;
-                        updated = true;
+                        updated = assignSourceAccountIdIfKnown(importTransaction, result.targetItem) || updated;
                     }
 
                     if (importTransaction.type === TransactionType.Transfer && originalDestinationAccountName === result.sourceItem && (!destinationAccountId || destinationAccountId === '0' || !allAccountsMap.value[destinationAccountId])) {
-                        importTransaction.destinationAccountId = result.targetItem as string;
-                        updated = true;
+                        updated = assignDestinationAccountIdIfKnown(importTransaction, result.targetItem) || updated;
                     }
                 } else if (type === 'tag' && importTransaction.tagIds) {
                     const removeIndex: number[] = [];
@@ -5567,25 +5646,20 @@ function showReplaceAllTypesDialog(): void {
                     if (rule.dataType === 'expenseCategory' || rule.dataType === 'incomeCategory' || rule.dataType === 'transferCategory') {
                         if (importTransaction.type !== TransactionType.ModifyBalance && importTransaction.originalCategoryName === rule.sourceValue) {
                             if (rule.dataType === 'expenseCategory' && importTransaction.type === TransactionType.Expense) {
-                                importTransaction.categoryId = rule.targetId;
-                                updated = true;
+                                updated = assignCategoryIdIfKnown(importTransaction, rule.targetId);
                             } else if (rule.dataType === 'incomeCategory' && importTransaction.type === TransactionType.Income) {
-                                importTransaction.categoryId = rule.targetId;
-                                updated = true;
+                                updated = assignCategoryIdIfKnown(importTransaction, rule.targetId);
                             } else if (rule.dataType === 'transferCategory' && importTransaction.type === TransactionType.Transfer) {
-                                importTransaction.categoryId = rule.targetId;
-                                updated = true;
+                                updated = assignCategoryIdIfKnown(importTransaction, rule.targetId);
                             }
                         }
                     } else if (rule.dataType === 'account') {
                         if (importTransaction.originalSourceAccountName === rule.sourceValue) {
-                            importTransaction.sourceAccountId = rule.targetId;
-                            updated = true;
+                            updated = assignSourceAccountIdIfKnown(importTransaction, rule.targetId) || updated;
                         }
 
                         if (importTransaction.type === TransactionType.Transfer && importTransaction.originalDestinationAccountName === rule.sourceValue) {
-                            importTransaction.destinationAccountId = rule.targetId;
-                            updated = true;
+                            updated = assignDestinationAccountIdIfKnown(importTransaction, rule.targetId) || updated;
                         }
                     } else if (rule.dataType === 'tag' && importTransaction.tagIds) {
                         for (let tagIndex = 0; tagIndex < importTransaction.tagIds.length; tagIndex++) {
@@ -5648,14 +5722,11 @@ function showBatchCreateInvalidItemDialog(type: BatchCreateDialogDataType, inval
 
                     if (importTransaction.type !== TransactionType.ModifyBalance && targetItem && (!categoryId || categoryId === '0' || !allCategoriesMap.value[categoryId])) {
                         if (type === 'expenseCategory' && importTransaction.type === TransactionType.Expense) {
-                            importTransaction.categoryId = targetItem;
-                            updated = true;
+                            updated = assignCategoryIdIfKnown(importTransaction, targetItem);
                         } else if (type === 'incomeCategory' && importTransaction.type === TransactionType.Income) {
-                            importTransaction.categoryId = targetItem;
-                            updated = true;
+                            updated = assignCategoryIdIfKnown(importTransaction, targetItem);
                         } else if (type === 'transferCategory' && importTransaction.type === TransactionType.Transfer) {
-                            importTransaction.categoryId = targetItem;
-                            updated = true;
+                            updated = assignCategoryIdIfKnown(importTransaction, targetItem);
                         }
                     }
                 } else if (type === 'tag' && importTransaction.tagIds) {
@@ -5709,18 +5780,29 @@ function convertTransactionType(fromType: TransactionType, toType: TransactionTy
         }
 
         importTransaction.type = toType;
-        importTransaction.categoryId = categoryMapByName[importTransaction.originalCategoryName]?.id || '0';
+        const convertedCategoryId = categoryMapByName[importTransaction.originalCategoryName]?.id || '';
+        if (convertedCategoryId) {
+            assignCategoryIdIfKnown(importTransaction, convertedCategoryId);
+        } else {
+            importTransaction.categoryId = '';
+        }
 
         if (importTransaction.type === TransactionType.Transfer) {
-            importTransaction.destinationAccountId = allAccountsMapByName.value[importTransaction.originalDestinationAccountName || '']?.id || '0';
+            const destinationAccountId = allAccountsMapByName.value[importTransaction.originalDestinationAccountName || '']?.id || '';
+            if (!assignDestinationAccountIdIfKnown(importTransaction, destinationAccountId)) {
+                importTransaction.destinationAccountId = '';
+            }
             importTransaction.destinationAmountCents = importTransaction.sourceAmountCents;
         } else {
             if (fromType === TransactionType.Transfer && toType === TransactionType.Income) {
-                importTransaction.sourceAccountId = importTransaction.destinationAccountId;
+                const transferDestinationAccountId = importTransaction.destinationAccountId;
+                if (!assignSourceAccountIdIfKnown(importTransaction, transferDestinationAccountId)) {
+                    importTransaction.sourceAccountId = '';
+                }
                 importTransaction.sourceAmountCents = importTransaction.destinationAmountCents;
             }
 
-            importTransaction.destinationAccountId = '0';
+            importTransaction.destinationAccountId = '';
             importTransaction.destinationAmountCents = 0;
         }
 
