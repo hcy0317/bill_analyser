@@ -2222,8 +2222,21 @@ pub async fn import_preview_index_runtime_handler(
         Ok(rows) => rows,
         Err(error) => return route_response(db_error_response(error)),
     };
-    let categories_by_id = BTreeMap::new();
-    let accounts_by_id = BTreeMap::new();
+    let user_id_i64 = match user_id_i64_for_sql(user_id) {
+        Ok(user_id_i64) => user_id_i64,
+        Err(error) => return route_response(db_error_response(error)),
+    };
+    let categories = match load_import_intelligence_categories(runtime.connection(), user_id_i64).await
+    {
+        Ok(categories) => categories,
+        Err(error) => return route_response(db_error_response(error)),
+    };
+    let accounts = match load_import_intelligence_accounts(runtime.connection(), user_id_i64).await {
+        Ok(accounts) => accounts,
+        Err(error) => return route_response(db_error_response(error)),
+    };
+    let categories_by_id = preview_index_category_lookup_by_id(categories);
+    let accounts_by_id = preview_index_account_lookup_by_id(accounts);
     let items = rows
         .into_iter()
         .filter_map(|row| serde_json::to_value(row).ok()?.as_object().cloned())
@@ -2233,6 +2246,33 @@ pub async fn import_preview_index_runtime_handler(
         total: items.len(),
         items,
     }))
+}
+
+fn preview_index_category_lookup_by_id(
+    categories: Vec<ImportIntelligenceCategory>,
+) -> BTreeMap<i64, CategoryLookup> {
+    categories
+        .into_iter()
+        .map(|category| {
+            (
+                category.id,
+                CategoryLookup {
+                    name: category.sub_category.clone(),
+                    sub_category: category.sub_category,
+                    main_category: category.main_category,
+                },
+            )
+        })
+        .collect()
+}
+
+fn preview_index_account_lookup_by_id(
+    accounts: Vec<ImportIntelligenceAccount>,
+) -> BTreeMap<i64, AccountLookup> {
+    accounts
+        .into_iter()
+        .map(|account| (account.id, AccountLookup { name: account.name }))
+        .collect()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -3188,6 +3228,42 @@ mod tests {
             response.body["error"],
             "Rust import route runtime DB error"
         );
+    }
+
+    #[test]
+    fn preview_index_lookup_maps_keep_valid_canonical_identities() {
+        let categories_by_id = preview_index_category_lookup_by_id(vec![ImportIntelligenceCategory {
+            id: 42,
+            type_code: 3,
+            main_category: "食品饮料".to_string(),
+            sub_category: "外卖".to_string(),
+        }]);
+        let accounts_by_id = preview_index_account_lookup_by_id(vec![ImportIntelligenceAccount {
+            id: 77,
+            name: "支付宝".to_string(),
+        }]);
+        let preview = json!({
+            "id": 9,
+            "preview_date": "2026-06-01T00:00:00Z",
+            "preview_type": "支出",
+            "preview_amount_cents": -2800,
+            "category_id": 42,
+            "preview_main_category": "/",
+            "preview_sub_category": "民生银行储蓄卡(6332)",
+            "preview_source_account_id": 77,
+            "preview_destination_account_id": null,
+            "preview_payment_method": "民生银行储蓄卡(6332)"
+        });
+        let item = build_import_preview_filter_index_item(
+            preview.as_object().expect("preview object"),
+            &categories_by_id,
+            &accounts_by_id,
+        );
+
+        assert_eq!(item.category_id, "42");
+        assert_eq!(item.actual_category_name, "外卖");
+        assert_eq!(item.source_account_id, "77");
+        assert_eq!(item.actual_source_account_name, "支付宝");
     }
 
     #[test]

@@ -223,6 +223,30 @@ pub async fn load_import_learning_feature_vector_sources(
         .collect()
 }
 
+pub async fn has_import_learning_feature_vector_sources(
+    pool: &PostgresPool,
+    user_id: i64,
+) -> DbResult<bool> {
+    let row = sqlx::query(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM import_learning_features AS feature
+            JOIN import_learning_samples AS sample
+                ON sample.id = feature.sample_id
+                AND sample.user_id = feature.user_id
+            WHERE feature.user_id = $1
+            LIMIT 1
+        ) AS has_sources
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(row.try_get("has_sources")?)
+}
+
 fn vector_outbox_event_from_row(row: sqlx::postgres::PgRow) -> DbResult<VectorOutboxEvent> {
     Ok(VectorOutboxEvent {
         id: row.try_get("id")?,

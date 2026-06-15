@@ -374,6 +374,38 @@ fn preview_filter_index_item_reads_signals_from_matching_feedback_payload() {
 }
 
 #[test]
+fn preview_filter_index_item_keeps_raw_invalid_identity_out_of_canonical_columns() {
+    let preview = json!({
+        "id": 79,
+        "preview_date": "2026-05-03 08:00:00",
+        "preview_type": "支出",
+        "preview_amount_cents": 2100,
+        "category_id": "/",
+        "preview_main_category": "/",
+        "preview_sub_category": "民生银行储蓄卡(6332)",
+        "preview_source_account_id": "民生银行储蓄卡(6332)",
+        "preview_destination_account_id": "/",
+        "preview_payment_method": "民生银行储蓄卡(6332)",
+        "preview_description": "raw import evidence"
+    });
+    let preview = preview.as_object().unwrap();
+
+    let item = build_import_preview_filter_index_item(
+        preview,
+        &BTreeMap::<i64, CategoryLookup>::new(),
+        &BTreeMap::<i64, AccountLookup>::new(),
+    );
+
+    assert_eq!(item.category_id, "");
+    assert_eq!(item.actual_category_name, "");
+    assert_eq!(item.source_account_id, "");
+    assert_eq!(item.destination_account_id, "");
+    assert_eq!(item.actual_source_account_name, "");
+    assert_eq!(item.actual_destination_account_name, "");
+    assert_eq!(item.payment_method, "民生银行储蓄卡(6332)");
+}
+
+#[test]
 fn preview_filter_index_item_treats_auto_applied_learning_as_accepted() {
     for review_status in ["auto_applied", "auto-applied"] {
         let preview = json!({

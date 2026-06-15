@@ -210,8 +210,9 @@ pub use user_data::{
 pub use user_scope::UserScope;
 pub use vector_outbox::{
     claim_pending_vector_outbox_events, enqueue_vector_outbox_event,
-    load_import_learning_feature_vector_sources, mark_vector_outbox_event_failed,
-    mark_vector_outbox_event_succeeded, ImportLearningFeatureVectorSource, VectorOutboxEvent,
-    VectorOutboxEventDraft, VECTOR_OUTBOX_STATUS_COMPLETED, VECTOR_OUTBOX_STATUS_FAILED,
-    VECTOR_OUTBOX_STATUS_PENDING, VECTOR_OUTBOX_STATUS_PROCESSING,
+    has_import_learning_feature_vector_sources, load_import_learning_feature_vector_sources,
+    mark_vector_outbox_event_failed, mark_vector_outbox_event_succeeded,
+    ImportLearningFeatureVectorSource, VectorOutboxEvent, VectorOutboxEventDraft,
+    VECTOR_OUTBOX_STATUS_COMPLETED, VECTOR_OUTBOX_STATUS_FAILED, VECTOR_OUTBOX_STATUS_PENDING,
+    VECTOR_OUTBOX_STATUS_PROCESSING,
 };

@@ -415,6 +415,57 @@ describe('checkDataMatching helpers', () => {
         expect(crossBatchViewModel.dedup?.labelKey).toBe('Cross-Batch Transfer');
     });
 
+    test('matches signal filters by the same visible signal families as the signal cell', () => {
+        const parserOnly = buildImportPreviewSignalViewModel({
+            parserId: 'alipay',
+            parserTags: ['parser:alipay']
+        });
+        const platformDuplicate = buildImportPreviewSignalViewModel({
+            parserId: 'alipay',
+            parserTags: ['parser:alipay'],
+            dedupType: 'platform_bank',
+            dedupSourceIds: [301]
+        });
+        const transferMatch = buildImportPreviewSignalViewModel({
+            parserId: 'cmbc',
+            parserTags: ['parser:cmbc'],
+            dedupType: 'transfer',
+            dedupSourceIds: [11, 12]
+        });
+        const historyRewrite = buildImportPreviewSignalViewModel({
+            parserId: 'abc',
+            reconciliationPlannedOperation: 'update_history',
+            reconciliationHistoryBillId: 9,
+            reconciliationOperationId: 'history:9',
+            reconciliationAcknowledgementToken: 'ack-9',
+            reconciliationDestructiveAckRequired: true
+        });
+        const learning = buildImportPreviewSignalViewModel({
+            parserId: 'wechat',
+            learningStatus: 'pending',
+            learningSummary: '支出 | 食品饮料/外卖'
+        });
+        const llm = buildImportPreviewSignalViewModel({
+            parserId: 'wechat',
+            llmStatus: 'pending',
+            llmTitle: 'LLM'
+        });
+
+        expect(matchesImportPreviewSignalFilter(parserOnly, 'parser')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(platformDuplicate, 'parser')).toBe(false);
+        expect(matchesImportPreviewSignalFilter(transferMatch, 'parser')).toBe(false);
+        expect(matchesImportPreviewSignalFilter(historyRewrite, 'parser')).toBe(false);
+        expect(matchesImportPreviewSignalFilter(learning, 'parser')).toBe(false);
+        expect(matchesImportPreviewSignalFilter(llm, 'parser')).toBe(false);
+
+        expect(matchesImportPreviewSignalFilter(platformDuplicate, 'platform_duplicate')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(parserOnly, 'platform_duplicate')).toBe(false);
+        expect(matchesImportPreviewSignalFilter(transferMatch, 'transfer')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(historyRewrite, 'history')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(learning, 'learning')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(llm, 'llm')).toBe(true);
+    });
+
     test('formats platform duplicate label and localized duplicate-source detail from structured metadata', () => {
         const viewModel = buildImportPreviewSignalViewModel({
             dedupType: 'platform_bank',
@@ -722,7 +773,7 @@ describe('checkDataMatching helpers', () => {
         expect(matchesImportPreviewSignalFilter(learningViewModel, 'learning')).toBe(true);
         expect(matchesImportPreviewSignalFilter(llmViewModel, 'llm')).toBe(true);
         expect(matchesImportPreviewSignalFilter(learningViewModel, null)).toBe(true);
-        expect(matchesImportPreviewSignalFilter(learningViewModel, 'unexpected' as never)).toBe(true);
+        expect(matchesImportPreviewSignalFilter(learningViewModel, 'unexpected' as never)).toBe(false);
     });
 
     test('builds explicit history rewrite signal and acknowledgement payloads', () => {

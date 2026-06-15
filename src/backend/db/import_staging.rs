@@ -713,19 +713,7 @@ fn push_preview_query_predicates(
         push_tag_predicate(query, alias, &value);
     }
     if let Some(value) = normalized_filter(filters.signal.as_deref()) {
-        query.push(" AND (");
-        query.push(alias);
-        query.push(".preview_payload->'preview_matching_feedback'");
-        let pattern = match value.split_once(':') {
-            Some((family, status)) => {
-                query.push("->");
-                query.push_bind(family.trim().to_string());
-                like_pattern(status.trim())
-            }
-            None => like_pattern(&value),
-        };
-        query.push(")::text ILIKE ");
-        query.push_bind(pattern);
+        push_preview_signal_predicate(query, alias, &value);
     }
     if let Some(value) = normalized_filter(filters.annotation.as_deref()) {
         push_annotation_predicate(query, alias, &value);
@@ -862,6 +850,151 @@ fn push_tag_predicate(query: &mut QueryBuilder<'_, Postgres>, alias: &str, value
     query.push(alias);
     query.push(".preview_payload->>'preview_parser_tags' ILIKE ");
     query.push_bind(like_pattern(value));
+}
+
+fn push_preview_signal_predicate(query: &mut QueryBuilder<'_, Postgres>, alias: &str, value: &str) {
+    let filter = normalize_visible_signal_filter(value);
+    let Some((family, status)) = signal_filter_family_status(&filter) else {
+        query.push(" AND ");
+        push_preview_signal_family_condition(query, alias, &filter);
+        return;
+    };
+
+    query.push(" AND (");
+    push_preview_signal_family_condition(query, alias, family);
+    query.push(" AND ");
+    push_preview_feedback_family_text_search(query, alias, family, status);
+    query.push(")");
+}
+
+fn push_preview_signal_family_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+    family: &str,
+) {
+    match family {
+        "parser" => {
+            query.push("(");
+            push_preview_parser_signal_condition(query, alias);
+            query.push(" AND NOT (");
+            push_preview_specific_visible_signal_condition(query, alias);
+            query.push("))");
+        }
+        "platform_duplicate" => push_preview_platform_duplicate_signal_condition(query, alias),
+        "transfer" => push_preview_transfer_signal_condition(query, alias),
+        "history" => push_preview_history_signal_condition(query, alias),
+        "learning" => push_preview_feedback_key_condition(query, alias, "learning"),
+        "llm" => push_preview_feedback_key_condition(query, alias, "llm"),
+        _ => {
+            query.push("FALSE");
+        }
+    }
+}
+
+fn push_preview_parser_signal_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
+    query.push("(COALESCE(NULLIF(");
+    query.push(alias);
+    query.push(".preview_payload->>'preview_parser_id', ''), '') <> '' OR COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(");
+    query.push(alias);
+    query.push(".preview_payload->'preview_parser_tags') = 'array' THEN ");
+    query.push(alias);
+    query.push(".preview_payload->'preview_parser_tags' ELSE '[]'::jsonb END), 0) > 0 OR ");
+    push_preview_feedback_key_condition(query, alias, "parser");
+    query.push(")");
+}
+
+fn push_preview_specific_visible_signal_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+) {
+    push_preview_platform_duplicate_signal_condition(query, alias);
+    query.push(" OR ");
+    push_preview_transfer_signal_condition(query, alias);
+    query.push(" OR ");
+    push_preview_history_signal_condition(query, alias);
+    query.push(" OR ");
+    push_preview_feedback_key_condition(query, alias, "learning");
+    query.push(" OR ");
+    push_preview_feedback_key_condition(query, alias, "llm");
+}
+
+fn push_preview_platform_duplicate_signal_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+) {
+    push_preview_dedup_type_in_condition(query, alias, &["platform_bank"]);
+}
+
+fn push_preview_transfer_signal_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
+    query.push("(");
+    push_preview_dedup_type_in_condition(query, alias, &["transfer", "transfer_cross_batch"]);
+    query.push(" OR ");
+    push_preview_feedback_key_condition(query, alias, "transfer");
+    query.push(")");
+}
+
+fn push_preview_history_signal_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
+    query.push("(LOWER(COALESCE(");
+    query.push(alias);
+    query.push(".preview_payload#>>'{preview_matching_feedback,reconciliation,planned_operation}', '')) IN ('update_history', 'merge_transfer_history') OR LOWER(COALESCE(");
+    query.push(alias);
+    query.push(".preview_payload#>>'{preview_matching_feedback,reconciliation,destructive_ack_required}', '')) = 'true')");
+}
+
+fn push_preview_dedup_type_in_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+    values: &[&str],
+) {
+    query.push("LOWER(COALESCE(");
+    query.push(alias);
+    query.push(".preview_payload->>'dedup_type', ");
+    query.push(alias);
+    query.push(".preview_payload#>>'{preview_matching_feedback,dedup,type}', '')) IN (");
+    for (index, value) in values.iter().enumerate() {
+        if index > 0 {
+            query.push(", ");
+        }
+        query.push("'");
+        query.push(*value);
+        query.push("'");
+    }
+    query.push(")");
+}
+
+fn push_preview_feedback_key_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+    key: &str,
+) {
+    query.push("(jsonb_typeof(");
+    query.push(alias);
+    query.push(".preview_payload->'preview_matching_feedback') = 'object' AND ");
+    query.push(alias);
+    query.push(".preview_payload->'preview_matching_feedback' ? '");
+    query.push(key);
+    query.push("')");
+}
+
+fn push_preview_feedback_family_text_search(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+    family: &str,
+    status: &str,
+) {
+    let Some(key) = preview_feedback_key_for_signal_family(family) else {
+        query.push("FALSE");
+        return;
+    };
+    query.push("(");
+    push_preview_feedback_key_condition(query, alias, key);
+    query.push(" AND (");
+    query.push(alias);
+    query.push(".preview_payload#>'{preview_matching_feedback,");
+    query.push(key);
+    query.push("}')::text ILIKE ");
+    query.push_bind(like_pattern(status));
+    query.push(")");
 }
 
 fn push_annotation_predicate(query: &mut QueryBuilder<'_, Postgres>, alias: &str, value: &str) {
@@ -2095,14 +2228,6 @@ fn bill_create_fields_from_preview(preview: &ImportPreviewRow) -> BillRecord {
     fields.insert(
         "payment_method".to_string(),
         json!(preview.preview_payment_method),
-    );
-    fields.insert(
-        "main_category".to_string(),
-        json!(preview.preview_main_category),
-    );
-    fields.insert(
-        "sub_category".to_string(),
-        json!(preview.preview_sub_category),
     );
     if let Some(value) = preview.category_id {
         fields.insert("category_id".to_string(), json!(value));
@@ -4226,8 +4351,12 @@ fn signal_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bool {
     let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) else {
         return true;
     };
-    let filter = filter.to_ascii_lowercase();
-    preview_feedback_contains_signal(&row.preview_matching_feedback, &filter)
+    let filter = normalize_visible_signal_filter(filter);
+    let Some((family, status)) = signal_filter_family_status(&filter) else {
+        return preview_signal_family_matches(&filter, row);
+    };
+    preview_signal_family_matches(family, row)
+        && preview_feedback_family_contains_status(&row.preview_matching_feedback, family, status)
 }
 
 fn annotation_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bool {
@@ -4246,13 +4375,134 @@ fn annotation_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bo
         .is_some_and(|value| json_value_contains_text(value, &filter))
 }
 
-fn preview_feedback_contains_signal(feedback: &Value, filter: &str) -> bool {
-    match filter.split_once(':') {
-        Some((family, status)) => feedback
-            .get(family)
-            .is_some_and(|value| json_value_contains_text(value, status)),
-        None => json_value_contains_text(feedback, filter),
+fn normalize_visible_signal_filter(filter: &str) -> String {
+    let normalized = filter.trim().to_ascii_lowercase();
+    if normalized.contains(':') {
+        return normalized;
     }
+    strip_numeric_visible_signal_suffix(&normalized).to_string()
+}
+
+fn strip_numeric_visible_signal_suffix(filter: &str) -> &str {
+    for delimiter in ['_', '-'] {
+        if let Some((family, suffix)) = filter.rsplit_once(delimiter) {
+            if suffix.chars().all(|ch| ch.is_ascii_digit()) && is_visible_signal_family(family) {
+                return family;
+            }
+        }
+    }
+    filter
+}
+
+fn signal_filter_family_status(filter: &str) -> Option<(&str, &str)> {
+    let (family, status) = filter.split_once(':')?;
+    let family = family.trim();
+    let status = status.trim();
+    if family.is_empty() || status.is_empty() {
+        return None;
+    }
+    Some((family, status))
+}
+
+fn preview_signal_family_matches(family: &str, row: &ImportPreviewRow) -> bool {
+    match family {
+        "parser" => preview_parser_signal_matches(row) && !preview_has_specific_visible_signal(row),
+        "platform_duplicate" => preview_platform_duplicate_signal_matches(row),
+        "transfer" => preview_transfer_signal_matches(row),
+        "history" => preview_history_signal_matches(row),
+        "learning" => preview_feedback_key_exists(&row.preview_matching_feedback, "learning"),
+        "llm" => preview_feedback_key_exists(&row.preview_matching_feedback, "llm"),
+        _ => false,
+    }
+}
+
+fn preview_parser_signal_matches(row: &ImportPreviewRow) -> bool {
+    !row.preview_parser_id.trim().is_empty()
+        || row
+            .preview_parser_tags
+            .iter()
+            .any(|tag| !tag.trim().is_empty())
+        || preview_feedback_key_exists(&row.preview_matching_feedback, "parser")
+}
+
+fn preview_has_specific_visible_signal(row: &ImportPreviewRow) -> bool {
+    preview_platform_duplicate_signal_matches(row)
+        || preview_transfer_signal_matches(row)
+        || preview_history_signal_matches(row)
+        || preview_feedback_key_exists(&row.preview_matching_feedback, "learning")
+        || preview_feedback_key_exists(&row.preview_matching_feedback, "llm")
+}
+
+fn preview_platform_duplicate_signal_matches(row: &ImportPreviewRow) -> bool {
+    preview_dedup_type(row) == "platform_bank"
+}
+
+fn preview_transfer_signal_matches(row: &ImportPreviewRow) -> bool {
+    matches!(
+        preview_dedup_type(row).as_str(),
+        "transfer" | "transfer_cross_batch"
+    ) || preview_feedback_key_exists(&row.preview_matching_feedback, "transfer")
+}
+
+fn preview_history_signal_matches(row: &ImportPreviewRow) -> bool {
+    let reconciliation = row.preview_matching_feedback.get("reconciliation");
+    let planned_operation = reconciliation
+        .and_then(|value| value.get("planned_operation"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    matches!(
+        planned_operation.as_str(),
+        "update_history" | "merge_transfer_history"
+    ) || reconciliation
+        .and_then(|value| value.get("destructive_ack_required"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn preview_dedup_type(row: &ImportPreviewRow) -> String {
+    let direct = row.dedup_type.trim();
+    if !direct.is_empty() {
+        return direct.to_ascii_lowercase();
+    }
+    row.preview_matching_feedback
+        .pointer("/dedup/type")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+}
+
+fn preview_feedback_key_exists(feedback: &Value, key: &str) -> bool {
+    feedback
+        .as_object()
+        .is_some_and(|object| object.contains_key(key))
+}
+
+fn preview_feedback_family_contains_status(feedback: &Value, family: &str, status: &str) -> bool {
+    preview_feedback_key_for_signal_family(family)
+        .and_then(|key| feedback.get(key))
+        .is_some_and(|value| json_value_contains_text(value, status))
+}
+
+fn preview_feedback_key_for_signal_family(family: &str) -> Option<&'static str> {
+    match family {
+        "parser" => Some("parser"),
+        "platform_duplicate" => Some("dedup"),
+        "transfer" => Some("transfer"),
+        "history" => Some("reconciliation"),
+        "learning" => Some("learning"),
+        "llm" => Some("llm"),
+        _ => None,
+    }
+}
+
+fn is_visible_signal_family(family: &str) -> bool {
+    matches!(
+        family,
+        "parser" | "platform_duplicate" | "transfer" | "history" | "learning" | "llm"
+    )
 }
 
 fn json_value_contains_text(value: &Value, needle: &str) -> bool {
@@ -4637,6 +4887,78 @@ mod import_preview_query_tests {
     }
 
     #[test]
+    fn preview_signal_filters_follow_visible_family_contract() {
+        let parser_only = preview_row(1);
+
+        let mut platform_duplicate = preview_row(2);
+        platform_duplicate.dedup_type = "platform_bank".to_string();
+        platform_duplicate.preview_matching_feedback = json!({
+            "parser": {"parser_id": "alipay"},
+            "dedup": {"type": "platform_bank", "source_count": 2}
+        });
+
+        let mut transfer = preview_row(3);
+        transfer.dedup_type = "transfer".to_string();
+        transfer.preview_matching_feedback = json!({
+            "transfer": {"review_status": "pending"}
+        });
+
+        let mut cross_batch_transfer = preview_row(4);
+        cross_batch_transfer.dedup_type = "transfer_cross_batch".to_string();
+
+        let mut history = preview_row(5);
+        history.preview_matching_feedback = json!({
+            "reconciliation": {
+                "planned_operation": "update_history",
+                "history_bill_id": 88,
+                "destructive_ack_required": true
+            }
+        });
+
+        let mut learning = preview_row(6);
+        learning.preview_matching_feedback = json!({
+            "learning": {"review_status": "needs_review", "reason": "manual"}
+        });
+
+        let mut llm = preview_row(7);
+        llm.preview_matching_feedback = json!({
+            "llm": {"review_status": "pending", "reason": "model recommendation"}
+        });
+
+        let rows = vec![
+            parser_only,
+            platform_duplicate,
+            transfer,
+            cross_batch_transfer,
+            history,
+            learning,
+            llm,
+        ];
+        let filtered_ids = |signal: &str| {
+            apply_preview_filters(
+                rows.clone(),
+                &ImportPreviewQueryFilters {
+                    signal: Some(signal.to_string()),
+                    ..ImportPreviewQueryFilters::default()
+                },
+            )
+            .into_iter()
+            .map(|row| row.id)
+            .collect::<Vec<_>>()
+        };
+
+        assert_eq!(filtered_ids("parser"), vec![1]);
+        assert_eq!(filtered_ids("parser_12"), vec![1]);
+        assert_eq!(filtered_ids("platform_duplicate"), vec![2]);
+        assert_eq!(filtered_ids("transfer"), vec![3, 4]);
+        assert_eq!(filtered_ids("history"), vec![5]);
+        assert_eq!(filtered_ids("learning"), vec![6]);
+        assert_eq!(filtered_ids("learning:needs_review"), vec![6]);
+        assert_eq!(filtered_ids("llm"), vec![7]);
+        assert!(filtered_ids("manual").is_empty());
+    }
+
+    #[test]
     fn preview_category_filter_uses_persisted_category_identity() {
         let mut matched = preview_row(1);
         matched.category_id = Some(42);
@@ -4799,7 +5121,8 @@ mod import_preview_query_tests {
         assert!(!sql.contains("preview_main_category"));
         assert!(!sql.contains("preview_sub_category"));
         assert!(sql.contains("p.account_id IS NULL"));
-        assert!(sql.contains("preview_matching_feedback'->"));
+        assert!(sql.contains("preview_payload#>'{preview_matching_feedback,learning}'"));
+        assert!(!sql.contains("preview_matching_feedback')::text ILIKE"));
         assert!(sql.contains("ORDER BY p.amount_cents DESC"));
         assert!(sql.contains("LIMIT"));
         assert!(sql.contains("OFFSET"));
@@ -4831,8 +5154,33 @@ mod import_preview_query_tests {
         assert!(sql.contains("p.category_id IS NULL"));
         assert!(sql.contains("p.account_id = "));
         assert!(sql.contains("p.transfer_target_account_id = "));
-        assert!(sql.contains("preview_matching_feedback')::text ILIKE"));
+        assert!(sql.contains("preview_matching_feedback' ? 'learning'"));
+        assert!(!sql.contains("preview_matching_feedback')::text ILIKE"));
         assert!(sql.contains("CASE lower(p.transaction_type)"));
+    }
+
+    #[test]
+    fn preview_sql_query_builder_filters_parser_by_visible_signal_family() {
+        let filters = ImportPreviewQueryFilters {
+            signal: Some("parser".to_string()),
+            ..ImportPreviewQueryFilters::default()
+        };
+        let mut query = QueryBuilder::<Postgres>::new(
+            "SELECT p.* FROM import_preview_rows p WHERE p.session_id = ",
+        );
+        query.push_bind(1_i64);
+        push_preview_query_predicates(&mut query, &filters, "p");
+
+        let sql = query.build().sql().to_string();
+
+        assert!(sql.contains("preview_parser_id"));
+        assert!(sql.contains("NOT"));
+        assert!(sql.contains("platform_bank"));
+        assert!(sql.contains("transfer_cross_batch"));
+        assert!(sql.contains("planned_operation"));
+        assert!(sql.contains("preview_matching_feedback' ? 'learning'"));
+        assert!(sql.contains("preview_matching_feedback' ? 'llm'"));
+        assert!(!sql.contains("preview_matching_feedback')::text ILIKE"));
     }
 
     #[test]
@@ -5083,17 +5431,17 @@ mod import_preview_query_tests {
     }
 
     #[test]
-    fn bill_create_fields_from_preview_preserves_category_identity() {
+    fn bill_create_fields_from_preview_uses_category_id_as_category_authority() {
         let mut row = preview_row(1);
         row.category_id = Some(42);
-        row.preview_main_category = "理财".to_string();
-        row.preview_sub_category = "理财收益".to_string();
+        row.preview_main_category = "/".to_string();
+        row.preview_sub_category = "民生银行储蓄卡(6332)".to_string();
 
         let fields = bill_create_fields_from_preview(&row);
 
         assert_eq!(fields.get("category_id"), Some(&json!(42)));
-        assert_eq!(fields.get("main_category"), Some(&json!("理财")));
-        assert_eq!(fields.get("sub_category"), Some(&json!("理财收益")));
+        assert_eq!(fields.get("main_category"), None);
+        assert_eq!(fields.get("sub_category"), None);
     }
 
     #[test]
@@ -5334,17 +5682,16 @@ mod import_preview_query_tests {
         row.preview_source_account_id = None;
         row.preview_destination_account_id = None;
         row.preview_payment_method.clear();
-        row.preview_matching_feedback = json!([
-            {"learning": ["needs_review", {"reason": "manual"}]},
-            12,
-            true,
-            null
-        ]);
+        row.preview_matching_feedback = json!({
+            "learning": {"review_status": "needs_review", "reason": "manual"},
+            "debug": [12, true, null]
+        });
 
         assert!(account_filter_matches(Some("__none__"), &row));
-        assert!(signal_filter_matches(Some("manual"), &row));
-        assert!(signal_filter_matches(Some("12"), &row));
-        assert!(signal_filter_matches(Some("true"), &row));
+        assert!(signal_filter_matches(Some("learning:needs_review"), &row));
+        assert!(!signal_filter_matches(Some("manual"), &row));
+        assert!(!signal_filter_matches(Some("12"), &row));
+        assert!(!signal_filter_matches(Some("true"), &row));
         assert!(!signal_filter_matches(Some("missing"), &row));
     }
 

@@ -177,6 +177,34 @@ describe('import preview transaction helper', () => {
         expect(transaction.parserTags).toStrictEqual(['parser:alipay']);
     });
 
+    test('keeps illegal category and account raw text out of canonical ids', () => {
+        const transaction = buildImportTransactionFromPreviewRecord({
+            id: 10,
+            category_id: '/',
+            preview_type: '支出',
+            preview_date: '2026-06-01T00:00:00Z',
+            preview_amount_cents: 235,
+            preview_main_category: '/',
+            preview_sub_category: '民生银行储蓄卡(6332)',
+            preview_source_account_id: '民生银行储蓄卡(6332)',
+            preview_destination_account_id: '/',
+            preview_payment_method: '民生银行储蓄卡(6332)'
+        }, 4, {
+            categoriesById,
+            transferCategories,
+            cashTransferCategoryId: 'transferSub',
+            timeZone: 'UTC'
+        });
+
+        expect(transaction.categoryId).toBe('');
+        expect(transaction.originalCategoryName).toBe('民生银行储蓄卡(6332)');
+        expect(transaction.sourceAccountId).toBe('');
+        expect(transaction.destinationAccountId).toBe('');
+        expect(transaction.originalSourceAccountName).toBe('民生银行储蓄卡(6332)');
+        expect(transaction.originalDestinationAccountName).toBe('/');
+        expect(transaction.paymentMethod).toBe('民生银行储蓄卡(6332)');
+    });
+
     test('uses explicit investment destination amount instead of source fallback', () => {
         const transaction = buildImportTransactionFromPreviewRecord({
             id: 77,

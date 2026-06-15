@@ -95,6 +95,37 @@ function getPreviewTimeInSeconds(
     return nowInSeconds ? nowInSeconds() : Date.now() / 1000;
 }
 
+function normalizePreviewAccountId(rawAccountId: unknown): string {
+    if (typeof rawAccountId === 'number' && Number.isFinite(rawAccountId) && rawAccountId > 0) {
+        return String(Math.trunc(rawAccountId));
+    }
+
+    if (typeof rawAccountId === 'string') {
+        const normalizedAccountId = rawAccountId.trim();
+        return /^[1-9]\d*$/.test(normalizedAccountId) ? normalizedAccountId : '';
+    }
+
+    return '';
+}
+
+function rawPreviewIdentityText(rawValue: unknown): string {
+    if (typeof rawValue === 'string') {
+        return rawValue.trim();
+    }
+
+    if (typeof rawValue === 'number' && Number.isFinite(rawValue)) {
+        return String(Math.trunc(rawValue));
+    }
+
+    return '';
+}
+
+function rawPreviewCategoryText(item: ImportPreviewRecord): string {
+    return item.preview_sub_category
+        || item.preview_main_category
+        || rawPreviewIdentityText(item.category_id ?? item.categoryId);
+}
+
 export function buildImportTransactionFromPreviewRecord(
     item: ImportPreviewRecord,
     index: number,
@@ -103,13 +134,11 @@ export function buildImportTransactionFromPreviewRecord(
     const type = getImportPreviewTransactionTypeNumber(item.preview_type) ?? TransactionType.Expense;
     const amountInCents = normalizeStrictAbsoluteCents(item.preview_amount_cents, 0);
     const destAmountInCents = normalizeStrictAbsoluteCents(item.preview_destination_amount_cents, 0);
-    const mainCategory = item.preview_main_category || '';
-    const subCategory = item.preview_sub_category || '';
     const categoryId = resolveImportPreviewCategoryId(item, options.categoriesById)
         || getDefaultPreviewCategoryId(type, options);
     const categoryPath = resolveImportPreviewCategoryPath(categoryId, options.categoriesById);
-    const sourceAccountId = item.preview_source_account_id ? String(item.preview_source_account_id) : '';
-    const destinationAccountId = item.preview_destination_account_id ? String(item.preview_destination_account_id) : '';
+    const sourceAccountId = normalizePreviewAccountId(item.preview_source_account_id);
+    const destinationAccountId = normalizePreviewAccountId(item.preview_destination_account_id);
     const parserId = item.preview_parser_id || item.matching?.parser?.id || '';
     const parserTags = Array.isArray(item.preview_parser_tags)
         ? item.preview_parser_tags
@@ -128,13 +157,16 @@ export function buildImportTransactionFromPreviewRecord(
     const responseItem: ImportTransactionResponse = {
         type,
         categoryId,
-        originalCategoryName: subCategory || mainCategory || categoryPath?.displayCategory || '',
+        originalCategoryName: categoryPath?.displayCategory || rawPreviewCategoryText(item),
         time: getPreviewTimeInSeconds(item.preview_date, options.nowInSeconds),
         utcOffset: getTimezoneOffsetMinutes(options.timeZone),
         sourceAccountId,
-        originalSourceAccountName: item.preview_payment_method || '',
+        originalSourceAccountName: rawPreviewIdentityText(item.preview_source_account_id)
+            || item.preview_payment_method
+            || '',
         originalSourceAccountCurrency: 'CNY',
         destinationAccountId,
+        originalDestinationAccountName: rawPreviewIdentityText(item.preview_destination_account_id),
         sourceAmountCents: amountInCents,
         destinationAmountCents: (type === TransactionType.Transfer || type === TransactionType.Investment)
             ? destAmountInCents || amountInCents

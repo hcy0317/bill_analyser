@@ -47,8 +47,8 @@ export interface ImportPreviewRecord {
     preview_destination_amount_cents?: number;
     preview_main_category?: string;
     preview_sub_category?: string;
-    preview_source_account_id?: number;
-    preview_destination_account_id?: number;
+    preview_source_account_id?: number | string | null;
+    preview_destination_account_id?: number | string | null;
     preview_description?: string;
     preview_counterparty?: string;
     preview_payment_method?: string;

@@ -2,9 +2,9 @@ use std::error::Error;
 
 use bill_analyser_db::{
     claim_pending_vector_outbox_events, enqueue_vector_outbox_event,
-    load_import_learning_feature_vector_sources, mark_vector_outbox_event_failed,
-    mark_vector_outbox_event_succeeded, VectorOutboxEventDraft, VECTOR_OUTBOX_STATUS_COMPLETED,
-    VECTOR_OUTBOX_STATUS_PENDING, VECTOR_OUTBOX_STATUS_PROCESSING,
+    has_import_learning_feature_vector_sources, load_import_learning_feature_vector_sources,
+    mark_vector_outbox_event_failed, mark_vector_outbox_event_succeeded, VectorOutboxEventDraft,
+    VECTOR_OUTBOX_STATUS_COMPLETED, VECTOR_OUTBOX_STATUS_PENDING, VECTOR_OUTBOX_STATUS_PROCESSING,
 };
 use serde_json::json;
 use sqlx::Row;
@@ -73,6 +73,10 @@ async fn vector_outbox_round_trips_and_feature_sources_load_when_postgres_availa
             .await?
             .try_get("status")?;
     assert_eq!(completed_status, VECTOR_OUTBOX_STATUS_COMPLETED);
+    assert!(
+        !has_import_learning_feature_vector_sources(pool, user_id).await?,
+        "fresh user has no vector recall source rows"
+    );
 
     let sample_id: i64 = sqlx::query(
         r#"
@@ -112,6 +116,10 @@ async fn vector_outbox_round_trips_and_feature_sources_load_when_postgres_availa
     assert_eq!(sources[0].user_id, user_id);
     assert_eq!(sources[0].feature_key, "counterparty");
     assert_eq!(sources[0].feature_payload["counterparty"], "coffee");
+    assert!(
+        has_import_learning_feature_vector_sources(pool, user_id).await?,
+        "vector recall source existence follows authoritative feature rows"
+    );
 
     test_db.cleanup().await?;
     Ok(())

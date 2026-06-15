@@ -26,9 +26,11 @@
 - 账户规则不得覆盖 parser、learning 或用户编辑已经显式给出的账户；旧 scope payload 或旧设置包字段会被忽略并返回 warning，新设置包导出不再包含这些 scope 字段。
 - 多文件 parser work 可以并发执行，但 session/template staging 仍保持一次性写入。
 - preview page 承担 Check Data 的分页、排序、筛选与轻量聚合 metadata；缺少分类、缺少账户和转账账户复核状态按当前预览字段计算。
+- preview signal filter 按信号列可见 family 计算，而不是任意 JSON 文本包含：parser 筛选只包含没有平台重复、转账匹配、历史改写、learning 和 LLM 可见信号的 parser 行；平台重复、转账匹配、历史改写、learning、LLM 筛选分别匹配对应可见 family。
 - preview 的 transfer 和 LLM 建议只有 pending 状态展示接受/拒绝动作。learning 建议按 `recommendation_key` 进入生命周期表：默认 `yellow` 只在信号列展示推荐类型、分类和账户，不自动改写预览字段；用户接受/拒绝会写入 `import_learning_feedback_events` 并更新 `import_learning_lifecycle`，同一建议接受达到 3 次后变为 `green` 并允许后续导入自动应用。
-- Weaviate 向量索引是运行态必需的 long-term learning 派生召回基础设施：由 PostgreSQL `vector_outbox_events` 和 `bill_weaviate_derived_index` CLI 负责 bootstrap、outbox batch 和 rebuild。Weaviate metadata 不能直接触发 auto-apply，生命周期阈值、反馈计数和 suppression 仍以 PostgreSQL 为准。
+- Weaviate 向量索引是运行态必需的 long-term learning 派生召回基础设施：由 PostgreSQL `vector_outbox_events` 和 `bill_weaviate_derived_index` CLI 负责 bootstrap、outbox batch 和 rebuild。Weaviate recall 只在当前用户存在 PostgreSQL `import_learning_features` 源行时发起；没有源行时直接跳过召回而不改变确定性规则、transfer、history rewrite、learning lifecycle 或 LLM 识别链路。Weaviate metadata 不能直接触发 auto-apply，生命周期阈值、反馈计数和 suppression 仍以 PostgreSQL 为准。
 - 前端人工编辑类型、分类、账户等字段时只清除 transfer/learning/LLM 这些 actionable 建议提示，并通过 family-scoped update payload 持久化。
+- 分类、来源账户与目标账户的 canonical id 必须来自当前用户 active 主数据；原始 parser/payment/category 文本只作为 review evidence 或非法字段提示展示，不会作为 accepted identity 写入 preview、confirm payload 或正式账单。
 - confirm、cancel、导入失败后新建 session 都会立即清理当前用户的 import staging；系统不保留未完成导入续传状态。
 - preview update/reclassify 要显式落库，不只改响应投影；reclassify 会复用 stage2 智能链路刷新分类、账户、recurring 和 learning 信号。
 - confirm 必须使用事务保证 bills、tags、accounts、learning side effects 一致。

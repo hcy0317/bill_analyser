@@ -1047,11 +1047,17 @@ export function matchesImportPreviewSignalFilter(
         return true;
     }
 
+    const normalizedDedupType = normalizeDedupType(viewModel.dedup?.dedupType);
     if (filter === 'parser') {
-        return !!viewModel.parser;
+        return !!viewModel.parser
+            && normalizedDedupType !== 'platform_bank'
+            && !isTransferLikeDedupType(normalizedDedupType)
+            && !viewModel.transferSuggestion
+            && !viewModel.historyRewrite
+            && !viewModel.learning
+            && !viewModel.llm;
     }
 
-    const normalizedDedupType = normalizeDedupType(viewModel.dedup?.dedupType);
     if (filter === 'platform_duplicate') {
         return normalizedDedupType === 'platform_bank';
     }
@@ -1072,5 +1078,5 @@ export function matchesImportPreviewSignalFilter(
         return !!viewModel.llm;
     }
 
-    return true;
+    return false;
 }

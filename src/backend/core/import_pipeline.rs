@@ -281,36 +281,38 @@ pub fn build_import_preview_filter_index_item(
         "business operation entered"
     );
     let category_id_value = preview_item.get("category_id");
-    let category_id = normalize_id_text(category_id_value);
+    let category_id_key = integer_lookup_key(category_id_value);
     let category_row =
-        integer_lookup_key(category_id_value).and_then(|id| categories_by_id.get(&id));
+        category_id_key.and_then(|id| categories_by_id.get(&id).map(|row| (id, row)));
+    let category_id = category_row
+        .map(|(id, _)| id.to_string())
+        .unwrap_or_default();
     let actual_category_name = category_row
-        .and_then(|row| first_non_empty([&row.name, &row.sub_category, &row.main_category]))
+        .and_then(|(_, row)| first_non_empty([&row.name, &row.sub_category, &row.main_category]))
         .map(ToOwned::to_owned)
-        .unwrap_or_else(|| {
-            first_non_empty([
-                &string_field_from_map(preview_item, "preview_sub_category"),
-                &string_field_from_map(preview_item, "preview_main_category"),
-            ])
-            .unwrap_or("")
-            .to_string()
-        });
+        .unwrap_or_default();
 
     let source_account_id_value = preview_item.get("preview_source_account_id");
-    let source_account_id = normalize_id_text(source_account_id_value);
+    let source_account_id_key = integer_lookup_key(source_account_id_value);
     let source_account_row =
-        integer_lookup_key(source_account_id_value).and_then(|id| accounts_by_id.get(&id));
+        source_account_id_key.and_then(|id| accounts_by_id.get(&id).map(|row| (id, row)));
+    let source_account_id = source_account_row
+        .map(|(id, _)| id.to_string())
+        .unwrap_or_default();
     let actual_source_account_name = source_account_row
-        .map(|row| row.name.clone())
+        .map(|(_, row)| row.name.clone())
         .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| string_field_from_map(preview_item, "preview_payment_method"));
+        .unwrap_or_default();
 
     let destination_account_id_value = preview_item.get("preview_destination_account_id");
-    let destination_account_id = normalize_id_text(destination_account_id_value);
+    let destination_account_id_key = integer_lookup_key(destination_account_id_value);
     let destination_account_row =
-        integer_lookup_key(destination_account_id_value).and_then(|id| accounts_by_id.get(&id));
+        destination_account_id_key.and_then(|id| accounts_by_id.get(&id).map(|row| (id, row)));
+    let destination_account_id = destination_account_row
+        .map(|(id, _)| id.to_string())
+        .unwrap_or_default();
     let actual_destination_account_name = destination_account_row
-        .map(|row| row.name.clone())
+        .map(|(_, row)| row.name.clone())
         .unwrap_or_default();
 
     ImportPreviewFilterIndexItem {
