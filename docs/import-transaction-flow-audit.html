@@ -3,172 +3,151 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Bill Analyser 导入交易流程审计图谱</title>
+  <title>Bill Analyser 导入交易审计思维导图</title>
   <style>
     :root {
-      --bg: #f7f8fb;
-      --panel: #ffffff;
-      --ink: #1f2937;
-      --muted: #5f6b7a;
-      --line: #d8dee8;
-      --soft: #edf2f7;
-      --fact: #176f5c;
-      --hint: #7758a6;
-      --risk: #b14b32;
-      --blue: #245f9f;
-      --green-soft: #e7f5ef;
-      --purple-soft: #f1ecf8;
+      --bg: #f5f7fb;
+      --paper: #ffffff;
+      --ink: #17202c;
+      --muted: #5d6878;
+      --line: #d7dee9;
+      --line-strong: #aeb9ca;
+      --brand: #a85f2d;
+      --brand-soft: #fff1e8;
+      --blue: #255f9e;
+      --blue-soft: #e8f2ff;
+      --teal: #177464;
+      --teal-soft: #e6f6f1;
+      --violet: #6550a8;
+      --violet-soft: #f0ecfb;
+      --red: #a9402d;
       --red-soft: #fff0eb;
-      --blue-soft: #eaf2fb;
-      --code: #243447;
+      --amber: #856014;
+      --amber-soft: #fff6dd;
+      --green: #2f6b2f;
+      --green-soft: #eaf6e9;
+      --shadow: 0 16px 40px rgba(23, 32, 44, 0.08);
+      --node-shadow: 0 8px 22px rgba(23, 32, 44, 0.07);
+      --radius: 8px;
     }
 
     * {
       box-sizing: border-box;
     }
 
+    html {
+      scroll-behavior: smooth;
+    }
+
     body {
       margin: 0;
-      background: var(--bg);
       color: var(--ink);
+      background:
+        linear-gradient(90deg, rgba(37, 95, 158, 0.05) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(37, 95, 158, 0.05) 1px, transparent 1px),
+        var(--bg);
+      background-size: 28px 28px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
-      line-height: 1.6;
+      line-height: 1.58;
     }
 
-    header {
-      background: #ffffff;
-      border-bottom: 1px solid var(--line);
+    a {
+      color: var(--blue);
+      text-decoration: none;
     }
 
-    .wrap {
-      max-width: 1180px;
-      margin: 0 auto;
-      padding: 24px;
-    }
-
-    .hero {
-      display: grid;
-      gap: 18px;
-      padding: 28px 24px 20px;
-    }
-
-    h1 {
-      margin: 0;
-      font-size: 30px;
-      line-height: 1.25;
-      letter-spacing: 0;
-    }
-
-    h2 {
-      margin: 36px 0 14px;
-      font-size: 22px;
-      line-height: 1.35;
-      letter-spacing: 0;
-    }
-
-    h3 {
-      margin: 24px 0 10px;
-      font-size: 17px;
-      line-height: 1.4;
-      letter-spacing: 0;
-    }
-
-    p {
-      margin: 0 0 12px;
+    a:hover {
+      text-decoration: underline;
     }
 
     code {
       padding: 1px 5px;
       border-radius: 4px;
-      background: #eef2f7;
-      color: var(--code);
+      color: #1e3348;
+      background: #eef3f8;
       font-family: Consolas, "Liberation Mono", monospace;
-      font-size: 0.94em;
-    }
-
-    .subtitle {
-      max-width: 920px;
-      color: var(--muted);
-      font-size: 15px;
-    }
-
-    .meta-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 12px;
-    }
-
-    .meta {
-      min-width: 0;
-      padding: 12px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fbfcfe;
-    }
-
-    .meta strong {
-      display: block;
-      margin-bottom: 4px;
-      font-size: 13px;
-      color: #334155;
-    }
-
-    .meta span {
-      display: block;
+      font-size: 0.93em;
       overflow-wrap: anywhere;
-      color: var(--muted);
-      font-size: 13px;
     }
 
-    nav {
-      position: sticky;
-      top: 0;
-      z-index: 2;
-      border-bottom: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.96);
+    header {
+      position: relative;
+      overflow: hidden;
+      color: #ffffff;
+      background:
+        linear-gradient(135deg, rgba(23, 32, 44, 0.92), rgba(44, 76, 96, 0.92)),
+        radial-gradient(circle at 10% 20%, rgba(198, 126, 72, 0.85), transparent 35%),
+        radial-gradient(circle at 86% 18%, rgba(37, 95, 158, 0.72), transparent 32%),
+        #17202c;
     }
 
-    .nav-inner {
-      max-width: 1180px;
+    .wrap {
+      max-width: 1320px;
       margin: 0 auto;
-      padding: 10px 24px;
+      padding: 28px;
+    }
+
+    .hero {
+      min-height: 420px;
+      display: grid;
+      grid-template-columns: minmax(300px, 0.9fr) minmax(520px, 1.1fr);
+      gap: 28px;
+      align-items: center;
+    }
+
+    h1 {
+      margin: 0 0 16px;
+      font-size: clamp(30px, 4vw, 54px);
+      line-height: 1.08;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 44px 0 16px;
+      font-size: 25px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 10px;
+      font-size: 17px;
+      line-height: 1.35;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 10px;
+    }
+
+    .hero-copy {
+      max-width: 640px;
+    }
+
+    .hero-copy p {
+      color: rgba(255, 255, 255, 0.82);
+      font-size: 16px;
+    }
+
+    .meta-row {
       display: flex;
+      flex-wrap: wrap;
       gap: 8px;
-      overflow-x: auto;
+      margin-top: 18px;
     }
 
-    .nav-inner a {
-      flex: 0 0 auto;
-      padding: 7px 10px;
-      border-radius: 6px;
-      color: var(--blue);
-      text-decoration: none;
-      font-size: 13px;
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 26px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      color: #243447;
+      background: #ffffff;
+      font-size: 12px;
+      font-weight: 650;
       white-space: nowrap;
-    }
-
-    .nav-inner a:hover {
-      background: var(--blue-soft);
-    }
-
-    .panel {
-      padding: 18px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--panel);
-      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-    }
-
-    .two-col {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      gap: 14px;
-    }
-
-    .three-col {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 14px;
     }
 
     .label {
@@ -179,175 +158,617 @@
       padding: 2px 8px;
       border-radius: 999px;
       font-size: 12px;
-      font-weight: 650;
+      font-weight: 750;
       white-space: nowrap;
     }
 
     .fact {
-      background: var(--green-soft);
-      color: var(--fact);
+      color: var(--teal);
+      background: var(--teal-soft);
     }
 
     .hint {
-      background: var(--purple-soft);
-      color: var(--hint);
+      color: var(--violet);
+      background: var(--violet-soft);
     }
 
     .risk {
+      color: var(--red);
       background: var(--red-soft);
-      color: var(--risk);
     }
 
     .blue {
-      background: var(--blue-soft);
       color: var(--blue);
+      background: var(--blue-soft);
     }
 
-    .table-wrap {
-      margin: 12px 0 22px;
-      overflow-x: auto;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #ffffff;
+    .amber {
+      color: var(--amber);
+      background: var(--amber-soft);
     }
 
-    table {
-      width: 100%;
-      min-width: 900px;
-      border-collapse: collapse;
-    }
-
-    th,
-    td {
-      padding: 10px 12px;
-      vertical-align: top;
-      border-bottom: 1px solid var(--line);
-      text-align: left;
-      font-size: 13px;
-    }
-
-    th {
-      position: sticky;
-      top: 0;
-      z-index: 1;
-      background: #f1f5f9;
-      color: #334155;
-      font-weight: 700;
-    }
-
-    tr:last-child td {
-      border-bottom: 0;
-    }
-
-    .flow {
-      display: grid;
-      gap: 10px;
-      counter-reset: step;
-    }
-
-    .flow-step {
+    .mindmap-cover {
       position: relative;
-      padding: 14px 14px 14px 52px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #ffffff;
+      min-height: 360px;
     }
 
-    .flow-step::before {
-      counter-increment: step;
-      content: counter(step);
+    .cover-line {
       position: absolute;
-      left: 14px;
-      top: 14px;
-      width: 26px;
-      height: 26px;
-      border-radius: 50%;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .cover-node {
+      position: absolute;
+      width: 184px;
+      min-height: 82px;
+      padding: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.26);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.16);
+    }
+
+    .cover-node strong {
+      display: block;
+      margin-bottom: 4px;
+      color: #ffffff;
+      font-size: 14px;
+    }
+
+    .cover-node span {
+      color: rgba(255, 255, 255, 0.76);
+      font-size: 12px;
+    }
+
+    .cover-center {
+      top: 130px;
+      left: calc(50% - 112px);
+      width: 224px;
+      min-height: 112px;
       display: grid;
       place-items: center;
-      background: var(--blue);
-      color: #ffffff;
+      text-align: center;
+      border-color: rgba(255, 255, 255, 0.42);
+      background: rgba(255, 255, 255, 0.18);
+    }
+
+    .n1 { top: 10px; left: 34px; }
+    .n2 { top: 26px; right: 34px; }
+    .n3 { top: 236px; left: 4px; }
+    .n4 { top: 246px; right: 16px; }
+    .n5 { top: 12px; left: calc(50% - 92px); }
+    .n6 { top: 290px; left: calc(50% - 92px); }
+
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 2px 12px rgba(23, 32, 44, 0.06);
+    }
+
+    .nav-inner {
+      max-width: 1320px;
+      margin: 0 auto;
+      padding: 10px 28px;
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+    }
+
+    .nav-inner a {
+      flex: 0 0 auto;
+      padding: 7px 10px;
+      border-radius: 6px;
+      color: #24415c;
       font-size: 13px;
-      font-weight: 700;
+      font-weight: 650;
+      white-space: nowrap;
     }
 
-    .flow-step h3 {
-      margin-top: 0;
+    .nav-inner a:hover {
+      background: var(--blue-soft);
+      text-decoration: none;
     }
 
-    .flow-step p {
+    .section-intro {
+      max-width: 880px;
+      color: var(--muted);
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+      box-shadow: var(--node-shadow);
+    }
+
+    .panel-pad {
+      padding: 18px;
+    }
+
+    .map-board {
+      position: relative;
+      padding: 28px;
+      overflow: hidden;
+    }
+
+    .map-board::before {
+      content: "";
+      position: absolute;
+      inset: 40px;
+      border: 1px dashed var(--line-strong);
+      border-radius: 28px;
+      pointer-events: none;
+    }
+
+    .map-grid {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(240px, 1fr) 300px minmax(240px, 1fr);
+      grid-template-rows: auto auto auto;
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .center-node {
+      grid-column: 2;
+      grid-row: 2;
+      position: relative;
+      z-index: 2;
+      min-height: 230px;
+      padding: 20px;
+      display: grid;
+      align-content: center;
+      text-align: center;
+      border: 2px solid var(--brand);
+      border-radius: 18px;
+      background: linear-gradient(180deg, #fff9f4, #ffffff);
+      box-shadow: var(--shadow);
+    }
+
+    .center-node h2 {
+      margin: 0 0 10px;
+      font-size: 24px;
+    }
+
+    .center-node p {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .branch {
+      position: relative;
+      z-index: 2;
+      padding: 15px;
+      border-radius: var(--radius);
+      border: 1px solid var(--line);
+      background: #ffffff;
+      box-shadow: var(--node-shadow);
+    }
+
+    .branch::after {
+      content: "";
+      position: absolute;
+      width: 34px;
+      height: 2px;
+      top: 50%;
+      background: var(--line-strong);
+    }
+
+    .branch.left::after {
+      right: -34px;
+    }
+
+    .branch.right::after {
+      left: -34px;
+    }
+
+    .branch.top::after,
+    .branch.bottom::after {
+      left: 50%;
+      width: 2px;
+      height: 28px;
+    }
+
+    .branch.top::after {
+      bottom: -28px;
+      top: auto;
+    }
+
+    .branch.bottom::after {
+      top: -28px;
+    }
+
+    .branch h3 {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .branch ul,
+    .node-list {
+      margin: 8px 0 0;
+      padding-left: 18px;
+    }
+
+    .branch li,
+    .node-list li {
       margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 13px;
     }
 
-    .checks {
-      margin: 0;
+    .b-parser { grid-column: 1; grid-row: 1; border-top: 4px solid var(--blue); }
+    .b-stage { grid-column: 2; grid-row: 1; border-top: 4px solid var(--teal); }
+    .b-intel { grid-column: 3; grid-row: 1; border-top: 4px solid var(--violet); }
+    .b-preview { grid-column: 1; grid-row: 2; border-left: 4px solid var(--brand); }
+    .b-frontend { grid-column: 3; grid-row: 2; border-left: 4px solid var(--blue); }
+    .b-confirm { grid-column: 1; grid-row: 3; border-top: 4px solid var(--green); }
+    .b-risk { grid-column: 2; grid-row: 3; border-top: 4px solid var(--red); }
+    .b-debug { grid-column: 3; grid-row: 3; border-top: 4px solid var(--amber); }
+
+    .legend-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 14px;
+    }
+
+    .legend-card {
+      padding: 14px;
+      border-radius: var(--radius);
+      border: 1px solid var(--line);
+      background: #ffffff;
+    }
+
+    .timeline {
+      position: relative;
+      display: grid;
+      gap: 14px;
+    }
+
+    .timeline::before {
+      content: "";
+      position: absolute;
+      top: 18px;
+      bottom: 18px;
+      left: 24px;
+      width: 3px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, var(--blue), var(--teal), var(--brand), var(--green));
+    }
+
+    .step-node {
+      position: relative;
+      display: grid;
+      grid-template-columns: 52px minmax(0, 1fr);
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    .step-index {
+      position: relative;
+      z-index: 1;
+      width: 50px;
+      height: 50px;
+      display: grid;
+      place-items: center;
+      border: 3px solid #ffffff;
+      border-radius: 50%;
+      color: #ffffff;
+      background: var(--blue);
+      box-shadow: var(--node-shadow);
+      font-weight: 800;
+    }
+
+    .step-card {
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #ffffff;
+      box-shadow: var(--node-shadow);
+    }
+
+    .step-card p {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      color: #334155;
+      background: #f8fafc;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .lineage {
+      display: grid;
+      gap: 14px;
+    }
+
+    .lineage-row {
+      display: grid;
+      grid-template-columns: 180px repeat(5, minmax(160px, 1fr));
+      gap: 10px;
+      align-items: stretch;
+      min-width: 1120px;
+    }
+
+    .lineage-scroll {
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .lane-head,
+    .lane-cell {
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #ffffff;
+    }
+
+    .lane-head {
+      color: #ffffff;
+      background: #243447;
+      font-weight: 750;
+    }
+
+    .lane-cell {
+      position: relative;
+      min-height: 112px;
+      box-shadow: var(--node-shadow);
+    }
+
+    .lane-cell::after {
+      content: "→";
+      position: absolute;
+      top: 50%;
+      right: -13px;
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      color: #ffffff;
+      background: var(--line-strong);
+      transform: translateY(-50%);
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .lineage-row .lane-cell:last-child::after {
+      display: none;
+    }
+
+    .lane-cell strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+
+    .lane-cell span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .feature-map,
+    .risk-map,
+    .debug-map,
+    .source-map {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .feature-node,
+    .risk-node,
+    .debug-node,
+    .source-node {
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #ffffff;
+      box-shadow: var(--node-shadow);
+    }
+
+    .feature-node h3,
+    .risk-node h3,
+    .debug-node h3,
+    .source-node h3 {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .mini {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .route {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .route-step {
+      position: relative;
+      padding: 9px 10px 9px 28px;
+      border-radius: 6px;
+      background: #f8fafc;
+      color: #334155;
+      font-size: 12px;
+    }
+
+    .route-step::before {
+      content: "";
+      position: absolute;
+      left: 10px;
+      top: 15px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--brand);
+    }
+
+    .check-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .check-card {
+      padding: 16px;
+      border-radius: var(--radius);
+      border: 1px solid var(--line);
+      background: #ffffff;
+      box-shadow: var(--node-shadow);
+    }
+
+    .check-card ol {
+      margin: 8px 0 0;
       padding-left: 22px;
     }
 
-    .checks li {
+    .check-card li {
       margin-bottom: 8px;
+      color: var(--muted);
+      font-size: 13px;
     }
 
     .callout {
-      margin: 14px 0;
-      padding: 12px 14px;
-      border-left: 4px solid var(--blue);
-      border-radius: 6px;
-      background: var(--blue-soft);
+      margin: 18px 0;
+      padding: 14px 16px;
+      border-left: 4px solid var(--brand);
+      border-radius: var(--radius);
+      background: var(--brand-soft);
     }
 
-    .callout.riskbox {
-      border-left-color: var(--risk);
-      background: var(--red-soft);
-    }
-
-    .callout.hintbox {
-      border-left-color: var(--hint);
-      background: var(--purple-soft);
-    }
-
-    .small {
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    .kbd {
-      display: inline-block;
-      padding: 1px 6px;
-      border: 1px solid #cbd5e1;
-      border-radius: 5px;
-      background: #ffffff;
-      color: #334155;
-      font-size: 12px;
+    .callout strong {
+      display: block;
+      margin-bottom: 4px;
     }
 
     footer {
-      margin-top: 42px;
-      padding: 24px;
+      margin-top: 50px;
       border-top: 1px solid var(--line);
       color: var(--muted);
+      background: #ffffff;
       font-size: 12px;
     }
 
-    @media (max-width: 780px) {
-      .wrap,
-      .hero,
-      .nav-inner {
-        padding-left: 14px;
-        padding-right: 14px;
-      }
-
-      h1 {
-        font-size: 24px;
-      }
-
-      .meta-grid,
-      .two-col,
-      .three-col {
+    @media (max-width: 1060px) {
+      .hero {
         grid-template-columns: 1fr;
       }
 
-      .flow-step {
-        padding-left: 46px;
+      .mindmap-cover {
+        min-height: 300px;
+      }
+
+      .cover-node {
+        position: static;
+        width: auto;
+        min-height: auto;
+      }
+
+      .cover-line {
+        display: none;
+      }
+
+      .mindmap-cover {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .cover-center {
+        grid-column: 1 / -1;
+      }
+
+      .map-grid,
+      .feature-map,
+      .risk-map,
+      .debug-map,
+      .source-map {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .center-node,
+      .b-parser,
+      .b-stage,
+      .b-intel,
+      .b-preview,
+      .b-frontend,
+      .b-confirm,
+      .b-risk,
+      .b-debug {
+        grid-column: auto;
+        grid-row: auto;
+      }
+
+      .branch::after,
+      .map-board::before {
+        display: none;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .wrap,
+      .nav-inner {
+        padding-left: 16px;
+        padding-right: 16px;
+      }
+
+      .hero {
+        min-height: auto;
+      }
+
+      .mindmap-cover,
+      .map-grid,
+      .legend-grid,
+      .feature-map,
+      .risk-map,
+      .debug-map,
+      .source-map,
+      .check-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .map-board {
+        padding: 14px;
+      }
+
+      .step-node {
+        grid-template-columns: 42px minmax(0, 1fr);
+      }
+
+      .step-index {
+        width: 42px;
+        height: 42px;
+      }
+
+      .timeline::before {
+        left: 20px;
       }
     }
   </style>
@@ -355,626 +776,533 @@
 <body>
   <header>
     <div class="wrap hero">
-      <div>
-        <h1>Bill Analyser 导入交易流程审计图谱</h1>
-        <p class="subtitle">
-          这份文档用于人工找 bug：把导入交易从文件解析、暂存规整、智能处理、预览编辑、筛选分页到确认入库的字段链路摊开，并标出容易错位的边界。
+      <div class="hero-copy">
+        <h1>导入交易流程审计思维导图</h1>
+        <p>
+          这不是普通表格文档，而是一张排查地图：从 parser 到正式账单，把每一层的数据列、功能依赖、业务处理逻辑和容易错位的边界按节点展开。
         </p>
+        <div class="meta-row">
+          <span class="pill">核对基线：2026-06-16</span>
+          <span class="pill">来源：当前 Rust import-v2 主链</span>
+          <span class="pill">目标文件：docs/import-transaction-flow-audit.html</span>
+          <span class="pill">用途：人工找 bug 与修复前后验收</span>
+        </div>
       </div>
-      <div class="meta-grid">
-        <div class="meta">
-          <strong>文档定位</strong>
-          <span>可维护的项目审计文档，可直接浏览器打开</span>
+      <div class="mindmap-cover" aria-label="导入交易审计地图概览">
+        <svg class="cover-line" viewBox="0 0 640 360" preserveAspectRatio="none" aria-hidden="true">
+          <path d="M320 180 L126 52 M320 180 L514 68 M320 180 L102 278 M320 180 L520 284 M320 180 L320 66 M320 180 L320 318" fill="none" stroke="rgba(255,255,255,.42)" stroke-width="2" stroke-dasharray="8 8"/>
+        </svg>
+        <div class="cover-node cover-center">
+          <strong>导入交易审计中枢</strong>
+          <span>一眼判断字段从哪里来、被谁改、错了查哪层</span>
         </div>
-        <div class="meta">
-          <strong>覆盖链路</strong>
-          <span><code>/api/bills/import/v2/*</code> 解析、stage2、preview、confirm</span>
-        </div>
-        <div class="meta">
-          <strong>核对基线</strong>
-          <span>2026-06-16；HEAD 912095d15；branch codex/import-transaction-flow-audit-html</span>
-        </div>
-        <div class="meta">
-          <strong>验证记录</strong>
-          <span>关键标记、HTML 标签、无外部资源、路径存在性已静态核对；Browser file:// 被策略阻止</span>
-        </div>
-        <div class="meta">
-          <strong>核心用途</strong>
-          <span>人工核对字段错位、分层定位、修复前后验收</span>
-        </div>
+        <div class="cover-node n1"><strong>parser 输入</strong><span>RawBill、StandardBill、平台原始语义</span></div>
+        <div class="cover-node n2"><strong>stage2 处理</strong><span>dedup、转账、分类、学习、账户识别</span></div>
+        <div class="cover-node n3"><strong>preview 存储</strong><span>typed columns 与 preview_payload 双合同</span></div>
+        <div class="cover-node n4"><strong>前端转换</strong><span>ImportPreviewRecord 到 ImportTransaction</span></div>
+        <div class="cover-node n5"><strong>高风险边界</strong><span>元/分、category_id、account id、用户 patch</span></div>
+        <div class="cover-node n6"><strong>排查路线</strong><span>金额错、分类错、筛不到、confirm 失败</span></div>
       </div>
     </div>
   </header>
 
   <nav>
     <div class="nav-inner">
-      <a href="#legend">标记说明</a>
-      <a href="#flow">主流程</a>
-      <a href="#columns">数据列地图</a>
+      <a href="#legend">图例</a>
+      <a href="#mindmap">总览地图</a>
+      <a href="#timeline">流程地图</a>
+      <a href="#lineage">字段血缘</a>
       <a href="#features">功能用列</a>
-      <a href="#boundaries">可疑边界</a>
-      <a href="#trace">错字段排查</a>
+      <a href="#risks">高风险边界</a>
+      <a href="#debug">错字段排查</a>
       <a href="#checklist">核对清单</a>
       <a href="#sources">源码索引</a>
     </div>
   </nav>
 
   <main class="wrap">
-    <section id="legend" class="panel">
-      <h2>标记说明</h2>
-      <p>
-        <span class="label fact">confirmed current-state fact</span>
-        表示已经从当前仓库代码或项目文档里确认的现状，不是理想设计。
+    <section id="legend" class="panel panel-pad">
+      <h2>图例：每个节点怎么读</h2>
+      <p class="section-intro">
+        本文保留原审计文档的字段深度，但用节点图替代表格式主阅读路径。先看总览地图，再沿流程地图和字段血缘图逐层下钻。
       </p>
-      <p>
-        <span class="label hint">investigation hint</span>
-        表示人工排查时优先看的线索、对照点或可复现观察方法。
-      </p>
-      <p>
-        <span class="label risk">high-risk boundary</span>
-        表示字段、单位、语义或层级最容易错位的位置，修 bug 时要先对齐合同。
-      </p>
-      <p class="small">
-        本文以当前主链路为准：Rust HTTP runtime、PostgreSQL import staging、前端 server-paged preview。旧链路或 legacy sidecar 不作为运行时主链。
-      </p>
+      <div class="legend-grid">
+        <div class="legend-card">
+          <span class="label fact">confirmed current-state fact</span>
+          <p class="mini">当前仓库源码或项目文档已确认的事实，例如 Rust runtime、import-v2 route、typed columns、identity validation。</p>
+        </div>
+        <div class="legend-card">
+          <span class="label hint">investigation hint</span>
+          <p class="mini">人工找 bug 时优先看的路径，例如先查 parser 标准行，还是先查 preview typed columns。</p>
+        </div>
+        <div class="legend-card">
+          <span class="label risk">high-risk boundary</span>
+          <p class="mini">最容易错位的边界，例如元/分、category id 与名称、source account 与 payment method、用户 patch 与智能链路。</p>
+        </div>
+      </div>
     </section>
 
-    <section id="flow">
-      <h2>一次导入从文件到正式交易的主流程</h2>
-      <div class="flow">
-        <article class="flow-step">
-          <h3>前端选择账单并调用解析入口</h3>
-          <p><span class="label fact">confirmed current-state fact</span> 导入入口走 <code>/api/bills/import/v2/parse</code> 或 <code>/api/bills/import/v2/parse_generic</code>，multipart 文件、JSON 和 generic JSON 分别进入对应 runtime handler。</p>
-          <p><span class="label hint">investigation hint</span> 如果“文件能上传但预览为空”，先看响应里是否已经有 <code>session_id</code>、parser summary、标准行数量，再决定查 parser 还是 stage2。</p>
-        </article>
+    <section id="mindmap">
+      <h2>总览地图：导入交易审计中枢</h2>
+      <p class="section-intro">
+        中心节点是“一条导入交易最终能不能正确入库”。周围八个分支分别回答：数据从哪来、在哪规整、被哪些智能链路改写、前端看的是哪份数据、筛选/编辑/确认分别信哪个字段。
+      </p>
+      <div class="panel map-board">
+        <div class="map-grid">
+          <article class="branch top b-parser">
+            <h3><span class="label blue">输入枝</span> parser 标准化</h3>
+            <ul>
+              <li><code>RawBill</code> 保留平台字段：交易时间、金额、商户、支付方式、原始分类、订单号、状态。</li>
+              <li><code>StandardBill</code> 统一为日期、金额、类型、描述、账户、分类、parser tags。</li>
+              <li><span class="label risk">high-risk boundary</span> <code>Money</code> 内部保留 cents，但 <code>StandardBill.amount</code> JSON 面向元；standard-row 与 preview typed columns 都有 cents 合同。</li>
+            </ul>
+          </article>
+          <article class="branch top b-stage">
+            <h3><span class="label fact">confirmed current-state fact</span> stage2 基底</h3>
+            <ul>
+              <li>加载 parser templates、标准行和历史候选。</li>
+              <li>先做同批/历史 dedup 与转账 materialization。</li>
+              <li>再生成 <code>ImportPreviewDraft</code>，作为后续智能链路的承载层。</li>
+            </ul>
+          </article>
+          <article class="branch top b-intel">
+            <h3><span class="label violet">智能枝</span> 规则、学习、LLM</h3>
+            <ul>
+              <li>分类规则与内置 fallback 先确定 <code>category_id</code> 与类型。</li>
+              <li>recurring、learning vector recall、LLM recommendation 继续补充信号。</li>
+              <li>账户规则最后运行，消费稳定后的类型、分类与转账/投资上下文。</li>
+            </ul>
+          </article>
 
-        <article class="flow-step">
-          <h3>parser 把原始账单规整成标准账单</h3>
-          <p><span class="label fact">confirmed current-state fact</span> parser 先产出 <code>RawBill</code>，再归一到 <code>StandardBill</code>。目前 registry 包含 <code>wechat</code>、<code>alipay</code>、<code>icbc</code>、<code>cmbc</code>、<code>abc</code>、<code>ccb</code>。</p>
-          <p><span class="label risk">high-risk boundary</span> <code>StandardBill.amount</code> 是 <code>Money</code>，序列化表现是元；后续 preview typed column 使用分。金额异常必须沿“元到分”逐层核对。</p>
-        </article>
+          <article class="branch left b-preview">
+            <h3><span class="label amber">存储枝</span> preview 双合同</h3>
+            <ul>
+              <li>typed columns：<code>amount_cents</code>、<code>transaction_type</code>、<code>category_id</code>、<code>account_id</code>、<code>selected</code>。</li>
+              <li>payload：展示、matching feedback、parser/learning/LLM/recurring 细节。</li>
+              <li><span class="label risk">high-risk boundary</span> 筛选和 confirm 更信 typed columns；展示和信号细节还读 payload。</li>
+            </ul>
+          </article>
 
-        <article class="flow-step">
-          <h3>解析结果进入 import session 与 parser template 暂存</h3>
-          <p><span class="label fact">confirmed current-state fact</span> parser 标准行会落入 import staging，形成 session、source、template、standard-row 这组导入暂存上下文。</p>
-          <p><span class="label hint">investigation hint</span> 如果 parser UI 看起来对，但 stage2 以后字段丢失，重点查 <code>ImportParserTemplateDraft</code> 到 <code>dedup_bill_from_parser_template</code> 的字段映射。</p>
-        </article>
+          <article class="center-node">
+            <h2>一条导入交易</h2>
+            <p>正确链路 = 字段含义稳定 + 当前用户身份有效 + 用户编辑不被覆盖 + confirm 重新校验后事务入库。</p>
+            <div class="chips">
+              <span class="chip">parse</span>
+              <span class="chip">stage2</span>
+              <span class="chip">preview</span>
+              <span class="chip">edit</span>
+              <span class="chip">filter</span>
+              <span class="chip">confirm</span>
+            </div>
+          </article>
 
-        <article class="flow-step">
-          <h3>stage2 处理去重、转账识别和正式账单物化基线</h3>
-          <p><span class="label fact">confirmed current-state fact</span> stage2 会加载模板、执行 smart dedup、加载标准行和历史候选、构造历史重复与转账计划，再生成 preview draft。</p>
-          <p><span class="label risk">high-risk boundary</span> 同批次重复、历史重复、转账识别与正式 bill materialization 共享金额、日期、账户、交易类型；任何一个字段错位都会影响后面的 signal 和确认入库。</p>
-        </article>
+          <article class="branch right b-frontend">
+            <h3><span class="label blue">前端枝</span> 页面转换</h3>
+            <ul>
+              <li><code>ImportPreviewRecord</code> 是接口层 preview 语义。</li>
+              <li><code>importPreviewTransaction.ts</code> 映射为 <code>ImportTransaction</code>。</li>
+              <li><span class="label hint">investigation hint</span> UI 错但接口对，优先查 category/account map、cents 规范化、本地筛选。</li>
+            </ul>
+          </article>
 
-        <article class="flow-step">
-          <h3>智能链路补全分类、周期、学习、LLM、账户识别</h3>
-          <p><span class="label fact">confirmed current-state fact</span> 处理顺序是 category rules / built-in fallback、recurring projection、learning vector recall、LLM 或推荐数据、最后 account recognition。</p>
-          <p><span class="label risk">high-risk boundary</span> account recognition 必须在分类、周期、学习这些 projection 之后，因为它依赖前面规整出的业务信号。提前跑会导致账户错配或覆盖用户编辑。</p>
-        </article>
+          <article class="branch bottom b-confirm">
+            <h3><span class="label fact">confirmed current-state fact</span> confirm 入库</h3>
+            <ul>
+              <li>当前前端主路径提交 <code>preview_updates</code> 并保留未补丁选择集。</li>
+              <li>后端兼容 <code>selected_ids</code>，但最终仍重新加载 selected preview rows。</li>
+              <li>identity validation error 或 requires review 未解决时拒绝入库。</li>
+            </ul>
+          </article>
+          <article class="branch bottom b-risk">
+            <h3><span class="label risk">high-risk boundary</span> 错位雷达</h3>
+            <ul>
+              <li>金额扩大/缩小 100 倍：查元到分转换。</li>
+              <li>分类名称对但入库错：以 <code>category_id</code> 为准。</li>
+              <li>筛选与展示不一致：查 typed columns 与 payload 是否同步。</li>
+            </ul>
+          </article>
+          <article class="branch bottom b-debug">
+            <h3><span class="label hint">investigation hint</span> 排查入口</h3>
+            <ul>
+              <li>接口已错：查 parser、stage2、preview 写入。</li>
+              <li>接口对但 UI 错：查前端转换和当前 taxonomy/account map。</li>
+              <li>UI 对但 confirm 错：查后端重载、identity validation、bill create fields。</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
 
-        <article class="flow-step">
-          <h3>preview draft 被校验并写入 typed columns 与 JSON payload</h3>
-          <p><span class="label fact">confirmed current-state fact</span> 写入 <code>import_preview_rows</code> 前会执行 identity validation，生成 typed columns 与 <code>preview_payload</code> 双份表示。</p>
-          <p><span class="label risk">high-risk boundary</span> typed columns 用于分页、筛选、facet、confirm；payload 用于前端展示和补充信号。两边不一致时，页面和入库可能表现不同。</p>
+    <section id="timeline">
+      <h2>流程地图：从文件到正式账单</h2>
+      <div class="timeline">
+        <article class="step-node">
+          <div class="step-index">1</div>
+          <div class="step-card">
+            <h3>上传与解析入口</h3>
+            <p><span class="label fact">confirmed current-state fact</span> 运行时走 <code>/api/bills/import/v2/parse</code>、<code>/api/bills/import/v2/parse_generic</code>、session/preview/update/reclassify/confirm 这一组 Rust route。</p>
+            <div class="chips"><span class="chip">multipart</span><span class="chip">JSON</span><span class="chip">generic parse</span><span class="chip">session_id</span></div>
+          </div>
         </article>
-
-        <article class="flow-step">
-          <h3>前端预览页加载 server-paged rows 并转换为 ImportTransaction</h3>
-          <p><span class="label fact">confirmed current-state fact</span> 前端 <code>ImportPreviewRecord</code> 通过 <code>importPreviewTransaction.ts</code> 映射为 <code>ImportTransaction</code>，再进入校验、筛选、编辑和确认 UI。</p>
-          <p><span class="label hint">investigation hint</span> 如果接口数据正确但页面展示错，优先查 <code>resolveImportPreviewCategoryId</code>、金额 cents 规范化、account/category map 是否来自当前用户。</p>
+        <article class="step-node">
+          <div class="step-index">2</div>
+          <div class="step-card">
+            <h3>parser 识别平台账单</h3>
+            <p>dedicated parser 包括 <code>wechat</code>、<code>alipay</code>、<code>icbc</code>、<code>cmbc</code>、<code>abc</code>、<code>ccb</code>。每行先进入 <code>RawBill</code>，再归一为 <code>StandardBill</code>。</p>
+            <div class="chips"><span class="chip">date</span><span class="chip">trade_time</span><span class="chip">amount</span><span class="chip">transaction_type</span><span class="chip">counterparty</span><span class="chip">payment_method</span><span class="chip">parser_tags</span></div>
+          </div>
         </article>
-
-        <article class="flow-step">
-          <h3>用户编辑、重新分类、LLM 推荐或筛选选择</h3>
-          <p><span class="label fact">confirmed current-state fact</span> 单行编辑走 preview update；重新分类会应用用户 patch 后重跑 intelligence chain；LLM preview recommend 有独立 accept/reject 入口。</p>
-          <p><span class="label risk">high-risk boundary</span> 用户显式编辑后的字段不能被后台推荐静默覆盖。看到“刚改完又变回去”，要查 patch 后重跑链路是否尊重 manual annotation 和 clear decision keys。</p>
+        <article class="step-node">
+          <div class="step-index">3</div>
+          <div class="step-card">
+            <h3>staging 与 parser template</h3>
+            <p>标准行进入 import session/source/template/standard-row 暂存。<code>ImportParserTemplateDraft</code> 记录 <code>parser_date</code>、<code>parser_amount</code>、<code>parser_type</code>、<code>parser_account_id</code> 等 stage2 输入。</p>
+            <p><span class="label hint">investigation hint</span> parser UI 对但 stage2 后错，先查 template draft 到 dedup input 的映射。</p>
+          </div>
         </article>
-
-        <article class="flow-step">
-          <h3>确认入库前再次校验，选中行转换为正式 bill create fields</h3>
-          <p><span class="label fact">confirmed current-state fact</span> 后端 confirm 兼容 <code>selected_ids</code>，当前前端主路径主要提交 <code>preview_updates</code> 并保留未补丁选择集；后端会在事务内把 selected preview 转为正式账单，并更新 session 状态。</p>
-          <p><span class="label risk">high-risk boundary</span> confirm 会拒绝 identity validation error 或仍需 review 的行。若前端显示可确认但后端拒绝，查 preview typed columns 与 payload 的校验状态是否同步。</p>
+        <article class="step-node">
+          <div class="step-index">4</div>
+          <div class="step-card">
+            <h3>stage2：去重、转账、预览基底</h3>
+            <p>stage2 用 parser template、标准行、历史候选构造 dedup bill、重复计划、转账计划，再生成 preview draft。</p>
+            <div class="chips"><span class="chip">dedup_type</span><span class="chip">dedup_source_ids</span><span class="chip">transfer</span><span class="chip">history candidates</span><span class="chip">stage2_baseline</span></div>
+          </div>
+        </article>
+        <article class="step-node">
+          <div class="step-index">5</div>
+          <div class="step-card">
+            <h3>智能链路：分类、周期、学习、LLM、账户</h3>
+            <p><span class="label fact">confirmed current-state fact</span> 账户识别最后运行；它依赖前面已经稳定的类型、分类、转账/投资上下文和仍为空的账户字段。</p>
+            <div class="chips"><span class="chip">category rules</span><span class="chip">built-in fallback</span><span class="chip">recurring</span><span class="chip">learning</span><span class="chip">LLM</span><span class="chip">account rules</span></div>
+          </div>
+        </article>
+        <article class="step-node">
+          <div class="step-index">6</div>
+          <div class="step-card">
+            <h3>preview row 写入</h3>
+            <p>写入 <code>import_preview_rows</code> 前执行 current-user identity validation。无效 category/account 会被清空并写入 <code>preview_matching_feedback.identity_validation</code>。</p>
+            <p><span class="label risk">high-risk boundary</span> typed columns 和 <code>preview_payload</code> 必须同步，否则会出现展示、筛选、confirm 三者不一致。</p>
+          </div>
+        </article>
+        <article class="step-node">
+          <div class="step-index">7</div>
+          <div class="step-card">
+            <h3>前端预览、筛选、编辑</h3>
+            <p>server-paged 模式下分页、筛选、facets 由后端在 <code>import_preview_rows</code> 上执行；前端只保留当前页草稿和交互态。</p>
+            <div class="chips"><span class="chip">ImportPreviewRecord</span><span class="chip">ImportTransaction</span><span class="chip">__none__</span><span class="chip">__invalid__</span><span class="chip">signal filter</span></div>
+          </div>
+        </article>
+        <article class="step-node">
+          <div class="step-index">8</div>
+          <div class="step-card">
+            <h3>confirm：重新加载与事务入库</h3>
+            <p>confirm 不信任前端内存行，而是后端重新加载 selected preview rows，应用补丁，再用 <code>bill_create_fields_from_preview</code> 转正式 bills。</p>
+            <div class="chips"><span class="chip">preview_updates</span><span class="chip">selected_ids compatibility</span><span class="chip">source_account_id</span><span class="chip">destination_account_id</span><span class="chip">amount_cents</span></div>
+          </div>
         </article>
       </div>
     </section>
 
-    <section id="columns">
-      <h2>数据列地图：从 parser 到正式账单</h2>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>层级</th>
-              <th>代表结构或表</th>
-              <th>核心数据列</th>
-              <th>进入下一层时的规整逻辑</th>
-              <th>人工找 bug 重点</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>原始 parser 输出</td>
-              <td><code>RawBill</code></td>
-              <td><code>date</code>, <code>trade_time</code>, <code>amount</code>, <code>transaction_type</code>, <code>description</code>, <code>counterparty</code>, <code>goods</code>, <code>product</code>, <code>remark</code>, <code>note</code>, <code>memo</code>, <code>abstract_text</code>, <code>summary</code>, <code>payment_method</code>, <code>channel</code>, <code>original_category</code>, <code>merchant</code>, <code>shop</code>, <code>opponent_account</code>, <code>parser_tags</code>, <code>transaction_id</code>, <code>order_id</code>, <code>merchant_id</code>, <code>status</code></td>
-              <td>各 parser 保留平台原始语义，后续转成统一字段。</td>
-              <td><span class="label risk">high-risk boundary</span> 平台字段名不同但含义相近，尤其 <code>counterparty</code>、<code>merchant</code>、<code>payment_method</code>、<code>status</code>。</td>
-            </tr>
-            <tr>
-              <td>标准 parser 行</td>
-              <td><code>StandardBill</code></td>
-              <td><code>date</code>, <code>amount</code>, <code>type</code>/<code>transaction_type</code>, <code>description</code>, <code>source_account_id</code>, <code>counterparty</code>, <code>payment_method</code>, <code>parser_tags</code>, <code>original_type</code>, <code>original_category</code>, <code>transaction_id</code>, <code>merchant_id</code>, <code>status</code>, <code>main_category</code>, <code>sub_category</code></td>
-              <td>统一日期、金额、类型、账户和描述；金额仍是 Money 元语义。</td>
-              <td><span class="label hint">investigation hint</span> parser 阶段金额或类型错误，优先回到对应 parser adapter，不要先改 preview。</td>
-            </tr>
-            <tr>
-              <td>parser template 暂存</td>
-              <td><code>ImportParserTemplateDraft</code></td>
-              <td><code>parser_date</code>, <code>parser_amount</code>, <code>parser_type</code>, <code>parser_description</code>, <code>parser_id</code>, <code>parser_tags</code>, <code>parser_counterparty</code>, <code>parser_payment_method</code>, <code>parser_original_type</code>, <code>parser_original_category</code>, <code>parser_account_id</code></td>
-              <td>把标准行作为 stage2 的稳定输入，支持 dedup 和 preview draft 构造。</td>
-              <td><span class="label risk">high-risk boundary</span> <code>parser_account_id</code> 和后续 <code>preview_source_account_id</code> 不是同一层含义，前者是 parser 识别结果，后者已进入业务预览。</td>
-            </tr>
-            <tr>
-              <td>去重输入</td>
-              <td><code>DedupBill</code></td>
-              <td>日期、金额、类型、账户、parser id、交易对象、支付方式、描述、原始类型、原始分类、tags、session id</td>
-              <td>由 parser template 派生，用于同批次、历史重复、转账匹配。</td>
-              <td><span class="label hint">investigation hint</span> 重复/转账 signal 异常，核对 dedup 输入是否已经缺字段，再查算法阈值。</td>
-            </tr>
-            <tr>
-              <td>预览 draft</td>
-              <td><code>ImportPreviewDraft</code></td>
-              <td><code>preview_date</code>, <code>preview_type</code>, <code>preview_amount_cents</code>, <code>preview_destination_amount_cents</code>, <code>category_id</code>, <code>preview_main_category</code>, <code>preview_sub_category</code>, <code>preview_source_account_id</code>, <code>preview_destination_account_id</code>, <code>preview_counterparty</code>, <code>preview_payment_method</code>, <code>preview_description</code>, <code>preview_parser_id</code>, <code>preview_parser_tags</code>, recurring fields, <code>preview_selected</code>, <code>dedup_type</code>, <code>dedup_source_ids</code>, <code>preview_matching_feedback</code></td>
-              <td>stage2 产物，承载智能链路和前端展示需要的数据。</td>
-              <td><span class="label risk">high-risk boundary</span> 这里首次同时拥有 typed category id、category names、账户 id、signal payload，最容易出现半更新。</td>
-            </tr>
-            <tr>
-              <td>预览 typed columns</td>
-              <td><code>import_preview_rows</code></td>
-              <td><code>session_id</code>, <code>user_id</code>, <code>page_sort_key</code>, <code>operation_kind</code>, <code>selected</code>, <code>signal_summary</code>, <code>merged_source_ids</code>, <code>occurred_at</code>, <code>amount_cents</code>, <code>direction</code>, <code>transaction_type</code>, <code>account_id</code>, <code>transfer_target_account_id</code>, <code>category_id</code>, <code>merchant</code>, <code>payment_method</code>, <code>description</code>, <code>preview_payload</code></td>
-              <td>用于分页、筛选、facet、confirm 和批量查询。</td>
-              <td><span class="label risk">high-risk boundary</span> 页面筛选多看 typed columns，卡片详情多看 payload；两者不同步时会出现“看得到但筛不到”或“筛得到但入库错”。</td>
-            </tr>
-            <tr>
-              <td>预览 payload</td>
-              <td><code>preview_payload</code></td>
-              <td><code>preview_date</code>, <code>preview_type</code>, <code>preview_amount_cents</code>, <code>category_id</code>, <code>categoryId</code>, <code>preview_source_account_id</code>, <code>preview_destination_account_id</code>, <code>preview_matching_feedback</code>, parser/recurring/learning/LLM 扩展字段</td>
-              <td>保留前端展示和智能信号细节，同时写回 category alias。</td>
-              <td><span class="label hint">investigation hint</span> <code>category_id</code> 与 <code>categoryId</code> 必须同值；一个有值一个为空，是典型 payload 同步 bug。</td>
-            </tr>
-            <tr>
-              <td>前端预览记录</td>
-              <td><code>ImportPreviewRecord</code></td>
-              <td><code>id</code>, <code>category_id</code>/<code>categoryId</code>, <code>preview_type</code>, <code>suggested_preview_type</code>, <code>preview_date</code>, <code>preview_amount_cents</code>, <code>preview_destination_amount_cents</code>, category names, source/destination account ids, description, counterparty, payment method, transfer/investment/learning/recurring/dedup/parser/matching/manual/selected fields</td>
-              <td>接口对象先保留 preview 语义，再映射成编辑模型。</td>
-              <td><span class="label risk">high-risk boundary</span> 分类必须按当前用户 category map 校验，不能信任历史 id 或其他用户 id。</td>
-            </tr>
-            <tr>
-              <td>前端编辑模型</td>
-              <td><code>ImportTransaction</code></td>
-              <td><code>type</code>, <code>categoryId</code>, <code>originalCategoryName</code>, <code>time</code>, <code>sourceAccountId</code>, <code>originalSourceAccountName</code>, <code>destinationAccountId</code>, <code>sourceAmountCents</code>, <code>destinationAmountCents</code>, <code>comment</code>, <code>counterparty</code>, <code>paymentMethod</code>, suggestion/learning/recurring/parser/dedup/matching/selected/valid fields</td>
-              <td>页面校验、编辑、选择和请求构造的主要模型。</td>
-              <td><span class="label risk">high-risk boundary</span> <code>originalSourceAccountName</code> 当前来自 <code>preview_payment_method</code>，这是展示边界，不应误认为真正 account name。</td>
-            </tr>
-            <tr>
-              <td>正式入库字段</td>
-              <td><code>bill_create_fields_from_preview</code></td>
-              <td><code>date</code>, <code>type</code>, <code>amount_cents</code>, <code>destination_amount_cents</code>, <code>counterparty</code>, <code>description</code>, <code>payment_method</code>, <code>main_category</code>, <code>sub_category</code>, <code>category_id</code>, <code>source_account_id</code>, <code>destination_account_id</code></td>
-              <td>selected preview 行通过事务批量创建正式 bills。</td>
-              <td><span class="label risk">high-risk boundary</span> confirm 使用的是后端重新加载并校验后的 preview，不是前端内存里的行。</td>
-            </tr>
-          </tbody>
-        </table>
+    <section id="lineage">
+      <h2>字段血缘图：这个值一路变成了什么</h2>
+      <p class="section-intro">
+        横向读每一行：从 parser 原始语义，经过 template/stage2、preview draft、typed columns/payload、前端模型，最后进入正式账单。看到字段错了，就沿这一行反查。
+      </p>
+      <div class="lineage-scroll panel panel-pad">
+        <div class="lineage">
+          <div class="lineage-row">
+            <div class="lane-head">字段主题</div>
+            <div class="lane-head">parser 标准行</div>
+            <div class="lane-head">template / stage2</div>
+            <div class="lane-head">preview draft</div>
+            <div class="lane-head">typed columns / payload</div>
+            <div class="lane-head">前端 / confirm</div>
+          </div>
+
+          <div class="lineage-row">
+            <div class="lane-head">金额</div>
+            <div class="lane-cell"><strong><code>StandardBill.amount</code></strong><span><code>Money</code> 内部保留 cents；JSON 序列化面向元，外部边界保留展示单位。</span></div>
+            <div class="lane-cell"><strong><code>amount_cents</code> / <code>parser_amount</code></strong><span>standard-row ledger 已有 <code>amount_cents</code>；parser template 的 <code>parser_amount</code> 是 stage2 元面输入。</span></div>
+            <div class="lane-cell"><strong><code>preview_amount_cents</code></strong><span>preview draft 的分合同；转账/投资还有 <code>preview_destination_amount_cents</code>。</span></div>
+            <div class="lane-cell"><strong><code>amount_cents</code></strong><span>分页、筛选、confirm 的权威 typed column；payload 存同值供展示。</span></div>
+            <div class="lane-cell"><strong><code>sourceAmountCents</code></strong><span>前端严格 cents；confirm 写入 <code>amount_cents</code> / <code>destination_amount_cents</code>。</span></div>
+          </div>
+
+          <div class="lineage-row">
+            <div class="lane-head">类型</div>
+            <div class="lane-cell"><strong><code>transaction_type</code></strong><span>parser 原始或规整类型，可能带平台语义。</span></div>
+            <div class="lane-cell"><strong><code>parser_type</code></strong><span>dedup、转账候选和 stage2 baseline 的输入。</span></div>
+            <div class="lane-cell"><strong><code>preview_type</code></strong><span>分类、学习、LLM、用户编辑都可能改写。</span></div>
+            <div class="lane-cell"><strong><code>transaction_type</code> / <code>direction</code></strong><span>筛选与确认读取的 typed 表示。</span></div>
+            <div class="lane-cell"><strong><code>ImportTransaction.type</code></strong><span>前端校验普通收支、转账、投资、余额调整。</span></div>
+          </div>
+
+          <div class="lineage-row">
+            <div class="lane-head">分类</div>
+            <div class="lane-cell"><strong><code>original_category</code></strong><span>平台原始分类；只作为线索。</span></div>
+            <div class="lane-cell"><strong><code>parser_original_category</code></strong><span>分类规则和 built-in fallback 参考。</span></div>
+            <div class="lane-cell"><strong><code>category_id</code></strong><span>预览阶段的 canonical 分类 id；名称仅辅助显示。</span></div>
+            <div class="lane-cell"><strong><code>category_id</code> / <code>categoryId</code></strong><span>typed column 和 payload alias 必须同值；非法 id 会被清空。</span></div>
+            <div class="lane-cell"><strong><code>categoryId</code></strong><span>前端按当前用户 taxonomy 解析；confirm 写正式 bill 的 <code>category_id</code>。</span></div>
+          </div>
+
+          <div class="lineage-row">
+            <div class="lane-head">账户</div>
+            <div class="lane-cell"><strong><code>source_account_id</code></strong><span>parser 可能识别出的来源账户。</span></div>
+            <div class="lane-cell"><strong><code>parser_account_id</code></strong><span>不是最终账户，只是 stage2 输入。</span></div>
+            <div class="lane-cell"><strong><code>preview_source_account_id</code></strong><span>账户规则最后补齐；转账/投资还要 destination。</span></div>
+            <div class="lane-cell"><strong><code>account_id</code> / <code>transfer_target_account_id</code></strong><span>筛选、facet、confirm 读取的 typed columns。</span></div>
+            <div class="lane-cell"><strong><code>sourceAccountId</code> / <code>destinationAccountId</code></strong><span>前端校验当前用户 active accounts，confirm 写正式账单。</span></div>
+          </div>
+
+          <div class="lineage-row">
+            <div class="lane-head">描述与对象</div>
+            <div class="lane-cell"><strong><code>description</code>, <code>counterparty</code>, <code>merchant</code></strong><span>parser 从平台字段规整描述、交易对象、商户。</span></div>
+            <div class="lane-cell"><strong><code>parser_description</code></strong><span>dedup、规则、LLM/learning 输入。</span></div>
+            <div class="lane-cell"><strong><code>preview_description</code>, <code>preview_counterparty</code></strong><span>用户可编辑，也影响后续推荐。</span></div>
+            <div class="lane-cell"><strong><code>description</code>, <code>merchant</code>, <code>payment_method</code></strong><span>typed columns 用于搜索、筛选、展示摘要。</span></div>
+            <div class="lane-cell"><strong><code>comment</code>, <code>counterparty</code>, <code>paymentMethod</code></strong><span>前端展示和最终 create request 来源。</span></div>
+          </div>
+
+          <div class="lineage-row">
+            <div class="lane-head">信号</div>
+            <div class="lane-cell"><strong><code>parser_tags</code></strong><span>平台/parser 标记，例如状态、渠道、重复线索。</span></div>
+            <div class="lane-cell"><strong>dedup / transfer plans</strong><span>stage2 生成重复、转账、history 候选。</span></div>
+            <div class="lane-cell"><strong><code>preview_matching_feedback</code></strong><span>learning、LLM、recurring、identity validation、manual annotation。</span></div>
+            <div class="lane-cell"><strong><code>signal_summary</code></strong><span>server-paged signal filter 的 typed 入口；payload 保留细节。</span></div>
+            <div class="lane-cell"><strong><code>matching</code></strong><span>前端 signal chip、候选 review、confirm 风险提示。</span></div>
+          </div>
+        </div>
       </div>
     </section>
 
     <section id="features">
-      <h2>功能用列矩阵：哪个功能依赖哪些字段</h2>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>功能</th>
-              <th>主要读取列</th>
-              <th>主要写入列</th>
-              <th>业务处理逻辑</th>
-              <th>常见错位表现</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>预览列表展示</td>
-              <td><code>preview_payload</code>, <code>occurred_at</code>, <code>amount_cents</code>, <code>transaction_type</code>, <code>category_id</code>, <code>account_id</code>, <code>transfer_target_account_id</code>, <code>payment_method</code>, <code>description</code></td>
-              <td>通常不写；本地编辑态会更新 draft</td>
-              <td>后端分页返回 preview rows，前端转换成 <code>ImportTransaction</code> 并展示。</td>
-              <td>列表值和编辑弹窗值不同，通常是 typed column 与 payload 不同步。</td>
-            </tr>
-            <tr>
-              <td>分类显示与分类校验</td>
-              <td><code>category_id</code>, <code>preview_main_category</code>, <code>preview_sub_category</code>, 当前用户 category map</td>
-              <td><code>category_id</code>, payload <code>category_id</code>/<code>categoryId</code>, category names</td>
-              <td>后端 identity validation 确认 category id 存在、属于当前用户、类型匹配；前端再用当前 taxonomy 解析。</td>
-              <td><span class="label risk">high-risk boundary</span> 名称正确但 id 错，页面可能看似可用，confirm 会拒绝或入错分类。</td>
-            </tr>
-            <tr>
-              <td>账户识别与账户校验</td>
-              <td><code>preview_source_account_id</code>, <code>preview_destination_account_id</code>, <code>account_id</code>, <code>transfer_target_account_id</code>, 当前用户 active accounts</td>
-              <td>source/destination account ids 与对应 typed columns</td>
-              <td>非转账要求 source account；转账和投资还要求 destination account；同账户转账是校验问题。</td>
-              <td>“账户有效但确认失败”通常查 active account map、是否跨用户、是否转账缺 destination。</td>
-            </tr>
-            <tr>
-              <td>金额展示和入库</td>
-              <td><code>parser_amount</code>, <code>preview_amount_cents</code>, <code>amount_cents</code>, <code>preview_destination_amount_cents</code>, <code>destination_amount_cents</code></td>
-              <td>preview cents typed columns、正式 bills cents fields</td>
-              <td>parser Money 元语义转成 preview cents；前端用 strict absolute cents；confirm 写入 cents。</td>
-              <td><span class="label risk">high-risk boundary</span> 金额扩大或缩小 100 倍，要从 parser 元语义和 preview cents 的转换点查。</td>
-            </tr>
-            <tr>
-              <td>类型和方向</td>
-              <td><code>parser_type</code>, <code>preview_type</code>, <code>transaction_type</code>, <code>direction</code>, <code>operation_kind</code></td>
-              <td>preview type、typed direction、operation kind、formal bill type</td>
-              <td>导入链路把原始类型规整为支出、收入、转账、余额调整、投资等业务类型。</td>
-              <td>筛选类型和行内类型不一致，先查 <code>transaction_type</code> typed column，再查 payload <code>preview_type</code>。</td>
-            </tr>
-            <tr>
-              <td>server-paged 筛选</td>
-              <td><code>selected</code>, <code>transaction_type</code>, <code>category_id</code>, <code>account_id</code>, <code>transfer_target_account_id</code>, parser tags, signal summary, identity validation</td>
-              <td>不直接写；筛选参数传给后端 query</td>
-              <td>分页筛选由后端执行；前端本地筛选只在非 server-paged 模式补充。</td>
-              <td><span class="label risk">high-risk boundary</span> 同一个筛选在本地和服务端结果不同，查 <code>checkDataFilters.ts</code> 与后端 <code>apply_preview_filters</code> 是否语义一致。</td>
-            </tr>
-            <tr>
-              <td>分类 facet</td>
-              <td><code>category_id</code> typed column 及 active category join</td>
-              <td>不写</td>
-              <td>后端 facet 聚合 active 且非空的当前 category 分布；<code>__none__</code>、<code>__invalid__</code> 是筛选哨兵和需处理统计语义，不是 facet SQL 自身的聚合项。</td>
-              <td><code>__none__</code>、<code>__invalid__</code> 数量异常时，查 filter predicate、requires review 计数和 identity validation，而不是只查 facet join。</td>
-            </tr>
-            <tr>
-              <td>账户 facet</td>
-              <td><code>account_id</code>, <code>transfer_target_account_id</code>, active accounts</td>
-              <td>不写</td>
-              <td>后端 facet 聚合 active 且非空的 source/destination account；缺失和非法账户通过筛选哨兵、identity validation 和需处理统计体现。</td>
-              <td>目标账户筛不出来，先区分 active account facet 缺失、<code>__none__</code>/<code>__invalid__</code> filter 命中，以及 payload 已变但 typed column 未更新。</td>
-            </tr>
-            <tr>
-              <td>signal 筛选</td>
-              <td><code>preview_matching_feedback</code>, <code>signal_summary</code>, parser tags, learning/LLM/recurring/dedup payload</td>
-              <td>信号 summary 与 matching payload</td>
-              <td>信号筛选支持 parser/platform_duplicate/transfer/history/learning/llm 等语义。</td>
-              <td>signal chip 显示但筛选不命中，查 <code>signal_filter_matches</code> 和前端 signal view model。</td>
-            </tr>
-            <tr>
-              <td>单行编辑</td>
-              <td>目标 preview row typed columns 与 payload</td>
-              <td>patch 指定字段，typed columns 和 payload 同步更新</td>
-              <td><code>apply_preview_patch_async</code> 应用 patch、清理相关 decision keys、重跑 identity validation。</td>
-              <td>编辑后展示没变或 confirm 仍用旧值，查 patch 是否同时写 typed column 和 payload。</td>
-            </tr>
-            <tr>
-              <td>重新分类</td>
-              <td>用户 patch 后的 preview rows、规则、学习、LLM、账户数据</td>
-              <td>分类、账户、matching、validation 状态</td>
-              <td>应用用户 patch 后重新运行 intelligence chain，再校验并批量更新。</td>
-              <td><span class="label risk">high-risk boundary</span> 用户手动分类被规则覆盖，查 manual annotation 是否参与跳过或锁定。</td>
-            </tr>
-            <tr>
-              <td>LLM 预览推荐</td>
-              <td>当前 preview rows、描述、商户、分类、历史/学习信号</td>
-              <td>LLM recommendation、accept/reject decision、可能的 preview patch</td>
-              <td>推荐和接受是独立入口，不应该绕过 identity validation。</td>
-              <td>LLM 接受后 category id 非当前用户，必须查 accept path 是否复用统一 validation。</td>
-            </tr>
-            <tr>
-              <td>确认入库</td>
-              <td>selected preview rows、<code>preview_updates</code>、identity validation、requires review 状态</td>
-              <td>正式 bills；session status；可能写确认历史</td>
-              <td>后端重新加载、应用补丁、拒绝未解决问题，再事务批量创建。</td>
-              <td>“预览选中了但没入库”查 selected typed column、当前前端 confirm request 的 <code>preview_updates</code>/<code>preserve_unpatched_selection</code>，以及后端兼容 <code>selected_ids</code> 路径和重载后的 selected 状态。</td>
-            </tr>
-          </tbody>
-        </table>
+      <h2>功能用列地图：点功能，看它信什么字段</h2>
+      <div class="feature-map">
+        <article class="feature-node">
+          <h3>预览列表 <span class="label fact">confirmed current-state fact</span></h3>
+          <p class="mini">读 <code>preview_payload</code> 展示细节，读 typed columns 做分页、排序、筛选和确认前状态。</p>
+          <div class="chips"><span class="chip">occurred_at</span><span class="chip">amount_cents</span><span class="chip">transaction_type</span><span class="chip">category_id</span><span class="chip">account_id</span><span class="chip">description</span></div>
+        </article>
+        <article class="feature-node">
+          <h3>分类校验 <span class="label risk">high-risk boundary</span></h3>
+          <p class="mini"><code>category_id</code> 是权威，<code>preview_main_category</code> 和 <code>preview_sub_category</code> 是显示线索。</p>
+          <div class="chips"><span class="chip">category_id</span><span class="chip">categoryId</span><span class="chip">active taxonomy</span><span class="chip">type match</span></div>
+        </article>
+        <article class="feature-node">
+          <h3>账户识别</h3>
+          <p class="mini">source/destination account 必须来自当前用户 active accounts；payment method 不是账户。</p>
+          <div class="chips"><span class="chip">account_id</span><span class="chip">transfer_target_account_id</span><span class="chip">preview_source_account_id</span><span class="chip">preview_destination_account_id</span></div>
+        </article>
+        <article class="feature-node">
+          <h3>server-paged 筛选</h3>
+          <p class="mini">服务端筛选是主源。本地 filter 只在非 server-paged 或当前页交互中补充。</p>
+          <div class="chips"><span class="chip">selected</span><span class="chip">transaction_type</span><span class="chip">category_id</span><span class="chip">account_id</span><span class="chip">parser_tags</span><span class="chip">signal_summary</span></div>
+        </article>
+        <article class="feature-node">
+          <h3>facet 与 sentinel</h3>
+          <p class="mini">facet 聚合 active 且非空 id；<code>__none__</code>、<code>__invalid__</code> 是筛选哨兵和需处理统计语义。</p>
+          <div class="chips"><span class="chip">active join</span><span class="chip">__none__</span><span class="chip">__invalid__</span><span class="chip">requires review</span></div>
+        </article>
+        <article class="feature-node">
+          <h3>单行编辑 / 重新分类</h3>
+          <p class="mini">patch 要同时更新 typed columns 与 payload，并尊重 manual annotation、accept/reject decision。</p>
+          <div class="chips"><span class="chip">apply_preview_patch_async</span><span class="chip">manual annotation</span><span class="chip">clear decision keys</span><span class="chip">identity validation</span></div>
+        </article>
+        <article class="feature-node">
+          <h3>LLM 推荐</h3>
+          <p class="mini">推荐和接受不应绕过统一 validation；接受后仍需 current-user category/account 校验。</p>
+          <div class="chips"><span class="chip">llm recommendation</span><span class="chip">accept/reject</span><span class="chip">category_id</span><span class="chip">identity_validation</span></div>
+        </article>
+        <article class="feature-node">
+          <h3>跨页选择</h3>
+          <p class="mini">跨页选择语义保留“全部/有效/无效/需标注”子集；不要只看当前页数组。</p>
+          <div class="chips"><span class="chip">selected</span><span class="chip">preview_ids</span><span class="chip">selected_only</span><span class="chip">preserve_unpatched_selection</span></div>
+        </article>
+        <article class="feature-node">
+          <h3>confirm 入库</h3>
+          <p class="mini">后端重载 selected rows、应用 <code>preview_updates</code>，拒绝 identity/review 问题后事务创建 bills。</p>
+          <div class="chips"><span class="chip">bill_create_fields_from_preview</span><span class="chip">source_account_id</span><span class="chip">destination_account_id</span><span class="chip">amount_cents</span><span class="chip">category_id</span></div>
+        </article>
       </div>
     </section>
 
-    <section id="boundaries">
-      <h2>可疑边界和常见错位点</h2>
-      <div class="three-col">
-        <div class="panel">
-          <h3>金额单位边界</h3>
-          <p><span class="label risk">high-risk boundary</span> parser 的 <code>Money</code> 是元语义，preview 和正式 bills 多数使用 cents。</p>
-          <p><span class="label hint">investigation hint</span> 金额错 100 倍时沿 <code>parser_amount</code> -> <code>preview_amount_cents</code> -> <code>amount_cents</code> -> <code>sourceAmountCents</code> 对照。</p>
-        </div>
-        <div class="panel">
-          <h3>分类 id 与名称边界</h3>
-          <p><span class="label risk">high-risk boundary</span> <code>category_id</code> 是权威字段，<code>preview_main_category</code> 和 <code>preview_sub_category</code> 是显示与兼容信息。</p>
-          <p><span class="label hint">investigation hint</span> 名称对、id 空或非法时，不要用名称反推入库；先修 id 来源和 identity validation。</p>
-        </div>
-        <div class="panel">
-          <h3>账户 id 边界</h3>
-          <p><span class="label risk">high-risk boundary</span> source account、destination account、payment method 是三种不同语义。</p>
-          <p><span class="label hint">investigation hint</span> 微信/支付宝支付方式看起来像账户名，但前端 <code>originalSourceAccountName</code> 当前来自 <code>preview_payment_method</code>。</p>
-        </div>
-        <div class="panel">
-          <h3>typed column 与 payload 边界</h3>
-          <p><span class="label risk">high-risk boundary</span> 后端筛选、facet、confirm 倾向 typed columns；前端展示和信号细节还依赖 payload。</p>
-          <p><span class="label hint">investigation hint</span> 一行编辑后立刻查两边是否都变了，尤其 category、account、amount、type、selected。</p>
-        </div>
-        <div class="panel">
-          <h3>server-paged 与本地筛选边界</h3>
-          <p><span class="label risk">high-risk boundary</span> server-paged 模式下，后端才是分页和筛选真源。</p>
-          <p><span class="label hint">investigation hint</span> 筛选结果异常时，同时对照后端 query 参数、facet 计数、前端 fallback filter。</p>
-        </div>
-        <div class="panel">
-          <h3>用户编辑与智能链路边界</h3>
-          <p><span class="label risk">high-risk boundary</span> 用户 patch 应该拥有更高优先级，不能被规则、学习或 LLM 静默覆盖。</p>
-          <p><span class="label hint">investigation hint</span> 查 <code>isManuallyAnnotated</code>、manual annotation payload、clear decision keys 和 reclassify 后的 batch update。</p>
-        </div>
-        <div class="panel">
-          <h3>转账与投资边界</h3>
-          <p><span class="label risk">high-risk boundary</span> 转账/投资比普通收支多一个 destination account 和 destination amount。</p>
-          <p><span class="label hint">investigation hint</span> destination 缺失、同账户、金额方向不一致都会让 confirm 拒绝或 requires review。</p>
-        </div>
-        <div class="panel">
-          <h3>历史重复与同批重复边界</h3>
-          <p><span class="label risk">high-risk boundary</span> 同批重复、历史重复、转账 materialization 都可能写入 signal 和 dedup source ids。</p>
-          <p><span class="label hint">investigation hint</span> 行被误判重复时，先看 dedup 输入字段是否一致，再看阈值和历史候选集合。</p>
-        </div>
-        <div class="panel">
-          <h3>当前用户数据边界</h3>
-          <p><span class="label risk">high-risk boundary</span> category 和 account 必须属于当前用户且处于 active 范围。</p>
-          <p><span class="label hint">investigation hint</span> 出现跨用户 id 或历史已删除 id，应从 identity validation 层查，不要只在 UI 隐藏警告。</p>
-        </div>
+    <section id="risks">
+      <h2>高风险边界雷达</h2>
+      <div class="risk-map">
+        <article class="risk-node">
+          <h3>金额单位 <span class="label risk">high-risk boundary</span></h3>
+          <p class="mini">parser/OCR/LLM/用户输入边界可能是元；<code>Money</code> 内部、standard-row ledger、preview typed columns 与正式账单保留整数分合同。</p>
+          <div class="route"><div class="route-step"><code>StandardBill.amount</code> JSON 面向元，内部 <code>Money</code> 保留 cents</div><div class="route-step">standard-row <code>amount_cents</code> 分</div><div class="route-step">preview/formal <code>amount_cents</code> 分</div></div>
+        </article>
+        <article class="risk-node">
+          <h3>分类 id 与名称</h3>
+          <p class="mini">名称只能帮人看，不能作为入库权威；跨用户、inactive、类型不匹配都要清空并 review。</p>
+          <div class="route"><div class="route-step">先看 <code>category_id</code></div><div class="route-step">再看 <code>categoryId</code> alias</div><div class="route-step">最后看 main/sub category 名称</div></div>
+        </article>
+        <article class="risk-node">
+          <h3>账户语义混用</h3>
+          <p class="mini">source account、destination account、payment method、平台渠道不是一回事。</p>
+          <div class="route"><div class="route-step"><code>parser_account_id</code> 是输入线索</div><div class="route-step"><code>account_id</code> 是 preview source typed column</div><div class="route-step"><code>transfer_target_account_id</code> 是目标账户</div></div>
+        </article>
+        <article class="risk-node">
+          <h3>typed columns vs payload</h3>
+          <p class="mini">看得到不代表筛得到；筛得到不代表 confirm 用的是同一值。</p>
+          <div class="route"><div class="route-step">展示异常：查 payload</div><div class="route-step">筛选异常：查 typed columns</div><div class="route-step">入库异常：查 confirm 重载后的 typed row</div></div>
+        </article>
+        <article class="risk-node">
+          <h3>用户编辑优先级</h3>
+          <p class="mini">用户 patch、manual annotation、accept/reject decision 不能被 reclassify 或推荐链路静默覆盖。</p>
+          <div class="route"><div class="route-step">update 后抓 row</div><div class="route-step">reclassify 后再抓 row</div><div class="route-step">比较 manual flag 和 decision keys</div></div>
+        </article>
+        <article class="risk-node">
+          <h3>转账/投资双账户</h3>
+          <p class="mini">转账和投资必须同时维护 source、destination、destination amount，同账户转账是校验问题。</p>
+          <div class="route"><div class="route-step">缺 destination：requires review</div><div class="route-step">同账户：identity issue</div><div class="route-step">金额方向异常：查 transfer materialization</div></div>
+        </article>
       </div>
     </section>
 
-    <section id="trace">
-      <h2>这个字段错了该往哪一层查</h2>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>现象</th>
-              <th>优先查的层</th>
-              <th>关键字段</th>
-              <th>判断方法</th>
-              <th>下一步</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>金额错 100 倍</td>
-              <td>parser -> template -> preview cents</td>
-              <td><code>StandardBill.amount</code>, <code>parser_amount</code>, <code>preview_amount_cents</code>, <code>amount_cents</code></td>
-              <td>同一行用交易时间和描述定位，逐层比金额单位。</td>
-              <td>parser 错就修 parser；template 对、preview 错就修元到分转换。</td>
-            </tr>
-            <tr>
-              <td>分类名称对但确认后分类错</td>
-              <td>preview identity validation 与 confirm</td>
-              <td><code>category_id</code>, <code>categoryId</code>, <code>preview_main_category</code>, <code>preview_sub_category</code></td>
-              <td>以 <code>category_id</code> 为准，比对当前用户 taxonomy。</td>
-              <td>修 id 解析或同步，不要只修名称展示。</td>
-            </tr>
-            <tr>
-              <td>分类筛选没有命中</td>
-              <td>typed column 查询</td>
-              <td><code>import_preview_rows.category_id</code>, <code>preview_payload.category_id</code></td>
-              <td>看 facet 计数与实际行 payload 是否不同。</td>
-              <td>修 update/reclassify 时 typed column 写回。</td>
-            </tr>
-            <tr>
-              <td>账户显示正确但后端认为非法</td>
-              <td>identity validation</td>
-              <td><code>account_id</code>, <code>transfer_target_account_id</code>, <code>preview_source_account_id</code>, <code>preview_destination_account_id</code></td>
-              <td>比对当前用户 active accounts，确认是否同账户转账。</td>
-              <td>修 account recognition 或用户 patch validation。</td>
-            </tr>
-            <tr>
-              <td>转账目标账户丢失</td>
-              <td>stage2 transfer materialization -> preview draft</td>
-              <td><code>preview_destination_account_id</code>, <code>transfer_target_account_id</code>, transfer matching payload</td>
-              <td>看转账识别是否产生 destination，再看 insert/update typed column。</td>
-              <td>修 materialization 或 preview row mapping。</td>
-            </tr>
-            <tr>
-              <td>筛选“需处理”数量不对</td>
-              <td>后端 <code>preview_requires_review</code></td>
-              <td>category/account 缺失、identity validation issues、transfer destination、same-account</td>
-              <td>逐行看 validation issue 是否落入 payload 和 typed condition。</td>
-              <td>统一后端 requires review 与前端 invalid item helpers。</td>
-            </tr>
-            <tr>
-              <td>signal chip 有，但 signal filter 没命中</td>
-              <td>signal summary 与 matching feedback</td>
-              <td><code>signal_summary</code>, <code>preview_matching_feedback</code>, parser tags, learning/LLM/recurring fields</td>
-              <td>看 chip 来源是 payload 还是 typed summary。</td>
-              <td>修 <code>signal_filter_matches</code> 或前端 signal view model。</td>
-            </tr>
-            <tr>
-              <td>手动编辑后又被覆盖</td>
-              <td>patch -> reclassify/intelligence chain</td>
-              <td>manual annotation、clear decision keys、category/account/type fields</td>
-              <td>在 update 后和 reclassify 后各取一次同一 preview row。</td>
-              <td>修优先级，不让规则/学习/LLM 覆盖用户显式选择。</td>
-            </tr>
-            <tr>
-              <td>前端显示选中但 confirm 未入库</td>
-              <td>selection persistence 与 confirm request</td>
-              <td><code>selected</code>, <code>selected_ids</code>, <code>preview_updates</code>, <code>preserve_unpatched_selection</code></td>
-              <td>检查 selection 是否写到后端，confirm 请求是否覆盖选择集。</td>
-              <td>修 selection update 或 confirm request 构造。</td>
-            </tr>
-            <tr>
-              <td>parser 行缺描述或交易对象</td>
-              <td>parser adapter</td>
-              <td><code>description</code>, <code>counterparty</code>, <code>merchant</code>, <code>goods</code>, <code>product</code>, <code>payment_method</code></td>
-              <td>先看 <code>RawBill</code> 是否已有信息，再看 StandardBill 映射。</td>
-              <td>修 parser，而不是在 preview 层猜测补齐。</td>
-            </tr>
-          </tbody>
-        </table>
+    <section id="debug">
+      <h2>错字段排查地图：从现象直接跳层</h2>
+      <div class="debug-map">
+        <article class="debug-node">
+          <h3>金额错 100 倍</h3>
+          <p class="mini"><span class="label hint">investigation hint</span> 不要先改 UI 格式化，先沿金额血缘查。</p>
+          <div class="route"><div class="route-step"><code>RawBill/StandardBill.amount</code> 与 standard-row <code>amount_cents</code> 是否已错</div><div class="route-step"><code>parser_amount</code> 到 <code>preview_amount_cents</code> 是否重复或漏掉元/分转换</div><div class="route-step">confirm <code>amount_cents</code> 是否与 preview typed column 一致</div></div>
+        </article>
+        <article class="debug-node">
+          <h3>分类名称对但入库错</h3>
+          <p class="mini">以 canonical <code>category_id</code> 为准，名称不是合同。</p>
+          <div class="route"><div class="route-step">查 <code>category_id</code> 是否当前用户 active</div><div class="route-step">查 payload <code>category_id</code>/<code>categoryId</code> 是否同值</div><div class="route-step">查 confirm 重载后的 row</div></div>
+        </article>
+        <article class="debug-node">
+          <h3>筛选结果和展示不一致</h3>
+          <p class="mini">server-paged 模式优先以后端筛选为准。</p>
+          <div class="route"><div class="route-step">查 query 参数是否进入 <code>getImportPreviewPage</code></div><div class="route-step">查后端 <code>apply_preview_filters</code></div><div class="route-step">对照本地 <code>checkDataFilters.ts</code></div></div>
+        </article>
+        <article class="debug-node">
+          <h3>账户显示对但 confirm 拒绝</h3>
+          <p class="mini">通常是 active account、destination 或同账户问题。</p>
+          <div class="route"><div class="route-step">查 <code>account_id</code>/<code>transfer_target_account_id</code></div><div class="route-step">查当前用户 active accounts</div><div class="route-step">查 <code>identity_validation</code> issues</div></div>
+        </article>
+        <article class="debug-node">
+          <h3>signal chip 有但筛不到</h3>
+          <p class="mini">chip 可能来自 payload，筛选可能读 signal summary 或 matching feedback。</p>
+          <div class="route"><div class="route-step">查 <code>preview_matching_feedback</code></div><div class="route-step">查 <code>signal_summary</code></div><div class="route-step">查 <code>signal_filter_matches</code> 与前端 signal view model</div></div>
+        </article>
+        <article class="debug-node">
+          <h3>编辑后又变回去</h3>
+          <p class="mini">排查用户 patch 是否被规则、学习或 LLM 覆盖。</p>
+          <div class="route"><div class="route-step">update 后保存 row 快照</div><div class="route-step">reclassify 后保存 row 快照</div><div class="route-step">比较 manual annotation 和 clear decision keys</div></div>
+        </article>
+        <article class="debug-node">
+          <h3>选中了但没入库</h3>
+          <p class="mini">confirm 只认后端重载后的 selected preview rows。</p>
+          <div class="route"><div class="route-step">查 <code>selected</code> typed column</div><div class="route-step">查 <code>preview_updates</code>/<code>preserve_unpatched_selection</code></div><div class="route-step">查后端兼容 <code>selected_ids</code> 路径和 requires review</div></div>
+        </article>
+        <article class="debug-node">
+          <h3>转账目标账户丢失</h3>
+          <p class="mini">先判断是 stage2 没识别，还是写入 preview 时丢 typed column。</p>
+          <div class="route"><div class="route-step">查 transfer plan / materialization</div><div class="route-step">查 <code>preview_destination_account_id</code></div><div class="route-step">查 <code>transfer_target_account_id</code> typed column</div></div>
+        </article>
+        <article class="debug-node">
+          <h3>parser 行缺描述或对象</h3>
+          <p class="mini">不要在 preview 层猜补；先回 parser adapter。</p>
+          <div class="route"><div class="route-step">查 <code>RawBill</code> 是否有 <code>merchant/goods/product</code></div><div class="route-step">查 <code>StandardBill.description</code></div><div class="route-step">再查 template draft 映射</div></div>
+        </article>
       </div>
     </section>
 
     <section id="checklist">
-      <h2>人工核对清单</h2>
-      <div class="two-col">
-        <div class="panel">
-          <h3>导入前后抽样核对</h3>
-          <ol class="checks">
-            <li>选一条有明确交易时间、金额、商户的账单，记录 parser 原始字段。</li>
-            <li>核对 <code>StandardBill.amount</code> 与平台金额是否同单位、同符号语义。</li>
-            <li>核对 <code>parser_amount</code> 到 <code>preview_amount_cents</code> 是否只发生一次元转分。</li>
-            <li>核对 <code>category_id</code> 是否属于当前用户 taxonomy，名称只是辅助。</li>
-            <li>核对 source account 与 payment method 是否被混用。</li>
-            <li>如果是转账，核对 source、destination、destination amount 和 same-account validation。</li>
-            <li>编辑一行后刷新预览页，确认 typed columns 与 payload 都持久化。</li>
-            <li>确认入库后，对照正式 bills 的 amount、category_id、source_account_id、destination_account_id。</li>
+      <h2>人工核对清单：按地图走一遍</h2>
+      <div class="check-grid">
+        <article class="check-card">
+          <h3>单行全链路抽样</h3>
+          <ol>
+            <li>用交易时间、金额、商户锁定一条真实导入行。</li>
+            <li>保存 parser 输出：<code>RawBill</code> 与 <code>StandardBill</code>。</li>
+            <li>保存 standard-row/template/stage2：<code>amount_cents</code>、<code>parser_amount</code>、<code>parser_type</code>、dedup/transfer 信号。</li>
+            <li>保存 preview：typed columns 与 <code>preview_payload</code>。</li>
+            <li>保存前端模型：<code>ImportTransaction</code> 的 type、categoryId、accounts、amount cents。</li>
+            <li>confirm 后对照正式 bill 的 amount、category、source/destination accounts。</li>
           </ol>
-        </div>
-        <div class="panel">
-          <h3>筛选和分页核对</h3>
-          <ol class="checks">
-            <li>在 server-paged 模式下核对筛选参数是否进入 <code>getImportPreviewPage</code>。</li>
+        </article>
+        <article class="check-card">
+          <h3>筛选与跨页选择</h3>
+          <ol>
+            <li>确认当前是否是 server-paged 模式。</li>
             <li>分类筛选分别测试正常分类、<code>__none__</code>、<code>__invalid__</code>。</li>
             <li>账户筛选分别测试 source、destination、缺失、非法。</li>
-            <li>signal 筛选逐项测试 parser、platform duplicate、transfer、history、learning、LLM。</li>
-            <li>只选中几行后翻页，确认 selected 状态来自后端而不是本地旧数组。</li>
-            <li>批量编辑或重新分类后，重新拉 page 和 facets，检查计数是否同步变化。</li>
-            <li>confirm 前后对比 session status，避免已确认 session 还能被继续编辑。</li>
+            <li>signal 筛选测试 parser、platform duplicate、transfer、history、learning、LLM。</li>
+            <li>跨页选择后刷新，确认 selected 状态来自后端。</li>
+            <li>批量编辑或重新分类后重新拉 page 和 facets，检查计数同步变化。</li>
           </ol>
-        </div>
+        </article>
       </div>
-
-      <div class="callout riskbox">
-        <strong>修 bug 前的最低证据：</strong>
-        至少固定一条 preview row 的 <code>id</code> 或 <code>page_sort_key</code>，同时拿到 parser 标准行、preview typed columns、preview payload、前端转换后的 <code>ImportTransaction</code>、confirm 后正式 bill 五个视角。没有这五个视角，字段错位很容易被修到错误层。
-      </div>
-
-      <div class="callout hintbox">
-        <strong>快速二分方法：</strong>
-        如果接口返回已经错，查 Rust parser/stage2/preview 写入；如果接口正确但 UI 错，查前端转换、当前 taxonomy/account map 和本地筛选；如果 UI 正确但 confirm 错，查 confirm 重新加载、identity validation 和 bill create fields。
+      <div class="callout">
+        <strong>最低排查证据</strong>
+        修导入预览 bug 前，至少固定一条 preview row 的 <code>id</code> 或 <code>page_sort_key</code>，并拿到 parser 标准行、preview typed columns、preview payload、前端 <code>ImportTransaction</code>、confirm 后正式 bill 五个视角。没有这五个视角，字段错位很容易被修到错误层。
       </div>
     </section>
 
     <section id="sources">
-      <h2>源码和文档索引</h2>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>位置</th>
-              <th>看什么</th>
-              <th>找 bug 用法</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>docs/PROJECT_OVERVIEW.md</code></td>
-              <td>项目当前架构、导入链路、Rust runtime 边界</td>
-              <td>确认主链是否仍是 Rust parser-first、REST <code>/api</code>、PostgreSQL staging。</td>
-            </tr>
-            <tr>
-              <td><code>docs/overview-import.md</code></td>
-              <td>导入 stage2 顺序和账户规则位置</td>
-              <td>确认 category、recurring、learning、account recognition 的先后关系。</td>
-            </tr>
-            <tr>
-              <td><code>docs/import-full-chain-scenarios.md</code></td>
-              <td>端到端场景矩阵</td>
-              <td>用 parser-first、规则、Weaviate recall、preview edit、confirm 场景做复现样本。</td>
-            </tr>
-            <tr>
-              <td><code>src/backend/parsers/lib.rs</code></td>
-              <td><code>RawBill</code>、<code>StandardBill</code>、parser registry</td>
-              <td>定位平台字段到标准字段的第一跳。</td>
-            </tr>
-            <tr>
-              <td><code>src/backend/http/import_routes/parse_handlers.rs</code></td>
-              <td>parse runtime handlers</td>
-              <td>定位 multipart、JSON、generic parse 请求入口。</td>
-            </tr>
-            <tr>
-              <td><code>src/backend/http/import_routes/stage_handlers.rs</code></td>
-              <td>stage2、dedup、intelligence、preview insert、reclassify、confirm</td>
-              <td>定位业务处理顺序和用户 patch 是否被覆盖。</td>
-            </tr>
-            <tr>
-              <td><code>src/backend/db/import_staging/types.rs</code></td>
-              <td>preview draft、template draft、preview row 类型</td>
-              <td>定位每一层字段名和字段语义。</td>
-            </tr>
-            <tr>
-              <td><code>src/backend/db/import_staging.rs</code></td>
-              <td>preview row insert/update/filter/facet/confirm 细节</td>
-              <td>定位 typed columns、payload、identity validation 和 confirm 入库字段。</td>
-            </tr>
-            <tr>
-              <td><code>src/web/src/views/desktop/transactions/import/importPreview.ts</code></td>
-              <td><code>ImportPreviewRecord</code> 和分类 id 解析</td>
-              <td>定位接口对象到前端预览模型的第一跳。</td>
-            </tr>
-            <tr>
-              <td><code>src/web/src/views/desktop/transactions/import/importPreviewTransaction.ts</code></td>
-              <td>preview row -> <code>ImportTransaction</code></td>
-              <td>定位展示、编辑和确认前端字段错位。</td>
-            </tr>
-            <tr>
-              <td><code>src/web/src/models/imported_transaction.ts</code></td>
-              <td><code>ImportTransaction</code>、校验、create request</td>
-              <td>定位前端校验和创建请求构造。</td>
-            </tr>
-            <tr>
-              <td><code>src/web/src/models/import_matching.ts</code></td>
-              <td>matching payload schema</td>
-              <td>定位 transfer、investment、learning、recurring、dedup、parser、annotation 信号。</td>
-            </tr>
-            <tr>
-              <td><code>src/web/src/lib/services.ts</code></td>
-              <td>preview page/update/confirm/LLM service</td>
-              <td>定位前端实际调用的 API、参数名和 request body。</td>
-            </tr>
-            <tr>
-              <td><code>src/web/src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue</code></td>
-              <td>预览页 UI、筛选、选择、编辑、signal 展示</td>
-              <td>定位用户看到的状态和后端 row 状态之间的差异。</td>
-            </tr>
-            <tr>
-              <td><code>src/web/src/views/desktop/transactions/import/importPreviewIndex.ts</code></td>
-              <td>server-paged filter constants 和 signal view model</td>
-              <td>定位 <code>__none__</code>、<code>__invalid__</code>、signal filter 的前端语义。</td>
-            </tr>
-            <tr>
-              <td><code>src/web/src/views/desktop/transactions/import/checkDataFilters.ts</code></td>
-              <td>本地筛选语义</td>
-              <td>对照后端 server-paged filter，排查本地/服务端筛选差异。</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section>
-      <h2>修复时不应破坏的合同</h2>
-      <div class="panel">
-        <ol class="checks">
-          <li><span class="label fact">confirmed current-state fact</span> 导入主链是 Rust parser-first，不要新增 sidecar 或旧式透传作为运行时兜底。</li>
-          <li><span class="label fact">confirmed current-state fact</span> <code>category_id</code> 和 account id 必须以当前用户 active 数据为准，非法值要在 identity validation 层处理。</li>
-          <li><span class="label fact">confirmed current-state fact</span> preview typed columns 与 <code>preview_payload</code> 都是有效合同；修一个字段时要确认两边是否都需要更新。</li>
-          <li><span class="label fact">confirmed current-state fact</span> confirm 只信任后端重新加载并校验后的 selected preview rows。</li>
-          <li><span class="label risk">high-risk boundary</span> 金额字段改动必须人工复核元/分转换，不要只看页面显示。</li>
-          <li><span class="label risk">high-risk boundary</span> 用户手动编辑、人工标注和 reject/accept decision 不能被重新分类链路静默覆盖。</li>
-          <li><span class="label risk">high-risk boundary</span> 转账和投资必须同时维护 source、destination、destination amount 与同账户校验。</li>
-          <li><span class="label hint">investigation hint</span> 每次修导入预览 bug 后，至少用一条真实 preview row 验证 parse -> stage2 -> preview -> edit/filter -> confirm 的闭环。</li>
-        </ol>
+      <h2>源码索引地图：节点对应的入口文件</h2>
+      <div class="source-map">
+        <article class="source-node">
+          <h3>架构与场景</h3>
+          <ul class="node-list">
+            <li><code>docs/PROJECT_OVERVIEW.md</code>：当前 Rust runtime、REST <code>/api</code> 与导入主链。</li>
+            <li><code>docs/overview-import.md</code>：导入 stage2 顺序与账户识别位置。</li>
+            <li><code>docs/import-full-chain-scenarios.md</code>：parser-first、stage2、preview edit、confirm 验收场景。</li>
+          </ul>
+        </article>
+        <article class="source-node">
+          <h3>后端 parser / route</h3>
+          <ul class="node-list">
+            <li><code>src/backend/parsers/lib.rs</code>：<code>RawBill</code>、<code>StandardBill</code>、parser registry。</li>
+            <li><code>src/backend/http/import_routes/parse_handlers.rs</code>：parse runtime handlers。</li>
+            <li><code>src/backend/http/import_routes/mod.rs</code>：import-v2 route table。</li>
+          </ul>
+        </article>
+        <article class="source-node">
+          <h3>后端 stage / preview</h3>
+          <ul class="node-list">
+            <li><code>src/backend/http/import_routes/stage_handlers.rs</code>：stage2、reclassify、confirm。</li>
+            <li><code>src/backend/db/import_staging/types.rs</code>：draft、template、preview row 类型。</li>
+            <li><code>src/backend/db/import_staging.rs</code>：insert/update/filter/facet/identity validation/confirm。</li>
+          </ul>
+        </article>
+        <article class="source-node">
+          <h3>前端 preview 模型</h3>
+          <ul class="node-list">
+            <li><code>src/web/src/views/desktop/transactions/import/importPreview.ts</code>：<code>ImportPreviewRecord</code> 与 category id 解析。</li>
+            <li><code>src/web/src/views/desktop/transactions/import/importPreviewTransaction.ts</code>：preview row 到 <code>ImportTransaction</code>。</li>
+            <li><code>src/web/src/models/imported_transaction.ts</code>：前端校验与 create request。</li>
+          </ul>
+        </article>
+        <article class="source-node">
+          <h3>前端交互与筛选</h3>
+          <ul class="node-list">
+            <li><code>src/web/src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue</code>：预览页 UI、编辑、选择、signal。</li>
+            <li><code>src/web/src/views/desktop/transactions/import/importPreviewIndex.ts</code>：server-paged filter constants 与 signal view model。</li>
+            <li><code>src/web/src/views/desktop/transactions/import/checkDataFilters.ts</code>：本地筛选语义。</li>
+          </ul>
+        </article>
+        <article class="source-node">
+          <h3>服务与 matching schema</h3>
+          <ul class="node-list">
+            <li><code>src/web/src/lib/services.ts</code>：preview page/update/confirm/LLM service。</li>
+            <li><code>src/web/src/models/import_matching.ts</code>：transfer、investment、learning、recurring、dedup、annotation payload schema。</li>
+          </ul>
+        </article>
       </div>
     </section>
   </main>
 
   <footer>
     <div class="wrap">
-      维护提示：后续修改导入链路、preview schema、前端 ImportTransaction 映射、筛选语义或 confirm 逻辑时，应同步更新本文相应章节。
+      维护规则：导入链路、preview schema、筛选语义、前端 ImportTransaction 映射或 confirm 逻辑发生变化时，同步更新这张审计思维导图。Browser file:// 自动烟测在 Codex Browser 策略下可能被阻止，本文保持无外部资源以支持直接本地打开。
     </div>
   </footer>
 </body>
