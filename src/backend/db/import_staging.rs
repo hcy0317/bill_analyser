@@ -926,11 +926,7 @@ fn push_preview_platform_duplicate_signal_condition(
 }
 
 fn push_preview_transfer_signal_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
-    query.push("(");
-    push_preview_dedup_type_in_condition(query, alias, &["transfer", "transfer_cross_batch"]);
-    query.push(" OR ");
     push_preview_feedback_key_condition(query, alias, "transfer");
-    query.push(")");
 }
 
 fn push_preview_history_signal_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
@@ -4438,10 +4434,7 @@ fn preview_platform_duplicate_signal_matches(row: &ImportPreviewRow) -> bool {
 }
 
 fn preview_transfer_signal_matches(row: &ImportPreviewRow) -> bool {
-    matches!(
-        preview_dedup_type(row).as_str(),
-        "transfer" | "transfer_cross_batch"
-    ) || preview_feedback_key_exists(&row.preview_matching_feedback, "transfer")
+    preview_feedback_key_exists(&row.preview_matching_feedback, "transfer")
 }
 
 fn preview_history_signal_matches(row: &ImportPreviewRow) -> bool {
@@ -4906,6 +4899,10 @@ mod import_preview_query_tests {
         let mut cross_batch_transfer = preview_row(4);
         cross_batch_transfer.dedup_type = "transfer_cross_batch".to_string();
 
+        let mut transfer_type_without_signal = preview_row(8);
+        transfer_type_without_signal.preview_type = "转账".to_string();
+        transfer_type_without_signal.dedup_type = "transfer".to_string();
+
         let mut history = preview_row(5);
         history.preview_matching_feedback = json!({
             "reconciliation": {
@@ -4933,6 +4930,7 @@ mod import_preview_query_tests {
             history,
             learning,
             llm,
+            transfer_type_without_signal,
         ];
         let filtered_ids = |signal: &str| {
             apply_preview_filters(
@@ -4947,15 +4945,20 @@ mod import_preview_query_tests {
             .collect::<Vec<_>>()
         };
 
-        assert_eq!(filtered_ids("parser"), vec![1]);
-        assert_eq!(filtered_ids("parser_12"), vec![1]);
+        assert_eq!(filtered_ids("parser"), vec![1, 4, 8]);
+        assert_eq!(filtered_ids("parser_12"), vec![1, 4, 8]);
         assert_eq!(filtered_ids("platform_duplicate"), vec![2]);
-        assert_eq!(filtered_ids("transfer"), vec![3, 4]);
+        assert_eq!(filtered_ids("transfer"), vec![3]);
         assert_eq!(filtered_ids("history"), vec![5]);
         assert_eq!(filtered_ids("learning"), vec![6]);
         assert_eq!(filtered_ids("learning:needs_review"), vec![6]);
+        assert_eq!(filtered_ids("learning_1"), vec![6]);
+        assert_eq!(filtered_ids("learning-1"), vec![6]);
         assert_eq!(filtered_ids("llm"), vec![7]);
         assert!(filtered_ids("manual").is_empty());
+        assert!(filtered_ids("12").is_empty());
+        assert!(filtered_ids("true").is_empty());
+        assert!(filtered_ids("missing").is_empty());
     }
 
     #[test]
@@ -5176,11 +5179,31 @@ mod import_preview_query_tests {
         assert!(sql.contains("preview_parser_id"));
         assert!(sql.contains("NOT"));
         assert!(sql.contains("platform_bank"));
-        assert!(sql.contains("transfer_cross_batch"));
+        assert!(!sql.contains("transfer_cross_batch"));
         assert!(sql.contains("planned_operation"));
         assert!(sql.contains("preview_matching_feedback' ? 'learning'"));
         assert!(sql.contains("preview_matching_feedback' ? 'llm'"));
         assert!(!sql.contains("preview_matching_feedback')::text ILIKE"));
+    }
+
+    #[test]
+    fn preview_sql_query_builder_filters_transfer_by_feedback_signal_only() {
+        let filters = ImportPreviewQueryFilters {
+            signal: Some("transfer".to_string()),
+            ..ImportPreviewQueryFilters::default()
+        };
+        let mut query = QueryBuilder::<Postgres>::new(
+            "SELECT p.* FROM import_preview_rows p WHERE p.session_id = ",
+        );
+        query.push_bind(1_i64);
+        push_preview_query_predicates(&mut query, &filters, "p");
+
+        let sql = query.build().sql().to_string();
+
+        assert!(sql.contains("preview_matching_feedback' ? 'transfer'"));
+        assert!(!sql.contains("transfer_cross_batch"));
+        assert!(!sql.contains("IN ('transfer'"));
+        assert!(!sql.contains("transaction_type"));
     }
 
     #[test]

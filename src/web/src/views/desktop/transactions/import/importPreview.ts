@@ -128,14 +128,14 @@ export function resolveImportPreviewCategoryPath(
     }
 
     const category = categoriesById[normalizedCategoryId];
-    if (!category) {
+    if (!category || category.hidden) {
         return null;
     }
 
     const parentId = category.parentId || '';
     if (parentId && parentId !== '0') {
         const parentCategory = categoriesById[parentId];
-        if (!parentCategory) {
+        if (!parentCategory || parentCategory.hidden) {
             return null;
         }
 

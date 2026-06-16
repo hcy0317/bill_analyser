@@ -901,9 +901,9 @@ export function buildImportPreviewSignalViewModel(
     const parserDetailLines = buildParserDetailLines(matchingSummary, state, options);
     const transferDetailLines = buildTransferDetailLines(state, options);
     const normalizedDedupType = normalizeDedupType(matchingSummary.dedupType);
+    const hasTransferSignal = !!state.transferStatus;
     const shouldHideParser = normalizedDedupType === 'platform_bank'
-        || isTransferLikeDedupType(normalizedDedupType)
-        || !!state.transferStatus;
+        || hasTransferSignal;
     const parser = matchingSummary.parserId && !shouldHideParser
         ? {
             parserId: matchingSummary.parserId,
@@ -913,7 +913,10 @@ export function buildImportPreviewSignalViewModel(
             detailLines: parserDetailLines
         }
         : null;
-    const hasMeaningfulDedup = normalizedDedupType !== '' && normalizedDedupType !== 'remaining';
+    const isTransferDedupWithoutSignal = isTransferLikeDedupType(normalizedDedupType) && !hasTransferSignal;
+    const hasMeaningfulDedup = normalizedDedupType !== ''
+        && normalizedDedupType !== 'remaining'
+        && !isTransferDedupWithoutSignal;
     const dedupSourceCount = hasMeaningfulDedup
         ? (state.dedupSourceCount || matchingSummary.dedupSourceIds.length)
         : 0;
@@ -943,7 +946,7 @@ export function buildImportPreviewSignalViewModel(
             labelKey: getImportCheckMatchingDedupLabel(matchingSummary),
             label: buildDedupLabel(matchingSummary, options),
             title: buildSignalTitle(dedupDetailLines, getImportCheckMatchingDedupTitle(matchingSummary, options)),
-            color: isTransferLikeDedupType(matchingSummary.dedupType) ? 'primary' : 'secondary',
+            color: isTransferLikeDedupType(matchingSummary.dedupType) && hasTransferSignal ? 'primary' : 'secondary',
             sourceCount: dedupSourceCount,
             detailLines: dedupDetailLines
         }
@@ -1051,7 +1054,6 @@ export function matchesImportPreviewSignalFilter(
     if (filter === 'parser') {
         return !!viewModel.parser
             && normalizedDedupType !== 'platform_bank'
-            && !isTransferLikeDedupType(normalizedDedupType)
             && !viewModel.transferSuggestion
             && !viewModel.historyRewrite
             && !viewModel.learning
@@ -1063,7 +1065,7 @@ export function matchesImportPreviewSignalFilter(
     }
 
     if (filter === 'transfer') {
-        return isTransferLikeDedupType(normalizedDedupType) || !!viewModel.transferSuggestion;
+        return !!viewModel.transferSuggestion;
     }
 
     if (filter === 'history') {

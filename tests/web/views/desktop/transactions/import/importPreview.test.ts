@@ -197,6 +197,49 @@ describe('import preview category resolution', () => {
 
         expect(resolveImportPreviewCategoryPath('missing', categoriesById)).toBeNull();
         expect(resolveImportPreviewCategoryPath('tagLikeName', categoriesById)).toBeNull();
+        expect(resolveImportPreviewCategoryPath('hiddenSub', {
+            hiddenParent: {
+                id: 'hiddenParent',
+                name: '隐藏父类',
+                parentId: '0',
+                hidden: true,
+                type: CategoryType.Expense
+            },
+            hiddenSub: {
+                id: 'hiddenSub',
+                name: '隐藏子类',
+                parentId: 'hiddenParent',
+                type: CategoryType.Expense
+            },
+            visibleParent: {
+                id: 'visibleParent',
+                name: '可见父类',
+                parentId: '0',
+                type: CategoryType.Expense
+            },
+            hiddenLeaf: {
+                id: 'hiddenLeaf',
+                name: '隐藏叶子类',
+                parentId: 'visibleParent',
+                hidden: true,
+                type: CategoryType.Expense
+            }
+        })).toBeNull();
+        expect(resolveImportPreviewCategoryPath('hiddenLeaf', {
+            visibleParent: {
+                id: 'visibleParent',
+                name: '可见父类',
+                parentId: '0',
+                type: CategoryType.Expense
+            },
+            hiddenLeaf: {
+                id: 'hiddenLeaf',
+                name: '隐藏叶子类',
+                parentId: 'visibleParent',
+                hidden: true,
+                type: CategoryType.Expense
+            }
+        })).toBeNull();
     });
 
     test('resolves the default transfer category from profile setting before visible fallback', () => {

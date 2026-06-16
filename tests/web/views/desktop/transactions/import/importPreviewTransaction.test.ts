@@ -205,6 +205,32 @@ describe('import preview transaction helper', () => {
         expect(transaction.paymentMethod).toBe('民生银行储蓄卡(6332)');
     });
 
+    test('does not use payment-method placeholders as account or category identity fallbacks', () => {
+        const transaction = buildImportTransactionFromPreviewRecord({
+            id: 11,
+            category_id: null,
+            preview_type: '支出',
+            preview_date: '2026-06-01T00:00:00Z',
+            preview_amount_cents: 235,
+            preview_main_category: '',
+            preview_sub_category: '',
+            preview_source_account_id: null,
+            preview_destination_account_id: null,
+            preview_payment_method: 'POS机'
+        }, 5, {
+            categoriesById,
+            transferCategories,
+            cashTransferCategoryId: 'transferSub',
+            timeZone: 'UTC'
+        });
+
+        expect(transaction.categoryId).toBe('');
+        expect(transaction.originalCategoryName).toBe('');
+        expect(transaction.sourceAccountId).toBe('');
+        expect(transaction.originalSourceAccountName).toBe('');
+        expect(transaction.paymentMethod).toBe('POS机');
+    });
+
     test('uses explicit investment destination amount instead of source fallback', () => {
         const transaction = buildImportTransactionFromPreviewRecord({
             id: 77,

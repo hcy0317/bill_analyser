@@ -303,6 +303,42 @@ describe('import preview index helpers', () => {
         });
     });
 
+    test('keeps server-paged transfer signal filtering independent from transaction type filtering', () => {
+        const signalOnlyFilters = buildImportPreviewServerQueryFilters({
+            minDatetime: null,
+            maxDatetime: null,
+            transactionType: null,
+            category: null,
+            account: null,
+            tag: null,
+            signal: 'transfer',
+            annotation: null,
+            description: null,
+        });
+
+        expect(signalOnlyFilters).toMatchObject({
+            signal: 'transfer'
+        });
+        expect(signalOnlyFilters).not.toHaveProperty('transactionType');
+
+        const signalAndTypeFilters = buildImportPreviewServerQueryFilters({
+            minDatetime: null,
+            maxDatetime: null,
+            transactionType: 4,
+            category: null,
+            account: null,
+            tag: null,
+            signal: 'transfer',
+            annotation: null,
+            description: null,
+        });
+
+        expect(signalAndTypeFilters).toMatchObject({
+            signal: 'transfer',
+            transactionType: '转账'
+        });
+    });
+
     test('omits unmapped identity filter labels instead of sending raw category or account text', () => {
         const filters = buildImportPreviewServerQueryFilters({
             minDatetime: null,

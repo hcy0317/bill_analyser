@@ -2002,6 +2002,7 @@ async function submit(): Promise<void> {
             logger.info(`[三阶段导入-阶段3] 开始确认导入, session_id=${serverSessionId.value}`);
 
             // 收集用户编辑后的数据
+            const validAccountIds = new Set(accountsStore.allVisiblePlainAccounts.map(account => String(account.id)));
             const previewUpdates = serverPagedPreviewMode.value
                 ? selectedPreviewUpdates
                 : selectedTransactions.map(t => {
@@ -2016,7 +2017,7 @@ async function submit(): Promise<void> {
 
                     return buildImportPreviewUpdateFromTransaction(t, {
                         categoryPath,
-                        validAccountIds: new Set(Object.keys(accountsStore.allAccountsMap)),
+                        validAccountIds,
                         clearTransferDecision: !!(t as ImportPreviewTransactionDraft)._shouldClearTransferDecision
                     });
                 });

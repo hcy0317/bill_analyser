@@ -839,6 +839,9 @@ import {
 import {
     buildImportPreviewUpdateFromTransaction
 } from '../importPreviewUpdates.ts';
+import {
+    clearResolvedImportPreviewReviewState
+} from '../importPreviewReviewState.ts';
 import { cloneImportPreviewDraftTransaction } from '../importPreviewDrafts.ts';
 import {
     buildImportPreviewServerQueryFilters,
@@ -1192,6 +1195,15 @@ function getCategoriesForType(type: number): TransactionCategory[] {
 function getAcceptedCategoryPathForTransaction(transaction: ImportTransaction): ReturnType<typeof resolveImportPreviewCategoryPath> {
     const categoryPath = resolveImportPreviewCategoryPath(transaction.categoryId, allCategoriesMap.value);
     if (!categoryPath) {
+        return null;
+    }
+    const normalizedCategoryId = String(transaction.categoryId || '').trim();
+    const category = allCategoriesMap.value[normalizedCategoryId];
+    if (!category || category.hidden) {
+        return null;
+    }
+    const parentId = category.parentId || '';
+    if (parentId && parentId !== '0' && allCategoriesMap.value[parentId]?.hidden) {
         return null;
     }
 
@@ -1778,11 +1790,25 @@ function mergePreviewMatchingPayload(
     const currentLLM = currentRecord['llm'] as ImportPreviewLLMMatchingPayload | undefined;
     const incomingLLM = incomingRecord['llm'] as ImportPreviewLLMMatchingPayload | undefined;
 
-    return {
-        ...currentRecord,
+    const {
+        annotation: _currentAnnotation,
+        identity_validation: _currentIdentityValidation,
+        ...currentWithoutClearableReviewState
+    } = currentRecord;
+    const nextMatching = {
+        ...currentWithoutClearableReviewState,
         ...incomingRecord,
         llm: hasMeaningfulLLMMatchingPayload(incomingLLM) ? incomingLLM : currentLLM,
-    } as ImportPreviewRecord['matching'];
+    } as Record<string, unknown>;
+
+    if (!Object.prototype.hasOwnProperty.call(incomingRecord, 'annotation')) {
+        delete nextMatching['annotation'];
+    }
+    if (!Object.prototype.hasOwnProperty.call(incomingRecord, 'identity_validation')) {
+        delete nextMatching['identity_validation'];
+    }
+
+    return nextMatching as unknown as ImportPreviewRecord['matching'];
 }
 
 function mergeLLMMatchingFromPayload(item: ImportTransaction, llmPayload: ImportPreviewLLMMatchingPayload | undefined): void {
@@ -2900,19 +2926,17 @@ function hasMissingCategoryIssue(item: ImportTransaction): boolean {
 }
 
 function hasMissingSourceAccountIssue(item: ImportTransaction): boolean {
-    return !item.sourceAccountId || item.sourceAccountId === '0';
+    return !isKnownAccountId(item.sourceAccountId);
 }
 
 function hasMissingDestinationAccountIssue(item: ImportTransaction): boolean {
-    return requiresDestinationAccount(item) && (!item.destinationAccountId || item.destinationAccountId === '0');
+    return requiresDestinationAccount(item) && !isKnownAccountId(item.destinationAccountId);
 }
 
 function hasTransferAccountReviewIssue(item: ImportTransaction): boolean {
     return requiresDestinationAccount(item)
-        && !!item.sourceAccountId
-        && !!item.destinationAccountId
-        && item.sourceAccountId !== '0'
-        && item.destinationAccountId !== '0'
+        && isKnownAccountId(item.sourceAccountId)
+        && isKnownAccountId(item.destinationAccountId)
         && item.sourceAccountId === item.destinationAccountId;
 }
 
@@ -3166,6 +3190,7 @@ function buildPreviewUpdates(options: { selectedOnly: boolean }): Record<string,
     const transactions = getTrackedTransactionsForSelection().filter(transaction => (
         !options.selectedOnly || transaction.selected
     ));
+    const validAccountIds = new Set(allVisibleAccounts.value.map(account => String(account.id)));
 
     return transactions.map(transaction => {
         const categoryPath = getAcceptedCategoryPathForTransaction(transaction);
@@ -3175,7 +3200,7 @@ function buildPreviewUpdates(options: { selectedOnly: boolean }): Record<string,
 
         return buildImportPreviewUpdateFromTransaction(transaction, {
             categoryPath,
-            validAccountIds: new Set(Object.keys(allAccountsMap.value)),
+            validAccountIds,
             clearTransferDecision,
             clearLearningDecision,
             clearLlmDecision,
@@ -4956,11 +4981,11 @@ function getCurrentInvalidAccountNames(): NameValue[] {
         const sourceAccountId = importTransaction.sourceAccountId;
         const destinationAccountId = importTransaction.destinationAccountId;
 
-        if (!sourceAccountId || sourceAccountId === '0' || !allAccountsMap.value[sourceAccountId]) {
+        if (!isKnownAccountId(sourceAccountId)) {
             invalidAccountNames[importTransaction.originalSourceAccountName] = true;
         }
 
-        if (importTransaction.type === TransactionType.Transfer && isString(importTransaction.originalDestinationAccountName) && (!destinationAccountId || destinationAccountId === '0' || !allAccountsMap.value[destinationAccountId])) {
+        if (importTransaction.type === TransactionType.Transfer && isString(importTransaction.originalDestinationAccountName) && !isKnownAccountId(destinationAccountId)) {
             invalidAccountNames[importTransaction.originalDestinationAccountName] = true;
         }
     }
@@ -5296,23 +5321,33 @@ function updateTransactionData(transaction: ImportTransaction): void {
         transaction.actualCategoryName = '';
     }
 
-    if (transaction.sourceAccountId && allAccountsMap.value[transaction.sourceAccountId]) {
+    if (isKnownAccountId(transaction.sourceAccountId)) {
         transaction.actualSourceAccountName = allAccountsMap.value[transaction.sourceAccountId]!.name;
-    } else if (!transaction.sourceAccountId || transaction.sourceAccountId === '0' || !allAccountsMap.value[transaction.sourceAccountId]) {
+    } else {
         transaction.actualSourceAccountName = '';
     }
 
-    if (transaction.destinationAccountId && allAccountsMap.value[transaction.destinationAccountId]) {
+    if (isKnownAccountId(transaction.destinationAccountId)) {
         transaction.actualDestinationAccountName = allAccountsMap.value[transaction.destinationAccountId]!.name;
-    } else if (!transaction.destinationAccountId || transaction.destinationAccountId === '0' || !allAccountsMap.value[transaction.destinationAccountId]) {
+    } else {
         transaction.actualDestinationAccountName = '';
     }
 
+    transaction.matching = clearResolvedImportPreviewReviewState(
+        transaction.matching as Record<string, unknown> | undefined,
+        {
+            hasMissingCategoryIssue: hasMissingCategoryIssue(transaction),
+            hasMissingSourceAccountIssue: hasMissingSourceAccountIssue(transaction),
+            hasMissingDestinationAccountIssue: hasMissingDestinationAccountIssue(transaction),
+            hasTransferAccountReviewIssue: hasTransferAccountReviewIssue(transaction)
+        }
+    ) as typeof transaction.matching;
 }
 
 function isKnownAccountId(accountId: string | number | null | undefined): boolean {
     const normalizedAccountId = String(accountId || '').trim();
-    return !!normalizedAccountId && normalizedAccountId !== '0' && !!allAccountsMap.value[normalizedAccountId];
+    const account = allAccountsMap.value[normalizedAccountId];
+    return !!normalizedAccountId && normalizedAccountId !== '0' && !!account && !account.hidden;
 }
 
 function isKnownCategoryIdForType(

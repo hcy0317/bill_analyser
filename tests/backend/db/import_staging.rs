@@ -339,6 +339,68 @@ async fn import_preview_runtime_facets_identity_validation_and_confirm_are_db_ba
         .and_then(Value::as_array)
         .is_some_and(|issues| !issues.is_empty()));
 
+    let resolved_single_id = insert_preview_bill(
+        pool,
+        "runtime-contract-session",
+        scoped_user_id,
+        &preview_draft(
+            "2026-05-04 10:00:00",
+            "支出",
+            2888,
+            Some(9_999_999),
+            Some(9_999_999),
+            None,
+            true,
+        ),
+    )?;
+    let resolved_before_patch = get_preview_bill_by_id(pool, resolved_single_id, scoped_user_id)?
+        .expect("inserted preview");
+    assert!(resolved_before_patch
+        .preview_matching_feedback
+        .pointer("/identity_validation/issues")
+        .and_then(Value::as_array)
+        .is_some_and(|issues| !issues.is_empty()));
+
+    let resolved_patch_count = replace_preview_selection_with_patches(
+        pool,
+        "runtime-contract-session",
+        scoped_user_id,
+        &[ImportPreviewPatch::new(resolved_single_id).with_changes([
+            (
+                ImportPreviewPatchField::SourceAccountId,
+                ImportPreviewPatchValue::Integer(wallet_id),
+            ),
+            (
+                ImportPreviewPatchField::CategoryId,
+                ImportPreviewPatchValue::Integer(food_id),
+            ),
+        ])],
+    )?;
+    assert_eq!(resolved_patch_count, 1);
+    let resolved_row =
+        get_preview_bill_by_id(pool, resolved_single_id, scoped_user_id)?.expect("patched preview");
+    assert_eq!(resolved_row.preview_source_account_id, Some(wallet_id));
+    assert_eq!(resolved_row.category_id, Some(food_id));
+    assert!(resolved_row
+        .preview_matching_feedback
+        .pointer("/identity_validation/issues")
+        .is_none());
+
+    let resolved_needs_review = query_preview_page_by_session(
+        pool,
+        "runtime-contract-session",
+        scoped_user_id,
+        &ImportPreviewPageRequest {
+            preview_ids: vec![resolved_single_id],
+            filters: ImportPreviewQueryFilters {
+                annotation: Some("needs-review".to_string()),
+                ..ImportPreviewQueryFilters::default()
+            },
+            ..ImportPreviewPageRequest::default()
+        },
+    )?;
+    assert_eq!(resolved_needs_review.total, 0);
+
     sqlx::query(
         r#"
         UPDATE import_preview_rows

@@ -161,9 +161,7 @@ export function buildImportTransactionFromPreviewRecord(
         time: getPreviewTimeInSeconds(item.preview_date, options.nowInSeconds),
         utcOffset: getTimezoneOffsetMinutes(options.timeZone),
         sourceAccountId,
-        originalSourceAccountName: rawPreviewIdentityText(item.preview_source_account_id)
-            || item.preview_payment_method
-            || '',
+        originalSourceAccountName: rawPreviewIdentityText(item.preview_source_account_id),
         originalSourceAccountCurrency: 'CNY',
         destinationAccountId,
         originalDestinationAccountName: rawPreviewIdentityText(item.preview_destination_account_id),

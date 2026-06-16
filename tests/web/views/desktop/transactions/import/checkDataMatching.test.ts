@@ -191,9 +191,8 @@ describe('checkDataMatching helpers', () => {
             ]
         });
 
-        expect(viewModel.parser).toBeNull();
-        expect(viewModel.dedup?.labelKey).toBe('Transfer Match');
-        expect(viewModel.dedup?.title).toBe('匹配 | 支付宝 | 微信');
+        expect(viewModel.parser?.parserId).toBe('alipay');
+        expect(viewModel.dedup).toBeNull();
         expect(viewModel.isManuallyAnnotated).toBe(true);
         expect(viewModel.investment).toBeNull();
     });
@@ -385,12 +384,13 @@ describe('checkDataMatching helpers', () => {
         expect(viewModel.dedup?.label).toBe('平台重复');
     });
 
-    test('hides parser chip when transfer match dedup is present', () => {
+    test('hides parser chip only when a transfer signal is present', () => {
         const viewModel = buildImportPreviewSignalViewModel({
             parserId: 'cmbc',
             parserTags: ['parser:cmbc'],
             dedupType: 'transfer',
-            dedupSourceIds: [11, 12]
+            dedupSourceIds: [11, 12],
+            transferStatus: 'pending'
         }, {
             parserLabels: {
                 cmbc: '民生银行'
@@ -404,7 +404,8 @@ describe('checkDataMatching helpers', () => {
             parserId: 'cmbc',
             parserTags: ['parser:cmbc'],
             dedupType: 'transfer_cross_batch',
-            dedupSourceIds: [21, 22]
+            dedupSourceIds: [21, 22],
+            transferStatus: 'pending'
         }, {
             parserLabels: {
                 cmbc: '民生银行'
@@ -413,6 +414,15 @@ describe('checkDataMatching helpers', () => {
 
         expect(crossBatchViewModel.parser).toBeNull();
         expect(crossBatchViewModel.dedup?.labelKey).toBe('Cross-Batch Transfer');
+
+        const transferDedupWithoutSignal = buildImportPreviewSignalViewModel({
+            parserId: 'cmbc',
+            parserTags: ['parser:cmbc'],
+            dedupType: 'transfer',
+            dedupSourceIds: [31, 32]
+        });
+        expect(transferDedupWithoutSignal.parser?.parserId).toBe('cmbc');
+        expect(transferDedupWithoutSignal.dedup).toBeNull();
     });
 
     test('matches signal filters by the same visible signal families as the signal cell', () => {
@@ -430,7 +440,14 @@ describe('checkDataMatching helpers', () => {
             parserId: 'cmbc',
             parserTags: ['parser:cmbc'],
             dedupType: 'transfer',
-            dedupSourceIds: [11, 12]
+            dedupSourceIds: [11, 12],
+            transferStatus: 'pending'
+        });
+        const transferDedupWithoutSignal = buildImportPreviewSignalViewModel({
+            parserId: 'cmbc',
+            parserTags: ['parser:cmbc'],
+            dedupType: 'transfer',
+            dedupSourceIds: [13, 14]
         });
         const historyRewrite = buildImportPreviewSignalViewModel({
             parserId: 'abc',
@@ -454,6 +471,7 @@ describe('checkDataMatching helpers', () => {
         expect(matchesImportPreviewSignalFilter(parserOnly, 'parser')).toBe(true);
         expect(matchesImportPreviewSignalFilter(platformDuplicate, 'parser')).toBe(false);
         expect(matchesImportPreviewSignalFilter(transferMatch, 'parser')).toBe(false);
+        expect(matchesImportPreviewSignalFilter(transferDedupWithoutSignal, 'parser')).toBe(true);
         expect(matchesImportPreviewSignalFilter(historyRewrite, 'parser')).toBe(false);
         expect(matchesImportPreviewSignalFilter(learning, 'parser')).toBe(false);
         expect(matchesImportPreviewSignalFilter(llm, 'parser')).toBe(false);
@@ -461,6 +479,7 @@ describe('checkDataMatching helpers', () => {
         expect(matchesImportPreviewSignalFilter(platformDuplicate, 'platform_duplicate')).toBe(true);
         expect(matchesImportPreviewSignalFilter(parserOnly, 'platform_duplicate')).toBe(false);
         expect(matchesImportPreviewSignalFilter(transferMatch, 'transfer')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(transferDedupWithoutSignal, 'transfer')).toBe(false);
         expect(matchesImportPreviewSignalFilter(historyRewrite, 'history')).toBe(true);
         expect(matchesImportPreviewSignalFilter(learning, 'learning')).toBe(true);
         expect(matchesImportPreviewSignalFilter(llm, 'llm')).toBe(true);
@@ -738,7 +757,8 @@ describe('checkDataMatching helpers', () => {
         });
         const transferViewModel = buildImportPreviewSignalViewModel({
             dedupType: 'transfer',
-            dedupSourceIds: [401, 402]
+            dedupSourceIds: [401, 402],
+            transferStatus: 'pending'
         });
         const learningViewModel = buildImportPreviewSignalViewModel({
             learningStatus: 'pending',
@@ -767,7 +787,14 @@ describe('checkDataMatching helpers', () => {
             dedupType: 'transfer_cross_batch',
             dedupSourceIds: [501, 502]
         });
-        expect(matchesImportPreviewSignalFilter(crossBatchTransferViewModel, 'transfer')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(crossBatchTransferViewModel, 'transfer')).toBe(false);
+
+        const crossBatchTransferSignalViewModel = buildImportPreviewSignalViewModel({
+            dedupType: 'transfer_cross_batch',
+            dedupSourceIds: [501, 502],
+            transferStatus: 'pending'
+        });
+        expect(matchesImportPreviewSignalFilter(crossBatchTransferSignalViewModel, 'transfer')).toBe(true);
 
         expect(matchesImportPreviewSignalFilter(historyViewModel, 'history')).toBe(true);
         expect(matchesImportPreviewSignalFilter(learningViewModel, 'learning')).toBe(true);
