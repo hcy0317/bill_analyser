@@ -487,6 +487,17 @@ describe('import preview server-paged reset guards', () => {
         expect(tabSource).toContain('destinationAccountId: item.destinationAccountId');
     });
 
+    test('check-data signal column uses the transfer signal adapter', () => {
+        const tabSource = readSource('src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue');
+        const signalModelIndex = tabSource.indexOf('const viewModel = buildImportPreviewSignalViewModel({');
+        const signalModelSource = tabSource.slice(signalModelIndex, tabSource.indexOf('}, {', signalModelIndex));
+
+        expect(tabSource).toContain('getImportPreviewTransferSignalStatus as getTransferSignalStatus');
+        expect(tabSource).toContain('getImportPreviewTransferSignalTitle as getTransferSignalTitle');
+        expect(signalModelSource).toContain('transferStatus: getTransferSignalStatus(item),');
+        expect(signalModelSource).toContain('transferTitle: getTransferSignalTitle(item),');
+    });
+
     test('check-data server paging no longer fetches a full preview index before filtering', () => {
         const parentSource = readSource('src/views/desktop/transactions/import/ImportDialog.vue');
         const tabSource = readSource('src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue');

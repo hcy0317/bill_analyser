@@ -141,6 +141,39 @@ describe('import preview transaction helper', () => {
         expect(transaction.index).toBe(42);
     });
 
+    test('keeps structured transfer matching feedback visible as a signal', () => {
+        const transaction = buildImportTransactionFromPreviewRecord({
+            id: 43,
+            preview_type: '转账',
+            preview_date: '2026-06-01T00:00:00Z',
+            preview_amount_cents: -1234,
+            preview_destination_amount_cents: 1234,
+            preview_source_account_id: 101,
+            preview_destination_account_id: 202,
+            matching: {
+                transfer: {
+                    candidate_type: 'cash_transfer',
+                    score: 0,
+                    level: '',
+                    reason: '同金额双边匹配',
+                    review_status: 'pending',
+                    reviewed_type: '',
+                    suppressed: false
+                }
+            } as unknown as ImportPreviewRecord['matching']
+        }, 8, {
+            categoriesById,
+            transferCategories,
+            cashTransferCategoryId: 'transferSub',
+            timeZone: 'Asia/Shanghai'
+        }) as ImportPreviewTransactionDraft;
+
+        expect(transaction.type).toBe(TransactionType.Transfer);
+        expect(transaction.transferSuggestionReason).toBe('同金额双边匹配');
+        expect(transaction.getTransferSuggestionReviewStatus()).toBe('pending');
+        expect(transaction.hasTransferSuggestion()).toBe(true);
+    });
+
     test('preserves invalid-date fallback and expense category/name mapping', () => {
         const transaction = buildImportTransactionFromPreviewRecord({
             id: 9,

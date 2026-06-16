@@ -894,6 +894,10 @@ import {
     type ImportPreviewSignalViewModelOptions
 } from '../checkDataMatching.ts';
 import {
+    getImportPreviewTransferSignalStatus as getTransferSignalStatus,
+    getImportPreviewTransferSignalTitle as getTransferSignalTitle
+} from '../importPreviewSignalAdapter.ts';
+import {
     getImportCheckVisibleTransactions,
     matchesImportTransactionCheckDataFilters,
     resolveImportCheckDatePresetRange,
@@ -2613,22 +2617,6 @@ const PARSER_COLORS: Record<string, string> = {
     generic: 'grey',
 };
 
-function getTransferSignalStatus(item: ImportTransaction): ImportPreviewSignalStatus | null {
-    if (item.hasTransferSuggestion()) {
-        return 'pending';
-    }
-
-    if (item.isTransferSuggestionAccepted()) {
-        return 'accepted';
-    }
-
-    if (item.isTransferSuggestionRejected()) {
-        return 'rejected';
-    }
-
-    return null;
-}
-
 function getLearningSignalStatus(item: ImportTransaction): ImportPreviewSignalStatus | null {
     if (!item.hasLearningRecommendation()) {
         return null;
@@ -2800,7 +2788,7 @@ function buildImportPreviewSignalCacheSignature(item: ImportTransaction): string
         item.matching?.annotation?.history_rewrite_notice || '',
         String(!!item.isManuallyAnnotated),
         getTransferSignalStatus(item) || '',
-        item.transferSuggestionReason || '',
+        getTransferSignalTitle(item),
         item.matching?.transfer.pair_order || '',
         serializeImportPreviewSignalSourceChain(item.matching?.transfer.source_chain),
         getLearningSignalStatus(item) || '',
@@ -2861,7 +2849,7 @@ function getImportPreviewSignalViewModel(item: ImportTransaction): ImportPreview
         reconciliationNotice: item.matching?.reconciliation?.notice || item.matching?.annotation?.history_rewrite_notice,
         isManuallyAnnotated: item.isManuallyAnnotated,
         transferStatus: getTransferSignalStatus(item),
-        transferTitle: item.transferSuggestionReason,
+        transferTitle: getTransferSignalTitle(item),
         transferPairOrder: item.matching?.transfer.pair_order,
         transferSourceChain: item.matching?.transfer.source_chain,
         learningStatus: getLearningSignalStatus(item),

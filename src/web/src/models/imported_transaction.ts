@@ -308,6 +308,10 @@ export class ImportTransaction implements ImportTransactionResponse {
     }
 
     public hasTransferSuggestion(): boolean {
+        if (this.getTransferSuggestionReviewStatus() === 'pending') {
+            return !this.matching?.transfer?.suppressed;
+        }
+
         return !!this.suggestedType
             && this.suggestedType === TransactionType.Transfer
             && this.type !== TransactionType.Transfer
