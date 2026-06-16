@@ -192,6 +192,26 @@ function Get-ConfiguredPort {
     return $DefaultPort
 }
 
+function Get-PositiveIntSetting {
+    param(
+        [string]$Name,
+        [int]$DefaultValue
+    )
+
+    $value = [Environment]::GetEnvironmentVariable($Name)
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return $DefaultValue
+    }
+
+    $parsed = 0
+    if ([int]::TryParse($value, [ref]$parsed) -and $parsed -gt 0) {
+        return $parsed
+    }
+
+    Write-Warn "无法解析 $Name='$value'，使用默认等待时间 $DefaultValue 秒"
+    return $DefaultValue
+}
+
 function Test-CanBindLocalPort {
     param([int]$Port)
 
@@ -491,6 +511,8 @@ $FrontendPort = 8081
 $BackendBaseUrl = "http://${BackendProbeHost}:$BackendPort"
 $BackendHealthUrl = "$BackendBaseUrl/api/health"
 $FrontendUrl = "http://127.0.0.1:$FrontendPort"
+$BackendStartupTimeoutSeconds = Get-PositiveIntSetting -Name "BILL_ANALYSER_BACKEND_STARTUP_TIMEOUT_SECONDS" -DefaultValue 300
+$FrontendStartupTimeoutSeconds = Get-PositiveIntSetting -Name "BILL_ANALYSER_FRONTEND_STARTUP_TIMEOUT_SECONDS" -DefaultValue 60
 
 # 打印横幅
 Write-Host ""
@@ -566,13 +588,20 @@ function Wait-ForHttpEndpoint {
     
     $startTime = Get-Date
     $timeout = New-TimeSpan -Seconds $TimeoutSeconds
+    $lastProgressSecond = 0
     
-    Write-Gray "  等待 $ServiceName 就绪 ($Url)..."
+    Write-Gray "  等待 $ServiceName 就绪 ($Url)，最多等待 $TimeoutSeconds 秒..."
     
     while ((Get-Date) - $startTime -lt $timeout) {
         if (Test-HttpEndpoint -Url $Url) {
             Write-Success "  ✓ $ServiceName 已就绪"
             return $true
+        }
+
+        $elapsedSeconds = [int]((Get-Date) - $startTime).TotalSeconds
+        if ($elapsedSeconds -gt 0 -and ($elapsedSeconds % 15) -eq 0 -and $elapsedSeconds -ne $lastProgressSecond) {
+            Write-Gray "  - 已等待 $elapsedSeconds 秒，继续检查 $ServiceName..."
+            $lastProgressSecond = $elapsedSeconds
         }
         Start-Sleep -Milliseconds 500
     }
@@ -620,7 +649,7 @@ if (-not $FrontendOnly) {
         Write-Gray "  后端服务器窗口已启动"
         
         # 等待后端就绪
-        if (Wait-ForHttpEndpoint -Url $BackendHealthUrl -TimeoutSeconds 45 -ServiceName "后端服务器") {
+        if (Wait-ForHttpEndpoint -Url $BackendHealthUrl -TimeoutSeconds $BackendStartupTimeoutSeconds -ServiceName "后端服务器") {
             $backendStarted = $true
         } else {
             Write-Err "  ✗ 后端服务器启动失败"
@@ -674,7 +703,7 @@ if (-not $BackendOnly) {
         Write-Gray "  前端服务器窗口已启动"
         
         # 等待前端就绪
-        if (Wait-ForHttpEndpoint -Url $FrontendUrl -TimeoutSeconds 60 -ServiceName "前端服务器") {
+        if (Wait-ForHttpEndpoint -Url $FrontendUrl -TimeoutSeconds $FrontendStartupTimeoutSeconds -ServiceName "前端服务器") {
             $frontendStarted = $true
         } else {
             Write-Err "  ✗ 前端服务器启动失败"

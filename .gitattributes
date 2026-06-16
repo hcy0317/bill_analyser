@@ -1,2 +1,3 @@
 src/backend/db/postgres/migrations/0006_recurring_suggestions.sql text eol=lf
 src/backend/db/postgres/migrations/0014_recurring_suggestion_amount_cents_comment.sql text eol=lf
+src/backend/db/postgres/migrations/0015_import_preview_filter_indexes.sql text eol=lf
