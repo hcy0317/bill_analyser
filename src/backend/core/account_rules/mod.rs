@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::category_rules::{
-    compile_rule_expression, match_rule_expression, RuleExpressionNodeDto,
+    compile_rule_expression, match_compiled_rule, CompiledRuleDto, RuleExpressionNodeDto,
 };
 
 pub const ACCOUNT_ROLE_ANY: &str = "any";
@@ -94,6 +94,12 @@ pub struct AccountRuleCandidate {
     pub priority: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledAccountRuleCandidate {
+    pub rule: AccountRuleCandidate,
+    pub compiled_rule: CompiledRuleDto,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountRuleMatch {
     pub account_id: i64,
@@ -174,43 +180,61 @@ pub fn match_account_rules(
     requested_role_scope: &str,
     transaction_type: &str,
 ) -> Option<AccountRuleMatch> {
+    let candidates = compile_account_rule_candidates(rules);
+    match_compiled_account_rules(&candidates, context, requested_role_scope, transaction_type)
+}
+
+pub fn compile_account_rule_candidates(
+    rules: &[AccountRuleCandidate],
+) -> Vec<CompiledAccountRuleCandidate> {
+    let mut candidates = rules
+        .iter()
+        .cloned()
+        .map(|rule| {
+            let compiled_rule = compile_rule_expression(&rule.rule_expression, rule.regex_enabled);
+            CompiledAccountRuleCandidate {
+                rule,
+                compiled_rule,
+            }
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by_key(|candidate| (candidate.rule.priority, candidate.rule.rule_id));
+    candidates
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+pub fn match_compiled_account_rules(
+    rules: &[CompiledAccountRuleCandidate],
+    context: &AccountRuleMatchContext,
+    requested_role_scope: &str,
+    transaction_type: &str,
+) -> Option<AccountRuleMatch> {
     let requested_role_scope = normalize_account_role_scope(Some(requested_role_scope)).ok()?;
     let transaction_type = normalize_transaction_type_scope(Some(transaction_type)).ok()?;
-    let mut candidates = rules.iter().collect::<Vec<_>>();
-    candidates.sort_by_key(|rule| (rule.priority, rule.rule_id));
 
-    for rule in candidates {
-        if !rule.enabled {
+    for rule in rules {
+        if !rule.rule.enabled {
             continue;
         }
         let field_values = context.contextual_field_values();
         let matched_fields = field_values
             .iter()
             .filter(|(_, value)| {
-                !value.trim().is_empty()
-                    && match_account_rule_expression(
-                        value,
-                        &rule.rule_expression,
-                        rule.regex_enabled,
-                    )
+                !value.trim().is_empty() && match_compiled_account_rule_expression(value, rule)
             })
             .map(|(field, _)| field.clone())
             .collect::<Vec<_>>();
         let fallback_used = matched_fields.is_empty()
-            && account_rule_cross_field_match(
-                &field_values,
-                &rule.rule_expression,
-                rule.regex_enabled,
-            );
+            && compiled_account_rule_cross_field_match(&field_values, rule);
         if matched_fields.is_empty() && !fallback_used {
             continue;
         }
         return Some(AccountRuleMatch {
-            account_id: rule.account_id,
-            rule_id: rule.rule_id,
+            account_id: rule.rule.account_id,
+            rule_id: rule.rule.rule_id,
             fallback_used,
             matched_fields,
-            priority: rule.priority,
+            priority: rule.rule.priority,
             account_role_scope: requested_role_scope.clone(),
             transaction_type_scope: transaction_type.clone(),
         });
@@ -218,11 +242,30 @@ pub fn match_account_rules(
     None
 }
 
+#[cfg(test)]
 fn match_account_rule_expression(text: &str, expr: &str, regex_enabled: bool) -> bool {
-    if regex_enabled {
-        return match_rule_expression(text, expr, true);
+    let compiled = compile_rule_expression(expr, regex_enabled);
+    match_compiled_account_rule_expression(
+        text,
+        &CompiledAccountRuleCandidate {
+            rule: AccountRuleCandidate {
+                rule_id: 0,
+                account_id: 0,
+                rule_expression: expr.to_string(),
+                regex_enabled,
+                enabled: true,
+                priority: 0,
+            },
+            compiled_rule: compiled,
+        },
+    )
+}
+
+fn match_compiled_account_rule_expression(text: &str, rule: &CompiledAccountRuleCandidate) -> bool {
+    if rule.rule.regex_enabled {
+        return match_compiled_rule(text, &rule.compiled_rule);
     }
-    let compiled = compile_rule_expression(expr, false);
+    let compiled = &rule.compiled_rule;
     if compiled.is_empty || text.trim().is_empty() {
         return false;
     }
@@ -267,10 +310,32 @@ fn match_account_rule_expression_node(text: &str, node: &RuleExpressionNodeDto) 
     }
 }
 
+#[cfg(test)]
 fn account_rule_cross_field_match(
     field_values: &[(String, String)],
     expr: &str,
     regex_enabled: bool,
+) -> bool {
+    let compiled_rule = compile_rule_expression(expr, regex_enabled);
+    compiled_account_rule_cross_field_match(
+        field_values,
+        &CompiledAccountRuleCandidate {
+            rule: AccountRuleCandidate {
+                rule_id: 0,
+                account_id: 0,
+                rule_expression: expr.to_string(),
+                regex_enabled,
+                enabled: true,
+                priority: 0,
+            },
+            compiled_rule,
+        },
+    )
+}
+
+fn compiled_account_rule_cross_field_match(
+    field_values: &[(String, String)],
+    rule: &CompiledAccountRuleCandidate,
 ) -> bool {
     let values = field_values
         .iter()
@@ -281,10 +346,10 @@ fn account_rule_cross_field_match(
         return false;
     }
     let combined_text = values.join(" ");
-    if regex_enabled {
-        return match_rule_expression(&combined_text, expr, true);
+    if rule.rule.regex_enabled {
+        return match_compiled_rule(&combined_text, &rule.compiled_rule);
     }
-    let compiled = compile_rule_expression(expr, false);
+    let compiled = &rule.compiled_rule;
     if compiled.is_empty || compiled.and_patterns.is_empty() || !compiled.or_blocks.is_empty() {
         return false;
     }

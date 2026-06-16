@@ -5,8 +5,8 @@
 use crate::{post_process_raw_bills, RawBill, StandardBill};
 
 use super::common::{
-    csv_records_from_text, decode_text, file_suffix, get, html_rows, rows_to_maps, workbook_rows,
-    RowMap,
+    csv_records_from_text, decode_text, file_suffix, get, html_payload_contains_any, rows_to_maps,
+    sheet_or_html_rows, RowMap,
 };
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -92,7 +92,12 @@ fn parse_sheet_or_html(bytes: &[u8]) -> Vec<StandardBill> {
         operation = "parse_sheet_or_html",
         "business operation entered"
     );
-    let rows = workbook_rows(bytes).unwrap_or_else(|| html_rows(bytes));
+    if html_payload_contains_any(bytes, &["微信支付账单", "交易对方", "金额(元)", "收/支"])
+        == Some(false)
+    {
+        return Vec::new();
+    }
+    let rows = sheet_or_html_rows(bytes);
     if !rows
         .iter()
         .take(5)

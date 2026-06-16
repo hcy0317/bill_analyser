@@ -5,7 +5,7 @@
 #[tracing::instrument(level = "debug", skip_all)]
 fn apply_transfer_account_rule_match(
     draft: &mut ImportPreviewDraft,
-    rules: &[AccountRuleCandidate],
+    rules: &[CompiledAccountRuleCandidate],
     accounts: &[ImportIntelligenceAccount],
 ) -> bool {
     if rules.is_empty() {
@@ -68,7 +68,7 @@ fn apply_transfer_account_rule_match(
 #[tracing::instrument(level = "debug", skip_all)]
 fn apply_investment_account_rule_match(
     draft: &mut ImportPreviewDraft,
-    rules: &[AccountRuleCandidate],
+    rules: &[CompiledAccountRuleCandidate],
     accounts: &[ImportIntelligenceAccount],
 ) -> bool {
     if rules.is_empty() {
@@ -126,7 +126,7 @@ fn apply_investment_account_rule_match(
 #[tracing::instrument(level = "debug", skip_all)]
 fn apply_standard_account_rule_match(
     draft: &mut ImportPreviewDraft,
-    rules: &[AccountRuleCandidate],
+    rules: &[CompiledAccountRuleCandidate],
     accounts: &[ImportIntelligenceAccount],
 ) -> bool {
     if rules.is_empty() || draft.preview_source_account_id.is_some() {
@@ -157,13 +157,13 @@ fn apply_standard_account_rule_match(
 }
 
 fn valid_account_rule_match(
-    rules: &[AccountRuleCandidate],
+    rules: &[CompiledAccountRuleCandidate],
     accounts: &[ImportIntelligenceAccount],
     context: &AccountRuleMatchContext,
     requested_role_scope: &str,
     transaction_type: &str,
 ) -> Option<AccountRuleMatch> {
-    match_account_rules(rules, context, requested_role_scope, transaction_type)
+    match_compiled_account_rules(rules, context, requested_role_scope, transaction_type)
         .filter(|rule_match| account_rule_account_exists(accounts, rule_match.account_id))
 }
 
@@ -442,6 +442,7 @@ mod account_rule_matcher_tests {
             ..ImportPreviewDraft::default()
         };
         let rules = vec![candidate(42, "OR={招商工资卡}")];
+        let rules = compile_account_rule_candidates(&rules);
         let accounts = vec![account(42, "招商银行")];
 
         assert!(apply_account_rule_match_after_semantic_projection(
@@ -468,6 +469,7 @@ mod account_rule_matcher_tests {
             ..ImportPreviewDraft::default()
         };
         let rules = vec![candidate(42, "OR={招商工资卡}")];
+        let rules = compile_account_rule_candidates(&rules);
         let accounts = vec![account(42, "招商银行")];
 
         assert!(!apply_account_rule_match_after_semantic_projection(

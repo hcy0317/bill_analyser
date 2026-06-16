@@ -90,6 +90,22 @@ pub(super) fn workbook_rows(bytes: &[u8]) -> Option<Vec<Vec<String>>> {
     )
 }
 
+pub(super) fn sheet_or_html_rows(bytes: &[u8]) -> Vec<Vec<String>> {
+    if looks_like_html_table_payload(bytes) {
+        html_rows(bytes)
+    } else {
+        workbook_rows(bytes).unwrap_or_else(|| html_rows(bytes))
+    }
+}
+
+pub(super) fn html_payload_contains_any(bytes: &[u8], needles: &[&str]) -> Option<bool> {
+    if !looks_like_html_table_payload(bytes) {
+        return None;
+    }
+    let text = decode_text(bytes);
+    Some(needles.iter().any(|needle| text.contains(needle)))
+}
+
 pub(super) fn looks_like_html_table_payload(bytes: &[u8]) -> bool {
     let mut probe = bytes;
     if probe.starts_with(&[0xef, 0xbb, 0xbf]) {
@@ -259,7 +275,7 @@ pub(super) fn compact_time(time: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::looks_like_html_table_payload;
+    use super::{looks_like_html_table_payload, sheet_or_html_rows};
 
     #[test]
     fn html_payload_detection_accepts_html_table_prefixes() {
@@ -279,5 +295,35 @@ mod tests {
         ));
         assert!(!looks_like_html_table_payload(b"transaction,date,amount\n"));
         assert!(!looks_like_html_table_payload(b""));
+    }
+
+    #[test]
+    fn sheet_or_html_rows_uses_html_fast_path_for_html_xls_exports() {
+        let rows = sheet_or_html_rows(
+            b"<html><body><table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table></body></html>",
+        );
+        assert_eq!(rows, vec![vec!["A", "B"], vec!["1", "2"]]);
+    }
+
+    #[test]
+    fn html_payload_contains_any_only_reports_for_html_payloads() {
+        assert_eq!(
+            super::html_payload_contains_any(
+                "<html><body>民生银行</body></html>".as_bytes(),
+                &["民生银行"]
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            super::html_payload_contains_any(
+                "<html><body>建设银行</body></html>".as_bytes(),
+                &["民生银行"]
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            super::html_payload_contains_any(b"transaction,date,amount\n", &["民生银行"]),
+            None
+        );
     }
 }

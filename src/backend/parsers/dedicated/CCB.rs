@@ -5,8 +5,8 @@
 use crate::{post_process_raw_bills, RawBill, StandardBill};
 
 use super::common::{
-    compact_date, compact_time, contains_all_text, file_suffix, get, html_rows, parse_amount,
-    positive_amount_text, row_contains_all, rows_to_maps, workbook_rows, RowMap,
+    compact_date, compact_time, contains_all_text, file_suffix, get, html_payload_contains_any,
+    parse_amount, positive_amount_text, row_contains_all, rows_to_maps, sheet_or_html_rows, RowMap,
 };
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -32,7 +32,14 @@ fn parse_sheet_or_html(bytes: &[u8]) -> Vec<StandardBill> {
         operation = "parse_sheet_or_html",
         "business operation entered"
     );
-    let rows = workbook_rows(bytes).unwrap_or_else(|| html_rows(bytes));
+    if html_payload_contains_any(
+        bytes,
+        &["建设银行", "China Construction Bank", "记账日", "对方户名"],
+    ) == Some(false)
+    {
+        return Vec::new();
+    }
+    let rows = sheet_or_html_rows(bytes);
     let content = rows.iter().flatten().cloned().collect::<Vec<_>>().join(" ");
     if !content.contains("建设银行")
         && !content.contains("China Construction Bank")

@@ -5,9 +5,9 @@
 use crate::{post_process_raw_bills, RawBill, StandardBill};
 
 use super::common::{
-    contains_all_text, csv_records_from_text, decode_text, file_suffix, get, html_rows,
-    looks_like_html_table_payload, parse_amount, positive_amount_text, rows_to_maps, workbook_rows,
-    RowMap,
+    contains_all_text, csv_records_from_text, decode_text, file_suffix, get,
+    html_payload_contains_any, parse_amount, positive_amount_text, rows_to_maps,
+    sheet_or_html_rows, RowMap,
 };
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -21,8 +21,7 @@ pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     let suffix = file_suffix(filename);
     match suffix.as_str() {
         "csv" | "txt" => parse_csv(bytes),
-        "xlsx" => parse_sheet_or_html(bytes, false),
-        "xls" => parse_sheet_or_html(bytes, true),
+        "xlsx" | "xls" => parse_sheet_or_html(bytes),
         _ => Vec::new(),
     }
 }
@@ -55,18 +54,27 @@ fn parse_csv(bytes: &[u8]) -> Vec<StandardBill> {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn parse_sheet_or_html(bytes: &[u8], allow_html_fast_path: bool) -> Vec<StandardBill> {
+fn parse_sheet_or_html(bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
     tracing::info!(
         domain = "import_parser",
         operation = "parse_sheet_or_html",
         "business operation entered"
     );
-    let rows = if allow_html_fast_path && looks_like_html_table_payload(bytes) {
-        html_rows(bytes)
-    } else {
-        workbook_rows(bytes).unwrap_or_else(|| html_rows(bytes))
-    };
+    if html_payload_contains_any(
+        bytes,
+        &[
+            "民生银行",
+            "个人账户对账单",
+            "账户余额",
+            "支出金额",
+            "存入金额",
+        ],
+    ) == Some(false)
+    {
+        return Vec::new();
+    }
+    let rows = sheet_or_html_rows(bytes);
     let content = rows.iter().flatten().cloned().collect::<Vec<_>>().join(" ");
     if !content.contains("民生银行")
         && !content.contains("个人账户对账单")

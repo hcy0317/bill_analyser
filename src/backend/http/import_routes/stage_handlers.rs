@@ -371,6 +371,7 @@ struct ImportIntelligenceRule {
     priority: i64,
     rule_expression: String,
     regex_enabled: bool,
+    compiled_rule: CompiledRuleDto,
 }
 
 #[derive(Debug, Clone)]
@@ -488,7 +489,12 @@ async fn apply_import_intelligence_chain(
         .iter()
         .map(import_intelligence_account_value)
         .collect::<Vec<_>>();
-    let account_rules = load_import_intelligence_account_rules(connection, user_id_i64).await?;
+    let account_rules =
+        compile_account_rule_candidates(&load_import_intelligence_account_rules(
+            connection,
+            user_id_i64,
+        )
+        .await?);
     let learning_rules = load_import_intelligence_learning_rules(connection, user_id_i64).await?;
     let recurring_templates =
         load_import_intelligence_recurring_templates(connection, user_id_i64).await?;
@@ -573,7 +579,7 @@ async fn apply_import_intelligence_chain(
 
 fn apply_account_rule_match_after_semantic_projection(
     draft: &mut ImportPreviewDraft,
-    account_rules: &[AccountRuleCandidate],
+    account_rules: &[CompiledAccountRuleCandidate],
     accounts: &[ImportIntelligenceAccount],
 ) -> bool {
     match preview_type_code(&draft.preview_type) {
@@ -682,19 +688,38 @@ async fn load_import_intelligence_category_rules(
             let expression = row.try_get::<Value, _>("rule_expression").ok()?;
             let id = row.try_get("id").ok()?;
             let priority = row.try_get::<i32, _>("priority").ok()?;
-            let regex_enabled = rule_expression_regex_enabled(&expression);
-            Some(Ok(ImportIntelligenceRule {
+            Some(Ok(import_intelligence_rule_from_expression(
                 id,
                 category_id,
-                category_type: category.type_code,
-                main_category: category.main_category.clone(),
-                sub_category: category.sub_category.clone(),
-                priority: i64::from(priority),
-                rule_expression: rule_expression_string(&expression),
-                regex_enabled,
-            }))
+                category,
+                i64::from(priority),
+                &expression,
+            )))
         })
         .collect()
+}
+
+fn import_intelligence_rule_from_expression(
+    id: i64,
+    category_id: i64,
+    category: &ImportIntelligenceCategory,
+    priority: i64,
+    expression: &Value,
+) -> ImportIntelligenceRule {
+    let regex_enabled = rule_expression_regex_enabled(expression);
+    let rule_expression = rule_expression_string(expression);
+    let compiled_rule = compile_rule_expression(&rule_expression, regex_enabled);
+    ImportIntelligenceRule {
+        id,
+        category_id,
+        category_type: category.type_code,
+        main_category: category.main_category.clone(),
+        sub_category: category.sub_category.clone(),
+        priority,
+        rule_expression,
+        regex_enabled,
+        compiled_rule,
+    }
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -930,7 +955,7 @@ where
     for rule in rules {
         if rule.rule_expression.trim().is_empty()
             || !rule_filter(rule, draft)
-            || !match_rule_expression(combined_text, &rule.rule_expression, rule.regex_enabled)
+            || !match_compiled_rule(combined_text, &rule.compiled_rule)
         {
             continue;
         }
@@ -3216,6 +3241,42 @@ mod tests {
             "expression": "商户",
             "regex_enabled": null
         })));
+    }
+
+    #[test]
+    fn compiled_category_rule_projection_matches_preview_draft() {
+        let category = ImportIntelligenceCategory {
+            id: 42,
+            type_code: 3,
+            main_category: "食品饮料".to_string(),
+            sub_category: "咖啡".to_string(),
+        };
+        let rule = import_intelligence_rule_from_expression(
+            7,
+            category.id,
+            &category,
+            10,
+            &json!({"expression": "OR={星巴克}", "regex_enabled": false}),
+        );
+        let mut draft = ImportPreviewDraft {
+            preview_type: "支出".to_string(),
+            preview_counterparty: "星巴克".to_string(),
+            preview_description: "拿铁".to_string(),
+            ..ImportPreviewDraft::default()
+        };
+
+        assert!(apply_income_expense_category_rule_match(
+            &mut draft,
+            &[rule]
+        ));
+
+        assert_eq!(draft.category_id, Some(42));
+        assert_eq!(draft.preview_main_category, "食品饮料");
+        assert_eq!(draft.preview_sub_category, "咖啡");
+        assert_eq!(
+            draft.preview_matching_feedback["category_rule"]["rule_id"],
+            json!(7)
+        );
     }
 
     #[test]
