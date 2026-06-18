@@ -33,7 +33,9 @@ use bill_analyser_core::{
     build_llm_provider_config, build_llm_rule_expression_synthesis_prompt,
     build_llm_rule_induction_prompt, build_ocr_config_success_response, build_ocr_error_response,
     build_ocr_recognition_success_response_with_context, build_unknown_ocr_provider_response,
-    category_rules::{compile_rule_expression, match_compiled_rule, CompiledRuleDto},
+    category_rules::{
+        compile_rule_expression, match_compiled_rule_lowercase_text, CompiledRuleDto,
+    },
     coerce_preview_selected_value, composite_hash_from_features, copy_runtime_llm_config,
     find_import_reconciliation_candidates, import_preview_index_success,
     import_preview_page_success, import_session_cancel_missing_response,

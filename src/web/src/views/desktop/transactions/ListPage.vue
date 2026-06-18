@@ -576,8 +576,7 @@
                                                :class="{ 'disabled': loading, 'has-bottom-border': idx < transactions.length - 1 }"
                                                v-for="(transaction, idx) in transactions">
                                             <tr class="transaction-list-row-date no-hover text-sm"
-                                                v-if="idx === 0 || transaction.gregorianCalendarYearDashMonthDashDay !== transactions[idx - 1]?.gregorianCalendarYearDashMonthDashDay"
-                                                @vue:mounted="console.log(`[Date Row] idx=${idx}, current=${transaction.gregorianCalendarYearDashMonthDashDay}, prev=${transactions[idx - 1]?.gregorianCalendarYearDashMonthDashDay}, show=${idx === 0 || transaction.gregorianCalendarYearDashMonthDashDay !== transactions[idx - 1]?.gregorianCalendarYearDashMonthDashDay}`)">
+                                                v-if="idx === 0 || transaction.gregorianCalendarYearDashMonthDashDay !== transactions[idx - 1]?.gregorianCalendarYearDashMonthDashDay">
                                                 <td :colspan="showTagInTransactionListPage ? 6 : 5" class="font-weight-bold">
                                                     <div class="d-flex align-center">
                                                         <span>{{ getDisplayLongDate(transaction) }}</span>
@@ -985,14 +984,11 @@ const allowCategoryTypes = computed<string>(() => {
 });
 
 const transactions = computed<Transaction[]>(() => {
-    console.log(`[transactions computed] pageType=${pageType.value}, queryMonthlyData=${queryMonthlyData.value}`);
-
     if (pageType.value === TransactionListPageType.List.type) {
         if (queryMonthlyData.value) {
             const transactionData = currentMonthTransactionData.value;
 
             if (!transactionData || !transactionData.items) {
-                console.log('[transactions computed] Monthly data: no data available');
                 return [];
             }
 
@@ -1000,16 +996,8 @@ const transactions = computed<Transaction[]>(() => {
             const lastIndex = currentPage.value * countPerPage.value;
 
             const result = transactionData.items.slice(firstIndex, lastIndex);
-            console.log('[transactions computed] Monthly data, total items:', transactionData.items.length, 'showing:', result.length);
-            result.forEach((t, i) => {
-                console.log(`  [${i}] ID=${t.id}, Date=${t.gregorianCalendarYearDashMonthDashDay}, DayOfWeek=${t.displayDayOfWeek}`);
-            });
             return result;
         } else {
-            console.log('[transactions computed] Non-monthly data, queryMonthlyData=false, items:', currentPageTransactions.value.length);
-            currentPageTransactions.value.forEach((t, i) => {
-                console.log(`  [${i}] ID=${t.id}, Date=${t.gregorianCalendarYearDashMonthDashDay}, DayOfWeek=${t.displayDayOfWeek}`);
-            });
             return currentPageTransactions.value;
         }
     } else if (pageType.value === TransactionListPageType.Calendar.type) {
@@ -1923,10 +1911,10 @@ watch(() => desktopPageStore.showAddTransactionDialogInTransactionList, (newValu
 
 // 监听交易日历日期变化，自动重新加载数据
 watch(currentCalendarDate, (newDate, oldDate) => {
-    console.log('[ListPage] currentCalendarDate changed:', { oldDate, newDate, pageType: pageType.value });
+    logger.debug('[ListPage] currentCalendarDate changed', { oldDate, newDate, pageType: pageType.value });
     // 日历模式下，日期变化时重新加载当天交易
     if (pageType.value === TransactionListPageType.Calendar.type && newDate !== oldDate) {
-        console.log('[ListPage] Calendar date changed, reloading transactions for date:', newDate);
+        logger.debug('[ListPage] Calendar date changed, reloading transactions', { date: newDate });
         reload(false, false);
     }
 });

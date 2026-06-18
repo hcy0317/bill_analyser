@@ -228,7 +228,7 @@ import {
 // 修复：添加initializeAxiosAuth()在main文件中调用
 // 确保页面加载时就设置axios.defaults.headers.common['Authorization']
 const SERVICES_CODE_VERSION = '2025-11-20-00:05-INIT-AXIOS-AUTH';
-logger.info(`[services.ts] Loading version: ${SERVICES_CODE_VERSION}`);
+logger.debug(`[services.ts] Loading version: ${SERVICES_CODE_VERSION}`);
 
 interface ApiRequestConfig extends AxiosRequestConfig {
     headers: AxiosRequestHeaders;  // 移除readonly，允许修改
@@ -416,18 +416,18 @@ axios.defaults.timeout = DEFAULT_API_TIMEOUT;
 // 注意：不在模块加载时调用getCurrentToken，因为可能触发AppLock检查
 // 而是在页面加载完成后，由initializeAxiosAuth()函数统一处理
 // @version 2025-11-20-00:15-ULTIMATE-FIX
-logger.info('[Axios Init] axios.defaults configured, waiting for initializeAxiosAuth() call');
+logger.debug('[Axios Init] axios.defaults configured, waiting for initializeAxiosAuth() call');
 
 // ==== 全局函数：初始化Axios Authorization（页面加载后调用） ====
 export function initializeAxiosAuth(): void {
-    logger.info('[initializeAxiosAuth] ★★★ VERSION: 2025-11-20-00:15-ULTIMATE-FIX ★★★');
+    logger.debug('[initializeAxiosAuth] axios auth initialization started');
     const token = getCurrentToken();
     if (token) {
         axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-        logger.info(`[initializeAxiosAuth] Set Authorization header in axios.defaults.headers.common (token length: ${token.length})`);
-        logger.info(`[initializeAxiosAuth] Verification: axios.defaults.headers.common['Authorization'] = ${axios.defaults.headers.common['Authorization'] ? 'SET ✓' : 'NOT_SET ✗'}`);
+        logger.debug(`[initializeAxiosAuth] Set Authorization header in axios.defaults.headers.common (token length: ${token.length})`);
+        logger.debug(`[initializeAxiosAuth] Verification: axios.defaults.headers.common['Authorization'] = ${axios.defaults.headers.common['Authorization'] ? 'SET' : 'NOT_SET'}`);
     } else {
-        logger.warn('[initializeAxiosAuth] No token found in localStorage');
+        logger.debug('[initializeAxiosAuth] No token found in localStorage');
     }
 }
 
@@ -436,10 +436,10 @@ export function initializeAxiosAuth(): void {
 export function updateAxiosAuthorizationHeader(token: string): void {
     if (token) {
         axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-        logger.info(`[updateAxiosAuth] Updated axios.defaults.headers.common['Authorization'] (token length: ${token.length})`);
+        logger.debug(`[updateAxiosAuth] Updated axios.defaults.headers.common['Authorization'] (token length: ${token.length})`);
     } else {
         delete axios.defaults.headers.common['Authorization'];
-        logger.info('[updateAxiosAuth] Cleared axios.defaults.headers.common[\'Authorization\']');
+        logger.debug('[updateAxiosAuth] Cleared axios.defaults.headers.common[\'Authorization\']');
     }
 }
 
@@ -479,25 +479,25 @@ function setAuthorizationHeader(headers: any, token: string): void {
 }
 
 // ==== 拦截器注册标记 ====
-logger.info(`[services.ts] Registering request interceptor...`);
+logger.debug('[services.ts] Registering request interceptor');
 
 axios.interceptors.request.use((config: ApiRequestConfig) => {
     const url = (config as any).url || 'unknown';
     const effectiveNoAuth = !!config.noAuth || isPublicNoAuthRequest(url);
 
     // 强制日志：验证拦截器是否被调用
-    logger.info(`[Interceptor START] ${url}`);
+    logger.debug(`[Interceptor START] ${url}`);
 
     // 检查是否需要阻塞
     if (needBlockRequest && !config.ignoreBlocked) {
-        logger.info(`[Interceptor] Blocking request ${url}, total blocked: ${blockedRequests.length + 1}`);
+        logger.debug(`[Interceptor] Blocking request ${url}, total blocked: ${blockedRequests.length + 1}`);
 
         // 关键修复：被阻塞的请求等待Token refresh完成后，自动获取最新Token
         return new Promise(resolve => {
             blockedRequests.push(() => {
                 // 解除阻塞时，重新从localStorage获取最新Token
                 const latestToken = getCurrentToken();
-                logger.info(`[Interceptor] Unblocking ${url}, fetching latest token from storage`);
+                logger.debug(`[Interceptor] Unblocking ${url}, fetching latest token from storage`);
 
                 if (latestToken && !effectiveNoAuth) {
                     // 双重保险：同时更新axios.defaults和config.headers
@@ -509,11 +509,11 @@ axios.interceptors.request.use((config: ApiRequestConfig) => {
                     }
 
                     setAuthorizationHeader(config.headers, latestToken);
-                    logger.info(`[Interceptor] ✓ Unblocked ${url} with latest token (defaults+config), length=${latestToken.length}`);
+                    logger.debug(`[Interceptor] Unblocked ${url} with latest token (defaults+config), length=${latestToken.length}`);
                 } else if (!latestToken && !effectiveNoAuth) {
                     logger.error(`[Interceptor] ✗ Unblocked ${url} but no token in localStorage!`);
                 } else {
-                    logger.info(`[Interceptor] Unblocked ${url} (noAuth request)`);
+                    logger.debug(`[Interceptor] Unblocked ${url} (noAuth request)`);
                 }
 
                 resolve(config);
@@ -537,7 +537,7 @@ axios.interceptors.request.use((config: ApiRequestConfig) => {
         headersType: typeof config.headers
     };
 
-    logger.info(`[Interceptor] Request to ${url}:`, JSON.stringify(tokenStatus));
+    logger.debug(`[Interceptor] Request to ${url}:`, JSON.stringify(tokenStatus));
 
     // 确保headers对象存在
     if (!config.headers) {
@@ -560,14 +560,14 @@ axios.interceptors.request.use((config: ApiRequestConfig) => {
         config.headers.Authorization = authValue;
         config.headers['authorization'] = authValue; // 小写版本（某些情况下需要）
 
-        logger.info(`[Interceptor] ✓ Token attached to ${url} (multi-method)`);
+        logger.debug(`[Interceptor] Token attached to ${url} (multi-method)`);
 
         // 验证所有方式
         const defaultsAuth = axios.defaults.headers.common['Authorization'];
         const configAuthCap = config.headers['Authorization'];
         const configAuthLow = config.headers['authorization'];
 
-        logger.info(`[Interceptor] Verification:`, {
+        logger.debug(`[Interceptor] Verification:`, {
             defaultsAuth: defaultsAuth ? 'SET' : 'NOT_SET',
             configAuthCapital: configAuthCap ? 'SET' : 'NOT_SET',
             configAuthLower: configAuthLow ? 'SET' : 'NOT_SET',
@@ -579,7 +579,7 @@ axios.interceptors.request.use((config: ApiRequestConfig) => {
                         || config.headers.Authorization
                         || config.headers['Authorization'];
 
-        logger.info(`[Interceptor] Verifying headers after set:`, {
+        logger.debug(`[Interceptor] Verifying headers after set:`, {
             hasAuthHeader: !!authHeader,
             allHeaderKeys: Object.keys(config.headers).join(', '),
             headersObjectType: Object.prototype.toString.call(config.headers),
@@ -601,7 +601,7 @@ axios.interceptors.request.use((config: ApiRequestConfig) => {
     const finalAuthCheck = (typeof config.headers.get === 'function' ? config.headers.get('Authorization') : null)
                         || config.headers.Authorization
                         || config.headers['Authorization'];
-    logger.info(`[Interceptor] Final check before return:`, {
+    logger.debug(`[Interceptor] Final check before return:`, {
         url: url,
         hasAuth: !!finalAuthCheck
     });
@@ -619,7 +619,7 @@ axios.interceptors.response.use((response: any) => {
                       || response.config?.headers?.['Authorization']
                       || (typeof response.config?.headers?.get === 'function' ? response.config.headers.get('Authorization') : null);
 
-    logger.info(`[Response Success] ${url} - Config had Authorization: ${authInConfig ? 'YES' : 'NO'}`);
+    logger.debug(`[Response Success] ${url} - Config had Authorization: ${authInConfig ? 'YES' : 'NO'}`);
 
     if ('cancelableUuid' in response.config && response.config.cancelableUuid && cancelableRequests[response.config.cancelableUuid as string]) {
         logger.debug('Response canceled by user request, url: ' + response.config.url + ', cancelableUuid: ' + response.config.cancelableUuid);
@@ -767,7 +767,7 @@ export default {
         return new Promise((resolve, reject) => {
             const refreshToken = getCurrentRefreshToken();
 
-            logger.info(`[refreshToken] Called, current needBlockRequest=${needBlockRequest}, blockedRequests=${blockedRequests.length}`);
+            logger.debug(`[refreshToken] Called, current needBlockRequest=${needBlockRequest}, blockedRequests=${blockedRequests.length}`);
 
             // 如果没有refreshToken，直接返回错误
             if (!refreshToken) {
@@ -781,7 +781,7 @@ export default {
                 return;
             }
 
-            logger.info(`[refreshToken] Starting token refresh, currently ${blockedRequests.length} blocked requests`);
+            logger.debug(`[refreshToken] Starting token refresh, currently ${blockedRequests.length} blocked requests`);
 
             const requestBody = { refreshToken };
 
@@ -793,7 +793,7 @@ export default {
             } as ApiRequestConfig);
 
             // 在请求发出后再设置阻塞标志，防止后续请求干扰
-            logger.info('[refreshToken] Setting needBlockRequest=true AFTER request sent');
+            logger.debug('[refreshToken] Setting needBlockRequest=true AFTER request sent');
             needBlockRequest = true;
 
             refreshPromise.then((response: any) => {
@@ -801,7 +801,7 @@ export default {
                 const newToken = data.result?.newToken;
 
                 if (newToken) {
-                    logger.info(`[refreshToken] Token refreshed successfully, unblocking ${blockedRequests.length} requests`);
+                    logger.debug(`[refreshToken] Token refreshed successfully, unblocking ${blockedRequests.length} requests`);
 
                     // 关键修复：不传递newToken，让被阻塞的请求自己从localStorage读取
                     blockedRequests.forEach(func => func());
@@ -811,13 +811,13 @@ export default {
                 }
 
                 // 解除阻塞状态
-                logger.info('[refreshToken] Clearing needBlockRequest=false after success');
+                logger.debug('[refreshToken] Clearing needBlockRequest=false after success');
                 needBlockRequest = false;
 
                 resolve(response);
             }).catch((error: any) => {
                 logger.error('[refreshToken] Failed to refresh token', error);
-                logger.info('[refreshToken] Clearing needBlockRequest=false after error');
+                logger.debug('[refreshToken] Clearing needBlockRequest=false after error');
                 needBlockRequest = false;
                 blockedRequests.length = 0;
                 reject(error);
@@ -977,7 +977,7 @@ export default {
         } as ApiRequestConfig);
     },
     getAllAccounts: ({ visibleOnly }: { visibleOnly: boolean }): ApiResponsePromise<AccountInfoResponse[]> => {
-        logger.info('[getAllAccounts] Making request with visibleOnly=' + visibleOnly);
+        logger.debug('[getAllAccounts] Making request with visibleOnly=' + visibleOnly);
         return axios.get<ApiResponse<AccountInfoResponse[]>>('accounts?visible_only=' + visibleOnly, {
             headers: {} as AxiosRequestHeaders,  // 显式创建headers对象
             ignoreError: true // 防止全局 401 处理器立即刷新页面

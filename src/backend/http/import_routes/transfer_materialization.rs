@@ -117,14 +117,9 @@ fn refresh_history_transfer_materialization_payloads(
     history_plan: &mut [HistoryTransferPreviewPlan],
     preview_drafts: &[ImportPreviewDraft],
 ) {
+    let preview_by_group_key = build_preview_draft_by_reconciliation_group_key(preview_drafts);
     for plan in history_plan {
-        let Some(final_preview) = preview_drafts.iter().find(|draft| {
-            draft
-                .preview_matching_feedback
-                .pointer("/reconciliation/group_key")
-                .and_then(Value::as_str)
-                == Some(plan.group_key.as_str())
-        }) else {
+        let Some(final_preview) = preview_by_group_key.get(&plan.group_key).copied() else {
             continue;
         };
         let Some(payload) = plan.materialization.materialized_payload.as_object_mut() else {
@@ -219,17 +214,12 @@ fn build_same_batch_transfer_decision_group(
 fn build_history_transfer_decision_groups(
     history_plan: &[HistoryTransferPreviewPlan],
     template_standard_rows: &HashMap<i64, i64>,
-    preview_rows: &[ImportPreviewRow],
+    preview_by_reconciliation_group_key: &HashMap<String, &ImportPreviewRow>,
 ) -> Vec<ImportDecisionGroupDraft> {
     history_plan
         .iter()
         .filter_map(|plan| {
-            let preview = preview_rows.iter().find(|row| {
-                row.preview_matching_feedback
-                    .pointer("/reconciliation/group_key")
-                    .and_then(Value::as_str)
-                    == Some(plan.group_key.as_str())
-            })?;
+            let preview = preview_by_reconciliation_group_key.get(&plan.group_key).copied()?;
             let standard_row_id = plan
                 .import_template_id
                 .and_then(|template_id| template_standard_rows.get(&template_id).copied());

@@ -21,8 +21,7 @@ function getStoredApplicationSettings(): BaseApplicationSetting {
     try {
         const storageData = localStorage.getItem(settingsLocalStorageKey) || '{}';
         return JSON.parse(storageData);
-    } catch (ex) {
-        console.warn('settings in local storage is invalid', ex);
+    } catch {
         return {};
     }
 }

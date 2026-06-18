@@ -97,7 +97,15 @@ pub struct AccountRuleCandidate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledAccountRuleCandidate {
     pub rule: AccountRuleCandidate,
-    pub compiled_rule: CompiledRuleDto,
+    compiled_expression: CompiledRuleDto,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AccountRulePreparedField {
+    field: String,
+    value: String,
+    normalized_value: String,
+    tokens: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,6 +117,26 @@ pub struct AccountRuleMatch {
     pub fallback_used: bool,
     pub account_role_scope: String,
     pub transaction_type_scope: String,
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+pub fn compile_account_rule_candidates(
+    rules: &[AccountRuleCandidate],
+) -> Vec<CompiledAccountRuleCandidate> {
+    let mut compiled = rules
+        .iter()
+        .cloned()
+        .map(|rule| {
+            let compiled_expression =
+                compile_rule_expression(&rule.rule_expression, rule.regex_enabled);
+            CompiledAccountRuleCandidate {
+                rule,
+                compiled_expression,
+            }
+        })
+        .collect::<Vec<_>>();
+    compiled.sort_by_key(|candidate| (candidate.rule.priority, candidate.rule.rule_id));
+    compiled
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -180,26 +208,8 @@ pub fn match_account_rules(
     requested_role_scope: &str,
     transaction_type: &str,
 ) -> Option<AccountRuleMatch> {
-    let candidates = compile_account_rule_candidates(rules);
-    match_compiled_account_rules(&candidates, context, requested_role_scope, transaction_type)
-}
-
-pub fn compile_account_rule_candidates(
-    rules: &[AccountRuleCandidate],
-) -> Vec<CompiledAccountRuleCandidate> {
-    let mut candidates = rules
-        .iter()
-        .cloned()
-        .map(|rule| {
-            let compiled_rule = compile_rule_expression(&rule.rule_expression, rule.regex_enabled);
-            CompiledAccountRuleCandidate {
-                rule,
-                compiled_rule,
-            }
-        })
-        .collect::<Vec<_>>();
-    candidates.sort_by_key(|candidate| (candidate.rule.priority, candidate.rule.rule_id));
-    candidates
+    let compiled = compile_account_rule_candidates(rules);
+    match_compiled_account_rules(&compiled, context, requested_role_scope, transaction_type)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -211,30 +221,40 @@ pub fn match_compiled_account_rules(
 ) -> Option<AccountRuleMatch> {
     let requested_role_scope = normalize_account_role_scope(Some(requested_role_scope)).ok()?;
     let transaction_type = normalize_transaction_type_scope(Some(transaction_type)).ok()?;
+    let field_values = context.contextual_prepared_field_values();
 
-    for rule in rules {
-        if !rule.rule.enabled {
+    for candidate in rules {
+        let rule = &candidate.rule;
+        if !rule.enabled {
             continue;
         }
-        let field_values = context.contextual_field_values();
         let matched_fields = field_values
             .iter()
-            .filter(|(_, value)| {
-                !value.trim().is_empty() && match_compiled_account_rule_expression(value, rule)
+            .filter(|field| {
+                !field.normalized_value.is_empty()
+                    && match_compiled_account_rule_expression_prepared(
+                        field,
+                        &candidate.compiled_expression,
+                        rule.regex_enabled,
+                    )
             })
-            .map(|(field, _)| field.clone())
+            .map(|field| field.field.clone())
             .collect::<Vec<_>>();
         let fallback_used = matched_fields.is_empty()
-            && compiled_account_rule_cross_field_match(&field_values, rule);
+            && account_rule_compiled_cross_field_match(
+                &field_values,
+                &candidate.compiled_expression,
+                rule.regex_enabled,
+            );
         if matched_fields.is_empty() && !fallback_used {
             continue;
         }
         return Some(AccountRuleMatch {
-            account_id: rule.rule.account_id,
-            rule_id: rule.rule.rule_id,
+            account_id: rule.account_id,
+            rule_id: rule.rule_id,
             fallback_used,
             matched_fields,
-            priority: rule.rule.priority,
+            priority: rule.priority,
             account_role_scope: requested_role_scope.clone(),
             transaction_type_scope: transaction_type.clone(),
         });
@@ -245,67 +265,70 @@ pub fn match_compiled_account_rules(
 #[cfg(test)]
 fn match_account_rule_expression(text: &str, expr: &str, regex_enabled: bool) -> bool {
     let compiled = compile_rule_expression(expr, regex_enabled);
-    match_compiled_account_rule_expression(
-        text,
-        &CompiledAccountRuleCandidate {
-            rule: AccountRuleCandidate {
-                rule_id: 0,
-                account_id: 0,
-                rule_expression: expr.to_string(),
-                regex_enabled,
-                enabled: true,
-                priority: 0,
-            },
-            compiled_rule: compiled,
-        },
-    )
+    let field = AccountRulePreparedField::new(String::new(), text.to_string());
+    match_compiled_account_rule_expression_prepared(&field, &compiled, regex_enabled)
 }
 
-fn match_compiled_account_rule_expression(text: &str, rule: &CompiledAccountRuleCandidate) -> bool {
-    if rule.rule.regex_enabled {
-        return match_compiled_rule(text, &rule.compiled_rule);
+fn match_compiled_account_rule_expression_prepared(
+    field: &AccountRulePreparedField,
+    compiled: &CompiledRuleDto,
+    regex_enabled: bool,
+) -> bool {
+    if regex_enabled {
+        return match_compiled_rule(&field.value, compiled);
     }
-    let compiled = &rule.compiled_rule;
-    if compiled.is_empty || text.trim().is_empty() {
+    if compiled.is_empty || field.normalized_value.is_empty() {
         return false;
     }
     compiled
         .expression_ast
         .as_ref()
-        .is_some_and(|expression_ast| match_account_rule_expression_node(text, expression_ast))
+        .is_some_and(|expression_ast| {
+            match_account_rule_expression_node_prepared(field, expression_ast)
+        })
 }
 
+#[cfg(test)]
 fn match_account_rule_expression_node(text: &str, node: &RuleExpressionNodeDto) -> bool {
+    let field = AccountRulePreparedField::new(String::new(), text.to_string());
+    match_account_rule_expression_node_prepared(&field, node)
+}
+
+fn match_account_rule_expression_node_prepared(
+    field: &AccountRulePreparedField,
+    node: &RuleExpressionNodeDto,
+) -> bool {
     match node.kind.as_str() {
         "all" => {
             !node.children.is_empty()
                 && node
                     .children
                     .iter()
-                    .all(|child| match_account_rule_expression_node(text, child))
+                    .all(|child| match_account_rule_expression_node_prepared(field, child))
         }
         "any" => node
             .children
             .iter()
-            .any(|child| match_account_rule_expression_node(text, child)),
+            .any(|child| match_account_rule_expression_node_prepared(field, child)),
         "not" => {
-            node.children.len() == 1 && !match_account_rule_expression_node(text, &node.children[0])
+            node.children.len() == 1
+                && !match_account_rule_expression_node_prepared(field, &node.children[0])
         }
         "clause" if node.operator == "OR" => node
             .patterns
             .iter()
-            .any(|pattern| account_rule_plain_pattern_matches(text, pattern)),
+            .any(|pattern| account_rule_plain_pattern_matches_prepared(field, pattern)),
         "clause" if node.operator == "AND" => {
             !node.patterns.is_empty()
                 && node
                     .patterns
                     .iter()
-                    .all(|pattern| account_rule_plain_pattern_matches(text, pattern))
+                    .all(|pattern| account_rule_plain_pattern_matches_prepared(field, pattern))
         }
         "clause" if node.operator == "NOT" => !node
             .patterns
             .iter()
-            .any(|pattern| account_rule_plain_pattern_matches(text, pattern)),
+            .any(|pattern| account_rule_plain_pattern_matches_prepared(field, pattern)),
         _ => false,
     }
 }
@@ -316,69 +339,67 @@ fn account_rule_cross_field_match(
     expr: &str,
     regex_enabled: bool,
 ) -> bool {
-    let compiled_rule = compile_rule_expression(expr, regex_enabled);
-    compiled_account_rule_cross_field_match(
-        field_values,
-        &CompiledAccountRuleCandidate {
-            rule: AccountRuleCandidate {
-                rule_id: 0,
-                account_id: 0,
-                rule_expression: expr.to_string(),
-                regex_enabled,
-                enabled: true,
-                priority: 0,
-            },
-            compiled_rule,
-        },
-    )
+    let compiled = compile_rule_expression(expr, regex_enabled);
+    let prepared = field_values
+        .iter()
+        .map(|(field, value)| AccountRulePreparedField::new(field.clone(), value.clone()))
+        .collect::<Vec<_>>();
+    account_rule_compiled_cross_field_match(&prepared, &compiled, regex_enabled)
 }
 
-fn compiled_account_rule_cross_field_match(
-    field_values: &[(String, String)],
-    rule: &CompiledAccountRuleCandidate,
+fn account_rule_compiled_cross_field_match(
+    field_values: &[AccountRulePreparedField],
+    compiled: &CompiledRuleDto,
+    regex_enabled: bool,
 ) -> bool {
     let values = field_values
         .iter()
-        .map(|(_, value)| value.as_str())
+        .map(|field| field.value.as_str())
         .filter(|value| !value.trim().is_empty())
         .collect::<Vec<_>>();
     if values.is_empty() {
         return false;
     }
     let combined_text = values.join(" ");
-    if rule.rule.regex_enabled {
-        return match_compiled_rule(&combined_text, &rule.compiled_rule);
+    if regex_enabled {
+        return match_compiled_rule(&combined_text, compiled);
     }
-    let compiled = &rule.compiled_rule;
     if compiled.is_empty || compiled.and_patterns.is_empty() || !compiled.or_blocks.is_empty() {
         return false;
     }
     if compiled.not_patterns.iter().any(|pattern| {
-        values
+        field_values
             .iter()
-            .any(|value| account_rule_plain_pattern_matches(value, pattern))
+            .any(|field| account_rule_plain_pattern_matches_prepared(field, pattern))
     }) {
         return false;
     }
     compiled.and_patterns.iter().all(|pattern| {
-        values
+        field_values
             .iter()
-            .any(|value| account_rule_plain_pattern_matches(value, pattern))
+            .any(|field| account_rule_plain_pattern_matches_prepared(field, pattern))
     })
 }
 
+#[cfg(test)]
 fn account_rule_plain_pattern_matches(text: &str, pattern: &str) -> bool {
+    let field = AccountRulePreparedField::new(String::new(), text.to_string());
     let pattern = normalize_account_rule_match_piece(pattern);
-    if pattern.is_empty() {
+    account_rule_plain_pattern_matches_prepared(&field, &pattern)
+}
+
+fn account_rule_plain_pattern_matches_prepared(
+    field: &AccountRulePreparedField,
+    pattern: &str,
+) -> bool {
+    let pattern = pattern.trim();
+    if pattern.is_empty() || field.normalized_value.is_empty() {
         return false;
     }
-    let text = normalize_account_rule_match_piece(text);
-    if text == pattern {
+    if field.normalized_value == pattern {
         return true;
     }
-    account_rule_match_tokens(&text)
-        .into_iter()
-        .any(|token| token == pattern)
+    field.tokens.iter().any(|token| token == pattern)
 }
 
 fn normalize_account_rule_match_piece(value: &str) -> String {
@@ -425,6 +446,13 @@ fn account_rule_match_tokens(value: &str) -> Vec<String> {
 }
 
 impl AccountRuleMatchContext {
+    fn contextual_prepared_field_values(&self) -> Vec<AccountRulePreparedField> {
+        self.contextual_field_values()
+            .into_iter()
+            .map(|(field, value)| AccountRulePreparedField::new(field, value))
+            .collect()
+    }
+
     fn contextual_field_values(&self) -> Vec<(String, String)> {
         let fields = FIELD_SCOPES
             .iter()
@@ -459,6 +487,19 @@ impl AccountRuleMatchContext {
                 (field.clone(), value)
             })
             .collect()
+    }
+}
+
+impl AccountRulePreparedField {
+    fn new(field: String, value: String) -> Self {
+        let normalized_value = normalize_account_rule_match_piece(&value);
+        let tokens = account_rule_match_tokens(&normalized_value);
+        Self {
+            field,
+            value,
+            normalized_value,
+            tokens,
+        }
     }
 }
 
@@ -518,7 +559,8 @@ mod tests {
 
     use super::{
         account_rule_cross_field_match, account_rule_plain_pattern_matches,
-        match_account_rule_expression, match_account_rule_expression_node, match_account_rules,
+        compile_account_rule_candidates, match_account_rule_expression,
+        match_account_rule_expression_node, match_account_rules, match_compiled_account_rules,
         normalize_account_role_scope, normalize_account_rule_field_scope,
         normalize_transaction_type_scope, AccountRuleCandidate, AccountRuleMatchContext,
         ACCOUNT_ROLE_SOURCE, FIELD_COUNTERPARTY, FIELD_DESCRIPTION, FIELD_EXPENSE_COUNTERPARTY,
@@ -657,6 +699,47 @@ mod tests {
         assert_eq!(matched.account_id, 70);
         assert!(matched.fallback_used);
         assert!(matched.matched_fields.is_empty());
+    }
+
+    #[test]
+    fn compiled_account_rules_preserve_priority_and_direct_match_semantics() {
+        let context = AccountRuleMatchContext {
+            counterparty: "支付宝".to_string(),
+            payment_method: "招商工资卡".to_string(),
+            description: "余额宝 转入".to_string(),
+            ..AccountRuleMatchContext::default()
+        };
+        let rules = vec![
+            AccountRuleCandidate {
+                rule_id: 2,
+                account_id: 20,
+                rule_expression: "AND={支付宝,余额宝}".to_string(),
+                regex_enabled: false,
+                enabled: true,
+                priority: 5,
+            },
+            AccountRuleCandidate {
+                rule_id: 1,
+                account_id: 10,
+                rule_expression: "OR={招商工资卡}".to_string(),
+                regex_enabled: false,
+                enabled: true,
+                priority: 1,
+            },
+        ];
+
+        let compiled = compile_account_rule_candidates(&rules);
+
+        assert_eq!(compiled[0].rule.rule_id, 1);
+        let matched = match_compiled_account_rules(
+            &compiled,
+            &context,
+            ACCOUNT_ROLE_SOURCE,
+            TRANSACTION_SCOPE_EXPENSE,
+        )
+        .expect("compiled account rule match");
+        assert_eq!(matched.account_id, 10);
+        assert_eq!(matched.matched_fields, vec![FIELD_PAYMENT_METHOD]);
     }
 
     #[test]

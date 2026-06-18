@@ -248,6 +248,7 @@ import {
     isNoAvailableTag,
     getAvailableTagCount
 } from '@/lib/tag.ts';
+import logger from '@/lib/logger.ts';
 
 import {
     mdiRefresh,
@@ -354,7 +355,7 @@ function save(tag: TransactionTag): void {
         }).then(() => {
             snackbar.value?.showMessage('Tag saved successfully');
         }).catch(error => {
-            console.error('[ListPage] Failed to reload tags after save', error);
+            logger.error('[ListPage] Failed to reload tags after save', error);
         });
     }).catch(error => {
         updating.value = false;
@@ -395,7 +396,7 @@ function saveSortResult(): void {
 }
 
 function hide(tag: TransactionTag, hidden: boolean): void {
-    console.log(`[ListPage] Hiding tag: ${tag.id}, hidden: ${hidden}`);
+    logger.debug(`[ListPage] Hiding tag: ${tag.id}, hidden: ${hidden}`);
     updating.value = true;
     tagHiding.value[tag.id] = true;
 
@@ -403,11 +404,11 @@ function hide(tag: TransactionTag, hidden: boolean): void {
         tag: tag,
         hidden: hidden
     }).then(() => {
-        console.log(`[ListPage] Tag hidden successfully: ${tag.id}`);
+        logger.debug(`[ListPage] Tag hidden successfully: ${tag.id}`);
         updating.value = false;
         tagHiding.value[tag.id] = false;
     }).catch(error => {
-        console.error(`[ListPage] Failed to hide tag: ${tag.id}`, error);
+        logger.error(`[ListPage] Failed to hide tag: ${tag.id}`, error);
         updating.value = false;
         tagHiding.value[tag.id] = false;
 
@@ -418,7 +419,7 @@ function hide(tag: TransactionTag, hidden: boolean): void {
 }
 
 function remove(tag: TransactionTag): void {
-    console.log(`[ListPage] Removing tag: ${tag.id}`);
+    logger.debug(`[ListPage] Removing tag: ${tag.id}`);
     confirmDialog.value?.open('Are you sure you want to delete this tag?').then(() => {
         updating.value = true;
         tagRemoving.value[tag.id] = true;
@@ -426,11 +427,11 @@ function remove(tag: TransactionTag): void {
         transactionTagsStore.deleteTag({
             tag: tag
         }).then(() => {
-            console.log(`[ListPage] Tag removed successfully: ${tag.id}`);
+            logger.debug(`[ListPage] Tag removed successfully: ${tag.id}`);
             updating.value = false;
             tagRemoving.value[tag.id] = false;
         }).catch(error => {
-            console.error(`[ListPage] Failed to remove tag: ${tag.id}`, error);
+            logger.error(`[ListPage] Failed to remove tag: ${tag.id}`, error);
             updating.value = false;
             tagRemoving.value[tag.id] = false;
 

@@ -8,7 +8,7 @@ pub async fn ocr_config_get_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "ocr_config_get_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "ocr_config_get_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -34,7 +34,7 @@ pub async fn ocr_config_put_runtime_handler(
     Json(payload): Json<Value>,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "ocr_config_put_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "ocr_config_put_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -65,7 +65,7 @@ pub async fn ocr_recognition_runtime_handler(
     body: Bytes,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "ocr_recognition_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "ocr_recognition_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -268,7 +268,7 @@ pub async fn learning_suggestions_list_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "learning_suggestions_list_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "learning_suggestions_list_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -309,7 +309,7 @@ pub async fn learning_suggestions_generate_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "learning_suggestions_generate_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "learning_suggestions_generate_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -334,7 +334,7 @@ pub async fn learning_suggestion_accept_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "learning_suggestion_accept_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "learning_suggestion_accept_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -361,7 +361,7 @@ pub async fn learning_suggestions_batch_accept_runtime_handler(
     Json(payload): Json<Value>,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "learning_suggestions_batch_accept_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "learning_suggestions_batch_accept_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -436,7 +436,7 @@ pub async fn learning_suggestion_reject_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "learning_suggestion_reject_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "learning_suggestion_reject_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -468,7 +468,7 @@ pub async fn learning_rules_list_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "learning_rules_list_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "learning_rules_list_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -516,7 +516,7 @@ pub async fn learning_rule_toggle_runtime_handler(
     Json(payload): Json<Value>,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "learning_rule_toggle_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "learning_rule_toggle_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -553,7 +553,7 @@ pub async fn learning_rule_update_runtime_handler(
     Json(payload): Json<Value>,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "learning_rule_update_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "learning_rule_update_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -600,7 +600,7 @@ pub async fn learning_rule_delete_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "learning_rule_delete_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "learning_rule_delete_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),

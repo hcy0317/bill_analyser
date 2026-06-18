@@ -24,6 +24,7 @@ import { AccountBalanceTrendChartType } from '@/core/statistics.ts';
 import { DEFAULT_CHART_COLORS } from '@/consts/color.ts';
 
 import { isArray } from '@/lib/common.ts';
+import logger from '@/lib/logger.ts';
 import { getExpenseAndIncomeAmountColor } from '@/lib/ui/common.ts';
 
 interface DesktopAccountBalanceTrendsChartProps extends CommonAccountBalanceTrendsChartProps {
@@ -61,7 +62,7 @@ const textDirection = computed<TextDirection>(() => getCurrentLanguageTextDirect
 const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
 
 const allSeries = computed<AccountBalanceTrendsChartDataItem[]>(() => {
-    console.log(`[AccountBalanceTrendsChart] allSeries计算开始 - type=${props.type}, dataItems数量=${allDataItems.value?.length || 0}`);
+    logger.debug(`[AccountBalanceTrendsChart] allSeries计算开始 - type=${props.type}, dataItems数量=${allDataItems.value?.length || 0}`);
 
     const series: AccountBalanceTrendsChartDataItem = {
         id: 'accountBalance',
@@ -81,7 +82,7 @@ const allSeries = computed<AccountBalanceTrendsChartDataItem[]>(() => {
     } else if (props.type === AccountBalanceTrendChartType.Column.type) {
         series.type = 'bar';
     } else if (props.type === AccountBalanceTrendChartType.Candlestick.type) {
-        console.log(`[AccountBalanceTrendsChart] 配置K线图样式`);
+        logger.debug(`[AccountBalanceTrendsChart] 配置K线图样式`);
         const expenseIncomeAmountColor = getExpenseAndIncomeAmountColor(userStore.currentUserExpenseAmountColor, userStore.currentUserIncomeAmountColor, isDarkMode.value);
         series.type = 'candlestick';
         series.itemStyle.color = expenseIncomeAmountColor.incomeAmountColor;
@@ -105,13 +106,13 @@ const allSeries = computed<AccountBalanceTrendsChartDataItem[]>(() => {
             ];
             series.data.push(candlestickData);
 
-            console.log(`[AccountBalanceTrendsChart] ${item.displayDate} K线数据: [开=${candlestickData[0]}, 收=${candlestickData[1]}, 低=${candlestickData[2]}, 高=${candlestickData[3]}], 高度=${highest - lowest}`);
+            logger.debug(`[AccountBalanceTrendsChart] ${item.displayDate} K线数据: [开=${candlestickData[0]}, 收=${candlestickData[1]}, 低=${candlestickData[2]}, 高=${candlestickData[3]}], 高度=${highest - lowest}`);
         } else {
             series.data.push(item.closingBalanceCents);
         }
     }
 
-    console.log(`[AccountBalanceTrendsChart] allSeries计算完成 - series.type=${series.type}, data点数=${series.data.length}`);
+    logger.debug(`[AccountBalanceTrendsChart] allSeries计算完成 - series.type=${series.type}, data点数=${series.data.length}`);
     return [series];
 });
 

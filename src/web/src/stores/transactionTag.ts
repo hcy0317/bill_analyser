@@ -289,23 +289,23 @@ export const useTransactionTagsStore = defineStore('transactionTags', () => {
 
     function hideTag({ tag, hidden }: { tag: TransactionTag, hidden: boolean }): Promise<boolean> {
         return new Promise((resolve, reject) => {
-            console.log(`[TransactionTagsStore] hideTag called for ${tag.id}, hidden=${hidden}`);
+            logger.debug(`[TransactionTagsStore] hideTag called for ${tag.id}, hidden=${hidden}`);
 
             services.hideTransactionTag({ id: tag.id, hidden: hidden }).then(response => {
                 const data = response.data;
 
                 if (!data || !data.success) {
-                    console.error(`[TransactionTagsStore] hideTag failed for ${tag.id}`, data);
+                    logger.error(`[TransactionTagsStore] hideTag failed for ${tag.id}`, data);
                     reject({ message: 'Unable to update tag visibility' });
                     return;
                 }
 
-                console.log(`[TransactionTagsStore] hideTag success for ${tag.id}`);
+                logger.debug(`[TransactionTagsStore] hideTag success for ${tag.id}`);
                 updateTagVisibilityInTransactionTagList({ tag, hidden });
 
                 resolve(true);
             }).catch(error => {
-                console.error(`[TransactionTagsStore] hideTag error for ${tag.id}`, error);
+                logger.error(`[TransactionTagsStore] hideTag error for ${tag.id}`, error);
                 logger.error('failed to update tag visibility', error);
 
                 if (error.response && error.response.data && error.response.data.message) {
@@ -321,17 +321,17 @@ export const useTransactionTagsStore = defineStore('transactionTags', () => {
 
     function deleteTag({ tag, beforeResolve }: { tag: TransactionTag, beforeResolve?: BeforeResolveFunction }): Promise<boolean> {
         return new Promise((resolve, reject) => {
-            console.log(`[TransactionTagsStore] deleteTag called for ${tag.id}`);
+            logger.debug(`[TransactionTagsStore] deleteTag called for ${tag.id}`);
             services.deleteTransactionTag({ id: tag.id }).then(response => {
                 const data = response.data;
 
                 if (!data || !data.success) {
-                    console.error(`[TransactionTagsStore] deleteTag failed for ${tag.id}`, data);
+                    logger.error(`[TransactionTagsStore] deleteTag failed for ${tag.id}`, data);
                     reject({ message: 'Unable to delete this tag' });
                     return;
                 }
 
-                console.log(`[TransactionTagsStore] deleteTag success for ${tag.id}`);
+                logger.debug(`[TransactionTagsStore] deleteTag success for ${tag.id}`);
 
                 if (beforeResolve) {
                     beforeResolve(() => {
@@ -343,7 +343,7 @@ export const useTransactionTagsStore = defineStore('transactionTags', () => {
                     resolve(true);
                 }
             }).catch(error => {
-                console.error(`[TransactionTagsStore] deleteTag error for ${tag.id}`, error);
+                logger.error(`[TransactionTagsStore] deleteTag error for ${tag.id}`, error);
                 logger.error('failed to delete tag', error);
 
                 if (error.response && error.response.data && error.response.data.message) {

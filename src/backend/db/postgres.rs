@@ -156,6 +156,40 @@ const IMPORT_PREVIEW_FILTER_INDEXES: &[&str] = &[
     "idx_import_preview_rows_session_type",
 ];
 
+const IMPORT_STAGING_CLEANUP_INDEX_TABLES: &[&str] = &[
+    "import_sessions",
+    "import_sources",
+    "import_standard_rows",
+    "import_preview_rows",
+    "import_decision_groups",
+    "import_decision_group_members",
+    "import_confirm_operations",
+    "preview_matching_feedback",
+    "import_learning_samples",
+    "import_learning_suggestions",
+    "import_learning_feedback_events",
+];
+
+const IMPORT_STAGING_CLEANUP_INDEXES: &[&str] = &[
+    "idx_import_sessions_user_id",
+    "idx_import_sources_user_session",
+    "idx_import_standard_rows_user_session",
+    "idx_import_preview_rows_user_session",
+    "idx_import_preview_rows_base_standard_row_id",
+    "idx_import_decision_groups_base_preview_row_id",
+    "idx_import_decision_group_members_preview_row_id",
+    "idx_import_decision_group_members_standard_row_id",
+    "idx_import_confirm_operations_session_id",
+    "idx_import_confirm_operations_preview_row_id",
+    "idx_preview_matching_feedback_session_id",
+    "idx_preview_matching_feedback_preview_row_id",
+    "idx_preview_matching_feedback_group_id",
+    "idx_import_learning_samples_preview_row_id",
+    "idx_import_learning_suggestions_session_id",
+    "idx_import_learning_suggestions_preview_row_id",
+    "idx_import_learning_feedback_events_suggestion_id",
+];
+
 const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
     PostgresMigrationDescriptor {
         version: 1,
@@ -262,6 +296,20 @@ const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
         required_tables: IMPORT_PREVIEW_FILTER_INDEX_TABLES,
         required_indexes: IMPORT_PREVIEW_FILTER_INDEXES,
     },
+    PostgresMigrationDescriptor {
+        version: 16,
+        file_name: "0016_import_staging_cleanup_fk_indexes.sql",
+        description: "add import staging cleanup and foreign-key helper indexes",
+        required_tables: IMPORT_STAGING_CLEANUP_INDEX_TABLES,
+        required_indexes: IMPORT_STAGING_CLEANUP_INDEXES,
+    },
+    PostgresMigrationDescriptor {
+        version: 17,
+        file_name: "0017_import_staging_cleanup_indexes_retained.sql",
+        description: "retain import staging cleanup helper indexes for existing version 17 deployments",
+        required_tables: IMPORT_STAGING_CLEANUP_INDEX_TABLES,
+        required_indexes: IMPORT_STAGING_CLEANUP_INDEXES,
+    },
 ];
 
 pub fn postgres_migrations_dir() -> PathBuf {
@@ -293,7 +341,7 @@ mod tests {
     #[test]
     fn postgres_manifest_points_to_existing_initial_schema() {
         let manifest = postgres_migration_manifest();
-        assert_eq!(manifest.len(), 15);
+        assert_eq!(manifest.len(), 17);
         assert_eq!(manifest[0].version, 1);
         assert_eq!(manifest[0].file_name, POSTGRES_INITIAL_SCHEMA_FILE);
         for (index, descriptor) in manifest.iter().enumerate() {

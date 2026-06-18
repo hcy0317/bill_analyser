@@ -2,7 +2,6 @@
 // 维护重点：本文件只组合导入预览上下文与 core account_rules，不重新实现规则表达式语义。
 // 不变式：导入账户识别不得回退到账户别名直接匹配；别名只作为账户规则迁移输入。
 
-#[tracing::instrument(level = "debug", skip_all)]
 fn apply_transfer_account_rule_match(
     draft: &mut ImportPreviewDraft,
     rules: &[CompiledAccountRuleCandidate],
@@ -65,7 +64,6 @@ fn apply_transfer_account_rule_match(
     changed
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
 fn apply_investment_account_rule_match(
     draft: &mut ImportPreviewDraft,
     rules: &[CompiledAccountRuleCandidate],
@@ -123,7 +121,6 @@ fn apply_investment_account_rule_match(
     changed
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
 fn apply_standard_account_rule_match(
     draft: &mut ImportPreviewDraft,
     rules: &[CompiledAccountRuleCandidate],
@@ -286,8 +283,11 @@ fn parser_tags_from_value(value: Option<&Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn import_preview_transfer_rule_text(draft: &ImportPreviewDraft) -> String {
-    let mut parts = vec![import_preview_rule_text(draft)];
+fn import_preview_transfer_rule_text(
+    preview_rule_text: &str,
+    draft: &ImportPreviewDraft,
+) -> String {
+    let mut parts = vec![preview_rule_text.to_string()];
     if let Some(source_chain) = transfer_source_chain(draft) {
         for entry in source_chain {
             for field in [
@@ -432,6 +432,12 @@ mod account_rule_matcher_tests {
         }
     }
 
+    fn compiled_rules(
+        rules: &[AccountRuleCandidate],
+    ) -> Vec<CompiledAccountRuleCandidate> {
+        compile_account_rule_candidates(rules)
+    }
+
     #[test]
     fn account_rules_consume_final_preview_type_after_semantic_projection() {
         let mut draft = ImportPreviewDraft {
@@ -441,8 +447,7 @@ mod account_rule_matcher_tests {
             preview_description: "学习已把原收入行投影为支出".to_string(),
             ..ImportPreviewDraft::default()
         };
-        let rules = vec![candidate(42, "OR={招商工资卡}")];
-        let rules = compile_account_rule_candidates(&rules);
+        let rules = compiled_rules(&[candidate(42, "OR={招商工资卡}")]);
         let accounts = vec![account(42, "招商银行")];
 
         assert!(apply_account_rule_match_after_semantic_projection(
@@ -468,8 +473,7 @@ mod account_rule_matcher_tests {
             preview_payment_method: "招商工资卡".to_string(),
             ..ImportPreviewDraft::default()
         };
-        let rules = vec![candidate(42, "OR={招商工资卡}")];
-        let rules = compile_account_rule_candidates(&rules);
+        let rules = compiled_rules(&[candidate(42, "OR={招商工资卡}")]);
         let accounts = vec![account(42, "招商银行")];
 
         assert!(!apply_account_rule_match_after_semantic_projection(

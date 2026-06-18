@@ -9,7 +9,7 @@ pub async fn llm_preview_recommend_accept_runtime_handler(
     Json(payload): Json<Value>,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "llm_preview_recommend_accept_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "llm_preview_recommend_accept_runtime_handler", "business operation entered");
     llm_preview_recommend_review_response(
         state,
         headers,
@@ -27,7 +27,7 @@ pub async fn llm_preview_recommend_reject_runtime_handler(
     Json(payload): Json<Value>,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "llm_preview_recommend_reject_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "llm_preview_recommend_reject_runtime_handler", "business operation entered");
     llm_preview_recommend_review_response(
         state,
         headers,
@@ -154,7 +154,7 @@ pub async fn llm_memory_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "llm_memory_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "llm_memory_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -190,7 +190,7 @@ pub async fn llm_config_get_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "llm_config_get_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "llm_config_get_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -221,7 +221,7 @@ pub async fn llm_config_post_runtime_handler(
     body: Bytes,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "llm_config_post_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "llm_config_post_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -266,7 +266,7 @@ pub async fn llm_configs_list_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "llm_configs_list_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "llm_configs_list_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -298,7 +298,7 @@ pub async fn llm_configs_create_runtime_handler(
     body: Bytes,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "llm_configs_create_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "llm_configs_create_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -370,7 +370,7 @@ pub async fn llm_config_update_runtime_handler(
     body: Bytes,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "llm_config_update_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "llm_config_update_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -421,7 +421,7 @@ pub async fn llm_config_delete_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "llm_config_delete_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "llm_config_delete_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -451,7 +451,7 @@ pub async fn llm_config_activate_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "llm_config_activate_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "llm_config_activate_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),

@@ -275,7 +275,7 @@ pub fn build_import_preview_filter_index_item(
     accounts_by_id: &BTreeMap<i64, AccountLookup>,
 ) -> ImportPreviewFilterIndexItem {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "build_import_preview_filter_index_item",
         "business operation entered"
@@ -470,7 +470,7 @@ pub fn attach_import_preview_matching_payload(preview_item: &mut Map<String, Val
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_import_preview_matching_payload(preview_item: &Map<String, Value>) -> Value {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "build_import_preview_matching_payload",
         "business operation entered"
@@ -956,7 +956,7 @@ where
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn import_stage_parse_success(data: ImportStageParseData) -> ImportV2RouteResponse {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "import_stage_parse_success",
         "business operation entered"
@@ -967,7 +967,7 @@ pub fn import_stage_parse_success(data: ImportStageParseData) -> ImportV2RouteRe
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn import_stage_dedup_success(data: ImportStageDedupData) -> ImportV2RouteResponse {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "import_stage_dedup_success",
         "business operation entered"
@@ -978,7 +978,7 @@ pub fn import_stage_dedup_success(data: ImportStageDedupData) -> ImportV2RouteRe
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn import_stage_confirm_success(data: ImportStageConfirmData) -> ImportV2RouteResponse {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "import_stage_confirm_success",
         "business operation entered"
@@ -989,7 +989,7 @@ pub fn import_stage_confirm_success(data: ImportStageConfirmData) -> ImportV2Rou
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn import_preview_page_success(data: ImportPreviewPageData) -> ImportV2RouteResponse {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "import_preview_page_success",
         "business operation entered"
@@ -1000,7 +1000,7 @@ pub fn import_preview_page_success(data: ImportPreviewPageData) -> ImportV2Route
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn import_preview_index_success(data: ImportPreviewIndexData) -> ImportV2RouteResponse {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "import_preview_index_success",
         "business operation entered"
@@ -1011,7 +1011,7 @@ pub fn import_preview_index_success(data: ImportPreviewIndexData) -> ImportV2Rou
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn import_session_success(session: ImportSessionSummary) -> ImportV2RouteResponse {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "import_session_success",
         "business operation entered"

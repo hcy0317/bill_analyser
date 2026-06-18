@@ -159,10 +159,10 @@ export function setTransactionModelByTransaction(transaction: Transaction, trans
 
     if (transaction2) {
         // 🆕 [数据传递日志] 记录transaction2的关键数据（v6.21.7）
-        logger.info(`[数据传递] setTransactionModelByTransaction: transaction2.id=${transaction2.id}, type=${transaction2.type}, categoryId=${transaction2.categoryId}`);
-        logger.info(`[数据传递] transaction2.category存在: ${!!transaction2.category}, tags数量: ${transaction2.tags?.length || 0}`);
+        logger.debug(`[数据传递] setTransactionModelByTransaction: transaction2.id=${transaction2.id}, type=${transaction2.type}, categoryId=${transaction2.categoryId}`);
+        logger.debug(`[数据传递] transaction2.category存在: ${!!transaction2.category}, tags数量: ${transaction2.tags?.length || 0}`);
         if (transaction2.category) {
-            logger.info(`[数据传递] transaction2.category内容: ${JSON.stringify({id: transaction2.category.id, name: transaction2.category.name, type: transaction2.category.type})}`);
+            logger.debug(`[数据传递] transaction2.category内容: ${JSON.stringify({id: transaction2.category.id, name: transaction2.category.name, type: transaction2.category.type})}`);
         }
 
         if (setContextData) {
@@ -180,23 +180,23 @@ export function setTransactionModelByTransaction(transaction: Transaction, trans
         } else if (transaction.type === TransactionType.Investment) {
             // 🆕 添加投资类型支持
             transaction.investmentCategoryId = transaction2.categoryId || '';
-            logger.info(`[数据传递] 设置investmentCategoryId: ${transaction.investmentCategoryId}`);
+            logger.debug(`[数据传递] 设置investmentCategoryId: ${transaction.investmentCategoryId}`);
         }
 
         // 🆕 传递category对象（v6.21.7修复）
         if (transaction2.category) {
             // 转换TransactionCategoryInfoResponse为TransactionCategory对象
             transaction.setCategory(TransactionCategory.of(transaction2.category));
-            logger.info(`[数据传递] 已调用transaction.setCategory(), category.id=${transaction2.category.id}`);
+            logger.debug(`[数据传递] 已调用transaction.setCategory(), category.id=${transaction2.category.id}`);
         } else {
-            logger.warn(`[数据传递] transaction2.category为空，跳过setCategory`);
+        logger.debug(`[数据传递] transaction2.category为空，跳过setCategory`);
         }
 
         // 🆕 传递tags对象（v6.21.7修复）
         if (transaction2.tags && transaction2.tags.length > 0) {
             // 转换TransactionTagInfoResponse[]为TransactionTag[]对象
             transaction.setTags(TransactionTag.ofMulti(transaction2.tags));
-            logger.info(`[数据传递] 已调用transaction.setTags(), tags数量=${transaction2.tags.length}`);
+            logger.debug(`[数据传递] 已调用transaction.setTags(), tags数量=${transaction2.tags.length}`);
         }
 
         if (setContextData) {

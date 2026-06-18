@@ -182,7 +182,7 @@ async fn import_parse_multipart_runtime_response(
     body: &[u8],
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "import_parse_multipart_runtime_response", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "import_parse_multipart_runtime_response", "business operation entered");
     let request_started_at = Instant::now();
     let user_id = match user_id_from_headers(headers, &state.config) {
         Ok(user_id) => user_id,
@@ -457,18 +457,22 @@ fn persist_import_parse_runtime_response(
         Ok(result) => result,
         Err(error) => return route_response(db_error_response(error)),
     };
+    let _staging_elapsed_ms = import_stage_elapsed_ms(_staging_started_at);
+    let _total_elapsed_ms = import_stage_elapsed_ms(_request_started_at);
     #[cfg(not(coverage))]
-    tracing::debug!(
+    tracing::info!(
         domain = "import_parser",
         operation = "persist_import_parse_runtime_response",
         user_id = user_id.get(),
         session_id = %input.session_id,
-        parser_id = %input._parser_id,
-        drafts = drafts.len(),
-        inserted_count = staging_result.inserted_count,
-        staging_elapsed_ms = import_stage_elapsed_ms(_staging_started_at),
-        total_elapsed_ms = import_stage_elapsed_ms(_request_started_at),
-        "stage1 staging inserted"
+        file_count = input.file_count,
+        matched_file_count = input.files.len(),
+        unmatched_file_count = input.unmatched_files.len(),
+        raw_transaction_count = input.standard_bills.len(),
+        standardized_row_count = staging_result.inserted_count,
+        elapsed_staging_ms = _staging_elapsed_ms,
+        elapsed_total_ms = _total_elapsed_ms,
+        "import stage1 summary"
     );
     if !staging_result.session_found {
         return route_response(import_session_not_found_response());

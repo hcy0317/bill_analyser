@@ -1,37 +1,40 @@
 import { isEnableDebug } from './settings.ts';
 
+type ConsoleWriter = (message?: unknown, ...optionalParams: unknown[]) => void;
+
+function timestamp(): string {
+    return new Date().toISOString();
+}
+
+function formatPrefix(level: 'Debug' | 'Info' | 'Warn' | 'Error'): string {
+    return `[bill analyser ${level}] ${timestamp()}`;
+}
+
+function writeLog(writer: ConsoleWriter, level: 'Debug' | 'Info' | 'Warn' | 'Error', msg: string, obj?: unknown): void {
+    const message = `${formatPrefix(level)} ${msg}`;
+    if (obj !== undefined) {
+        writer(message, obj);
+    } else {
+        writer(message);
+    }
+}
+
 function logDebug(msg: string, obj?: unknown): void {
     if (isEnableDebug()) {
-        if (obj) {
-            console.debug('[bill analyser Debug] ' + msg, obj);
-        } else {
-            console.debug('[bill analyser Debug] ' + msg);
-        }
+        writeLog(console.debug, 'Debug', msg, obj);
     }
 }
 
 function logInfo(msg: string, obj?: unknown): void {
-    if (obj) {
-        console.info('[bill analyser Info] ' + msg, obj);
-    } else {
-        console.info('[bill analyser Info] ' + msg);
-    }
+    writeLog(console.info, 'Info', msg, obj);
 }
 
 function logWarn(msg: string, obj?: unknown): void {
-    if (obj) {
-        console.warn('[bill analyser Warn] ' + msg, obj);
-    } else {
-        console.warn('[bill analyser Warn] ' + msg);
-    }
+    writeLog(console.warn, 'Warn', msg, obj);
 }
 
 function logError(msg: string, obj?: unknown): void {
-    if (obj) {
-        console.error('[bill analyser Error] ' + msg, obj);
-    } else {
-        console.error('[bill analyser Error] ' + msg);
-    }
+    writeLog(console.error, 'Error', msg, obj);
 }
 
 export default {

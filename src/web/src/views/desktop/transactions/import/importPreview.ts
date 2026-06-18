@@ -1,6 +1,5 @@
 import type { ImportMatchingPayload } from '@/models/import_matching.ts';
 import { CategoryType } from '@/core/category.ts';
-import { TransactionType } from '@/core/transaction.ts';
 
 export interface ImportPreviewLLMMatchingPayload {
     suggested_main_category?: string;
@@ -94,30 +93,6 @@ function normalizePreviewCategoryId(rawCategoryId: number | string | null | unde
     return '';
 }
 
-function getImportPreviewTransactionType(previewType?: string): TransactionType | null {
-    const normalizedPreviewType = (previewType || '').trim().toLowerCase();
-    switch (normalizedPreviewType) {
-        case '收入':
-        case 'income':
-        case '2':
-            return TransactionType.Income;
-        case '支出':
-        case 'expense':
-        case '3':
-            return TransactionType.Expense;
-        case '转账':
-        case 'transfer':
-        case '4':
-            return TransactionType.Transfer;
-        case '投资':
-        case 'investment':
-        case '5':
-            return TransactionType.Investment;
-        default:
-            return null;
-    }
-}
-
 export function resolveImportPreviewCategoryPath(
     categoryId: number | string | null | undefined,
     categoriesById: ImportPreviewCategoryMap
@@ -163,17 +138,9 @@ export function resolveImportPreviewCategoryId(
     previewData: ImportPreviewRecord,
     categoriesById: ImportPreviewCategoryMap
 ): string {
-    const previewTransactionType = getImportPreviewTransactionType(previewData.preview_type);
     const persistedCategoryId = normalizePreviewCategoryId(previewData.category_id ?? previewData.categoryId);
     const persistedCategory = resolveImportPreviewCategoryPath(persistedCategoryId, categoriesById);
-    if (
-        persistedCategory
-        && (
-            previewTransactionType === null
-            || persistedCategory.type === null
-            || persistedCategory.type === previewTransactionType
-        )
-    ) {
+    if (persistedCategory) {
         return persistedCategoryId;
     }
 

@@ -142,7 +142,7 @@ describe('import preview category resolution', () => {
         })).toBe('');
     });
 
-    test('does not resolve same-name categories from another transaction type', () => {
+    test('trusts canonical category ids even when local type metadata differs', () => {
         const typedCategoriesById = {
             expenseParent: {
                 id: 'expenseParent',
@@ -176,7 +176,7 @@ describe('import preview category resolution', () => {
             preview_type: '转账',
             preview_main_category: '账户互转',
             preview_sub_category: '咖啡'
-        }, typedCategoriesById)).toBe('');
+        }, typedCategoriesById)).toBe('expenseSub');
 
         expect(resolveImportPreviewCategoryId({
             id: 11,
@@ -522,5 +522,17 @@ describe('import preview server-paged reset guards', () => {
         expect(nextFunctionIndex).toBeGreaterThan(functionIndex);
         expect(functionSource).toContain('return hasCurrentAnnotationIssue(item);');
         expect(functionSource).not.toContain('hasRawPersistedMatchingAnnotationIssue');
+    });
+
+    test('check-data annotation resolution reads status-only missing category payloads', () => {
+        const tabSource = readSource('src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue');
+        const functionIndex = tabSource.indexOf('function getAnnotationType');
+        const nextFunctionIndex = tabSource.indexOf('function isCategoryAnnotationType', functionIndex);
+        const functionSource = tabSource.slice(functionIndex, nextFunctionIndex);
+
+        expect(functionIndex).toBeGreaterThanOrEqual(0);
+        expect(nextFunctionIndex).toBeGreaterThan(functionIndex);
+        expect(functionSource).toContain('return getAnnotationText(annotation).trim().toLowerCase();');
+        expect(functionSource).not.toContain("annotation['type'] || ''");
     });
 });

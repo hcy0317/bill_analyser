@@ -195,6 +195,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import axios from 'axios';
+import logger from '@/lib/logger.ts';
 
 // 类型
 interface ParserInfo {
@@ -323,7 +324,7 @@ const loadParsers = async (): Promise<void> => {
             availableParsers.value = response.data.data;
         }
     } catch (error) {
-        console.error('Failed to load parsers:', error);
+        logger.error('Failed to load parsers:', error);
     }
 };
 

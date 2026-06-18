@@ -12,7 +12,7 @@ use super::common::{
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "parse",
         "business operation entered"
@@ -28,7 +28,7 @@ pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_csv(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "parse_csv",
         "business operation entered"
@@ -87,7 +87,7 @@ fn raw_wechat(row: &RowMap) -> Option<RawBill> {
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_sheet_or_html(bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "parse_sheet_or_html",
         "business operation entered"

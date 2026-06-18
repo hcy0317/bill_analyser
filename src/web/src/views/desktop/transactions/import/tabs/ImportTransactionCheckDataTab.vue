@@ -1211,12 +1211,7 @@ function getAcceptedCategoryPathForTransaction(transaction: ImportTransaction): 
         return null;
     }
 
-    const expectedCategoryType = transactionTypeToCategoryType(transaction.type as TransactionType);
-    if (expectedCategoryType === null || categoryPath.type === null) {
-        return categoryPath;
-    }
-
-    return categoryPath.type === expectedCategoryType ? categoryPath : null;
+    return categoryPath;
 }
 
 function isTransactionCategoryAccepted(transaction: ImportTransaction): boolean {
@@ -2325,6 +2320,7 @@ async function reviewTransferSuggestion(
     }
 
     addDecisionLoadingId(transferDecisionLoadingIds, previewId);
+    logger.info(`[转账建议决策] 开始: preview_id=${previewId}, decision=${decision}`);
 
     try {
         const token = getCurrentToken();
@@ -2367,6 +2363,7 @@ async function reviewTransferSuggestion(
         }
 
         syncTransactionFromPreviewDecision(item, refreshedPreview);
+        logger.info(`[转账建议决策] 完成: preview_id=${previewId}, decision=${decision}`);
 
         snackbar.value?.showMessage(tt(getTransferDecisionMessageKey(decision)));
     } catch (error) {
@@ -2398,6 +2395,7 @@ async function reviewLearningSuggestion(
     const candidateId = `preview:${previewId}:learning`;
 
     addDecisionLoadingId(learningDecisionLoadingIds, previewId);
+    logger.info(`[学习建议决策] 开始: preview_id=${previewId}, decision=${decision}`);
 
     if (shouldBlockLearningDecisionOnSync(item)) {
         snackbar.value?.showMessage(tt('Please sync manual preview edits before reviewing learning suggestions'));
@@ -2461,6 +2459,7 @@ async function reviewLearningSuggestion(
         }
 
         syncTransactionFromPreviewDecision(item, refreshedPreview);
+        logger.info(`[学习建议决策] 完成: preview_id=${previewId}, decision=${decision}`);
         snackbar.value?.showMessage(tt(getLearningDecisionMessageKey(decision)));
     } catch (error) {
         const actionErrorText = getActionErrorMessage(error, 'Learning decision failed');
@@ -2490,6 +2489,7 @@ async function reviewLLMRecommendation(
     }
 
     addDecisionLoadingId(llmDecisionLoadingIds, previewId);
+    logger.info(`[LLM 建议决策] 开始: preview_id=${previewId}, decision=${decision}`);
 
     try {
         const suggestion = {
@@ -2515,6 +2515,7 @@ async function reviewLLMRecommendation(
 
         syncTransactionFromLLMPreviewPayload(item, result);
         await refreshLLMSessionSignalMemory(true);
+        logger.info(`[LLM 建议决策] 完成: preview_id=${previewId}, decision=${decision}`);
         snackbar.value?.showMessage(tt(decision === 'accept' ? 'LLM Suggestion Accepted' : 'LLM Suggestion Rejected'));
     } catch (error) {
         const actionErrorText = getActionErrorMessage(error, 'LLM recommendation decision failed');
@@ -2991,7 +2992,7 @@ function getAnnotationType(annotation: MatchingAnnotationPayload): string {
     }
 
     if (annotation && typeof annotation === 'object') {
-        return String(annotation['type'] || '').trim().toLowerCase();
+        return getAnnotationText(annotation).trim().toLowerCase();
     }
 
     return '';
@@ -5342,12 +5343,13 @@ function isKnownCategoryIdForType(
     categoryId: string | number | null | undefined,
     transactionType: TransactionType
 ): boolean {
+    void transactionType;
     const normalizedCategoryId = String(categoryId || '').trim();
     if (!normalizedCategoryId || normalizedCategoryId === '0') {
         return false;
     }
     const categoryPath = resolveImportPreviewCategoryPath(normalizedCategoryId, allCategoriesMap.value);
-    return !!categoryPath && (categoryPath.type === null || categoryPath.type === transactionType);
+    return !!categoryPath;
 }
 
 function assignCategoryIdIfKnown(

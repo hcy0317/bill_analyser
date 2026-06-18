@@ -683,6 +683,9 @@ const pendingInitialCheckDataPageRequest = ref<{
 } | null>(null);
 let previewPageRequestSequence = 0;
 let previewPageAbortController: AbortController | null = null;
+const importDialogOpenedAt = ref<number | null>(null);
+const importSubmitStartedAt = ref<number | null>(null);
+const firstOperablePreviewLogged = ref<boolean>(false);
 const parsedFileDelimiter = ref<string>('');
 const matchedImportConfig = ref<ImportConfigMatchResult | null>(null);
 
@@ -720,6 +723,21 @@ const editImportConfigRecommended = ref<boolean>(false);
 const editingImportConfig = ref<ImportConfigMatchResult | null>(null);
 const showCheckDataFilterMenu = ref<boolean>(false);
 const openedCheckDataFilterGroups = ref<string[]>([]);
+
+function importFlowElapsedMs(startedAt: number | null): number | null {
+    return startedAt === null ? null : Math.max(Date.now() - startedAt, 0);
+}
+
+function logImportFlowMilestone(
+    milestone: string,
+    context: Record<string, unknown> = {}
+): void {
+    logger.info(`[三阶段导入-profile] ${milestone}`, {
+        ...context,
+        import_dialog_opened_elapsed_ms: importFlowElapsedMs(importDialogOpenedAt.value),
+        elapsed_to_first_operable_preview_ms: importFlowElapsedMs(importSubmitStartedAt.value)
+    });
+}
 
 const importFlowProgressTitleMap = computed<Record<ImportFlowProgressKey, string>>(() => ({
     selectSource: tt('Select File'),
@@ -964,6 +982,10 @@ watch(
 
 function open(): Promise<void> {
     abortPendingPreviewPageRequest();
+    importDialogOpenedAt.value = Date.now();
+    importSubmitStartedAt.value = null;
+    firstOperablePreviewLogged.value = false;
+    logImportFlowMilestone('import_dialog_opened_at');
     // v6.52: 清理之前可能残留的导入会话数据
     // 确保每次打开导入对话框时 bills_parser_template 和 bills_preview 表都是干净的
     if (serverSessionId.value) {
@@ -1065,6 +1087,10 @@ function setSelectedImportFiles(files: readonly File[]): void {
     processDSVMethod.value = ImportDSVProcessMethod.AutoDetect;
     matchedImportConfig.value = null;
     parsedFileData.value = undefined;
+    logImportFlowMilestone('files_selected_at', {
+        file_count: importFiles.value.length,
+        total_size_bytes: importFiles.value.reduce((sum, file) => sum + file.size, 0)
+    });
 }
 
 function looksLikeStructuredBillStatementFile(file?: File): boolean {
@@ -1500,11 +1526,24 @@ async function fetchPreviewPage(
         if (!result.success) {
             throw new Error(result.error || '获取预览分页失败');
         }
+        logImportFlowMilestone('preview_response_received_at', {
+            page: normalizedPage,
+            page_size: normalizedPageSize,
+            signal_filter: sortOptions.filters?.signal || null
+        });
 
         const previewData = Array.isArray(result.data?.preview) ? result.data.preview as ImportPreviewRecord[] : [];
         importTransactions.value = previewData.map((item, idx) => convertPreviewToImportTransaction(item, idx));
         previewTotalCount.value = Number(result.data?.total || 0);
         previewMetadata.value = (result.data?.metadata || null) as ImportPreviewMetadata | null;
+        if (!firstOperablePreviewLogged.value && normalizedPage === 1) {
+            firstOperablePreviewLogged.value = true;
+            logImportFlowMilestone('first_operable_preview_at', {
+                preview_table_mounted_at: new Date().toISOString(),
+                row_count: previewData.length,
+                total: previewTotalCount.value
+            });
+        }
         logger.info(
             `[三阶段导入-预览分页] 加载 page=${normalizedPage}, page_size=${normalizedPageSize}, sort_by=${normalizedSortBy || 'default'}, sort_direction=${normalizedSortDirection}, filters=${Object.keys(sortOptions.filters || {}).length}, rows=${previewData.length}, total=${previewTotalCount.value}`
         );
@@ -1559,6 +1598,9 @@ async function onCheckDataPageRequested(
 async function executeStage2Dedup(): Promise<void> {
     importProcess.value = 60;
     logger.info(`[三阶段导入-阶段2] 开始去重处理, session_id=${serverSessionId.value}`);
+    logImportFlowMilestone('stage_status_poll_started_at', {
+        session_id: serverSessionId.value
+    });
 
     const token = getCurrentToken();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -1581,7 +1623,10 @@ async function executeStage2Dedup(): Promise<void> {
     }
 
     const stage2Result = await stage2Response.json();
-    logger.info(`[三阶段导入-阶段2] 完成: success=${stage2Result.success}, preview_count=${stage2Result.data?.preview_count || stage2Result.data?.preview?.length || 0}`);
+    logImportFlowMilestone('stage2_response_received_at', {
+        session_id: serverSessionId.value
+    });
+    logger.info(`[三阶段导入-阶段2] 完成: success=${stage2Result.success}, preview_count=${stage2Result.data?.after_dedup || stage2Result.data?.preview_count || stage2Result.data?.preview?.length || 0}`);
 
     if (!stage2Result.success) {
         throw new Error(stage2Result.error || '去重预览失败');
@@ -1635,6 +1680,12 @@ async function parseData(): Promise<void> {
 
     submitting.value = true;
     importProcess.value = 0;
+    importSubmitStartedAt.value = Date.now();
+    firstOperablePreviewLogged.value = false;
+    logImportFlowMilestone('import_submit_at', {
+        file_count: importFiles.value.length,
+        total_size_bytes: importFiles.value.reduce((sum, file) => sum + file.size, 0)
+    });
 
     try {
         // ========== 阶段1: 上传并解析所有文件 ==========
@@ -1666,6 +1717,10 @@ async function parseData(): Promise<void> {
         }
 
         const stage1Result = await stage1Response.json();
+        logImportFlowMilestone('upload_completed_at', {
+            session_id: stage1Result.data?.session_id,
+            parsed_count: stage1Result.data?.parsed_count
+        });
         logger.info(`[三阶段导入-阶段1] 完成: success=${stage1Result.success}, session_id=${stage1Result.data?.session_id}, parsed_count=${stage1Result.data?.parsed_count}`);
 
         if (!stage1Result.success || !stage1Result.data?.session_id) {

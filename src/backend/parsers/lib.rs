@@ -141,7 +141,7 @@ impl StandardBill {
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn parser_registry() -> &'static [ParserInfo] {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "parser_registry",
         "business operation entered"
@@ -371,7 +371,7 @@ pub fn aggregate_description(raw_bill: &RawBill) -> String {
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn post_process_raw_bills(parser_id: &str, raw_bills: &[RawBill]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "post_process_raw_bills",
         "business operation entered"

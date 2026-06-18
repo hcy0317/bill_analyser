@@ -208,16 +208,13 @@ const HISTORY_REWRITE_OPERATION_LABELS: Record<string, string> = {
     merge_transfer_history: 'Merge History Transfer'
 };
 
-function humanizeDedupType(rawType: string): string {
-    return rawType
-        .split('_')
-        .filter(part => !!part)
-        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(' ');
-}
-
 function normalizeDedupType(rawType: string | undefined): string {
     return (rawType || '').trim().toLowerCase();
+}
+
+function isVisibleDedupType(rawType: string | undefined): boolean {
+    const normalizedDedupType = normalizeDedupType(rawType);
+    return !!MATCHING_DEDUP_LABEL_KEYS[normalizedDedupType];
 }
 
 function normalizeTextValue(value: unknown): string {
@@ -266,11 +263,11 @@ export function getImportCheckMatchingContextSummary(
 
 export function hasImportCheckMatchingContext(summary: ImportCheckMatchingContextSummary): boolean {
     return !!summary.parserId
-        || (summary.dedupType !== '' && summary.dedupType !== 'remaining' && summary.dedupSourceIds.length > 0);
+        || (isVisibleDedupType(summary.dedupType) && summary.dedupSourceIds.length > 0);
 }
 
 export function hasImportCheckMatchingDedupContext(summary: ImportCheckMatchingContextSummary): boolean {
-    return summary.dedupType !== '' && summary.dedupType !== 'remaining' && summary.dedupSourceIds.length > 0;
+    return isVisibleDedupType(summary.dedupType) && summary.dedupSourceIds.length > 0;
 }
 
 export function getImportCheckMatchingDedupLabel(summary: ImportCheckMatchingContextSummary): string {
@@ -280,7 +277,7 @@ export function getImportCheckMatchingDedupLabel(summary: ImportCheckMatchingCon
         return '';
     }
 
-    return MATCHING_DEDUP_LABEL_KEYS[normalizedDedupType] || humanizeDedupType(normalizedDedupType);
+    return MATCHING_DEDUP_LABEL_KEYS[normalizedDedupType] || '';
 }
 
 export function shouldShowImportCheckMatchingDedupSourceCount(dedupType: string | undefined): boolean {
@@ -914,8 +911,7 @@ export function buildImportPreviewSignalViewModel(
         }
         : null;
     const isTransferDedupWithoutSignal = isTransferLikeDedupType(normalizedDedupType) && !hasTransferSignal;
-    const hasMeaningfulDedup = normalizedDedupType !== ''
-        && normalizedDedupType !== 'remaining'
+    const hasMeaningfulDedup = isVisibleDedupType(normalizedDedupType)
         && !isTransferDedupWithoutSignal;
     const dedupSourceCount = hasMeaningfulDedup
         ? (state.dedupSourceCount || matchingSummary.dedupSourceIds.length)
@@ -958,8 +954,8 @@ export function buildImportPreviewSignalViewModel(
         'Transfer Suggestion Accepted',
         'Transfer Suggestion Rejected',
         [
-            { decision: 'accept', labelKey: 'Apply Suggestion', color: 'warning' },
-            { decision: 'reject', labelKey: 'Reject Transfer Suggestion', color: 'error' }
+            { decision: 'accept', labelKey: 'Accept', color: 'warning' },
+            { decision: 'reject', labelKey: 'Reject', color: 'error' }
         ],
         undefined,
         undefined,

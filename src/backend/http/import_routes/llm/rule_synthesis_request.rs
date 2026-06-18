@@ -9,7 +9,7 @@ pub async fn llm_rule_synthesis_runtime_handler(
     body: Bytes,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "llm_rule_synthesis_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "llm_rule_synthesis_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),

@@ -468,7 +468,7 @@
                                                 :prepend-icon="mdiPound"
                                                 :text="(() => {
                                                     const name = item.title || transaction.tags?.find(t => String(t.id) === String(item.value))?.name || allTagsMap[item.value]?.name || `#${item.value}`;
-                                                    logger.info(`[chip渲染] item.value=${item.value}, item.title=${item.title}, 最终name=${name}`);
+                                                    logger.debug(`[chip渲染] item.value=${item.value}, item.title=${item.title}, 最终name=${name}`);
                                                     return name;
                                                 })()"
                                                 v-bind="props"
@@ -1282,43 +1282,43 @@ function open(options: TransactionEditOptions): Promise<TransactionEditResponse 
             const transaction: Transaction = responses[3];
 
             // 添加日志追踪标签数据
-            logger.info(`[标签调试] 加载交易详情 ID=${transaction.id}, tagIds=${JSON.stringify(transaction.tagIds)}, tags数量=${transaction.tags?.length || 0}`);
+            logger.debug(`[标签调试] 加载交易详情 ID=${transaction.id}, tagIds=${JSON.stringify(transaction.tagIds)}, tags数量=${transaction.tags?.length || 0}`);
             if (transaction.tags && transaction.tags.length > 0) {
-                logger.info(`[标签调试] tags内容: ${JSON.stringify(transaction.tags.map(t => ({id: t.id, idType: typeof t.id, name: t.name, nameType: typeof t.name})))}`);
+                logger.debug(`[标签调试] tags内容: ${JSON.stringify(transaction.tags.map(t => ({id: t.id, idType: typeof t.id, name: t.name, nameType: typeof t.name})))}`);
             }
-            logger.info(`[标签调试] allTags数量=${allTags.value.length}, allTagsMap键数量=${Object.keys(allTagsMap.value).length}`);
+            logger.debug(`[标签调试] allTags数量=${allTags.value.length}, allTagsMap键数量=${Object.keys(allTagsMap.value).length}`);
             if (allTags.value.length > 0) {
-                logger.info(`[标签调试] allTags前5项: ${JSON.stringify(allTags.value.slice(0, 5).map(t => ({id: t.id, idType: typeof t.id, name: t.name, nameType: typeof t.name})))}`);
+                logger.debug(`[标签调试] allTags前5项: ${JSON.stringify(allTags.value.slice(0, 5).map(t => ({id: t.id, idType: typeof t.id, name: t.name, nameType: typeof t.name})))}`);
             }
 
             // 检查 tagIds 与 allTags 的匹配情况
-            logger.info(`[标签调试] transaction.tagIds类型: ${JSON.stringify(transaction.tagIds.map(id => ({id, type: typeof id})))}`);
-            logger.info(`[标签调试] allTags的id类型: ${JSON.stringify(allTags.value.map(t => ({id: t.id, type: typeof t.id})).slice(0, 5))}`);
+            logger.debug(`[标签调试] transaction.tagIds类型: ${JSON.stringify(transaction.tagIds.map(id => ({id, type: typeof id})))}`);
+            logger.debug(`[标签调试] allTags的id类型: ${JSON.stringify(allTags.value.map(t => ({id: t.id, type: typeof t.id})).slice(0, 5))}`);
 
             // 测试匹配
             for (const tagId of transaction.tagIds) {
                 const foundInAllTags = allTags.value.find(t => t.id === tagId);
-                logger.info(`[标签调试] tagId=${tagId} (${typeof tagId}) 在allTags中匹配: ${foundInAllTags ? 'YES' : 'NO'}`);
+                logger.debug(`[标签调试] tagId=${tagId} (${typeof tagId}) 在allTags中匹配: ${foundInAllTags ? 'YES' : 'NO'}`);
                 if (!foundInAllTags) {
                     const foundWithConversion = allTags.value.find(t => String(t.id) === String(tagId));
-                    logger.info(`[标签调试] 使用String()转换后匹配: ${foundWithConversion ? 'YES' : 'NO'}, 匹配到: ${foundWithConversion ? JSON.stringify({id: foundWithConversion.id, name: foundWithConversion.name}) : 'null'}`);
+                    logger.debug(`[标签调试] 使用String()转换后匹配: ${foundWithConversion ? 'YES' : 'NO'}, 匹配到: ${foundWithConversion ? JSON.stringify({id: foundWithConversion.id, name: foundWithConversion.name}) : 'null'}`);
                 }
             }
 
             // 【新增】添加分类调试日志
-            logger.info(`[分类调试] 加载交易详情 ID=${transaction.id}, type=${transaction.type}, categoryId=${transaction.categoryId}`);
-            logger.info(`[分类调试] transaction.category存在: ${!!transaction.category}`);
+            logger.debug(`[分类调试] 加载交易详情 ID=${transaction.id}, type=${transaction.type}, categoryId=${transaction.categoryId}`);
+            logger.debug(`[分类调试] transaction.category存在: ${!!transaction.category}`);
             if (transaction.category) {
-                logger.info(`[分类调试] transaction.category内容: ${JSON.stringify({id: transaction.category.id, name: transaction.category.name, type: transaction.category.type})}`);
+                logger.debug(`[分类调试] transaction.category内容: ${JSON.stringify({id: transaction.category.id, name: transaction.category.name, type: transaction.category.type})}`);
             }
-            logger.info(`[分类调试] expenseCategoryId="${transaction.expenseCategoryId}", incomeCategoryId="${transaction.incomeCategoryId}", transferCategoryId="${transaction.transferCategoryId}", investmentCategoryId="${transaction.investmentCategoryId}"`);
+            logger.debug(`[分类调试] expenseCategoryId="${transaction.expenseCategoryId}", incomeCategoryId="${transaction.incomeCategoryId}", transferCategoryId="${transaction.transferCategoryId}", investmentCategoryId="${transaction.investmentCategoryId}"`);
 
             setTransaction(transaction, options, true, true);
 
             // 【修正】setTransaction后检查transaction.category (transaction是Transaction对象，不是ref)
-            logger.info(`[分类调试] setTransaction后 transaction.category存在: ${!!transaction.category}`);
+            logger.debug(`[分类调试] setTransaction后 transaction.category存在: ${!!transaction.category}`);
             if (transaction.category) {
-                logger.info(`[分类调试] setTransaction后 transaction.category内容: ${JSON.stringify({id: transaction.category.id, name: transaction.category.name})}`);
+                logger.debug(`[分类调试] setTransaction后 transaction.category内容: ${JSON.stringify({id: transaction.category.id, name: transaction.category.name})}`);
             }
 
             originalTransactionEditable.value = transaction.editable;
@@ -1681,7 +1681,7 @@ function saveNewTag(tagName: string): void {
                 // 刷新成功，新标签现在可以正常显示
             }).catch(refreshError => {
                 // 刷新失败不影响核心功能，只记录日志
-                console.warn('Failed to refresh tags after creating new tag:', refreshError);
+                logger.warn('Failed to refresh tags after creating new tag:', refreshError);
             });
         }
     }).catch(error => {

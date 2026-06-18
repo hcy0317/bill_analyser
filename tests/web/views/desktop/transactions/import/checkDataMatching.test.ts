@@ -154,14 +154,19 @@ describe('checkDataMatching helpers', () => {
         expect(getImportCheckMatchingDedupLabel(summary)).toBe('Split-Merge Duplicate');
     });
 
-    test('humanizes unknown dedup types when no canonical label exists', () => {
+    test('hides unknown raw dedup types instead of exposing system signal names', () => {
         const summary = getImportCheckMatchingContextSummary({
-            dedupType: 'manual_merge_case',
+            dedupType: 'same_batch',
             dedupSourceIds: [501]
         });
 
-        expect(getImportCheckMatchingDedupLabel(summary)).toBe('Manual Merge Case');
-        expect(getImportCheckMatchingDedupTitle(summary)).toBe('Manual Merge Case');
+        expect(hasImportCheckMatchingDedupContext(summary)).toBe(false);
+        expect(getImportCheckMatchingDedupLabel(summary)).toBe('');
+        expect(getImportCheckMatchingDedupTitle(summary)).toBe('');
+        expect(buildImportPreviewSignalViewModel({
+            dedupType: 'same_batch',
+            dedupSourceIds: [501]
+        }).dedup).toBeNull();
     });
 
     test('builds compact signal cell model without exposing raw parser tags in body labels', () => {
@@ -204,8 +209,8 @@ describe('checkDataMatching helpers', () => {
         });
 
         expect(viewModel.transferSuggestion?.actions.map(action => action.labelKey)).toStrictEqual([
-            'Apply Suggestion',
-            'Reject Transfer Suggestion'
+            'Accept',
+            'Reject'
         ]);
         expect(viewModel.learning?.actions.map(action => action.labelKey)).toStrictEqual([
             'Apply Suggestion',
@@ -481,6 +486,7 @@ describe('checkDataMatching helpers', () => {
         expect(matchesImportPreviewSignalFilter(transferMatch, 'transfer')).toBe(true);
         expect(matchesImportPreviewSignalFilter(transferDedupWithoutSignal, 'transfer')).toBe(false);
         expect(matchesImportPreviewSignalFilter(historyRewrite, 'history')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(transferMatch, 'learning')).toBe(false);
         expect(matchesImportPreviewSignalFilter(learning, 'learning')).toBe(true);
         expect(matchesImportPreviewSignalFilter(llm, 'llm')).toBe(true);
     });
@@ -795,6 +801,7 @@ describe('checkDataMatching helpers', () => {
             transferStatus: 'pending'
         });
         expect(matchesImportPreviewSignalFilter(crossBatchTransferSignalViewModel, 'transfer')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(crossBatchTransferSignalViewModel, 'learning')).toBe(false);
 
         expect(matchesImportPreviewSignalFilter(historyViewModel, 'history')).toBe(true);
         expect(matchesImportPreviewSignalFilter(learningViewModel, 'learning')).toBe(true);

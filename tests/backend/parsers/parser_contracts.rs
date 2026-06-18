@@ -378,6 +378,21 @@ fn dedicated_parser_detector_records_exactly_one_no_match_and_conflict_evidence(
         parse_dedicated_import_bytes("ambiguous-bank.csv", conflict_csv.as_bytes(), "auto")
             .is_none()
     );
+
+    let hinted_conflict = detect_dedicated_import_bytes(
+        "农业银行_ambiguous-bank.csv",
+        conflict_csv.as_bytes(),
+        "auto",
+    );
+    assert_eq!(hinted_conflict.status, "conflict");
+    assert!(hinted_conflict.selected_parser_id.is_none());
+    assert_eq!(hinted_conflict.conflict_group, ["abc", "icbc"]);
+    assert!(parse_dedicated_import_bytes(
+        "农业银行_ambiguous-bank.csv",
+        conflict_csv.as_bytes(),
+        "auto"
+    )
+    .is_none());
 }
 
 #[test]

@@ -65,7 +65,7 @@ fn stage2_account_rules_run_after_semantic_projection_and_before_baseline() {
 }
 
 #[test]
-fn stage2_materialization_order_keeps_preview_before_decision_groups() {
+fn stage2_materialization_dispatches_decision_groups_after_preview() {
     let handlers = source("src/backend/http/import_routes/stage_handlers.rs");
     let handler = section_between(
         &handlers,
@@ -83,9 +83,10 @@ fn stage2_materialization_order_keeps_preview_before_decision_groups() {
         materialization,
         "insert_import_history_materializations_batch",
     );
-    let load_preview_for_groups = position(materialization, "let preview_rows_for_groups =");
-    let build_groups = position(materialization, "build_import_match_decision_groups");
-    let insert_groups = position(materialization, "insert_import_decision_groups_batch");
+    let dispatch_groups = position(
+        materialization,
+        "spawn_import_decision_group_materialization",
+    );
     let update_status = position(materialization, "update_import_session_status");
     let mark_templates_processed = position(
         materialization,
@@ -94,11 +95,28 @@ fn stage2_materialization_order_keeps_preview_before_decision_groups() {
 
     assert!(clear_existing < insert_preview);
     assert!(insert_preview < insert_history);
-    assert!(insert_history < load_preview_for_groups);
+    assert!(insert_history < dispatch_groups);
+    assert!(dispatch_groups < update_status);
+    assert!(update_status < mark_templates_processed);
+
+    let background_materialization = section_between(
+        &handlers,
+        "fn spawn_import_decision_group_materialization",
+        "#[derive(Debug, Clone, Default)]",
+    );
+    let load_preview_for_groups =
+        position(background_materialization, "let preview_rows_for_groups =");
+    let build_groups = position(
+        background_materialization,
+        "build_import_match_decision_groups",
+    );
+    let insert_groups = position(
+        background_materialization,
+        "insert_import_decision_groups_batch",
+    );
+
     assert!(load_preview_for_groups < build_groups);
     assert!(build_groups < insert_groups);
-    assert!(insert_groups < update_status);
-    assert!(update_status < mark_templates_processed);
 }
 
 #[test]

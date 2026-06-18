@@ -162,6 +162,117 @@ fn import_staging_schema_keeps_rebuildable_preview_materialization_edges() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn creating_import_session_keeps_existing_user_sessions() -> Result<(), Box<dyn Error>> {
+    let Some(test_db) =
+        postgres_test_support::isolated_postgres_database("import_session_create_keeps_old")
+            .await?
+    else {
+        return Ok(());
+    };
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "import-session-create-keeps-old").await?;
+    let scoped_user_id = UserId::new(user_id as u64).expect("positive user id");
+
+    create_import_session(
+        pool,
+        &ImportSessionDraft {
+            session_id: "first-import-session".to_string(),
+            user_id: scoped_user_id,
+            file_count: 1,
+        },
+    )?;
+    create_import_session(
+        pool,
+        &ImportSessionDraft {
+            session_id: "second-import-session".to_string(),
+            user_id: scoped_user_id,
+            file_count: 1,
+        },
+    )?;
+
+    assert!(get_import_session(pool, "first-import-session", scoped_user_id)?.is_some());
+    assert!(get_import_session(pool, "second-import-session", scoped_user_id)?.is_some());
+    let session_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*)::BIGINT FROM import_sessions WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(pool)
+            .await?;
+    assert_eq!(session_count, 2);
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn recreating_import_session_resets_same_session_children() -> Result<(), Box<dyn Error>> {
+    let Some(test_db) =
+        postgres_test_support::isolated_postgres_database("import_session_recreate_resets").await?
+    else {
+        return Ok(());
+    };
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "import-session-recreate-resets").await?;
+    let scoped_user_id = UserId::new(user_id as u64).expect("positive user id");
+    let session_id = "reused-import-session";
+
+    create_import_session(
+        pool,
+        &ImportSessionDraft {
+            session_id: session_id.to_string(),
+            user_id: scoped_user_id,
+            file_count: 1,
+        },
+    )?;
+    insert_preview_bills_batch(
+        pool,
+        session_id,
+        scoped_user_id,
+        &[preview_draft(
+            "2026-01-01 09:00:00",
+            "支出",
+            1234,
+            None,
+            None,
+            None,
+            true,
+        )],
+    )?;
+    let before = get_import_session(pool, session_id, scoped_user_id)?.expect("session");
+    assert_eq!(before.total_preview, 1);
+
+    create_import_session(
+        pool,
+        &ImportSessionDraft {
+            session_id: session_id.to_string(),
+            user_id: scoped_user_id,
+            file_count: 2,
+        },
+    )?;
+
+    let after = get_import_session(pool, session_id, scoped_user_id)?.expect("session");
+    assert_eq!(after.file_count, 2);
+    assert_eq!(after.total_parsed, 0);
+    assert_eq!(after.total_preview, 0);
+    assert_eq!(after.total_confirmed, 0);
+    let stale_preview_count: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)::BIGINT
+        FROM import_preview_rows p
+        JOIN import_sessions s ON s.id = p.session_id
+        WHERE s.user_id = $1 AND s.session_key = $2
+        "#,
+    )
+    .bind(user_id)
+    .bind(session_id)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(stale_preview_count, 0);
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn import_preview_runtime_facets_identity_validation_and_confirm_are_db_backed(
 ) -> Result<(), Box<dyn Error>> {
     let Some(test_db) =

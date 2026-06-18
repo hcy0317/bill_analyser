@@ -9,7 +9,7 @@ pub async fn llm_candidates_list_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "llm_candidates_list_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "llm_candidates_list_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -60,7 +60,7 @@ pub async fn llm_candidate_get_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "llm_candidate_get_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "llm_candidate_get_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -98,7 +98,7 @@ pub async fn llm_candidate_accept_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "llm_candidate_accept_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "llm_candidate_accept_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -130,7 +130,7 @@ pub async fn llm_candidate_reject_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "llm_candidate_reject_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "llm_candidate_reject_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),

@@ -9,7 +9,7 @@ use super::common::{csv_records_from_text, decode_text, file_suffix, get, RowMap
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "parse",
         "business operation entered"
@@ -24,7 +24,7 @@ pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_csv(bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "parse_csv",
         "business operation entered"

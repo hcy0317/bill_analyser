@@ -63,4 +63,35 @@ describe('import preview review state helpers', () => {
             },
         });
     });
+
+    test('drops status-only missing category annotation after category is fixed', () => {
+        const matching = clearResolvedImportPreviewReviewState({
+            annotation: {
+                status: 'missing_category',
+            },
+        }, {
+            hasMissingCategoryIssue: false,
+            hasMissingSourceAccountIssue: false,
+            hasMissingDestinationAccountIssue: false,
+            hasTransferAccountReviewIssue: false,
+        });
+
+        expect(matching).toBeUndefined();
+    });
+
+    test('drops missing category annotation when generic type is paired with specific status', () => {
+        const matching = clearResolvedImportPreviewReviewState({
+            annotation: {
+                type: 'classification',
+                status: 'missing_category',
+            },
+        }, {
+            hasMissingCategoryIssue: false,
+            hasMissingSourceAccountIssue: false,
+            hasMissingDestinationAccountIssue: false,
+            hasTransferAccountReviewIssue: false,
+        });
+
+        expect(matching).toBeUndefined();
+    });
 });

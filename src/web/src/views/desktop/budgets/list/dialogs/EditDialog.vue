@@ -392,13 +392,13 @@ function open({ budget: budgetData, type, usePrimaryCategoryOnly: usePrimaryOnly
             const foundCategoryId = findCategoryIdByName(budget.value.category, budget.value.subCategory);
             if (foundCategoryId) {
                 budget.value.categoryId = foundCategoryId;
-                logger.info(`[Budget Edit] 根据名称查找分类ID: ${budget.value.category}/${budget.value.subCategory} -> ${foundCategoryId}`);
+                logger.debug(`[Budget Edit] 根据名称查找分类ID: ${budget.value.category}/${budget.value.subCategory} -> ${foundCategoryId}`);
             }
         }
 
         // 注意：不再覆盖usePrimaryCategoryOnly，因为open()已经设置了正确的值
 
-        logger.info(`[Budget Edit] 打开对话框: id=${budget.value.id}, category=${budget.value.category}, subCategory=${budget.value.subCategory}, categoryId=${budget.value.categoryId}, usePrimaryOnly=${usePrimaryCategoryOnly.value}`);
+        logger.debug(`[Budget Edit] 打开对话框: id=${budget.value.id}, category=${budget.value.category}, subCategory=${budget.value.subCategory}, categoryId=${budget.value.categoryId}, usePrimaryOnly=${usePrimaryCategoryOnly.value}`);
 
         // 初始化完成，允许watch触发
         isInitializing.value = false;
@@ -431,28 +431,28 @@ function close(): void {
  */
 function onCategoryChange(categoryId: string | unknown): void {
     const catId = String(categoryId || '');
-    logger.info(`[Budget] onCategoryChange called with categoryId: "${catId}"`);
-    logger.info(`[Budget] Current budgetType: ${budget.value.type}, categoryTypeValue: ${categoryTypeValue.value}`);
-    logger.info(`[Budget] availableCategories count: ${availableCategories.value.length}`);
-    logger.info(`[Budget] allCategoriesMap keys count: ${Object.keys(allCategoriesMap.value).length}`);
+    logger.debug(`[Budget] onCategoryChange called with categoryId: "${catId}"`);
+    logger.debug(`[Budget] Current budgetType: ${budget.value.type}, categoryTypeValue: ${categoryTypeValue.value}`);
+    logger.debug(`[Budget] availableCategories count: ${availableCategories.value.length}`);
+    logger.debug(`[Budget] allCategoriesMap keys count: ${Object.keys(allCategoriesMap.value).length}`);
 
     if (catId) {
         budget.value.categoryId = catId;
     }
 
     const selectedCategory = allCategoriesMap.value[catId];
-    logger.info(`[Budget] selectedCategory from allCategoriesMap:`, selectedCategory ? { id: selectedCategory.id, name: selectedCategory.name, parentId: selectedCategory.parentId } : 'not found');
+    logger.debug(`[Budget] selectedCategory from allCategoriesMap:`, selectedCategory ? { id: selectedCategory.id, name: selectedCategory.name, parentId: selectedCategory.parentId } : 'not found');
 
     const resolvedSelection = resolveBudgetCategorySelection(availableCategories.value, catId);
 
     if (resolvedSelection) {
         budget.value.category = resolvedSelection.primaryCategoryName;
         budget.value.subCategory = resolvedSelection.secondaryCategoryName;
-        logger.info(`[Budget] Resolved category selection: category=${budget.value.category}, subCategory=${budget.value.subCategory}`);
+        logger.debug(`[Budget] Resolved category selection: category=${budget.value.category}, subCategory=${budget.value.subCategory}`);
     } else if (catId) {
         logger.warn(`[Budget] Category not found anywhere for id: "${catId}"`);
-        logger.info(`[Budget] Available keys in allCategoriesMap:`, Object.keys(allCategoriesMap.value).slice(0, 10));
-        logger.info(`[Budget] availablePrimaryCategories:`, availablePrimaryCategories.value.map(c => ({ id: c.id, name: c.name })).slice(0, 5));
+        logger.debug(`[Budget] Available keys in allCategoriesMap:`, Object.keys(allCategoriesMap.value).slice(0, 10));
+        logger.debug(`[Budget] availablePrimaryCategories:`, availablePrimaryCategories.value.map(c => ({ id: c.id, name: c.name })).slice(0, 5));
     }
 }
 
@@ -477,7 +477,7 @@ async function save(): Promise<void> {
     }
 
     // 日志记录保存前的数据（用于调试）
-    logger.info('[Budget Save] Before validation:', {
+    logger.debug('[Budget Save] Before validation:', {
         categoryId: budget.value.categoryId,
         category: budget.value.category,
         subCategory: budget.value.subCategory
@@ -490,7 +490,7 @@ async function save(): Promise<void> {
     }
 
     // 日志记录保存的数据
-    logger.info('[Budget Save] Data to save:', {
+    logger.debug('[Budget Save] Data to save:', {
         id: budget.value.id,
         name: budget.value.name,
         category: budget.value.category,

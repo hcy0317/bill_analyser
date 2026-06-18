@@ -185,7 +185,7 @@ export function getCurrentToken(): string | null {
             if (currentEncryptedToken) {
                 // 改进后的启发式判断：如果它看起来像 JWT（以 eyJ 开头），那基本可以确定是明文 token。
                 if (currentEncryptedToken.startsWith('eyJ')) {
-                    logger.info(`[getCurrentToken] Fallback: Returning JWT from localStorage (length=${currentEncryptedToken.length})`);
+                    logger.debug(`[getCurrentToken] Fallback: Returning JWT from localStorage (length=${currentEncryptedToken.length})`);
                     return currentEncryptedToken;
                 }
 
@@ -210,7 +210,7 @@ export function getCurrentToken(): string | null {
         }
 
         // 重新解密 token
-        logger.info('[getCurrentToken] Encrypted token changed, re-decrypting...');
+        logger.debug('[getCurrentToken] Encrypted token changed, re-decrypting...');
 
         const appLockState = getUserAppLockState();
 
@@ -224,12 +224,12 @@ export function getCurrentToken(): string | null {
         sessionStorage.setItem(encryptedTokenSessionStorageKey, currentEncryptedToken);
         sessionStorage.setItem(tokenSessionStorageKey, token);
 
-        logger.info(`[getCurrentToken] Token re-decrypted successfully (length=${token.length})`);
+        logger.debug(`[getCurrentToken] Token re-decrypted successfully (length=${token.length})`);
         return token;
     } else {
         const token = localStorage.getItem(tokenLocalStorageKey);
         if (!token) {
-            logger.warn('[getCurrentToken] No token in localStorage (normal mode)');
+            logger.debug('[getCurrentToken] No token in localStorage (normal mode)');
         } else {
             logger.debug(`[getCurrentToken] Normal mode: Returning token from localStorage (length=${token.length})`);
         }
@@ -245,7 +245,7 @@ export function updateCurrentToken(token: string): void {
 
     const enableAppLock = isEnableApplicationLock();
     const hasLockState = hasUserAppLockState();
-    logger.info(`[updateCurrentToken] Storing token: length=${token.length}, AppLock=${enableAppLock}, HasLockState=${hasLockState}`);
+    logger.debug(`[updateCurrentToken] Storing token: length=${token.length}, AppLock=${enableAppLock}, HasLockState=${hasLockState}`);
 
     if (enableAppLock && hasLockState) {
         const appLockState = getUserAppLockState();
@@ -270,7 +270,7 @@ export function updateCurrentToken(token: string): void {
         // 关键修复：同步更新axios.defaults.headers.common
         // 这确保浏览器的CORS预检能识别Authorization头
         axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-        logger.info('[updateCurrentToken] Updated axios.defaults.headers.common with new token');
+        logger.debug('[updateCurrentToken] Updated axios.defaults.headers.common with new token');
     }
 }
 
@@ -316,25 +316,25 @@ export function getCurrentUserInfo(): UserBasicInfo | null {
     const data = localStorage.getItem(userInfoLocalStorageKey);
 
     if (!data) {
-        logger.warn('[getCurrentUserInfo] 用户信息不存在于localStorage');
+        logger.debug('[getCurrentUserInfo] 用户信息不存在于localStorage');
         return null;
     }
 
     // 🆕 记录原始localStorage数据，验证fiscalYearStart的来源
-    logger.info(`[getCurrentUserInfo] 原始localStorage数据: ${data.substring(0, 200)}...`);
+    logger.debug(`[getCurrentUserInfo] 原始localStorage数据: ${data.substring(0, 200)}...`);
 
     const userInfo = normalizeUserBasicInfo(JSON.parse(data) as UserBasicInfo);
 
     // 🆕 验证所有关键字段是否存在
-    logger.info(`[getCurrentUserInfo] 解析后的用户信息:`);
-    logger.info(`  - id: ${userInfo.id} (类型: ${typeof userInfo.id})`);
-    logger.info(`  - username: ${userInfo.username}`);
-    logger.info(`  - fiscalYearStart: ${userInfo.fiscalYearStart} (0x${userInfo.fiscalYearStart?.toString(16)}) (类型: ${typeof userInfo.fiscalYearStart})`);
+    logger.debug('[getCurrentUserInfo] 解析后的用户信息:');
+    logger.debug(`  - id: ${userInfo.id} (类型: ${typeof userInfo.id})`);
+    logger.debug(`  - username: ${userInfo.username}`);
+    logger.debug(`  - fiscalYearStart: ${userInfo.fiscalYearStart} (0x${userInfo.fiscalYearStart?.toString(16)}) (类型: ${typeof userInfo.fiscalYearStart})`);
 
     if (userInfo.fiscalYearStart) {
         const month = userInfo.fiscalYearStart >> 8;
         const day = userInfo.fiscalYearStart & 0xff;
-        logger.info(`  - 财年开始日期解码: ${month}月${day}日`);
+        logger.debug(`  - 财年开始日期解码: ${month}月${day}日`);
 
         // fiscalYearStart 应为 month << 8 | day 的复合值；仅对明显异常值保留告警
         if (userInfo.fiscalYearStart === 1) {
@@ -408,7 +408,7 @@ export function clearCurrentSessionToken(): void {
 }
 
 export function clearCurrentTokenAndUserInfo(clearAppLockState: boolean): void {
-    logger.info(`[clearCurrentTokenAndUserInfo] 开始清理: clearAppLockState=${clearAppLockState}`);
+    logger.debug(`[clearCurrentTokenAndUserInfo] 开始清理: clearAppLockState=${clearAppLockState}`);
 
     if (clearAppLockState) {
         logger.debug('[clearCurrentTokenAndUserInfo] 清理AppLock状态');
@@ -443,6 +443,6 @@ export function clearCurrentTokenAndUserInfo(clearAppLockState: boolean): void {
             axiosAuthStillExists: !!axiosAuthStillExists
         });
     } else {
-        logger.info('[clearCurrentTokenAndUserInfo] ✅ 所有token和用户信息已清理');
+        logger.debug('[clearCurrentTokenAndUserInfo] 所有token和用户信息已清理');
     }
 }

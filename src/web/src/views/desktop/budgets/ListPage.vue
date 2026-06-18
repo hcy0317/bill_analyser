@@ -2943,7 +2943,7 @@ function navigateToTransactions(category: string, budget: Budget | null): void {
         tagIds: tagFilter.value
     });
 
-    console.log(`[Budget] 跳转到账单列表: category=${category}, query=`, query);
+    logger.debug(`[Budget] 跳转到账单列表: category=${category}, query=`, query);
 
     // 跳转到账单列表页面
     router.push({

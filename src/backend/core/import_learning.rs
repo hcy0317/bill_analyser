@@ -68,7 +68,7 @@ pub fn build_composite_match_features(
     payment_method: &str,
 ) -> Option<BTreeMap<String, String>> {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "build_composite_match_features",
         "business operation entered"
@@ -101,7 +101,7 @@ pub fn build_composite_match_hash(
     payment_method: &str,
 ) -> Option<String> {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "build_composite_match_hash",
         "business operation entered"
@@ -176,7 +176,7 @@ pub fn amount_cents_bucket(raw_amount_cents: Option<&Value>) -> &'static str {
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_semantic_label(row: &Map<String, Value>) -> String {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "build_semantic_label",
         "business operation entered"
@@ -189,7 +189,7 @@ pub fn build_semantic_label(row: &Map<String, Value>) -> String {
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_route_label(row: &Map<String, Value>) -> String {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "build_route_label",
         "business operation entered"
@@ -254,7 +254,7 @@ pub struct RouteLabelParts {
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_feature_payload(row: &Map<String, Value>) -> BTreeMap<String, String> {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "build_feature_payload",
         "business operation entered"
@@ -361,7 +361,7 @@ pub fn build_label_confirmation_counts(
     samples: &[ImportLearningTrainingSample],
 ) -> BTreeMap<String, i64> {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "build_label_confirmation_counts",
         "business operation entered"
@@ -379,7 +379,7 @@ pub fn build_semantic_label_counts(
     samples: &[ImportLearningTrainingSample],
 ) -> BTreeMap<String, i64> {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "build_semantic_label_counts",
         "business operation entered"
@@ -419,7 +419,7 @@ pub fn evaluate_learning_policy(
     conflict_reasons: &[String],
 ) -> LearningPolicyDecision {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "evaluate_learning_policy",
         "business operation entered"
@@ -503,7 +503,7 @@ pub fn build_dataset_snapshot_payload(
     samples: &[ImportLearningTrainingSample],
 ) -> ImportLearningDatasetSnapshotPayload {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "build_dataset_snapshot_payload",
         "business operation entered"
@@ -520,7 +520,7 @@ pub fn build_dataset_snapshot_payload(
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn import_learning_model_version(dataset_snapshot_id: i64) -> String {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "import_learning_model_version",
         "business operation entered"
@@ -545,7 +545,7 @@ pub fn build_model_registry_payload(
     confirmation_counts: BTreeMap<String, i64>,
 ) -> ImportLearningModelRegistryPayload {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "build_model_registry_payload",
         "business operation entered"
@@ -595,7 +595,7 @@ pub fn build_llm_preview_apply_plan(
     resolved_destination_account_id: Option<i64>,
 ) -> LlmPreviewApplyPlan {
     #[cfg(not(coverage))]
-    tracing::info!(
+    tracing::debug!(
         domain = "import_parser",
         operation = "build_llm_preview_apply_plan",
         "business operation entered"

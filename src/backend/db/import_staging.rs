@@ -44,11 +44,7 @@ pub fn init_import_staging_schema(_pool: &PostgresPool) -> DbResult<()> {
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn create_import_session(pool: &PostgresPool, draft: &ImportSessionDraft) -> DbResult<i64> {
-    block_on_db(async move {
-        let user_id = user_id_i64(draft.user_id)?;
-        clear_user_import_staging_data_async(pool, user_id).await?;
-        create_import_session_async(pool, draft).await
-    })
+    block_on_db(create_import_session_async(pool, draft))
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -114,7 +110,6 @@ pub fn stage_import_parser_templates_with_sources(
                 .await?
                 .map(|session| session.id)
         } else {
-            clear_user_import_staging_data_async(pool, user_id).await?;
             Some(create_import_session_async(pool, draft).await?)
         };
         let Some(session_db_id) = session else {
@@ -883,7 +878,7 @@ fn push_preview_signal_family_condition(
         "platform_duplicate" => push_preview_platform_duplicate_signal_condition(query, alias),
         "transfer" => push_preview_transfer_signal_condition(query, alias),
         "history" => push_preview_history_signal_condition(query, alias),
-        "learning" => push_preview_feedback_key_condition(query, alias, "learning"),
+        "learning" => push_preview_recommendation_signal_condition(query, alias),
         "llm" => push_preview_feedback_key_condition(query, alias, "llm"),
         _ => {
             query.push("FALSE");
@@ -913,7 +908,7 @@ fn push_preview_specific_visible_signal_condition(
     query.push(" OR ");
     push_preview_history_signal_condition(query, alias);
     query.push(" OR ");
-    push_preview_feedback_key_condition(query, alias, "learning");
+    push_preview_recommendation_signal_condition(query, alias);
     query.push(" OR ");
     push_preview_feedback_key_condition(query, alias, "llm");
 }
@@ -926,7 +921,33 @@ fn push_preview_platform_duplicate_signal_condition(
 }
 
 fn push_preview_transfer_signal_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
+    query.push("(");
     push_preview_feedback_key_condition(query, alias, "transfer");
+    query.push(" AND (");
+    query.push("LOWER(COALESCE(");
+    query.push(alias);
+    query.push(".preview_payload#>>'{preview_matching_feedback,transfer,review_status}', '')) IN ('accepted', 'rejected', 'skipped') OR (LOWER(COALESCE(");
+    query.push(alias);
+    query.push(".preview_payload#>>'{preview_matching_feedback,transfer,review_status}', '')) = 'pending' AND LOWER(COALESCE(");
+    query.push(alias);
+    query.push(".preview_payload#>>'{preview_matching_feedback,transfer,suppressed}', 'false')) <> 'true') OR (LOWER(COALESCE(");
+    query.push(alias);
+    query.push(".preview_payload#>>'{preview_matching_feedback,transfer,suppressed}', 'false')) <> 'true' AND LOWER(COALESCE(");
+    query.push(alias);
+    query.push(".preview_payload->>'preview_type', '')) NOT IN ('转账', 'transfer', '4') AND (COALESCE(NULLIF(");
+    query.push(alias);
+    query.push(".preview_payload#>>'{preview_matching_feedback,transfer,candidate_type}', ''), '') <> '' OR COALESCE(NULLIF(");
+    query.push(alias);
+    query.push(
+        ".preview_payload#>>'{preview_matching_feedback,transfer,reason}', ''), '') <> ''))))",
+    );
+}
+
+fn push_preview_recommendation_signal_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+) {
+    push_preview_feedback_key_condition(query, alias, "learning");
 }
 
 fn push_preview_history_signal_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
@@ -982,6 +1003,15 @@ fn push_preview_feedback_family_text_search(
         query.push("FALSE");
         return;
     };
+    push_preview_feedback_text_search_condition(query, alias, key, status);
+}
+
+fn push_preview_feedback_text_search_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+    key: &str,
+    status: &str,
+) {
     query.push("(");
     push_preview_feedback_key_condition(query, alias, key);
     query.push(" AND (");
@@ -2481,7 +2511,12 @@ async fn create_import_session_async(
         ON CONFLICT (user_id, session_key) DO UPDATE SET
             status = 'parsing',
             source_count = excluded.source_count,
+            row_count = 0,
             file_count = excluded.file_count,
+            total_parsed = 0,
+            total_preview = 0,
+            total_confirmed = 0,
+            metadata = '{}'::jsonb,
             updated_at = now(),
             version = import_sessions.version + 1
         RETURNING id
@@ -2492,24 +2527,305 @@ async fn create_import_session_async(
     .bind(draft.file_count)
     .fetch_one(pool)
     .await?;
-    row.try_get("id").map_err(DbError::from)
+    let session_db_id = row.try_get("id").map_err(DbError::from)?;
+    clear_import_session_child_data_async(pool, user_id, session_db_id, &draft.session_id).await?;
+    Ok(session_db_id)
+}
+
+async fn clear_import_session_child_data_async(
+    pool: &PostgresPool,
+    user_id: i64,
+    session_db_id: i64,
+    session_key: &str,
+) -> DbResult<usize> {
+    let annotation_count =
+        sqlx::query("DELETE FROM import_annotation_samples WHERE user_id = $1 AND session_id = $2")
+            .bind(user_id)
+            .bind(session_key)
+            .execute(pool)
+            .await?
+            .rows_affected();
+    let feedback_event_count = sqlx::query(
+        r#"
+        UPDATE import_learning_feedback_events
+        SET suggestion_id = NULL
+        WHERE user_id = $1
+          AND suggestion_id IN (
+              SELECT id
+              FROM import_learning_suggestions
+              WHERE user_id = $1 AND session_id = $2
+          )
+        "#,
+    )
+    .bind(user_id)
+    .bind(session_db_id)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    let learning_suggestion_count = sqlx::query(
+        "DELETE FROM import_learning_suggestions WHERE user_id = $1 AND session_id = $2",
+    )
+    .bind(user_id)
+    .bind(session_db_id)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    let learning_sample_count = sqlx::query(
+        r#"
+        UPDATE import_learning_samples
+        SET preview_row_id = NULL,
+            updated_at = now(),
+            version = version + 1
+        WHERE user_id = $1
+          AND preview_row_id IN (
+              SELECT id
+              FROM import_preview_rows
+              WHERE user_id = $1 AND session_id = $2
+          )
+        "#,
+    )
+    .bind(user_id)
+    .bind(session_db_id)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    let matching_feedback_count =
+        sqlx::query("DELETE FROM preview_matching_feedback WHERE user_id = $1 AND session_id = $2")
+            .bind(user_id)
+            .bind(session_db_id)
+            .execute(pool)
+            .await?
+            .rows_affected();
+    let confirm_count =
+        sqlx::query("DELETE FROM import_confirm_operations WHERE user_id = $1 AND session_id = $2")
+            .bind(user_id)
+            .bind(session_db_id)
+            .execute(pool)
+            .await?
+            .rows_affected();
+    let group_member_count = sqlx::query(
+        r#"
+        DELETE FROM import_decision_group_members members
+        USING import_decision_groups groups
+        WHERE members.group_id = groups.id
+          AND groups.user_id = $1
+          AND groups.session_id = $2
+        "#,
+    )
+    .bind(user_id)
+    .bind(session_db_id)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    let group_count =
+        sqlx::query("DELETE FROM import_decision_groups WHERE user_id = $1 AND session_id = $2")
+            .bind(user_id)
+            .bind(session_db_id)
+            .execute(pool)
+            .await?
+            .rows_affected();
+    let history_count = sqlx::query(
+        "DELETE FROM import_history_materializations WHERE user_id = $1 AND session_id = $2",
+    )
+    .bind(user_id)
+    .bind(session_db_id)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    let preview_count =
+        sqlx::query("DELETE FROM import_preview_rows WHERE user_id = $1 AND session_id = $2")
+            .bind(user_id)
+            .bind(session_db_id)
+            .execute(pool)
+            .await?
+            .rows_affected();
+    let parser_count =
+        sqlx::query("DELETE FROM import_standard_rows WHERE user_id = $1 AND session_id = $2")
+            .bind(user_id)
+            .bind(session_db_id)
+            .execute(pool)
+            .await?
+            .rows_affected();
+    let source_count =
+        sqlx::query("DELETE FROM import_sources WHERE user_id = $1 AND session_id = $2")
+            .bind(user_id)
+            .bind(session_db_id)
+            .execute(pool)
+            .await?
+            .rows_affected();
+
+    Ok(usize::try_from(
+        annotation_count
+            + feedback_event_count
+            + learning_suggestion_count
+            + learning_sample_count
+            + matching_feedback_count
+            + confirm_count
+            + group_member_count
+            + group_count
+            + history_count
+            + preview_count
+            + parser_count
+            + source_count,
+    )
+    .unwrap_or(usize::MAX))
 }
 
 async fn clear_user_import_staging_data_async(
     pool: &PostgresPool,
     user_id: i64,
 ) -> DbResult<usize> {
+    let session_ids = sqlx::query_scalar::<_, i64>(
+        "SELECT id FROM import_sessions WHERE user_id = $1 ORDER BY id ASC",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
     let annotation_count = sqlx::query("DELETE FROM import_annotation_samples WHERE user_id = $1")
         .bind(user_id)
         .execute(pool)
         .await?
         .rows_affected();
-    let session_count = sqlx::query("DELETE FROM import_sessions WHERE user_id = $1")
-        .bind(user_id)
-        .execute(pool)
-        .await?
-        .rows_affected();
-    Ok(usize::try_from(annotation_count + session_count).unwrap_or(usize::MAX))
+
+    if session_ids.is_empty() {
+        return Ok(usize::try_from(annotation_count).unwrap_or(usize::MAX));
+    }
+
+    let feedback_event_count = sqlx::query(
+        r#"
+        UPDATE import_learning_feedback_events
+        SET suggestion_id = NULL
+        WHERE user_id = $1
+          AND suggestion_id IN (
+              SELECT id
+              FROM import_learning_suggestions
+              WHERE user_id = $1 AND session_id = ANY($2)
+          )
+        "#,
+    )
+    .bind(user_id)
+    .bind(&session_ids)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    let learning_suggestion_count = sqlx::query(
+        "DELETE FROM import_learning_suggestions WHERE user_id = $1 AND session_id = ANY($2)",
+    )
+    .bind(user_id)
+    .bind(&session_ids)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    let learning_sample_count = sqlx::query(
+        r#"
+        UPDATE import_learning_samples
+        SET preview_row_id = NULL,
+            updated_at = now(),
+            version = version + 1
+        WHERE user_id = $1
+          AND preview_row_id IN (
+              SELECT id
+              FROM import_preview_rows
+              WHERE user_id = $1 AND session_id = ANY($2)
+          )
+        "#,
+    )
+    .bind(user_id)
+    .bind(&session_ids)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    let matching_feedback_count = sqlx::query(
+        "DELETE FROM preview_matching_feedback WHERE user_id = $1 AND session_id = ANY($2)",
+    )
+    .bind(user_id)
+    .bind(&session_ids)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    let confirm_count = sqlx::query(
+        "DELETE FROM import_confirm_operations WHERE user_id = $1 AND session_id = ANY($2)",
+    )
+    .bind(user_id)
+    .bind(&session_ids)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    let group_member_count = sqlx::query(
+        r#"
+        DELETE FROM import_decision_group_members members
+        USING import_decision_groups groups
+        WHERE members.group_id = groups.id
+          AND groups.user_id = $1
+          AND groups.session_id = ANY($2)
+        "#,
+    )
+    .bind(user_id)
+    .bind(&session_ids)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    let group_count = sqlx::query(
+        "DELETE FROM import_decision_groups WHERE user_id = $1 AND session_id = ANY($2)",
+    )
+    .bind(user_id)
+    .bind(&session_ids)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    let history_count = sqlx::query(
+        "DELETE FROM import_history_materializations WHERE user_id = $1 AND session_id = ANY($2)",
+    )
+    .bind(user_id)
+    .bind(&session_ids)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    let preview_count =
+        sqlx::query("DELETE FROM import_preview_rows WHERE user_id = $1 AND session_id = ANY($2)")
+            .bind(user_id)
+            .bind(&session_ids)
+            .execute(pool)
+            .await?
+            .rows_affected();
+    let parser_count =
+        sqlx::query("DELETE FROM import_standard_rows WHERE user_id = $1 AND session_id = ANY($2)")
+            .bind(user_id)
+            .bind(&session_ids)
+            .execute(pool)
+            .await?
+            .rows_affected();
+    let source_count =
+        sqlx::query("DELETE FROM import_sources WHERE user_id = $1 AND session_id = ANY($2)")
+            .bind(user_id)
+            .bind(&session_ids)
+            .execute(pool)
+            .await?
+            .rows_affected();
+    let session_count =
+        sqlx::query("DELETE FROM import_sessions WHERE user_id = $1 AND id = ANY($2)")
+            .bind(user_id)
+            .bind(&session_ids)
+            .execute(pool)
+            .await?
+            .rows_affected();
+
+    Ok(usize::try_from(
+        annotation_count
+            + feedback_event_count
+            + learning_suggestion_count
+            + learning_sample_count
+            + matching_feedback_count
+            + confirm_count
+            + group_member_count
+            + group_count
+            + history_count
+            + preview_count
+            + parser_count
+            + source_count
+            + session_count,
+    )
+    .unwrap_or(usize::MAX))
 }
 
 async fn get_import_session_async(
@@ -4406,7 +4722,7 @@ fn preview_signal_family_matches(family: &str, row: &ImportPreviewRow) -> bool {
         "platform_duplicate" => preview_platform_duplicate_signal_matches(row),
         "transfer" => preview_transfer_signal_matches(row),
         "history" => preview_history_signal_matches(row),
-        "learning" => preview_feedback_key_exists(&row.preview_matching_feedback, "learning"),
+        "learning" => preview_recommendation_signal_matches(row),
         "llm" => preview_feedback_key_exists(&row.preview_matching_feedback, "llm"),
         _ => false,
     }
@@ -4425,7 +4741,7 @@ fn preview_has_specific_visible_signal(row: &ImportPreviewRow) -> bool {
     preview_platform_duplicate_signal_matches(row)
         || preview_transfer_signal_matches(row)
         || preview_history_signal_matches(row)
-        || preview_feedback_key_exists(&row.preview_matching_feedback, "learning")
+        || preview_recommendation_signal_matches(row)
         || preview_feedback_key_exists(&row.preview_matching_feedback, "llm")
 }
 
@@ -4434,7 +4750,47 @@ fn preview_platform_duplicate_signal_matches(row: &ImportPreviewRow) -> bool {
 }
 
 fn preview_transfer_signal_matches(row: &ImportPreviewRow) -> bool {
-    preview_feedback_key_exists(&row.preview_matching_feedback, "transfer")
+    let Some(transfer) = row
+        .preview_matching_feedback
+        .get("transfer")
+        .and_then(Value::as_object)
+    else {
+        return false;
+    };
+    let review_status = transfer
+        .get("review_status")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if matches!(review_status.as_str(), "accepted" | "rejected" | "skipped") {
+        return true;
+    }
+    let suppressed = transfer
+        .get("suppressed")
+        .map(json_value_is_truthy)
+        .unwrap_or(false);
+    if review_status == "pending" && !suppressed {
+        return true;
+    }
+    let has_candidate = transfer
+        .get("candidate_type")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty())
+        || transfer
+            .get("reason")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty());
+    has_candidate
+        && !suppressed
+        && !matches!(
+            row.preview_type.trim().to_ascii_lowercase().as_str(),
+            "转账" | "transfer" | "4"
+        )
+}
+
+fn preview_recommendation_signal_matches(row: &ImportPreviewRow) -> bool {
+    preview_feedback_key_exists(&row.preview_matching_feedback, "learning")
 }
 
 fn preview_history_signal_matches(row: &ImportPreviewRow) -> bool {
@@ -4475,7 +4831,12 @@ fn preview_feedback_key_exists(feedback: &Value, key: &str) -> bool {
 
 fn preview_feedback_family_contains_status(feedback: &Value, family: &str, status: &str) -> bool {
     preview_feedback_key_for_signal_family(family)
-        .and_then(|key| feedback.get(key))
+        .is_some_and(|key| preview_feedback_key_contains_status(feedback, key, status))
+}
+
+fn preview_feedback_key_contains_status(feedback: &Value, key: &str, status: &str) -> bool {
+    feedback
+        .get(key)
         .is_some_and(|value| json_value_contains_text(value, status))
 }
 
@@ -4510,6 +4871,21 @@ fn json_value_contains_text(value: &Value, needle: &str) -> bool {
         Value::Number(number) => number.to_string().contains(needle),
         Value::Bool(value) => value.to_string().contains(needle),
         Value::Null => false,
+    }
+}
+
+fn json_value_is_truthy(value: &Value) -> bool {
+    match value {
+        Value::Bool(value) => *value,
+        Value::Number(number) => {
+            number.as_i64().is_some_and(|value| value != 0)
+                || number.as_f64().is_some_and(|value| value != 0.0)
+        }
+        Value::String(text) => matches!(
+            text.trim().to_ascii_lowercase().as_str(),
+            "true" | "1" | "yes" | "y"
+        ),
+        _ => false,
     }
 }
 
@@ -4903,6 +5279,12 @@ mod import_preview_query_tests {
         transfer_type_without_signal.preview_type = "转账".to_string();
         transfer_type_without_signal.dedup_type = "transfer".to_string();
 
+        let mut transfer_feedback_without_visible_signal = preview_row(9);
+        transfer_feedback_without_visible_signal.preview_type = "转账".to_string();
+        transfer_feedback_without_visible_signal.preview_matching_feedback = json!({
+            "transfer": {"candidate_type": "cash_transfer", "reason": "parser inferred transfer"}
+        });
+
         let mut history = preview_row(5);
         history.preview_matching_feedback = json!({
             "reconciliation": {
@@ -4931,6 +5313,7 @@ mod import_preview_query_tests {
             learning,
             llm,
             transfer_type_without_signal,
+            transfer_feedback_without_visible_signal,
         ];
         let filtered_ids = |signal: &str| {
             apply_preview_filters(
@@ -4945,13 +5328,14 @@ mod import_preview_query_tests {
             .collect::<Vec<_>>()
         };
 
-        assert_eq!(filtered_ids("parser"), vec![1, 4, 8]);
-        assert_eq!(filtered_ids("parser_12"), vec![1, 4, 8]);
+        assert_eq!(filtered_ids("parser"), vec![1, 4, 8, 9]);
+        assert_eq!(filtered_ids("parser_12"), vec![1, 4, 8, 9]);
         assert_eq!(filtered_ids("platform_duplicate"), vec![2]);
         assert_eq!(filtered_ids("transfer"), vec![3]);
         assert_eq!(filtered_ids("history"), vec![5]);
         assert_eq!(filtered_ids("learning"), vec![6]);
         assert_eq!(filtered_ids("learning:needs_review"), vec![6]);
+        assert!(filtered_ids("learning:pending").is_empty());
         assert_eq!(filtered_ids("learning_1"), vec![6]);
         assert_eq!(filtered_ids("learning-1"), vec![6]);
         assert_eq!(filtered_ids("llm"), vec![7]);
@@ -5125,6 +5509,7 @@ mod import_preview_query_tests {
         assert!(!sql.contains("preview_sub_category"));
         assert!(sql.contains("p.account_id IS NULL"));
         assert!(sql.contains("preview_payload#>'{preview_matching_feedback,learning}'"));
+        assert!(!sql.contains("preview_payload#>'{preview_matching_feedback,transfer}'"));
         assert!(!sql.contains("preview_matching_feedback')::text ILIKE"));
         assert!(sql.contains("ORDER BY p.amount_cents DESC"));
         assert!(sql.contains("LIMIT"));
@@ -5158,6 +5543,7 @@ mod import_preview_query_tests {
         assert!(sql.contains("p.account_id = "));
         assert!(sql.contains("p.transfer_target_account_id = "));
         assert!(sql.contains("preview_matching_feedback' ? 'learning'"));
+        assert!(!sql.contains("preview_matching_feedback' ? 'transfer'"));
         assert!(!sql.contains("preview_matching_feedback')::text ILIKE"));
         assert!(sql.contains("CASE lower(p.transaction_type)"));
     }
@@ -5201,6 +5587,8 @@ mod import_preview_query_tests {
         let sql = query.build().sql().to_string();
 
         assert!(sql.contains("preview_matching_feedback' ? 'transfer'"));
+        assert!(sql.contains("review_status"));
+        assert!(sql.contains("candidate_type"));
         assert!(!sql.contains("transfer_cross_batch"));
         assert!(!sql.contains("IN ('transfer'"));
         assert!(!sql.contains("transaction_type"));

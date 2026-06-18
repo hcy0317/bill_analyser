@@ -15,13 +15,14 @@ function normalizedText(value: unknown): string {
     return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
-function annotationReviewKey(annotation: unknown): string {
+function annotationReviewKeys(annotation: unknown): string[] {
     if (typeof annotation === 'string') {
-        return annotation.trim().toLowerCase();
+        const value = annotation.trim().toLowerCase();
+        return value ? [value] : [];
     }
 
     if (!isRecord(annotation)) {
-        return '';
+        return [];
     }
 
     return [
@@ -29,7 +30,7 @@ function annotationReviewKey(annotation: unknown): string {
         annotation['status'],
         annotation['review_status'],
         annotation['reason']
-    ].map(normalizedText).find(value => value !== '') || '';
+    ].map(normalizedText).filter(value => value !== '');
 }
 
 function preserveManualAnnotationFlag(annotation: unknown): ReviewStateRecord | null {
@@ -133,8 +134,8 @@ export function clearResolvedImportPreviewReviewState<T extends ReviewStateRecor
     }
 
     const annotation = next['annotation'];
-    const reviewKey = annotationReviewKey(annotation);
-    if (reviewKey && resolvedAnnotationKey(reviewKey, issues)) {
+    const reviewKeys = annotationReviewKeys(annotation);
+    if (reviewKeys.some(reviewKey => resolvedAnnotationKey(reviewKey, issues))) {
         const manualAnnotation = preserveManualAnnotationFlag(annotation);
         if (manualAnnotation) {
             next['annotation'] = manualAnnotation;

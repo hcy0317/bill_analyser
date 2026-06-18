@@ -242,14 +242,8 @@ fn apply_import_learning_vector_recall_hit(
         .transaction_type
         .as_deref()
         .and_then(normalize_transaction_type_text);
-    let learned_type = if transfer_protected {
-        raw_learned_type
-            .as_deref()
-            .filter(|transaction_type| *transaction_type == "转账")
-            .map(ToOwned::to_owned)
-    } else {
-        raw_learned_type
-    };
+    let learned_type =
+        learning_projection_type_for_transfer_authority(raw_learned_type, transfer_protected);
     let candidate_preview_type = if transfer_protected {
         "转账"
     } else {

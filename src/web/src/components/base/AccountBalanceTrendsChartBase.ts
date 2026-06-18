@@ -15,6 +15,7 @@ import type { AccountInfoResponse } from '@/models/account.ts';
 import type { TransactionReconciliationStatementResponseItem } from '@/models/transaction.ts';
 
 import { isArray } from '@/lib/common.ts';
+import logger from '@/lib/logger.ts';
 import { sumAmounts } from '@/lib/numeral.ts';
 import {
     getGregorianCalendarYearAndMonthFromUnixTime,
@@ -52,15 +53,15 @@ export interface CommonAccountBalanceTrendsChartProps {
 }
 
 export function useAccountBalanceTrendsChartBase(props: CommonAccountBalanceTrendsChartProps) {
-    console.log(`[AccountBalanceTrendsChartBase] 初始化 - fiscalYearStart=${props.fiscalYearStart}, dateAggregationType=${props.dateAggregationType}, account=${props.account.name}, items数量=${props.items?.length || 0}`);
+    logger.debug(`[AccountBalanceTrendsChartBase] 初始化 - fiscalYearStart=${props.fiscalYearStart}, dateAggregationType=${props.dateAggregationType}, account=${props.account.name}, items数量=${props.items?.length || 0}`);
 
     // 记录前3笔交易的原始数据，验证accountOpeningBalanceCents字段
     if (props.items && props.items.length > 0) {
-        console.log(`[AccountBalanceTrendsChartBase] API返回的前3笔交易数据:`);
+        logger.debug(`[AccountBalanceTrendsChartBase] API返回的前3笔交易数据:`);
         for (let i = 0; i < Math.min(3, props.items.length); i++) {
             const item = props.items[i];
             if (item) {
-                console.log(`  #${i + 1}: time=${item.time}, accountOpeningBalanceCents=${item.accountOpeningBalanceCents}, accountClosingBalanceCents=${item.accountClosingBalanceCents}`);
+                logger.debug(`  #${i + 1}: time=${item.time}, accountOpeningBalanceCents=${item.accountOpeningBalanceCents}, accountClosingBalanceCents=${item.accountClosingBalanceCents}`);
             }
         }
     }
@@ -75,11 +76,11 @@ export function useAccountBalanceTrendsChartBase(props: CommonAccountBalanceTren
 
     const dataDateRange = computed<AccountBalanceUnixTimeAndBalanceRange | null>(() => {
         if (!props.items || props.items.length < 1) {
-            console.log(`[AccountBalanceTrendsChartBase] dataDateRange计算 - 无数据项`);
+            logger.debug(`[AccountBalanceTrendsChartBase] dataDateRange计算 - 无数据项`);
             return null;
         }
 
-        console.log(`[AccountBalanceTrendsChartBase] dataDateRange计算 - 开始处理${props.items.length}条交易记录`);
+        logger.debug(`[AccountBalanceTrendsChartBase] dataDateRange计算 - 开始处理${props.items.length}条交易记录`);
 
         let minUnixTime = Number.MAX_SAFE_INTEGER, maxUnixTime = 0;
         let minUnixTimeOpeningBalanceCents = 0;
@@ -100,7 +101,7 @@ export function useAccountBalanceTrendsChartBase(props: CommonAccountBalanceTren
         }
 
         if (minUnixTime >= Number.MAX_SAFE_INTEGER || maxUnixTime <= 0) {
-            console.log(`[AccountBalanceTrendsChartBase] dataDateRange计算 - 无效的时间范围`);
+            logger.debug(`[AccountBalanceTrendsChartBase] dataDateRange计算 - 无效的时间范围`);
             return null;
         }
 
@@ -111,27 +112,27 @@ export function useAccountBalanceTrendsChartBase(props: CommonAccountBalanceTren
             minUnixTimeClosingBalanceCents: minUnixTimeClosingBalanceCents,
             maxUnixTimeClosingBalanceCents: maxUnixTimeClosingBalanceCents
         };
-        console.log(`[AccountBalanceTrendsChartBase] dataDateRange计算完成 - 时间范围: ${new Date(minUnixTime * 1000).toISOString()} ~ ${new Date(maxUnixTime * 1000).toISOString()}, 期初余额: ${minUnixTimeOpeningBalanceCents}, 期末余额: ${maxUnixTimeClosingBalanceCents}`);
+        logger.debug(`[AccountBalanceTrendsChartBase] dataDateRange计算完成 - 时间范围: ${new Date(minUnixTime * 1000).toISOString()} ~ ${new Date(maxUnixTime * 1000).toISOString()}, 期初余额: ${minUnixTimeOpeningBalanceCents}, 期末余额: ${maxUnixTimeClosingBalanceCents}`);
         return result;
     });
 
     const allDateRanges = computed<YearUnixTime[] | FiscalYearUnixTime[] | YearQuarterUnixTime[] | YearMonthUnixTime[] | YearMonthDayUnixTime[]>(() => {
         if (!dataDateRange.value) {
-            console.log(`[AccountBalanceTrendsChartBase] allDateRanges计算 - dataDateRange为空`);
+            logger.debug(`[AccountBalanceTrendsChartBase] allDateRanges计算 - dataDateRange为空`);
             return [];
         }
 
-        console.log(`[AccountBalanceTrendsChartBase] allDateRanges计算 - dateAggregationType=${props.dateAggregationType}, fiscalYearStart=${props.fiscalYearStart}`);
+        logger.debug(`[AccountBalanceTrendsChartBase] allDateRanges计算 - dateAggregationType=${props.dateAggregationType}, fiscalYearStart=${props.fiscalYearStart}`);
 
         if (props.dateAggregationType === ChartDateAggregationType.Day.type) {
             const result = getAllDaysStartAndEndUnixTimes(dataDateRange.value.minUnixTime, dataDateRange.value.maxUnixTime);
-            console.log(`[AccountBalanceTrendsChartBase] allDateRanges计算完成 - 按天聚合，共${result.length}天`);
+            logger.debug(`[AccountBalanceTrendsChartBase] allDateRanges计算完成 - 按天聚合，共${result.length}天`);
             return result;
         } else {
             const startYearMonth = getGregorianCalendarYearAndMonthFromUnixTime(dataDateRange.value.minUnixTime);
             const endYearMonth = getGregorianCalendarYearAndMonthFromUnixTime(dataDateRange.value.maxUnixTime);
             const result = getAllDateRangesByYearMonthRange(startYearMonth, endYearMonth, props.fiscalYearStart, props.dateAggregationType);
-            console.log(`[AccountBalanceTrendsChartBase] allDateRanges计算完成 - 按期间聚合(type=${props.dateAggregationType})，共${result.length}个期间`);
+            logger.debug(`[AccountBalanceTrendsChartBase] allDateRanges计算完成 - 按期间聚合(type=${props.dateAggregationType})，共${result.length}个期间`);
             return result;
         }
     });
@@ -140,11 +141,11 @@ export function useAccountBalanceTrendsChartBase(props: CommonAccountBalanceTren
         const ret: AccountBalanceTrendsChartItem[] = [];
 
         if (!dataDateRange.value || !allDateRanges.value || allDateRanges.value.length < 1 || !props.items || props.items.length < 1) {
-            console.log(`[AccountBalanceTrendsChartBase] allDataItems计算 - 缺少必要数据，返回空数组`);
+            logger.debug(`[AccountBalanceTrendsChartBase] allDataItems计算 - 缺少必要数据，返回空数组`);
             return ret;
         }
 
-        console.log(`[AccountBalanceTrendsChartBase] allDataItems计算开始 - 处理${allDateRanges.value.length}个日期范围，${props.items.length}条交易`);
+        logger.debug(`[AccountBalanceTrendsChartBase] allDataItems计算开始 - 处理${allDateRanges.value.length}个日期范围，${props.items.length}条交易`);
 
         const dayDataItemsMap: Record<number, TransactionReconciliationStatementResponseItem[]> = {};
 
@@ -239,7 +240,7 @@ export function useAccountBalanceTrendsChartBase(props: CommonAccountBalanceTren
                 }
 
                 // 添加日志记录数据点
-                console.log(`[AccountBalanceTrends] ${displayDate} (有变动): 开盘=${lastOpeningBalanceCents}, 收盘=${lastClosingBalanceCents}, 最低=${lastMinimumBalanceCents}, 最高=${lastMaximumBalanceCents}`);
+                logger.debug(`[AccountBalanceTrends] ${displayDate} (有变动): 开盘=${lastOpeningBalanceCents}, 收盘=${lastClosingBalanceCents}, 最低=${lastMinimumBalanceCents}, 最高=${lastMaximumBalanceCents}`);
 
                 ret.push({
                     displayDate: displayDate,
@@ -259,7 +260,7 @@ export function useAccountBalanceTrendsChartBase(props: CommonAccountBalanceTren
                 if (consecutiveNoChangeCount === 1) {
                     aggregatedStartDate = displayDate;  // 记录聚合起始日期
                     aggregatedEndDate = displayDate;    // 初始化为起始日期
-                    console.log(`[AccountBalanceTrends] ${displayDate} (无变动): 余额=${lastClosingBalanceCents}`);
+                    logger.debug(`[AccountBalanceTrends] ${displayDate} (无变动): 余额=${lastClosingBalanceCents}`);
                     ret.push({
                         displayDate: displayDate,
                         displayDateRange: displayDate,  // 初始只有一天
@@ -277,15 +278,15 @@ export function useAccountBalanceTrendsChartBase(props: CommonAccountBalanceTren
                     if (lastItem && consecutiveNoChangeCount > 1) {
                         // 更新最后一个数据点的日期范围显示
                         lastItem.displayDateRange = `${aggregatedStartDate} ~ ${aggregatedEndDate}`;
-                        console.log(`[AccountBalanceTrends] ${displayDate} (无变动，更新范围): ${lastItem.displayDateRange}, 连续无变动天数=${consecutiveNoChangeCount}`);
+                        logger.debug(`[AccountBalanceTrends] ${displayDate} (无变动，更新范围): ${lastItem.displayDateRange}, 连续无变动天数=${consecutiveNoChangeCount}`);
                     } else {
-                        console.log(`[AccountBalanceTrends] ${displayDate} (无变动，跳过): 连续无变动天数=${consecutiveNoChangeCount}`);
+                        logger.debug(`[AccountBalanceTrends] ${displayDate} (无变动，跳过): 连续无变动天数=${consecutiveNoChangeCount}`);
                     }
                 }
             }
         }
 
-        console.log(`[AccountBalanceTrendsChartBase] allDataItems计算完成 - 生成${ret.length}个数据点`);
+        logger.debug(`[AccountBalanceTrendsChartBase] allDataItems计算完成 - 生成${ret.length}个数据点`);
         return ret;
     });
 

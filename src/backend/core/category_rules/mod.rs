@@ -2,6 +2,12 @@
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
 // 不变式：金额单位、用户可见类型和API payload 在进入或离开本层时必须显式转换。
 
+use std::{
+    collections::HashMap,
+    sync::{OnceLock, RwLock},
+};
+
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,6 +27,8 @@ pub struct CompiledRuleDto {
     pub expression_ast: Option<RuleExpressionNodeDto>,
 }
 
+static RULE_REGEX_CACHE: OnceLock<RwLock<HashMap<String, Option<Regex>>>> = OnceLock::new();
+
 impl CompiledRuleDto {
     fn empty() -> Self {
         Self {
@@ -33,7 +41,6 @@ impl CompiledRuleDto {
     }
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
 pub fn compile_rule_expression(expr: &str, regex_enabled: bool) -> CompiledRuleDto {
     if expr.is_empty() {
         return CompiledRuleDto::empty();
@@ -58,13 +65,11 @@ pub fn compile_rule_expression(expr: &str, regex_enabled: bool) -> CompiledRuleD
     }
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
 pub fn match_rule_expression(text: &str, expr: &str, regex_enabled: bool) -> bool {
     let compiled = compile_rule_expression(expr, regex_enabled);
     match_compiled_rule(text, &compiled)
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
 pub fn escape_rule_expression_term(term: &str) -> String {
     let mut output = String::new();
     for value in term.chars() {
@@ -76,21 +81,28 @@ pub fn escape_rule_expression_term(term: &str) -> String {
     output
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
 pub fn match_compiled_rule(text: &str, compiled: &CompiledRuleDto) -> bool {
     if compiled.is_empty || text.is_empty() {
         return false;
     }
 
     let text_lower = text.to_lowercase();
+    match_compiled_rule_lowercase_text(&text_lower, compiled)
+}
+
+pub fn match_compiled_rule_lowercase_text(text_lower: &str, compiled: &CompiledRuleDto) -> bool {
+    if compiled.is_empty || text_lower.is_empty() {
+        return false;
+    }
+
     if let Some(expression_ast) = &compiled.expression_ast {
-        return match_rule_expression_node(&text_lower, expression_ast);
+        return match_rule_expression_node(text_lower, expression_ast);
     }
 
     if compiled
         .not_patterns
         .iter()
-        .any(|pattern| match_rule_pattern(&text_lower, pattern))
+        .any(|pattern| match_rule_pattern(text_lower, pattern))
     {
         return false;
     }
@@ -98,7 +110,7 @@ pub fn match_compiled_rule(text: &str, compiled: &CompiledRuleDto) -> bool {
     if compiled
         .and_patterns
         .iter()
-        .any(|pattern| !match_rule_pattern(&text_lower, pattern))
+        .any(|pattern| !match_rule_pattern(text_lower, pattern))
     {
         return false;
     }
@@ -107,7 +119,7 @@ pub fn match_compiled_rule(text: &str, compiled: &CompiledRuleDto) -> bool {
         return compiled.or_blocks.iter().all(|block| {
             block
                 .iter()
-                .any(|pattern| match_rule_pattern(&text_lower, pattern))
+                .any(|pattern| match_rule_pattern(text_lower, pattern))
         });
     }
 
@@ -151,12 +163,49 @@ fn match_rule_expression_node(text_lower: &str, node: &RuleExpressionNodeDto) ->
 
 fn match_rule_pattern(text_lower: &str, pattern: &str) -> bool {
     if let Some(regex_pattern) = pattern.strip_prefix("regex:") {
-        return regex::RegexBuilder::new(regex_pattern)
-            .case_insensitive(true)
-            .build()
-            .is_ok_and(|regex| regex.is_match(text_lower));
+        if regex_pattern_is_plain_literal(regex_pattern) {
+            return plain_regex_literal_matches(text_lower, regex_pattern);
+        }
+        return cached_rule_regex(regex_pattern).is_some_and(|regex| regex.is_match(text_lower));
     }
     text_lower.contains(pattern)
+}
+
+fn plain_regex_literal_matches(text_lower: &str, pattern: &str) -> bool {
+    if pattern.is_ascii() {
+        return text_lower.contains(&pattern.to_ascii_lowercase());
+    }
+    text_lower.contains(pattern)
+}
+
+fn regex_pattern_is_plain_literal(pattern: &str) -> bool {
+    !pattern.is_empty()
+        && !pattern.chars().any(|ch| {
+            matches!(
+                ch,
+                '\\' | '.' | '+' | '*' | '?' | '^' | '$' | '(' | ')' | '[' | ']' | '{' | '}' | '|'
+            )
+        })
+}
+
+fn cached_rule_regex(pattern: &str) -> Option<Regex> {
+    let cache = RULE_REGEX_CACHE.get_or_init(|| RwLock::new(HashMap::new()));
+    if let Ok(reader) = cache.read() {
+        if let Some(regex) = reader.get(pattern) {
+            return regex.clone();
+        }
+    }
+
+    let compiled = regex::RegexBuilder::new(pattern)
+        .case_insensitive(true)
+        .build()
+        .ok();
+    if let Ok(mut writer) = cache.write() {
+        writer
+            .entry(pattern.to_string())
+            .or_insert_with(|| compiled.clone());
+    }
+    compiled
 }
 
 struct RuleExpressionParser {
@@ -181,7 +230,6 @@ impl RuleExpressionParser {
         Ok(node)
     }
 
-    #[tracing::instrument(level = "debug", skip_all)]
     fn parse_or_expression(
         &self,
         mut index: usize,
@@ -213,7 +261,6 @@ impl RuleExpressionParser {
         Ok((collapse_children("any", children), index))
     }
 
-    #[tracing::instrument(level = "debug", skip_all)]
     fn parse_and_expression(
         &self,
         mut index: usize,
@@ -295,7 +342,6 @@ impl RuleExpressionParser {
         Ok((collapse_children("all", children), index))
     }
 
-    #[tracing::instrument(level = "debug", skip_all)]
     fn parse_factor(
         &self,
         mut index: usize,
@@ -348,7 +394,6 @@ impl RuleExpressionParser {
         Ok((Some(self.parse_clause(&block)?), index))
     }
 
-    #[tracing::instrument(level = "debug", skip_all)]
     fn parse_clause(&self, block: &str) -> Result<RuleExpressionNodeDto, String> {
         let Some(eq_idx) = block.find("={") else {
             let pattern = if self.regex_enabled {
@@ -461,7 +506,6 @@ fn collapse_children(
     }
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
 fn apply_not_connector(child: RuleExpressionNodeDto) -> RuleExpressionNodeDto {
     if child.kind == "clause" && child.operator == "NOT" {
         return child;
@@ -571,7 +615,10 @@ fn is_factor_terminator(value: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{compile_rule_expression, match_rule_expression};
+    use super::{
+        compile_rule_expression, match_compiled_rule, match_compiled_rule_lowercase_text,
+        match_rule_expression,
+    };
 
     #[test]
     fn compiles_composite_expression_with_visible_not() {
@@ -641,6 +688,11 @@ mod tests {
 
     #[test]
     fn matches_current_expression_rules() {
+        let compiled = compile_rule_expression("OR={星巴克}+AND={拿铁}", false);
+        assert_eq!(
+            match_compiled_rule("星巴克燕麦拿铁", &compiled),
+            match_compiled_rule_lowercase_text("星巴克燕麦拿铁", &compiled)
+        );
         assert!(match_rule_expression(
             "星巴克燕麦拿铁",
             "OR={星巴克}+AND={拿铁}",

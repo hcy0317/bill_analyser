@@ -146,6 +146,8 @@ fn build_import_match_decision_groups(
     let template_standard_rows =
         build_template_standard_row_map(input.templates, input.standard_rows);
     let preview_by_source_id = build_preview_by_source_id(input.preview_rows);
+    let preview_by_reconciliation_group_key =
+        build_preview_by_reconciliation_group_key(input.preview_rows);
     let templates_by_index = input.templates.iter().collect::<Vec<_>>();
     let mut groups = input
         .duplicate_groups
@@ -172,12 +174,12 @@ fn build_import_match_decision_groups(
     groups.extend(build_history_duplicate_decision_groups(
         input.history_duplicate_plan,
         &template_standard_rows,
-        input.preview_rows,
+        &preview_by_reconciliation_group_key,
     ));
     groups.extend(build_history_transfer_decision_groups(
         input.history_transfer_plan,
         &template_standard_rows,
-        input.preview_rows,
+        &preview_by_reconciliation_group_key,
     ));
     groups
 }
@@ -186,14 +188,9 @@ fn refresh_history_duplicate_materialization_payloads(
     history_plan: &mut [HistoryDuplicatePreviewPlan],
     preview_drafts: &[ImportPreviewDraft],
 ) {
+    let preview_by_group_key = build_preview_draft_by_reconciliation_group_key(preview_drafts);
     for plan in history_plan {
-        let Some(final_preview) = preview_drafts.iter().find(|draft| {
-            draft
-                .preview_matching_feedback
-                .pointer("/reconciliation/group_key")
-                .and_then(Value::as_str)
-                == Some(plan.group_key.as_str())
-        }) else {
+        let Some(final_preview) = preview_by_group_key.get(&plan.group_key).copied() else {
             continue;
         };
         let Some(payload) = plan.materialization.materialized_payload.as_object_mut() else {
@@ -312,17 +309,12 @@ fn build_same_batch_decision_group(
 fn build_history_duplicate_decision_groups(
     history_plan: &[HistoryDuplicatePreviewPlan],
     template_standard_rows: &HashMap<i64, i64>,
-    preview_rows: &[ImportPreviewRow],
+    preview_by_reconciliation_group_key: &HashMap<String, &ImportPreviewRow>,
 ) -> Vec<ImportDecisionGroupDraft> {
     history_plan
         .iter()
         .filter_map(|plan| {
-            let preview = preview_rows.iter().find(|row| {
-                row.preview_matching_feedback
-                    .pointer("/reconciliation/group_key")
-                    .and_then(Value::as_str)
-                    == Some(plan.group_key.as_str())
-            })?;
+            let preview = preview_by_reconciliation_group_key.get(&plan.group_key).copied()?;
             let standard_row_id = plan
                 .import_template_id
                 .and_then(|template_id| template_standard_rows.get(&template_id).copied());
@@ -373,6 +365,38 @@ fn build_preview_by_source_id(preview_rows: &[ImportPreviewRow]) -> HashMap<i64,
         }
     }
     map
+}
+
+fn build_preview_by_reconciliation_group_key(
+    preview_rows: &[ImportPreviewRow],
+) -> HashMap<String, &ImportPreviewRow> {
+    let mut map = HashMap::new();
+    for row in preview_rows {
+        if let Some(group_key) = preview_reconciliation_group_key(&row.preview_matching_feedback) {
+            map.entry(group_key).or_insert(row);
+        }
+    }
+    map
+}
+
+fn build_preview_draft_by_reconciliation_group_key(
+    preview_drafts: &[ImportPreviewDraft],
+) -> HashMap<String, &ImportPreviewDraft> {
+    let mut map = HashMap::new();
+    for draft in preview_drafts {
+        if let Some(group_key) = preview_reconciliation_group_key(&draft.preview_matching_feedback)
+        {
+            map.entry(group_key).or_insert(draft);
+        }
+    }
+    map
+}
+
+fn preview_reconciliation_group_key(feedback: &Value) -> Option<String> {
+    feedback
+        .pointer("/reconciliation/group_key")
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 fn build_template_standard_row_map(

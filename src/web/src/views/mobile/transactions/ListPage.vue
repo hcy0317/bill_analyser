@@ -526,6 +526,7 @@ import {
     categoryTypeToTransactionType,
     transactionTypeToCategoryType
 } from '@/lib/category.ts';
+import logger from '@/lib/logger.ts';
 
 const props = defineProps<{
     f7route: Router.Route;
@@ -1283,10 +1284,10 @@ onUnmounted(() => {
 
 // 监听交易日历日期变化，自动重新加载数据
 watch(currentCalendarDate, (newDate, oldDate) => {
-    console.log('[ListPage] currentCalendarDate changed:', { oldDate, newDate, pageType: pageType.value });
+    logger.debug('[ListPage] currentCalendarDate changed', { oldDate, newDate, pageType: pageType.value });
     // 日历模式下，日期变化时重新加载当天交易
     if (pageType.value === TransactionListPageType.Calendar.type && newDate !== oldDate) {
-        console.log('[ListPage] Calendar date changed, reloading transactions for date:', newDate);
+        logger.debug('[ListPage] Calendar date changed, reloading transactions', { date: newDate });
         reload();
     }
 });

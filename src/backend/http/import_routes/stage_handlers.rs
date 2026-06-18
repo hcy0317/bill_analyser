@@ -9,7 +9,7 @@ pub async fn import_dedup_runtime_handler(
     Json(payload): Json<Value>,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "import_dedup_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "import_dedup_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -126,6 +126,7 @@ pub async fn import_dedup_runtime_handler(
         &history_duplicate_import_keys,
         &history_duplicate_ids,
     );
+    let _dedup_elapsed_ms = import_stage_elapsed_ms(_dedup_started_at);
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
@@ -135,7 +136,7 @@ pub async fn import_dedup_runtime_handler(
         original = dedup_result.original_count,
         kept = dedup_result.kept_bills.len(),
         removed = dedup_result.removed_count,
-        elapsed_ms = import_stage_elapsed_ms(_dedup_started_at),
+        elapsed_ms = _dedup_elapsed_ms,
         "stage2 smart dedup complete"
     );
     let history_import_keys = history_duplicate_plan
@@ -164,6 +165,7 @@ pub async fn import_dedup_runtime_handler(
             .iter()
             .map(|plan| plan.preview_draft.clone()),
     );
+    let _intelligence_started_at = Instant::now();
     let mut intelligence_stats = match apply_import_intelligence_chain(
         runtime.connection_mut(),
         user_id,
@@ -174,10 +176,12 @@ pub async fn import_dedup_runtime_handler(
         Ok(stats) => stats,
         Err(error) => return route_response(db_error_response(error)),
     };
+    let _intelligence_elapsed_ms = import_stage_elapsed_ms(_intelligence_started_at);
     let user_id_i64 = match user_id_i64_for_sql(user_id) {
         Ok(user_id) => user_id,
         Err(error) => return route_response(db_error_response(error)),
     };
+    let _vector_recall_started_at = Instant::now();
     match apply_import_learning_vector_recall_chain(
         runtime.connection(),
         &state.config,
@@ -189,7 +193,24 @@ pub async fn import_dedup_runtime_handler(
         Ok(vector_stats) => intelligence_stats.merge_vector_recall(vector_stats),
         Err(error) => return route_response(db_error_response(error)),
     }
+    let _vector_recall_elapsed_ms = import_stage_elapsed_ms(_vector_recall_started_at);
     enforce_import_preview_invariants(preview_drafts.as_mut_slice());
+    let _category_missing_count = preview_drafts
+        .iter()
+        .filter(|draft| {
+            draft.category_id.is_none()
+                && draft.preview_main_category.trim().is_empty()
+                && draft.preview_sub_category.trim().is_empty()
+        })
+        .count();
+    let _transfer_candidate_count = preview_drafts
+        .iter()
+        .filter(|draft| is_transfer_protected_preview(draft))
+        .count();
+    let _learning_candidate_count = preview_drafts
+        .iter()
+        .filter(|draft| draft.preview_matching_feedback.get("learning").is_some())
+        .count();
     refresh_history_duplicate_materialization_payloads(
         &mut history_duplicate_plan,
         &preview_drafts,
@@ -228,29 +249,20 @@ pub async fn import_dedup_runtime_handler(
     ) {
         return route_response(db_error_response(error));
     }
-    let preview_rows_for_groups =
-        match get_preview_by_session(runtime.connection(), &session_id, user_id, false) {
-            Ok(rows) => rows,
-            Err(error) => return route_response(db_error_response(error)),
-        };
-    let decision_groups = build_import_match_decision_groups(ImportMatchDecisionGroupInput {
-        session_id: &session_id,
-        duplicate_groups: &dedup_result.duplicate_groups,
-        transfer_pairs: &dedup_result.transfer_pairs,
-        templates: &templates,
-        standard_rows: &standard_rows,
-        preview_rows: &preview_rows_for_groups,
-        history_duplicate_plan: &history_duplicate_plan,
-        history_transfer_plan: &history_transfer_plan,
-    });
-    if let Err(error) = insert_import_decision_groups_batch(
-        runtime.connection_mut(),
-        &session_id,
+    let _preview_insert_elapsed_ms = import_stage_elapsed_ms(_preview_insert_started_at);
+    let database_candidate_count = history_duplicate_plan.len() + history_transfer_plan.len();
+    spawn_import_decision_group_materialization(ImportDecisionGroupMaterializationInput {
+        pool: runtime.pool().clone(),
+        session_id: session_id.clone(),
         user_id,
-        &decision_groups,
-    ) {
-        return route_response(db_error_response(error));
-    }
+        duplicate_groups: dedup_result.duplicate_groups.clone(),
+        transfer_pairs: dedup_result.transfer_pairs.clone(),
+        templates: templates.clone(),
+        standard_rows,
+        history_duplicate_plan,
+        history_transfer_plan,
+    });
+    let _decision_groups_elapsed_ms = 0u128;
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
@@ -258,7 +270,9 @@ pub async fn import_dedup_runtime_handler(
         user_id = user_id.get(),
         session_id = %session_id,
         preview_rows = inserted_preview,
-        elapsed_ms = import_stage_elapsed_ms(_preview_insert_started_at),
+        elapsed_ms = _preview_insert_elapsed_ms,
+        decision_groups_deferred = true,
+        decision_groups_elapsed_ms = _decision_groups_elapsed_ms,
         "stage2 preview inserted"
     );
     let _status_update_started_at = Instant::now();
@@ -295,6 +309,7 @@ pub async fn import_dedup_runtime_handler(
         status_elapsed_ms = import_stage_elapsed_ms(_status_update_started_at),
         "stage2 status updated"
     );
+    let _api_response_started_at = Instant::now();
     let preview = if include_preview {
         match get_preview_by_session(runtime.connection(), &session_id, user_id, false) {
             Ok(rows) => rows.into_iter().map(preview_row_to_value).collect(),
@@ -303,6 +318,41 @@ pub async fn import_dedup_runtime_handler(
     } else {
         Vec::new()
     };
+    let _api_response_elapsed_ms = import_stage_elapsed_ms(_api_response_started_at);
+    let _total_elapsed_ms = import_stage_elapsed_ms(_stage_started_at);
+    #[cfg(not(coverage))]
+    tracing::info!(
+        domain = "import_parser",
+        operation = "import_dedup_runtime_handler",
+        user_id = user_id.get(),
+        session_id = %session_id,
+        file_count = templates.len(),
+        raw_transaction_count = dedup_result.original_count,
+        preview_count = inserted_preview,
+        dedup_group_count = dedup_result.duplicate_groups.len()
+            + dedup_result.transfer_pairs.len()
+            + dedup_result.split_groups.len(),
+        category_missing_count = _category_missing_count,
+        transfer_candidate_count = _transfer_candidate_count,
+        learning_candidate_count = _learning_candidate_count,
+        elapsed_total_ms = _total_elapsed_ms,
+        elapsed_parse_ms = 0u128,
+        elapsed_dedup_ms = _dedup_elapsed_ms,
+        elapsed_intelligence_ms = _intelligence_elapsed_ms,
+        elapsed_learning_ms = _vector_recall_elapsed_ms,
+        elapsed_identity_validation_ms = 0u128,
+        elapsed_preview_insert_ms = _preview_insert_elapsed_ms,
+        elapsed_decision_groups_ms = _decision_groups_elapsed_ms,
+        decision_groups_deferred = true,
+        elapsed_api_response_ms = _api_response_elapsed_ms,
+        elapsed_intelligence_load_ms = intelligence_stats._elapsed_load_ms,
+        elapsed_category_rule_ms = intelligence_stats.elapsed_category_rule_ns / 1_000_000,
+        elapsed_recurring_rule_ms = intelligence_stats.elapsed_recurring_rule_ns / 1_000_000,
+        elapsed_learning_rule_ms = intelligence_stats.elapsed_learning_rule_ns / 1_000_000,
+        elapsed_account_rule_ms = intelligence_stats.elapsed_account_rule_ns / 1_000_000,
+        elapsed_stage2_baseline_ms = intelligence_stats.elapsed_stage2_baseline_ns / 1_000_000,
+        "import stage2 summary"
+    );
     route_response(import_stage_dedup_success(ImportStageDedupData {
         session_id,
         preview,
@@ -323,10 +373,82 @@ pub async fn import_dedup_runtime_handler(
             "learning_vector_recalled": intelligence_stats.learning_vector_recalled,
             "learning_vector_status": intelligence_stats.learning_vector_status,
             "recurring_projected": intelligence_stats.recurring_projected,
-            "database_candidates": history_duplicate_plan.len() + history_transfer_plan.len(),
+            "database_candidates": database_candidate_count,
             "provider_bypassed": false,
         }),
     }))
+}
+
+struct ImportDecisionGroupMaterializationInput {
+    pool: PostgresPool,
+    session_id: String,
+    user_id: UserId,
+    duplicate_groups: Vec<DuplicateGroup>,
+    transfer_pairs: Vec<TransferPair>,
+    templates: Vec<bill_analyser_db::ImportParserTemplateRow>,
+    standard_rows: Vec<bill_analyser_db::ImportStandardRow>,
+    history_duplicate_plan: Vec<HistoryDuplicatePreviewPlan>,
+    history_transfer_plan: Vec<HistoryTransferPreviewPlan>,
+}
+
+fn spawn_import_decision_group_materialization(input: ImportDecisionGroupMaterializationInput) {
+    tokio::task::spawn_blocking(move || {
+        let started_at = Instant::now();
+        let preview_rows_for_groups =
+            match get_preview_by_session(&input.pool, &input.session_id, input.user_id, false) {
+                Ok(rows) => rows,
+                Err(error) => {
+                    tracing::error!(
+                        domain = "import_parser",
+                        operation = "import_decision_group_materialization",
+                        user_id = input.user_id.get(),
+                        session_id = %input.session_id,
+                        error = %error,
+                        "import decision group materialization failed to load preview rows"
+                    );
+                    return;
+                }
+            };
+        let decision_groups = build_import_match_decision_groups(ImportMatchDecisionGroupInput {
+            session_id: &input.session_id,
+            duplicate_groups: &input.duplicate_groups,
+            transfer_pairs: &input.transfer_pairs,
+            templates: &input.templates,
+            standard_rows: &input.standard_rows,
+            preview_rows: &preview_rows_for_groups,
+            history_duplicate_plan: &input.history_duplicate_plan,
+            history_transfer_plan: &input.history_transfer_plan,
+        });
+        match insert_import_decision_groups_batch(
+            &input.pool,
+            &input.session_id,
+            input.user_id,
+            &decision_groups,
+        ) {
+            Ok(inserted) => {
+                tracing::debug!(
+                    domain = "import_parser",
+                    operation = "import_decision_group_materialization",
+                    user_id = input.user_id.get(),
+                    session_id = %input.session_id,
+                    decision_groups = inserted,
+                    elapsed_ms = import_stage_elapsed_ms(started_at),
+                    "import decision group materialization completed"
+                );
+            }
+            Err(error) => {
+                tracing::error!(
+                    domain = "import_parser",
+                    operation = "import_decision_group_materialization",
+                    user_id = input.user_id.get(),
+                    session_id = %input.session_id,
+                    error = %error,
+                    elapsed_ms = import_stage_elapsed_ms(started_at),
+                    "import decision group materialization failed"
+                );
+            }
+        }
+    });
 }
 
 #[derive(Debug, Clone, Default)]
@@ -337,6 +459,12 @@ struct ImportIntelligenceStats {
     learning_vector_recalled: usize,
     learning_vector_status: String,
     recurring_projected: usize,
+    _elapsed_load_ms: u128,
+    elapsed_category_rule_ns: u128,
+    elapsed_recurring_rule_ns: u128,
+    elapsed_learning_rule_ns: u128,
+    elapsed_account_rule_ns: u128,
+    elapsed_stage2_baseline_ns: u128,
 }
 
 impl ImportIntelligenceStats {
@@ -371,7 +499,41 @@ struct ImportIntelligenceRule {
     priority: i64,
     rule_expression: String,
     regex_enabled: bool,
-    compiled_rule: CompiledRuleDto,
+    compiled_expression: CompiledRuleDto,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ImportIntelligenceRuleSet {
+    income: Vec<ImportIntelligenceRule>,
+    expense: Vec<ImportIntelligenceRule>,
+    transfer: Vec<ImportIntelligenceRule>,
+    investment: Vec<ImportIntelligenceRule>,
+}
+
+impl ImportIntelligenceRuleSet {
+    fn from_rules(rules: Vec<ImportIntelligenceRule>) -> Self {
+        let mut rule_set = Self::default();
+        for rule in rules {
+            match rule.category_type {
+                2 => rule_set.income.push(rule),
+                3 => rule_set.expense.push(rule),
+                4 => rule_set.transfer.push(rule),
+                5 => rule_set.investment.push(rule),
+                _ => {}
+            }
+        }
+        rule_set
+    }
+
+    fn for_type(&self, category_type: i64) -> &[ImportIntelligenceRule] {
+        match category_type {
+            2 => &self.income,
+            3 => &self.expense,
+            4 => &self.transfer,
+            5 => &self.investment,
+            _ => &[],
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -472,6 +634,7 @@ async fn apply_import_intelligence_chain(
     drafts: &mut [ImportPreviewDraft],
 ) -> Result<ImportIntelligenceStats, bill_analyser_db::DbError> {
     let user_id_i64 = user_id_i64_for_sql(user_id)?;
+    let load_started_at = Instant::now();
     let categories = load_import_intelligence_categories(connection, user_id_i64).await?;
     let categories_by_id = categories
         .iter()
@@ -482,19 +645,18 @@ async fn apply_import_intelligence_chain(
         .iter()
         .map(import_intelligence_category_value)
         .collect::<Vec<_>>();
-    let category_rules =
-        load_import_intelligence_category_rules(connection, user_id_i64, &categories_by_id).await?;
+    let category_rules = ImportIntelligenceRuleSet::from_rules(
+        load_import_intelligence_category_rules(connection, user_id_i64, &categories_by_id)
+            .await?,
+    );
     let accounts = load_import_intelligence_accounts(connection, user_id_i64).await?;
     let account_values = accounts
         .iter()
         .map(import_intelligence_account_value)
         .collect::<Vec<_>>();
-    let account_rules =
-        compile_account_rule_candidates(&load_import_intelligence_account_rules(
-            connection,
-            user_id_i64,
-        )
-        .await?);
+    let account_rule_candidates =
+        load_import_intelligence_account_rules(connection, user_id_i64).await?;
+    let account_rules = compile_account_rule_candidates(&account_rule_candidates);
     let learning_rules = load_import_intelligence_learning_rules(connection, user_id_i64).await?;
     let recurring_templates =
         load_import_intelligence_recurring_templates(connection, user_id_i64).await?;
@@ -504,7 +666,10 @@ async fn apply_import_intelligence_chain(
         load_user_cash_transfer_category_id(connection, user_id_i64).await?,
     )
     .cloned();
-    let mut stats = ImportIntelligenceStats::default();
+    let mut stats = ImportIntelligenceStats {
+        _elapsed_load_ms: import_stage_elapsed_ms(load_started_at),
+        ..Default::default()
+    };
     for draft in &mut *drafts {
         ensure_base_matching_feedback(draft);
         let before_category = (
@@ -512,22 +677,29 @@ async fn apply_import_intelligence_chain(
             draft.preview_main_category.clone(),
             draft.preview_sub_category.clone(),
         );
+        let category_started_at = Instant::now();
+        let preview_rule_text = import_preview_rule_text(draft);
         if preview_type_code(&draft.preview_type) == Some(4) {
-            if !apply_transfer_category_rule_match(draft, &category_rules) {
+            if !apply_transfer_category_rule_match(draft, category_rules.for_type(4), &preview_rule_text) {
                 apply_transfer_default_category(draft, &categories, transfer_category.as_ref());
             }
         } else if preview_type_code(&draft.preview_type) == Some(5) {
-            if !apply_investment_category_rule_match(draft, &category_rules) {
-                apply_builtin_category_rule_fallback(draft, &categories);
+            if !apply_investment_category_rule_match(draft, category_rules.for_type(5)) {
+                apply_builtin_category_rule_fallback(draft, &categories, &preview_rule_text);
             }
-        } else if !apply_income_expense_category_rule_match(draft, &category_rules) {
-            apply_builtin_category_rule_fallback(draft, &categories);
+        } else if !apply_income_expense_category_rule_match(draft, &category_rules, &preview_rule_text)
+        {
+            apply_builtin_category_rule_fallback(draft, &categories, &preview_rule_text);
         }
+        stats.elapsed_category_rule_ns += category_started_at.elapsed().as_nanos();
 
+        let recurring_started_at = Instant::now();
         if let Some(candidate) = best_recurring_candidate_for_draft(draft, &recurring_templates) {
             apply_recurring_candidate(draft, candidate);
             stats.recurring_projected += 1;
         }
+        stats.elapsed_recurring_rule_ns += recurring_started_at.elapsed().as_nanos();
+        let learning_started_at = Instant::now();
         if let Some(result) = apply_learning_rule_match(
             connection,
             user_id_i64,
@@ -544,6 +716,7 @@ async fn apply_import_intelligence_chain(
                 increment_applied_learning_rules(connection, user_id_i64, &[rule_id])?;
             }
         }
+        stats.elapsed_learning_rule_ns += learning_started_at.elapsed().as_nanos();
 
         let before_account_rule = (
             draft.preview_source_account_id,
@@ -552,8 +725,12 @@ async fn apply_import_intelligence_chain(
         // Account recognition is intentionally last in stage2: type/transfer,
         // recurring, and learning projections may still change the account
         // role, transaction type, or explicit accounts that rules must consume.
+        let account_started_at = Instant::now();
         apply_account_rule_match_after_semantic_projection(draft, &account_rules, &accounts);
+        stats.elapsed_account_rule_ns += account_started_at.elapsed().as_nanos();
+        let baseline_started_at = Instant::now();
         persist_stage2_actionable_baseline(draft);
+        stats.elapsed_stage2_baseline_ns += baseline_started_at.elapsed().as_nanos();
 
         if before_category
             != (
@@ -688,38 +865,22 @@ async fn load_import_intelligence_category_rules(
             let expression = row.try_get::<Value, _>("rule_expression").ok()?;
             let id = row.try_get("id").ok()?;
             let priority = row.try_get::<i32, _>("priority").ok()?;
-            Some(Ok(import_intelligence_rule_from_expression(
+            let regex_enabled = rule_expression_regex_enabled(&expression);
+            let rule_expression = rule_expression_string(&expression);
+            let compiled_expression = compile_rule_expression(&rule_expression, regex_enabled);
+            Some(Ok(ImportIntelligenceRule {
                 id,
                 category_id,
-                category,
-                i64::from(priority),
-                &expression,
-            )))
+                category_type: category.type_code,
+                main_category: category.main_category.clone(),
+                sub_category: category.sub_category.clone(),
+                priority: i64::from(priority),
+                rule_expression,
+                regex_enabled,
+                compiled_expression,
+            }))
         })
         .collect()
-}
-
-fn import_intelligence_rule_from_expression(
-    id: i64,
-    category_id: i64,
-    category: &ImportIntelligenceCategory,
-    priority: i64,
-    expression: &Value,
-) -> ImportIntelligenceRule {
-    let regex_enabled = rule_expression_regex_enabled(expression);
-    let rule_expression = rule_expression_string(expression);
-    let compiled_rule = compile_rule_expression(&rule_expression, regex_enabled);
-    ImportIntelligenceRule {
-        id,
-        category_id,
-        category_type: category.type_code,
-        main_category: category.main_category.clone(),
-        sub_category: category.sub_category.clone(),
-        priority,
-        rule_expression,
-        regex_enabled,
-        compiled_rule,
-    }
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -905,57 +1066,45 @@ fn matching_feedback_object_mut(draft: &mut ImportPreviewDraft) -> &mut Map<Stri
         .expect("matching feedback object")
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
 fn apply_transfer_category_rule_match(
     draft: &mut ImportPreviewDraft,
     rules: &[ImportIntelligenceRule],
+    preview_rule_text: &str,
 ) -> bool {
-    let combined_text = import_preview_transfer_rule_text(draft);
-    apply_category_rule_match_filtered(draft, rules, &combined_text, |rule, _| {
-        rule.category_type == 4
-    })
+    let combined_text = import_preview_transfer_rule_text(preview_rule_text, draft);
+    apply_category_rule_match_filtered(draft, rules, &combined_text)
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
 fn apply_investment_category_rule_match(
     draft: &mut ImportPreviewDraft,
     rules: &[ImportIntelligenceRule],
 ) -> bool {
     let combined_text = import_preview_visible_rule_text(draft);
-    apply_category_rule_match_filtered(draft, rules, &combined_text, |rule, _| {
-        rule.category_type == 5
-    })
+    apply_category_rule_match_filtered(draft, rules, &combined_text)
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
 fn apply_income_expense_category_rule_match(
     draft: &mut ImportPreviewDraft,
-    rules: &[ImportIntelligenceRule],
+    rule_set: &ImportIntelligenceRuleSet,
+    preview_rule_text: &str,
 ) -> bool {
     let Some(expected_type) = preview_type_code(&draft.preview_type).filter(|value| {
         matches!(*value, 2 | 3)
     }) else {
         return false;
     };
-    let combined_text = import_preview_rule_text(draft);
-    apply_category_rule_match_filtered(draft, rules, &combined_text, |rule, _| {
-        rule.category_type == expected_type
-    })
+    apply_category_rule_match_filtered(draft, rule_set.for_type(expected_type), preview_rule_text)
 }
 
-fn apply_category_rule_match_filtered<F>(
+fn apply_category_rule_match_filtered(
     draft: &mut ImportPreviewDraft,
     rules: &[ImportIntelligenceRule],
     combined_text: &str,
-    mut rule_filter: F,
-) -> bool
-where
-    F: FnMut(&ImportIntelligenceRule, &ImportPreviewDraft) -> bool,
-{
+) -> bool {
+    let combined_text_lower = combined_text.to_lowercase();
     for rule in rules {
-        if rule.rule_expression.trim().is_empty()
-            || !rule_filter(rule, draft)
-            || !match_compiled_rule(combined_text, &rule.compiled_rule)
+        if rule.compiled_expression.is_empty
+            || !match_compiled_rule_lowercase_text(&combined_text_lower, &rule.compiled_expression)
         {
             continue;
         }
@@ -980,10 +1129,10 @@ where
     false
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
 fn apply_builtin_category_rule_fallback(
     draft: &mut ImportPreviewDraft,
     categories: &[ImportIntelligenceCategory],
+    preview_rule_text: &str,
 ) -> bool {
     if preview_type_code(&draft.preview_type)
         .is_some_and(|expected_type| preview_category_matches_type(draft, categories, expected_type))
@@ -991,7 +1140,7 @@ fn apply_builtin_category_rule_fallback(
         return false;
     }
 
-    let combined_text = normalize_category_fallback_text(&import_preview_rule_text(draft));
+    let combined_text = normalize_category_fallback_text(preview_rule_text);
     let current_category_text = normalize_category_fallback_text(&format!(
         "{} {}",
         draft.preview_main_category, draft.preview_sub_category
@@ -1038,7 +1187,6 @@ fn apply_builtin_category_rule_fallback(
     false
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
 fn normalize_category_fallback_text(value: &str) -> String {
     value
         .trim()
@@ -1046,7 +1194,6 @@ fn normalize_category_fallback_text(value: &str) -> String {
         .replace(char::is_whitespace, "")
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
 fn find_import_intelligence_category<'a>(
     categories: &'a [ImportIntelligenceCategory],
     category_type: i64,
@@ -1060,7 +1207,6 @@ fn find_import_intelligence_category<'a>(
     })
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
 fn persist_stage2_actionable_baseline(draft: &mut ImportPreviewDraft) {
     let snapshot = import_preview_stage2_snapshot(draft);
 
@@ -1070,7 +1216,6 @@ fn persist_stage2_actionable_baseline(draft: &mut ImportPreviewDraft) {
     );
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
 fn import_preview_stage2_snapshot(draft: &ImportPreviewDraft) -> Value {
     json!({
         "preview_type": draft.preview_type,
@@ -1082,7 +1227,6 @@ fn import_preview_stage2_snapshot(draft: &ImportPreviewDraft) -> Value {
     })
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
 fn import_preview_transfer_applied_snapshot(draft: &ImportPreviewDraft) -> Value {
     json!({
         "preview_type": draft.preview_type,
@@ -1130,7 +1274,6 @@ fn transfer_entry_text(value: Option<&Value>) -> Option<String> {
     value.as_f64().map(|number| number.to_string())
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
 fn apply_learning_rule_match(
     connection: &Connection,
     user_id: i64,
@@ -1193,14 +1336,8 @@ fn apply_learning_rule_match(
         .learned_type
         .as_deref()
         .and_then(normalize_transaction_type_text);
-    let learned_type = if transfer_protected {
-        raw_learned_type
-            .as_deref()
-            .filter(|transaction_type| *transaction_type == "转账")
-            .map(ToOwned::to_owned)
-    } else {
-        raw_learned_type.clone()
-    };
+    let learned_type =
+        learning_projection_type_for_transfer_authority(raw_learned_type, transfer_protected);
     let candidate_preview_type = if transfer_protected {
         "转账"
     } else {
@@ -1402,7 +1539,6 @@ fn annotate_learning_rule_skip(draft: &mut ImportPreviewDraft, rule_id: i64, rea
     );
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
 fn apply_transfer_default_category(
     draft: &mut ImportPreviewDraft,
     categories: &[ImportIntelligenceCategory],
@@ -1447,13 +1583,47 @@ fn preview_category_matches_type(
     })
 }
 
+fn learning_projection_type_for_transfer_authority(
+    raw_learned_type: Option<String>,
+    transfer_authority: bool,
+) -> Option<String> {
+    match (transfer_authority, raw_learned_type.as_deref()) {
+        (true, Some("转账")) => raw_learned_type,
+        (true, _) => None,
+        (false, Some("转账")) => None,
+        (false, _) => raw_learned_type,
+    }
+}
+
 fn is_transfer_protected_preview(draft: &ImportPreviewDraft) -> bool {
-    draft
-        .dedup_type
-        .as_deref()
-        .map(|value| value.trim().to_ascii_lowercase().contains("transfer"))
+    let Some(transfer_feedback) = draft
+        .preview_matching_feedback
+        .get("transfer")
+        .and_then(Value::as_object)
+    else {
+        return false;
+    };
+
+    let review_status = transfer_feedback
+        .get("review_status")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if review_status == "rejected" {
+        return false;
+    }
+
+    transfer_feedback
+        .get("candidate_type")
+        .and_then(Value::as_str)
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "transfer" | "transfer_cross_batch"
+            )
+        })
         .unwrap_or(false)
-        || draft.preview_matching_feedback.get("transfer").is_some()
 }
 
 fn enforce_import_preview_invariants(drafts: &mut [ImportPreviewDraft]) {
@@ -1473,7 +1643,6 @@ fn enforce_import_preview_invariants(drafts: &mut [ImportPreviewDraft]) {
     }
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
 fn persist_transfer_pending_applied_snapshot(draft: &mut ImportPreviewDraft) {
     let applied_snapshot = import_preview_transfer_applied_snapshot(draft);
     let feedback = matching_feedback_object_mut(draft);
@@ -1522,7 +1691,6 @@ fn annotate_transfer_account_review(draft: &mut ImportPreviewDraft) {
     );
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
 fn clear_transfer_account_review_annotation(draft: &mut ImportPreviewDraft) {
     if draft
         .preview_matching_feedback
@@ -1620,7 +1788,6 @@ fn increment_applied_learning_rules(
     Ok(())
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
 fn import_preview_rule_text(draft: &ImportPreviewDraft) -> String {
     let mut parts = vec![
         draft.preview_counterparty.clone(),
@@ -1883,7 +2050,7 @@ pub async fn import_confirm_runtime_handler(
     Json(payload): Json<Value>,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "import_confirm_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "import_confirm_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2034,7 +2201,7 @@ pub async fn import_session_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "import_session_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "import_session_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2067,7 +2234,7 @@ pub async fn import_session_cancel_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "import_session_cancel_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "import_session_cancel_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2097,7 +2264,7 @@ pub async fn import_preview_page_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "import_preview_page_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "import_preview_page_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2225,7 +2392,7 @@ pub async fn import_preview_index_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "import_preview_index_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "import_preview_index_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2308,7 +2475,7 @@ pub async fn import_preview_selection_runtime_handler(
     Json(payload): Json<Value>,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "import_preview_selection_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "import_preview_selection_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2464,7 +2631,7 @@ pub async fn import_preview_update_runtime_handler(
     Json(payload): Json<Value>,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "import_preview_update_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "import_preview_update_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2535,7 +2702,7 @@ pub async fn import_reclassify_runtime_handler(
     Json(payload): Json<Value>,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "import_reclassify_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "import_reclassify_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2645,7 +2812,7 @@ pub async fn preview_recurring_candidates_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "preview_recurring_candidates_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "preview_recurring_candidates_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2721,7 +2888,7 @@ pub async fn preview_recurring_match_put_runtime_handler(
     Json(payload): Json<Value>,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "preview_recurring_match_put_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "preview_recurring_match_put_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2783,7 +2950,7 @@ pub async fn preview_recurring_match_delete_runtime_handler(
     Json(payload): Json<Value>,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "preview_recurring_match_delete_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "preview_recurring_match_delete_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2837,7 +3004,7 @@ pub async fn preview_transfer_decision_runtime_handler(
     Json(payload): Json<Value>,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "preview_transfer_decision_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "preview_transfer_decision_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -2889,7 +3056,7 @@ pub async fn import_learning_suggestions_get_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "import_learning_suggestions_get_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "import_learning_suggestions_get_runtime_handler", "business operation entered");
     import_learning_suggestions_response(state, session_id, headers, None).await
 }
 
@@ -2901,7 +3068,7 @@ pub async fn import_learning_suggestions_post_runtime_handler(
     Json(payload): Json<Value>,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "import_learning_suggestions_post_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "import_learning_suggestions_post_runtime_handler", "business operation entered");
     import_learning_suggestions_response(state, session_id, headers, Some(payload)).await
 }
 
@@ -3031,7 +3198,7 @@ pub async fn import_learning_promote_runtime_handler(
     Json(payload): Json<Value>,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "import_learning_promote_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "import_learning_promote_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -3101,7 +3268,7 @@ pub async fn import_learning_rules_list_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "import_learning_rules_list_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "import_learning_rules_list_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -3157,7 +3324,7 @@ pub async fn import_learning_rule_update_runtime_handler(
     Json(payload): Json<Value>,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "import_learning_rule_update_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "import_learning_rule_update_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -3195,7 +3362,7 @@ pub async fn import_learning_rule_delete_runtime_handler(
     headers: HeaderMap,
 ) -> Response {
     #[cfg(not(coverage))]
-    tracing::info!(domain = "import_parser", operation = "import_learning_rule_delete_runtime_handler", "business operation entered");
+    tracing::debug!(domain = "import_parser", operation = "import_learning_rule_delete_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
@@ -3241,42 +3408,6 @@ mod tests {
             "expression": "商户",
             "regex_enabled": null
         })));
-    }
-
-    #[test]
-    fn compiled_category_rule_projection_matches_preview_draft() {
-        let category = ImportIntelligenceCategory {
-            id: 42,
-            type_code: 3,
-            main_category: "食品饮料".to_string(),
-            sub_category: "咖啡".to_string(),
-        };
-        let rule = import_intelligence_rule_from_expression(
-            7,
-            category.id,
-            &category,
-            10,
-            &json!({"expression": "OR={星巴克}", "regex_enabled": false}),
-        );
-        let mut draft = ImportPreviewDraft {
-            preview_type: "支出".to_string(),
-            preview_counterparty: "星巴克".to_string(),
-            preview_description: "拿铁".to_string(),
-            ..ImportPreviewDraft::default()
-        };
-
-        assert!(apply_income_expense_category_rule_match(
-            &mut draft,
-            &[rule]
-        ));
-
-        assert_eq!(draft.category_id, Some(42));
-        assert_eq!(draft.preview_main_category, "食品饮料");
-        assert_eq!(draft.preview_sub_category, "咖啡");
-        assert_eq!(
-            draft.preview_matching_feedback["category_rule"]["rule_id"],
-            json!(7)
-        );
     }
 
     #[test]
@@ -3369,6 +3500,75 @@ mod tests {
             *field == ImportPreviewPatchField::CategoryId
                 && *value == ImportPreviewPatchValue::Integer(42)
         }));
+    }
+
+    #[test]
+    fn automatic_transfer_authority_requires_transfer_matching_feedback() {
+        let raw_dedup_only = ImportPreviewDraft {
+            dedup_type: Some("transfer_cross_batch".to_string()),
+            preview_matching_feedback: json!({}),
+            ..ImportPreviewDraft::default()
+        };
+        assert!(!is_transfer_protected_preview(&raw_dedup_only));
+
+        let same_batch_transfer_match = ImportPreviewDraft {
+            dedup_type: Some("transfer".to_string()),
+            preview_matching_feedback: json!({
+                "transfer": {
+                    "candidate_type": "transfer",
+                    "review_status": "pending"
+                }
+            }),
+            ..ImportPreviewDraft::default()
+        };
+        assert!(is_transfer_protected_preview(&same_batch_transfer_match));
+
+        let history_transfer_match = ImportPreviewDraft {
+            dedup_type: Some("transfer_cross_batch".to_string()),
+            preview_matching_feedback: json!({
+                "transfer": {
+                    "candidate_type": "transfer_cross_batch",
+                    "review_status": "pending"
+                },
+                "reconciliation": {
+                    "candidate_type": "transfer"
+                }
+            }),
+            ..ImportPreviewDraft::default()
+        };
+        assert!(is_transfer_protected_preview(&history_transfer_match));
+
+        let rejected_transfer_match = ImportPreviewDraft {
+            dedup_type: Some("transfer".to_string()),
+            preview_matching_feedback: json!({
+                "transfer": {
+                    "candidate_type": "transfer",
+                    "review_status": "rejected"
+                }
+            }),
+            ..ImportPreviewDraft::default()
+        };
+        assert!(!is_transfer_protected_preview(&rejected_transfer_match));
+    }
+
+    #[test]
+    fn learning_projection_cannot_create_transfer_without_authority() {
+        assert_eq!(
+            learning_projection_type_for_transfer_authority(Some("转账".to_string()), false),
+            None
+        );
+        assert_eq!(
+            learning_projection_type_for_transfer_authority(Some("支出".to_string()), false),
+            Some("支出".to_string())
+        );
+        assert_eq!(
+            learning_projection_type_for_transfer_authority(Some("转账".to_string()), true),
+            Some("转账".to_string())
+        );
+        assert_eq!(
+            learning_projection_type_for_transfer_authority(Some("收入".to_string()), true),
+            None
+        );
     }
 
     #[test]

@@ -801,7 +801,6 @@ export function getDateRangeByDateType(dateType: number | undefined, firstDayOfW
     // 添加日志记录财年开始日期
     if (dateType === DateRange.ThisYear.type || dateType === DateRange.LastYear.type ||
         dateType === DateRange.ThisFiscalYear.type || dateType === DateRange.LastFiscalYear.type) {
-        console.log(`[getDateRangeByDateType] dateType=${dateType}, fiscalYearStart=${fiscalYearStart}`);
     }
 
     if (dateType === DateRange.All.type) { // 全部
@@ -820,37 +819,19 @@ export function getDateRangeByDateType(dateType: number | undefined, firstDayOfW
         maxTime = getUnixTimeBeforeUnixTime(getThisMonthFirstUnixTime(), 1, 'seconds');
         minTime = getUnixTimeBeforeUnixTime(getThisMonthFirstUnixTime(), 1, 'months');
     } else if (dateType === DateRange.ThisYear.type) { // 今年 - 自然年（1月1日开始）
-        console.log(`[getDateRangeByDateType] ThisYear (自然年) - fiscalYearStart参数值=${fiscalYearStart}（但自然年不使用此参数）`);
         const now = moment();
         maxTime = now.clone().endOf('year').unix();
         minTime = now.clone().startOf('year').unix();
-        console.log(`[getDateRangeByDateType] ThisYear range: ${new Date(minTime * 1000).toISOString()} - ${new Date(maxTime * 1000).toISOString()}`);
     } else if (dateType === DateRange.LastYear.type) { // 去年 - 自然年
-        console.log(`[getDateRangeByDateType] LastYear (去年自然年) - fiscalYearStart参数值=${fiscalYearStart}（但去年不使用此参数）`);
         const lastYear = moment().subtract(1, 'years');
         maxTime = lastYear.clone().endOf('year').unix();
         minTime = lastYear.clone().startOf('year').unix();
-        console.log(`[getDateRangeByDateType] LastYear range: ${new Date(minTime * 1000).toISOString()} - ${new Date(maxTime * 1000).toISOString()}`);
     } else if (dateType === DateRange.ThisFiscalYear.type) { // 本财年
-        console.log(`[getDateRangeByDateType] ThisFiscalYear - using fiscalYearStart=${fiscalYearStart}`);
         maxTime = getFiscalYearEndUnixTime(getTodayFirstUnixTime(), fiscalYearStart);
         minTime = getFiscalYearStartUnixTime(getTodayFirstUnixTime(), fiscalYearStart);
-        // 显示本地时间而非UTC时间，避免用户误解
-        const minDate = new Date(minTime * 1000);
-        const maxDate = new Date(maxTime * 1000);
-        console.log(`[getDateRangeByDateType] ThisFiscalYear range (Local Time): ${minDate.toLocaleString('zh-CN')} - ${maxDate.toLocaleString('zh-CN')}`);
-        console.log(`[getDateRangeByDateType] ThisFiscalYear range (UTC): ${minDate.toISOString()} - ${maxDate.toISOString()}`);
-        console.log(`[getDateRangeByDateType] ThisFiscalYear unix timestamps: ${minTime} - ${maxTime}`);
     } else if (dateType === DateRange.LastFiscalYear.type) { // 上一财年
-        console.log(`[getDateRangeByDateType] LastFiscalYear - using fiscalYearStart=${fiscalYearStart}`);
         maxTime = getUnixTimeBeforeUnixTime(getFiscalYearEndUnixTime(getTodayFirstUnixTime(), fiscalYearStart), 1, 'years');
         minTime = getUnixTimeBeforeUnixTime(getFiscalYearStartUnixTime(getTodayFirstUnixTime(), fiscalYearStart), 1, 'years');
-        // 显示本地时间而非UTC时间，避免用户误解
-        const lastMinDate = new Date(minTime * 1000);
-        const lastMaxDate = new Date(maxTime * 1000);
-        console.log(`[getDateRangeByDateType] LastFiscalYear range (Local Time): ${lastMinDate.toLocaleString('zh-CN')} - ${lastMaxDate.toLocaleString('zh-CN')}`);
-        console.log(`[getDateRangeByDateType] LastFiscalYear range (UTC): ${lastMinDate.toISOString()} - ${lastMaxDate.toISOString()}`);
-        console.log(`[getDateRangeByDateType] LastFiscalYear unix timestamps: ${minTime} - ${maxTime}`);
     } else if (dateType === DateRange.RecentTwelveMonths.type) { // 最近 12 个月
         maxTime = getThisMonthLastUnixTime();
         minTime = getUnixTimeBeforeUnixTime(getThisMonthFirstUnixTime(), 11, 'months');
@@ -864,19 +845,16 @@ export function getDateRangeByDateType(dateType: number | undefined, firstDayOfW
         minTime = getUnixTimeBeforeUnixTime(getThisMonthFirstUnixTime(), 35, 'months');
     } else if (dateType === DateRange.RecentTwoYears.type) // 最近 2 年 - 最近 2 个自然年
     {
-        console.log(`[getDateRangeByDateType] RecentTwoYears (最近2个自然年)`);
         const now = moment();
         maxTime = now.clone().endOf('year').unix();
         minTime = now.clone().subtract(1, 'years').startOf('year').unix();
     } else if (dateType === DateRange.RecentThreeYears.type) // 最近 3 年 - 最近 3 个自然年
     {
-        console.log(`[getDateRangeByDateType] RecentThreeYears (最近3个自然年)`);
         const now = moment();
         maxTime = now.clone().endOf('year').unix();
         minTime = now.clone().subtract(2, 'years').startOf('year').unix();
     } else if (dateType === DateRange.RecentFiveYears.type) // 最近 5 年 - 最近 5 个自然年
     {
-        console.log(`[getDateRangeByDateType] RecentFiveYears (最近5个自然年)`);
         const now = moment();
         maxTime = now.clone().endOf('year').unix();
         minTime = now.clone().subtract(4, 'years').startOf('year').unix();
