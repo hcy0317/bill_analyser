@@ -111,6 +111,16 @@ describe('import preview update helper', () => {
         expect(update.selected).toBe(false);
     });
 
+    test('marks preview updates as manually annotated only after user edits', () => {
+        const update = buildImportPreviewUpdateFromTransaction(makeTransaction({
+            isManuallyAnnotated: true
+        }), {
+            categoryPath
+        });
+
+        expect(update.is_manually_annotated).toBe(true);
+    });
+
     test.each([
         ['decimal number', { sourceAmountCents: 12.34 }],
         ['decimal string', { sourceAmountCents: '12.34' as unknown as number }],

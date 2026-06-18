@@ -271,8 +271,8 @@ fn post_process_skips_missing_dates_and_zero_amounts() {
 }
 
 #[test]
-fn post_process_preserves_no_income_expenditure_as_transfer_before_staging_suppression() {
-    let processed = post_process_raw_bills(
+fn post_process_demotes_no_income_expenditure_by_signed_amount_before_staging() {
+    let outgoing = post_process_raw_bills(
         "alipay",
         &[RawBill {
             date: "2019-02-09 11:52:47".to_string(),
@@ -286,10 +286,29 @@ fn post_process_preserves_no_income_expenditure_as_transfer_before_staging_suppr
         }],
     );
 
-    assert_eq!(processed.len(), 1);
-    assert_eq!(processed[0].original_type, "不计收支");
-    assert_eq!(processed[0].transaction_type, "转账");
-    assert_ne!(processed[0].transaction_type, "收入");
+    assert_eq!(outgoing.len(), 1);
+    assert_eq!(outgoing[0].original_type, "不计收支");
+    assert_eq!(outgoing[0].transaction_type, "收入");
+    assert_ne!(outgoing[0].transaction_type, "转账");
+
+    let incoming = post_process_raw_bills(
+        "alipay",
+        &[RawBill {
+            date: "2019-02-09 11:52:47".to_string(),
+            amount: "-813.22".to_string(),
+            transaction_type: "不计收支".to_string(),
+            description: "自动还款-花呗2019年02月账单".to_string(),
+            counterparty: "支付宝（中国）网络技术有限公司".to_string(),
+            payment_method: "跨行支付".to_string(),
+            original_category: "信用借还".to_string(),
+            ..Default::default()
+        }],
+    );
+
+    assert_eq!(incoming.len(), 1);
+    assert_eq!(incoming[0].original_type, "不计收支");
+    assert_eq!(incoming[0].transaction_type, "支出");
+    assert_ne!(incoming[0].transaction_type, "转账");
 }
 
 #[test]

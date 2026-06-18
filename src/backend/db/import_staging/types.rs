@@ -364,6 +364,7 @@ pub enum ImportPreviewPatchField {
     RecurringMatchReasons,
     RecurringMatchedDate,
     Selected,
+    ManualAnnotation,
     MatchingFeedback,
 }
 

@@ -284,17 +284,21 @@ fn build_preview_patch_from_payload(
             ImportPreviewPatchValue::Bool(coerce_preview_selected_value(Some(value), true)),
         ));
     }
-    if let Some(value) = first_value(
+    if bool_field_from_object(
         object,
         &[
-            "matchingFeedback",
-            "preview_matching_feedback",
-            "previewMatchingFeedback",
+            "isManuallyAnnotated",
+            "is_manually_annotated",
+            "preview_is_manually_annotated",
+            "previewIsManuallyAnnotated",
         ],
-    ) {
+    )
+    .is_some_and(|value| value)
+        && payload_contains_manual_edit_field(object)
+    {
         changes.push((
-            ImportPreviewPatchField::MatchingFeedback,
-            ImportPreviewPatchValue::Json(value.clone()),
+            ImportPreviewPatchField::ManualAnnotation,
+            ImportPreviewPatchValue::Bool(true),
         ));
     }
 
@@ -324,6 +328,47 @@ fn build_preview_patch_from_payload(
         patch = patch.with_llm_decision_cleared();
     }
     patch
+}
+
+fn payload_contains_manual_edit_field(object: &Map<String, Value>) -> bool {
+    const MANUAL_EDIT_KEYS: &[&str] = &[
+        "type",
+        "preview_type",
+        "previewType",
+        "amountCents",
+        "amount_cents",
+        "previewAmountCents",
+        "preview_amount_cents",
+        "sourceAmountCents",
+        "destinationAmountCents",
+        "destination_amount_cents",
+        "previewDestinationAmountCents",
+        "preview_destination_amount_cents",
+        "mainCategory",
+        "preview_main_category",
+        "previewMainCategory",
+        "subCategory",
+        "preview_sub_category",
+        "previewSubCategory",
+        "categoryId",
+        "category_id",
+        "sourceAccountId",
+        "preview_source_account_id",
+        "previewSourceAccountId",
+        "destinationAccountId",
+        "preview_destination_account_id",
+        "previewDestinationAccountId",
+        "counterparty",
+        "preview_counterparty",
+        "previewCounterparty",
+        "paymentMethod",
+        "preview_payment_method",
+        "previewPaymentMethod",
+        "description",
+        "preview_description",
+        "previewDescription",
+    ];
+    MANUAL_EDIT_KEYS.iter().any(|key| object.contains_key(*key))
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -632,6 +677,81 @@ mod preview_mutation_helper_tests {
         assert_eq!(
             change_value(&patch, ImportPreviewPatchField::RecurringCandidateCount),
             Some(&ImportPreviewPatchValue::Integer(2))
+        );
+    }
+
+    #[test]
+    fn preview_patch_payload_ignores_client_supplied_matching_feedback() {
+        let object = Map::from_iter([
+            (
+                "matchingFeedback".to_string(),
+                json!({
+                    "transfer": {
+                        "candidate_type": "transfer",
+                        "review_status": "pending"
+                    }
+                }),
+            ),
+            ("preview_type".to_string(), json!("转账")),
+        ]);
+
+        let patch = build_preview_patch_from_payload(7, &object);
+
+        assert_eq!(
+            change_value(&patch, ImportPreviewPatchField::Type),
+            Some(&ImportPreviewPatchValue::Text("转账".to_string()))
+        );
+        assert_eq!(
+            change_value(&patch, ImportPreviewPatchField::MatchingFeedback),
+            None
+        );
+    }
+
+    #[test]
+    fn preview_patch_payload_marks_manual_annotation_without_matching_feedback_authority() {
+        let object = Map::from_iter([
+            ("is_manually_annotated".to_string(), json!(true)),
+            ("preview_type".to_string(), json!("转账")),
+            (
+                "previewMatchingFeedback".to_string(),
+                json!({
+                    "transfer": {
+                        "candidate_type": "transfer",
+                        "review_status": "pending"
+                    }
+                }),
+            ),
+        ]);
+
+        let patch = build_preview_patch_from_payload(7, &object);
+
+        assert_eq!(
+            change_value(&patch, ImportPreviewPatchField::ManualAnnotation),
+            Some(&ImportPreviewPatchValue::Bool(true))
+        );
+        assert_eq!(
+            change_value(&patch, ImportPreviewPatchField::Type),
+            Some(&ImportPreviewPatchValue::Text("转账".to_string()))
+        );
+        assert_eq!(
+            change_value(&patch, ImportPreviewPatchField::MatchingFeedback),
+            None
+        );
+    }
+
+    #[test]
+    fn preview_patch_payload_ignores_standalone_manual_annotation_marker() {
+        let object = Map::from_iter([("is_manually_annotated".to_string(), json!(true))]);
+
+        let patch = build_preview_patch_from_payload(7, &object);
+
+        assert_eq!(
+            change_value(&patch, ImportPreviewPatchField::ManualAnnotation),
+            None
+        );
+        assert_eq!(
+            change_value(&patch, ImportPreviewPatchField::MatchingFeedback),
+            None
         );
     }
 

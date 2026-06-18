@@ -3806,6 +3806,9 @@ fn build_preview_row_update_query(
     query.push_bind(preview.preview_payment_method.clone());
     query.push(", description = ");
     query.push_bind(preview.preview_description.clone());
+    if preview.preview_type != "转账" && preview.preview_type != "transfer" {
+        query.push(", hidden_transfer_payload = '{}'::jsonb");
+    }
     query.push(", preview_payload = ");
     query.push_bind(preview_payload);
     query.push(
@@ -4298,12 +4301,38 @@ fn apply_patch_value_to_preview(
             preview.preview_selected = value;
             payload_set(payload, "preview_selected", json!(value));
         }
+        (ImportPreviewPatchField::ManualAnnotation, ImportPreviewPatchValue::Bool(true)) => {
+            mark_preview_manual_annotation(preview, payload);
+        }
         (ImportPreviewPatchField::MatchingFeedback, ImportPreviewPatchValue::Json(value)) => {
             preview.preview_matching_feedback = value.clone();
             payload_set(payload, "preview_matching_feedback", value);
         }
         _ => {}
     }
+}
+
+fn mark_preview_manual_annotation(preview: &mut ImportPreviewRow, payload: &mut Value) {
+    if !preview.preview_matching_feedback.is_object() {
+        preview.preview_matching_feedback = json!({});
+    }
+    let Some(feedback) = preview.preview_matching_feedback.as_object_mut() else {
+        return;
+    };
+    let annotation = feedback
+        .entry("annotation".to_string())
+        .or_insert_with(|| json!({}));
+    if !annotation.is_object() {
+        *annotation = json!({});
+    }
+    if let Some(annotation) = annotation.as_object_mut() {
+        annotation.insert("is_manually_annotated".to_string(), json!(true));
+    }
+    payload_set(
+        payload,
+        "preview_matching_feedback",
+        preview.preview_matching_feedback.clone(),
+    );
 }
 
 fn expected_state_conflicts(
@@ -6068,6 +6097,40 @@ mod import_preview_query_tests {
     }
 
     #[test]
+    fn preview_patch_value_marks_manual_annotation_without_replacing_feedback() {
+        let mut row = preview_row(1);
+        row.preview_matching_feedback = json!({
+            "parser": {"parser_id": "alipay"}
+        });
+        let mut payload = json!({});
+
+        apply_patch_value_to_preview(
+            &mut row,
+            &mut payload,
+            ImportPreviewPatchField::ManualAnnotation,
+            ImportPreviewPatchValue::Bool(true),
+        );
+
+        assert_eq!(
+            row.preview_matching_feedback.pointer("/parser/parser_id"),
+            Some(&json!("alipay"))
+        );
+        assert_eq!(
+            row.preview_matching_feedback
+                .pointer("/annotation/is_manually_annotated"),
+            Some(&json!(true))
+        );
+        assert_eq!(
+            payload.pointer("/preview_matching_feedback/parser/parser_id"),
+            Some(&json!("alipay"))
+        );
+        assert_eq!(
+            payload.pointer("/preview_matching_feedback/annotation/is_manually_annotated"),
+            Some(&json!(true))
+        );
+    }
+
+    #[test]
     fn preview_category_lookup_helpers_preserve_type_path_and_sql_contract() {
         let lookup =
             import_preview_category_lookup_from_values("理财收益", "理财/理财收益", Some("income"));
@@ -6210,6 +6273,7 @@ mod import_preview_query_tests {
         assert!(single_insert_sql.contains("RETURNING id"));
 
         let mut preview = preview_row(7);
+        preview.preview_type = "转账".to_string();
         preview.category_id = Some(42);
         let mut update_builder = build_preview_row_update_query(
             &preview,
@@ -6223,7 +6287,21 @@ mod import_preview_query_tests {
         let update_sql = update_builder.build().sql().to_string();
         assert!(update_sql.contains("UPDATE import_preview_rows"));
         assert!(update_sql.contains("category_id ="));
+        assert!(!update_sql.contains("hidden_transfer_payload = '{}'::jsonb"));
         assert!(update_sql.contains("WHERE id ="));
+
+        preview.preview_type = "支出".to_string();
+        let mut demoted_update_builder = build_preview_row_update_query(
+            &preview,
+            json!({"preview_type": "支出"}).to_string(),
+            1000,
+            "expense",
+            7,
+            1,
+            2,
+        );
+        let demoted_update_sql = demoted_update_builder.build().sql().to_string();
+        assert!(demoted_update_sql.contains("hidden_transfer_payload = '{}'::jsonb"));
     }
 
     #[test]

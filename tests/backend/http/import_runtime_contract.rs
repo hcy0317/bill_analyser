@@ -41,6 +41,7 @@ fn stage2_account_rules_run_after_semantic_projection_and_before_baseline() {
         "fn apply_account_rule_match_after_semantic_projection",
     );
 
+    let transfer_demotion = position(stage2_loop, "demote_unauthorized_transfer_preview");
     let category_projection = position(stage2_loop, "apply_transfer_category_rule_match");
     let recurring_projection = position(stage2_loop, "best_recurring_candidate_for_draft");
     let learning_projection = position(stage2_loop, "apply_learning_rule_match");
@@ -52,6 +53,8 @@ fn stage2_account_rules_run_after_semantic_projection_and_before_baseline() {
     let baseline_persist = position(stage2_loop, "persist_stage2_actionable_baseline(draft);");
     let stats_update = position(stage2_loop, "stats.account_matched += 1;");
 
+    assert!(transfer_demotion < category_projection);
+    assert!(stage2_loop.contains("if is_transfer_protected_preview(draft)"));
     assert!(category_projection < recurring_projection);
     assert!(recurring_projection < learning_projection);
     assert!(learning_projection < account_pre_snapshot);

@@ -35,6 +35,7 @@ export type ImportPreviewUpdatePayload = Record<string, unknown> & {
     preview_main_category: string;
     preview_sub_category: string;
     clear_transfer_decision: boolean;
+    is_manually_annotated?: boolean;
     selected: boolean;
 };
 
@@ -107,6 +108,9 @@ export function buildImportPreviewUpdateFromTransaction(
         clear_transfer_decision: clearTransferDecision,
         selected: transaction.selected
     };
+    if (transaction.isManuallyAnnotated) {
+        update['is_manually_annotated'] = true;
+    }
 
     if (options.includeSuggestionDecisionClears) {
         update['clear_learning_decision'] = clearLearningDecision;
