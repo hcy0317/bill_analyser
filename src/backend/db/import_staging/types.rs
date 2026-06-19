@@ -506,6 +506,8 @@ pub struct ImportPreviewLearningApply {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ImportPreviewLlmSuggestion {
+    pub suggested_type: String,
+    pub suggested_category_id: Option<i64>,
     pub suggested_main_category: String,
     pub suggested_sub_category: String,
     pub suggested_source_account: String,

@@ -785,6 +785,24 @@ mod preview_mutation_helper_tests {
                 && *value == ImportPreviewPatchValue::Null
         }));
     }
+
+    #[test]
+    fn llm_suggestion_parser_normalizes_suggested_type() {
+        let suggestion = llm_suggestion_from_value(&json!({
+            "suggestedType": "investment",
+            "suggested_category_id": 55,
+            "suggested_main_category": "投资交易",
+            "suggested_sub_category": "基金买入",
+            "confidence": 0.82
+        }))
+        .expect("llm suggestion");
+
+        assert_eq!(suggestion.suggested_type, "投资");
+        assert_eq!(suggestion.suggested_category_id, Some(55));
+        assert_eq!(suggestion.suggested_main_category, "投资交易");
+        assert_eq!(suggestion.suggested_sub_category, "基金买入");
+        assert_eq!(suggestion.confidence, 0.82);
+    }
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -1055,6 +1073,29 @@ fn preview_decision_result_response(
 fn llm_suggestion_from_value(value: &Value) -> Option<ImportPreviewLlmSuggestion> {
     let object = value.as_object()?;
     let suggestion = ImportPreviewLlmSuggestion {
+        suggested_type: first_value(
+            object,
+            &[
+                "suggested_type",
+                "suggestedType",
+                "previewType",
+                "preview_type",
+                "type",
+            ],
+        )
+        .and_then(value_to_preview_type_text)
+        .unwrap_or_default(),
+        suggested_category_id: first_value(
+            object,
+            &[
+                "suggested_category_id",
+                "suggestedCategoryId",
+                "categoryId",
+                "category_id",
+            ],
+        )
+        .and_then(value_to_i64)
+        .filter(|value| *value > 0),
         suggested_main_category: first_value(
             object,
             &[

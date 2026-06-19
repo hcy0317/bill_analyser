@@ -93,15 +93,15 @@ pub async fn llm_preview_recommend_runtime_handler(
             Ok(provider) => provider,
             Err(response) => return route_response(response),
         };
-        let categories = match load_existing_category_paths(runtime.connection(), user_id_value) {
+        let categories = match load_existing_category_paths(runtime.connection(), user_id_value).await {
             Ok(categories) => categories,
             Err(response) => return route_response(response),
         };
-        let accounts = match load_existing_account_names(runtime.connection(), user_id_value) {
+        let accounts = match load_existing_account_names(runtime.connection(), user_id_value).await {
             Ok(accounts) => accounts,
             Err(response) => return route_response(response),
         };
-        let account_ids = match load_account_id_map(runtime.connection(), user_id_value) {
+        let account_ids = match load_account_id_map(runtime.connection(), user_id_value).await {
             Ok(accounts) => accounts,
             Err(response) => return route_response(response),
         };

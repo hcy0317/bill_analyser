@@ -7,6 +7,7 @@ struct ImportLearningVectorRecallStats {
 #[derive(Debug, Clone)]
 struct ImportLearningVectorRecallResult {
     draft_index: usize,
+    scope_order: usize,
     hits: Vec<WeaviateImportLearningRecallHit>,
 }
 
@@ -54,33 +55,52 @@ fn build_import_learning_vector_recall_requests(
         .iter()
         .enumerate()
         .filter(|(_, draft)| draft.preview_matching_feedback.get("learning").is_none())
-        .filter_map(|(draft_index, draft)| {
+        .flat_map(|(draft_index, draft)| {
             let features = build_composite_match_features(
                 &draft.preview_parser_id,
                 &draft.preview_counterparty,
                 &draft.preview_description,
                 &draft.preview_payment_method,
-            )?;
-            let transaction_type_scope =
-                normalize_weaviate_transaction_type_scope(&draft.preview_type);
-            if build_import_learning_vector_recall_queries(
-                &config.weaviate.collection_prefix,
-                user_id,
-                &features,
-                &transaction_type_scope,
-                WEAVIATE_RECALL_DEFAULT_LIMIT,
-            )
-            .is_empty()
-            {
-                return None;
-            }
-            Some(ImportLearningVectorRecallRequestDraft {
-                draft_index,
-                features,
-                transaction_type_scope,
-            })
+            );
+            let Some(features) = features else {
+                return Vec::new();
+            };
+            import_learning_vector_recall_scopes(draft)
+                .into_iter()
+                .enumerate()
+                .filter_map(|(scope_order, transaction_type_scope)| {
+                    if build_import_learning_vector_recall_queries(
+                        &config.weaviate.collection_prefix,
+                        user_id,
+                        &features,
+                        &transaction_type_scope,
+                        WEAVIATE_RECALL_DEFAULT_LIMIT,
+                    )
+                    .is_empty()
+                    {
+                        return None;
+                    }
+                    Some(ImportLearningVectorRecallRequestDraft {
+                        draft_index,
+                        scope_order,
+                        features: features.clone(),
+                        transaction_type_scope,
+                    })
+                })
+                .collect::<Vec<_>>()
         })
         .collect()
+}
+
+fn import_learning_vector_recall_scopes(draft: &ImportPreviewDraft) -> Vec<String> {
+    if is_transfer_protected_preview(draft) {
+        return vec!["transfer".to_string()];
+    }
+    vec![
+        normalize_weaviate_transaction_type_scope("income"),
+        normalize_weaviate_transaction_type_scope("expense"),
+        normalize_weaviate_transaction_type_scope("investment"),
+    ]
 }
 
 fn run_import_learning_vector_recall_blocking(
@@ -121,6 +141,7 @@ fn run_import_learning_vector_recall_blocking(
                             .await
                             .map(|hits| ImportLearningVectorRecallResult {
                                 draft_index: request.draft_index,
+                                scope_order: request.scope_order,
                                 hits,
                             })
                             .map_err(|error| error.to_string())
@@ -133,7 +154,7 @@ fn run_import_learning_vector_recall_blocking(
                         Ok(Err(_)) | Err(_) => errors += 1,
                     }
                 }
-                results.sort_by_key(|result| result.draft_index);
+                results.sort_by_key(|result| (result.draft_index, result.scope_order));
                 if errors > 0 && results.is_empty() {
                     return Err(format!("{} recall requests failed", errors));
                 }
@@ -191,15 +212,29 @@ async fn apply_import_learning_vector_recall_results(
         .map(|account| json!({"id": account.id, "name": account.name}))
         .collect::<Vec<_>>();
 
-    let mut applied = 0;
+    let mut hits_by_draft = BTreeMap::<
+        usize,
+        Vec<(usize, &WeaviateImportLearningRecallHit)>,
+    >::new();
     for result in results {
-        let Some(draft) = drafts.get_mut(result.draft_index) else {
+        for hit in &result.hits {
+            hits_by_draft
+                .entry(result.draft_index)
+                .or_default()
+                .push((result.scope_order, hit));
+        }
+    }
+
+    let mut applied = 0;
+    for (draft_index, mut candidates) in hits_by_draft {
+        let Some(draft) = drafts.get_mut(draft_index) else {
             continue;
         };
         if draft.preview_matching_feedback.get("learning").is_some() {
             continue;
         }
-        for hit in &result.hits {
+        sort_import_learning_vector_recall_candidates(&mut candidates);
+        for (_, hit) in candidates {
             if apply_import_learning_vector_recall_hit(
                 connection,
                 user_id,
@@ -217,6 +252,28 @@ async fn apply_import_learning_vector_recall_results(
         }
     }
     Ok(applied)
+}
+
+fn sort_import_learning_vector_recall_candidates(
+    candidates: &mut [(usize, &WeaviateImportLearningRecallHit)],
+) {
+    candidates.sort_by(|left, right| {
+        right
+            .1
+            .score
+            .partial_cmp(&left.1.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| left.0.cmp(&right.0))
+            .then_with(|| match (left.1.distance, right.1.distance) {
+                (Some(left_distance), Some(right_distance)) => left_distance
+                    .partial_cmp(&right_distance)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            })
+            .then_with(|| left.1.postgres_source_id.cmp(&right.1.postgres_source_id))
+    });
 }
 
 fn apply_import_learning_vector_recall_hit(
@@ -256,7 +313,8 @@ fn apply_import_learning_vector_recall_hit(
         if transfer_protected && category.type_code != 4 {
             return None;
         }
-        category_type_matches_preview(category.type_code, candidate_preview_type).then_some(category)
+        category_type_matches_learning_projection(category.type_code, candidate_preview_type)
+            .then_some(category)
     });
     let recommended_category_id = learned_category.map(|category| category.id);
     if learned_type.is_none()
@@ -420,6 +478,26 @@ mod vector_recall_tests {
         }
     }
 
+    fn vector_hit(
+        postgres_source_id: &str,
+        score: f64,
+        distance: Option<f64>,
+    ) -> WeaviateImportLearningRecallHit {
+        WeaviateImportLearningRecallHit {
+            postgres_source_id: postgres_source_id.to_string(),
+            recommendation_key: None,
+            feature_key: None,
+            rule_state: Some(WEAVIATE_RULE_STATE_POSTGRES_AUTHORITATIVE.to_string()),
+            transaction_type: Some("expense".to_string()),
+            category_id: None,
+            source_account_id: None,
+            destination_account_id: None,
+            payload_json: None,
+            distance,
+            score,
+        }
+    }
+
     #[tokio::test]
     async fn vector_recall_skips_network_without_sources() -> VectorRecallTestResult {
         let Ok(postgres_url) = std::env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
@@ -502,6 +580,7 @@ mod vector_recall_tests {
             1,
             vec![ImportLearningVectorRecallRequestDraft {
                 draft_index: 7,
+                scope_order: 0,
                 features: BTreeMap::from([("counterparty".to_string(), "商户".to_string())]),
                 transaction_type_scope: "支出".to_string(),
             }],
@@ -518,6 +597,7 @@ mod vector_recall_tests {
             1,
             vec![ImportLearningVectorRecallRequestDraft {
                 draft_index: 7,
+                scope_order: 0,
                 features: BTreeMap::from([
                     ("counterparty".to_string(), "商户".to_string()),
                     ("description".to_string(), "早餐".to_string()),
@@ -529,5 +609,83 @@ mod vector_recall_tests {
 
         assert!(status.starts_with("degraded:"), "status={status}");
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn vector_recall_candidates_prefer_highest_score_across_scopes() {
+        let low_income = vector_hit("income-low", 0.72, Some(0.28));
+        let high_investment = vector_hit("investment-high", 0.91, Some(0.09));
+        let medium_expense = vector_hit("expense-medium", 0.86, Some(0.14));
+        let mut candidates = vec![
+            (0, &low_income),
+            (2, &high_investment),
+            (1, &medium_expense),
+        ];
+
+        sort_import_learning_vector_recall_candidates(&mut candidates);
+
+        assert_eq!(candidates[0].1.postgres_source_id, "investment-high");
+        assert_eq!(candidates[1].1.postgres_source_id, "expense-medium");
+        assert_eq!(candidates[2].1.postgres_source_id, "income-low");
+    }
+
+    #[test]
+    fn vector_recall_requests_fan_out_non_transfer_scopes() {
+        let config = crate::config::HttpShellConfig {
+            weaviate: disabled_weaviate_config(),
+            ..Default::default()
+        };
+        let drafts = vec![ImportPreviewDraft {
+            preview_parser_id: "alipay".to_string(),
+            preview_type: "支出".to_string(),
+            preview_counterparty: "基金平台".to_string(),
+            preview_description: "定投扣款".to_string(),
+            preview_payment_method: "招商卡".to_string(),
+            ..Default::default()
+        }];
+
+        let requests = build_import_learning_vector_recall_requests(&config, 1, &drafts);
+
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| request.transaction_type_scope.as_str())
+                .collect::<Vec<_>>(),
+            vec!["income", "expense", "investment"]
+        );
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| request.scope_order)
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+    }
+
+    #[test]
+    fn vector_recall_requests_keep_transfer_scope_only_for_authorized_transfer() {
+        let config = crate::config::HttpShellConfig {
+            weaviate: disabled_weaviate_config(),
+            ..Default::default()
+        };
+        let drafts = vec![ImportPreviewDraft {
+            preview_parser_id: "alipay".to_string(),
+            preview_type: "转账".to_string(),
+            preview_counterparty: "支付宝".to_string(),
+            preview_description: "余额转出".to_string(),
+            preview_payment_method: "支付宝".to_string(),
+            preview_matching_feedback: json!({
+                "transfer": {
+                    "candidate_type": "transfer",
+                    "review_status": "pending"
+                }
+            }),
+            ..Default::default()
+        }];
+
+        let requests = build_import_learning_vector_recall_requests(&config, 1, &drafts);
+
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].transaction_type_scope, "transfer");
     }
 }

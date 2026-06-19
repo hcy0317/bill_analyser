@@ -46,7 +46,7 @@ pub async fn llm_rule_synthesis_runtime_handler(
         if let Err(response) = init_global_learning_runtime_schema(&runtime) {
             return route_response(response);
         }
-        let categories = match load_existing_category_values(runtime.connection(), user_id_value) {
+        let categories = match load_existing_category_values(runtime.connection(), user_id_value).await {
             Ok(categories) => categories,
             Err(response) => return route_response(response),
         };

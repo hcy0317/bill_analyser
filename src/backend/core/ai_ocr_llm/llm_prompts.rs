@@ -147,7 +147,7 @@ pub fn build_llm_import_preview_recommendation_prompt(
     };
 
     format!(
-        "以下是一批待导入的交易记录，请为每笔交易推荐最合适的主分类、子分类和账户路由。\n{categories_block}{accounts_block}{memory_block}\n交易列表：\n{transactions_block}\n\n请以如下 JSON 格式返回（数组，每个元素对应一笔交易）：\n[\n  {{\n    \"preview_id\": <预览行ID>,\n    \"suggested_main_category\": \"<推荐主分类>\",\n    \"suggested_sub_category\": \"<推荐子分类>\",\n    \"suggested_source_account\": \"<推荐来源账户，可为空>\",\n    \"suggested_destination_account\": \"<推荐目标账户，可为空>\",\n    \"confidence\": <0.0-1.0之间的置信度>,\n    \"reason\": \"<简短推荐理由>\"\n  }}\n]\n\n分类应尽可能贴合中文个人财务常见分类体系。如果历史记忆中有相似交易的反馈，优先参考用户的纠正。\n只返回 JSON，不要有其他文字。"
+        "以下是一批待导入的交易记录，请为每笔交易推荐最合适的类型、主分类、子分类和账户路由。\n{categories_block}{accounts_block}{memory_block}\n交易列表：\n{transactions_block}\n\n请以如下 JSON 格式返回（数组，每个元素对应一笔交易）：\n[\n  {{\n    \"preview_id\": <预览行ID>,\n    \"suggested_type\": \"<收入|支出|投资|转账之一；只有交易本身明确是账户间转移时才填转账>\",\n    \"suggested_category_id\": <已有分类 ID，无法从候选分类选择时填 null>,\n    \"suggested_main_category\": \"<推荐主分类>\",\n    \"suggested_sub_category\": \"<推荐子分类>\",\n    \"suggested_source_account\": \"<推荐来源账户，可为空>\",\n    \"suggested_destination_account\": \"<推荐目标账户，可为空>\",\n    \"confidence\": <0.0-1.0之间的置信度>,\n    \"reason\": \"<简短推荐理由>\"\n  }}\n]\n\n如已提供分类候选，应优先按 ID 选择，并让主分类/子分类与该 ID 对应路径一致。如果历史记忆中有相似交易的反馈，优先参考用户的纠正。\n只返回 JSON，不要有其他文字。"
     )
 }
 
@@ -235,4 +235,32 @@ fn prompt_value(value: &Value, key: &str) -> String {
             Value::Array(_) | Value::Object(_) => Some(value.to_string()),
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn import_preview_recommendation_prompt_requests_suggested_type() {
+        let prompt = build_llm_import_preview_recommendation_prompt(
+            &[serde_json::json!({
+                "id": 7,
+                "date": "2026-01-01",
+                "amount": "12.34",
+                "type": "支出",
+                "counterparty": "基金平台",
+                "description": "定投扣款",
+                "payment_method": "招商卡",
+            })],
+            &["ID=55 | 投资 | 投资交易/基金买入".to_string()],
+            &["招商卡".to_string()],
+            &[],
+        );
+
+        assert!(prompt.contains("\"suggested_type\""));
+        assert!(prompt.contains("\"suggested_category_id\""));
+        assert!(prompt.contains("收入|支出|投资|转账"));
+        assert!(prompt.contains("ID=55 | 投资 | 投资交易/基金买入"));
+    }
 }

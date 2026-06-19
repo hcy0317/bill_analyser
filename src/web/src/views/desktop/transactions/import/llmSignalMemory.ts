@@ -5,6 +5,8 @@ export interface LLMMemoryEventItem {
     preview_id?: number | null;
     decision?: string | null;
     llm_response_raw?: string | null;
+    suggested_type?: string | null;
+    suggested_category_id?: number | null;
     suggested_main_category?: string | null;
     suggested_sub_category?: string | null;
     suggested_source_account?: string | null;
@@ -15,6 +17,8 @@ export interface LLMMemoryEventItem {
 export interface LLMSignalMemoryState {
     reviewStatus: ImportPreviewSignalStatus | '';
     suppressed: boolean;
+    suggestedType?: string;
+    suggestedCategoryId?: number;
     suggestedMainCategory: string;
     suggestedSubCategory: string;
     suggestedSourceAccount: string;
@@ -55,7 +59,9 @@ export function parseLLMMemoryEventSignal(event: LLMMemoryEventItem): LLMSignalM
             ? 'rejected'
             : '';
 
-    return {
+    const suggestedType = String(event.suggested_type || rawSuggestion['suggested_type'] || '');
+    const suggestedCategoryId = Number(event.suggested_category_id || rawSuggestion['suggested_category_id'] || 0);
+    const signal: LLMSignalMemoryState = {
         reviewStatus: normalizedReviewStatus || 'pending',
         suppressed: normalizedReviewStatus === 'rejected',
         suggestedMainCategory: String(event.suggested_main_category || rawSuggestion['suggested_main_category'] || ''),
@@ -65,6 +71,13 @@ export function parseLLMMemoryEventSignal(event: LLMMemoryEventItem): LLMSignalM
         confidence: Number(event.confidence || rawSuggestion['confidence'] || 0),
         reason: String(rawSuggestion['reason'] || '')
     };
+    if (suggestedType) {
+        signal.suggestedType = suggestedType;
+    }
+    if (suggestedCategoryId > 0) {
+        signal.suggestedCategoryId = suggestedCategoryId;
+    }
+    return signal;
 }
 
 export function shouldReplaceLLMSignalMemoryState(

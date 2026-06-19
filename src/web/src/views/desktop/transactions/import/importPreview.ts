@@ -2,6 +2,8 @@ import type { ImportMatchingPayload } from '@/models/import_matching.ts';
 import { CategoryType } from '@/core/category.ts';
 
 export interface ImportPreviewLLMMatchingPayload {
+    suggested_type?: string;
+    suggested_category_id?: number;
     suggested_main_category?: string;
     suggested_sub_category?: string;
     suggested_source_account?: string;

@@ -118,7 +118,7 @@ async fn llm_preview_recommend_review_response(
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
     };
-    let account_ids = match load_account_id_map(runtime.connection(), user_id_value) {
+    let account_ids = match load_account_id_map(runtime.connection(), user_id_value).await {
         Ok(account_ids) => account_ids,
         Err(response) => return route_response(response),
     };

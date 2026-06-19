@@ -477,6 +477,7 @@ impl ImportIntelligenceStats {
 #[derive(Debug, Clone)]
 struct ImportLearningVectorRecallRequestDraft {
     draft_index: usize,
+    scope_order: usize,
     features: BTreeMap<String, String>,
     transaction_type_scope: String,
 }
@@ -523,6 +524,17 @@ impl ImportIntelligenceRuleSet {
             }
         }
         rule_set
+    }
+
+    fn non_transfer_by_priority(&self) -> Vec<&ImportIntelligenceRule> {
+        let mut rules = self
+            .income
+            .iter()
+            .chain(self.expense.iter())
+            .chain(self.investment.iter())
+            .collect::<Vec<_>>();
+        rules.sort_by_key(|rule| (rule.priority, rule.id));
+        rules
     }
 
     fn for_type(&self, category_type: i64) -> &[ImportIntelligenceRule] {
@@ -684,11 +696,7 @@ async fn apply_import_intelligence_chain(
             if !apply_transfer_category_rule_match(draft, category_rules.for_type(4), &preview_rule_text) {
                 apply_transfer_default_category(draft, &categories, transfer_category.as_ref());
             }
-        } else if preview_type_code(&draft.preview_type) == Some(5) {
-            if !apply_investment_category_rule_match(draft, category_rules.for_type(5)) {
-                apply_builtin_category_rule_fallback(draft, &categories, &preview_rule_text);
-            }
-        } else if !apply_income_expense_category_rule_match(draft, &category_rules, &preview_rule_text)
+        } else if !apply_non_transfer_category_rule_match(draft, &category_rules, &preview_rule_text)
         {
             apply_builtin_category_rule_fallback(draft, &categories, &preview_rule_text);
         }
@@ -1201,30 +1209,32 @@ fn apply_transfer_category_rule_match(
     apply_category_rule_match_filtered(draft, rules, &combined_text)
 }
 
-fn apply_investment_category_rule_match(
-    draft: &mut ImportPreviewDraft,
-    rules: &[ImportIntelligenceRule],
-) -> bool {
-    let combined_text = import_preview_visible_rule_text(draft);
-    apply_category_rule_match_filtered(draft, rules, &combined_text)
-}
-
-fn apply_income_expense_category_rule_match(
+fn apply_non_transfer_category_rule_match(
     draft: &mut ImportPreviewDraft,
     rule_set: &ImportIntelligenceRuleSet,
     preview_rule_text: &str,
 ) -> bool {
-    let Some(expected_type) = preview_type_code(&draft.preview_type).filter(|value| {
-        matches!(*value, 2 | 3)
-    }) else {
+    if is_transfer_protected_preview(draft) {
         return false;
-    };
-    apply_category_rule_match_filtered(draft, rule_set.for_type(expected_type), preview_rule_text)
+    }
+    apply_category_rule_match_candidate_refs(
+        draft,
+        rule_set.non_transfer_by_priority(),
+        preview_rule_text,
+    )
 }
 
 fn apply_category_rule_match_filtered(
     draft: &mut ImportPreviewDraft,
     rules: &[ImportIntelligenceRule],
+    combined_text: &str,
+) -> bool {
+    apply_category_rule_match_candidate_refs(draft, rules.iter().collect(), combined_text)
+}
+
+fn apply_category_rule_match_candidate_refs(
+    draft: &mut ImportPreviewDraft,
+    rules: Vec<&ImportIntelligenceRule>,
     combined_text: &str,
 ) -> bool {
     let combined_text_lower = combined_text.to_lowercase();
@@ -1484,7 +1494,7 @@ fn apply_learning_rule_match(
         };
         if transfer_protected && category.type_code != 4 {
             None
-        } else if !category_type_matches_preview(category.type_code, candidate_preview_type) {
+        } else if !category_type_matches_learning_projection(category.type_code, candidate_preview_type) {
             if !transfer_protected {
                 annotate_learning_rule_skip(
                     draft,
@@ -1721,6 +1731,19 @@ fn learning_projection_type_for_transfer_authority(
     }
 }
 
+fn category_type_matches_learning_projection(category_type: i64, preview_type: &str) -> bool {
+    if matches!(category_type, 0 | 1) {
+        return true;
+    }
+    let Some(preview_type) = preview_type_code(preview_type) else {
+        return category_type != 4;
+    };
+    if category_type == 4 || preview_type == 4 {
+        return category_type == preview_type;
+    }
+    matches!(category_type, 2 | 3 | 5) && matches!(preview_type, 2 | 3 | 5)
+}
+
 fn is_transfer_protected_preview(draft: &ImportPreviewDraft) -> bool {
     let Some(transfer_feedback) = draft
         .preview_matching_feedback
@@ -1932,19 +1955,6 @@ fn import_preview_rule_text(draft: &ImportPreviewDraft) -> String {
         .filter(|value| !value.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-fn import_preview_visible_rule_text(draft: &ImportPreviewDraft) -> String {
-    [
-        draft.preview_counterparty.clone(),
-        draft.preview_payment_method.clone(),
-        draft.preview_description.clone(),
-    ]
-    .into_iter()
-    .map(|value| value.trim().to_string())
-    .filter(|value| !value.is_empty())
-    .collect::<Vec<_>>()
-    .join(" ")
 }
 
 fn category_type_matches_preview(category_type: i64, preview_type: &str) -> bool {
@@ -3729,6 +3739,54 @@ mod tests {
             regex_enabled: false,
             compiled_expression: compile_rule_expression(expression, false),
         }
+    }
+
+    #[test]
+    fn non_transfer_category_rules_can_reclassify_expense_to_investment() {
+        let rule_set = ImportIntelligenceRuleSet::from_rules(vec![category_rule(
+            10,
+            55,
+            5,
+            "投资交易",
+            "基金买入",
+            "OR={定投扣款}",
+        )]);
+        let mut draft = ImportPreviewDraft {
+            preview_type: "支出".to_string(),
+            preview_description: "基金定投扣款".to_string(),
+            preview_payment_method: "招商卡".to_string(),
+            ..ImportPreviewDraft::default()
+        };
+        let preview_rule_text = import_preview_rule_text(&draft);
+
+        assert!(apply_non_transfer_category_rule_match(
+            &mut draft,
+            &rule_set,
+            &preview_rule_text
+        ));
+
+        assert_eq!(draft.preview_type, "投资");
+        assert_eq!(draft.category_id, Some(55));
+        assert_eq!(draft.preview_main_category, "投资交易");
+        assert_eq!(draft.preview_sub_category, "基金买入");
+        assert_eq!(
+            draft
+                .preview_matching_feedback
+                .pointer("/category_rule/category_id"),
+            Some(&json!(55))
+        );
+    }
+
+    #[test]
+    fn non_transfer_learning_projection_allows_income_expense_investment_mutual_category() {
+        assert!(category_type_matches_learning_projection(5, "支出"));
+        assert!(category_type_matches_learning_projection(5, "收入"));
+        assert!(category_type_matches_learning_projection(2, "投资"));
+        assert!(category_type_matches_learning_projection(3, "投资"));
+        assert!(!category_type_matches_learning_projection(4, "支出"));
+        assert!(!category_type_matches_learning_projection(5, "转账"));
+        assert!(!category_type_matches_learning_projection(4, "坏类型"));
+        assert!(category_type_matches_learning_projection(5, "坏类型"));
     }
 
     #[test]

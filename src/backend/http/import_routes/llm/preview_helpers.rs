@@ -133,45 +133,123 @@ fn load_llm_memory_prompt_context(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn load_existing_category_paths(
+async fn load_existing_category_paths(
     connection: &Connection,
     user_id: i64,
 ) -> Result<Vec<String>, ImportV2RouteResponse> {
-    Ok(load_existing_category_values(connection, user_id)?
+    Ok(load_existing_category_values(connection, user_id).await?
         .into_iter()
         .filter_map(|value| {
-            value
+            let id = value.get("id").and_then(Value::as_i64)?;
+            let category_type = value.get("type").and_then(Value::as_str).unwrap_or_default();
+            let path = value
                 .get("path")
                 .and_then(Value::as_str)
-                .map(str::to_string)
+                .unwrap_or_default()
+                .trim();
+            if path.is_empty() {
+                return None;
+            }
+            Some(format!("ID={id} | {category_type} | {path}"))
         })
         .collect())
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn load_existing_category_values(
-    _connection: &Connection,
-    _user_id: i64,
+async fn load_existing_category_values(
+    connection: &Connection,
+    user_id: i64,
 ) -> Result<Vec<Value>, ImportV2RouteResponse> {
-    Ok(Vec::new())
+    let rows = sqlx::query(
+        r#"
+        SELECT id, category_type, path, name
+        FROM categories
+        WHERE user_id = $1 AND is_active = true
+        ORDER BY display_order ASC, id ASC
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(connection)
+    .await
+    .map_err(db_error_response)?;
+    rows.into_iter()
+        .map(|row| {
+            let id: i64 = row.try_get("id").map_err(db_error_response)?;
+            let category_type: Option<String> =
+                row.try_get("category_type").map_err(db_error_response)?;
+            let path: Option<String> = row.try_get("path").map_err(db_error_response)?;
+            let name: String = row.try_get("name").map_err(db_error_response)?;
+            let path = category_prompt_path(path.as_deref(), &name);
+            Ok(json!({
+                "id": id,
+                "type": category_type_label(category_type.as_deref()).unwrap_or_default(),
+                "path": path,
+            }))
+        })
+        .collect()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn load_existing_account_names(
+async fn load_existing_account_names(
     connection: &Connection,
     user_id: i64,
 ) -> Result<Vec<String>, ImportV2RouteResponse> {
-    Ok(load_account_id_map(connection, user_id)?
+    Ok(load_account_id_map(connection, user_id).await?
         .into_keys()
         .collect::<Vec<_>>())
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn load_account_id_map(
-    _connection: &Connection,
-    _user_id: i64,
+async fn load_account_id_map(
+    connection: &Connection,
+    user_id: i64,
 ) -> Result<BTreeMap<String, i64>, ImportV2RouteResponse> {
-    Ok(BTreeMap::new())
+    let rows = sqlx::query(
+        r#"
+        SELECT id, name
+        FROM accounts
+        WHERE user_id = $1 AND is_active = true
+        ORDER BY display_order ASC, id ASC
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(connection)
+    .await
+    .map_err(db_error_response)?;
+    let mut accounts = BTreeMap::new();
+    for row in rows {
+        let id: i64 = row.try_get("id").map_err(db_error_response)?;
+        let name: String = row.try_get("name").map_err(db_error_response)?;
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        accounts.insert(trimmed.to_string(), id);
+    }
+    Ok(accounts)
+}
+
+fn category_prompt_path(path: Option<&str>, name: &str) -> String {
+    let parts = path
+        .unwrap_or_default()
+        .split('/')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        return name.trim().to_string();
+    }
+    parts.join("/")
+}
+
+fn category_type_label(value: Option<&str>) -> Option<&'static str> {
+    match value.unwrap_or_default().trim().to_ascii_lowercase().as_str() {
+        "2" | "income" | "收入" => Some("收入"),
+        "3" | "expense" | "支出" => Some("支出"),
+        "4" | "transfer" | "转账" => Some("转账"),
+        "5" | "investment" | "投资" => Some("投资"),
+        _ => None,
+    }
 }
 
 fn fill_llm_suggestion_account_ids(value: Value, account_ids: &BTreeMap<String, i64>) -> Value {

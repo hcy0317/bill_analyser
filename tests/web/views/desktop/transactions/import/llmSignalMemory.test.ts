@@ -40,6 +40,26 @@ describe('llm signal memory helpers', () => {
         })).toBeNull();
     });
 
+    test('preserves suggested transaction type from raw payload', () => {
+        const signal = parseLLMMemoryEventSignal({
+            preview_id: 102,
+            llm_response_raw: JSON.stringify({
+                suggested_type: '投资',
+                suggested_category_id: 55,
+                suggested_main_category: '投资交易',
+                suggested_sub_category: '基金买入'
+            })
+        });
+
+        expect(signal).toMatchObject({
+            reviewStatus: 'pending',
+            suggestedType: '投资',
+            suggestedCategoryId: 55,
+            suggestedMainCategory: '投资交易',
+            suggestedSubCategory: '基金买入'
+        });
+    });
+
     test('falls back to an empty raw suggestion when llm_response_raw is invalid json', () => {
         const signal = parseLLMMemoryEventSignal({
             preview_id: 7,

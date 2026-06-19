@@ -1669,6 +1669,8 @@ function clearLearningRecommendationState(item: ImportTransaction): void {
 
 function clearLLMRecommendationState(item: ImportTransaction): void {
     const llmPayload = ensureLLMMatchingPayload(item);
+    llmPayload.suggested_type = '';
+    llmPayload.suggested_category_id = undefined;
     llmPayload.suggested_main_category = '';
     llmPayload.suggested_sub_category = '';
     llmPayload.suggested_source_account = '';
@@ -1730,6 +1732,10 @@ function ensureLLMMatchingPayload(item: ImportTransaction): ImportPreviewLLMMatc
     return llmPayload;
 }
 
+function getLLMSignalType(llmPayload: ImportPreviewLLMMatchingPayload): string {
+    return String(llmPayload.suggested_type || '').trim();
+}
+
 function getLLMSignalCategoryPath(llmPayload: ImportPreviewLLMMatchingPayload): string {
     return [llmPayload.suggested_main_category || '', llmPayload.suggested_sub_category || '']
         .filter(part => !!part)
@@ -1750,6 +1756,7 @@ function getLLMSignalStatus(item: ImportTransaction): ImportPreviewSignalStatus 
     }
 
     const hasPendingSignal = !!getLLMSignalCategoryPath(llmPayload)
+        || !!getLLMSignalType(llmPayload)
         || !!getLLMSignalAccountRoute(llmPayload)
         || Number(llmPayload.confidence || 0) > 0
         || !!String(llmPayload.reason || '').trim();
@@ -1762,6 +1769,7 @@ function hasMeaningfulLLMMatchingPayload(llmPayload: ImportPreviewLLMMatchingPay
     }
 
     return !!getLLMSignalCategoryPath(llmPayload)
+        || !!getLLMSignalType(llmPayload)
         || !!getLLMSignalAccountRoute(llmPayload)
         || Number(llmPayload.confidence || 0) > 0
         || !!String(llmPayload.reason || '').trim()
@@ -1771,6 +1779,7 @@ function hasMeaningfulLLMMatchingPayload(llmPayload: ImportPreviewLLMMatchingPay
 
 function buildLLMSignalSummary(llmPayload: ImportPreviewLLMMatchingPayload): string {
     return [
+        getLLMSignalType(llmPayload),
         getLLMSignalCategoryPath(llmPayload),
         getLLMSignalAccountRoute(llmPayload)
     ].filter(part => !!part).join(' | ');
@@ -1816,6 +1825,8 @@ function mergeLLMMatchingFromPayload(item: ImportTransaction, llmPayload: Import
     }
 
     const nextLLM = ensureLLMMatchingPayload(item);
+    nextLLM.suggested_type = llmPayload.suggested_type || '';
+    nextLLM.suggested_category_id = llmPayload.suggested_category_id;
     nextLLM.suggested_main_category = llmPayload.suggested_main_category || '';
     nextLLM.suggested_sub_category = llmPayload.suggested_sub_category || '';
     nextLLM.suggested_source_account = llmPayload.suggested_source_account || '';
@@ -1836,6 +1847,10 @@ function syncTransactionFromLLMPreviewPayload(
 ): void {
     const previewData = payload.preview;
     if (previewData) {
+        const nextType = getImportPreviewTransactionTypeNumber(previewData.preview_type);
+        if (nextType !== undefined) {
+            item.type = nextType;
+        }
         setTransactionCategoryFromId(
             item,
             resolveImportPreviewCategoryId(previewData, allCategoriesMap.value)
@@ -1872,6 +1887,8 @@ function applyLLMSignalMemoryToTransactions(transactions: ImportTransaction[] = 
         }
 
         mergeLLMMatchingFromPayload(transaction, {
+            suggested_type: memorySignal.suggestedType,
+            suggested_category_id: memorySignal.suggestedCategoryId,
             suggested_main_category: memorySignal.suggestedMainCategory,
             suggested_sub_category: memorySignal.suggestedSubCategory,
             suggested_source_account: memorySignal.suggestedSourceAccount,
@@ -2804,6 +2821,8 @@ function buildImportPreviewSignalCacheSignature(item: ImportTransaction): string
         Number(item.matching?.learning.rejected_count || 0),
         Number(item.matching?.learning.auto_applied_count || 0),
         getLLMSignalStatus(item) || '',
+        String(llmPayload.suggested_type || ''),
+        String(llmPayload.suggested_category_id || ''),
         String(llmPayload.suggested_main_category || ''),
         String(llmPayload.suggested_sub_category || ''),
         String(llmPayload.suggested_source_account || ''),
