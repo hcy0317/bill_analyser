@@ -40,6 +40,30 @@ interface ImportPreviewPageData {
     readonly metadata?: Record<string, unknown>;
 }
 
+interface ImportPreviewSelectionData {
+    readonly updated: number;
+    readonly selectionAction: string;
+    readonly metadata?: {
+        readonly counts?: {
+            readonly selected?: number;
+            readonly selected_invalid?: number;
+        };
+    };
+}
+
+interface ImportPreviewUpdateData {
+    readonly updated?: boolean;
+    readonly previewItem?: Record<string, unknown>;
+}
+
+interface ImportPreviewReclassifyData {
+    readonly updated: number;
+    readonly total: number;
+    readonly categorized: number;
+    readonly account_matched: number;
+    readonly preview?: Array<Record<string, unknown>>;
+}
+
 interface ImportStageConfirmData {
     readonly imported_count: number;
     readonly skipped_count: number;
@@ -75,6 +99,10 @@ export interface AlipayImportResult {
     readonly parse: ImportStageParseData;
     readonly dedup: ImportStageDedupData;
     readonly preview: ImportPreviewPageData;
+    readonly update: ImportPreviewUpdateData;
+    readonly reclassify: ImportPreviewReclassifyData;
+    readonly deselect: ImportPreviewSelectionData;
+    readonly selectAll: ImportPreviewSelectionData;
     readonly confirm: ImportStageConfirmData;
     readonly transactions: TransactionListResponse;
     readonly januaryAmounts: TransactionAmountsResponseItem;
@@ -105,10 +133,54 @@ export async function runAlipayImportFlow(client: E2EApiClient): Promise<AlipayI
     expect(Number(preview.total || 0), 'server-paged preview total').toBe(dedup.after_dedup);
     expect(preview.preview || [], 'preview rows').not.toHaveLength(0);
 
+    const previewRows = preview.preview || [];
+    const firstPreviewRow = previewRows[0];
+    expect(firstPreviewRow, 'first preview row for update smoke').toBeTruthy();
+    if (!firstPreviewRow) {
+        throw new Error('Import preview update smoke requires at least one preview row');
+    }
+
+    const update = await client.put<ImportPreviewUpdateData>(
+        `bills/import/v2/preview/${encodeURIComponent(parse.session_id)}/update`,
+        {
+            ...buildPreviewUpdate(firstPreviewRow, confirmContext),
+            responseMode: 'preview-item'
+        }
+    );
+    expect(update.updated, 'single preview update result').toBe(true);
+    expect(
+        numericField(update.previewItem || {}, ['id']),
+        'updated preview item id echoes the requested row'
+    ).toBe(numericField(firstPreviewRow, ['id']));
+
+    const previewUpdates = previewRows.map(row => buildPreviewUpdate(row, confirmContext));
+    const reclassify = await client.post<ImportPreviewReclassifyData>(
+        `bills/import/v2/reclassify/${encodeURIComponent(parse.session_id)}`,
+        { preview_updates: previewUpdates }
+    );
+    expect(reclassify.updated, 'reclassify applies preview updates').toBeGreaterThan(0);
+    expect(reclassify.total, 'reclassify keeps preview row count').toBe(dedup.after_dedup);
+    expect(reclassify.categorized, 'reclassify returns categorized rows').toBeGreaterThan(0);
+    expect(reclassify.account_matched, 'reclassify returns account-matched rows').toBeGreaterThan(0);
+
+    const deselect = await client.put<ImportPreviewSelectionData>(
+        `bills/import/v2/preview/${encodeURIComponent(parse.session_id)}/selection`,
+        { selectionAction: 'select_none' }
+    );
+    expect(deselect.selectionAction, 'deselect selection action echo').toBe('select_none');
+    expect(deselect.updated, 'deselect touches server-paged preview rows').toBeGreaterThan(0);
+
+    const selectAll = await client.put<ImportPreviewSelectionData>(
+        `bills/import/v2/preview/${encodeURIComponent(parse.session_id)}/selection`,
+        { selectionAction: 'select_all' }
+    );
+    expect(selectAll.selectionAction, 'select all action echo').toBe('select_all');
+    expect(selectAll.metadata?.counts?.selected || 0, 'server-paged selection count').toBeGreaterThan(0);
+
     const confirm = await client.post<ImportStageConfirmData>('bills/import/v2/confirm', {
         session_id: parse.session_id,
         preserve_unpatched_selection: true,
-        preview_updates: (preview.preview || []).map(row => buildPreviewUpdate(row, confirmContext))
+        preview_updates: previewUpdates
     });
     expect(confirm.imported_count, 'confirmed imported count').toBeGreaterThan(0);
     expect(confirm.imported_count, 'confirmed imported count must not exceed dedup preview count').toBeLessThanOrEqual(dedup.after_dedup);
@@ -132,6 +204,10 @@ export async function runAlipayImportFlow(client: E2EApiClient): Promise<AlipayI
         parse,
         dedup,
         preview,
+        update,
+        reclassify,
+        deselect,
+        selectAll,
         confirm,
         transactions,
         januaryAmounts: januaryAmounts as TransactionAmountsResponseItem
@@ -271,6 +347,8 @@ export function summarizeObservedAmounts(result: AlipayImportResult): string {
     return JSON.stringify({
         sourceIncomeCents: ALIPAY_SAMPLE_SOURCE_TOTALS.sourceIncomeCents,
         sourceExpenseCents: ALIPAY_SAMPLE_SOURCE_TOTALS.sourceExpenseCents,
+        reclassifiedRows: result.reclassify.total,
+        selectedRows: result.selectAll.metadata?.counts?.selected,
         importedCount: result.confirm.imported_count,
         observedIncomeCents: cny?.incomeAmountCents,
         observedExpenseCents: cny?.expenseAmountCents

@@ -9,9 +9,10 @@ use bill_analyser_db::{
     confirm_preview_to_bills, create_import_session, get_import_session, get_preview_bill_by_id,
     insert_preview_bill, insert_preview_bills_batch, postgres_initial_schema_path,
     postgres_migration_manifest, query_preview_page_by_session,
-    replace_preview_selection_with_patches, ImportPreviewDraft, ImportPreviewPageRequest,
-    ImportPreviewPatch, ImportPreviewPatchField, ImportPreviewPatchValue,
-    ImportPreviewQueryFilters, ImportSessionDraft, PostgresPool,
+    replace_preview_selection_with_patches, update_session_preview_selection_by_query,
+    ImportPreviewDraft, ImportPreviewPageRequest, ImportPreviewPatch, ImportPreviewPatchField,
+    ImportPreviewPatchValue, ImportPreviewQueryFilters, ImportPreviewSelectionMode,
+    ImportPreviewSelectionTarget, ImportSessionDraft, PostgresPool,
 };
 use serde_json::{json, Value};
 use sqlx::Row;
@@ -567,6 +568,215 @@ async fn import_preview_runtime_facets_identity_validation_and_confirm_are_db_ba
     let session = get_import_session(pool, valid_session, scoped_user_id)?.expect("session");
     assert_eq!(session.status, "confirmed");
     assert_eq!(session.total_confirmed, 1);
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn import_preview_selection_by_query_locks_cross_page_targets() -> Result<(), Box<dyn Error>>
+{
+    let Some(test_db) =
+        postgres_test_support::isolated_postgres_database("import_preview_selection_targets")
+            .await?
+    else {
+        return Ok(());
+    };
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "import-preview-selection-targets").await?;
+    let scoped_user_id = UserId::new(user_id as u64).expect("positive user id");
+    let wallet_id = insert_account(pool, user_id, "现金钱包").await?;
+    let bank_id = insert_account(pool, user_id, "银行卡").await?;
+    let food_id = insert_category(pool, user_id, "咖啡", "expense", "餐饮/咖啡").await?;
+    let transfer_id = insert_category(pool, user_id, "转账", "transfer", "转账").await?;
+    let session_id = "selection-target-session";
+
+    create_import_session(
+        pool,
+        &ImportSessionDraft {
+            session_id: session_id.to_string(),
+            user_id: scoped_user_id,
+            file_count: 1,
+        },
+    )?;
+
+    let valid_expense_id = insert_preview_bill(
+        pool,
+        session_id,
+        scoped_user_id,
+        &preview_draft(
+            "2026-06-01 09:00:00",
+            "支出",
+            1001,
+            Some(food_id),
+            Some(wallet_id),
+            None,
+            false,
+        ),
+    )?;
+    let missing_category_id = insert_preview_bill(
+        pool,
+        session_id,
+        scoped_user_id,
+        &preview_draft(
+            "2026-06-02 09:00:00",
+            "支出",
+            1002,
+            None,
+            Some(wallet_id),
+            None,
+            false,
+        ),
+    )?;
+    let valid_transfer_id = insert_preview_bill(
+        pool,
+        session_id,
+        scoped_user_id,
+        &preview_draft(
+            "2026-06-03 09:00:00",
+            "转账",
+            1003,
+            Some(transfer_id),
+            Some(wallet_id),
+            Some(bank_id),
+            false,
+        ),
+    )?;
+    let same_account_transfer_id = insert_preview_bill(
+        pool,
+        session_id,
+        scoped_user_id,
+        &preview_draft(
+            "2026-06-04 09:00:00",
+            "转账",
+            1004,
+            Some(transfer_id),
+            Some(bank_id),
+            Some(bank_id),
+            false,
+        ),
+    )?;
+
+    let selected_valid = update_session_preview_selection_by_query(
+        pool,
+        session_id,
+        scoped_user_id,
+        ImportPreviewSelectionMode::Select,
+        ImportPreviewSelectionTarget::Valid,
+        &ImportPreviewPageRequest {
+            page: 1,
+            page_size: 1,
+            ..ImportPreviewPageRequest::default()
+        },
+    )?;
+    assert_eq!(selected_valid, 2);
+    let selected_page = query_preview_page_by_session(
+        pool,
+        session_id,
+        scoped_user_id,
+        &ImportPreviewPageRequest {
+            filters: ImportPreviewQueryFilters {
+                selected_only: true,
+                ..ImportPreviewQueryFilters::default()
+            },
+            sort_by: "time".to_string(),
+            sort_direction: "asc".to_string(),
+            ..ImportPreviewPageRequest::default()
+        },
+    )?;
+    assert_eq!(
+        selected_page
+            .rows
+            .iter()
+            .map(|row| row.id)
+            .collect::<Vec<_>>(),
+        vec![valid_expense_id, valid_transfer_id]
+    );
+    assert_eq!(selected_page.metadata.counts.selected, 2);
+    assert_eq!(selected_page.metadata.counts.selected_invalid, 0);
+
+    update_session_preview_selection_by_query(
+        pool,
+        session_id,
+        scoped_user_id,
+        ImportPreviewSelectionMode::Deselect,
+        ImportPreviewSelectionTarget::All,
+        &ImportPreviewPageRequest::default(),
+    )?;
+    let selected_transfer_reviews = update_session_preview_selection_by_query(
+        pool,
+        session_id,
+        scoped_user_id,
+        ImportPreviewSelectionMode::Select,
+        ImportPreviewSelectionTarget::NeedsReview,
+        &ImportPreviewPageRequest {
+            filters: ImportPreviewQueryFilters {
+                transaction_type: Some("转账".to_string()),
+                ..ImportPreviewQueryFilters::default()
+            },
+            ..ImportPreviewPageRequest::default()
+        },
+    )?;
+    assert_eq!(selected_transfer_reviews, 1);
+    let transfer_review_page = query_preview_page_by_session(
+        pool,
+        session_id,
+        scoped_user_id,
+        &ImportPreviewPageRequest {
+            filters: ImportPreviewQueryFilters {
+                selected_only: true,
+                ..ImportPreviewQueryFilters::default()
+            },
+            ..ImportPreviewPageRequest::default()
+        },
+    )?;
+    assert_eq!(transfer_review_page.rows[0].id, same_account_transfer_id);
+    assert_eq!(transfer_review_page.metadata.counts.selected_invalid, 1);
+
+    update_session_preview_selection_by_query(
+        pool,
+        session_id,
+        scoped_user_id,
+        ImportPreviewSelectionMode::Deselect,
+        ImportPreviewSelectionTarget::All,
+        &ImportPreviewPageRequest::default(),
+    )?;
+    let inverted = update_session_preview_selection_by_query(
+        pool,
+        session_id,
+        scoped_user_id,
+        ImportPreviewSelectionMode::Invert,
+        ImportPreviewSelectionTarget::All,
+        &ImportPreviewPageRequest {
+            preview_ids: vec![valid_expense_id, missing_category_id],
+            ..ImportPreviewPageRequest::default()
+        },
+    )?;
+    assert_eq!(inverted, 2);
+    let inverted_page = query_preview_page_by_session(
+        pool,
+        session_id,
+        scoped_user_id,
+        &ImportPreviewPageRequest {
+            filters: ImportPreviewQueryFilters {
+                selected_only: true,
+                ..ImportPreviewQueryFilters::default()
+            },
+            sort_by: "time".to_string(),
+            sort_direction: "asc".to_string(),
+            ..ImportPreviewPageRequest::default()
+        },
+    )?;
+    assert_eq!(
+        inverted_page
+            .rows
+            .iter()
+            .map(|row| row.id)
+            .collect::<Vec<_>>(),
+        vec![valid_expense_id, missing_category_id]
+    );
+    assert_eq!(inverted_page.metadata.counts.selected, 2);
+    assert_eq!(inverted_page.metadata.counts.selected_invalid, 1);
 
     test_db.cleanup().await?;
     Ok(())

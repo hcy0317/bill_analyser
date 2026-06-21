@@ -181,6 +181,31 @@ G011 `behavior-lock` 必须补强或明确复用以下场景：
 - parser 只读边界：D1 不修改 dedicated parser，行为锁仅验证 exactly-one 和 source parser tags。
 - 浏览器或 API smoke：至少一次真实导入样本预览确认链路。
 
+### 7.1 G011 行为锁定证据
+
+G011 已补强以下行为锁定入口，后续 `backend-shape`/`frontend-shape` 拆分必须保持这些测试和 smoke 通过：
+
+- `tests/backend/db/import_staging.rs::import_preview_selection_by_query_locks_cross_page_targets`
+  - 锁定 `update_session_preview_selection_by_query` 的跨页选择语义。
+  - 覆盖 `Select/Valid`、`Select/NeedsReview`、`Deselect/All`、`Invert/preview_ids`。
+  - 覆盖 selected count 与 selected invalid count，避免后续拆分把 valid/needs-review 判断退化成当前页本地选择。
+- `src/web/e2e/helpers/importFlow.ts::runAlipayImportFlow`
+  - 真实 API/browser smoke 从 Alipay fixture 走 `parse -> dedup -> preview page -> preview update -> reclassify -> server-paged selection -> confirm -> transaction list -> statistics page`。
+  - `preview update` 锁定单行 update API 和 `responseMode=preview-item` 返回当前 preview item。
+  - `reclassify` 锁定批量 preview update 后仍返回分类和账户匹配统计。
+  - `selection` 锁定服务端 selection endpoint 可更新 server-paged preview rows；valid/needs-review 的精确语义由后端 DB 集成测试负责。
+  - `confirm` 继续以 `preview_updates` 明确写入 category/account/cents，避免样本数据是否预先 valid 影响 smoke 稳定性。
+
+本切片实际验证命令：
+
+- `cargo fmt --all -- --check`
+- `cargo test -p bill-analyser-db --test import_staging`
+- `cargo test -p bill-analyser-core --test import_pipeline_contracts`
+- `cargo test -p bill-analyser-http --test import_runtime_contract`
+- `Set-Location src/web; npm run e2e:check`
+- `Set-Location src/web; npm run lint:ci`（当前通过，保留既有 `no-explicit-any` warning）
+- `Set-Location src/web; npm run e2e -- --project=desktop-chromium e2e/tests/import-preview-statistics.spec.ts`
+
 ## 8. 后续切片执行顺序
 
 ### 8.1 G011 behavior-lock
