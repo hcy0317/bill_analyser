@@ -17,6 +17,9 @@ interface TransactionListLinkSource {
     ): string;
 }
 
+/**
+ * 构造统计页筛选链接，保留当前分析类型、聚合粒度和筛选条件。
+ */
 export function getFilterLinkUrl(
     statisticsStore: StatisticsPageLinkSource,
     analysisType: StatisticsAnalysisType,
@@ -26,6 +29,9 @@ export function getFilterLinkUrl(
     return `/statistics/transaction?${statisticsStore.getTransactionStatisticsPageParams(analysisType, trendDateAggregationType, assetTrendsDateAggregationType)}`;
 }
 
+/**
+ * 构造统计图表条目到交易列表的钻取链接。
+ */
 export function getTransactionItemLinkUrl(
     statisticsStore: TransactionListLinkSource,
     analysisType: StatisticsAnalysisType,

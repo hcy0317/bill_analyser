@@ -1,5 +1,5 @@
+/// 查询用户账单的最小和最大日期，用于统计页“全部时间”范围兜底。
 #[tracing::instrument(level = "debug", skip_all)]
-
 pub async fn find_postgres_statistics_all_date_range(
     pool: &PostgresPool,
     user_id: UserId,

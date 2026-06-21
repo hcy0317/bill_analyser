@@ -1,5 +1,5 @@
+/// 解析统计时间戳范围，兼容 0/0 表示“全部时间”的旧前端约定。
 #[tracing::instrument(level = "debug", skip_all)]
-
 pub fn parse_statistics_timestamp_range(
     start_raw: Option<&str>,
     end_raw: Option<&str>,
@@ -19,6 +19,7 @@ pub fn parse_statistics_timestamp_range(
     })
 }
 
+/// 校验统计查询起止时间戳顺序，防止反向范围进入数据库查询。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn validate_statistics_time_range(
     start_time: i64,
@@ -33,6 +34,7 @@ pub fn validate_statistics_time_range(
     Ok(())
 }
 
+/// 校验资产趋势查询跨度，非全部模式限制在 365 天内。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn validate_asset_trends_span(
     start_time: i64,
@@ -48,6 +50,7 @@ pub fn validate_asset_trends_span(
     Ok(())
 }
 
+/// 解析统计年月范围，兼容 0/197001 表示全部时间的历史参数。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_statistics_year_month_range(
     start_raw: Option<&str>,

@@ -1,5 +1,5 @@
+/// 按账户初始余额、历史余额增量和账单流水生成每日资产趋势快照。
 #[tracing::instrument(level = "debug", skip_all)]
-
 pub fn build_asset_trends(
     bills: &[StatisticsBillInput],
     accounts: &[StatisticsAccountInput],
@@ -63,6 +63,7 @@ pub fn build_asset_trends(
     result
 }
 
+/// 提取在资产趋势区间内有非零余额或余额变化的账户 ID。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn non_empty_asset_trend_account_ids(days: &[AssetTrendDay]) -> BTreeSet<String> {
     let mut ids = BTreeSet::new();
@@ -79,6 +80,7 @@ pub fn non_empty_asset_trend_account_ids(days: &[AssetTrendDay]) -> BTreeSet<Str
     ids
 }
 
+/// 根据有效资产趋势账户构造前端图例，隐藏全程无余额的账户。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_asset_trend_legend(
     accounts: &[StatisticsAccountInput],
@@ -101,6 +103,7 @@ pub fn build_asset_trend_legend(
         .collect()
 }
 
+/// 汇总可见账户的资产、负债和净资产快照，金额保持整数分。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_net_worth_snapshot(accounts: &[StatisticsAccountInput]) -> NetWorthSnapshot {
     #[cfg(not(coverage))]
@@ -149,6 +152,7 @@ pub fn build_net_worth_snapshot(accounts: &[StatisticsAccountInput]) -> NetWorth
     }
 }
 
+/// 将净资产快照包装为历史 API 使用的 success/data 响应结构。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_net_worth_snapshot_response(snapshot: &NetWorthSnapshot) -> Value {
     json!({"success": true, "data": snapshot})

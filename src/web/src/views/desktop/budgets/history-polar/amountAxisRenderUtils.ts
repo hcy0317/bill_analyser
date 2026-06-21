@@ -15,6 +15,9 @@ import {
     getSectorCenter
 } from './renderUtils.ts';
 
+/**
+ * 从 ECharts 自定义系列 render 参数中取回金额轴动画帧。
+ */
 export function getFrameByGridLineRenderParams(
     frames: HistoricalGridLineAnimationFrame[],
     params: HistoricalSectorRenderParams
@@ -24,6 +27,9 @@ export function getFrameByGridLineRenderParams(
         ?? null;
 }
 
+/**
+ * 根据金额轴动画帧和当前进度计算网格线圆环形状。
+ */
 export function getHistoricalGridLineShape(
     frame: Pick<HistoricalGridLineAnimationFrame, 'radiusAxisMaxValue' | 'radiusRatio'>,
     params: HistoricalSectorRenderParams,

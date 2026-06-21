@@ -1,5 +1,5 @@
+/// 返回统计汇率功能支持的 provider 元数据，用于前端展示和后端校验。
 #[tracing::instrument(level = "debug", skip_all)]
-
 pub fn exchange_rate_provider_options() -> BTreeMap<String, ExchangeRateProviderOption> {
     BTreeMap::from([
         (
@@ -46,6 +46,7 @@ pub fn exchange_rate_provider_options() -> BTreeMap<String, ExchangeRateProvider
     ])
 }
 
+/// 规范化用户请求的汇率 provider，空值统一为 auto。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_requested_exchange_rate_provider(raw: Option<&str>) -> String {
     let provider = raw.unwrap_or("auto").trim().to_lowercase();
@@ -56,6 +57,7 @@ pub fn normalize_requested_exchange_rate_provider(raw: Option<&str>) -> String {
     }
 }
 
+/// 根据请求 provider 生成回退候选顺序，auto 使用默认链路。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_provider_candidate_order(requested_provider: &str) -> Vec<String> {
     #[cfg(not(coverage))]
@@ -84,6 +86,7 @@ pub fn build_provider_candidate_order(requested_provider: &str) -> Vec<String> {
     order
 }
 
+/// 将用户自定义汇率列表组装为接口结果，并用有效日期推导更新时间。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_user_custom_exchange_rates_result(
     base_currency: &str,
@@ -126,6 +129,7 @@ pub fn build_user_custom_exchange_rates_result(
     }
 }
 
+/// 将外部 provider 汇率表转换为统一接口结果，并标记是否发生 provider 回退。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_provider_exchange_rates_result(
     base_currency: &str,
@@ -171,6 +175,7 @@ pub fn build_provider_exchange_rates_result(
     }
 }
 
+/// 构建内置 CNY 基准汇率回退结果，保证外部 provider 不可用时仍有可展示数据。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_builtin_fallback_exchange_rates(
     base_currency: &str,
@@ -229,6 +234,7 @@ pub fn build_builtin_fallback_exchange_rates(
     }
 }
 
+/// 将“中国外汇牌价每 100 外币兑人民币”的报价表转换为目标基准汇率。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn convert_cny_quote_map_to_rates(
     quote_map: &BTreeMap<String, f64>,
@@ -271,6 +277,7 @@ pub fn convert_cny_quote_map_to_rates(
     result
 }
 
+/// 将 provider 原始基准币汇率转换为目标基准币和目标币种集合。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn convert_provider_base_currency(
     rates: &BTreeMap<String, f64>,

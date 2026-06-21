@@ -63,6 +63,9 @@ export function matchAmountFilterCents(amountCents: number, filter: AmountFilter
     }
 }
 
+/**
+ * 返回指定金额筛选类型需要填写的参数数量，供筛选弹窗决定输入框数量。
+ */
 export function getAmountFilterParameterCount(filterType: string): number {
     const filterTypeObj = AmountFilterType.valueOf(filterType);
     return filterTypeObj ? filterTypeObj.paramCount : 0;

@@ -324,6 +324,9 @@ function createHistoricalAmountAxisLabelRenderItem(
     };
 }
 
+/**
+ * 构建金额轴标签自定义系列，负责标签位置、透明度和跨帧动画。
+ */
 export function buildHistoricalAmountAxisLabelCustomSeries(
     frames: HistoricalGridLineAnimationFrame[],
     formatAmount: (amount: number) => string,

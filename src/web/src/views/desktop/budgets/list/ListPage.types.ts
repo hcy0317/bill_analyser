@@ -23,6 +23,9 @@ export interface FilterPreset {
     budgetAmountFilterCents: string;
 }
 
+/**
+ * 校验路由或持久化状态中的预算视图模式是否属于当前页面支持的集合。
+ */
 export function isBudgetViewMode(value: string): value is BudgetViewMode {
     return value === 'budget' || value === 'forecast' || value === 'history';
 }

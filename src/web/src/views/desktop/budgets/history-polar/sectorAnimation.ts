@@ -71,6 +71,9 @@ function getSectorCollapsedSnapshot(
     };
 }
 
+/**
+ * 生成历史图表扇区动画帧，维护扇区角度、半径和消失模式。
+ */
 export function resolveHistoricalSectorAnimationFrames(
     inputs: HistoricalSectorAnimationFrameInput[],
     state?: HistoricalLabelAnimationState,
@@ -405,6 +408,9 @@ function createHistoricalSectorRenderItem(
     };
 }
 
+/**
+ * 构建历史预算扇区自定义系列，负责柱状扇区动画和 tooltip 数据。
+ */
 export function buildHistoricalSectorCustomSeries(
     id: string,
     name: string,

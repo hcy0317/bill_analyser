@@ -1,5 +1,5 @@
+/// 从统计分析报告 JSON 中提取趋势点，兼容驼峰和下划线金额字段。
 #[tracing::instrument(level = "debug", skip_all)]
-
 pub fn build_statistics_trend_points(analyzer_result: &Value) -> Vec<StatisticsTrendPoint> {
     #[cfg(not(coverage))]
     tracing::info!(
@@ -36,11 +36,13 @@ pub fn build_statistics_trend_points(analyzer_result: &Value) -> Vec<StatisticsT
         .collect()
 }
 
+/// 将分析报告中的趋势点包装为统计趋势接口响应。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_statistics_trend_response(analyzer_result: &Value) -> Value {
     json!({"success": true, "data": build_statistics_trend_points(analyzer_result)})
 }
 
+/// 按月、季、年或默认近 30 天计算统计分析报告的日期范围。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn statistics_analyzer_period_range(
     period: &str,
@@ -67,6 +69,7 @@ pub fn statistics_analyzer_period_range(
     }
 }
 
+/// 基于账单样本生成统计分析报告，包含汇总、分类、类型、趋势和头部交易。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_statistics_analyzer_report(
     period: &str,
@@ -99,6 +102,7 @@ pub fn build_statistics_analyzer_report(
     })
 }
 
+/// 构建统计分析趋势接口结果，保留请求周期和可选分类筛选。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_statistics_analyzer_trends_result(
     period: &str,
@@ -118,6 +122,7 @@ pub fn build_statistics_analyzer_trends_result(
     })
 }
 
+/// 将单个周期内的账单汇总为收入、支出和净额趋势桶。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_statistics_analyzer_trend_bucket(
     period: &str,
@@ -147,6 +152,7 @@ pub fn build_statistics_analyzer_trend_bucket(
     }
 }
 
+/// 构建统计分析对比结果，目前按分类维度输出收入、支出、笔数和净额。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_statistics_analyzer_comparison_result(
     period: &str,
@@ -201,6 +207,7 @@ pub fn build_statistics_analyzer_comparison_result(
     })
 }
 
+/// 构建指定主分类下的子分类支出分布和占比明细。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_statistics_analyzer_category_result(
     period: &str,

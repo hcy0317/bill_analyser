@@ -49,6 +49,9 @@ import {
     resolveHistoricalSectorAnimationFrames
 } from './sectorAnimation.ts';
 
+/**
+ * 构建历史预算极坐标图的 ECharts option，组合扇区、标签和金额轴系列。
+ */
 export function buildHistoricalPolarChartOption(
     model: HistoricalPolarChartModel,
     args: HistoricalPolarChartOptionArgs

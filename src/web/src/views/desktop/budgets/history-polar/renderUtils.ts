@@ -4,6 +4,9 @@ import type {
     HistoricalSectorRenderParams
 } from './types.ts';
 
+/**
+ * 安全读取 ECharts 自定义系列坐标，坐标非法时返回 null 中止渲染。
+ */
 export function getSafeRenderCoord(api: HistoricalLabelRenderApi, value: number[]): [number, number] | null {
     try {
         const [x = 0, y = 0] = api.coord(value);
@@ -17,6 +20,9 @@ export function getSafeRenderCoord(api: HistoricalLabelRenderApi, value: number[
     }
 }
 
+/**
+ * 读取扇区渲染中心点，兼容自定义系列坐标返回异常的情况。
+ */
 export function getSectorCenter(params: HistoricalSectorRenderParams): [number, number] | null {
     const cx = Number(params.coordSys?.cx);
     const cy = Number(params.coordSys?.cy);
@@ -28,6 +34,9 @@ export function getSectorCenter(params: HistoricalSectorRenderParams): [number, 
     return [cx, cy];
 }
 
+/**
+ * 按半径比例计算极坐标像素半径。
+ */
 export function getPolarRadiusPx(
     api: HistoricalSectorRenderApi,
     center: [number, number],
@@ -42,6 +51,9 @@ export function getPolarRadiusPx(
     return Math.hypot(point[0] - center[0], point[1] - center[1]);
 }
 
+/**
+ * 将极坐标角度轴值转换为画布渲染使用的弧度角。
+ */
 export function getPolarCanvasAngle(
     api: HistoricalSectorRenderApi,
     center: [number, number],

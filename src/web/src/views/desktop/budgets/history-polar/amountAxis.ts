@@ -17,6 +17,9 @@ import {
 } from './math.ts';
 import { isHistoricalGridLineSnapshot } from './state.ts';
 
+/**
+ * 根据金额轴最大值计算等分网格线金额，金额保持展示用元单位。
+ */
 export function getHistoricalAmountGridLineValues(amountAxisMax: number): number[] {
     const maxValue = toNonNegativeFiniteNumber(amountAxisMax);
     if (maxValue <= 0) {
@@ -137,6 +140,9 @@ function buildHistoricalAmountAxisLeavingFrames(
     });
 }
 
+/**
+ * 生成金额轴网格线动画帧，负责处理进入、更新、退出和重启场景。
+ */
 export function resolveHistoricalGridLineAnimationFrames(
     inputs: HistoricalGridLineAnimationFrameInput[],
     state?: HistoricalLabelAnimationState,
@@ -259,6 +265,9 @@ export function resolveHistoricalGridLineAnimationFrames(
     return frames;
 }
 
+/**
+ * 解析金额轴动画的起始半径比例，用于从旧半径平滑过渡。
+ */
 export function resolveHistoricalAmountAxisStartRadiusRatio(frame: HistoricalGridLineAnimationFrame): number {
     if (!frame.previous) {
         return clamp(toFiniteNumber(frame.radiusRatio, 0), 0, 1);
@@ -267,16 +276,25 @@ export function resolveHistoricalAmountAxisStartRadiusRatio(frame: HistoricalGri
     return clamp(toFiniteNumber(frame.previous.radiusRatio, frame.radiusRatio), 0, 1);
 }
 
+/**
+ * 计算金额轴退出动画的边缘半径比例。
+ */
 export function getHistoricalAmountAxisTransitionEdgeRatio(radiusRatio: number): number {
     return clamp(toFiniteNumber(radiusRatio, 0), 0, 1) >= 0.5
         ? AMOUNT_AXIS_OUTER_TRANSITION_RADIUS_RATIO
         : 0;
 }
 
+/**
+ * 判断金额轴渲染是否应视为重启动画。
+ */
 export function isHistoricalAmountAxisRenderRestart(frame: HistoricalGridLineAnimationFrame): boolean {
     return !!frame.previous && frame.previous.dataId !== frame.dataId;
 }
 
+/**
+ * 根据最大金额计算金额轴标签间隔，保证刻度不超过固定数量。
+ */
 export function getHistoricalAmountAxisInterval(maxAmount: number): number {
     if (maxAmount <= 0) {
         return 25;

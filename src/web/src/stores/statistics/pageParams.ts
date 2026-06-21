@@ -12,6 +12,9 @@ import { getFinalAccountIdsByFilteredAccountIds } from '@/lib/account.ts';
 import { getFinalCategoryIdsByFilteredCategoryIds } from '@/lib/category.ts';
 import type { TransactionStatisticsFilter } from './types.ts';
 
+/**
+ * 将统计页当前筛选状态序列化为 URL query，供页面刷新和筛选链接复现图表状态。
+ */
 export function buildTransactionStatisticsPageParams(
     filter: TransactionStatisticsFilter,
     analysisType: StatisticsAnalysisType,
@@ -90,6 +93,9 @@ export function buildTransactionStatisticsPageParams(
     return querys.join('&');
 }
 
+/**
+ * 根据图表点击项、筛选条件和日期范围生成交易列表 query，保证统计钻取时账户/分类/标签条件一致。
+ */
 export function buildTransactionListPageParams({
     filter,
     accountsMap,

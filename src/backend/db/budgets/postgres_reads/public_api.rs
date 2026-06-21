@@ -1,3 +1,4 @@
+/// 查询预算列表并补齐分类上下文，返回 API 层使用的预算记录。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn query_postgres_budgets_for_listing(
     pool: &PostgresPool,
@@ -10,6 +11,7 @@ pub async fn query_postgres_budgets_for_listing(
     enrich_postgres_budget_listing(pool, user_id, filters.budget_type, &mut budgets).await
 }
 
+/// 按用户和预算 ID 读取单条预算，未命中时返回 None。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn get_postgres_budget_by_id(
     pool: &PostgresPool,
@@ -20,6 +22,7 @@ pub async fn get_postgres_budget_by_id(
     get_postgres_budget_by_id_on_pool(pool, user_id, budget_id).await
 }
 
+/// 创建预算并同步主分类预算与周期父子预算层级。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn create_postgres_budget(
     pool: &PostgresPool,
@@ -45,6 +48,7 @@ pub async fn create_postgres_budget(
     Ok(budget_id)
 }
 
+/// 更新预算字段并重新同步受影响的主分类预算和周期预算层级。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn update_postgres_budget(
     pool: &PostgresPool,
@@ -86,6 +90,7 @@ pub async fn update_postgres_budget(
     Ok(true)
 }
 
+/// 删除预算；删除主分类预算时会同时删除同周期子预算并同步层级。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn delete_postgres_budget(
     pool: &PostgresPool,
@@ -153,6 +158,7 @@ pub async fn delete_postgres_budget(
     Ok(deleted > 0)
 }
 
+/// 导出用户预算为可迁移 JSON，金额字段保持整数分。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn export_postgres_budgets(pool: &PostgresPool, user_id: UserId) -> DbResult<Vec<Value>> {
     let user_id = user_id_i64(user_id)?;
@@ -175,6 +181,7 @@ pub async fn export_postgres_budgets(pool: &PostgresPool, user_id: UserId) -> Db
         .collect())
 }
 
+/// 批量导入预算记录，按行返回创建、更新和错误统计。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_postgres_budgets(
     pool: &PostgresPool,
@@ -216,6 +223,7 @@ pub async fn import_postgres_budgets(
     }))
 }
 
+/// 查询预算执行明细，按筛选条件计算每个预算的已花费、剩余和执行率。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn query_postgres_budget_execution_details(
     pool: &PostgresPool,
@@ -259,6 +267,7 @@ pub async fn query_postgres_budget_execution_details(
     Ok(results)
 }
 
+/// 查询预算预测结果，基于历史账单窗口估算当前预算周期支出。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn query_postgres_budget_forecast(
     pool: &PostgresPool,
@@ -347,6 +356,7 @@ pub async fn query_postgres_budget_forecast(
     Ok(results)
 }
 
+/// 查询预算执行历史，优先复用快照，缺失精确周期时按需计算并合并。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn query_postgres_budget_execution_history(
     pool: &PostgresPool,
@@ -400,6 +410,7 @@ pub async fn query_postgres_budget_execution_history(
     Ok(history_items.into_iter().map(Value::Object).collect())
 }
 
+/// 为当前预算执行结果写入历史快照，金额字段保持整数分。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn create_postgres_budget_execution_snapshots(
     pool: &PostgresPool,

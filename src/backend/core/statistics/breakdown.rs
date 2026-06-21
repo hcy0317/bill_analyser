@@ -1,5 +1,5 @@
+/// 将账单按主分类汇总为饼图数据，金额以绝对整数分排序。
 #[tracing::instrument(level = "debug", skip_all)]
-
 pub fn build_category_pie_data(bills: &[StatisticsBillInput]) -> Vec<NameValueStatisticItem> {
     #[cfg(not(coverage))]
     tracing::info!(
@@ -29,6 +29,7 @@ pub fn build_category_pie_data(bills: &[StatisticsBillInput]) -> Vec<NameValueSt
     result
 }
 
+/// 汇总支出商户排行，空商户统一归入“未知商家”。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_top_merchants_data(
     bills: &[StatisticsBillInput],
@@ -70,6 +71,7 @@ pub fn build_top_merchants_data(
     result
 }
 
+/// 解析交易金额周期查询参数，返回周期标识和起止时间戳。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_transaction_amount_period_query(period_query: &str) -> Option<(String, i64, i64)> {
     let parts = period_query.split('_').collect::<Vec<_>>();
@@ -81,6 +83,7 @@ pub fn parse_transaction_amount_period_query(period_query: &str) -> Option<(Stri
     Some((parts[0].to_string(), start_time, end_time))
 }
 
+/// 汇总一个时间段内的收入/支出金额桶，金额保持整数分。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_transaction_amount_period_result(
     start_time: i64,
@@ -115,6 +118,7 @@ pub fn build_transaction_amount_period_result(
     }
 }
 
+/// 将按周期分组的交易金额汇总包装为接口响应。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_transaction_amounts_response(
     period_results: &BTreeMap<String, TransactionAmountPeriodResult>,

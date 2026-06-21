@@ -188,6 +188,9 @@ function buildPrimaryBandsAndSlots(
     };
 }
 
+/**
+ * 根据图例选择状态同步主分类和子分类的可见性。
+ */
 export function syncHistoricalLegendSelection(
     points: HistoricalCategoryChartPoint[],
     currentSelection: HistoricalLegendSelection = {}
@@ -202,6 +205,9 @@ export function syncHistoricalLegendSelection(
     return nextSelection;
 }
 
+/**
+ * 切换单个子分类图例选择状态。
+ */
 export function toggleHistoricalSecondarySelection(
     currentSelection: HistoricalLegendSelection,
     secondaryKey: string
@@ -212,6 +218,9 @@ export function toggleHistoricalSecondarySelection(
     };
 }
 
+/**
+ * 切换主分类图例选择状态，并级联影响其子分类。
+ */
 export function toggleHistoricalPrimarySelection(
     currentSelection: HistoricalLegendSelection,
     model: HistoricalPolarChartModel,
@@ -232,6 +241,9 @@ export function toggleHistoricalPrimarySelection(
     return nextSelection;
 }
 
+/**
+ * 将历史预算分组转换为极坐标图模型，包括图例、环带、槽位和金额轴范围。
+ */
 export function buildHistoricalPolarChartModel(
     points: HistoricalCategoryChartPoint[],
     selection: HistoricalLegendSelection = {}

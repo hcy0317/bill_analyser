@@ -1,5 +1,5 @@
+/// 汇总日历范围内的账单事件和周期账单投影。
 #[tracing::instrument(level = "debug", skip_all)]
-
 pub fn build_calendar_events_data(
     bills: &[StatisticsBillInput],
     recurring_rules: &[RecurringRuleInput],
@@ -54,6 +54,7 @@ pub fn build_calendar_events_data(
     }
 }
 
+/// 将日历事件数据包装为 success/data 接口响应。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_calendar_events_response(data: &CalendarEventsData) -> Value {
     json!({"success": true, "data": data})

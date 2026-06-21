@@ -1,3 +1,4 @@
+/// 查询资产趋势 payload，聚合账单流水、账户余额和图例数据。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn query_postgres_asset_trends_payload(
     pool: &PostgresPool,
@@ -23,6 +24,7 @@ pub async fn query_postgres_asset_trends_payload(
     }))
 }
 
+/// 查询指定日期段的交易收入/支出金额汇总，返回整数分金额桶。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn query_postgres_transaction_amount_period(
     pool: &PostgresPool,
@@ -68,6 +70,7 @@ pub async fn query_postgres_transaction_amount_period(
     })
 }
 
+/// 查询统计分析报告 payload，按请求周期加载账单并构造报告。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn query_postgres_statistics_analyzer_report_payload(
     pool: &PostgresPool,
@@ -92,6 +95,7 @@ pub async fn query_postgres_statistics_analyzer_report_payload(
     ))
 }
 
+/// 查询统计分析趋势 payload，按过去 12 个周期聚合可选分类数据。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn query_postgres_statistics_analyzer_trends_payload(
     pool: &PostgresPool,
@@ -124,6 +128,7 @@ pub async fn query_postgres_statistics_analyzer_trends_payload(
     ))
 }
 
+/// 查询统计分析对比 payload，按指定 compare_type 构建对比结果。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn query_postgres_statistics_analyzer_comparison_payload(
     pool: &PostgresPool,
@@ -147,6 +152,7 @@ pub async fn query_postgres_statistics_analyzer_comparison_payload(
     ))
 }
 
+/// 查询统计分析分类 payload，按主分类筛选并汇总子分类支出。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn query_postgres_statistics_analyzer_category_payload(
     pool: &PostgresPool,
@@ -173,6 +179,7 @@ pub async fn query_postgres_statistics_analyzer_category_payload(
     ))
 }
 
+/// 查询净资产 payload，基于账户当前余额构造资产/负债快照。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn query_postgres_net_worth_payload(
     pool: &PostgresPool,
@@ -183,6 +190,7 @@ pub async fn query_postgres_net_worth_payload(
     Ok(json!(build_net_worth_snapshot(&accounts)))
 }
 
+/// 查询统计日历 payload，合并账单事件和周期账单投影。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn query_postgres_calendar_events_payload(
     pool: &PostgresPool,
@@ -206,6 +214,7 @@ pub async fn query_postgres_calendar_events_payload(
     ))
 }
 
+/// 查询统计洞察异常摘要 payload，按最近月份窗口分析异常交易。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn query_postgres_insight_anomaly_summary_payload(
     pool: &PostgresPool,

@@ -65,6 +65,9 @@ function normalizeAmount(value: number): number {
     return Number.isFinite(amount) ? Math.max(0, amount) : 0;
 }
 
+/**
+ * 将历史预算筛选值规范化为预算类型，无法识别时返回 null。
+ */
 export function normalizeHistoricalBudgetType(value: unknown): BudgetType | null {
     if (value === BudgetType.Expense || value === BudgetType.Investment) {
         return value;
@@ -89,6 +92,9 @@ export function normalizeHistoricalBudgetType(value: unknown): BudgetType | null
     return null;
 }
 
+/**
+ * 按预算类型过滤历史预算条目，保留缺少类型字段的兼容数据。
+ */
 export function filterHistoricalBudgetItemsByType(
     items: BudgetHistoryItem[],
     activeType: BudgetType
@@ -188,6 +194,9 @@ function getColor(value: string | undefined): string | undefined {
     return value.startsWith('#') ? value : `#${value}`;
 }
 
+/**
+ * 将历史预算记录按周期、主分类和子分类聚合为图表分组。
+ */
 export function buildHistoricalBudgetPeriodGroups({
     items,
     aggregationType,

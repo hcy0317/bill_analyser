@@ -1,5 +1,5 @@
+/// 生成统计洞察异常摘要，合并大额交易、重复扣款和分类突增信号。
 #[tracing::instrument(level = "debug", skip_all)]
-
 pub fn build_insight_anomaly_summary(
     bills: &[StatisticsBillInput],
     analyzed_months: u32,

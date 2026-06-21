@@ -21,6 +21,7 @@ pub struct StatisticsContractError {
 }
 
 impl StatisticsContractError {
+    /// 构造统计合同错误，分别保留机器可读 error 和用户可读 message。
     #[tracing::instrument(level = "debug", skip_all)]
     pub fn new(error: impl Into<String>, message: impl Into<String>) -> Self {
         Self {

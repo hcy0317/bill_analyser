@@ -32,6 +32,9 @@ import {
 import { getSafeRenderCoord } from './renderUtils.ts';
 import { isHistoricalLabelSnapshot } from './state.ts';
 
+/**
+ * 生成历史图表标签动画帧，覆盖新增、更新、退出和朝向切换。
+ */
 export function resolveHistoricalLabelAnimationFrames(
     inputs: HistoricalLabelAnimationFrameInput[],
     state?: HistoricalLabelAnimationState,
@@ -431,6 +434,9 @@ function createHistoricalLabelRenderItem(
     };
 }
 
+/**
+ * 构建主/子分类标签自定义系列，绑定标签动画帧和渲染逻辑。
+ */
 export function buildHistoricalLabelCustomSeries(
     name: string,
     polarIndex: number,

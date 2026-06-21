@@ -1,5 +1,5 @@
+/// 规范化中文币种名称，用于外部汇率源名称到 ISO 币种代码的映射。
 #[tracing::instrument(level = "debug", skip_all)]
-
 pub fn normalize_chinese_currency_name(value: &str) -> String {
     let text = value
         .trim()
@@ -15,6 +15,7 @@ pub fn normalize_chinese_currency_name(value: &str) -> String {
         .to_string()
 }
 
+/// 从外部汇率源的文本单元格中提取有效数字，过滤空值、占位符和时间字段。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn extract_numeric_values(values: &[&str]) -> Vec<f64> {
     values
@@ -38,6 +39,7 @@ pub fn extract_numeric_values(values: &[&str]) -> Vec<f64> {
         .collect()
 }
 
+/// 从统计分析报告中提取总览卡片需要的收入、支出、净收入和分类摘要。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_overview_result_from_report(report: &Value) -> Value {
     #[cfg(not(coverage))]
@@ -66,6 +68,7 @@ pub fn build_overview_result_from_report(report: &Value) -> Value {
     })
 }
 
+/// 根据报告中存在的数据块生成建议渲染的图表 ID 列表。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_statistics_report_chart_plan(report: &Value) -> Vec<String> {
     #[cfg(not(coverage))]

@@ -42,6 +42,9 @@ function parseBudgetDate(date: string | undefined, endOfDay: boolean): Date | nu
         : new Date(year, month - 1, day, 0, 0, 0);
 }
 
+/**
+ * 根据预算记录与分类树解析主/子分类 ID，并保留可回显的分类名称。
+ */
 export function resolveBudgetCategorySelection(
     categories: TransactionCategory[],
     categoryId: string
@@ -80,6 +83,9 @@ export function resolveBudgetCategorySelection(
     return null;
 }
 
+/**
+ * 按主分类和子分类名称在分类树中查找预算钻取使用的分类 ID。
+ */
 export function findBudgetCategoryIdByNames(
     categories: TransactionCategory[],
     primaryCategoryName: string,
@@ -104,6 +110,9 @@ export function findBudgetCategoryIdByNames(
     return '';
 }
 
+/**
+ * 从预算行提取交易钻取所需的主分类和子分类 ID。
+ */
 export function getBudgetDrilldownCategoryIds(
     categories: TransactionCategory[],
     primaryCategoryName: string,
@@ -139,6 +148,9 @@ export function getBudgetDrilldownCategoryIds(
     return fallbackCategoryId || '';
 }
 
+/**
+ * 构建预算执行明细跳转到交易列表时的路由 query。
+ */
 export function buildBudgetDrilldownRouteQuery({
     categories,
     primaryCategoryName,

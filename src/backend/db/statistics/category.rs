@@ -1,3 +1,4 @@
+/// 查询分类统计 payload，按账单、分类和账户上下文构造明细项。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn query_postgres_category_statistics_payload(
     pool: &PostgresPool,
@@ -15,6 +16,7 @@ pub async fn query_postgres_category_statistics_payload(
     ))
 }
 
+/// 查询分类趋势 payload，按年月范围生成分类趋势桶。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn query_postgres_category_trends_payload(
     pool: &PostgresPool,
@@ -34,6 +36,7 @@ pub async fn query_postgres_category_trends_payload(
     )))
 }
 
+/// 查询分类饼图 payload，按主分类汇总账单金额。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn query_postgres_category_pie_payload(
     pool: &PostgresPool,
@@ -45,6 +48,7 @@ pub async fn query_postgres_category_pie_payload(
     Ok(build_category_pie_data(&bills))
 }
 
+/// 查询商户排行 payload，按交易对手方聚合支出金额和笔数。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn query_postgres_top_merchants_payload(
     pool: &PostgresPool,

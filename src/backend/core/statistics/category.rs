@@ -1,5 +1,5 @@
+/// 按分类和账户组合汇总账单金额，保持统计页明细表所需的 category/account 粒度。
 #[tracing::instrument(level = "debug", skip_all)]
-
 pub fn build_category_statistics_items(
     bills: &[StatisticsBillInput],
     categories: &[StatisticsCategoryInput],
@@ -42,6 +42,7 @@ pub fn build_category_statistics_items(
         .collect()
 }
 
+/// 将分类统计项包装为旧前端兼容的 startTime/endTime/items 响应结构。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_category_statistics_response(
     start_time: i64,
@@ -58,6 +59,7 @@ pub fn build_category_statistics_response(
     })
 }
 
+/// 按年月范围构造分类趋势桶，缺失月份也返回空桶以稳定图表横轴。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_category_trend_statistics(
     bills: &[StatisticsBillInput],

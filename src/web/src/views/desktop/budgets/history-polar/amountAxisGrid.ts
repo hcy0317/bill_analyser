@@ -210,6 +210,9 @@ function createHistoricalGridLineRenderItem(
     };
 }
 
+/**
+ * 构建金额轴网格线自定义系列，复用动画状态实现平滑更新。
+ */
 export function buildHistoricalGridLineCustomSeries(
     frames: HistoricalGridLineAnimationFrame[]
 ): Record<string, unknown> {

@@ -1,3 +1,4 @@
+/// 读取用户默认统计币种，兼容 metadata 的 camelCase 和 snake_case 字段。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn get_postgres_statistics_user_default_currency(
     pool: &PostgresPool,
@@ -33,6 +34,7 @@ pub async fn get_postgres_statistics_user_default_currency(
     })
 }
 
+/// 列出用户针对指定基准币维护的自定义汇率。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn list_postgres_user_custom_exchange_rates(
     pool: &PostgresPool,
@@ -44,6 +46,7 @@ pub async fn list_postgres_user_custom_exchange_rates(
     Ok(parse_postgres_custom_exchange_rates(&value))
 }
 
+/// 新增或更新用户自定义汇率，并刷新设置版本与更新时间。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn upsert_postgres_user_custom_exchange_rate(
     pool: &PostgresPool,
@@ -86,6 +89,7 @@ pub async fn upsert_postgres_user_custom_exchange_rate(
     Ok(UserCustomExchangeRateUpsert { update_time })
 }
 
+/// 删除用户指定目标币种的自定义汇率，未命中时返回 false。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn delete_postgres_user_custom_exchange_rate(
     pool: &PostgresPool,
@@ -121,6 +125,7 @@ pub async fn delete_postgres_user_custom_exchange_rate(
     Ok(true)
 }
 
+// 读取自定义汇率设置原始 JSON；缺失时提供空 rates 结构，避免上层重复兜底。
 async fn load_postgres_custom_exchange_rates_value(
     pool: &PostgresPool,
     user_id: i64,
@@ -137,6 +142,7 @@ async fn load_postgres_custom_exchange_rates_value(
     Ok(value)
 }
 
+// 构造自定义汇率设置键，基准币统一大写以避免重复设置项。
 fn postgres_custom_exchange_rates_key(base_currency: &str) -> String {
     format!(
         "statistics.custom_exchange_rates.{}",
@@ -144,6 +150,7 @@ fn postgres_custom_exchange_rates_key(base_currency: &str) -> String {
     )
 }
 
+// 解析并去重自定义汇率 JSON，兼容新旧字段名和日期/时间戳两种有效期来源。
 fn parse_postgres_custom_exchange_rates(value: &Value) -> Vec<UserCustomExchangeRateInput> {
     let Some(rates) = value.get("rates").and_then(Value::as_array) else {
         return Vec::new();
@@ -186,6 +193,7 @@ fn parse_postgres_custom_exchange_rates(value: &Value) -> Vec<UserCustomExchange
     result
 }
 
+// 将规范化后的自定义汇率写回 settings.value 使用的 JSON 结构。
 fn postgres_custom_exchange_rates_value(rates: &[UserCustomExchangeRateInput]) -> Value {
     json!({
         "rates": rates

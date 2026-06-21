@@ -361,6 +361,29 @@ D5 需要提前记录的共享面：
 - 收紧 Rust/frontend structure baseline，只处理已完成 D5 项，不能吞并 D6/D10 历史债。
 - PR/CI/merge/delete/writeback 完整后，cursor 推进到 D6。
 
+本次 comment-pass 执行结果：
+
+- 后端预算/统计 public API、统计核心 builder、汇率 provider/custom rate、资产趋势、日历、异常洞察和预算仓储边界均补充 `///` 中文说明。
+- 前端预算列表 helper、统计 query/link helper、预算分类钻取、预算 forecast/history grouping、历史极坐标图的几何/动画/状态/渲染导出函数均补充 JSDoc 中文说明。
+- `src/backend/db/statistics/exchange.rs` 的自定义汇率 JSON 读取、key 构造、解析和写回 helper 补充私有业务 helper 说明。
+
+本次 comment-pass 本地验证：
+
+- `cargo fmt --all -- --check`：通过。
+- `Set-Location src/web; npm run lint:ci`：通过；仅保留既有 `no-explicit-any` warning。
+- `cargo clippy --workspace --all-targets -- -D warnings`：通过。
+- `Set-Location src/web; npm run test:coverage`：91 suites / 38984 tests passed，All files line coverage 99.13%。
+- `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35`：通过，完整 Rust 工作区 coverage gate 生成 `workspace.lcov`。
+- `node scripts/check-backend-doc-map.mjs`：通过。
+- D5 Rust public function 注释扫描：通过，无裸 `pub fn` / `pub async fn`。
+- D5 TypeScript exported function 注释扫描：通过，无裸 `export function`。
+- `git diff --check`：通过。
+
+结构 gate 结果：
+
+- `node scripts/check-rust-backend-structure.mjs` 仍失败 3 项，均为 D6 auth 历史债；D5 backend 仅保留 line-reduction warning。
+- `Set-Location src/web; npm run structure:check` 仍失败 4 项，均为 D10/shared shell 或非 D5 历史债；D5 frontend 仅保留 line-reduction warning。
+
 ## 8. 关键风险与阻断条件
 
 - 金额必须保持显式 cents/minor units；预算 amount、spent amount、forecast amount、统计聚合、资产余额和汇率换算不得引入浮点金额作为业务存储。

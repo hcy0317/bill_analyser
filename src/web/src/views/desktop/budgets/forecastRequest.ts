@@ -12,6 +12,9 @@ export interface BudgetForecastLoadRequestInput {
     readonly forecastStrategy: BudgetForecastStrategy;
 }
 
+/**
+ * 根据预算预测页的筛选状态构造后端 forecast 请求参数。
+ */
 export function buildBudgetForecastLoadRequest({
     budgetType,
     periodRequest,
