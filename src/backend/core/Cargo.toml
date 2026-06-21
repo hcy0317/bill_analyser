@@ -67,6 +67,10 @@ name = "runtime_governance_contracts"
 path = "../../../tests/backend/core/runtime_governance_contracts.rs"
 
 [[test]]
+name = "rule_center_contracts"
+path = "../../../tests/backend/core/rule_center_contracts.rs"
+
+[[test]]
 name = "ops_contracts"
 path = "../../../tests/backend/core/ops_contracts.rs"
 

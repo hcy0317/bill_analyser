@@ -101,6 +101,12 @@ Behavior-lock 切片至少应补强：
 - 前端优先补 pairingcenter source guards 与 focused unit tests，不做结构移动。
 - 若发现真实 bug，当前切片写 `blocked:<reason>`，另开 fix slice。
 
+当前 behavior-lock 切片锁定：
+
+- `tests/backend/core/rule_center_contracts.rs` 覆盖分类规则表达式的括号、OR/AND/NOT、REGEX、转义逗号、空表达式和非法表达式合同。
+- `tests/backend/core/rule_center_contracts.rs` 覆盖账户规则的优先级、禁用规则跳过、投资上下文字段、跨字段 fallback、token 边界和 `regex_enabled` 正则匹配。
+- `tests/web/views/desktop/pairingcenter/ruleCenterFilters.test.ts` 覆盖规则中心筛选查询的全角符号归一、include/exclude 组合、regex 模式 fail closed 和主分类筛选顺序。
+
 ### 6.3 backend-shape
 
 建议顺序：
