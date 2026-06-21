@@ -304,3 +304,24 @@ D6 behavior-lock 切片补充了拆分前合同测试，仍不移动生产代码
 - `node scripts/check-backend-doc-map.mjs` 通过。
 - `node scripts/check-rust-backend-structure.mjs` 预期失败仍为 D6 三项：`auth_postgres.rs`、`auth_registration_defaults.rs`、`public_auth_handlers.rs`。
 - `Set-Location src/web; npm run structure:check` 预期失败仍为 D10 shared 四项：`services.ts`、`stores/index.ts`、`core/theme.ts`、`models/imported_transaction.ts`。
+
+## 10. Backend-shape 记录
+
+D6 backend-shape 切片按现有后端 facade 模板完成纯结构拆分，不改变 SQL、REST path、请求/响应字段、JWT/refresh/session、2FA/recovery code、注册默认包内容或 user-scope 校验。
+
+- `src/backend/db/auth_postgres.rs`：保留 repository facade、共享 metadata/row mapping/helper 和模块内测试；实现下沉到 `auth_postgres/identity_checks.rs`、`read_models.rs`、`audit_events.rs`、`sessions.rs`、`two_factor.rs`、`profile_updates.rs`、`cloud_settings.rs`、`registration.rs`、`registration_defaults_seed.rs`。
+- `src/backend/db/auth_registration_defaults.rs`：保留默认包 facade；默认包常量和测试下沉到 `auth_registration_defaults/types.rs`、`expense_categories.rs`、`income_transfer_investment.rs`、`categories.rs`、`accounts.rs`、`category_rules.rs`、`account_rules.rs`、`tests.rs`。
+- `src/backend/http/auth_routes/public_auth_handlers.rs`：保留 public auth handler facade；CORS、注册、API/MCP token、登录和 refresh handler 下沉到 `public_auth_handlers/cors.rs`、`register.rs`、`personal_tokens.rs`、`login.rs`、`refresh.rs`。
+
+本切片本地验证：
+
+- `cargo fmt --all` 通过。
+- `cargo test -p bill-analyser-db auth_postgres` 通过，5 tests。
+- `cargo test -p bill-analyser-db --test registration_defaults_postgres` 通过，1 test。
+- `cargo test -p bill-analyser-core --test auth_security_contracts` 通过，7 tests。
+- `cargo test -p bill-analyser-http auth_routes` 通过，7 tests。
+- `node scripts/check-rust-backend-structure.mjs` 通过；D6 三项后端结构 gate 红灯清零，且新子文件均低于 600 行。
+- `cargo fmt --all -- --check` 通过。
+- `cargo clippy --workspace --all-targets -- -D warnings` 通过。
+- `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过，生成 `workspace.lcov`。
+- 独立 `security-reviewer` 审查结论 `APPROVE`：未发现安全 blocker；确认未新增硬编码 secret，SQL 仍使用 bind 参数，token/session/2FA/recovery-code/profile/cloud-settings/external-auth 语义和 user-scope 校验保持不变，CORS/preflight 只做文件移动。
