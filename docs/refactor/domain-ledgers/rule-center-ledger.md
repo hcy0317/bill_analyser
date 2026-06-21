@@ -116,6 +116,12 @@ Behavior-lock 切片至少应补强：
 3. 如结构门禁仍要求，拆 `account_rule_handlers.rs` 的 handler、formatter、compat warning 和 test-context helper；保持 route path 和 response envelope 不变。
 4. 运行 focused Rust tests；若改业务源码，最终运行 Rust workspace coverage gate。
 
+当前 backend-shape 切片结果：
+
+- `src/backend/core/category_rules/mod.rs` 已改为 facade；表达式 DTO、parser、matching、term helper 和模块内测试分别进入 `types.rs`、`parser.rs`、`matching.rs`、`terms.rs`、`tests.rs`。
+- `src/backend/core/account_rules/mod.rs` 已改为 facade；候选编译、scope 归一、上下文字段准备、匹配解释和模块内测试分别进入 `engine.rs`、`tests.rs`。
+- D3 后端结构门禁直接项 `src/backend/core/account_rules/mod.rs` 与 `src/backend/core/category_rules/mod.rs` 已退出 failure 列表；剩余 Rust 结构失败均为非 D3 历史项。
+
 ### 6.4 frontend-shape
 
 建议顺序：
