@@ -15,6 +15,10 @@ describe('settings JSON per-page import/export controls', () => {
         'utf-8'
     );
 
+    const readJoinedSource = (relativePaths: string[]) => relativePaths
+        .map(readSource)
+        .join('\n');
+
     const expectedSettingsSections: SettingsBundleSectionKey[] = [
         'accounts',
         'transactionCategories',
@@ -42,9 +46,18 @@ describe('settings JSON per-page import/export controls', () => {
     });
 
     test('wires every requested desktop page to its own settings section', () => {
-        const accounts = readSource('src/views/desktop/accounts/ListPage.vue');
-        const categories = readSource('src/views/desktop/categories/ListPage.vue');
-        const tags = readSource('src/views/desktop/tags/ListPage.vue');
+        const accounts = readJoinedSource([
+            'src/views/desktop/accounts/ListPage.vue',
+            'src/views/desktop/accounts/list/ListPage.template.html',
+        ]);
+        const categories = readJoinedSource([
+            'src/views/desktop/categories/ListPage.vue',
+            'src/views/desktop/categories/list/ListPage.template.html',
+        ]);
+        const tags = readJoinedSource([
+            'src/views/desktop/tags/ListPage.vue',
+            'src/views/desktop/tags/list/ListPage.template.html',
+        ]);
         const templates = readSource('src/views/desktop/templates/ListPage.vue');
         const rules = readSource('src/views/desktop/pairingcenter/components/RuleCenterPanel.vue');
         const accountRules = readSource('src/views/desktop/pairingcenter/components/AccountRulePanel.vue');
@@ -62,7 +75,10 @@ describe('settings JSON per-page import/export controls', () => {
 
     test('removes incorrect standalone settings-page entry and category dual buttons', () => {
         const dataManagement = readSource('src/views/desktop/user/settings/tabs/UserDataManagementSettingTab.vue');
-        const categories = readSource('src/views/desktop/categories/ListPage.vue');
+        const categories = readJoinedSource([
+            'src/views/desktop/categories/ListPage.vue',
+            'src/views/desktop/categories/list/ListPage.template.html',
+        ]);
 
         expect(dataManagement).not.toContain("tt('Settings JSON')");
         expect(dataManagement).not.toContain('importSettingsBundle');

@@ -7,8 +7,10 @@ function readSource(relativePath: string): string {
 
 describe('desktop account list add button contract', () => {
     test('header add action dispatches by current account category without menu items or icon', () => {
-        const source = readSource('src/views/desktop/accounts/ListPage.vue');
-        const toolbarAddButton = source.match(/<v-btn class="ms-3"[\s\S]*?\{\{ tt\('Add'\) \}\}[\s\S]*?<\/v-btn>/)?.[0] ?? '';
+        const facade = readSource('src/views/desktop/accounts/ListPage.vue');
+        const template = readSource('src/views/desktop/accounts/list/ListPage.template.html');
+        const source = `${facade}\n${template}`;
+        const toolbarAddButton = template.match(/<v-btn class="ms-3"[\s\S]*?\{\{ tt\('Add'\) \}\}[\s\S]*?<\/v-btn>/)?.[0] ?? '';
 
         expect(toolbarAddButton).toContain('@click="addAccountForCurrentCategory"');
         expect(toolbarAddButton).not.toContain(':prepend-icon');

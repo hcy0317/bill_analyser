@@ -1,0 +1,24 @@
+
+.account-edit-balancetime .item-title {
+    width: 100%;
+}
+
+.account-edit-balancetime .item-title > .item-header > .account-edit-balancetime-header {
+    display: block;
+    width: 100%;
+}
+
+.account-edit-balancetime .item-title > .account-edit-balancetime-title {
+    display: flex;
+    width: 100%;
+}
+
+.account-edit-balancetime .item-title > .account-edit-balancetime-title > .account-edit-balancetime-time {
+    flex-grow: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.subaccount-delete-button {
+    margin-inline-start: auto;
+}

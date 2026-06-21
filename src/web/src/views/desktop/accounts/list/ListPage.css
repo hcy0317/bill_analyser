@@ -1,0 +1,97 @@
+.account-statistic-item-value {
+    font-size: 1rem;
+}
+
+.account-category-tabs .v-tab.v-tab.v-btn {
+    height: calc(var(--v-tabs-height) * 1.5);
+}
+
+.accounts-overview-title {
+    line-height: 2rem !important;
+    min-height: 52px;
+    display: flex;
+    align-items: flex-end;
+}
+
+.accounts-overview-amount {
+    font-size: 1.5rem;
+    color: rgba(var(--v-theme-on-background), var(--v-high-emphasis-opacity));
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.accounts-overview-subtitle {
+    font-size: 1rem;
+    line-height: 1.75rem;
+}
+
+.account-card > .v-card-item {
+    padding-top: 0.875rem;
+    padding-bottom: 0.875rem;
+}
+
+.account-card .account-title {
+    font-size: 1rem;
+    line-height: 1.5rem !important;
+}
+
+.account-card .account-title .account-name {
+    color: rgba(var(--v-theme-on-background), var(--v-high-emphasis-opacity));
+}
+
+.account-card .account-currency {
+    font-size: 0.8rem;
+    color: rgba(var(--v-theme-on-background), var(--v-medium-emphasis-opacity));
+}
+
+.account-card .account-subaccounts {
+    overflow-x: auto;
+    white-space: nowrap;
+}
+
+.account-card .account-subaccounts.v-btn-toggle {
+    height: auto !important;
+    padding: 0;
+    border: none;
+}
+
+.account-card .account-subaccounts.v-btn-toggle > .v-btn {
+    border-color: rgba(var(--v-border-color), var(--v-border-opacity));
+}
+
+.account-card .account-subaccounts.v-btn-toggle > .v-btn:not(:first-child) {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+    border-left: none;
+}
+
+.account-card .account-subaccounts.v-btn-toggle > .v-btn:not(:last-child) {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.account-card .account-subaccounts.v-btn-toggle > .v-btn {
+    border: thin solid rgba(var(--v-border-color), var(--v-border-opacity));
+}
+
+.account-card .account-subaccounts.v-btn-toggle button.v-btn {
+    width: auto !important;
+}
+
+.account-card .account-toolbar {
+    overflow-x: auto;
+    white-space: nowrap;
+}
+
+.account-card .account-toolbar .hover-display {
+    display: none;
+}
+
+.account-card .account-toolbar:hover .hover-display {
+    display: grid;
+}
+
+.account-card .account-balance {
+    font-size: 1.25rem;
+    color: rgba(var(--v-theme-on-background), var(--v-high-emphasis-opacity));
+}

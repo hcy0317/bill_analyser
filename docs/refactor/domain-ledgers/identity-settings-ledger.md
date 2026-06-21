@@ -234,6 +234,27 @@ G015 已补强以下行为锁定入口，后续 `backend-shape`/`frontend-shape`
 - `cargo test -p bill-analyser-db --test category_rules_postgres`
 - `cargo test -p bill-analyser-http taxonomy`
 
+### 7.3 G015 frontend-shape 证据
+
+本切片只做身份设置前端物理结构拆分，不改按钮入口、导入导出控件、REST/store 调用、账户余额聚合、分类/标签编辑合同或现有视觉布局。
+
+- `src/web/src/views/desktop/accounts/ListPage.vue` 变为桌面账户列表页面 facade，模板和样式下沉到 `desktop/accounts/list/**`。
+- `src/web/src/views/desktop/accounts/list/dialogs/EditDialog.vue` 变为账户编辑弹窗脚本 facade，模板和样式下沉到 `dialogs/edit-dialog/**`。
+- `src/web/src/views/mobile/accounts/EditPage.vue` 变为移动账户编辑页 facade，模板和样式下沉到 `mobile/accounts/edit-page/**`。
+- `src/web/src/views/desktop/categories/ListPage.vue` 变为桌面分类列表页面 facade，模板/样式下沉到 `desktop/categories/list/**`，页面状态、表单、导入导出和操作回调收敛到 `useCategoryListPage.ts`。
+- `src/web/src/views/desktop/tags/ListPage.vue` 变为桌面标签列表页面 facade，模板和样式下沉到 `desktop/tags/list/**`。
+- 源码合同测试已改为同时读取 facade 与外置 template/style，避免后续回归只检查入口文件。
+- `npm run structure:check` 已移除 D2 前端直接失败项；剩余结构失败均为 D3+ 或其他后续域历史结构债。
+
+本切片已通过的 focused 验证：
+
+- `Set-Location src/web; npx vue-tsc --noEmit --pretty false`
+- `Set-Location src/web; npm run lint:ci`
+- `Set-Location src/web; npm run structure:check`（预期仍失败；D2 前端失败项已清零，剩余为非 D2 历史结构债）
+- `Set-Location src/web; npm run test -- --runTestsByPath ../../tests/web/stores/account.test.ts ../../tests/web/models/transaction_category.test.ts ../../tests/web/models/transaction_tag.test.ts ../../tests/web/views/desktop/accounts/listPageAddButton.test.ts ../../tests/web/views/desktop/accounts/editDialogLayout.test.ts ../../tests/web/views/desktop/categories/listPageAddButton.test.ts ../../tests/web/views/desktop/categories/editDialog.test.ts ../../tests/web/views/desktop/settingsJsonPerPageImportExport.test.ts`
+- `Set-Location src/web; npm run test:coverage`
+- `Set-Location src/web; npm run build`
+
 ## 8. 后续切片执行顺序
 
 ### 8.1 behavior-lock

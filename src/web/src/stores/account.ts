@@ -1,15 +1,12 @@
 import { ref, computed } from 'vue';
 import { defineStore } from 'pinia';
-
 import { useSettingsStore } from './setting.ts';
 import { useUserStore } from './user.ts';
 import { useExchangeRatesStore } from './exchangeRates.ts';
-
 import { type BeforeResolveFunction, itemAndIndex, reversed, entries, values } from '@/core/base.ts';
 import type { HiddenAmount, NumberWithSuffix } from '@/core/numeral.ts';
 import { AccountType, AccountCategory } from '@/core/account.ts';
 import { DISPLAY_HIDDEN_AMOUNT, INCOMPLETE_AMOUNT_SUFFIX } from '@/consts/numeral.ts';
-
 import {
     type AccountNewDisplayOrderRequest,
     type AccountDisplayBalance,
@@ -17,13 +14,11 @@ import {
     type AccountShowingIds,
     Account
 } from '@/models/account.ts';
-
 import { isNumber, isEquals } from '@/lib/common.ts';
 import { getCategorizedAccountsMap, getAllFilteredAccountsBalance } from '@/lib/account.ts';
 import services from '@/lib/services.ts';
 import logger from '@/lib/logger.ts';
 import { getApiErrorMessage } from '@/lib/api_error.ts';
-
 export const useAccountsStore = defineStore('accounts', () => {
     const settingsStore = useSettingsStore();
     const userStore = useUserStore();

@@ -7,7 +7,11 @@ function readSource(relativePath: string): string {
 
 describe('desktop account edit dialog layout contract', () => {
     test('dialog width is constrained by viewport and account matching editor stays compact', () => {
-        const editDialog = readSource('src/views/desktop/accounts/list/dialogs/EditDialog.vue');
+        const editDialog = [
+            readSource('src/views/desktop/accounts/list/dialogs/EditDialog.vue'),
+            readSource('src/views/desktop/accounts/list/dialogs/edit-dialog/EditDialog.template.html'),
+            readSource('src/views/desktop/accounts/list/dialogs/edit-dialog/EditDialog.css'),
+        ].join('\n');
 
         expect(editDialog).toContain('width="calc(100vw - 32px)"');
         expect(editDialog).toContain(':max-width="account.type === AccountType.MultiSubAccounts.type ? 1000 : 800"');

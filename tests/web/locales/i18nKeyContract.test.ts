@@ -14,6 +14,10 @@ function readSource(relativePath: string): string {
     return fs.readFileSync(path.resolve(process.cwd(), relativePath), 'utf-8');
 }
 
+function readJoinedSource(...relativePaths: string[]): string {
+    return relativePaths.map(readSource).join('\n');
+}
+
 function readLocale(locale: string): Record<string, unknown> {
     return JSON.parse(readSource(`src/locales/${locale}.json`));
 }
@@ -137,7 +141,10 @@ describe('i18n key contract for reported warning surfaces', () => {
     });
 
     test('account matching rule builder title exists in active locales', () => {
-        const accountEditDialog = readSource('src/views/desktop/accounts/list/dialogs/EditDialog.vue');
+        const accountEditDialog = readJoinedSource(
+            'src/views/desktop/accounts/list/dialogs/EditDialog.vue',
+            'src/views/desktop/accounts/list/dialogs/edit-dialog/EditDialog.template.html'
+        );
 
         expect(accountEditDialog).toContain('title="Account Matching"');
 

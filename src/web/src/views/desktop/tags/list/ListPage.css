@@ -1,0 +1,46 @@
+.transaction-tags-table tr.transaction-tags-table-row-tag .hover-display {
+    display: none;
+}
+
+.transaction-tags-table tr.transaction-tags-table-row-tag:hover .hover-display {
+    display: inline-grid;
+}
+
+.transaction-tags-table tr:not(:last-child) > td > div {
+    padding-bottom: 1px;
+}
+
+.transaction-tags-table .has-bottom-border tr:last-child > td > div {
+    padding-bottom: 1px;
+}
+
+.transaction-tags-table tr.transaction-tags-table-row-tag .right-bottom-icon .v-badge__badge {
+    padding-bottom: 1px;
+}
+
+.transaction-tags-table .v-text-field .v-input__prepend {
+    margin-inline-end: 0;
+    color: rgba(var(--v-theme-on-surface));
+}
+
+.transaction-tags-table .v-text-field .v-input__prepend .v-badge > .v-badge__wrapper > .v-icon {
+    opacity: var(--v-medium-emphasis-opacity);
+}
+
+.transaction-tags-table .v-text-field.v-input--plain-underlined .v-input__prepend {
+    padding-top: 10px;
+}
+
+.transaction-tags-table .v-text-field .v-field__input {
+    font-size: 0.875rem;
+    padding-top: 0;
+    color: rgba(var(--v-theme-on-surface));
+}
+
+.transaction-tags-table .transaction-tag-name {
+    font-size: 0.875rem;
+}
+
+.transaction-tags-table tr .v-text-field .v-field__input {
+    padding-bottom: 1px;
+}

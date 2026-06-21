@@ -1,0 +1,12 @@
+.transaction-category-table tr.transaction-category-table-row .hover-display {
+    display: none;
+}
+
+.transaction-category-table tr.transaction-category-table-row:hover .hover-display {
+    display: grid;
+}
+
+.transaction-category-table .transaction-category-comment {
+    font-size: 0.8rem;
+    color: rgba(var(--v-theme-on-background), var(--v-medium-emphasis-opacity)) !important;
+}

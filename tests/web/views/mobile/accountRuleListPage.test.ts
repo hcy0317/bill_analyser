@@ -5,6 +5,10 @@ function readSource(relativePath: string): string {
     return fs.readFileSync(path.resolve(process.cwd(), relativePath), 'utf-8');
 }
 
+function readJoinedSource(...relativePaths: string[]): string {
+    return relativePaths.map(readSource).join('\n');
+}
+
 describe('mobile account recognition rule parity', () => {
     test('mobile router and settings expose account-rule management', () => {
         const router = readSource('src/router/mobile.ts');
@@ -17,7 +21,10 @@ describe('mobile account recognition rule parity', () => {
     });
 
     test('mobile account edit links each persisted account to rules without alias fields', () => {
-        const source = readSource('src/views/mobile/accounts/EditPage.vue');
+        const source = readJoinedSource(
+            'src/views/mobile/accounts/EditPage.vue',
+            'src/views/mobile/accounts/edit-page/EditPage.template.html'
+        );
 
         expect(source).toContain('`/account/rules?accountId=${account.id}`');
         expect(source).toContain('`/account/rules?accountId=${subAccount.id}`');

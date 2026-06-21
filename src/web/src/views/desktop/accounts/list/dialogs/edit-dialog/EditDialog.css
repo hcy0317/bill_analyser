@@ -1,0 +1,41 @@
+.account-edit-card,
+.account-edit-content,
+.account-edit-window {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.account-edit-card {
+    overflow: hidden;
+}
+
+.account-edit-content {
+    overflow-x: hidden;
+}
+
+.account-edit-tabs {
+    flex: 0 0 180px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.account-rule-section {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: hidden;
+}
+
+.account-rule-section :deep(.category-rule-builder),
+.account-rule-section :deep(.category-rule-builder__content),
+.account-rule-section :deep(.rule-expression-input),
+.account-rule-section :deep(.rule-expression-groups) {
+    min-width: 0;
+    max-width: 100%;
+}
+
+@media (max-width: 960px) {
+    .account-edit-tabs {
+        flex-basis: auto;
+        width: 100%;
+    }
+}
