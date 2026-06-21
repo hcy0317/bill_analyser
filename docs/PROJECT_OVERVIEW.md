@@ -76,6 +76,8 @@ multipart 上传并行执行 dedicated parser 检测，每个文件必须且只�
 
 预算按月/季/年层级同步，删除主预算或最后一个子预算时会清理派生父周期预算。预算 CRUD、导出、导入、执行、预测和快照按同一层级、筛选、账户/标签上下文与名称更新语义执行，并通过 `amount_cents` / `amountCents` 写入 minor units 列。统计链路由 Rust 读取账户、分类、汇率和资产趋势数据，所有金额响应字段均使用显式 cents/minor units 字段，前端图表只在展示时格式化为元。
 
+预算与统计后端当前以 facade + 功能子文件组织：`src/backend/db/budgets.rs` 聚合预算 DTO、payload normalization、execution/history helper 和 record helper 子文件，`src/backend/db/budgets/postgres_reads.rs` 聚合预算 PostgreSQL listing、mutation、import/export、execution、forecast、history、period sync、row mapping 和 value helper 子文件；`src/backend/db/statistics.rs` 聚合统计 category、asset/analyzer、exchange、range、loader 和 helper 子文件；`src/backend/core/statistics.rs` 聚合统计 range、category、asset、anomaly、calendar、breakdown、Analyzer、exchange 和通用 helper 子文件。该拆分不改变 REST 路由、PostgreSQL user-scope、预算 period 层级同步、统计 cents/minor units、汇率 fallback 或图表 response 合同。
+
 ## 认证与备份
 
 认证运行态校验 Bearer access token 签名、过期时间和 PostgreSQL token session。登录、注册、邮箱验证、密码重置、refresh、logout、2FA、profile、cloud settings、external auth、user-data statistics/export/clear 直接读写 PostgreSQL 表。敏感动作通过当前密码、操作密码或签名 step-up token 校验，并写入认证或业务审计。

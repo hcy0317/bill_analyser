@@ -302,6 +302,35 @@ D5 需要提前记录的共享面：
 4. 拆 `core/statistics.rs`，按 ranges/category/asset/calendar/analyzer/exchange/anomalies/types/helpers 分离。
 5. 跑 focused tests、fmt、clippy 和 full Rust coverage gate；结构 gate 中 D5 backend failure 应清零或仅剩明确 baseline 解释。
 
+### 7.2.1 本次 backend-shape 执行记录
+
+执行时间：2026-06-22T00:09:06+08:00，基于 `bill_analyser/main` 的 `42847b73ecc1155e5430b85874a5d9e6817b44c2`。
+
+本切片完成的后端结构拆分：
+
+- `src/backend/db/budgets.rs` 保留预算 DTO facade，并通过 `budgets/payloads.rs`、`execution.rs`、`history.rs`、`record_helpers.rs`、`tests.rs` 拆出 payload normalization、预算执行、历史合并、record/value helper 和模块测试。
+- `src/backend/db/budgets/postgres_reads.rs` 保留 PostgreSQL 预算仓储 facade，并通过 `postgres_reads/public_api.rs`、`listing.rs`、`execution.rs`、`forecast.rs`、`history.rs`、`mapping.rs`、`mutation_sql.rs`、`period_sync.rs`、`value_helpers.rs`、`tests.rs` 拆出预算 CRUD/导入导出、列表 enrichment、执行、预测、历史、period 层级同步、row mapping 和 SQL/value helper。
+- `src/backend/db/statistics.rs` 保留 PostgreSQL 统计仓储 facade，并通过 `statistics/category.rs`、`asset_analyzer.rs`、`exchange.rs`、`ranges.rs`、`loaders.rs`、`helpers.rs` 拆出 category/pie/top merchants、asset/analyzer/net worth/calendar/insights、汇率 settings、日期范围、loader 和映射 helper。
+- `src/backend/core/statistics.rs` 保留统计核心 facade 和 DTO，并通过 `statistics/ranges.rs`、`category.rs`、`asset.rs`、`anomalies.rs`、`calendar.rs`、`breakdown.rs`、`analyzer.rs`、`exchange.rs`、`misc_public.rs`、`analyzer_helpers.rs`、`date_helpers.rs`、`insight_helpers.rs`、`calendar_helpers.rs`、`exchange_helpers.rs`、`value_helpers.rs` 拆出统计核心构建器和 helper。
+
+已通过的验证：
+
+- `cargo fmt --all -- --check`：通过。
+- `cargo test -p bill-analyser-core --test budget_contracts`：11 passed。
+- `cargo test -p bill-analyser-core --test statistics_contracts`：6 passed。
+- `cargo test -p bill-analyser-db budget`：7 passed。
+- `cargo test -p bill-analyser-db statistics`：`statistics_postgres_queries_preserve_explicit_cents_and_transfer_boundaries` passed。
+- `cargo clippy --workspace --all-targets -- -D warnings`：通过。
+- `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35`：通过，完整 Rust 工作区 coverage gate 生成 `workspace.lcov`。
+- `node scripts/check-rust-backend-structure.mjs`：D5 backend failure 清零；仅剩 D6 auth 历史债。
+- `node scripts/check-backend-doc-map.mjs`：通过。
+- `git diff --check`：通过。
+
+结构结果：
+
+- D5 backend facade 和新增子文件均低于 600 行；当前最大新增文件是 `src/backend/db/budgets/postgres_reads/period_sync.rs` 550 行。
+- `src/backend/core/statistics.rs`、`src/backend/db/statistics.rs`、`src/backend/db/budgets/postgres_reads.rs` 在结构 gate 中只剩 line-reduction warning。
+
 ### 7.3 frontend-shape
 
 1. 拆桌面预算 `ListPage.vue` 为 facade + template/style + state/filter/action/presentation/drilldown 子文件。
