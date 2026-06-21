@@ -45,6 +45,29 @@ fn gitea_ci_path_filters_cover_backend_contract_tests() {
 }
 
 #[test]
+fn gitea_ci_does_not_require_privileged_runtime_services() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let workflow = fs::read_to_string(repo_root.join(".gitea/workflows/ci.yml"))
+        .expect("Gitea CI workflow is readable");
+
+    for forbidden in [
+        "services:",
+        "postgres:",
+        "image: postgres",
+        "ports:",
+        "/dev/tcp",
+        "docker ",
+        "docker-compose",
+        "BILL_ANALYSER_TEST_POSTGRES_URL",
+    ] {
+        assert!(
+            !workflow.contains(forbidden),
+            "Gitea CI must not require privileged runtime services or port-bound infrastructure: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn governance_tests_verified_paths_exist() {
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
 
