@@ -8,6 +8,7 @@ export interface RecurringCandidateItem {
 
 type Translate = (key: string) => string;
 
+/** 创建周期候选副标题格式化器，集中维护日期和原因展示文案。 */
 export function createRecurringCandidateSubtitleFormatter(tt: Translate): (candidate: RecurringCandidateItem) => string {
     return (candidate: RecurringCandidateItem): string => {
         const reasons = Array.isArray(candidate.matchReasons)
@@ -21,6 +22,7 @@ export function createRecurringCandidateSubtitleFormatter(tt: Translate): (candi
     };
 }
 
+/** 取周期候选的首个主要原因，作为按钮和紧凑列表中的摘要。 */
 export function getRecurringCandidatePrimaryReason(candidate: RecurringCandidateItem): string {
     if (!Array.isArray(candidate.matchReasons) || candidate.matchReasons.length < 1) {
         return '';

@@ -1,7 +1,9 @@
+/// 返回后端账单写入合同使用的交易类型中文名。
 pub fn backend_transaction_type_name(transaction_type: TransactionType) -> &'static str {
     transaction_type.backend_name()
 }
 
+/// 把后端历史值、英文别名或旧数字编码归一为前端交易类型枚举。
 pub fn frontend_transaction_type_from_backend(
     raw_value: &str,
 ) -> Result<TransactionType, RuntimeError> {
@@ -17,6 +19,7 @@ pub fn frontend_transaction_type_from_backend(
     }
 }
 
+/// 按支出、转账、投资的后端存储语义把来源金额转换为负数。
 pub fn signed_backend_amount(transaction_type: TransactionType, source_amount: Money) -> Money {
     if matches!(
         transaction_type,
@@ -31,6 +34,7 @@ pub fn signed_backend_amount(transaction_type: TransactionType, source_amount: M
     }
 }
 
+/// 将前端创建/编辑 payload 转成后端账单 mutation 数据和标签、账户、分类元数据。
 pub fn frontend_transaction_mutation_to_backend(
     frontend_data: &Value,
     _utc_offset: UtcOffsetMinutes,
@@ -105,6 +109,7 @@ pub fn frontend_transaction_mutation_to_backend(
     Ok((backend_data, metadata))
 }
 
+/// 为手工创建交易补齐描述、交易对方和默认来源账户等后端必填字段。
 pub fn apply_manual_create_defaults(
     backend_data: &mut Map<String, Value>,
     frontend_data: &Value,
@@ -155,6 +160,7 @@ pub fn apply_manual_create_defaults(
     Ok(())
 }
 
+/// 应用创建时的分类合同：优先使用已解析分类，其次规则命中，最后按类型兜底。
 pub fn apply_create_category_contract(
     backend_data: &mut Map<String, Value>,
     resolved_category: Option<(&str, &str)>,

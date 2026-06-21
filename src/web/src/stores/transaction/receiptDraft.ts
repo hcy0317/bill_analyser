@@ -16,6 +16,7 @@ const KNOWN_RECEIPT_IMAGE_ERROR_CODES: ReadonlySet<ReceiptImageErrorCode> = new 
     'unknown'
 ]);
 
+/** 将后端 OCR 错误码和 HTTP 状态归一为前端展示使用的稳定错误枚举。 */
 export function mapReceiptImageErrorCode(rawCode: string | undefined, status: number): ReceiptImageErrorCode {
     if (rawCode && KNOWN_RECEIPT_IMAGE_ERROR_CODES.has(rawCode as ReceiptImageErrorCode) && rawCode !== 'unknown') {
         return rawCode as ReceiptImageErrorCode;
@@ -44,6 +45,7 @@ export function mapReceiptImageErrorCode(rawCode: string | undefined, status: nu
     return 'unknown';
 }
 
+/** 构造图片 OCR 识别错误对象，保留原始异常供调用方记录日志。 */
 export function buildRecognizeReceiptImageError(errorCode: ReceiptImageErrorCode, message: string, status: number, originalError?: unknown): RecognizeReceiptImageError {
     return {
         errorCode,
@@ -55,10 +57,12 @@ export function buildRecognizeReceiptImageError(errorCode: ReceiptImageErrorCode
 
 type ReceiptDraftFieldKind = 'string' | 'number' | 'stringArray' | 'transactionType';
 
+/** 判断未知值是否是可读取字段的普通对象。 */
 function isRecord(value: unknown): value is Record<string, unknown> {
     return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
+/** 把 OCR draft 中可展示的字符串或数字字段归一为非空字符串。 */
 function normalizeReceiptDraftString(value: unknown): string | undefined {
     if (typeof value === 'string' && value) {
         return value;
@@ -71,6 +75,7 @@ function normalizeReceiptDraftString(value: unknown): string | undefined {
     return undefined;
 }
 
+/** 归一 OCR draft 候选标签数组，并去除空值和重复项。 */
 function normalizeReceiptDraftStringArray(value: unknown): string[] | undefined {
     if (!Array.isArray(value)) {
         return undefined;
@@ -82,6 +87,7 @@ function normalizeReceiptDraftStringArray(value: unknown): string[] | undefined 
     return normalized.length ? Array.from(new Set(normalized)) : undefined;
 }
 
+/** 按字段类型归一 OCR draft 字段值，避免把坏格式写入交易草稿。 */
 function normalizeReceiptDraftFieldValue(value: unknown, kind: ReceiptDraftFieldKind): string | number | string[] | undefined {
     if (kind === 'number') {
         return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
@@ -102,6 +108,7 @@ function normalizeReceiptDraftFieldValue(value: unknown, kind: ReceiptDraftField
     return normalizeReceiptDraftString(value);
 }
 
+/** 归一单个 OCR draft 字段，并保留置信度、原因、证据和展示单位。 */
 function normalizeReceiptDraftField(raw: unknown, kind: ReceiptDraftFieldKind): ReceiptDraftField | undefined {
     if (!isRecord(raw)) {
         return undefined;
@@ -142,6 +149,7 @@ function normalizeReceiptDraftField(raw: unknown, kind: ReceiptDraftFieldKind): 
     return field;
 }
 
+/** 归一同一字段的多个 OCR 候选值。 */
 function normalizeReceiptDraftFieldList(raw: unknown, kind: ReceiptDraftFieldKind): ReceiptDraftField[] | undefined {
     if (!Array.isArray(raw)) {
         return undefined;
@@ -153,6 +161,7 @@ function normalizeReceiptDraftFieldList(raw: unknown, kind: ReceiptDraftFieldKin
     return fields.length ? fields : undefined;
 }
 
+/** 判断自动填充区是否至少包含一个可应用字段。 */
 function hasReceiptDraftAutoFill(autoFill: ReceiptDraftAutoFill): boolean {
     return !!(
         autoFill.type
@@ -166,6 +175,7 @@ function hasReceiptDraftAutoFill(autoFill: ReceiptDraftAutoFill): boolean {
     );
 }
 
+/** 判断候选区是否至少包含一个可展示字段。 */
 function hasReceiptDraftCandidates(candidates: ReceiptDraftCandidates): boolean {
     return !!(
         candidates.type?.length
@@ -179,6 +189,7 @@ function hasReceiptDraftCandidates(candidates: ReceiptDraftCandidates): boolean 
     );
 }
 
+/** 将后端图片 OCR 原始 draft 归一为交易编辑页可消费的草稿结构。 */
 export function normalizeReceiptTransactionDraft(raw: unknown): ReceiptTransactionDraft | undefined {
     if (!isRecord(raw)) {
         return undefined;

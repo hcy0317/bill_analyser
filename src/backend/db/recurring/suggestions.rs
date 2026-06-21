@@ -1,4 +1,5 @@
 #[tracing::instrument(level = "debug", skip_all)]
+/// 统计当前用户周期建议数量，供分页和 badge 使用。
 pub async fn count_postgres_recurring_suggestions(
     pool: &PostgresPool,
     user_id: UserId,
@@ -26,6 +27,7 @@ pub async fn count_postgres_recurring_suggestions(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 分页读取当前用户周期建议列表，并保持检测结果的排序合同。
 pub async fn list_postgres_recurring_suggestions(
     pool: &PostgresPool,
     user_id: UserId,

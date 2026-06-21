@@ -1,3 +1,4 @@
+/// 基于正式账单历史检测周期候选并写入当前用户的周期建议表。
 pub async fn detect_and_save_postgres_recurring_suggestions(
     pool: &PostgresPool,
     user_id: UserId,

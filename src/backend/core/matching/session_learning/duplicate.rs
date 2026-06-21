@@ -1,3 +1,4 @@
+/// 构造单个重复账单候选，用于导入预览和正式账单 matching 展示。
 pub fn build_duplicate_bill_candidate(
     anchor_bill: &Map<String, Value>,
     candidate_bill: &Map<String, Value>,
@@ -25,6 +26,7 @@ pub fn build_duplicate_bill_candidate(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 从候选账单集合中批量构造重复账单候选列表。
 pub fn build_duplicate_bill_candidates(
     anchor_bill: &Map<String, Value>,
     candidate_bills: &[Value],

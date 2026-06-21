@@ -1,3 +1,4 @@
+/// 根据正式账单和学习规则构造单个 learning matching 候选。
 pub fn build_learning_candidate_for_bill(
     bill: &Map<String, Value>,
     rule: &Map<String, Value>,
@@ -60,6 +61,7 @@ pub fn build_learning_candidate_for_bill(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 为正式账单批量生成 learning matching 候选，并按相似度排序。
 pub fn build_learning_candidates_for_bill(
     bill: &Map<String, Value>,
     rules: &[Value],
@@ -99,6 +101,7 @@ pub fn build_learning_candidates_for_bill(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 反序列化 learning 规则特征，兼容旧 payload 的缺失或坏格式。
 pub fn deserialize_learning_match_features(
     rule: &Map<String, Value>,
 ) -> Option<BTreeMap<String, String>> {
@@ -125,6 +128,7 @@ pub fn deserialize_learning_match_features(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 计算 learning 规则和账单特征的相似度分数。
 pub fn score_learning_rule_similarity(
     bill_features: &BTreeMap<String, String>,
     rule_features: &BTreeMap<String, String>,
@@ -186,6 +190,7 @@ pub fn score_learning_rule_similarity(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 生成 learning 规则命中摘要，供候选面板展示证据。
 pub fn build_learning_rule_result_summary(
     rule: &Map<String, Value>,
     categories: &[Value],

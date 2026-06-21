@@ -1,3 +1,4 @@
+/// 按用户、筛选、分页和排序查询正式账单列表，并返回总数与记录。
 pub async fn query_postgres_bills(
     pool: &PostgresPool,
     user_id: i64,
@@ -45,6 +46,7 @@ pub async fn query_postgres_bills(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 在当前用户范围内读取单笔正式账单详情。
 pub async fn get_postgres_bill_by_id(
     pool: &PostgresPool,
     user_id: i64,

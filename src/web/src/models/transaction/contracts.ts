@@ -216,6 +216,7 @@ export interface TransactionAmountsRequestParams extends PartialRecord<Transacti
     monthBeforeLast10Months?: StartEndTime;
 }
 
+/** 统计请求时间窗集合，负责把多组交易金额查询参数序列化为 API payload。 */
 export class TransactionAmountsRequest {
     public readonly useTransactionTimezone: boolean;
     public readonly query: string;

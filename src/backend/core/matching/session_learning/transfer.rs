@@ -1,4 +1,5 @@
 #[tracing::instrument(level = "debug", skip_all)]
+/// 构造单个转账配对候选，保持来源/目标行和金额方向语义。
 pub fn build_transfer_pair_candidate(
     anchor_bill: &Map<String, Value>,
     candidate_bill: &Map<String, Value>,
@@ -66,6 +67,7 @@ pub fn build_transfer_pair_candidate(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 从预览行组合中筛选并构造可展示的转账配对候选列表。
 pub fn build_transfer_pair_candidates(
     anchor_bill: &Map<String, Value>,
     candidate_bills: &[Value],

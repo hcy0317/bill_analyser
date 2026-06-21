@@ -1,3 +1,4 @@
+/// 接受周期建议并创建或更新对应周期模板。
 pub async fn accept_postgres_recurring_suggestion(
     pool: &PostgresPool,
     user_id: UserId,
@@ -92,6 +93,7 @@ pub async fn accept_postgres_recurring_suggestion(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 拒绝周期建议，防止同一建议继续干扰用户判断。
 pub async fn reject_postgres_recurring_suggestion(
     pool: &PostgresPool,
     user_id: UserId,

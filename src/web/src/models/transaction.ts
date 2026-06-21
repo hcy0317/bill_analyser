@@ -17,6 +17,7 @@ import type {
     TransactionModifyRequest
 } from './transaction/contracts.ts';
 
+/** 前端正式交易模型，统一承载列表、编辑、批量录入和移动端页面的交易字段投影。 */
 export class Transaction implements TransactionInfoResponse {
     public id: string;
     public timeSequenceId: string;
@@ -464,6 +465,7 @@ export class Transaction implements TransactionInfoResponse {
     }
 }
 
+/** 交易地理位置请求模型，保持经纬度、地址和坐标类型字段的 API 合同。 */
 export class TransactionGeoLocation implements TransactionGeoLocationRequest {
     public latitude: number;
     public longitude: number;

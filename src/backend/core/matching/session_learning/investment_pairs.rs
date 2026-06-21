@@ -1,3 +1,4 @@
+/// 构造投资买卖或账户流转的配对候选。
 pub fn build_investment_pair_candidate(
     anchor_bill: &Map<String, Value>,
     candidate_bill: &Map<String, Value>,
@@ -59,6 +60,7 @@ pub fn build_investment_pair_candidate(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 从预览行组合中筛选并构造投资配对候选列表。
 pub fn build_investment_pair_candidates(
     anchor_bill: &Map<String, Value>,
     candidate_bills: &[Value],

@@ -1,3 +1,4 @@
+/// 读取绑定到指定周期模板的正式账单列表。
 pub async fn get_postgres_bills_linked_to_recurring(
     pool: &PostgresPool,
     user_id: UserId,
@@ -23,6 +24,7 @@ pub async fn get_postgres_bills_linked_to_recurring(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 读取最近正式账单样本，作为周期检测的候选输入。
 pub async fn list_postgres_recent_bills_for_recurring_detection(
     pool: &PostgresPool,
     user_id: UserId,

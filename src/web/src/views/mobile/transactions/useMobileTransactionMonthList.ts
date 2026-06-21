@@ -8,6 +8,7 @@ import type { Transaction } from '@/models/transaction.ts';
 
 import { isNumber } from '@/lib/common.ts';
 
+/** 维护移动交易列表按月折叠状态，避免刷新列表时丢失用户折叠选择。 */
 export function useMobileTransactionMonthList(transactions: ComputedRef<TransactionMonthList[]>): {
     transactionInvisibleYearMonths: Ref<Record<TextualYearMonth, boolean>>;
     resetTransactionMonthListState: () => void;

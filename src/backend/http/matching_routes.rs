@@ -65,6 +65,7 @@ pub const MATCHING_RECURRING_CALENDAR_NETWORTH_ROUTE_PATTERNS: &[(&str, &str)] =
 ];
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 注册正式账单 matching、周期建议、日历和净值相关路由。
 pub fn matching_recurring_calendar_networth_runtime_router() -> Router<HttpAppState> {
     Router::new()
         .route("/api/calendar/events", get(calendar_events_handler))

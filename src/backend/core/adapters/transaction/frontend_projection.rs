@@ -1,3 +1,4 @@
+/// 把后端正式账单视图投影为前端交易列表和编辑页共用的响应结构。
 pub fn frontend_transaction_from_backend(bill: &BackendTransactionView) -> FrontendTransactionView {
     let parsed_date = parse_bill_datetime(&bill.date);
     let time = parsed_date
@@ -55,6 +56,7 @@ pub fn frontend_transaction_from_backend(bill: &BackendTransactionView) -> Front
     }
 }
 
+/// 将交易列表 type 查询参数归一为后端筛选可识别的交易类型名。
 pub fn transaction_list_type_filter(raw_value: Option<&str>) -> Option<String> {
     let value = raw_value?.trim();
     if value.is_empty() {
@@ -73,6 +75,7 @@ pub fn transaction_list_type_filter(raw_value: Option<&str>) -> Option<String> {
     Some(value.to_string())
 }
 
+/// 根据前端 0-based 月份参数生成整月闭区间日期字符串。
 pub fn month_date_range(year: i32, month: u32) -> Result<(String, String), RuntimeError> {
     if !(1..=12).contains(&month) {
         return Err(RuntimeError::new(ErrorCode::InvalidInput, "invalid month"));
@@ -87,10 +90,12 @@ pub fn month_date_range(year: i32, month: u32) -> Result<(String, String), Runti
     Ok((start, end))
 }
 
+/// 生成导出单元格的 key=value 文本，并对公式样式内容加引号防注入。
 pub fn serialize_export_cell(key: &str, value: impl ToString) -> String {
     serialize_optional_export_cell(key, Some(value))
 }
 
+/// 仅在可选值存在时生成导出单元格，避免把空值导出成误导性文本。
 pub fn serialize_optional_export_cell<T: ToString>(key: &str, value: Option<T>) -> String {
     let serialized = value.map(|value| value.to_string()).unwrap_or_default();
     if EXPORT_TEXT_KEYS.contains(&key) && is_formula_like_export_cell(&serialized) {
@@ -99,6 +104,7 @@ pub fn serialize_optional_export_cell<T: ToString>(key: &str, value: Option<T>) 
     serialized
 }
 
+/// 判断导出文本是否可能被电子表格当作公式执行。
 pub fn is_formula_like_export_cell(value: &str) -> bool {
     value
         .trim_start()

@@ -475,7 +475,7 @@ function getAmountFilterParameterCount(filterType: string): number {
     return amountFilterCentsType ? amountFilterCentsType.paramCount : 0;
 }
 
-function updateUrlWhenChanged(changed: boolean): void {
+function updateUrlWhenChanged(changed: boolean): void { // 交易列表筛选条件改变后统一刷新 URL，保持刷新页面和导出请求能复用同一查询合同。
     if (changed) {
         loading.value = true;
         currentPageTransactions.value = [];
@@ -485,7 +485,7 @@ function updateUrlWhenChanged(changed: boolean): void {
     }
 }
 
-function init(initProps: TransactionListProps): void {
+function init(initProps: TransactionListProps): void { // 从路由 query 和用户设置恢复交易列表状态，是桌面列表的单一初始化入口。
     let dateRange: TimeRangeAndDateType | null = getDateRangeByDateType(initProps.initDateType ? parseInt(initProps.initDateType) : undefined, firstDayOfWeek.value, fiscalYearStart.value);
 
     if (!dateRange && initProps.initDateType && initProps.initMaxTime && initProps.initMinTime &&
@@ -550,7 +550,7 @@ function init(initProps: TransactionListProps): void {
     });
 }
 
-function reload(force: boolean, init: boolean): void {
+function reload(force: boolean, init: boolean): void { // 根据当前页模式、筛选和分页重新加载交易数据，并同步月度概览。
     loading.value = true;
 
     const page = currentPage.value;
@@ -630,7 +630,7 @@ function changePageType(type: number): void {
     updateUrlWhenChanged(true);
 }
 
-function changeDateFilter(dateRange: TimeRangeAndDateType | number | null): void {
+function changeDateFilter(dateRange: TimeRangeAndDateType | number | null): void { // 切换日期筛选并同步日历、账期和普通日期范围三类查询参数。
     if (dateRange === DateRange.Custom.type || (isObject(dateRange) && dateRange.dateType === DateRange.Custom.type && !dateRange.minTime && !dateRange.maxTime)) { // Custom
         if (!query.value.minTime || !query.value.maxTime) {
             customMaxDatetime.value = getActualUnixTimeForStore(getCurrentUnixTime(), currentTimezoneOffsetMinutes.value, getBrowserTimezoneOffsetMinutes());
@@ -822,7 +822,7 @@ function changeTypeFilter(type: number): void {
     updateUrlWhenChanged(changed);
 }
 
-function changeCategoryFilter(categoryIds: string): void {
+function changeCategoryFilter(categoryIds: string): void { // 切换分类筛选，处理多选状态和 URL 中的 categoryIds 合同。
     categoryMenuState.value = false;
 
     if (query.value.categoryIds === categoryIds) {
@@ -842,7 +842,7 @@ function changeMultipleCategoriesFilter(changed: boolean): void {
     updateUrlWhenChanged(changed);
 }
 
-function changeAccountFilter(accountIds: string): void {
+function changeAccountFilter(accountIds: string): void { // 切换账户筛选，保持父子账户隐藏状态和多选 query 合同一致。
     if (query.value.accountIds === accountIds) {
         return;
     }
@@ -910,7 +910,7 @@ function onAmountFilterTypeClick(filterType: string): void {
     }
 }
 
-function changeAmountFilter(filterType: string): void {
+function changeAmountFilter(filterType: string): void { // 应用金额筛选，按筛选类型决定需要写入 URL 的金额参数数量。
     currentAmountFilterType.value = '';
     amountMenuState.value = false;
 
@@ -952,7 +952,7 @@ function changeAmountFilter(filterType: string): void {
     updateUrlWhenChanged(changed);
 }
 
-function add(template?: TransactionTemplate): void {
+function add(template?: TransactionTemplate): void { // 打开新增交易弹窗，并把模板字段投影到正式交易草稿。
     const currentUnixTime = getCurrentUnixTime();
 
     let newTransactionTime: number | undefined = undefined;
@@ -985,7 +985,7 @@ function add(template?: TransactionTemplate): void {
     });
 }
 
-function addByRecognizingImage(): void {
+function addByRecognizingImage(): void { // 通过图片 OCR 新建交易草稿，统一处理金额分、时间、分类、账户和标签候选。
     aiImageRecognitionDialog.value?.open().then(result => {
         // result is RecognizedReceiptImageResponse: { amount(yuan|null), tradeTime(ISO|null), description, provenance, confidence }
         // Convert yuan -> cents to match Bill Analyser frontend money convention; skip when backend cannot determine.
@@ -1020,7 +1020,7 @@ function addByRecognizingImage(): void {
     });
 }
 
-function batchAdd(): void {
+function batchAdd(): void { // 打开批量手工录入弹窗，并把当前筛选上下文作为批量录入默认值。
     const currentUnixTime = getCurrentUnixTime();
 
     let newTransactionTime: number | undefined = undefined;
@@ -1052,7 +1052,7 @@ function batchAdd(): void {
     });
 }
 
-function importTransaction(): void {
+function importTransaction(): void { // 打开导入入口；导入预览本身属于 D1 域，这里只负责交易页装配。
     importDialog.value?.open().then(() => {
         reload(false, false);
     }).catch(error => {
@@ -1062,7 +1062,7 @@ function importTransaction(): void {
     });
 }
 
-function exportTransactions(fileExtension: string): void {
+function exportTransactions(fileExtension: string): void { // 使用当前交易列表筛选条件导出正式账单，避免导出结果与屏幕筛选不一致。
     if (exportingData.value) {
         return;
     }
@@ -1094,7 +1094,7 @@ function exportTransactions(fileExtension: string): void {
     });
 }
 
-function show(transaction: Transaction): void {
+function show(transaction: Transaction): void { // 打开交易详情/编辑弹窗，并在保存后按返回动作刷新列表或进入编辑态。
     editDialog.value?.open({
         id: transaction.id,
         currentTransaction: transaction

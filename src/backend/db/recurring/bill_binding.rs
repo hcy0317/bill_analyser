@@ -1,4 +1,5 @@
 #[tracing::instrument(level = "debug", skip_all)]
+/// 为指定正式账单生成可绑定的周期模板候选。
 pub async fn get_postgres_bill_recurring_candidates(
     pool: &PostgresPool,
     user_id: UserId,
@@ -31,6 +32,7 @@ pub async fn get_postgres_bill_recurring_candidates(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 将正式账单绑定到周期模板，并按模板规则重算下一次日期。
 pub async fn bind_postgres_bill_to_recurring(
     pool: &PostgresPool,
     user_id: UserId,
@@ -105,6 +107,7 @@ pub async fn bind_postgres_bill_to_recurring(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 解除正式账单与周期模板的绑定，并清理账单侧周期字段。
 pub async fn unbind_postgres_bill_from_recurring(
     pool: &PostgresPool,
     user_id: UserId,

@@ -1,3 +1,4 @@
+/// 读取正式账单绑定的标签名称列表。
 pub async fn get_postgres_bill_tags(
     pool: &PostgresPool,
     user_id: i64,
@@ -20,6 +21,7 @@ pub async fn get_postgres_bill_tags(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 读取当前用户第一个可用账户，作为手工录入缺省账户兜底。
 pub async fn get_first_postgres_account_id(
     pool: &PostgresPool,
     user_id: i64,
@@ -41,6 +43,7 @@ pub async fn get_first_postgres_account_id(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 在当前用户范围内按分类 id 解析主/子分类名称。
 pub async fn resolve_postgres_category_by_id(
     pool: &PostgresPool,
     user_id: i64,
@@ -66,6 +69,7 @@ pub async fn resolve_postgres_category_by_id(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 读取对账接口指定的账户基础信息和期初余额。
 pub async fn get_postgres_reconciliation_account(
     pool: &PostgresPool,
     user_id: i64,
@@ -94,6 +98,7 @@ pub async fn get_postgres_reconciliation_account(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 读取对账筛选所需的当前用户分类清单。
 pub async fn list_postgres_reconciliation_categories(
     pool: &PostgresPool,
     user_id: i64,

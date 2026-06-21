@@ -313,6 +313,27 @@ D4 `behavior-lock` 必须补强或明确复用以下场景：
 - 收紧 Rust/frontend structure baseline，让已完成 D4 项退出 failure/warning；非 D4 历史债不得在 D4 governance-docs 中吞并。
 - PR/CI/merge/delete/writeback 证据完整后，cursor 才能推进到 D5。
 
+本次 comment-pass 切片执行证据（2026-06-21）：
+
+- 已按“导出函数、业务关键函数、复杂私有 helper 必须有中文说明；简单 getter/映射/事件转发不强制”策略补齐 D4 说明：
+  - 后端正式交易适配器：类型/金额转换、批量 route 响应、图片安全、对账余额回放和错误响应。
+  - 后端正式账单 repository：查询、创建、更新、删除、标签/账户/分类读取和对账辅助查询。
+  - 后端周期与 matching：周期建议检测/接受/拒绝、账单绑定/解绑、linked bills、transfer/duplicate/investment/learning 候选和 matching action payload。
+  - 前端交易入口：`useTransactionsStore`、`Transaction`/`TransactionGeoLocation`、receipt OCR draft 归一、移动编辑图片/金额 helper、周期候选展示 helper、批量录入目标字段规则。
+  - 前端复杂页面 helper：桌面/移动交易列表筛选与导入导出、桌面编辑弹窗保存/周期/OCR/matching、批量手工录入填充/校验/键盘导航、移动编辑保存/OCR/地理位置。
+- 本切片只补中文说明，不改变 REST route、SQL、金额 cents 字段、Pinia/store 导出、页面入口、交互视觉或业务判断。
+- 通过验证：
+  - `cargo fmt --all -- --check`
+  - `cargo test -p bill-analyser-db --test bills_postgres`
+  - `cargo test -p bill-analyser-core --test transaction_adapter_contracts`
+  - `cargo test -p bill-analyser-http matching`
+  - `Set-Location src/web; npm run lint:ci`（0 errors，保留既有 `no-explicit-any` warnings）
+  - `Set-Location src/web; npm run test -- --runTestsByPath ../../tests/web/stores/transaction.core.test.ts ../../tests/web/stores/transaction.recognizeReceiptImage.test.ts ../../tests/web/models/bill_matching.test.ts ../../tests/web/views/desktop/transactions/editDialogPictureOcr.test.ts ../../tests/web/views/desktop/transactions/batchManualEntryDialog.test.ts ../../tests/web/views/mobile/transactionEditPagePictureOcr.test.ts ../../tests/web/views/mobile/transactionListPageInvestment.test.ts ../../tests/web/views/mobile/transactionEditPageInvestment.test.ts`
+  - `Set-Location src/web; npm run test:coverage`（90 suites / 38980 tests passed；总行覆盖 99.13%，总分支覆盖 91.48%）
+  - `node scripts/check-rust-backend-structure.mjs`（仍因 6 个非 D4 历史结构债失败；D4 后端目标仅保留 line-reduction warning）
+  - `Set-Location src/web; npm run structure:check`（仍因 7 个非 D4 历史结构债失败；D4 前端目标仅保留 line-reduction warning）
+  - `git diff --check`
+
 ## 9. 关键风险与阻断条件
 
 - `db/bills/postgres_reads.rs` 同时处理 SQL、事务、身份校验、标签、余额同步和 row mapping；拆分前必须先锁 user-scope、transaction rollback、cents 字段和账户余额副作用。

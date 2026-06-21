@@ -1,3 +1,4 @@
+/// 更新当前用户的一笔正式账单，并重新同步标签与受影响账户余额。
 pub async fn update_postgres_bill(
     pool: &PostgresPool,
     user_id: i64,
@@ -79,6 +80,7 @@ pub async fn update_postgres_bill(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 批量更新正式账单，确保每条更新的身份校验和余额同步在事务内完成。
 pub async fn batch_update_postgres_bills(
     pool: &PostgresPool,
     user_id: i64,

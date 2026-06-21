@@ -1,3 +1,4 @@
+/// 构造接受、拒绝、清除 matching 候选后的统一 action payload。
 pub fn build_matching_candidate_action_payload(
     candidate_id: &str,
     result: &Map<String, Value>,

@@ -1,7 +1,9 @@
+/// 返回单笔账单需要重算余额的账户集合。
 pub fn sync_account_ids_for_bill(snapshot: BillAccountSyncSnapshot) -> Vec<i64> {
     collect_account_ids([snapshot])
 }
 
+/// 返回更新账单前后都需要重算余额的账户集合。
 pub fn sync_account_ids_for_update(
     old_bill: BillAccountSyncSnapshot,
     new_bill: BillAccountSyncSnapshot,
@@ -9,10 +11,12 @@ pub fn sync_account_ids_for_update(
     collect_account_ids([old_bill, new_bill])
 }
 
+/// 返回批量删除账单后需要重算余额的账户集合。
 pub fn sync_account_ids_for_batch_delete(bills: &[BillAccountSyncSnapshot]) -> Vec<i64> {
     collect_account_ids(bills.iter().copied())
 }
 
+/// 按收入、支出、转账、投资方向重新计算指定账户余额。
 pub fn calculate_account_balance_from_bills(
     account_id: i64,
     initial_balance: Money,
@@ -56,6 +60,7 @@ pub fn calculate_account_balance_from_bills(
     money_from_i128_cents(balance)
 }
 
+/// 解析对账单查询参数，并把缺失或非法输入映射成稳定路由响应。
 pub fn parse_reconciliation_query(
     account_id: Option<&str>,
     start_time: Option<i64>,
@@ -99,6 +104,7 @@ pub fn parse_reconciliation_query(
     })
 }
 
+/// 将前端分类筛选 id 映射成对账查询使用的主/子分类筛选条件。
 pub fn reconciliation_category_filters(
     raw_category_ids: Option<&str>,
     categories: &[ReconciliationCategoryRecord],
@@ -127,6 +133,7 @@ pub fn reconciliation_category_filters(
         .collect()
 }
 
+/// 将前端交易类型编码映射为后端对账筛选类型名。
 pub fn reconciliation_type_filter(transaction_type_code: Option<i64>) -> Option<&'static str> {
     match transaction_type_code {
         Some(1) => Some(TransactionType::Income.backend_name()),
@@ -137,6 +144,7 @@ pub fn reconciliation_type_filter(transaction_type_code: Option<i64>) -> Option<
     }
 }
 
+/// 构造对账查询复用的账单筛选 JSON，保持与正式账单列表筛选一致。
 pub fn build_reconciliation_filters(
     params: &ReconciliationQueryParams,
     category_filters: &[ReconciliationCategoryFilter],
@@ -169,6 +177,7 @@ pub fn build_reconciliation_filters(
     Value::Object(filters)
 }
 
+/// 根据查询是否指定开始日期决定对账期初余额来源。
 pub fn reconciliation_opening_balance(
     params: &ReconciliationQueryParams,
     account_initial_balance: Money,
@@ -184,6 +193,7 @@ pub fn reconciliation_opening_balance(
     }
 }
 
+/// 逐笔回放对账账单，计算期末余额、流入流出和每笔开收盘余额。
 pub fn calculate_reconciliation_summary(
     account_id: i64,
     opening_balance: Money,
@@ -244,6 +254,7 @@ pub fn calculate_reconciliation_summary(
     })
 }
 
+/// 把余额回放结果回填到前端交易数组，并按时间倒序输出。
 pub fn build_reconciliation_transactions(
     frontend_transactions: Vec<Value>,
     balance_history: &BTreeMap<String, ReconciliationBalanceEntry>,
@@ -275,6 +286,7 @@ pub fn build_reconciliation_transactions(
     transactions
 }
 
+/// 组装对账接口最终 payload，统一 cents 汇总字段和交易明细。
 pub fn reconciliation_result_payload(
     params: &ReconciliationQueryParams,
     account_name: impl Into<String>,
@@ -304,6 +316,7 @@ pub fn reconciliation_result_payload(
     })
 }
 
+/// 生成对账接口成功响应。
 pub fn reconciliation_success_response(
     params: &ReconciliationQueryParams,
     account_name: impl Into<String>,
@@ -321,6 +334,7 @@ pub fn reconciliation_success_response(
     })
 }
 
+/// 生成对账接口缺少必填参数时的错误响应。
 pub fn missing_reconciliation_parameters_response() -> RouteResponseContract {
     simple_route_error_response(
         400,
@@ -328,6 +342,7 @@ pub fn missing_reconciliation_parameters_response() -> RouteResponseContract {
     )
 }
 
+/// 生成对账接口账户 id 非法时的错误响应。
 pub fn invalid_reconciliation_account_id_response(
     account_id: impl ToString,
 ) -> RouteResponseContract {
@@ -337,10 +352,12 @@ pub fn invalid_reconciliation_account_id_response(
     )
 }
 
+/// 生成对账账户不存在时的错误响应。
 pub fn reconciliation_account_not_found_response() -> RouteResponseContract {
     simple_route_error_response(404, "Account not found")
 }
 
+/// 生成对账内部错误响应，并保留前端依赖的 message 文案。
 pub fn reconciliation_internal_error_response(error: impl Into<String>) -> RouteResponseContract {
     let mut body = Map::new();
     body.insert("success".to_string(), Value::Bool(false));

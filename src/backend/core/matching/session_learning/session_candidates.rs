@@ -1,3 +1,4 @@
+/// 汇总导入 session 的配对候选响应，供前端候选面板消费。
 pub fn build_matching_session_candidates(session_id: &str, previews: &[Value]) -> Value {
     #[cfg(not(coverage))]
     tracing::info!(domain = "matching", operation = "build_matching_session_candidates", "business operation entered");
@@ -55,6 +56,7 @@ pub fn build_matching_session_candidates(session_id: &str, previews: &[Value]) -
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 解析对账候选查询参数，并返回可透传给 repository 的筛选 JSON。
 pub fn parse_reconciliation_candidates_query(query: &Map<String, Value>) -> Result<Value, String> {
     let candidate_type = optional_lower_query(query, "candidateType");
     if let Some(candidate_type) = candidate_type.as_deref() {

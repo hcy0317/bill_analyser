@@ -217,7 +217,7 @@ const noTransaction = computed<boolean>(() => {
 
 const hasMoreTransaction = computed<boolean>(() => transactionsStore.hasMoreTransaction);
 
-function init(): void {
+function init(): void { // 从路由 query、账期设置和缓存状态恢复移动交易列表。
     const initQuery = props.f7route.query;
 
     let dateRange: TimeRangeAndDateType | null = getDateRangeByDateType(initQuery['dateType'] ? parseInt(initQuery['dateType']) : undefined, firstDayOfWeek.value, fiscalYearStart.value);
@@ -247,7 +247,7 @@ function init(): void {
     reload();
 }
 
-function reload(done?: () => void): void {
+function reload(done?: () => void): void { // 重新加载移动交易列表第一页，并重建按月分组和折叠高度。
     const force = !!done;
 
     if (!done) {
@@ -305,7 +305,7 @@ function reload(done?: () => void): void {
     });
 }
 
-function loadMore(autoExpand: boolean): void {
+function loadMore(autoExpand: boolean): void { // 加载下一页交易数据，并按月份追加到现有分组。
     if (!hasMoreTransaction.value) {
         return;
     }
@@ -354,7 +354,7 @@ function changePageType(type: number): void {
     }
 }
 
-function changeDateFilter(dateType: number): void {
+function changeDateFilter(dateType: number): void { // 切换移动端日期筛选，统一处理自然日期和账期日期范围。
     if (dateType === DateRange.Custom.type) { // Custom
         if (!query.value.minTime || !query.value.maxTime) {
             customMaxDatetime.value = getActualUnixTimeForStore(getCurrentUnixTime(), currentTimezoneOffsetMinutes.value, getBrowserTimezoneOffsetMinutes());
@@ -509,7 +509,7 @@ function shiftDateRange(minTime: number, maxTime: number, scale: number): void {
     }
 }
 
-function changeTypeFilter(type: number): void {
+function changeTypeFilter(type: number): void { // 切换交易类型筛选并刷新移动列表。
     if (query.value.type === type) {
         return;
     }
@@ -544,7 +544,7 @@ function changeTypeFilter(type: number): void {
     }
 }
 
-function changeCategoryFilter(categoryIds: string): void {
+function changeCategoryFilter(categoryIds: string): void { // 切换分类筛选，保持移动端单选和多选入口共用同一 query 字段。
     if (query.value.categoryIds === categoryIds) {
         return;
     }
@@ -570,7 +570,7 @@ function filterMultipleCategories(): void {
     props.f7router.navigate(navigateUrl);
 }
 
-function changeAccountFilter(accountIds: string): void {
+function changeAccountFilter(accountIds: string): void { // 切换账户筛选，保持隐藏账户展示与桌面端筛选语义一致。
     if (query.value.accountIds === accountIds) {
         return;
     }
@@ -640,7 +640,7 @@ function changeKeywordFilter(keyword: string): void {
     }
 }
 
-function changeAmountFilter(filterType: string): void {
+function changeAmountFilter(filterType: string): void { // 应用移动端金额筛选，并写回金额筛选类型和范围参数。
     if (query.value.amountFilterCents === filterType) {
         return;
     }
@@ -662,7 +662,7 @@ function changeAmountFilter(filterType: string): void {
     }
 }
 
-function add(): void {
+function add(): void { // 进入移动端新增交易页，并把当前筛选上下文作为默认草稿来源。
     const currentUnixTime = getCurrentUnixTime();
 
     let setTransactionTime = false;
@@ -703,15 +703,15 @@ function add(): void {
     props.f7router.navigate(`/transaction/add?${params.join('&')}`);
 }
 
-function duplicate(transaction: Transaction): void {
+function duplicate(transaction: Transaction): void { // 以当前交易为模板进入移动端复制页面。
     props.f7router.navigate(`/transaction/add?id=${transaction.id}&type=${transaction.type}`);
 }
 
-function edit(transaction: Transaction): void {
+function edit(transaction: Transaction): void { // 进入移动端交易编辑页面。
     props.f7router.navigate(`/transaction/edit?id=${transaction.id}&type=${transaction.type}`);
 }
 
-function remove(transaction: Transaction | null, confirm: boolean): void {
+function remove(transaction: Transaction | null, confirm: boolean): void { // 删除移动端交易，支持二次确认并在成功后刷新列表。
     if (!transaction) {
         showAlert('An error occurred');
         return;
@@ -774,7 +774,7 @@ function onResize(): void {
         });
 }
 
-function onScroll(): void {
+function onScroll(): void { // 滚动时维护月份折叠可见性并触发无限加载。
     setTransactionInvisibleYearMonthList();
 }
 

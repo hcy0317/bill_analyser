@@ -315,7 +315,7 @@ function showRecurringOperationError(error: unknown): void {
     snackbar.value?.showError(String(error));
 }
 
-async function refreshBillRecurringCandidates(silent = false): Promise<void> {
+async function refreshBillRecurringCandidates(silent = false): Promise<void> { // 刷新当前账单可绑定的周期候选，并在非静默模式下反馈加载错误。
     if (props.type !== TransactionEditPageType.Transaction || !editId.value || mode.value === TransactionEditPageMode.Add) {
         resetBillRecurringState();
         return;
@@ -372,7 +372,7 @@ function closeBillRecurringCandidateDialog(): void {
     showRecurringCandidateDialog.value = false;
 }
 
-async function applyBillRecurringCandidate(): Promise<void> {
+async function applyBillRecurringCandidate(): Promise<void> { // 将用户选择的周期候选绑定到当前正式账单，并同步弹窗内周期状态。
     if (!editId.value || !selectedRecurringCandidateId.value) {
         return;
     }
@@ -409,7 +409,7 @@ async function applyBillRecurringCandidate(): Promise<void> {
     }
 }
 
-async function clearBillRecurringMatch(): Promise<void> {
+async function clearBillRecurringMatch(): Promise<void> { // 解除当前账单的周期绑定，并刷新候选列表以恢复可绑定状态。
     if (!editId.value || !linkedRecurringId.value) {
         return;
     }
@@ -446,7 +446,7 @@ function clearBillRecurringMatchFromDialog(): void {
     clearBillRecurringMatch();
 }
 
-function setTransaction(newTransaction: Transaction | null, options: SetTransactionOptions, setContextData: boolean, convertContextTime: boolean): void {
+function setTransaction(newTransaction: Transaction | null, options: SetTransactionOptions, setContextData: boolean, convertContextTime: boolean): void { // 设置弹窗交易上下文，集中处理复制、只读、时间转换和背景展示状态。
     setTransactionModelByTransaction(
         transaction.value,
         newTransaction,
@@ -472,7 +472,7 @@ function setTransaction(newTransaction: Transaction | null, options: SetTransact
     );
 }
 
-function open(options: TransactionEditOptions): Promise<TransactionEditResponse | undefined> {
+function open(options: TransactionEditOptions): Promise<TransactionEditResponse | undefined> { // 打开交易编辑弹窗，并用 Promise 向列表页返回保存、删除、编辑或取消结果。
     addByTemplateId.value = null;
     duplicateFromId.value = null;
     showState.value = true;
@@ -663,7 +663,7 @@ function open(options: TransactionEditOptions): Promise<TransactionEditResponse 
     });
 }
 
-function save(): void {
+function save(): void { // 保存新增或编辑交易，统一处理标签新建、地理位置、周期状态和返回动作。
     const problemMessage = inputEmptyProblemMessage.value;
 
     if (problemMessage) {
@@ -916,7 +916,7 @@ function cancel(): void {
     }
 }
 
-function updateGeoLocation(forceUpdate: boolean): void {
+function updateGeoLocation(forceUpdate: boolean): void { // 更新交易地理位置，支持强制刷新和浏览器定位失败提示。
     geoMenuState.value = false;
 
     if (!isSupportGeoLocation) {
@@ -1012,7 +1012,7 @@ function applyReceiptDraftCandidate(candidate: ReceiptDraftCandidateHint): void 
     receiptDraftCandidateHints.value = receiptDraftCandidateHints.value.filter(item => item.id !== candidate.id);
 }
 
-function applyReceiptRecognitionResult(result: RecognizedReceiptImageResponse): void {
+function applyReceiptRecognitionResult(result: RecognizedReceiptImageResponse): void { // 把图片 OCR 识别结果应用到交易草稿，保留候选证据并只覆盖可自动填充字段。
     receiptDraftCandidateHints.value = buildReceiptDraftCandidateHints(result.draft);
     applyReceiptDraftAutoFillToTransaction(transaction.value, result);
 
@@ -1048,7 +1048,7 @@ function showReceiptRecognitionError(error: RecognizeReceiptImageError | unknown
     snackbar.value?.showError('Unable to recognize image');
 }
 
-async function recognizeUploadedPicture(pictureFile: File): Promise<void> {
+async function recognizeUploadedPicture(pictureFile: File): Promise<void> { // 上传后调用图片 OCR 识别，并将识别成功或失败状态回写到弹窗提示。
     if (!shouldRecognizeUploadedPicture()) {
         return;
     }
@@ -1066,7 +1066,7 @@ async function recognizeUploadedPicture(pictureFile: File): Promise<void> {
     }
 }
 
-async function uploadPicture(event: Event): Promise<void> {
+async function uploadPicture(event: Event): Promise<void> { // 上传交易图片，成功后按配置触发 OCR，并维护当前图片列表。
     if (!event || !event.target) {
         return;
     }
@@ -1147,7 +1147,7 @@ function onBillMatchingError(message: string): void {
     snackbar.value?.showError(message);
 }
 
-async function onBillMatchingUpdated(): Promise<void> {
+async function onBillMatchingUpdated(): Promise<void> { // matching 面板操作后刷新账单和候选，确保弹窗展示最新配对状态。
     if (props.type !== TransactionEditPageType.Transaction || !editId.value || mode.value !== TransactionEditPageMode.View) {
         return;
     }

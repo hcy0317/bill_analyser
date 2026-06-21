@@ -1,3 +1,4 @@
+/// 删除当前用户的一笔正式账单，并同步相关账户余额。
 pub async fn delete_postgres_bill(
     pool: &PostgresPool,
     user_id: i64,
@@ -28,6 +29,7 @@ pub async fn delete_postgres_bill(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 批量删除当前用户的正式账单，并按受影响账户去重重算余额。
 pub async fn batch_delete_postgres_bills(
     pool: &PostgresPool,
     user_id: i64,

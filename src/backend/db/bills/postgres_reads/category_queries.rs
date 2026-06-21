@@ -1,4 +1,5 @@
 #[tracing::instrument(level = "debug", skip_all)]
+/// 将分类 id 列表解析成当前用户可见的主/子分类筛选条件。
 pub async fn postgres_category_filters_for_ids(
     pool: &PostgresPool,
     user_id: i64,

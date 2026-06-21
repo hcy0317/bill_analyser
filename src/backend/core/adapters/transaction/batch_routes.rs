@@ -1,3 +1,4 @@
+/// 从批量创建请求中抽取交易条目数组，保证后续逐条转换的输入形状稳定。
 pub fn batch_create_transaction_items(
     payload: &Value,
 ) -> Result<Vec<&Map<String, Value>>, RuntimeError> {
@@ -35,6 +36,7 @@ pub fn batch_create_transaction_items(
     Ok(objects)
 }
 
+/// 校验单条创建交易在路由层必须存在的字段。
 pub fn validate_bill_create_fields<'a>(
     fields: impl IntoIterator<Item = &'a str>,
 ) -> Result<(), RuntimeError> {
@@ -45,6 +47,7 @@ pub fn validate_bill_create_fields<'a>(
     )
 }
 
+/// 校验单条更新交易在路由层必须存在的字段。
 pub fn validate_bill_update_fields<'a>(
     fields: impl IntoIterator<Item = &'a str>,
 ) -> Result<(), RuntimeError> {
@@ -55,6 +58,7 @@ pub fn validate_bill_update_fields<'a>(
     )
 }
 
+/// 校验批量更新条目必须携带 id 和局部更新字段。
 pub fn validate_batch_route_update_fields<'a>(
     fields: impl IntoIterator<Item = &'a str>,
 ) -> Result<(), RuntimeError> {
@@ -65,6 +69,7 @@ pub fn validate_batch_route_update_fields<'a>(
     )
 }
 
+/// 生成批量更新响应，保持旧接口的 updatedCount 字段合同。
 pub fn batch_update_response(
     success_count: usize,
     failed_count: usize,
@@ -77,6 +82,7 @@ pub fn batch_update_response(
     }
 }
 
+/// 生成批量创建成功 payload，保留逐条结果和 id 列表两个兼容字段。
 pub fn batch_create_success_response(items: Vec<Value>, ids: Vec<String>) -> BatchCreateResult {
     BatchCreateResult {
         failed_index: None,
@@ -86,6 +92,7 @@ pub fn batch_create_success_response(items: Vec<Value>, ids: Vec<String>) -> Bat
     }
 }
 
+/// 将批量创建成功 payload 包装成路由响应合同。
 pub fn batch_create_success_route_response(
     items: Vec<Value>,
     ids: Vec<String>,
@@ -99,6 +106,7 @@ pub fn batch_create_success_route_response(
     }
 }
 
+/// 生成批量创建部分失败的业务响应，保留成功项和逐条错误明细。
 pub fn batch_create_failure_response(
     failed_index: usize,
     created_items: Vec<Value>,
@@ -112,6 +120,7 @@ pub fn batch_create_failure_response(
     }
 }
 
+/// 生成批量创建在 payload 预处理阶段失败时的路由响应。
 pub fn batch_create_prepare_error_route_response(
     error: impl Into<String>,
     failed_index: usize,
@@ -122,6 +131,7 @@ pub fn batch_create_prepare_error_route_response(
     }
 }
 
+/// 生成批量创建在持久化阶段失败时的路由响应。
 pub fn batch_create_persist_error_route_response(
     error: impl Into<String>,
     failed_index: usize,
@@ -142,6 +152,7 @@ pub fn batch_create_persist_error_route_response(
     }
 }
 
+/// 生成删除单笔正式账单后的兼容 payload。
 pub fn delete_bill_success_payload() -> Value {
     let mut payload = Map::new();
     payload.insert("success".to_string(), Value::Bool(true));
@@ -153,6 +164,7 @@ pub fn delete_bill_success_payload() -> Value {
     Value::Object(payload)
 }
 
+/// 生成批量删除后的删除数量 payload。
 pub fn batch_delete_success_payload(deleted_count: usize) -> Value {
     let mut result = Map::new();
     result.insert(
@@ -165,6 +177,7 @@ pub fn batch_delete_success_payload(deleted_count: usize) -> Value {
     Value::Object(payload)
 }
 
+/// 汇总批量更新前后受影响账户，供余额重算去重使用。
 pub fn batch_update_balance_sync_account_ids<'a>(
     _updated_fields: impl IntoIterator<Item = &'a str>,
 ) -> Vec<i64> {

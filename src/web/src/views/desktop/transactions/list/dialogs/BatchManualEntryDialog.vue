@@ -120,7 +120,7 @@ function getInitialTransactionType(type?: string | number): number {
     return TransactionType.Expense;
 }
 
-function createTransactionRow(options?: BatchManualEntryDialogOpenOptions): BatchEntryRow {
+function createTransactionRow(options?: BatchManualEntryDialogOpenOptions): BatchEntryRow { // 创建批量录入空行，并应用入口传入的筛选上下文默认值。
     const timezone = settingsStore.appSettings.timeZone;
     const utcOffset = getTimezoneOffsetMinutes(timezone);
     const type = getInitialTransactionType(options?.type);
@@ -147,7 +147,7 @@ function createTransactionRow(options?: BatchManualEntryDialogOpenOptions): Batc
     return { id: rowId, transaction };
 }
 
-function createRowFromTransaction(source: Transaction): BatchEntryRow {
+function createRowFromTransaction(source: Transaction): BatchEntryRow { // 从已有行复制新行，保留可批量复用的交易字段并生成新的行 id。
     const timezone = settingsStore.appSettings.timeZone;
     const utcOffset = getTimezoneOffsetMinutes(timezone);
     const transaction = Transaction.createNewTransaction(source.type, source.time, timezone, utcOffset);
@@ -192,7 +192,7 @@ function isDestinationAmountSync(rowId: string): boolean {
     return !!destinationAmountSyncState.value[rowId];
 }
 
-function onTransactionTypeChanged(row: BatchEntryRow): void {
+function onTransactionTypeChanged(row: BatchEntryRow): void { // 类型变化时重置不再适用的分类和目标字段，避免转账/投资残留污染普通交易。
     const transaction = row.transaction;
     transaction.expenseCategoryId = '';
     transaction.incomeCategoryId = '';
@@ -258,7 +258,7 @@ function copyPreviousRow(index: number): void {
     rows.value.splice(index + 1, 0, createRowFromTransaction(previousRow.transaction));
 }
 
-function applyCommonFields(target: Transaction, source: Transaction, rowId: string): void {
+function applyCommonFields(target: Transaction, source: Transaction, rowId: string): void { // 将上一行常用字段强制覆盖到目标行，用于“向下应用”场景。
     target.type = source.type;
     target.expenseCategoryId = '';
     target.incomeCategoryId = '';
@@ -283,7 +283,7 @@ function applyCommonFields(target: Transaction, source: Transaction, rowId: stri
     currentCategoryIds.value[rowId] = target.getCategoryId();
 }
 
-function fillEmptyCommonFields(target: Transaction, source: Transaction, rowId: string): void {
+function fillEmptyCommonFields(target: Transaction, source: Transaction, rowId: string): void { // 只填充目标行空字段，用于保留用户已输入内容的批量补全场景。
     if (!target.getCategoryId() && source.getCategoryId()) {
         target.type = source.type;
         target.expenseCategoryId = '';
@@ -406,7 +406,7 @@ function isRowEmpty(row: BatchEntryRow): boolean {
         && !transaction.comment;
 }
 
-function isRowValid(row: BatchEntryRow): boolean {
+function isRowValid(row: BatchEntryRow): boolean { // 校验单行是否满足提交条件，覆盖时间、类型、金额、账户和目标账户要求。
     const transaction = row.transaction;
     if (!transaction.getCategoryId()) {
         return false;
@@ -429,7 +429,7 @@ function isRowValid(row: BatchEntryRow): boolean {
     return true;
 }
 
-function getRowIssues(row: BatchEntryRow): string[] {
+function getRowIssues(row: BatchEntryRow): string[] { // 汇总单行校验问题，供状态列和提交前错误提示复用。
     const transaction = row.transaction;
     const issues: string[] = [];
 
@@ -462,7 +462,7 @@ function getDestinationCurrency(transaction: Transaction): string {
     return accountsStore.allAccountsMap[transaction.destinationAccountId]?.currency || userStore.currentUserDefaultCurrency || 'CNY';
 }
 
-function getAvailableFieldKeys(transaction: Transaction): BatchEntryFieldKey[] {
+function getAvailableFieldKeys(transaction: Transaction): BatchEntryFieldKey[] { // 根据交易类型返回键盘导航可进入的字段集合，隐藏不适用的目标字段。
     if (requiresDestination(transaction)) {
         return BATCH_ENTRY_FIELD_ORDER;
     }
@@ -523,7 +523,7 @@ function shouldHandleGridNavigation(event: KeyboardEvent): boolean {
     return true;
 }
 
-function focusBatchField(rowIndex: number, fieldKey: BatchEntryFieldKey): void {
+function focusBatchField(rowIndex: number, fieldKey: BatchEntryFieldKey): void { // 将焦点移动到批量表格指定单元格，供方向键和回车导航复用。
     nextTick(() => {
         window.setTimeout(() => {
             const cell = document.querySelector(`.batch-manual-entry-cell[data-batch-row="${rowIndex}"][data-batch-field="${fieldKey}"]`) as HTMLElement | null;
@@ -547,7 +547,7 @@ function focusBatchField(rowIndex: number, fieldKey: BatchEntryFieldKey): void {
     });
 }
 
-function onCellKeydown(rowIndex: number, fieldKey: BatchEntryFieldKey, event: KeyboardEvent): void {
+function onCellKeydown(rowIndex: number, fieldKey: BatchEntryFieldKey, event: KeyboardEvent): void { // 处理批量录入表格键盘导航，保持 Excel 风格的横纵向移动体验。
     if (!shouldHandleGridNavigation(event)) {
         return;
     }
@@ -621,7 +621,7 @@ function reset(options?: BatchManualEntryDialogOpenOptions): void {
     rows.value = [createTransactionRow(options)];
 }
 
-function open(options?: BatchManualEntryDialogOpenOptions): Promise<BatchManualEntryDialogResponse> {
+function open(options?: BatchManualEntryDialogOpenOptions): Promise<BatchManualEntryDialogResponse> { // 打开批量录入弹窗并返回提交结果 Promise，供交易列表刷新和 snackbar 使用。
     submitting.value = false;
     reset(options);
     showState.value = true;
@@ -646,7 +646,7 @@ function cancel(): void {
     }
 }
 
-function submit(): void {
+function submit(): void { // 提交所有非空且校验通过的批量交易，并保留逐行错误提示。
     const nonEmptyRows = rows.value.filter(row => !isRowEmpty(row));
 
     if (nonEmptyRows.length === 0) {

@@ -1,3 +1,4 @@
+/// 在当前用户范围内创建单笔正式账单，并同步标签、账户余额等副作用。
 pub async fn create_postgres_bill(
     pool: &PostgresPool,
     user_id: i64,
@@ -39,6 +40,7 @@ pub async fn create_postgres_bill(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 批量创建正式账单，保持全部条目在同一事务中的原子性。
 pub async fn batch_create_postgres_bills(
     pool: &PostgresPool,
     user_id: i64,

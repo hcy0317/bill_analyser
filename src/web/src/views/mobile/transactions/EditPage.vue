@@ -301,7 +301,7 @@ const transactionDisplayScheduledEndDate = computed<string>(() => {
     }
 });
 
-function getPageTypeNameMode(): { type: TransactionEditPageType, mode: TransactionEditPageMode } | null {
+function getPageTypeNameMode(): { type: TransactionEditPageType, mode: TransactionEditPageMode } | null { // 从移动端路由解析新增、编辑、复制和只读详情模式。
     if (props.f7route.path === '/transaction/add') {
         return {
             type: TransactionEditPageType.Transaction,
@@ -362,7 +362,7 @@ function hasAvailableCategoriesForType(type: number): boolean {
     return false;
 }
 
-async function addDefaultCategoriesAndOpenSheet(type: number): Promise<void> {
+async function addDefaultCategoriesAndOpenSheet(type: number): Promise<void> { // 当当前类型没有分类时先创建默认分类，再打开分类选择 sheet。
     if (addingDefaultCategories.value) {
         return;
     }
@@ -417,7 +417,7 @@ function handleCategoryItemClick(): void {
     });
 }
 
-function init(): void {
+function init(): void { // 初始化移动编辑页交易草稿，处理路由参数、模板、复制和 OCR draft。
     if (!pageTypeAndMode) {
         showToast('Parameter Invalid');
         loadingError.value = 'Parameter Invalid';
@@ -578,7 +578,7 @@ function init(): void {
     });
 }
 
-function save(): void {
+function save(): void { // 保存移动端新增或编辑交易，并统一处理标签、地理位置和返回导航。
     const router = props.f7router;
 
     if (mode.value === TransactionEditPageMode.View) {
@@ -687,7 +687,7 @@ function save(): void {
     }
 }
 
-function updateGeoLocation(forceUpdate: boolean): void {
+function updateGeoLocation(forceUpdate: boolean): void { // 更新移动端交易地理位置，支持强制刷新和失败提示。
     if (!isSupportGeoLocation) {
         logger.warn('this browser does not support geo location');
 
@@ -759,7 +759,7 @@ function applyReceiptDraftCandidate(candidate: ReceiptDraftCandidateHint): void 
     receiptDraftCandidateHints.value = receiptDraftCandidateHints.value.filter(item => item.id !== candidate.id);
 }
 
-function applyReceiptRecognitionResult(result: RecognizedReceiptImageResponse): void {
+function applyReceiptRecognitionResult(result: RecognizedReceiptImageResponse): void { // 把图片 OCR 识别结果应用到移动交易草稿，保留候选提示并只覆盖可用字段。
     receiptDraftCandidateHints.value = buildReceiptDraftCandidateHints(result.draft);
     applyReceiptDraftAutoFillToTransaction(transaction.value, result);
 
@@ -792,7 +792,7 @@ function showReceiptRecognitionError(error: RecognizeReceiptImageError | unknown
     showToast('Unable to recognize image');
 }
 
-async function recognizeUploadedPicture(pictureFile: File): Promise<void> {
+async function recognizeUploadedPicture(pictureFile: File): Promise<void> { // 上传后调用图片 OCR 识别，并把识别状态回写到移动编辑页。
     if (!shouldRecognizeUploadedPicture()) {
         return;
     }
@@ -809,7 +809,7 @@ async function recognizeUploadedPicture(pictureFile: File): Promise<void> {
     }
 }
 
-async function uploadPicture(event: Event): Promise<void> {
+async function uploadPicture(event: Event): Promise<void> { // 上传移动端交易图片，成功后按配置触发 OCR 并刷新图片列表。
     if (!event || !event.target) {
         return;
     }
@@ -880,7 +880,7 @@ function viewOrRemovePicture(pictureInfo: TransactionPictureInfoBasicResponse): 
     });
 }
 
-function duplicate(withTime?: boolean, withGeoLocation?: boolean): void {
+function duplicate(withTime?: boolean, withGeoLocation?: boolean): void { // 从当前交易生成复制草稿，可选择保留时间和地理位置。
     props.f7router.navigate(`/transaction/add?id=${transaction.value.id}&type=${transaction.value.type}&withTime=${withTime ?? false}&withGeoLocation=${withGeoLocation ?? false}`);
 }
 

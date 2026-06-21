@@ -85,6 +85,7 @@ export {
     mapReceiptImageErrorCode
 } from './transaction/receiptDraft.ts';
 
+/** 正式交易 store facade，集中暴露列表、CRUD、批量操作、导出、对账和图片 OCR 动作。 */
 export const useTransactionsStore = defineStore('transactions', () => {
     const settingsStore = useSettingsStore();
     const userStore = useUserStore();
