@@ -396,6 +396,15 @@ D5 需要提前记录的共享面：
 - `Set-Location src/web; npm run structure:check`：仍失败 4 项，均为 D10/shared-shell 或非 D5 历史债；D5 frontend 无 warning/failure。
 - `node scripts/check-backend-doc-map.mjs`：通过。
 
+本次 closeout 完成确认：
+
+- D5 已按 `ledger -> behavior-lock -> backend-shape -> frontend-shape -> comment-pass -> governance-docs -> closeout` 顺序完成。
+- PR #224、#225、#226、#227、#228、#229 均有 Gitea PR CI 通过记录，已合并到 `main`，来源分支均已删除。
+- D5 backend 结构 gate 已无 warning/failure；剩余 Rust 失败仅为 D6 auth 历史债。
+- D5 frontend 结构 gate 已无 warning/failure；剩余 frontend 失败仅为 D10/shared-shell 或非 D5 历史债。
+- D5 行为锁定覆盖预算 CRUD/import/export/execution/forecast/history、统计 category/trend/asset/analyzer、汇率 custom/provider/fallback 和桌面预算/统计关键接线。
+- 下一游标推进到 D6 `auth-profile-user-data-security/ledger`，D6 需要带安全审查证据继续同一套切片流程。
+
 ## 8. 关键风险与阻断条件
 
 - 金额必须保持显式 cents/minor units；预算 amount、spent amount、forecast amount、统计聚合、资产余额和汇率换算不得引入浮点金额作为业务存储。
