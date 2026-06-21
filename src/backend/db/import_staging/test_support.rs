@@ -1,0 +1,34 @@
+use sqlx::Execute;
+
+fn preview_row(id: i64) -> ImportPreviewRow {
+    ImportPreviewRow {
+        id,
+        session_id: "session".to_string(),
+        user_id: 1,
+        preview_date: "2026-01-01 09:00:00".to_string(),
+        preview_type: "支出".to_string(),
+        preview_amount_cents: 1000,
+        preview_destination_amount_cents: 0,
+        category_id: None,
+        preview_main_category: "餐饮".to_string(),
+        preview_sub_category: "午餐".to_string(),
+        preview_source_account_id: Some(11),
+        preview_destination_account_id: None,
+        preview_counterparty: "商户".to_string(),
+        preview_payment_method: "付款卡".to_string(),
+        preview_description: "默认备注".to_string(),
+        preview_parser_id: "fixture".to_string(),
+        preview_parser_tags: vec!["parser:fixture".to_string()],
+        preview_recurring_id: None,
+        preview_recurring_name: String::new(),
+        preview_recurring_candidate_count: 0,
+        preview_recurring_match_score: 0.0,
+        preview_recurring_match_reasons: String::new(),
+        preview_recurring_matched_date: String::new(),
+        preview_selected: true,
+        dedup_type: String::new(),
+        dedup_source_ids: Vec::new(),
+        preview_matching_feedback: json!({}),
+        created_at: "2026-01-01 09:00:00".to_string(),
+    }
+}

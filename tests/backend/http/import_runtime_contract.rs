@@ -2,7 +2,10 @@
 // 维护重点：这些测试不替代行为测试；它们防止拆分 stage_handlers.rs 时把账户规则提前到语义投影之前。
 // 不变式：stage2 必须先完成类型/分类、recurring、learning 投影，再最后运行 account_rules 并持久化 baseline。
 
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -12,7 +15,32 @@ fn repo_root() -> PathBuf {
 }
 
 fn source(path: &str) -> String {
-    fs::read_to_string(repo_root().join(path)).unwrap_or_else(|err| panic!("read {path}: {err}"))
+    let file_path = repo_root().join(path);
+    let raw = fs::read_to_string(&file_path).unwrap_or_else(|err| panic!("read {path}: {err}"));
+    expand_rust_includes(&raw, file_path.parent().expect("source file has parent"))
+}
+
+fn expand_rust_includes(source: &str, base_dir: &Path) -> String {
+    let mut expanded = String::new();
+    for line in source.lines() {
+        if let Some(include_path) = rust_include_path(line) {
+            let nested_path = base_dir.join(include_path);
+            let nested = fs::read_to_string(&nested_path)
+                .unwrap_or_else(|err| panic!("read include {}: {err}", nested_path.display()));
+            let nested_base = nested_path.parent().expect("include file has parent");
+            expanded.push_str(&expand_rust_includes(&nested, nested_base));
+        } else {
+            expanded.push_str(line);
+            expanded.push('\n');
+        }
+    }
+    expanded
+}
+
+fn rust_include_path(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+    let path = trimmed.strip_prefix("include!(\"")?.strip_suffix("\");")?;
+    Some(path)
 }
 
 fn section_between<'a>(source: &'a str, start: &str, end: &str) -> &'a str {

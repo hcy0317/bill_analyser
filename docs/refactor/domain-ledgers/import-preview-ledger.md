@@ -53,9 +53,9 @@
 
 | 文件 | 行数/状态 | 当前职责 | 后续拆分方向 |
 | --- | ---: | --- | --- |
-| `src/backend/db/import_staging.rs` | 6024，严重超限 | session/source/template/standard-row/preview/page query/selection/update/identity validation/confirm/history materialization/learning lifecycle/LLM memory 的混合 repository facade 和实现 | 保留 facade，拆到 `import_staging/{sessions,sources,standard_rows,preview_query,preview_mutations,selection,identity_validation,confirm,history_materialization,learning_lifecycle,llm_memory,row_mapping}.rs` |
-| `src/backend/db/import_staging/types.rs` | 611，超限 | 导入 session、preview row、query filters、patch、decision、learning/LLM DTO、confirm acknowledgement 类型 | 拆成 `types/{session,preview_query,preview_patch,decision,learning,llm,confirm}.rs`，`types.rs` 只 re-export |
-| `src/backend/db/import_staging/preview_drafts.rs` | 655，超限 | `DedupBill`/历史正式账单到 `ImportPreviewDraft` 的投影，transfer/history/dedup feedback 构造 | 拆为 `preview_drafts/{dedup,history_duplicate,history_transfer,feedback,helpers}.rs` |
+| `src/backend/db/import_staging.rs` | 60，facade | 只保留 Postgres import staging 公共 adapter 的导入和 include 聚合 | 已拆到 `import_staging/{session_lifecycle,parser_templates,sources_standard_rows,preview_query,preview_predicates,preview_selection,preview_write,identity_validation,confirm,materialization_ledger,row_mapping,patch_payload_helpers,filter_matching,...}.rs`；生产子文件均小于 600 行 |
+| `src/backend/db/import_staging/types.rs` | 12，facade | 只保留类型子模块 include 聚合 | 已拆到 `import_staging/types/{session,preview_draft,parser_template,preview_query,preview_patch,preview_decision_learning,recurring_annotation_memory,confirm_history}.rs` |
+| `src/backend/db/import_staging/preview_drafts.rs` | 10，facade | 只保留 preview draft 子模块 include 聚合 | 已拆到 `import_staging/preview_drafts/{dedup,history_inputs,history_duplicate,history_transfer,default,helpers,tests}.rs` |
 | `src/backend/db/import_staging/ledger_types.rs` | 小文件 | import decision/materialization ledger 类型 | 可保留；后续只在 ledger 或 history materialization 拆分时移动 |
 
 主要函数群：
@@ -74,11 +74,11 @@
 
 | 文件 | 行数/状态 | 当前职责 | 后续拆分方向 |
 | --- | ---: | --- | --- |
-| `src/backend/http/import_routes/stage_handlers.rs` | 3860，严重超限 | dedup runtime、stage2 智能链、confirm、session、preview page/index/selection/update/reclassify、recurring/transfer/learning handlers 混合 | 保留 route facade，拆到 `stage_handlers/{dedup,stage2_intelligence,category_rules,recurring_projection,learning_projection,account_rules,preview_page,preview_selection,preview_update,reclassify,confirm,learning_routes}.rs` |
-| `src/backend/http/import_routes/preview_mutation_helpers.rs` | 1254，超限 | preview update payload 解析、patch 构造、category lookup、decision payload、response projection | 拆到 `preview_mutations/{payload,patch_builder,category_lookup,decisions,llm,recurring,response_projection}.rs` |
+| `src/backend/http/import_routes/stage_handlers.rs` | 20，facade | 只保留 import stage/preview handler include 聚合 | 已拆到 `stage_handlers/{dedup_handler,decision_group_materialization,stage2_types,stage2_chain,stage2_transfer_invariants,stage2_category_rules,stage2_learning_rules,stage2_recurring_accounts,preview_patch_projection,confirm_handler,session_handlers,preview_page_handlers,preview_selection_handler,preview_mutation_handlers,recurring_transfer_handlers,learning_handlers,tests}.rs` |
+| `src/backend/http/import_routes/preview_mutation_helpers.rs` | 12，facade | 只保留 preview mutation helper include 聚合 | 已拆到 `preview_mutation_helpers/{selection_payload,session_update_payload,patch_builder,update_payloads,decisions,llm_decisions,value_changes,response_projection,tests}.rs` |
 | `src/backend/http/import_routes/multipart_and_ocr.rs` | 1047，超限但 D1 只读 | multipart 解析、OCR/LLM runtime、provider auth、local OCR、网络 provider 安全 | D1 只读合同；OCR/LLM 属 D8，除 upload contract 测试外不在 D1 重构 |
 | `src/backend/http/import_routes/response_payload.rs` | 608 | preview/response JSON 投影 | 可与 `response_payload_ledger.rs`、core response contract 配合收敛 |
-| `src/backend/http/import_routes/stage_vector_recall.rs` | 508 | stage2 Weaviate recall 请求和结果接入 | D1 只锁行为，主体归 D8 |
+| `src/backend/http/import_routes/stage_vector_recall.rs` | 5，facade | stage2 Weaviate recall 请求和结果接入 | 已拆到 `stage_vector_recall/{types,chain,worker,results,tests}.rs`；后续 D8 仍负责 learning/Weaviate 域语义收敛 |
 | `src/backend/http/import_routes/stage_account_rule_matchers.rs` | 479 | stage2 account_rules 匹配组合 | D1 可移动到 stage2 子模块，规则核心仍归 D3 |
 | `src/backend/http/import_routes/duplicate_materialization.rs` | 440 | 同批/跨批重复和历史 materialization | D1 后端拆分优先对象 |
 | `src/backend/http/import_routes/transfer_materialization.rs` | 264 | transfer materialization | D1 后端拆分优先对象 |
@@ -205,6 +205,31 @@ G011 已补强以下行为锁定入口，后续 `backend-shape`/`frontend-shape`
 - `Set-Location src/web; npm run e2e:check`
 - `Set-Location src/web; npm run lint:ci`（当前通过，保留既有 `no-explicit-any` warning）
 - `Set-Location src/web; npm run e2e -- --project=desktop-chromium e2e/tests/import-preview-statistics.spec.ts`
+
+### 7.2 G012 后端结构拆分证据
+
+G012 已完成导入预览后端的第一轮结构拆分，保持 `REST /api/...`、DB 函数名、HTTP handler 名和测试入口不变：
+
+- `src/backend/db/import_staging.rs` 由大文件实现改为 60 行 facade；session/parser/source/preview query/predicate/selection/write/identity/decision/LLM/confirm/materialization/row mapping/filter matching/test support 已按职责拆到 `src/backend/db/import_staging/**`。
+- `src/backend/db/import_staging/types.rs` 和 `preview_drafts.rs` 改为 facade；类型 DTO 与 dedup/history preview draft 构造分别拆入 `types/**` 与 `preview_drafts/**`。
+- `src/backend/http/import_routes/stage_handlers.rs` 改为 20 行 facade；dedup 主链、stage2 类型/规则/learning/recurring/account、confirm/session/preview/selection/update/reclassify/learning handler 和测试拆入 `stage_handlers/**`。
+- `src/backend/http/import_routes/preview_mutation_helpers.rs` 改为 12 行 facade；payload、patch builder、decision、LLM decision、value conversion、response projection 和测试拆入 `preview_mutation_helpers/**`。
+- `src/backend/http/import_routes/stage_vector_recall.rs` 改为 5 行 facade；vector recall chain/worker/result application/test 拆入 `stage_vector_recall/**`。
+- `tests/backend/http/import_runtime_contract.rs` 的源码顺序测试改为递归展开本仓库单行 `include!("...")`，继续锁定 stage2 编排顺序而不绑定单文件物理位置。
+
+G012 已补充关键导出函数、业务关键函数和复杂 helper 的中文说明；简单 getter、字段映射和测试小 helper 不强制补充。
+
+本切片已验证：
+
+- `cargo fmt --all -- --check`
+- `cargo test -p bill-analyser-db preview`
+- `cargo test -p bill-analyser-db --test import_staging`
+- `cargo test -p bill-analyser-http --test import_runtime_contract`
+- `cargo test -p bill-analyser-http preview`
+- `cargo test -p bill-analyser-core --test import_pipeline_contracts`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35`
+- `node scripts/check-rust-backend-structure.mjs`：导入预览相关 `import_staging.rs`、`types.rs`、`preview_drafts.rs`、`stage_handlers.rs`、`preview_mutation_helpers.rs`、`stage_vector_recall.rs` 已退出失败列表；剩余失败为 D2-D10 其他功能域既有结构债。
 
 ## 8. 后续切片执行顺序
 

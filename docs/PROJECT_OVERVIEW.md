@@ -19,6 +19,8 @@ Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预
 - `src/backend/db`：PostgreSQL schema scripts、SQLx pool、user-scope repository、导入 staging、auth、budget、matching、taxonomy/settings、backup metadata 与 vector outbox。
 - `src/backend/parsers`：微信、支付宝、工商银行、农业银行、建设银行、民生银行等 dedicated parser，以及 `RawBill` 到 `StandardBill` 的统一标准化。
 
+导入预览后端当前以 facade + 功能子文件组织：`src/backend/db/import_staging.rs` 聚合 session、parser/source staging、preview query/predicate/selection/write/identity/confirm/materialization/row mapping/filter matching 等子文件；`src/backend/http/import_routes/stage_handlers.rs`、`preview_mutation_helpers.rs` 与 `stage_vector_recall.rs` 聚合 dedup/stage2、preview page/selection/update/reclassify、confirm、learning、vector recall 等子文件。该拆分只改变物理结构，公开函数名、REST 路由、PostgreSQL 合同与导入语义保持不变。
+
 ## 数据库与健康检查
 
 默认本地运行态使用：
