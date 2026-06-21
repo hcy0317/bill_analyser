@@ -40,13 +40,13 @@
     {
       "path": "src/views/desktop/budgets/ListPage.vue",
       "kind": "vue",
-      "lines": 3488,
+      "lines": 2547,
       "sections": {
-        "template": 194,
-        "script": 2727,
-        "style": 116
+        "template": 1,
+        "script": 2543,
+        "style": 1
       },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+      "reason": "legacy oversized file tracked by the frontend structure ratchet; D5 governance baseline after budget statistics split and comment-pass"
     },
     {
       "path": "src/locales/helpers.ts",
@@ -74,8 +74,8 @@
     {
       "path": "src/stores/statistics.ts",
       "kind": "ts",
-      "lines": 2061,
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+      "lines": 1811,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet; D5 governance baseline after budget statistics split and comment-pass"
     },
     {
       "path": "src/views/desktop/transactions/list/dialogs/EditDialog.vue",
@@ -152,13 +152,13 @@
     {
       "path": "src/views/desktop/statistics/TransactionPage.vue",
       "kind": "vue",
-      "lines": 1339,
+      "lines": 843,
       "sections": {
-        "template": 108,
-        "script": 841,
-        "style": 45
+        "template": 1,
+        "script": 839,
+        "style": 1
       },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+      "reason": "legacy oversized file tracked by the frontend structure ratchet; D5 governance baseline after budget statistics split and comment-pass"
     },
     {
       "path": "src/views/desktop/transactions/list/dialogs/BatchManualEntryDialog.vue",
@@ -170,12 +170,6 @@
         "style": 1
       },
       "reason": "legacy oversized file tracked by the frontend structure ratchet; D4 governance baseline after transaction domain split and comment-pass"
-    },
-    {
-      "path": "src/consts/currency.ts",
-      "kind": "ts",
-      "lines": 1288,
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
       "path": "src/stores/account.ts",

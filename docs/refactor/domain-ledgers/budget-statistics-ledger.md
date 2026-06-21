@@ -384,6 +384,18 @@ D5 需要提前记录的共享面：
 - `node scripts/check-rust-backend-structure.mjs` 仍失败 3 项，均为 D6 auth 历史债；D5 backend 仅保留 line-reduction warning。
 - `Set-Location src/web; npm run structure:check` 仍失败 4 项，均为 D10/shared shell 或非 D5 历史债；D5 frontend 仅保留 line-reduction warning。
 
+本次 governance-docs 执行结果：
+
+- `scripts/rust-backend-structure-baseline.json` 删除 D5 已拆分且低于阈值的 `src/backend/db/budgets/postgres_reads.rs`、`src/backend/db/statistics.rs`、`src/backend/core/statistics.rs` 旧超大基线。
+- `src/web/scripts/frontend-structure-baseline.json` 将 D5 仍超阈值但已缩小的 `src/views/desktop/budgets/ListPage.vue`、`src/stores/statistics.ts`、`src/views/desktop/statistics/TransactionPage.vue` 更新为新 ratchet，并删除已低于阈值的 `src/consts/currency.ts`。
+- 未调整 D6 auth、D10 shared shell、theme、imported transaction 或其他非 D5 历史债基线。
+
+本次 governance-docs 本地验证：
+
+- `node scripts/check-rust-backend-structure.mjs`：仍失败 3 项，均为 D6 auth 历史债；D5 backend 无 warning/failure。
+- `Set-Location src/web; npm run structure:check`：仍失败 4 项，均为 D10/shared-shell 或非 D5 历史债；D5 frontend 无 warning/failure。
+- `node scripts/check-backend-doc-map.mjs`：通过。
+
 ## 8. 关键风险与阻断条件
 
 - 金额必须保持显式 cents/minor units；预算 amount、spent amount、forecast amount、统计聚合、资产余额和汇率换算不得引入浮点金额作为业务存储。
