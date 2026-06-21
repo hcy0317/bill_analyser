@@ -390,3 +390,26 @@ D6 governance-docs 切片只收紧结构治理基线和记录现状，不改变�
 
 - `node scripts/check-rust-backend-structure.mjs` 通过，扫描 464 个 Rust 后端文件，baseline entries 从 9 收紧到 8。
 - `Set-Location src/web; npm run structure:check` 预期失败仍为 D10 shared 四项：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`；D6 已清理三项不再出现 line-reduction warning。
+
+## 14. Closeout 记录
+
+D6 auth-profile-user-data-security 域已完成 ledger、behavior-lock、backend-shape、frontend-shape、comment-pass、governance-docs 六个切片，均已通过 PR CI、squash merge 并删除来源分支。
+
+PR 链路证据：
+
+- #231 `docs(auth): 建立认证用户安全域结构债 ledger`，merge commit `79dd12f52f07283cc0b767ad614d5b39cc34d911`。
+- #232 `test(auth): 锁定认证用户安全域行为合同`，merge commit `392ec3742ad275d83175eeac51acbe23ffe01805`。
+- #233 `refactor(auth): 拆分认证后端结构`，merge commit `09c4bc11564afce6e8bf6f045eed4ee7f9c83f72`。
+- #234 `refactor(auth): 拆分认证前端结构`，merge commit `caad561ab1236dfe6b84b61bcd45440c256b6614`。
+- #235 `docs(auth): 补齐认证用户域关键函数中文说明`，merge commit `f49694ab1473ce07b1d7f4bc7c64543f7a154056`。
+- #236 `chore(auth): 收紧认证用户域结构治理基线`，merge commit `a31ad9bec5b452a9dbb8f92e910584ebf0a5261f`。
+
+关闭门禁：
+
+- Gitea Actions PR CI 均已成功；最后一个 D6 切片为 run #14620，`backend-ci #16427`、`frontend-ci #16428`、`repo-governance #16429` 全部通过。
+- 远端分支检查只返回 `refs/heads/main`，D6 六个 feature branch 均已删除。
+- `node scripts/check-rust-backend-structure.mjs` 通过，D6 后端结构 gate 清零，当前 Rust backend baseline entries 为 8。
+- `Set-Location src/web; npm run structure:check` 只保留 D10 shared 四项失败；D6 已拆分前端入口不再产生 FAIL 或 line-reduction warning。
+- D6 独立安全审查证据已在 backend-shape 记录：`security-reviewer` 结论 `APPROVE`，未发现 blocker；token/session/2FA/recovery code、SQL bind、user-scope、CORS/preflight 和敏感信息暴露语义保持不变。
+
+后续游标推进到 D7 `backup-cloud-sync` / `ledger`。
