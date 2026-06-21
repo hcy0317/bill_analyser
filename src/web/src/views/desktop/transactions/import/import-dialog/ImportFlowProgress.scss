@@ -1,0 +1,61 @@
+.import-flow-progress {
+    border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+    border-radius: 16px;
+    padding: 16px;
+    background: rgba(var(--v-theme-surface), 0.78);
+}
+
+.import-flow-progress__trail {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.import-flow-progress__step {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    color: rgba(var(--v-theme-on-surface), 0.58);
+    font-size: 0.78rem;
+}
+
+.import-flow-progress__marker {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 24px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 1px solid rgba(var(--v-theme-on-surface), 0.18);
+    color: currentColor;
+    font-weight: 700;
+}
+
+.import-flow-progress__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.import-flow-progress__step--active {
+    color: rgb(var(--v-theme-primary));
+    font-weight: 700;
+}
+
+.import-flow-progress__step--complete {
+    color: rgba(var(--v-theme-on-surface), 0.78);
+}
+
+.import-flow-progress__step--active .import-flow-progress__marker,
+.import-flow-progress__step--complete .import-flow-progress__marker {
+    border-color: rgb(var(--v-theme-primary));
+    background: rgba(var(--v-theme-primary), 0.12);
+}
+
+@media (max-width: 700px) {
+    .import-flow-progress__trail {
+        grid-template-columns: 1fr;
+    }
+}

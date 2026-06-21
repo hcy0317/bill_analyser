@@ -49,91 +49,14 @@
                             </v-list>
                         </v-menu>
                     </v-btn>
-                    <v-btn density="comfortable" color="default" variant="text" class="ms-2"
-                           :icon="true" :disabled="loading || submitting"
-                           v-if="currentStep === 'checkData' && importTransactionCheckDataTab?.filterMenus">
-                        <v-icon :icon="mdiFilterOutline" />
-                        <v-menu
-                            activator="parent"
-                            max-height="500"
-                            min-width="360"
-                            v-model="showCheckDataFilterMenu"
-                            :close-on-content-click="false"
-                        >
-                            <v-list
-                                density="compact"
-                                class="py-1 import-check-data-filter-menu"
-                                v-model:opened="openedCheckDataFilterGroups"
-                                open-strategy="multiple"
-                            >
-                                <v-list-group
-                                    v-for="group in importTransactionCheckDataTab.filterMenus"
-                                    :key="group.title"
-                                    :value="group.title"
-                                >
-                                    <template #activator="{ props: groupActivatorProps }">
-                                        <v-list-item
-                                            v-bind="groupActivatorProps"
-                                            class="import-check-data-filter-menu__group"
-                                        >
-                                            <template #title>
-                                                <span
-                                                    :class="{
-                                                        'import-check-data-filter-menu__group-title': true,
-                                                        'import-check-data-filter-menu__group-title--active': isActiveCheckDataFilterGroup(group.summary)
-                                                    }"
-                                                >
-                                                    {{ group.title }}
-                                                </span>
-                                            </template>
-                                        </v-list-item>
-                                    </template>
-
-                                    <template
-                                        v-for="(menu, index) in group.items"
-                                        :key="`${group.title}_${index}`"
-                                    >
-                                        <v-list-group
-                                            v-if="menu.items?.length"
-                                            :value="`${group.title}_${menu.title}`"
-                                        >
-                                            <template #activator="{ props: childGroupActivatorProps }">
-                                                <v-list-item
-                                                    v-bind="childGroupActivatorProps"
-                                                    :prepend-icon="menu.prependIcon"
-                                                    :title="menu.title"
-                                                    :subtitle="menu.subTitle"
-                                                    :disabled="menu.disabled"
-                                                    class="import-check-data-filter-menu__item"
-                                                />
-                                            </template>
-                                            <v-list-item
-                                                v-for="(childMenu, childIndex) in menu.items"
-                                                :key="`${group.title}_${menu.title}_${childIndex}`"
-                                                :prepend-icon="childMenu.prependIcon"
-                                                :title="childMenu.title"
-                                                :subtitle="childMenu.subTitle"
-                                                :append-icon="childMenu.appendIcon"
-                                                :disabled="childMenu.disabled"
-                                                class="import-check-data-filter-menu__item"
-                                                @click="childMenu.onClick?.()"
-                                            />
-                                        </v-list-group>
-                                        <v-list-item
-                                            v-else
-                                            :prepend-icon="menu.prependIcon"
-                                            :title="menu.title"
-                                            :subtitle="menu.subTitle"
-                                            :append-icon="menu.appendIcon"
-                                            :disabled="menu.disabled"
-                                            class="import-check-data-filter-menu__item"
-                                            @click="menu.onClick?.()"
-                                        />
-                                    </template>
-                                </v-list-group>
-                            </v-list>
-                        </v-menu>
-                    </v-btn>
+                    <import-check-data-filter-button
+                        v-if="currentStep === 'checkData' && importTransactionCheckDataTab?.filterMenus"
+                        v-model:visible="showCheckDataFilterMenu"
+                        v-model:opened="openedCheckDataFilterGroups"
+                        :disabled="loading || submitting"
+                        :filter-menus="importTransactionCheckDataTab.filterMenus"
+                        :is-active-summary="isActiveCheckDataFilterGroup"
+                    />
                     <v-btn density="comfortable" color="default" variant="text" class="ms-2"
                            :icon="true" :disabled="loading || submitting"
                            v-if="currentStep === 'checkData' && importTransactionCheckDataTab?.toolMenus">
@@ -155,53 +78,21 @@
                 </div>
             </template>
 
-            <div class="import-flow-progress mt-4 cursor-default" aria-live="polite">
-                <div class="d-flex align-start justify-space-between gap-4 flex-wrap">
-                    <div>
-                        <div class="text-caption text-medium-emphasis">
-                            {{ tt('Import') }} {{ currentFlowProgressIndex + 1 }}/{{ importFlowProgressItems.length }}
-                        </div>
-                        <h5 class="text-subtitle-1 mb-1">{{ currentFlowProgressItem.title }}</h5>
-                        <div class="text-body-2 text-medium-emphasis">{{ currentFlowProgressDetail }}</div>
-                    </div>
-                    <v-chip density="comfortable" color="primary" variant="tonal">
-                        {{ tt('Current') }}
-                    </v-chip>
-                </div>
-
-                <v-progress-linear
-                    class="mt-4"
-                    color="primary"
-                    bg-opacity="0.12"
-                    rounded
-                    height="8"
-                    :model-value="currentFlowProgressValue"
-                />
-
-                <div class="import-flow-progress__trail mt-3" role="list" :aria-label="tt('Import Preview')">
-                    <div
-                        v-for="(item, index) in importFlowProgressItems"
-                        :key="item.key"
-                        role="listitem"
-                        :aria-current="item.active ? 'step' : undefined"
-                        :class="[
-                            'import-flow-progress__step',
-                            {
-                                'import-flow-progress__step--active': item.active,
-                                'import-flow-progress__step--complete': item.complete
-                            }
-                        ]"
-                    >
-                        <span class="import-flow-progress__marker">{{ index + 1 }}</span>
-                        <span class="import-flow-progress__label">{{ item.title }}</span>
-                    </div>
-                </div>
-            </div>
+            <import-flow-progress
+                class="mt-4"
+                :current-index="currentFlowProgressIndex"
+                :current-item="currentFlowProgressItem"
+                :current-label="tt('Current')"
+                :detail="currentFlowProgressDetail"
+                :import-label="tt('Import')"
+                :items="importFlowProgressItems"
+                :progress-value="currentFlowProgressValue"
+                :trail-label="tt('Import Preview')"
+            />
 
             <v-window class="disable-tab-transition" v-model="currentStep">
                 <v-window-item value="uploadFile">
                     <v-row>
-                        <!-- v6.79: 移除文件类型选择器，因为解析器会自动识别文件格式 -->
 
                         <v-col cols="12" md="12" v-if="allFileSubTypes">
                             <v-select
@@ -474,6 +365,8 @@ import SnackBar from '@/components/desktop/SnackBar.vue';
 import ImportTransactionDefineColumnTab from './tabs/ImportTransactionDefineColumnTab.vue';
 import ImportTransactionExecuteCustomScriptTab from './tabs/ImportTransactionExecuteCustomScriptTab.vue';
 import ImportTransactionCheckDataTab from './tabs/ImportTransactionCheckDataTab.vue';
+import ImportFlowProgress from './import-dialog/ImportFlowProgress.vue';
+import ImportCheckDataFilterButton from './import-dialog/ImportCheckDataFilterButton.vue';
 import {
     resolveImportPreviewCategoryPath,
     type ImportPreviewRecord
@@ -489,7 +382,6 @@ import {
 } from './importPreviewUpdates.ts';
 import type {
     ImportPreviewMetadata,
-    ImportPreviewServerQueryFilters,
     PreviewPageRequestOptions
 } from './importPreviewIndex.ts';
 import {
@@ -503,6 +395,30 @@ import {
     fetchImportStage,
     isAbortError
 } from './importDialogApi.ts';
+import {
+    getImportConfigDisplayDescription,
+    getMatchedImportConfigMessage,
+    normalizeImportConfigMatchResult,
+    resolveImportConfigFileFormat
+} from './import-dialog/importConfigHelpers.ts';
+import {
+    appendPreviewPageFilters,
+    normalizePreviewPageSortBy,
+    normalizePreviewPageSortDirection
+} from './import-dialog/previewPageQuery.ts';
+import {
+    ImportDSVProcessMethod,
+    type ImportConfigMatchResult,
+    type ImportConfigSuggestionResult,
+    type ImportFieldMappings,
+    type ImportFilePreviewResult,
+    type ImportTransactionCheckDataFilterMenuGroup,
+    type ImportTransactionDialogStep,
+    type UnmatchedFileInfo
+} from './import-dialog/types.ts';
+import { createImportFlowMilestoneLogger } from './import-dialog/importFlowProfiler.ts';
+import { useImportFlowProgress } from './import-dialog/useImportFlowProgress.ts';
+import { useImportSourceSelection } from './import-dialog/useImportSourceSelection.ts';
 
 import { ref, computed, nextTick, useTemplateRef, watch } from 'vue';
 
@@ -520,7 +436,6 @@ import { useUserStore } from '@/stores/user.ts';
 import { type NumeralSystem } from '@/core/numeral.ts';
 import { CategoryType } from '@/core/category.ts';
 
-import type { LocalizedImportFileTypeSubType } from '@/core/file.ts';
 import { ImportTransaction } from '@/models/imported_transaction.ts';
 
 import { getCurrentToken } from '@/lib/userstate.ts';
@@ -530,7 +445,6 @@ import logger from '@/lib/logger.ts';
 import { DEFAULT_IMPORT_API_TIMEOUT, DEFAULT_IMPORT_PARSE_API_TIMEOUT } from '@/consts/api.ts';
 
 import {
-    mdiFilterOutline,
     mdiCheck,
     mdiContentSaveOutline,
     mdiDotsVertical,
@@ -545,95 +459,6 @@ type SnackBarType = InstanceType<typeof SnackBar>;
 type ImportTransactionDefineColumnTabType = InstanceType<typeof ImportTransactionDefineColumnTab>;
 type ImportTransactionExecuteCustomScriptTabType = InstanceType<typeof ImportTransactionExecuteCustomScriptTab>;
 type ImportTransactionCheckDataTabType = InstanceType<typeof ImportTransactionCheckDataTab>;
-
-type ImportTransactionDialogStep = 'uploadFile' | 'defineColumn' | 'executeCustomScript' | 'checkData' | 'finalResult';
-type ImportFlowProgressKey = 'selectSource' | 'parseStageRows' | 'reviewPreview' | 'confirmImport' | 'result';
-
-interface ImportFlowProgressItem {
-    complete: boolean;
-    key: ImportFlowProgressKey;
-    title: string;
-    active: boolean;
-}
-
-enum ImportDSVProcessMethod {
-    AutoDetect,
-    ColumnMapping,
-}
-
-interface ImportConfigMatchResult {
-    id: number;
-    name: string;
-    fileFormat?: string;
-    description?: string;
-    descriptionSummary?: string;
-    fieldMappings: ImportFieldMappings;
-    sampleHeaders?: string[];
-    dateFormat?: string;
-    delimiter?: string;
-    encoding?: string;
-    skipRows?: number;
-    hasHeader?: boolean;
-    customRules?: Record<string, unknown>;
-    isDefault?: boolean;
-    defaultRecommendation?: boolean;
-    matchScore?: number;
-    matchReason?: string;
-}
-
-interface ImportFilePreviewResult {
-    headers: string[];
-    sampleData: string[][];
-    previewRows?: string[][];
-    totalRows: number;
-    encoding?: string;
-    delimiter?: string;
-}
-
-interface ImportConfigSuggestionResult {
-    includeHeader?: boolean;
-    columnMapping?: Record<string, number>;
-    transactionTypeMapping?: Record<string, number>;
-    suggestions?: Array<{
-        columnType: number;
-        columnIndex: number;
-        header: string;
-        score: number;
-    }>;
-}
-
-interface ImportFieldMappings {
-    includeHeader?: boolean;
-    columnMapping?: Record<number, number>;
-    transactionTypeMapping?: Record<string, number>;
-    timeFormat?: string;
-    timezoneFormat?: string;
-    amountDecimalSeparator?: string;
-    amountDigitGroupingSymbol?: string;
-    geoLocationSeparator?: string;
-    geoLocationOrder?: string;
-    tagSeparator?: string;
-}
-
-interface ImportTransactionCheckDataFilterMenuGroup {
-    title: string;
-    summary?: string;
-}
-
-const IMPORT_FLOW_PROGRESS_ORDER: ImportFlowProgressKey[] = [
-    'selectSource',
-    'parseStageRows',
-    'reviewPreview',
-    'confirmImport',
-    'result'
-];
-
-const FALLBACK_IMPORT_FLOW_PROGRESS_ITEM: ImportFlowProgressItem = {
-    active: true,
-    complete: false,
-    key: 'selectSource',
-    title: ''
-};
 
 defineProps<{
     persistent?: boolean;
@@ -662,7 +487,7 @@ const importTransactionCheckDataTab = useTemplateRef<ImportTransactionCheckDataT
 const fileInput = useTemplateRef<HTMLInputElement>('fileInput');
 
 const showState = ref<boolean>(false);
-const serverSessionId = ref<string>('');  // v6.48: 后端三阶段导入的会话ID
+const serverSessionId = ref<string>('');
 const currentStep = ref<ImportTransactionDialogStep>('uploadFile');
 const importProcess = ref<number>(0);
 const selectedFileTypes = ref<string[]>(['auto']);
@@ -689,20 +514,6 @@ const firstOperablePreviewLogged = ref<boolean>(false);
 const parsedFileDelimiter = ref<string>('');
 const matchedImportConfig = ref<ImportConfigMatchResult | null>(null);
 
-const SERVER_PAGED_PREVIEW_SORTABLE_COLUMNS = new Set<string>([
-    'time',
-    'type',
-    'sourceAmountCents',
-    'counterparty',
-    'paymentMethod',
-    'comment'
-]);
-
-// v7: 未匹配文件的逐文件列映射队列
-interface UnmatchedFileInfo {
-    originalName: string;
-    tempPath: string;
-}
 const unmatchedFilesQueue = ref<UnmatchedFileInfo[]>([]);
 const currentUnmatchedIndex = ref<number>(0);
 
@@ -724,143 +535,22 @@ const editingImportConfig = ref<ImportConfigMatchResult | null>(null);
 const showCheckDataFilterMenu = ref<boolean>(false);
 const openedCheckDataFilterGroups = ref<string[]>([]);
 
-function importFlowElapsedMs(startedAt: number | null): number | null {
-    return startedAt === null ? null : Math.max(Date.now() - startedAt, 0);
-}
-
-function logImportFlowMilestone(
-    milestone: string,
-    context: Record<string, unknown> = {}
-): void {
-    logger.info(`[三阶段导入-profile] ${milestone}`, {
-        ...context,
-        import_dialog_opened_elapsed_ms: importFlowElapsedMs(importDialogOpenedAt.value),
-        elapsed_to_first_operable_preview_ms: importFlowElapsedMs(importSubmitStartedAt.value)
-    });
-}
-
-const importFlowProgressTitleMap = computed<Record<ImportFlowProgressKey, string>>(() => ({
-    selectSource: tt('Select File'),
-    parseStageRows: `${tt('Parser')} / ${tt('Define Columns')}`,
-    reviewPreview: tt('Check Data'),
-    confirmImport: `${tt('Confirm')} ${tt('Import')}`,
-    result: tt('Import Result')
-}));
-
-const currentImportFlowProgressKey = computed<ImportFlowProgressKey>(() => {
-    if (currentStep.value === 'finalResult') {
-        return 'result';
-    }
-
-    if (currentStep.value === 'checkData') {
-        return submitting.value ? 'confirmImport' : 'reviewPreview';
-    }
-
-    if (
-        currentStep.value === 'defineColumn'
-        || currentStep.value === 'executeCustomScript'
-        || (currentStep.value === 'uploadFile' && submitting.value)
-    ) {
-        return 'parseStageRows';
-    }
-
-    return 'selectSource';
-});
-
-const currentFlowProgressIndex = computed<number>(() => {
-    const index = IMPORT_FLOW_PROGRESS_ORDER.indexOf(currentImportFlowProgressKey.value);
-    return index >= 0 ? index : 0;
-});
-
-const importFlowProgressItems = computed<ImportFlowProgressItem[]>(() => {
-    const activeIndex = currentFlowProgressIndex.value;
-    const titles = importFlowProgressTitleMap.value;
-
-    return IMPORT_FLOW_PROGRESS_ORDER.map((key, index) => ({
-        active: index === activeIndex,
-        complete: index < activeIndex,
-        key,
-        title: titles[key]
-    }));
-});
-
-const currentFlowProgressItem = computed<ImportFlowProgressItem>(() => {
-    return importFlowProgressItems.value[currentFlowProgressIndex.value]
-        ?? importFlowProgressItems.value[0]
-        ?? FALLBACK_IMPORT_FLOW_PROGRESS_ITEM;
-});
-
-const currentFlowProgressValue = computed<number>(() => {
-    return ((currentFlowProgressIndex.value + 1) / IMPORT_FLOW_PROGRESS_ORDER.length) * 100;
-});
-
-const currentFlowProgressDetail = computed<string>(() => {
-    if (currentImportFlowProgressKey.value === 'parseStageRows') {
-        if (unmatchedFilesQueue.value.length > 0) {
-            const fileName = unmatchedFilesQueue.value[currentUnmatchedIndex.value]?.originalName || '';
-            return `${fileName} (${currentUnmatchedIndex.value + 1}/${unmatchedFilesQueue.value.length})`;
-        }
-
-        return matchedImportConfig.value?.name || tt('Parser');
-    }
-
-    if (currentImportFlowProgressKey.value === 'reviewPreview') {
-        return previewTotalCount.value > 0
-            ? tt('format.misc.previewCount', { count: getDisplayCount(previewTotalCount.value) })
-            : tt('Import Preview');
-    }
-
-    if (currentImportFlowProgressKey.value === 'confirmImport') {
-        return importProcess.value > 0
-            ? tt('format.misc.importingTransactions', { process: formatNumberToLocalizedNumerals(importProcess.value, 2) })
-            : tt('Confirm');
-    }
-
-    if (currentImportFlowProgressKey.value === 'result') {
-        return tt('format.misc.importTransactionResult', { count: getDisplayCount(importedCount.value || 0) });
-    }
-
-    return fileName.value || supportedImportFileExtensions.value;
-});
-
-const fileType = computed<string>(() => {
-    const type = selectedFileTypes.value[0];
-    if (selectedFileTypes.value.length > 0 && type && type !== 'auto') {
-        return type;
-    }
-
-    const currentFile = importFile.value;
-    const lowerName = currentFile?.name.toLowerCase() || '';
-    if (lowerName.endsWith('.csv') || lowerName.endsWith('.txt')) {
-        return 'dsv';
-    }
-
-    return 'auto';
-});
-
-const showHandlingMethodSelector = computed<boolean>(() => {
-    if (importFiles.value.length > 1) {
-        return false;
-    }
-
-    if (fileType.value !== 'dsv' && fileType.value !== 'dsv_data') {
-        return false;
-    }
-
-    return !looksLikeStructuredBillStatementFile(importFile.value);
-});
-
-const allFileSubTypes = computed<LocalizedImportFileTypeSubType[] | undefined>(() => undefined);
-
-const isImportDataFromTextbox = computed<boolean>(() => false);
-
-const supportedImportFileExtensions = computed<string>(() => '.csv,.xls,.xlsx,.txt');
-
-const exportFileGuideDocumentUrl = computed<string | undefined>(() => undefined);
-const exportFileGuideDocumentLanguageName = computed<string | undefined>(() => undefined);
-
 const importFile = computed<File | undefined>(() => {
     return importFiles.value.length > 0 ? importFiles.value[0] : undefined;
+});
+
+const {
+    allFileSubTypes,
+    exportFileGuideDocumentLanguageName,
+    exportFileGuideDocumentUrl,
+    fileType,
+    isImportDataFromTextbox,
+    showHandlingMethodSelector,
+    supportedImportFileExtensions
+} = useImportSourceSelection({
+    importFile,
+    importFiles,
+    selectedFileTypes
 });
 
 const importedCount = ref<number | null>(null);
@@ -872,19 +562,11 @@ let rejectFunc: ((reason?: unknown) => void) | null = null;
 
 const numeralSystem = computed<NumeralSystem>(() => getCurrentNumeralSystemType());
 
-// 精简后的文件类型选项
-// const fileTypeOptions = [
-//     { title: 'Auto', value: 'auto' },
-//     { title: 'Alipay', value: 'alipay' },
-//     { title: 'WeChat', value: 'wechat' },
-//     { title: 'ICBC', value: 'icbc' },
-//     { title: 'ABC', value: 'abc' },
-//     { title: 'CMBC', value: 'cmbc' },
-//     { title: 'CCB', value: 'ccb' },
-//     { title: 'ABC Credit', value: 'abc_credit' },
-//     { title: 'PSBC Credit', value: 'psbc_credit' },
-//     { title: 'SPDB Credit', value: 'spdb_credit' }
-// ];
+const logImportFlowMilestone = createImportFlowMilestoneLogger({
+    importDialogOpenedAt,
+    importSubmitStartedAt,
+    logger
+});
 
 const fileName = computed<string>(() => {
     if (importFiles.value.length === 0) return '';
@@ -897,34 +579,27 @@ function getDisplayCount(count: number): string {
     return numeralSystem.value.formatNumber(count);
 }
 
-function normalizeImportConfigMatchResult(config: Partial<ImportConfigMatchResult>): ImportConfigMatchResult | null {
-    const id = Number(config.id);
-    const name = typeof config.name === 'string' ? config.name.trim() : '';
-
-    if (!Number.isFinite(id) || !name) {
-        return null;
-    }
-
-    return {
-        id,
-        name,
-        fileFormat: config.fileFormat,
-        description: config.description,
-        descriptionSummary: config.descriptionSummary,
-        fieldMappings: config.fieldMappings || {},
-        sampleHeaders: config.sampleHeaders || [],
-        dateFormat: config.dateFormat,
-        delimiter: config.delimiter,
-        encoding: config.encoding,
-        skipRows: config.skipRows,
-        hasHeader: config.hasHeader,
-        customRules: config.customRules,
-        isDefault: config.isDefault,
-        defaultRecommendation: config.defaultRecommendation,
-        matchScore: config.matchScore,
-        matchReason: config.matchReason
-    };
-}
+const {
+    currentFlowProgressDetail,
+    currentFlowProgressIndex,
+    currentFlowProgressItem,
+    currentFlowProgressValue,
+    importFlowProgressItems
+} = useImportFlowProgress({
+    currentStep,
+    submitting,
+    importProcess,
+    unmatchedFilesQueue,
+    currentUnmatchedIndex,
+    matchedImportConfig,
+    previewTotalCount,
+    importedCount,
+    fileName,
+    supportedImportFileExtensions,
+    translate: tt,
+    formatNumber: formatNumberToLocalizedNumerals,
+    formatCount: getDisplayCount
+});
 
 function isActiveCheckDataFilterGroup(summary?: string): boolean {
     return !!summary && summary !== tt('All');
@@ -986,7 +661,6 @@ function open(): Promise<void> {
     importSubmitStartedAt.value = null;
     firstOperablePreviewLogged.value = false;
     logImportFlowMilestone('import_dialog_opened_at');
-    // v6.52: 清理之前可能残留的导入会话数据
     // 确保每次打开导入对话框时 bills_parser_template 和 bills_preview 表都是干净的
     if (serverSessionId.value) {
         cleanupServerSession();
@@ -1093,37 +767,8 @@ function setSelectedImportFiles(files: readonly File[]): void {
     });
 }
 
-function looksLikeStructuredBillStatementFile(file?: File): boolean {
-    const fileName = file?.name?.toLowerCase() || '';
-
-    return /微信支付账单|wechat|wxpay|支付宝交易明细|alipay/.test(fileName);
-}
-
 function getImportConfigFileFormat(): string {
-    const lowerName = importFile.value?.name.toLowerCase() || '';
-    if (lowerName.endsWith('.csv') || lowerName.endsWith('.txt')) {
-        return 'csv';
-    }
-    if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls')) {
-        return 'excel';
-    }
-    return 'csv';
-}
-
-function getMatchedImportConfigMessage(config: ImportConfigMatchResult): string {
-    if (config.matchReason === 'default_template_fallback') {
-        return `已自动回退到默认模板：${config.name}`;
-    }
-
-    return `已自动套用模板：${config.name}`;
-}
-
-function getImportConfigDisplayDescription(config: Partial<ImportConfigMatchResult> | null | undefined): string {
-    if (!config) {
-        return '';
-    }
-
-    return config.description || config.descriptionSummary || config.sampleHeaders?.join(' / ') || '';
+    return resolveImportConfigFileFormat(importFile.value);
 }
 
 async function loadImportConfigList(): Promise<void> {
@@ -1350,7 +995,6 @@ async function saveCurrentImportConfig(): Promise<void> {
 }
 
 /**
- * v7: 为未匹配的服务端临时文件准备列映射界面
  */
 async function prepareColumnMappingForUnmatchedFile(fileInfo: UnmatchedFileInfo): Promise<void> {
     logger.info(`[列映射] 准备文件: ${fileInfo.originalName} (${currentUnmatchedIndex.value + 1}/${unmatchedFilesQueue.value.length})`);
@@ -1409,45 +1053,7 @@ async function prepareColumnMappingForUnmatchedFile(fileInfo: UnmatchedFileInfo)
 }
 
 /**
- * v7: 执行阶段2去重并显示预览
  */
-function normalizePreviewPageSortBy(value: string | null | undefined): string {
-    const normalizedValue = String(value || '').trim();
-    return SERVER_PAGED_PREVIEW_SORTABLE_COLUMNS.has(normalizedValue) ? normalizedValue : '';
-}
-
-function normalizePreviewPageSortDirection(value: string | null | undefined): 'asc' | 'desc' {
-    return String(value || '').toLowerCase() === 'desc' ? 'desc' : 'asc';
-}
-
-const PREVIEW_PAGE_FILTER_PARAM_NAMES: Record<keyof ImportPreviewServerQueryFilters, string> = {
-    minDatetime: 'min_datetime',
-    maxDatetime: 'max_datetime',
-    transactionType: 'transaction_type',
-    category: 'category',
-    account: 'account',
-    tag: 'tag',
-    signal: 'signal',
-    annotation: 'annotation',
-    description: 'description',
-};
-
-function appendPreviewPageFilters(
-    searchParams: URLSearchParams,
-    filters: ImportPreviewServerQueryFilters | undefined
-): void {
-    if (!filters) {
-        return;
-    }
-
-    for (const [key, value] of Object.entries(filters)) {
-        if (typeof value !== 'string') {
-            continue;
-        }
-        searchParams.set(PREVIEW_PAGE_FILTER_PARAM_NAMES[key as keyof ImportPreviewServerQueryFilters], value);
-    }
-}
-
 function abortPendingPreviewPageRequest(): void {
     previewPageRequestSequence += 1;
     previewPageAbortController?.abort();
@@ -1651,7 +1257,6 @@ async function executeStage2Dedup(): Promise<void> {
 }
 
 /**
- * v7: 三阶段导入 - 解析并去重（含逐文件列映射）
  *
  * 新流程：
  * 1. 所有文件先送入 v2/parse，命中特定解析器的直接写入同一会话
@@ -1696,7 +1301,6 @@ async function parseData(): Promise<void> {
             formData.append('files', file);
         }
 
-        // v6.79: 直接使用 'auto'，解析器会自动识别文件格式
         formData.append('parser_type', 'auto');
 
         const token = getCurrentToken();
@@ -1730,7 +1334,6 @@ async function parseData(): Promise<void> {
         serverSessionId.value = stage1Result.data.session_id;
         importProcess.value = 30;
 
-        // v7: 检查是否有未匹配特定解析器的文件
         const unmatchedFiles: Array<{ original_name: string; temp_path: string }> = stage1Result.data.unmatched_files || [];
 
         if (unmatchedFiles.length > 0) {
@@ -1774,7 +1377,6 @@ function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: num
 }
 
 /**
- * v6.55: 处理重新分类后的数据更新
  * @param previewData 后端返回的原始预览数据数组（使用 preview_* 字段）
  */
 function onReclassified(previewData: ImportPreviewRecord[]): void {
@@ -2053,7 +1655,6 @@ async function submit(): Promise<void> {
                 return;
             }
 
-            // v6.48+: 使用三阶段确认接口作为唯一主链
             logger.info(`[三阶段导入-阶段3] 开始确认导入, session_id=${serverSessionId.value}`);
 
             // 收集用户编辑后的数据
@@ -2115,7 +1716,6 @@ async function submit(): Promise<void> {
             importedCount.value = result.data?.imported_count || selectedCount;
             currentStep.value = 'finalResult';
 
-            // v6.61: 清理服务器会话（虽然后端 import_stage3_confirm 已经清理了临时表，
             // 但为了健壮性，在成功时也显式调用清理以确保数据被删除）
             await cleanupServerSession();
             serverSessionId.value = '';
@@ -2146,7 +1746,6 @@ function close(completed: boolean): void {
             resolveFunc();
         }
     } else {
-        // v6.51: 用户点击取消时，清理后端会话（清空 parser_template 和 preview 表）
         if (serverSessionId.value) {
             cleanupServerSession();
         }
@@ -2172,85 +1771,4 @@ defineExpose({
 });
 </script>
 
-<style scoped>
-.import-flow-progress {
-    border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-    border-radius: 16px;
-    padding: 16px;
-    background: rgba(var(--v-theme-surface), 0.78);
-}
-
-.import-flow-progress__trail {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 10px;
-}
-
-.import-flow-progress__step {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    color: rgba(var(--v-theme-on-surface), 0.58);
-    font-size: 0.78rem;
-}
-
-.import-flow-progress__marker {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: 0 0 24px;
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    border: 1px solid rgba(var(--v-theme-on-surface), 0.18);
-    color: currentColor;
-    font-weight: 700;
-}
-
-.import-flow-progress__label {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.import-flow-progress__step--active {
-    color: rgb(var(--v-theme-primary));
-    font-weight: 700;
-}
-
-.import-flow-progress__step--complete {
-    color: rgba(var(--v-theme-on-surface), 0.78);
-}
-
-.import-flow-progress__step--active .import-flow-progress__marker,
-.import-flow-progress__step--complete .import-flow-progress__marker {
-    border-color: rgb(var(--v-theme-primary));
-    background: rgba(var(--v-theme-primary), 0.12);
-}
-
-@media (max-width: 700px) {
-    .import-flow-progress__trail {
-        grid-template-columns: 1fr;
-    }
-}
-
-.import-check-data-filter-drawer :deep(.v-navigation-drawer__content) {
-    display: flex;
-    flex-direction: column;
-}
-
-.import-check-data-filter-menu__group-title {
-    font-size: 0.98rem;
-    font-weight: 700;
-    letter-spacing: 0.01em;
-}
-
-.import-check-data-filter-menu__group-title--active {
-    color: rgb(var(--v-theme-primary));
-}
-
-.import-check-data-filter-menu :deep(.v-list-group__items .v-list-item) {
-    padding-inline-start: 28px;
-}
-</style>
+<style scoped src="./import-dialog/ImportDialog.scss"></style>

@@ -1,0 +1,18 @@
+.import-check-data-filter-drawer :deep(.v-navigation-drawer__content) {
+    display: flex;
+    flex-direction: column;
+}
+
+.import-check-data-filter-menu__group-title {
+    font-size: 0.98rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+}
+
+.import-check-data-filter-menu__group-title--active {
+    color: rgb(var(--v-theme-primary));
+}
+
+.import-check-data-filter-menu :deep(.v-list-group__items .v-list-item) {
+    padding-inline-start: 28px;
+}

@@ -7,17 +7,25 @@ function readImportDialogSource(): string {
     return fs.readFileSync(path.resolve(process.cwd(), 'src/views/desktop/transactions/import/ImportDialog.vue'), 'utf-8');
 }
 
+function readImportFlowProgressSource(): string {
+    return fs.readFileSync(
+        path.resolve(process.cwd(), 'src/views/desktop/transactions/import/import-dialog/useImportFlowProgress.ts'),
+        'utf-8'
+    );
+}
+
 describe('import dialog progress UI contract', () => {
     test('uses active import-flow progress instead of the obsolete StepsBar copy', () => {
-        const source = readImportDialogSource();
+        const dialogSource = readImportDialogSource();
+        const progressSource = readImportFlowProgressSource();
 
-        expect(source).not.toContain('<steps-bar');
-        expect(source).toContain('import-flow-progress');
-        expect(source).toContain("'selectSource'");
-        expect(source).toContain("'parseStageRows'");
-        expect(source).toContain("'reviewPreview'");
-        expect(source).toContain("'confirmImport'");
-        expect(source).toContain("'result'");
+        expect(dialogSource).not.toContain('<steps-bar');
+        expect(dialogSource).toContain('import-flow-progress');
+        expect(progressSource).toContain("'selectSource'");
+        expect(progressSource).toContain("'parseStageRows'");
+        expect(progressSource).toContain("'reviewPreview'");
+        expect(progressSource).toContain("'confirmImport'");
+        expect(progressSource).toContain("'result'");
     });
 
     test('keeps the v2 parse endpoint on the Rust REST import chain', () => {

@@ -105,8 +105,10 @@
 
 | 文件 | 行数/状态 | 当前职责 | 后续拆分方向 |
 | --- | ---: | --- | --- |
-| `src/web/src/views/desktop/transactions/import/ImportDialog.vue` | 2005，gate 2256 | 文件选择、配置匹配、列映射、stage2、preview page 请求、confirm、history rewrite ack、清理 session | 页面入口保留 step orchestration；拆 `useImportFiles`、`useImportConfig`、`useImportStageApi`、`useImportPreviewPaging`、`useImportConfirmPayload`、`useImportSessionCleanup` |
-| `src/web/src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue` | 5279，gate 5977 | preview 表格、筛选、批量选择、编辑草稿、annotation、signal actions、recurring/transfer/learning/LLM 决策、批量分类/账户/标签 | 保留 tab 壳和事件；拆 components、composables、adapters：`PreviewTableToolbar`、`PreviewSignalActions`、`usePreviewSelection`、`usePreviewDrafts`、`usePreviewDecisionActions`、`usePreviewAnnotationIssues`、`usePreviewBatchActions`、`usePreviewFacets` |
+| `src/web/src/views/desktop/transactions/import/ImportDialog.vue` | 1589，已低于 frontend structure baseline | 文件选择、列映射、stage2、preview page 请求、confirm、history rewrite ack、清理 session 的页面编排入口 | 已拆出 `import-dialog/**`；后续只保留 step orchestration，可继续拆 `stage2/confirm/session cleanup` 但不能改变 REST 和视觉合同 |
+| `src/web/src/views/desktop/transactions/import/import-dialog/**` | 15-115 | 导入源选择、导入流程进度、导入配置描述、preview page query、导入流 profiler、对话框样式和共享类型 | 可继续按 API/paging/confirm 细分；当前所有子文件低于 600 行 |
+| `src/web/src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue` | 4469，已低于 frontend structure baseline | preview 表格入口、编辑草稿、annotation、signal actions、recurring/transfer/learning/LLM 决策和事件合同 | 已拆出菜单和批量动作；后续可继续拆 selection、decision actions、annotation、facet/query adapter |
+| `src/web/src/views/desktop/transactions/import/check-data-tab/**` | 551-581 | check-data 筛选/工具菜单与批量分类、账户、标签、类型动作 composable | 可继续拆 decision action 与 annotation issue composable；当前子文件低于 600 行 |
 | `tabs/ImportTransactionDefineColumnTab.vue` | 545 | 手工列映射 | D1 可作为上传/解析前置页面保留；不优先拆 |
 | `tabs/ImportTransactionExecuteCustomScriptTab.vue` | 298 | 自定义脚本导入 | D1 只读 |
 | `tabs/ImportPreviewSignalCell.vue` | 440 | preview signal cell 展示和动作入口 | 可保留为展示组件，后续从大 tab 中剥离 action payload |
@@ -115,8 +117,10 @@
 
 | 文件 | 行数 | 当前职责 | 后续拆分方向 |
 | --- | ---: | --- | --- |
-| `checkDataMatching.ts` | 957，gate 1080 | parser/dedup/transfer/learning/LLM/history signal view model 和 filter matching | 拆 `signals/{parser,dedup,transfer,learning,llm,history,filters}.ts` |
-| `importPreviewIndex.ts` | 591，gate 670 | server-paged index/facet/filter/sort/selection helpers | 拆 `previewIndex/{filters,facets,selection,sort}.ts` |
+| `checkDataMatching.ts` | 6，facade | 聚合导入预览 signal view model、matching context 与 history rewrite helper | 已拆到 `check-data-matching/{types,shared,context,historyRewrite,signalViewModel}.ts` |
+| `check-data-matching/**` | 93-379 | parser/dedup/transfer/learning/LLM/history signal view model、filter matching、history rewrite acknowledgement helper 和共享类型 | 当前所有子文件低于 600 行；后续新增 signal family 必须落在对应子文件并保持 facade 兼容 |
+| `importPreviewIndex.ts` | 5，facade | 聚合 server-paged preview index helper | 已拆到 `import-preview-index/{types,filterGrouping,queryFilters,mapping}.ts` |
+| `import-preview-index/**` | 105-180 | server-paged filter grouping、query filter、preview index mapping 和共享类型 | 当前所有子文件低于 600 行；后续 server query/filter 新逻辑优先落入该子域 |
 | `importPreview.ts` | 153 | category id/path resolution | 可保留，增加注释时标明 canonical id 约束 |
 | `importPreviewTransaction.ts` | 188 | backend preview record -> `ImportTransaction` | 可保留，后续移入 adapter 目录 |
 | `importPreviewUpdates.ts` | 111 | update payload 构造 | 可保留或移入 `adapters/previewUpdates.ts` |
@@ -167,6 +171,7 @@ D1 默认 owned paths：
 - `tests/web/views/desktop/transactions/import/importPreviewTransaction.test.ts`: backend preview record 到 `ImportTransaction` 投影。
 - `tests/web/views/desktop/transactions/import/importPreviewUpdates.test.ts`: preview update payload、manual annotation、suggestion clear。
 - `tests/web/views/desktop/transactions/import/importDialogHistoryAck.test.ts`: confirm history rewrite acknowledgement payload。
+- `tests/web/views/desktop/transactions/import/importDialogProgress.test.ts`: import dialog progress UI 和 v2 parse endpoint 源码合同。
 - `tests/web/views/desktop/transactions/import/importStageTimeout.test.ts`: long-running import stage timeout。
 - `tests/web/views/mobile/importPreviewPage.test.ts`: mobile import preview parity。
 
@@ -231,6 +236,24 @@ G012 已补充关键导出函数、业务关键函数和复杂 helper 的中文�
 - `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35`
 - `node scripts/check-rust-backend-structure.mjs`：导入预览相关 `import_staging.rs`、`types.rs`、`preview_drafts.rs`、`stage_handlers.rs`、`preview_mutation_helpers.rs`、`stage_vector_recall.rs` 已退出失败列表；剩余失败为 D2-D10 其他功能域既有结构债。
 
+### 7.3 G013 前端结构拆分证据
+
+G013 已完成导入预览前端第一轮结构拆分，保持页面 prop/emit、REST 调用、金额/身份合同和视觉布局不变：
+
+- `ImportDialog.vue` 保留对话框模板和流程编排，导入源选择、导入流程进度、配置匹配、preview page query、导入流 profiler、样式和共享类型拆入 `import-dialog/**`。
+- `ImportTransactionCheckDataTab.vue` 保留预览表格入口、编辑草稿、事件合同和决策动作接线，筛选/工具菜单与批量分类、账户、标签、类型动作拆入 `check-data-tab/**`。
+- `checkDataMatching.ts` 改为 6 行 facade；signal view model、matching context、shared helper、history rewrite acknowledgement 与共享类型拆入 `check-data-matching/**`。
+- `importPreviewIndex.ts` 改为 5 行 facade；server-paged filter grouping、query filter、preview index mapping 与共享类型拆入 `import-preview-index/**`。
+- `tests/web/views/desktop/transactions/import/importDialogProgress.test.ts` 的源码嗅探跟随新边界读取 `useImportFlowProgress.ts`，继续锁定 active import-flow progress 和 v2 parse endpoint。
+
+本切片已验证：
+
+- `Set-Location src/web; npm run lint:ci`：通过，保留仓库既有 `no-explicit-any` warning。
+- `Set-Location src/web; npm run test -- --runTestsByPath ../../tests/web/views/desktop/transactions/import/checkDataMatching.test.ts ../../tests/web/views/desktop/transactions/import/importPreviewIndex.test.ts ../../tests/web/views/desktop/transactions/import/importPreview.test.ts ../../tests/web/views/desktop/transactions/import/checkDataFilters.test.ts`：4 suite、78 tests 通过。
+- `Set-Location src/web; npm run test -- --runTestsByPath ../../tests/web/views/desktop/transactions/import/importDialogProgress.test.ts`：1 suite、2 tests 通过。
+- `Set-Location src/web; npm run test:coverage`：85 suite、38962 tests 通过；总行覆盖率 99.13%，导入预览覆盖分组行覆盖率 98.71%。
+- `Set-Location src/web; npm run structure:check`：导入预览 D1 相关失败项已退出 FAIL 列表；剩余 42 项为 D2-D10 非 D1 历史结构债。
+
 ## 8. 后续切片执行顺序
 
 ### 8.1 G011 behavior-lock
@@ -255,13 +278,7 @@ G012 已补充关键导出函数、业务关键函数和复杂 helper 的中文�
 
 ### 8.3 G013 frontend-shape
 
-建议顺序：
-
-1. 先从 `ImportDialog.vue` 抽 API/paging/confirm composables，页面模板和视觉结构不变。
-2. 再从 `ImportTransactionCheckDataTab.vue` 抽 selection、decision actions、annotation、batch actions、facet/query adapter。
-3. `checkDataMatching.ts` 按 signal family 拆分，保留 barrel/facade 兼容旧 import。
-4. 每一步保留现有 prop/emit 合同和 UI 视觉，不做布局/配色重设计。
-5. 运行 `npm run lint`、相关 vitest、`npm run test:coverage`；可见流程补 browser smoke。
+已完成第一轮 frontend-shape：`ImportDialog.vue`、`ImportTransactionCheckDataTab.vue`、`checkDataMatching.ts`、`importPreviewIndex.ts` 均已拆成 facade + 功能子文件夹，导入预览 D1 相关前端结构失败已退出 FAIL 列表。
 
 ### 8.4 G014 comment-pass/governance-docs/closeout
 
