@@ -102,13 +102,13 @@
     {
       "path": "src/views/desktop/pairingcenter/components/RuleCenterPanel.vue",
       "kind": "vue",
-      "lines": 1626,
+      "lines": 1659,
       "sections": {
         "template": 329,
-        "script": 751,
+        "script": 784,
         "style": 192
       },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+      "reason": "legacy oversized file tracked by the frontend structure ratchet; D3 comment-pass baseline includes required Chinese function comments"
     },
     {
       "path": "src/views/mobile/transactions/EditPage.vue",
@@ -124,13 +124,13 @@
     {
       "path": "src/views/desktop/pairingcenter/components/LearningCenterPanel.vue",
       "kind": "vue",
-      "lines": 1573,
+      "lines": 1618,
       "sections": {
         "template": 424,
-        "script": 590,
+        "script": 635,
         "style": 183
       },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+      "reason": "legacy oversized file tracked by the frontend structure ratchet; D3 comment-pass baseline includes required Chinese function comments"
     },
     {
       "path": "src/stores/transaction.ts",
@@ -227,13 +227,13 @@
     {
       "path": "src/views/desktop/pairingcenter/components/AccountRulePanel.vue",
       "kind": "vue",
-      "lines": 798,
+      "lines": 822,
       "sections": {
         "template": 198,
-        "script": 395,
+        "script": 419,
         "style": 133
       },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+      "reason": "legacy oversized file tracked by the frontend structure ratchet; D3 comment-pass baseline includes required Chinese function comments"
     },
     {
       "path": "src/views/mobile/users/UserProfilePage.vue",
@@ -271,13 +271,13 @@
     {
       "path": "src/views/desktop/pairingcenter/ListPage.vue",
       "kind": "vue",
-      "lines": 721,
+      "lines": 733,
       "sections": {
         "template": 142,
-        "script": 460,
+        "script": 472,
         "style": 56
       },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+      "reason": "legacy oversized file tracked by the frontend structure ratchet; D3 comment-pass baseline includes required Chinese function comments"
     },
     {
       "path": "src/models/account.ts",

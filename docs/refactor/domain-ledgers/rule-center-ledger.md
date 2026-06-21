@@ -148,6 +148,20 @@ Behavior-lock 切片至少应补强：
 - 收紧 Rust/frontend structure baseline，让完成的 D3 项退出 failure/warning。
 - PR/CI/merge/delete/writeback 证据完整后，cursor 推进到 D4。
 
+当前 comment-pass 切片结果：
+
+- 后端 `account_rules`、`category_rules`、rule HTTP handler 和 shared audit/rule helper 已补齐公开入口、业务关键函数和复杂私有 helper 的中文说明。
+- 前端规则中心导航、筛选、表达式展示、分类规则、账户规则、学习中心、LLM/OCR 配置相关复杂 helper 已补齐中文说明；简单 getter、颜色/label 映射和事件转发未强制补注释。
+- 本切片为 comment-only：未改变 API、DB、金额单位、规则表达式语法、UI 视觉或运行逻辑。
+- 已通过 `cargo fmt --all -- --check`、`cargo test -p bill-analyser-core --test rule_center_contracts`、`cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35`、`npm run lint:ci`、`npm run test:coverage`（89 suites / 38974 tests / 99.13% total line coverage）、`node scripts/check-backend-doc-map.mjs` 与 Gitea Actions run 14566。
+
+当前 governance-docs 切片结果：
+
+- `src/web/scripts/frontend-structure-baseline.json` 已对 D3 四个前端大文件记录注释后的当前行数：`RuleCenterPanel.vue` 1659 行、`LearningCenterPanel.vue` 1618 行、`AccountRulePanel.vue` 822 行、`ListPage.vue` 733 行。
+- baseline 调整只覆盖 comment-pass 必需中文函数说明带来的 D3 行数变化；非 D3 历史结构失败没有被本切片吞并。
+- `node scripts/check-rust-backend-structure.mjs` 仍失败 10 个非 D3 历史项，D3 后端项为 0。
+- `node scripts/check-frontend-structure.mjs` 仍失败 19 个非 D3 历史项，D3 pairingcenter 项为 0。
+
 ## 7. 关键风险与阻断条件
 
 - 规则表达式语法是业务合同；拆 parser/matcher 时不得改变 OR/AND/NOT/REGEX、括号、转义和 regex disabled 语义。
