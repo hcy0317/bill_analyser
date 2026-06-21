@@ -216,6 +216,24 @@ G015 已补强以下行为锁定入口，后续 `backend-shape`/`frontend-shape`
 - `node scripts/check-backend-doc-map.mjs`
 - `git diff --check`
 
+### 7.2 G015 backend-shape 证据
+
+本切片只做后端物理结构拆分，不改 REST route、SQL 条件、settings bundle 导入顺序、账户 legacy 归一化或金额 cents/minor units 合同。
+
+- `src/backend/db/taxonomy/postgres_reads.rs` 变为 taxonomy Postgres facade，按账户、分类、分类规则、账户规则、标签、模板、row mapping、template/account/category/rule helper 和测试拆到 `postgres_reads/**`。
+- `src/backend/db/taxonomy/settings_bundle/postgres_import_export.rs` 变为 settings bundle 导入 facade，按 orchestrator、accounts、categories、tags、templates、category rules、account rules、helper 和测试拆到 `postgres_import_export/**`。
+- `src/backend/http/taxonomy_routes/account_handlers.rs` 变为账户 handler facade，按 CRUD、display order、balance sync、move transactions、clear transactions 和 helper 拆到 `account_handlers/**`。
+- `src/backend/http/taxonomy_routes/account_category_formatters/accounts_and_tags.rs` 变为账户/标签格式化 facade，按 sub accounts、account responses、account payload、account normalization、tag/template responses 和测试拆到 `accounts_and_tags/**`。
+- `node scripts/check-rust-backend-structure.mjs` 已移除 D2 后端四个直接失败项；剩余 12 项均为 D3+ 或其他后续域历史结构债。
+
+本切片已通过的 focused 验证：
+
+- `cargo fmt --all -- --check`
+- `cargo test -p bill-analyser-db --test settings_bundle_postgres`
+- `cargo test -p bill-analyser-db --test account_rules_postgres`
+- `cargo test -p bill-analyser-db --test category_rules_postgres`
+- `cargo test -p bill-analyser-http taxonomy`
+
 ## 8. 后续切片执行顺序
 
 ### 8.1 behavior-lock

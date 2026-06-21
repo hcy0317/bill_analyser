@@ -21,6 +21,8 @@ Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预
 
 导入预览后端当前以 facade + 功能子文件组织：`src/backend/db/import_staging.rs` 聚合 session、parser/source staging、preview query/predicate/selection/write/identity/confirm/materialization/row mapping/filter matching 等子文件；`src/backend/http/import_routes/stage_handlers.rs`、`preview_mutation_helpers.rs` 与 `stage_vector_recall.rs` 聚合 dedup/stage2、preview page/selection/update/reclassify、confirm、learning、vector recall 等子文件。该拆分只改变物理结构，公开函数名、REST 路由、PostgreSQL 合同与导入语义保持不变。
 
+身份设置后端当前以 facade + 功能子文件组织：`src/backend/db/taxonomy/postgres_reads.rs` 聚合账户、分类、分类规则、账户规则、标签、模板、row mapping 与 helper 子文件；`settings_bundle/postgres_import_export.rs` 聚合 settings bundle 导入编排、账户/分类/标签/模板/规则 section importer 与金额/ref helper；`src/backend/http/taxonomy_routes/account_handlers.rs` 聚合账户 CRUD、排序、余额同步、交易迁移和清理；`account_category_formatters/accounts_and_tags.rs` 聚合账户子账户、响应格式化、请求 payload、legacy 类型分类归一化、标签和模板格式化。该拆分不改变 REST route、user-scope SQL、settings bundle 顺序、legacy 恢复兼容或 cents/minor units 金额合同。
+
 导入预览桌面前端当前以页面 facade + 功能子文件组织：`ImportDialog.vue` 保留导入流程编排和模板入口，`import-dialog/**` 承载导入源选择、进度条、配置匹配、preview page 查询参数和样式；`ImportTransactionCheckDataTab.vue` 保留预览表格入口和事件合同，`check-data-tab/**` 承载筛选菜单和批量动作；`checkDataMatching.ts` 与 `importPreviewIndex.ts` 作为兼容 facade 聚合 `check-data-matching/**` 和 `import-preview-index/**` 的信号视图模型、历史改写、筛选分组、查询过滤与 mapping helper。该拆分不改变 prop/emit、REST 调用、金额/身份合同或导入预览视觉布局。
 
 ## 数据库与健康检查
