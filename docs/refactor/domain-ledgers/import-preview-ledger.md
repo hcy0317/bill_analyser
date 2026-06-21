@@ -254,6 +254,20 @@ G013 已完成导入预览前端第一轮结构拆分，保持页面 prop/emit�
 - `Set-Location src/web; npm run test:coverage`：85 suite、38962 tests 通过；总行覆盖率 99.13%，导入预览覆盖分组行覆盖率 98.71%。
 - `Set-Location src/web; npm run structure:check`：导入预览 D1 相关失败项已退出 FAIL 列表；剩余 42 项为 D2-D10 非 D1 历史结构债。
 
+### 7.4 G014 注释与治理收口证据
+
+G014 已完成 D1 closeout 的结构治理收口：
+
+- `scripts/rust-backend-structure-baseline.json` 已收紧 D1 后端 ratchet：`import_staging.rs`、`stage_handlers.rs`、`preview_mutation_helpers.rs` 等已拆小 facade 不再保留旧大文件 baseline；仍超阈值的 `core/import_pipeline.rs`、`core/import_learning.rs` 和 `multipart_and_ocr.rs` 按当前更小行数锁定。
+- `src/web/scripts/frontend-structure-baseline.json` 已收紧 D1 前端 ratchet：`ImportDialog.vue` 与 `ImportTransactionCheckDataTab.vue` 按当前行数锁定，`checkDataMatching.ts` facade 低于阈值后移出 baseline。
+- G012/G013 已按“导出函数、业务关键函数、复杂私有 helper 必须有中文说明；简单 getter/映射/事件转发不强制”的策略补充 D1 关键中文说明；G014 未发现必须新增的业务注释缺口。
+- 结构门禁复跑后，D1 导入预览相关 warning/fail 已退出列表；剩余 Rust 16 项 failure、Frontend 42 项 failure 均属于 D2-D10 后续功能域或全局共享尾扫。
+
+本切片已验证：
+
+- `node scripts/check-rust-backend-structure.mjs`：D1 相关 warning 已退出；剩余 16 项为非 D1 历史结构债。
+- `Set-Location src/web; npm run structure:check`：D1 相关 warning 已退出；剩余 42 项为非 D1 历史结构债。
+
 ## 8. 后续切片执行顺序
 
 ### 8.1 G011 behavior-lock
@@ -282,11 +296,7 @@ G013 已完成导入预览前端第一轮结构拆分，保持页面 prop/emit�
 
 ### 8.4 G014 comment-pass/governance-docs/closeout
 
-- 对导出函数、业务关键函数、复杂私有 helper 补中文说明。
-- 简单 getter、字段映射、事件转发不强制。
-- 更新结构门禁 baseline/ratchet，确保 D1 相关文件不回涨。
-- 若稳定业务事实改变，更新 `docs/PROJECT_OVERVIEW.md`；纯结构移动不写会话日志。
-- 完成 PR CI、squash merge、删除分支、写回 progress，并把 cursor 推进到 D2。
+已完成 D1 closeout：关键中文说明策略已覆盖，结构门禁 baseline/ratchet 已收紧到 D1 当前文件形态，PR/CI/merge/delete/writeback 证据由 progress ledger 记录，下一游标推进到 D2。
 
 ## 9. 关键风险与阻断条件
 

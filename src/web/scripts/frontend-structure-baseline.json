@@ -29,10 +29,10 @@
     {
       "path": "src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue",
       "kind": "vue",
-      "lines": 5233,
+      "lines": 5079,
       "sections": {
-        "template": 462,
-        "script": 4404,
+        "template": 461,
+        "script": 4239,
         "style": 24
       },
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
@@ -102,11 +102,11 @@
     {
       "path": "src/views/desktop/transactions/import/ImportDialog.vue",
       "kind": "vue",
-      "lines": 1833,
+      "lines": 1774,
       "sections": {
-        "template": 113,
-        "script": 1415,
-        "style": 20
+        "template": 90,
+        "script": 1411,
+        "style": 1
       },
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
@@ -193,12 +193,6 @@
       "path": "src/models/transaction.ts",
       "kind": "ts",
       "lines": 964,
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
-    },
-    {
-      "path": "src/views/desktop/transactions/import/checkDataMatching.ts",
-      "kind": "ts",
-      "lines": 925,
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
