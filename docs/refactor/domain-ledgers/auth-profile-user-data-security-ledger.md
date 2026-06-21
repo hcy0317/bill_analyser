@@ -284,3 +284,23 @@ D6 完成前必须满足：
 - `Set-Location src/web; npm run lint:ci` 和 `npm run test:coverage` 通过，必要时补桌面/移动用户页或 store 单测。
 - 安全审查结论不含 blocker；如发现真实安全缺陷，必须拆出独立 fix/prerequisite slice，不能混入结构搬迁。
 - PR CI 通过、自动 squash merge、来源分支删除、进度 JSON 与 ultragoal ledger 回写完成。
+
+## 9. Behavior-lock 记录
+
+D6 behavior-lock 切片补充了拆分前合同测试，仍不移动生产代码：
+
+- `tests/backend/core/auth_security_contracts.rs`：新增 `AuthRestError` JSON 对外字段合同，锁定不暴露 password/token/stack；补充 `TokenKind::from_str`、`as_str`、API/MCP/session user-agent 和 token type 推断合同。
+- `tests/web/stores/user.test.ts`：新增 user store 合同测试，覆盖 basic info localStorage key、profile 读取归一化、profile 更新缓存写回、user-data statistics fallback 计数、导出 content-type 校验、settings bundle section export/preview 和 avatar token URL helper。
+- `tests/web/stores/authSecurity.test.ts`：新增认证安全 store 合同测试，覆盖 refresh token 轮换写回、旧 token best-effort revoke、cloud settings/user profile 写回、API token generation、2FA status/confirm/recovery code、external auth list/unlink。
+
+本切片本地验证：
+
+- `cargo fmt --all -- --check` 通过。
+- `cargo test -p bill-analyser-core --test auth_security_contracts` 通过，7 tests。
+- `cargo test -p bill-analyser-db --test registration_defaults_postgres` 通过，1 test。
+- `Set-Location src/web; npm run test -- --runTestsByPath ../../tests/web/stores/authSecurity.test.ts ../../tests/web/stores/user.test.ts ../../tests/web/models/user.test.ts ../../tests/web/models/token.test.ts` 通过，20 tests。
+- `Set-Location src/web; npm run lint:ci` 通过，仅有既有 `no-explicit-any` warnings。
+- `Set-Location src/web; npm run test:coverage` 通过，93 suites / 38996 tests，All files line coverage 99.13%。
+- `node scripts/check-backend-doc-map.mjs` 通过。
+- `node scripts/check-rust-backend-structure.mjs` 预期失败仍为 D6 三项：`auth_postgres.rs`、`auth_registration_defaults.rs`、`public_auth_handlers.rs`。
+- `Set-Location src/web; npm run structure:check` 预期失败仍为 D10 shared 四项：`services.ts`、`stores/index.ts`、`core/theme.ts`、`models/imported_transaction.ts`。

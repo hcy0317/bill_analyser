@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use bill_analyser_core::auth::{
     extract_bearer_token_or_empty, infer_token_type_from_user_agent, json_object_or_empty,
     normalize_recovery_code, parse_bearer_authorization_header, parse_user_agent_device_name,
@@ -66,6 +68,24 @@ fn refresh_claim_validation_preserves_existing_error_contract() {
 }
 
 #[test]
+fn auth_rest_error_serializes_only_public_error_fields() {
+    let error = AuthRestError::new(403, "Forbidden", "Sensitive action requires step-up");
+    let serialized = serde_json::to_value(error).unwrap();
+
+    assert_eq!(
+        serialized,
+        json!({
+            "status": 403,
+            "error": "Forbidden",
+            "message": "Sensitive action requires step-up"
+        })
+    );
+    assert!(serialized.get("password").is_none());
+    assert!(serialized.get("token").is_none());
+    assert!(serialized.get("stack").is_none());
+}
+
+#[test]
 fn json_body_object_contract_treats_null_and_scalars_as_empty() {
     assert!(json_object_or_empty(None).is_empty());
     assert!(json_object_or_empty(Some(&json!(null))).is_empty());
@@ -77,6 +97,15 @@ fn json_body_object_contract_treats_null_and_scalars_as_empty() {
 
 #[test]
 fn token_kind_and_user_agent_projection_match_token_routes() {
+    assert_eq!(TokenKind::from_str("session").unwrap(), TokenKind::Session);
+    assert_eq!(TokenKind::from_str(" API ").unwrap(), TokenKind::Api);
+    assert_eq!(TokenKind::from_str("mcp").unwrap(), TokenKind::Mcp);
+    assert!(TokenKind::from_str("admin").is_err());
+
+    assert_eq!(TokenKind::Session.as_str(), "session");
+    assert_eq!(TokenKind::Api.as_str(), "api");
+    assert_eq!(TokenKind::Mcp.as_str(), "mcp");
+
     assert_eq!(
         TokenKind::Api.user_agent("Browser"),
         "Bill Analyser API Token"
