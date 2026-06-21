@@ -180,7 +180,7 @@
     {
       "path": "src/stores/account.ts",
       "kind": "ts",
-      "lines": 1246,
+      "lines": 1243,
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
@@ -213,17 +213,6 @@
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
-      "path": "src/views/desktop/accounts/ListPage.vue",
-      "kind": "vue",
-      "lines": 829,
-      "sections": {
-        "template": 141,
-        "script": 409,
-        "style": 99
-      },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
-    },
-    {
       "path": "src/stores/index.ts",
       "kind": "ts",
       "lines": 824,
@@ -233,17 +222,6 @@
       "path": "src/styles/mobile/global.scss",
       "kind": "style",
       "lines": 824,
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
-    },
-    {
-      "path": "src/views/mobile/accounts/EditPage.vue",
-      "kind": "vue",
-      "lines": 779,
-      "sections": {
-        "template": 258,
-        "script": 234,
-        "style": 26
-      },
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
@@ -322,10 +300,10 @@
     {
       "path": "src/views/desktop/categories/list/dialogs/EditDialog.vue",
       "kind": "vue",
-      "lines": 655,
+      "lines": 628,
       "sections": {
         "template": 26,
-        "script": 535,
+        "script": 508,
         "style": 0
       },
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
@@ -417,28 +395,6 @@
         "template": 85,
         "script": 344,
         "style": 0
-      },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
-    },
-    {
-      "path": "src/views/desktop/tags/ListPage.vue",
-      "kind": "vue",
-      "lines": 526,
-      "sections": {
-        "template": 74,
-        "script": 245,
-        "style": 48
-      },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
-    },
-    {
-      "path": "src/views/desktop/categories/ListPage.vue",
-      "kind": "vue",
-      "lines": 523,
-      "sections": {
-        "template": 87,
-        "script": 304,
-        "style": 14
       },
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },

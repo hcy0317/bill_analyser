@@ -11,14 +11,6 @@
   "countMode": "non-comment-non-observability-rust-lines",
   "files": [
     {
-      "path": "src/backend/db/taxonomy/postgres_reads.rs",
-      "kind": "rust",
-      "area": "db",
-      "lines": 2894,
-      "physicalLines": 3045,
-      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
       "path": "src/backend/db/budgets/postgres_reads.rs",
       "kind": "rust",
       "area": "db",
@@ -99,14 +91,6 @@
       "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     },
     {
-      "path": "src/backend/db/taxonomy/settings_bundle/postgres_import_export.rs",
-      "kind": "rust",
-      "area": "db",
-      "lines": 940,
-      "physicalLines": 992,
-      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
       "path": "src/backend/core/ops.rs",
       "kind": "rust",
       "area": "core",
@@ -128,14 +112,6 @@
       "area": "core",
       "lines": 827,
       "physicalLines": 999,
-      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/http/taxonomy_routes/account_handlers.rs",
-      "kind": "rust",
-      "area": "http",
-      "lines": 759,
-      "physicalLines": 834,
       "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     },
     {

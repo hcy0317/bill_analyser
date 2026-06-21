@@ -280,6 +280,24 @@ G015 已补强以下行为锁定入口，后续 `backend-shape`/`frontend-shape`
 - `Set-Location src/web; npm run structure:check`（预期仍失败；D2 前端失败项为 0，剩余 30 项为非 D2 历史结构债）
 - `node scripts/check-backend-doc-map.mjs`
 
+### 7.5 G015 governance-docs 证据
+
+本切片只收紧身份设置域已完成拆分后的结构治理基线，不改业务源码、REST 合同、SQL、store 行为或页面视觉。
+
+- `docs/PROJECT_OVERVIEW.md` 已在 D2 backend-shape 阶段记录 taxonomy/settings 后端和前端当前 facade + 功能子文件事实；本切片复核后未新增会话日志式内容。
+- `scripts/rust-backend-structure-baseline.json` 已移除 D2 已拆分并低于阈值的旧聚合入口：`taxonomy/postgres_reads.rs`、`settings_bundle/postgres_import_export.rs`、`taxonomy_routes/account_handlers.rs`。
+- `src/web/scripts/frontend-structure-baseline.json` 已移除低于阈值的 D2 页面入口：桌面账户列表、移动账户编辑页、桌面分类列表、桌面标签列表。
+- `src/web/scripts/frontend-structure-baseline.json` 对仍真实超阈值的 D2 共享文件只做向下 ratchet：`src/stores/account.ts` 由 1246 行降为 1243 行，分类编辑弹窗由 655/535 降为 628/508。
+- 结构检查仍保留非 D2 历史债务，不在本切片扩大治理口径或重标其它功能域。
+
+本切片已通过的 focused 验证：
+
+- `node scripts/check-rust-backend-structure.mjs`（预期仍失败；D2 后端 WARN/FAIL 为 0，剩余 12 项为非 D2 历史结构债）
+- `Set-Location src/web; npm run structure:check`（预期仍失败；D2 前端 WARN/FAIL 为 0，剩余 30 项为非 D2 历史结构债）
+- `node scripts/check-governance-normalizers.mjs`
+- `node scripts/check-backend-doc-map.mjs`
+- `git diff --check`
+
 ## 8. 后续切片执行顺序
 
 ### 8.1 behavior-lock
