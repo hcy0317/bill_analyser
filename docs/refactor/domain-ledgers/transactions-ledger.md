@@ -345,6 +345,18 @@ D4 `behavior-lock` 必须补强或明确复用以下场景：
   - JSON baseline 文件解析检查
   - `git diff --check`
 
+当前 closeout 证据（2026-06-21）：
+
+- D4 `ledger`：PR #217，commit `7bd8037ae5f24a0d555b12bb9f4eb3555b8ad356`，CI run 14574 通过；Gitea merge API 超时后以等价 squash commit `829b28aa8878def7490eb5edf931f337cc354795` 集成到 `main`，来源分支已删除。
+- D4 `behavior-lock`：PR #218，commit `cf694ff7e60f37d9e6ac737759db808fe3522775`，CI run 14577 通过，squash merge `4ee80fb657e85a943a09ee22bb721c7262d111b1`，来源分支已删除。
+- D4 `backend-shape`：PR #219，commit `e4c1680f8672d06cc443b201d503a7e0e0fb6fe9`，CI run 14580 通过，squash merge `f0b150e9a4af27ee73b2ceb7162c70df0c8a15f3`，来源分支已删除。
+- D4 `frontend-shape`：PR #220，commit `56a411f39c311fc4f9fd7b414c7e092897e53dc6`，CI run 14585 通过，squash merge `5d6593a87411436b6d192894a3b1a3887e1cd40a`，来源分支已删除。
+- D4 `comment-pass`：PR #221，commit `7e9a3bf269f78f4dc868178789af83ffa042521b`，CI run 14588 通过，squash merge `5de9238ee54ceb4d9abea676ff89de75d31d57c6`，来源分支已删除。
+- D4 `governance-docs`：PR #222，commit `ac6b56affb1deda738c1eee9157dfa1c09a58635`，CI run 14590 通过，squash merge `66ace41efe2887c852a990ca3ed387a7a32767aa`，来源分支已删除。
+- D4 结束时 `node scripts/check-rust-backend-structure.mjs` 仍失败 6 个非 D4 历史项：`auth_postgres.rs`、`budgets/postgres_reads.rs`、`auth_registration_defaults.rs`、`statistics.rs`、`auth_routes/public_auth_handlers.rs`、`budgets.rs`；D4 后端直接项为 0。
+- D4 结束时 `Set-Location src/web; npm run structure:check` 仍失败 7 个非 D4 历史项：desktop budgets、`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`；D4 前端直接项为 0。
+- D4 收口后 cursor 应推进到 D5 `budget-statistics-exchange-assets` 的 `ledger` 切片。
+
 ## 9. 关键风险与阻断条件
 
 - `db/bills/postgres_reads.rs` 同时处理 SQL、事务、身份校验、标签、余额同步和 row mapping；拆分前必须先锁 user-scope、transaction rollback、cents 字段和账户余额副作用。
