@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 import { createPinia, setActivePinia } from 'pinia';
 
 import { AccountCategory, AccountType } from '@/core/account.ts';
-import { TransactionType } from '@/core/transaction.ts';
+import { DateRange } from '@/core/datetime.ts';
+import { TransactionTagFilterType, TransactionType } from '@/core/transaction.ts';
 import type { AccountInfoResponse } from '@/models/account.ts';
 import {
     Transaction,
@@ -211,6 +212,49 @@ describe('transaction store service boundary', () => {
         }));
         expect(page.totalCount).toBe(1);
         expect(transactionsStore.transactionListStateInvalid).toBe(false);
+    });
+
+    test('filter URL params and export requests keep the transaction query contract', () => {
+        const transactionsStore = useTransactionsStore();
+
+        transactionsStore.initTransactionListFilter({
+            dateType: DateRange.Custom.type,
+            minTime: 1_767_225_600,
+            maxTime: 1_770_422_399,
+            type: TransactionType.Investment,
+            categoryIds: 'fund,bond',
+            accountIds: 'brokerage,bank',
+            tagIds: 'tag-plan',
+            tagFilterType: TransactionTagFilterType.NotHasAny.type,
+            amountFilterCents: 'bt:10000:20000',
+            keyword: '沪深300 ETF'
+        });
+
+        expect(transactionsStore.getTransactionListPageParams(2)).toBe(
+            'pageType=2'
+            + '&type=5'
+            + '&accountIds=brokerage,bank'
+            + '&categoryIds=fund,bond'
+            + '&tagIds=tag-plan'
+            + '&tagFilterType=2'
+            + '&dateType=255'
+            + '&maxTime=1770422399'
+            + '&minTime=1767225600'
+            + '&amountFilterCents=bt%3A10000%3A20000'
+            + '&keyword=%E6%B2%AA%E6%B7%B1300%20ETF'
+        );
+
+        expect(transactionsStore.getExportTransactionDataRequestByTransactionFilter()).toStrictEqual({
+            maxTime: 1_770_422_399,
+            minTime: 1_767_225_600,
+            type: TransactionType.Investment,
+            categoryIds: 'fund,bond',
+            accountIds: 'brokerage,bank',
+            tagIds: 'tag-plan',
+            tagFilterType: TransactionTagFilterType.NotHasAny.type,
+            amountFilterCents: 'bt:10000:20000',
+            keyword: '沪深300 ETF'
+        });
     });
 
     test('saveTransactions filters unsupported drafts and invalidates high-fanout account/overview/statistics state', async () => {

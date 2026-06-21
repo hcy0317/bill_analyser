@@ -229,6 +229,22 @@ D4 `behavior-lock` 必须补强或明确复用以下场景：
   - `Set-Location src/web; npm run lint:ci`
 - 若发现真实 bug，当前切片写 `blocked:<reason>`，另开 fix slice。
 
+本次 behavior-lock 切片执行证据（2026-06-21）：
+
+- 新增后端 adapter 合同：`tests/backend/core/transaction_adapter_contracts.rs` 锁定转账和投资写入时 `sourceAmountCents` 转负、`destinationAmountCents` 原样保留、来源/目标账户和分类/tag metadata 不丢失。
+- 新增前端 store 合同：`tests/web/stores/transaction.core.test.ts` 锁定交易列表 URL query 与导出请求共享同一筛选合同，覆盖自定义日期、投资类型、分类、账户、标签、tag filter、金额区间和关键词编码。
+- 新增桌面批量录入源码合同：`tests/web/views/desktop/transactions/batchManualEntryDialog.test.ts` 锁定批量录入的 destination 字段键盘网格、转账/投资目标金额同步、非空行校验、批量 `saveTransactions` 提交、批量覆盖/填空分工，以及桌面列表把当前筛选上下文传给批量录入弹窗。
+- 通过验证：
+  - `cargo fmt --all -- --check`
+  - `cargo test -p bill-analyser-db --test bills_postgres`
+  - `cargo test -p bill-analyser-db --test matching_postgres`
+  - `cargo test -p bill-analyser-core --test transaction_adapter_contracts`
+  - `cargo test -p bill-analyser-core --test matching_contracts`
+  - `cargo test -p bill-analyser-http matching`
+  - `Set-Location src/web; npm run test -- --runTestsByPath ../../tests/web/stores/transaction.core.test.ts ../../tests/web/stores/transaction.recognizeReceiptImage.test.ts ../../tests/web/models/bill_matching.test.ts ../../tests/web/views/desktop/transactions/editDialogPictureOcr.test.ts ../../tests/web/views/desktop/transactions/batchManualEntryDialog.test.ts ../../tests/web/views/mobile/transactionEditPagePictureOcr.test.ts ../../tests/web/views/mobile/transactionListPageInvestment.test.ts`
+  - `Set-Location src/web; npm run lint:ci`（0 errors，保留既有 `no-explicit-any` warnings）
+- 覆盖率门禁：本切片只改测试和 ledger 文档，未改业务运行时代码；Rust full-runtime coverage 与被改业务源码 90% 核算不适用。
+
 ### 8.2 backend-shape
 
 建议顺序：

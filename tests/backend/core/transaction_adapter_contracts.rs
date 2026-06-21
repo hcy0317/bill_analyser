@@ -276,6 +276,61 @@ fn frontend_mutation_to_backend_and_create_defaults_match_current_write_adapter(
 }
 
 #[test]
+fn frontend_mutation_to_backend_preserves_transfer_and_investment_destination_contracts() {
+    let transfer = json!({
+        "type": 4,
+        "time": 1_735_758_245,
+        "sourceAmountCents": 12345,
+        "destinationAmountCents": 12300,
+        "sourceAccountId": "10",
+        "destinationAccountId": "11",
+        "categoryId": "22",
+        "tagIds": ["31", "32"],
+        "comment": "内部转账"
+    });
+
+    let (transfer_backend, transfer_metadata) =
+        frontend_transaction_mutation_to_backend(&transfer, UtcOffsetMinutes::new(480)).unwrap();
+
+    assert_eq!(transfer_backend["type"], "转账");
+    assert_eq!(transfer_backend["amount_cents"], -12345);
+    assert_eq!(transfer_backend["destination_amount_cents"], 12300);
+    assert_eq!(transfer_backend["source_account_id"], 10);
+    assert_eq!(transfer_backend["destination_account_id"], 11);
+    assert_eq!(transfer_backend["description"], "内部转账");
+    assert_eq!(transfer_metadata.category_id, "22");
+    assert_eq!(transfer_metadata.source_account_id, 10);
+    assert_eq!(transfer_metadata.destination_account_id, 11);
+    assert_eq!(transfer_metadata.tag_ids, vec![31, 32]);
+
+    let investment = json!({
+        "type": 5,
+        "time": 1_735_758_245,
+        "sourceAmountCents": 100000,
+        "destinationAmountCents": 99888,
+        "sourceAccountId": 12,
+        "destinationAccountId": 13,
+        "categoryId": "88",
+        "tagIds": [90],
+        "comment": "基金买入"
+    });
+
+    let (investment_backend, investment_metadata) =
+        frontend_transaction_mutation_to_backend(&investment, UtcOffsetMinutes::new(480)).unwrap();
+
+    assert_eq!(investment_backend["type"], "投资");
+    assert_eq!(investment_backend["amount_cents"], -100000);
+    assert_eq!(investment_backend["destination_amount_cents"], 99888);
+    assert_eq!(investment_backend["source_account_id"], 12);
+    assert_eq!(investment_backend["destination_account_id"], 13);
+    assert_eq!(investment_backend["description"], "基金买入");
+    assert_eq!(investment_metadata.category_id, "88");
+    assert_eq!(investment_metadata.source_account_id, 12);
+    assert_eq!(investment_metadata.destination_account_id, 13);
+    assert_eq!(investment_metadata.tag_ids, vec![90]);
+}
+
+#[test]
 fn create_category_contracts_cover_current_rest_edges() {
     let mut category_by_id = json!({"type": "支出"}).as_object().unwrap().clone();
     apply_create_category_contract(&mut category_by_id, Some(("餐饮", "早餐")), None);
