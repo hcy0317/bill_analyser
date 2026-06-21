@@ -1,4 +1,5 @@
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：读取用户 2FA 启用状态，供登录分支和安全设置页判断是否需要验证码。
 pub async fn get_postgres_auth_user_two_factor_enabled(
     pool: &PostgresPool,
     user_id: UserId,
@@ -12,6 +13,7 @@ pub async fn get_postgres_auth_user_two_factor_enabled(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：启用 2FA 并写入 recovery code hash，同时刷新当前 session 的 2FA 状态。
 pub async fn enable_postgres_two_factor_with_recovery_codes_and_session(
     pool: &PostgresPool,
     user_id: UserId,
@@ -72,6 +74,7 @@ pub async fn enable_postgres_two_factor_with_recovery_codes_and_session(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：禁用 2FA 并清理 recovery code，同时更新当前 session 状态避免旧状态残留。
 pub async fn disable_postgres_two_factor_and_clear_recovery_codes(
     pool: &PostgresPool,
     user_id: UserId,
@@ -115,6 +118,7 @@ pub async fn disable_postgres_two_factor_and_clear_recovery_codes(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：重新生成 recovery code hash 列表，替换旧备份码并保留用户 2FA 启用状态。
 pub async fn replace_postgres_two_factor_recovery_codes(
     pool: &PostgresPool,
     user_id: UserId,
@@ -136,6 +140,7 @@ pub async fn replace_postgres_two_factor_recovery_codes(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：消费单个 recovery code hash，命中后删除该码以保证备份码只能使用一次。
 pub async fn consume_postgres_two_factor_recovery_code(
     pool: &PostgresPool,
     user_id: UserId,
@@ -161,11 +166,13 @@ pub async fn consume_postgres_two_factor_recovery_code(
     .map_err(postgres_auth_error)
 }
 
+// 中文说明：归一化单个 recovery code 后计算 hash，空值直接忽略避免写入无效备份码。
 fn hash_two_factor_recovery_code(recovery_code: &str) -> Option<String> {
     recovery_code_hash_input(recovery_code)
         .map(|value| format!("{:x}", Sha256::digest(value.as_bytes())))
 }
 
+// 中文说明：把 recovery code 明文列表转换为 hash 列表，供启用和重新生成 2FA 时持久化。
 fn normalized_two_factor_recovery_code_hashes(recovery_codes: &[&str]) -> Vec<String> {
     let mut seen_hashes = HashSet::new();
     let mut code_hashes = Vec::new();
@@ -180,6 +187,7 @@ fn normalized_two_factor_recovery_code_hashes(recovery_codes: &[&str]) -> Vec<St
     code_hashes
 }
 
+// 中文说明：在事务内替换 recovery code hash 数组，确保启用/重生成流程可原子提交。
 async fn replace_postgres_two_factor_recovery_code_hashes_in_tx(
     transaction: &mut sqlx::Transaction<'_, Postgres>,
     user_id: i64,

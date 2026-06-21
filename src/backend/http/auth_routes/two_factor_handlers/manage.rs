@@ -3,6 +3,7 @@
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：生成 2FA 启用草稿，返回 secret/QR code 供用户绑定认证器。
 async fn request_two_factor_enable_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -18,6 +19,7 @@ async fn request_two_factor_enable_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：确认启用 2FA，校验当前密码和 passcode 后写入 recovery codes。
 async fn confirm_two_factor_enable_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -68,6 +70,7 @@ async fn confirm_two_factor_enable_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：禁用当前用户 2FA，校验当前密码后清理 secret 和 recovery codes。
 async fn disable_two_factor_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -92,6 +95,7 @@ async fn disable_two_factor_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：重新生成当前用户 2FA recovery codes，校验当前密码后替换旧备份码。
 async fn regenerate_two_factor_recovery_codes_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -115,6 +119,7 @@ async fn regenerate_two_factor_recovery_codes_handler(
         .await;
 }
 
+// 中文说明：执行 PostgreSQL 2FA 启用草稿响应，生成 secret、issuer 和二维码 payload。
 async fn request_postgres_two_factor_enable_response(
     state: HttpAppState,
     auth: AuthenticatedUser,
@@ -154,6 +159,7 @@ async fn request_postgres_two_factor_enable_response(
     )
 }
 
+// 中文说明：执行 PostgreSQL 2FA 启用确认，写入 secret 与 recovery code hash 并返回明文备份码。
 async fn confirm_postgres_two_factor_enable_response(
     state: HttpAppState,
     headers: HeaderMap,
@@ -256,6 +262,7 @@ async fn confirm_postgres_two_factor_enable_response(
     )
 }
 
+// 中文说明：执行 PostgreSQL 2FA 禁用流程，清理认证器 secret、备份码和 session 状态。
 async fn disable_postgres_two_factor_response(
     state: HttpAppState,
     headers: HeaderMap,
@@ -326,6 +333,7 @@ async fn disable_postgres_two_factor_response(
     success_result(StatusCode::OK, Value::Bool(true))
 }
 
+// 中文说明：执行 PostgreSQL recovery code 重新生成流程，返回新的明文备份码给前端一次性展示。
 async fn regenerate_postgres_two_factor_recovery_codes_response(
     state: HttpAppState,
     headers: HeaderMap,

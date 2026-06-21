@@ -7,6 +7,7 @@ import type {
 import logger from '@/lib/logger.ts';
 import services from '@/lib/services.ts';
 
+/** 中文说明：把后端新旧统计字段归一成字符串计数，缺失或异常值统一显示为 0。 */
 function normalizeStatisticsCount(result: Record<string, string | number | undefined>, primaryKey: string, fallbackKey?: string): string {
     const rawValue = result[primaryKey] ?? (fallbackKey ? result[fallbackKey] : undefined);
 
@@ -21,6 +22,7 @@ function normalizeStatisticsCount(result: Record<string, string | number | undef
     return '0';
 }
 
+/** 中文说明：创建用户数据统计与导出动作，统一处理统计字段兼容和导出 content-type 校验。 */
 export function createUserDataManagementActions() {
     function getUserDataStatistics(): Promise<DataStatisticsResponse> {
         return new Promise((resolve, reject) => {

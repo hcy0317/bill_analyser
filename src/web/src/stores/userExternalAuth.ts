@@ -5,6 +5,7 @@ import type {UserExternalAuthInfoResponse, UserExternalAuthUnlinkRequest} from '
 import logger from '@/lib/logger.ts';
 import services from '@/lib/services.ts';
 
+/** 中文说明：外部登录 store 负责读取 OAuth 绑定列表和解绑当前用户的第三方身份。 */
 export const useUserExternalAuthStore = defineStore('userExternalAUth', () => {
     function getExternalAuths(): Promise<UserExternalAuthInfoResponse[]> {
         return new Promise((resolve, reject) => {

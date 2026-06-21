@@ -8,6 +8,7 @@ type UserCloudSettingsStore = {
     updateApplicationSyncSettingKeys: (enabledSettingKeys?: string[]) => void;
 };
 
+/** 中文说明：创建用户应用云同步设置动作，负责服务端配置读写和本地同步 key 刷新。 */
 export function createUserCloudSettingsActions(settingsStore: UserCloudSettingsStore) {
     function getUserApplicationCloudSettings(): Promise<ApplicationCloudSetting[] | false> {
         return new Promise((resolve, reject) => {

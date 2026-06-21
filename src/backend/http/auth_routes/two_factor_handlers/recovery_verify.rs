@@ -3,6 +3,7 @@
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：校验登录阶段的 2FA recovery code，成功后签发完整登录 token。
 async fn verify_two_factor_recovery_login_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -48,6 +49,7 @@ async fn verify_two_factor_recovery_login_handler(
         .await;
 }
 
+// 中文说明：执行 PostgreSQL recovery code 登录校验，命中后消费备份码并创建认证 session。
 async fn verify_postgres_two_factor_recovery_login_response(
     state: HttpAppState,
     headers: HeaderMap,

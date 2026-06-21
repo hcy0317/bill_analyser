@@ -15,6 +15,7 @@ import { updateCurrentToken, updateCurrentRefreshToken } from '@/lib/userstate.t
 import logger from '@/lib/logger.ts';
 import services from '@/lib/services.ts';
 
+/** 中文说明：2FA store 负责读取状态、启用确认、禁用、登录验证和 recovery code 管理。 */
 export const useTwoFactorAuthStore = defineStore('twoFactorAuth', () => {
     function get2FAStatus(): Promise<TwoFactorStatusResponse> {
         return new Promise((resolve, reject) => {

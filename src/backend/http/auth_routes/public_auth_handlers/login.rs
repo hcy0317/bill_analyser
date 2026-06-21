@@ -1,3 +1,4 @@
+// 中文说明：处理公开登录请求，解析账号密码和 2FA 字段后交给 PostgreSQL 登录响应编排。
 #[tracing::instrument(level = "debug", skip_all)]
 async fn login_handler(
     State(state): State<HttpAppState>,
@@ -39,6 +40,7 @@ async fn login_handler(
 }
 
 
+// 中文说明：校验密码、登录失败计数、锁定状态和 2FA 分支，并在成功时创建 token session。
 async fn login_postgres_response(
     state: &HttpAppState,
     login_name: &str,

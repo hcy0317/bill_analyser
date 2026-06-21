@@ -82,6 +82,7 @@ function parseDeviceInfo(uaInfo: UserAgentInfo): string {
     return result;
 }
 
+/** 中文说明：把 token/session 响应解析成前端 SessionInfo，统一设备类型、系统和浏览器展示字段。 */
 export function parseSessionInfo(token: TokenInfoResponse): SessionInfo {
     const isCreateForAPI = token.tokenType === TOKEN_TYPE_API;
     const isCreateForMCP = token.tokenType === TOKEN_TYPE_MCP;

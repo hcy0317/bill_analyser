@@ -16,6 +16,7 @@ import { updateCurrentToken, updateCurrentRefreshToken } from '@/lib/userstate.t
 import logger from '@/lib/logger.ts';
 import services from '@/lib/services.ts';
 
+/** 中文说明：token store 负责列出、生成、撤销 API/MCP token 和登录 session。 */
 export const useTokensStore = defineStore('tokens', () => {
     const settingsStore = useSettingsStore();
     const userStore = useUserStore();

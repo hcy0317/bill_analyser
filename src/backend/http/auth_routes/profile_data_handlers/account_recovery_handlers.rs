@@ -3,6 +3,7 @@
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：返回 OAuth2 callback 授权配置，供前端决定是否展示第三方登录回调入口。
 async fn authorize_oauth2_callback_handler(State(state): State<HttpAppState>) -> Response {
     #[cfg(not(coverage))]
     tracing::info!(domain = "auth", operation = "authorize_oauth2_callback_handler", "business operation entered");
@@ -22,6 +23,7 @@ async fn authorize_oauth2_callback_handler(State(state): State<HttpAppState>) ->
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：处理邮箱验证 token，校验后标记邮箱已验证并返回公开验证结果。
 async fn verify_email_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -74,6 +76,7 @@ async fn verify_email_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：公开重发邮箱验证邮件入口，按 username/email 查找用户并触发发送流程。
 async fn resend_public_verification_email_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -112,6 +115,7 @@ async fn resend_public_verification_email_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：处理忘记密码请求，生成重置邮件或安全地返回不可枚举响应。
 async fn forgot_password_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -152,6 +156,7 @@ async fn forgot_password_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：处理密码重置请求，校验 reset token 和密码策略后更新密码 hash。
 async fn reset_password_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -226,6 +231,7 @@ async fn reset_password_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：解绑当前用户外部登录身份，校验 provider/providerUserId 后删除绑定。
 async fn unlink_profile_external_auth_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -276,6 +282,7 @@ async fn unlink_profile_external_auth_handler(
         .await;
 }
 
+// 中文说明：执行 PostgreSQL 邮箱验证流程，保持 token 消费、用户状态和响应字段一致。
 async fn verify_postgres_email_response(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -384,6 +391,7 @@ async fn verify_postgres_email_response(
     )
 }
 
+// 中文说明：执行公开邮箱验证重发流程，保持用户枚举保护和发送开关合同。
 async fn resend_public_postgres_verification_email_response(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -442,6 +450,7 @@ async fn resend_public_postgres_verification_email_response(
     success_result(StatusCode::OK, Value::Bool(true))
 }
 
+// 中文说明：执行忘记密码 PostgreSQL 流程，生成重置 token 并触发邮件发送。
 async fn forgot_postgres_password_response(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -494,6 +503,7 @@ async fn forgot_postgres_password_response(
     success_result(StatusCode::OK, Value::Bool(true))
 }
 
+// 中文说明：执行密码重置 PostgreSQL 流程，更新密码并清理旧会话或失败状态。
 async fn reset_postgres_password_response(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -553,6 +563,7 @@ async fn reset_postgres_password_response(
     success_result(StatusCode::OK, Value::Bool(true))
 }
 
+// 中文说明：执行外部身份解绑 PostgreSQL 删除，确保只影响当前用户绑定记录。
 async fn unlink_postgres_profile_external_auth_response(
     state: &HttpAppState,
     auth: AuthenticatedUser,

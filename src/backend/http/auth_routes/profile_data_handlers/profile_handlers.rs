@@ -3,6 +3,7 @@
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：读取当前用户 profile 响应，包含基本资料、偏好、默认账户分类和头像字段。
 async fn get_profile_handler(State(state): State<HttpAppState>, headers: HeaderMap) -> Response {
     #[cfg(not(coverage))]
     tracing::info!(domain = "auth", operation = "get_profile_handler", "business operation entered");
@@ -27,6 +28,7 @@ async fn get_profile_handler(State(state): State<HttpAppState>, headers: HeaderM
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：处理 profile 更新请求，解析用户资料字段后校验 user-scope 引用并写入审计。
 async fn update_profile_handler(
     State(state): State<HttpAppState>,
     connect_info: Option<ConnectInfo<SocketAddr>>,
@@ -53,6 +55,7 @@ async fn update_profile_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：处理头像上传请求，校验文件类型和大小后写入头像 URL/provider。
 async fn update_profile_avatar_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -72,6 +75,7 @@ async fn update_profile_avatar_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：清除当前用户头像字段，并把 profile 变更结果返回给前端。
 async fn remove_profile_avatar_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -86,6 +90,7 @@ async fn remove_profile_avatar_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：根据上传结果更新头像字段，复用 profile 更新事务和响应投影。
 async fn update_profile_avatar_value(
     state: &HttpAppState,
     user_id: UserId,
@@ -118,6 +123,7 @@ async fn update_profile_avatar_value(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：为已登录用户重发邮箱验证邮件，保持发送开关和限流审计合同。
 async fn resend_profile_verification_email_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -198,6 +204,7 @@ async fn resend_profile_verification_email_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：读取当前用户 profile cloud settings，用于桌面和移动端同步设置页。
 async fn get_profile_cloud_settings_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -223,6 +230,7 @@ async fn get_profile_cloud_settings_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：更新 profile cloud settings，支持 full update 并按当前用户边界写入。
 async fn update_profile_cloud_settings_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -278,6 +286,7 @@ async fn update_profile_cloud_settings_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：关闭当前用户 profile cloud settings，同步清理服务端云同步配置。
 async fn delete_profile_cloud_settings_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -299,6 +308,7 @@ async fn delete_profile_cloud_settings_handler(
         };
 }
 
+// 中文说明：把已校验 profile update 写入 PostgreSQL 并转换成统一 REST profile 响应。
 async fn update_postgres_profile_response(
     state: &HttpAppState,
     user_id: UserId,
@@ -380,6 +390,7 @@ async fn update_postgres_profile_response(
     }
 }
 
+// 中文说明：组合校验 profile 更新字段，确保邮箱、账户和分类引用都满足当前用户边界。
 async fn validated_postgres_profile_updates(
     pool: &bill_analyser_db::PostgresPool,
     user_id: UserId,
@@ -399,6 +410,7 @@ async fn validated_postgres_profile_updates(
     Ok(updates)
 }
 
+// 中文说明：校验 profile 邮箱变更，重置验证状态并阻止邮箱被其他用户占用。
 async fn validate_postgres_profile_email_update(
     pool: &bill_analyser_db::PostgresPool,
     user_id: UserId,
@@ -436,6 +448,7 @@ async fn validate_postgres_profile_email_update(
     }
 }
 
+// 中文说明：校验 profile 中默认账户、现金账户和现金转账分类 ID，非法引用会被拒绝。
 async fn validate_postgres_profile_reference_ids(
     pool: &bill_analyser_db::PostgresPool,
     user_id: UserId,
@@ -466,6 +479,7 @@ async fn validate_postgres_profile_reference_ids(
     Ok(())
 }
 
+// 中文说明：校验单个 profile 账户 ID 是否属于当前用户，空值按未指定处理。
 async fn validate_postgres_profile_account_id(
     pool: &bill_analyser_db::PostgresPool,
     user_id: UserId,
@@ -487,6 +501,7 @@ async fn validate_postgres_profile_account_id(
     }
 }
 
+// 中文说明：校验单个 profile 分类 ID 是否属于当前用户，空值按未指定处理。
 async fn validate_postgres_profile_category_id(
     pool: &bill_analyser_db::PostgresPool,
     user_id: UserId,
@@ -509,6 +524,7 @@ async fn validate_postgres_profile_category_id(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：列出当前用户绑定的外部登录身份，供安全设置页展示和解绑。
 async fn list_profile_external_auths_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,

@@ -8,6 +8,7 @@ import type {
 import logger from '@/lib/logger.ts';
 import services from '@/lib/services.ts';
 
+/** 中文说明：创建设置包整包/分 section 导入导出动作，保留 JSON blob 和预览响应合同。 */
 export function createUserSettingsBundleActions() {
     function getExportedSettingsBundle(): Promise<Blob> {
         return new Promise((resolve, reject) => {

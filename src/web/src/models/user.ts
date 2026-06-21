@@ -8,6 +8,7 @@ import type { LocalizedPresetCategory } from '@/core/category.ts';
 import { TransactionEditScopeType } from '@/core/transaction.ts';
 import { FiscalYearFormat, FiscalYearStart } from '@/core/fiscalyear';
 
+/** 中文说明：前端用户资料模型，负责注册/profile 表单字段、偏好设置和 API payload 投影。 */
 export class User {
     public username: string = '';
     public password: string = '';
@@ -344,6 +345,7 @@ function normalizeFiscalYearStart(value: unknown): number {
     return monthOnly?.value ?? EMPTY_USER_BASIC_INFO.fiscalYearStart;
 }
 
+/** 中文说明：归一化后端或本地缓存中的用户 basic info，补齐缺省值并保持数组字段隔离。 */
 export function normalizeUserBasicInfo(userInfo?: Partial<UserBasicInfo> | null): UserBasicInfo {
     return {
         ...EMPTY_USER_BASIC_INFO,

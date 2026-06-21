@@ -11,6 +11,7 @@ import { normalizeUserBasicInfo } from '@/models/user.ts';
 
 type StoreUserBasicInfo = (userInfo: UserBasicInfo) => void;
 
+/** 中文说明：创建 profile、交易编辑范围和头像更新动作，统一在成功响应后刷新 basic info 缓存。 */
 export function createUserProfileActions(storeUserBasicInfo: StoreUserBasicInfo) {
     function getCurrentUserProfile(): Promise<UserProfileResponse> {
         return new Promise((resolve, reject) => {

@@ -85,12 +85,14 @@ function parsePublicKeyFromAttestationData(credential: Credential): Uint8Array {
     return publicKeyBytes;
 }
 
+/** 中文说明：同步判断当前浏览器是否暴露 WebAuthn 基础 API。 */
 export function isWebAuthnSupported(): boolean {
     return !!window.PublicKeyCredential
         && !!navigator.credentials
         && isFunction(window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable);
 }
 
+/** 中文说明：异步确认浏览器是否完整支持 WebAuthn 平台认证器能力。 */
 export function isWebAuthnCompletelySupported(): Promise<boolean> {
     if (!isWebAuthnSupported()) {
         return Promise.resolve(false);
@@ -99,6 +101,7 @@ export function isWebAuthnCompletelySupported(): Promise<boolean> {
     return window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
 }
 
+/** 中文说明：为当前用户创建 WebAuthn credential，并把 token 解锁材料封装进注册响应。 */
 export function registerWebAuthnCredential(lockState: ApplicationLockState, userInfo: UserBasicInfo): Promise<WebAuthnRegisterResponse> {
     if (!window.location || !window.location.hostname) {
         return Promise.reject({
@@ -160,6 +163,7 @@ export function registerWebAuthnCredential(lockState: ApplicationLockState, user
     });
 }
 
+/** 中文说明：使用已保存的 credentialId 触发 WebAuthn 验证，成功后返回解锁所需的断言信息。 */
 export function verifyWebAuthnCredential(userInfo: UserBasicInfo, credentialId: string): Promise<WebAuthnVerifyResponse> {
     if (!window.location || !window.location.hostname) {
         return Promise.reject({

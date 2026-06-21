@@ -1,4 +1,5 @@
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：创建注册用户并可选写入 standard_daily_v1 默认包，整个流程在同一事务内完成。
 pub async fn create_postgres_registered_user_with_defaults(
     pool: &PostgresPool,
     draft: &RegisterUserDraft,

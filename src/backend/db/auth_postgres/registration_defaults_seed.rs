@@ -1,5 +1,6 @@
 #[doc(hidden)]
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：为新注册用户写入 standard_daily_v1 默认账户、分类和识别规则，并返回 seed 摘要。
 pub async fn seed_postgres_standard_daily_defaults_for_user(
     pool: &PostgresPool,
     user_id: i64,
@@ -11,6 +12,7 @@ pub async fn seed_postgres_standard_daily_defaults_for_user(
     Ok(summary)
 }
 
+// 中文说明：按固定顺序写入 standard_daily_v1 默认包，确保账户、分类和规则引用可解析。
 async fn insert_postgres_standard_daily_package(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: i64,
@@ -37,6 +39,7 @@ async fn insert_postgres_standard_daily_package(
     Ok(summary)
 }
 
+// 中文说明：写入默认分类树，先主分类后子分类以保证 path 和父子引用稳定。
 async fn insert_postgres_standard_category_tree(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: i64,
@@ -83,6 +86,7 @@ async fn insert_postgres_standard_category_tree(
 }
 
 #[allow(clippy::too_many_arguments)]
+// 中文说明：按默认分类定义幂等写入分类，保留颜色、图标和 display_order 合同。
 async fn upsert_postgres_standard_category(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: i64,
@@ -160,6 +164,7 @@ async fn upsert_postgres_standard_category(
     row.try_get("id").map_err(postgres_auth_error)
 }
 
+// 中文说明：在注册默认包事务内按分类名称/path 查找已写入分类，供规则和摘要引用。
 async fn find_postgres_register_category(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: i64,
@@ -188,6 +193,7 @@ async fn find_postgres_register_category(
     .map_err(postgres_auth_error)
 }
 
+// 中文说明：写入默认账户并返回摘要，保持账户类型、分类、币种和识别规则引用一致。
 async fn insert_postgres_standard_account(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: i64,
@@ -262,6 +268,7 @@ async fn insert_postgres_standard_account(
     row.try_get("id").map_err(postgres_auth_error)
 }
 
+// 中文说明：写入默认分类规则，先校验表达式可编译再保存当前 rule_expression JSON。
 async fn insert_postgres_standard_category_rule(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: i64,
@@ -319,6 +326,7 @@ async fn insert_postgres_standard_category_rule(
     Ok(())
 }
 
+// 中文说明：按分类 path 查找 standard_daily_v1 目标分类，供默认规则绑定 canonical category id。
 async fn find_postgres_standard_category_by_path(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: i64,
@@ -336,6 +344,7 @@ async fn find_postgres_standard_category_by_path(
     find_postgres_register_category(transaction, user_id, Some(parent_id), sub_category).await
 }
 
+// 中文说明：写入默认账户规则，绑定账户 ID 并保存兼容当前账户规则引擎的表达式 JSON。
 async fn insert_postgres_standard_account_rule(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: i64,
@@ -400,6 +409,7 @@ async fn insert_postgres_standard_account_rule(
     Ok(())
 }
 
+// 中文说明：校验默认规则表达式可由当前规则解析器编译，防止注册时写入坏规则。
 fn ensure_register_rule_expression(name: &str, expression: &str) -> DbResult<()> {
     let compiled = compile_rule_expression(expression, false);
     if compiled.is_empty {
@@ -410,6 +420,7 @@ fn ensure_register_rule_expression(name: &str, expression: &str) -> DbResult<()>
     Ok(())
 }
 
+// 中文说明：构造默认规则表达式 JSON，保持 expression-only 与 regex_enabled 字段合同。
 fn register_rule_expression_json(expression: &str, regex_enabled: bool) -> Json<Value> {
     Json(json!({
         "expression": expression,
@@ -417,6 +428,7 @@ fn register_rule_expression_json(expression: &str, regex_enabled: bool) -> Json<
     }))
 }
 
+// 中文说明：把 PostgreSQL 返回 ID 压缩为 i32 摘要字段，超界时按注册错误处理。
 fn auth_i64_to_i32(value: i64) -> i32 {
     i32::try_from(value).unwrap_or_else(|_| {
         if value.is_negative() {
@@ -427,6 +439,7 @@ fn auth_i64_to_i32(value: i64) -> i32 {
     })
 }
 
+// 中文说明：写入测试/预置分类集合，复用默认包分类 upsert 逻辑以保持合同一致。
 async fn insert_postgres_preset_categories(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: i64,
@@ -472,6 +485,7 @@ async fn insert_postgres_preset_categories(
     Ok(())
 }
 
+// 中文说明：幂等写入注册默认分类，服务于默认包和测试预置分类的共享路径。
 async fn upsert_postgres_register_category(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: i64,

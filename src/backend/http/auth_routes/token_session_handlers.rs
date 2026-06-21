@@ -3,6 +3,7 @@
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：列出当前用户 token session 和 personal token，供安全设置页展示设备与 token 状态。
 async fn list_tokens_handler(State(state): State<HttpAppState>, headers: HeaderMap) -> Response {
     #[cfg(not(coverage))]
     tracing::info!(domain = "auth", operation = "list_tokens_handler", "business operation entered");
@@ -15,6 +16,7 @@ async fn list_tokens_handler(State(state): State<HttpAppState>, headers: HeaderM
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：统一生成 API/MCP personal token，校验当前 token 密码后写入独立 session 记录。
 async fn generate_personal_token(
     token_kind: TokenKind,
     state: HttpAppState,
@@ -54,6 +56,7 @@ async fn generate_personal_token(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：撤销当前用户除当前 session 外的其他 token session，服务于安全设置“一键登出其他设备”。
 async fn revoke_other_tokens_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -69,6 +72,7 @@ async fn revoke_other_tokens_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：撤销当前用户指定 token/session，保持 token id 和用户边界校验。
 async fn revoke_token_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -93,6 +97,7 @@ async fn revoke_token_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：处理 logout 请求，解析 Bearer token 后按 token hash 失效当前 session。
 async fn logout_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -119,6 +124,7 @@ async fn logout_handler(
         );
 }
 
+// 中文说明：读取 PostgreSQL token 列表并转换成前端 token/session 响应。
 async fn list_postgres_tokens_response(
     state: HttpAppState,
     headers: HeaderMap,
@@ -150,6 +156,7 @@ async fn list_postgres_tokens_response(
 }
 
 #[allow(clippy::too_many_arguments)]
+// 中文说明：生成 PostgreSQL personal token，校验密码、签发 token 并创建带设备信息的 session。
 async fn generate_postgres_personal_token(
     token_kind: TokenKind,
     state: HttpAppState,
@@ -308,6 +315,7 @@ async fn generate_postgres_personal_token(
     success_result(StatusCode::OK, Value::Object(result))
 }
 
+// 中文说明：撤销当前用户其他 PostgreSQL session，并返回剩余当前 session 结果。
 async fn revoke_other_postgres_tokens_response(
     state: HttpAppState,
     headers: HeaderMap,
@@ -339,6 +347,7 @@ async fn revoke_other_postgres_tokens_response(
     }
 }
 
+// 中文说明：撤销指定 PostgreSQL token session，避免当前用户越权撤销他人 session。
 async fn revoke_postgres_token_response(
     state: HttpAppState,
     auth: AuthenticatedUser,
@@ -357,6 +366,7 @@ async fn revoke_postgres_token_response(
     }
 }
 
+// 中文说明：根据当前 Bearer token hash 定位 PostgreSQL session id，供 revoke others 保留当前会话。
 async fn current_postgres_session_id(
     pool: &bill_analyser_db::PostgresPool,
     headers: &HeaderMap,
@@ -369,6 +379,7 @@ async fn current_postgres_session_id(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：从 Authorization header 中解析 logout Bearer token，保持缺失和格式错误的 REST 错误字段。
 fn parse_logout_bearer_token(headers: &HeaderMap) -> Result<String, AuthRestError> {
     let auth_header = header_value(headers, header::AUTHORIZATION.as_str());
     if auth_header.is_empty() {
@@ -386,6 +397,7 @@ fn parse_logout_bearer_token(headers: &HeaderMap) -> Result<String, AuthRestErro
 
 #[cfg(test)]
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：生成 logout 找不到 session 时的兼容 warning payload，不暴露完整 token hash。
 fn logout_session_not_found_warning_payload(token_hash: &str) -> Value {
     json!({
         "level": "warn",

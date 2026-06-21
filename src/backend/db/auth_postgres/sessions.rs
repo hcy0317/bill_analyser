@@ -1,4 +1,5 @@
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：清理已过期 token session，保持 refresh/session 表不会无限累积历史记录。
 pub async fn cleanup_postgres_expired_sessions(pool: &PostgresPool, now: &str) -> DbResult<u64> {
     sqlx::query(
         r#"
@@ -15,6 +16,7 @@ pub async fn cleanup_postgres_expired_sessions(pool: &PostgresPool, now: &str) -
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：按 access token hash 读取当前有效 session 用户，作为 Bearer token 认证主入口。
 pub async fn get_postgres_auth_token_user(
     pool: &PostgresPool,
     user_id: UserId,
@@ -43,6 +45,7 @@ pub async fn get_postgres_auth_token_user(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：列出用户所有 token session，并投影当前 session、设备和最近使用时间给前端安全页。
 pub async fn list_postgres_user_sessions(
     pool: &PostgresPool,
     user_id: UserId,
@@ -81,6 +84,7 @@ pub async fn list_postgres_user_sessions(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：根据 token hash 查询仍有效的 session id，用于撤销当前 token 或校验会话存在性。
 pub async fn get_postgres_active_session_id_by_token_hash(
     pool: &PostgresPool,
     token_hash: &str,
@@ -100,6 +104,7 @@ pub async fn get_postgres_active_session_id_by_token_hash(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：读取仍有效的 refresh session，确保 refresh token 轮换只发生在当前可用会话内。
 pub async fn get_postgres_active_refresh_session(
     pool: &PostgresPool,
     refresh_token_hash: &str,
@@ -135,6 +140,7 @@ pub async fn get_postgres_active_refresh_session(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：创建新的 token session，保存 access/refresh hash 与设备信息供后续撤销和轮换。
 pub async fn create_postgres_token_session(
     pool: &PostgresPool,
     draft: &CreateTokenSessionDraft,
@@ -146,6 +152,7 @@ pub async fn create_postgres_token_session(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：轮换 refresh token session，原子更新 access/refresh hash 和过期时间。
 pub async fn rotate_postgres_refresh_token_session(
     pool: &PostgresPool,
     consumed_session_id: i64,
@@ -183,6 +190,7 @@ pub async fn rotate_postgres_refresh_token_session(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：按 session id 失效当前用户的指定会话，避免跨用户撤销其他人的 token。
 pub async fn invalidate_postgres_session_by_id(
     pool: &PostgresPool,
     session_id: i64,
@@ -204,6 +212,7 @@ pub async fn invalidate_postgres_session_by_id(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：按 token hash 失效当前会话，服务于 logout 和旧 refresh token best-effort 撤销。
 pub async fn invalidate_postgres_session_by_token_hash(
     pool: &PostgresPool,
     token_hash: &str,
@@ -223,6 +232,7 @@ pub async fn invalidate_postgres_session_by_token_hash(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：撤销当前用户除指定 session 外的其他会话，支持改密后踢出其他设备。
 pub async fn invalidate_other_postgres_user_sessions(
     pool: &PostgresPool,
     user_id: UserId,
@@ -244,6 +254,7 @@ pub async fn invalidate_other_postgres_user_sessions(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：统计近期 token 密码校验失败次数，作为敏感操作限流和锁定依据。
 pub async fn count_postgres_recent_token_password_failures(
     pool: &PostgresPool,
     user_id: UserId,

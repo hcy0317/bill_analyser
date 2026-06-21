@@ -11,6 +11,7 @@ import {
     type DisplaySettingsBundleDataManagementEntry,
 } from '@/models/data_management.ts';
 
+/** 中文说明：提供桌面/移动用户数据管理页共享统计、导出格式和敏感清理选项。 */
 export function useDataManagementPageBase() {
     const { tt, formatNumberToLocalizedNumerals } = useI18n();
 

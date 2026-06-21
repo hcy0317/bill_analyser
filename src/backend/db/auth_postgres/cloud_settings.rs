@@ -1,4 +1,5 @@
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：全量或增量写入用户应用云同步设置，保持配置项按用户边界幂等 upsert。
 pub async fn update_postgres_application_cloud_settings(
     pool: &PostgresPool,
     user_id: UserId,
@@ -46,6 +47,7 @@ pub async fn update_postgres_application_cloud_settings(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：删除当前用户全部应用云同步设置，用于关闭云同步时清理服务端配置。
 pub async fn delete_postgres_application_cloud_settings(
     pool: &PostgresPool,
     user_id: UserId,

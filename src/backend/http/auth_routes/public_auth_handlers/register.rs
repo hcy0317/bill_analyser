@@ -1,3 +1,4 @@
+// 中文说明：处理公开注册请求，校验注册开关、密码策略和默认包选项后进入 PostgreSQL 注册事务。
 #[tracing::instrument(level = "debug", skip_all)]
 async fn register_handler(
     State(state): State<HttpAppState>,
@@ -104,6 +105,7 @@ async fn register_handler(
 
 
 #[allow(clippy::too_many_arguments)]
+// 中文说明：执行 PostgreSQL 注册事务并投影注册响应，包含 token、refresh token 和可选 defaultSeed 摘要。
 async fn register_postgres_response(
     state: &HttpAppState,
     body: &Map<String, Value>,
@@ -228,6 +230,7 @@ async fn register_postgres_response(
     )
 }
 
+// 中文说明：把注册默认包写入摘要转换成前端 defaultSeed 字段，保持 opt-in 注册响应合同。
 fn register_default_seed_response(summary: &RegisterDefaultSeedSummary) -> Option<Value> {
     let package = summary.package.as_ref()?;
     Some(json!({

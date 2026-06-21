@@ -342,3 +342,36 @@ D6 frontend-shape 切片按前端 facade + 功能文件夹模板完成认证/用
 - `Set-Location src/web; npm run test:coverage` 通过，93 suites / 38996 tests，All files line coverage 99.13%。
 - `Set-Location src/web; npm run build` 通过；仅出现既有 Sass `@import` deprecation、`server_settings.js` 非 module、Framework7 空 CSS 和 chunk size warnings。
 - `git diff --check` 通过；仅有 Windows checkout 换行提示。
+
+## 12. Comment-pass 记录
+
+D6 comment-pass 切片按用户确认的注释标准补齐中文说明：导出函数、业务关键函数、复杂私有 helper 必须说明意图、边界或安全语义；简单 getter、映射和事件转发不强制扩写。该切片只补文档注释，不改变 SQL、REST path、请求/响应字段、token/session/2FA/recovery code 语义、localStorage key、profile/user-data/settings bundle 调用或页面视觉。
+
+后端补充范围：
+
+- `src/backend/db/auth_postgres/**`：身份存在性校验、登录/profile 读取、审计事件、session 生命周期、2FA/recovery code、profile/cloud settings 更新、注册与默认包 seed helper。
+- `src/backend/db/user_data.rs`：user-data statistics/export/clear/audit 入口和导出/统计私有 helper。
+- `src/backend/http/auth_routes/**`：public auth、token/session、profile/user-data、account recovery、2FA status/manage/recovery verify handler 和响应 helper。
+
+前端补充范围：
+
+- `src/web/src/stores/user/**`、`src/web/src/stores/token.ts`、`src/web/src/stores/twoFactorAuth.ts`、`src/web/src/stores/userExternalAuth.ts`：user/token/2FA/external auth store facade 与 action helper。
+- `src/web/src/lib/userstate.ts`、`src/web/src/lib/session.ts`、`src/web/src/lib/webauthn.ts`：token、app lock、user info、session metadata 和 WebAuthn 边界 helper。
+- `src/web/src/models/user.ts`、`src/web/src/models/token.ts`、`src/web/src/views/base/users/**`、桌面/移动用户资料 label helper：模型和页面组合函数说明。
+
+本切片本地验证：
+
+- 自定义 D6 注释扫描通过，覆盖选定 D6 Rust/TypeScript 文件的 `pub fn`、`export function/class`、`export const use*` 注释前置检查。
+- `cargo fmt --all -- --check` 通过。
+- `git diff --check` 通过；仅有 Windows checkout 换行提示。
+- `node scripts/check-backend-doc-map.mjs` 通过。
+- `Set-Location src/web; npm run lint:ci` 通过，仅有既有 `no-explicit-any` warnings。
+- `cargo test -p bill-analyser-core --test auth_security_contracts` 通过，7 tests。
+- `cargo test -p bill-analyser-db --test registration_defaults_postgres` 通过，1 test。
+- `cargo test -p bill-analyser-http auth_routes` 通过，7 tests。
+- `Set-Location src/web; npm run test -- --runTestsByPath ../../tests/web/stores/user.test.ts ../../tests/web/stores/authSecurity.test.ts ../../tests/web/models/user.test.ts ../../tests/web/models/token.test.ts` 通过，4 suites / 20 tests。
+- `Set-Location src/web; npm run test:coverage` 通过，93 suites / 38996 tests，All files line coverage 99.13%。
+- `cargo clippy --workspace --all-targets -- -D warnings` 通过。
+- `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过，生成 `workspace.lcov`。
+- `node scripts/check-rust-backend-structure.mjs` 通过；仅剩 baseline line-reduction warnings。
+- `Set-Location src/web; npm run structure:check` 预期失败仍为 D10 shared 四项：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`；D6 相关文件没有新增 FAIL。

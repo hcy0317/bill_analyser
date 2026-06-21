@@ -12,6 +12,7 @@ import {
 
 type Translate = (key: string, params?: Record<string, unknown>) => string;
 
+/** 中文说明：创建桌面用户资料页默认账户、现金账户和现金转账分类的展示文本。 */
 export function createAccountCategorySelectionTexts({
     allAccounts,
     allCategories,

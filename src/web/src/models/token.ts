@@ -57,6 +57,7 @@ export enum SessionDeviceType {
     Default = 'default'
 }
 
+/** 中文说明：前端 token session 展示模型，封装设备类型、客户端、系统和当前 session 标记。 */
 export class SessionInfo {
     public readonly tokenId: string;
     public readonly isCurrent: boolean;

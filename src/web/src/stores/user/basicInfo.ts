@@ -25,6 +25,7 @@ type UserBasicInfoSettings = {
 
 type AvatarUrlResolver = (userInfoOrAvatarUrl: UserBasicInfo | string | null, disableBrowserCache: boolean | string) => string | null;
 
+/** 中文说明：创建用户 basic info 缓存、localStorage 写回和全局偏好 getter，保持登录态基础字段合同。 */
 export function createUserBasicInfoState(settingsStore: UserBasicInfoSettings, getUserAvatarUrl: AvatarUrlResolver) {
     const currentUserBasicInfo = ref<UserBasicInfo | null>(getCurrentUserInfo());
 

@@ -8,6 +8,7 @@ import { findDisplayNameByType } from '@/lib/common.ts';
 
 type Translate = (key: string, params?: Record<string, unknown>) => string;
 
+/** 中文说明：创建移动用户资料页当前语言和星期设置的展示文本。 */
 export function createMobileProfileLabels({
     allLanguages,
     allWeekDays,

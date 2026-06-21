@@ -1,4 +1,5 @@
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：更新用户 profile 和 metadata，统一校验默认账户、现金账户和现金转账分类归属。
 pub async fn update_postgres_auth_user_profile(
     pool: &PostgresPool,
     user_id: UserId,
@@ -9,6 +10,7 @@ pub async fn update_postgres_auth_user_profile(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：在事务内更新 profile 并写入认证审计日志，确保资料变更和审计事件一致提交。
 pub async fn update_postgres_auth_user_profile_with_auth_log(
     pool: &PostgresPool,
     user_id: UserId,

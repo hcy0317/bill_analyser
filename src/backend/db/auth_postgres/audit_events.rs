@@ -1,4 +1,5 @@
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：写入认证审计日志，记录登录、敏感操作和 profile 变更等安全事件。
 pub async fn create_postgres_auth_log(pool: &PostgresPool, draft: &AuthLogDraft) -> DbResult<i64> {
     let metadata = auth_log_metadata(draft);
     let row = sqlx::query(
@@ -27,6 +28,7 @@ pub async fn create_postgres_auth_log(pool: &PostgresPool, draft: &AuthLogDraft)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：在事件限流窗口内写入认证日志，超过阈值时拒绝以保护敏感操作入口。
 pub async fn create_postgres_auth_log_under_event_limit(
     pool: &PostgresPool,
     user_id: UserId,
@@ -74,6 +76,7 @@ pub async fn create_postgres_auth_log_under_event_limit(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：统计指定事件在时间窗口内的次数，服务于登录失败和敏感操作限流。
 pub async fn count_postgres_auth_events_since(
     pool: &PostgresPool,
     user_id: UserId,
@@ -100,6 +103,7 @@ pub async fn count_postgres_auth_events_since(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：读取用户操作密码 hash，供 step-up 或敏感数据操作校验当前密码。
 pub async fn get_postgres_operation_password(
     pool: &PostgresPool,
     user_id: UserId,
@@ -115,6 +119,7 @@ pub async fn get_postgres_operation_password(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：更新用户邮箱验证状态，支持邮箱验证完成和邮箱变更后的状态重置。
 pub async fn set_postgres_user_email_verified(
     pool: &PostgresPool,
     user_id: UserId,
@@ -150,6 +155,7 @@ pub async fn set_postgres_user_email_verified(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：更新用户密码 hash，并同步修改时间、失败计数和可选 token 会话清理策略。
 pub async fn update_postgres_user_password_hash(
     pool: &PostgresPool,
     user_id: UserId,
@@ -175,6 +181,7 @@ pub async fn update_postgres_user_password_hash(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：记录用户最近登录时间并清零登录失败计数，供登录成功后的状态维护使用。
 pub async fn update_postgres_user_last_login(
     pool: &PostgresPool,
     user_id: UserId,
@@ -190,6 +197,7 @@ pub async fn update_postgres_user_last_login(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：递增用户登录失败次数，供登录锁定和安全审计判断使用。
 pub async fn increment_postgres_failed_login(
     pool: &PostgresPool,
     user_id: UserId,

@@ -90,6 +90,7 @@ pub struct PostgresUserDataAuditEvent<'a> {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：统计当前用户各类业务数据数量，供数据管理页展示清理/导出前摘要。
 pub async fn get_postgres_user_data_statistics(
     pool: &PostgresPool,
     user_id: UserId,
@@ -105,6 +106,7 @@ pub async fn get_postgres_user_data_statistics(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：按当前用户统计指定表的记录数，供用户数据统计接口聚合各类资源数量。
 async fn count_postgres_user_rows(
     pool: &PostgresPool,
     table_name: &'static str,
@@ -119,6 +121,7 @@ async fn count_postgres_user_rows(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：读取当前用户分类清单，供用户数据导出时生成分类名称映射。
 pub async fn list_postgres_user_data_categories(
     pool: &PostgresPool,
     user_id: UserId,
@@ -151,6 +154,7 @@ pub async fn list_postgres_user_data_categories(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：加载当前用户可导出的账单、账户、分类和标签数据，按导出格式组装 bundle。
 pub async fn load_postgres_user_data_export(
     pool: &PostgresPool,
     user_id: UserId,
@@ -185,6 +189,7 @@ pub async fn load_postgres_user_data_export(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：清理当前用户正式交易相关数据，并写入用户数据审计事件。
 pub async fn clear_postgres_user_transactions(
     pool: &PostgresPool,
     user_id: UserId,
@@ -209,6 +214,7 @@ pub async fn clear_postgres_user_transactions(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：清理当前用户全部可清理业务数据，按 user-scope 逐表删除并返回清理摘要。
 pub async fn clear_postgres_user_data(
     pool: &PostgresPool,
     user_id: UserId,
@@ -224,6 +230,7 @@ pub async fn clear_postgres_user_data(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：写入用户数据管理审计事件，记录导出、清理等敏感数据操作。
 pub async fn create_postgres_user_data_audit_event(
     pool: &PostgresPool,
     draft: PostgresUserDataAuditEvent<'_>,
@@ -254,6 +261,7 @@ pub async fn create_postgres_user_data_audit_event(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：批量读取账户名称，供用户数据导出时把账户 ID 投影为可读名称。
 async fn load_postgres_account_names(
     pool: &PostgresPool,
     user_id: UserId,
@@ -271,6 +279,7 @@ async fn load_postgres_account_names(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：批量读取账单标签名称，供用户数据导出时把 tag id 列表转换为展示文本。
 async fn load_postgres_tag_names_for_bills(
     pool: &PostgresPool,
     user_id: UserId,
@@ -303,6 +312,7 @@ async fn load_postgres_tag_names_for_bills(
     Ok(tags)
 }
 
+// 中文说明：清理前先统计用户域内待删除数据量，作为清理结果和审计摘要。
 async fn postgres_clear_all_counts(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: i64,
@@ -319,6 +329,7 @@ async fn postgres_clear_all_counts(
     Ok(counts)
 }
 
+// 中文说明：按用户边界删除指定表数据，供全量清理事务逐表执行。
 async fn delete_postgres_user_rows(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     table_name: &'static str,
@@ -332,6 +343,7 @@ async fn delete_postgres_user_rows(
     Ok(())
 }
 
+// 中文说明：把分类 path/name 拆成主分类和子分类展示名，兼容只有 name 的旧数据。
 fn postgres_category_names(path: Option<&str>, name: &str) -> (String, String) {
     let parts = path
         .unwrap_or_default()
@@ -347,6 +359,7 @@ fn postgres_category_names(path: Option<&str>, name: &str) -> (String, String) {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：归一化 ID 列表并去重排序，避免导出查询对重复 ID 做无效批量读取。
 fn normalize_ids(values: &[i64]) -> Vec<i64> {
     values
         .iter()

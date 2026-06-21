@@ -6,6 +6,7 @@ import {
 } from '@/lib/common.ts';
 import services from '@/lib/services.ts';
 
+/** 中文说明：把用户头像路径转换成带认证 token 的内部头像 URL，并按需附加缓存破坏参数。 */
 export function getUserAvatarUrl(userInfoOrAvatarUrl: UserBasicInfo | string | null, disableBrowserCache: boolean | string): string | null {
     let avatarUrl = '';
 

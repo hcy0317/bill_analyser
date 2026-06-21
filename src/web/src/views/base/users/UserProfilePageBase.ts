@@ -17,6 +17,7 @@ import { type CategorizedAccount, Account} from '@/models/account.ts';
 import { setExpenseAndIncomeAmountColor } from '@/lib/ui/common.ts';
 import { getCategorizedAccounts } from '@/lib/account.ts';
 
+/** 中文说明：提供桌面/移动用户资料页共享状态、选项、校验和 profile 更新后的本地同步逻辑。 */
 export function useUserProfilePageBase() {
     const normalizeKeywordList = (keywords: string[]): string => JSON.stringify(
         (keywords || []).map(keyword => `${keyword || ''}`.trim()).filter(keyword => !!keyword)

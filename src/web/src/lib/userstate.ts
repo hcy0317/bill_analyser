@@ -38,10 +38,12 @@ function getDecryptedToken(encryptedToken: string, appLockState: ApplicationLock
     return bytes.toString(CryptoJS.enc.Utf8);
 }
 
+/** 中文说明：判断当前会话是否存在 access token。 */
 export function isUserLogined(): boolean {
     return !!localStorage.getItem(tokenLocalStorageKey);
 }
 
+/** 中文说明：判断应用锁是否已解锁并可读取明文 token。 */
 export function isUserUnlocked(): boolean {
     if (!isUserLogined()) {
         return false;
@@ -54,10 +56,12 @@ export function isUserUnlocked(): boolean {
     return !!sessionStorage.getItem(appLockStateSessionStorageKey) && !!sessionStorage.getItem(tokenSessionStorageKey);
 }
 
+/** 中文说明：判断本地是否保存了应用锁状态。 */
 export function hasUserAppLockState(): boolean {
     return !!getUserAppLockState();
 }
 
+/** 中文说明：读取当前应用锁状态，缺失或解析失败时返回 null。 */
 export function getUserAppLockState(): ApplicationLockState | null {
     const data = sessionStorage.getItem(appLockStateSessionStorageKey);
 
@@ -74,6 +78,7 @@ export function getUserAppLockState(): ApplicationLockState | null {
     return appLockState as ApplicationLockState;
 }
 
+/** 中文说明：用 WebAuthn 认证结果恢复应用锁状态，并解密当前 access/refresh token。 */
 export function unlockTokenByWebAuthn(credentialId: string, userName: string, userSecret: string): void {
     const webauthnConfigData = localStorage.getItem(webauthnConfigLocalStorageKey);
 
@@ -104,6 +109,7 @@ export function unlockTokenByWebAuthn(credentialId: string, userName: string, us
     sessionStorage.setItem(tokenSessionStorageKey, token);
 }
 
+/** 中文说明：用 PIN 码恢复应用锁状态，并解密当前 access/refresh token。 */
 export function unlockTokenByPinCode(userName: string, pinCode: string): void {
     const encryptedToken = localStorage.getItem(tokenLocalStorageKey);
 
@@ -122,6 +128,7 @@ export function unlockTokenByPinCode(userName: string, pinCode: string): void {
     sessionStorage.setItem(tokenSessionStorageKey, token);
 }
 
+/** 中文说明：启用应用锁时重新加密当前 access/refresh token，并保存锁定状态。 */
 export function encryptToken(userName: string, pinCode: string): void {
     const token = localStorage.getItem(tokenLocalStorageKey);
 
@@ -141,6 +148,7 @@ export function encryptToken(userName: string, pinCode: string): void {
     localStorage.setItem(tokenLocalStorageKey, encryptedToken);
 }
 
+/** 中文说明：根据内存中的应用锁密钥解密 token，并把明文 token 恢复到当前会话状态。 */
 export function decryptToken(): void {
     const token = sessionStorage.getItem(tokenSessionStorageKey);
 
@@ -154,6 +162,7 @@ export function decryptToken(): void {
     sessionStorage.removeItem(appLockStateSessionStorageKey);
 }
 
+/** 中文说明：校验 PIN 是否能解开当前应用锁，用于本地解锁前的快速验证。 */
 export function isCorrectPinCode(pinCode: string): boolean {
     const secret = getAppLockSecret(pinCode);
     const appLockState = getUserAppLockState();
@@ -165,6 +174,7 @@ export function isCorrectPinCode(pinCode: string): boolean {
     return appLockState && secret === appLockState.secret;
 }
 
+/** 中文说明：读取当前 access token，应用锁启用时只在解锁后返回明文。 */
 export function getCurrentToken(): string | null {
     const enableAppLock = isEnableApplicationLock();
 
@@ -237,6 +247,7 @@ export function getCurrentToken(): string | null {
     }
 }
 
+/** 中文说明：更新当前 access token，并在应用锁启用时同步写入加密缓存。 */
 export function updateCurrentToken(token: string): void {
     if (!isString(token)) {
         logger.error(`[updateCurrentToken] Token is not a string: ${typeof token}`);
@@ -274,20 +285,24 @@ export function updateCurrentToken(token: string): void {
     }
 }
 
+/** 中文说明：读取当前 refresh token，供 refresh 流程和会话恢复使用。 */
 export function getCurrentRefreshToken(): string | null {
     return localStorage.getItem(refreshTokenLocalStorageKey);
 }
 
+/** 中文说明：更新当前 refresh token，并在应用锁启用时同步写入加密缓存。 */
 export function updateCurrentRefreshToken(refreshToken: string): void {
     if (isString(refreshToken)) {
         localStorage.setItem(refreshTokenLocalStorageKey, refreshToken);
     }
 }
 
+/** 中文说明：判断当前用户是否已保存 WebAuthn 凭据配置。 */
 export function hasWebAuthnConfig(): boolean {
     return !!getWebAuthnCredentialId();
 }
 
+/** 中文说明：读取当前用户 WebAuthn credentialId，供解锁时发起断言。 */
 export function getWebAuthnCredentialId(): string | undefined {
     const webauthnConfigData = localStorage.getItem(webauthnConfigLocalStorageKey);
 
@@ -300,6 +315,7 @@ export function getWebAuthnCredentialId(): string | undefined {
     return webauthnConfig.credentialId;
 }
 
+/** 中文说明：保存当前用户 WebAuthn credentialId，供下次应用锁解锁时定位凭据。 */
 export function saveWebAuthnConfig(credentialId: string): void {
     const webAuthnConfig: WebAuthnConfig = {
         credentialId: credentialId
@@ -308,10 +324,12 @@ export function saveWebAuthnConfig(credentialId: string): void {
     localStorage.setItem(webauthnConfigLocalStorageKey, JSON.stringify(webAuthnConfig));
 }
 
+/** 中文说明：清理当前用户 WebAuthn 凭据配置。 */
 export function clearWebAuthnConfig(): void {
     localStorage.removeItem(webauthnConfigLocalStorageKey);
 }
 
+/** 中文说明：读取本地缓存的当前用户 basic info。 */
 export function getCurrentUserInfo(): UserBasicInfo | null {
     const data = localStorage.getItem(userInfoLocalStorageKey);
 
@@ -347,16 +365,19 @@ export function getCurrentUserInfo(): UserBasicInfo | null {
     return userInfo;
 }
 
+/** 中文说明：持久化当前用户 basic info，保持登录态恢复和全局用户偏好读取一致。 */
 export function updateCurrentUserInfo(user: UserBasicInfo): void {
     if (isObject(user)) {
         localStorage.setItem(userInfoLocalStorageKey, JSON.stringify(normalizeUserBasicInfo(user)));
     }
 }
 
+/** 中文说明：清理本地缓存的当前用户 basic info。 */
 export function clearCurrentUserInfo(): void {
     localStorage.removeItem(userInfoLocalStorageKey);
 }
 
+/** 中文说明：读取本地保存的手工交易草稿。 */
 export function getUserTransactionDraft(): TransactionDraft | null {
     let data = localStorage.getItem(transactionDraftLocalStorageKey);
 
@@ -377,6 +398,7 @@ export function getUserTransactionDraft(): TransactionDraft | null {
     return JSON.parse(data) as TransactionDraft;
 }
 
+/** 中文说明：持久化用户手工交易草稿，避免页面切换或刷新后丢失未保存录入。 */
 export function updateUserTransactionDraft(transaction?: TransactionDraft | null): void {
     if (!isObject(transaction)) {
         return;
@@ -397,16 +419,19 @@ export function updateUserTransactionDraft(transaction?: TransactionDraft | null
     localStorage.setItem(transactionDraftLocalStorageKey, data);
 }
 
+/** 中文说明：清理本地保存的手工交易草稿。 */
 export function clearUserTransactionDraft(): void {
     localStorage.removeItem(transactionDraftLocalStorageKey);
 }
 
+/** 中文说明：清理当前 session access token，保留 refresh token 和用户信息。 */
 export function clearCurrentSessionToken(): void {
     sessionStorage.removeItem(tokenSessionStorageKey);
     sessionStorage.removeItem(encryptedTokenSessionStorageKey);
     sessionStorage.removeItem(appLockStateSessionStorageKey);
 }
 
+/** 中文说明：清理当前 token、refresh token 和用户信息，并按需要同步清除应用锁状态。 */
 export function clearCurrentTokenAndUserInfo(clearAppLockState: boolean): void {
     logger.debug(`[clearCurrentTokenAndUserInfo] 开始清理: clearAppLockState=${clearAppLockState}`);
 

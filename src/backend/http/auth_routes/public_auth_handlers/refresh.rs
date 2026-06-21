@@ -1,3 +1,4 @@
+// 中文说明：处理 refresh token 请求，先校验 claim 类型再执行 PostgreSQL session 轮换。
 #[tracing::instrument(level = "debug", skip_all)]
 async fn refresh_token_handler(
     State(state): State<HttpAppState>,
@@ -34,6 +35,7 @@ async fn refresh_token_handler(
 }
 
 
+// 中文说明：根据 refresh claim 查找有效 session，签发新 access/refresh token 并原子更新 token hash。
 async fn refresh_postgres_response(
     state: &HttpAppState,
     user_id: UserId,

@@ -3,6 +3,7 @@
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：返回后端系统版本信息，供前端用户数据页展示当前运行态版本。
 async fn system_version_handler() -> Response {
     #[cfg(not(coverage))]
     tracing::info!(domain = "auth", operation = "system_version_handler", "business operation entered");
@@ -17,6 +18,7 @@ async fn system_version_handler() -> Response {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：读取当前用户数据统计，统计交易、账户、分类、标签、图片和模板等用户域数据量。
 async fn get_user_data_statistics_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -41,6 +43,7 @@ async fn get_user_data_statistics_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：导出当前用户数据，按请求格式返回 CSV/TSV/JSON 并保持下载 content-type 合同。
 async fn export_user_data_handler(
     State(state): State<HttpAppState>,
     Path(file_type): Path<String>,
@@ -77,6 +80,7 @@ async fn export_user_data_handler(
         return user_data_export_response(bundle, export_type);
 }
 
+// 中文说明：把用户数据导出 bundle 转成 HTTP 下载响应，按导出类型选择文本或 JSON。
 fn user_data_export_response(bundle: UserDataExportBundle, export_type: UserDataExportType) -> Response {
     let export_text = match render_user_data_export(&bundle, export_type.delimiter()) {
         Ok(value) => value,
@@ -85,6 +89,7 @@ fn user_data_export_response(bundle: UserDataExportBundle, export_type: UserData
     user_data_export_response_text(export_text, export_type)
 }
 
+// 中文说明：构造文本导出下载响应，保持文件名和 content-type 与前端下载逻辑一致。
 fn user_data_export_response_text(export_text: String, export_type: UserDataExportType) -> Response {
     let filename = format!(
         "bill_analyser_export_{}.{}",
@@ -106,6 +111,7 @@ fn user_data_export_response_text(export_text: String, export_type: UserDataExpo
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：清空当前用户正式交易数据，先校验当前密码再执行敏感数据删除。
 async fn clear_user_transactions_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -125,6 +131,7 @@ async fn clear_user_transactions_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：清空当前用户全部可清理业务数据，先校验当前密码再进入统一删除编排。
 async fn clear_all_user_data_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -137,6 +144,7 @@ async fn clear_all_user_data_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：统一编排用户数据清理请求，区分仅交易和全量清理并写入审计。
 async fn clear_user_data_handler(
     state: HttpAppState,
     headers: HeaderMap,
@@ -153,6 +161,7 @@ async fn clear_user_data_handler(
         return clear_postgres_user_data_handler(state, auth, connect_info, headers, body, kind).await;
 }
 
+// 中文说明：执行 PostgreSQL 用户数据清理事务，保证只删除当前用户域内的数据。
 async fn clear_postgres_user_data_handler(
     state: HttpAppState,
     auth: AuthenticatedUser,

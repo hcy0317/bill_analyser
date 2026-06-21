@@ -3,6 +3,7 @@
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：读取当前用户 2FA 状态，供安全设置页和登录态检查展示。
 async fn get_two_factor_status_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -36,6 +37,7 @@ async fn get_two_factor_status_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：校验敏感操作 step-up 请求，支持当前密码、操作密码或 TOTP/recovery code。
 async fn verify_security_step_up_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -78,6 +80,7 @@ async fn verify_security_step_up_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：校验登录阶段的 TOTP/passcode，成功后签发完整登录 token。
 async fn verify_two_factor_login_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -127,6 +130,7 @@ async fn verify_two_factor_login_handler(
         .await;
 }
 
+// 中文说明：执行 PostgreSQL step-up 校验并签发短期 step-up token 给敏感操作使用。
 async fn verify_postgres_security_step_up_response(
     state: HttpAppState,
     auth: AuthenticatedUser,
@@ -275,6 +279,7 @@ async fn verify_postgres_security_step_up_response(
     )
 }
 
+// 中文说明：执行 PostgreSQL 2FA 登录校验，消费 pending token 并创建认证 session。
 async fn verify_postgres_two_factor_login_response(
     state: HttpAppState,
     headers: HeaderMap,

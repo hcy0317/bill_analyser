@@ -1,4 +1,5 @@
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：生成当前用户 API token，复用 personal token 统一入口并标记 API token 类型。
 async fn generate_api_token_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -18,6 +19,7 @@ async fn generate_api_token_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：生成当前用户 MCP token，复用 personal token 统一入口并标记 MCP token 类型。
 async fn generate_mcp_token_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
