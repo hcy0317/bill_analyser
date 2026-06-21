@@ -247,6 +247,35 @@ D5 behavior-lock 建议补强：
 - 桌面预算页源码合同：拆分后仍使用 `useBudgetStore`、现有 helper、现有 dialog 和现有 drilldown query。
 - 桌面统计页源码合同：拆分后仍使用 `useStatisticsStore`、现有 date/filter query、chart click 和 export dialog。
 
+### 5.1 本次 behavior-lock 执行记录
+
+执行时间：2026-06-21T23:48:20+08:00，基于 `bill_analyser/main` 的 `b5a1e991501312a59a38cdb4048c9c720b7def02`。
+
+本切片新增或扩展的 D5 行为锁定：
+
+- `tests/web/views/desktop/budgets/listPageCategoryIcons.test.ts` 新增桌面预算页源码合同，锁定预算页 facade 对 `useBudgetStore`、`useTransactionCategoriesStore`、预算历史/预测/list table/edit dialog、forecast helper、drilldown helper、reload、forecast、导入导出、删除和 `@budget:saved` 回调的接线。
+- `tests/web/views/desktop/statistics/transactionPageSourceContract.test.ts` 新增桌面统计页源码合同，锁定统计页 facade 对 `useStatisticsStore`、`ExportDialog`、filter/page params、category/trend/asset load actions、日期控制、图表 drilldown 和导出动作的接线。
+- 复用现有后端预算合同 `tests/backend/core/budget_contracts.rs` 锁定预算 cents、period、execution、history、forecast、import/export、filter 和路由 scope 语义。
+- 复用现有后端统计合同 `tests/backend/core/statistics_contracts.rs` 锁定统计 cents 符号、category/trend/asset、net worth、calendar、insights、Analyzer、汇率 provider/custom/fallback 和范围校验语义。
+
+已通过的 focused 验证：
+
+- `cargo test -p bill-analyser-core --test budget_contracts`：11 passed。
+- `cargo test -p bill-analyser-core --test statistics_contracts`：6 passed。
+- `Set-Location src/web; npm run test -- --runTestsByPath ../../tests/web/lib/services.budget.test.ts ../../tests/web/lib/services.statistics.test.ts ../../tests/web/stores/statistics.test.ts ../../tests/web/views/desktop/budgets/forecastRequest.test.ts ../../tests/web/views/desktop/budgets/forecastDisplay.test.ts ../../tests/web/views/desktop/budgets/categorySelection.test.ts ../../tests/web/views/desktop/budgets/listPageCategoryIcons.test.ts ../../tests/web/views/desktop/statistics/transactionPageSourceContract.test.ts`：8 suites / 40 tests passed。
+
+已通过的扩展验证：
+
+- `Set-Location src/web; npm run lint:ci`：通过，输出仅保留既有 `no-explicit-any` warning。
+- `Set-Location src/web; npm run test:coverage`：91 suites / 38984 tests passed，All files line coverage 99.13%。
+- `node scripts/check-backend-doc-map.mjs`：通过。
+- `git diff --check`：通过。
+
+结构 gate 结果：
+
+- `node scripts/check-rust-backend-structure.mjs` 仍失败 6 项；D5 项仍为 `db/budgets/postgres_reads.rs`、`db/statistics.rs`、`db/budgets.rs`，非 D5 项仍为 auth/public auth debt。该结果符合 behavior-lock 不移动结构的约束。
+- `Set-Location src/web; npm run structure:check` 仍失败 7 项；D5 项仍为 `views/desktop/budgets/ListPage.vue` 及其 template/script section，非 D5 项仍为 shared shell debt。该结果符合 behavior-lock 不移动结构的约束。
+
 ## 6. Shared path lease
 
 D5 需要提前记录的共享面：

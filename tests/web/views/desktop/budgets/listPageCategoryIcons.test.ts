@@ -53,3 +53,57 @@ describe('desktop budget category icon loading', () => {
         expect(budgetTableSource).not.toContain('v-if="budget.categoryIcon"');
     });
 });
+
+describe('desktop budget list page source contract', () => {
+    const readListPageSource = () => fs.readFileSync(
+        path.resolve(process.cwd(), 'src/views/desktop/budgets/ListPage.vue'),
+        'utf-8'
+    );
+
+    test('keeps the budget page facade wired to stores, dialogs, and helper modules', () => {
+        const source = readListPageSource();
+
+        [
+            "import { useBudgetStore } from '@/stores/budget.ts'",
+            "import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts'",
+            "import BudgetForecastPanel from './components/BudgetForecastPanel.vue'",
+            "import BudgetForecastSettingsDialog from './components/BudgetForecastSettingsDialog.vue'",
+            "import BudgetHistoryPanel from './components/BudgetHistoryPanel.vue'",
+            "import BudgetListTable from './components/BudgetListTable.vue'",
+            "import EditDialog from './list/dialogs/EditDialog.vue'",
+            "import { buildBudgetDrilldownRouteQuery } from './categorySelection.ts'",
+            "import { buildBudgetForecastLoadRequest } from './forecastRequest.ts'",
+            'const budgetStore = useBudgetStore()',
+            'const transactionCategoriesStore = useTransactionCategoriesStore()'
+        ].forEach(requiredSource => {
+            expect(source).toContain(requiredSource);
+        });
+    });
+
+    test('keeps reload, forecast, import/export, saved callback, delete, and drilldown actions attached', () => {
+        const source = readListPageSource();
+
+        [
+            'async function reload(force: boolean): Promise<void>',
+            'async function loadForecast(): Promise<void>',
+            'function navigateToTransactions(category: string, budget: Budget | null): void',
+            'function getCurrentPeriodRequest(): BudgetHistoryRequest',
+            'async function exportBudgets(): Promise<void>',
+            'function importBudgets(): void',
+            'async function onFileSelected(event: Event): Promise<void>',
+            'function onBudgetSaved(): void',
+            '@budget:saved="onBudgetSaved"',
+            'budgetStore.loadAllBudgets',
+            'budgetStore.loadBudgetExecution',
+            'budgetStore.loadBudgetHistory',
+            'budgetStore.loadBudgetForecast',
+            'budgetStore.deleteBudget',
+            'budgetStore.exportBudgets',
+            'budgetStore.importBudgets',
+            'buildBudgetDrilldownRouteQuery({',
+            'buildBudgetForecastLoadRequest'
+        ].forEach(requiredSource => {
+            expect(source).toContain(requiredSource);
+        });
+    });
+});
