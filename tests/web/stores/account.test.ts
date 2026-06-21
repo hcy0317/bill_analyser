@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 import { createPinia, setActivePinia } from 'pinia';
 
 import { AccountCategory, AccountType } from '@/core/account.ts';
+import { EMPTY_USER_BASIC_INFO } from '@/models/user.ts';
 import type { AccountInfoResponse, SyncBalancesResponse } from '@/models/account.ts';
 import { useAccountsStore } from '@/stores/account.ts';
+import { useUserStore } from '@/stores/user.ts';
 
 const memStore = new Map<string, string>();
 (globalThis as unknown as { localStorage: Storage }).localStorage = {
@@ -189,6 +191,86 @@ describe('accounts store service boundary', () => {
 
         await store.loadAllAccounts({ force: false });
         expect(mockGetAllAccounts).toHaveBeenCalledTimes(1);
+    });
+
+    test('keeps asset, liability, hidden and parent-account balance semantics stable', async () => {
+        mockGetAllAccounts.mockResolvedValue(accountsApiResponse([
+            accountResponse({
+                id: 'cash-visible',
+                name: '现金',
+                category: AccountCategory.Cash.type,
+                balanceCents: 10000,
+                displayOrder: 1
+            }),
+            accountResponse({
+                id: 'credit-card',
+                name: '信用卡',
+                category: AccountCategory.CreditCard.type,
+                balanceCents: -2500,
+                displayOrder: 2
+            }),
+            accountResponse({
+                id: 'hidden-saving',
+                name: '隐藏储蓄',
+                category: AccountCategory.SavingsAccount.type,
+                balanceCents: 99999,
+                hidden: true,
+                displayOrder: 3
+            }),
+            accountResponse({
+                id: 'bank-parent',
+                name: '银行',
+                category: AccountCategory.CheckingAccount.type,
+                type: AccountType.MultiSubAccounts.type,
+                currency: '---',
+                balanceCents: 0,
+                displayOrder: 4,
+                subAccounts: [
+                    accountResponse({
+                        id: 'bank-visible',
+                        name: '银行卡',
+                        parentId: 'bank-parent',
+                        category: AccountCategory.CheckingAccount.type,
+                        balanceCents: 7000,
+                        displayOrder: 1
+                    }),
+                    accountResponse({
+                        id: 'bank-hidden',
+                        name: '隐藏银行卡',
+                        parentId: 'bank-parent',
+                        category: AccountCategory.CheckingAccount.type,
+                        balanceCents: 3000,
+                        hidden: true,
+                        displayOrder: 2
+                    })
+                ]
+            })
+        ]));
+
+        const store = useAccountsStore();
+        const userStore = useUserStore();
+        userStore.storeUserBasicInfo({
+            ...EMPTY_USER_BASIC_INFO,
+            username: 'identity-settings-test',
+            defaultCurrency: 'CNY'
+        });
+        await store.loadAllAccounts({ force: true });
+
+        expect(store.getNetAssets(true)).toBe(14500);
+        expect(store.getTotalAssets(true)).toBe(17000);
+        expect(store.getTotalLiabilities(true)).toBe(2500);
+        expect(store.getAccountCategoryTotalBalance(true, AccountCategory.CheckingAccount)).toBe(7000);
+        expect(store.getAccountCategoryTotalBalance(true, AccountCategory.CreditCard)).toBe(2500);
+        expect(store.allVisiblePlainAccounts.map(account => account.id)).toStrictEqual([
+            'cash-visible',
+            'bank-visible',
+            'credit-card'
+        ]);
+        expect(store.expandAccountIds(['bank-parent', 'credit-card'])).toStrictEqual([
+            'bank-visible',
+            'bank-hidden',
+            'credit-card'
+        ]);
     });
 
     test('syncAllAccountBalances deduplicates requests and refreshes account cache by default', async () => {

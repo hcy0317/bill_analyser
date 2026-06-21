@@ -93,6 +93,65 @@ fn settings_bundle_taxonomy_export_preserves_importable_refs_and_minor_units(
     Ok(())
 }
 
+#[test]
+fn settings_bundle_normalization_locks_identity_sections_and_errors() -> Result<(), Box<dyn Error>>
+{
+    let normalized = normalize_settings_bundle_sections(&json!({
+        "schemaVersion": 1,
+        "accounts": [
+            {"externalRef": "account:cash", "name": "现金", "balanceCents": 1234},
+            "ignored-non-object"
+        ],
+        "transactionCategories": [
+            {"externalRef": "category:food", "mainCategory": "餐饮", "subCategory": "午餐"}
+        ],
+        "transactionTags": [
+            {"externalRef": "tag:project", "name": "项目"}
+        ],
+        "transactionTemplates": [],
+        "scheduledTransactions": [],
+        "categoryRecognitionRules": [],
+        "accountRecognitionRules": [],
+        "llmConfigs": [{"provider": "local"}],
+        "ocrConfig": []
+    }))?;
+
+    assert_eq!(normalized["accounts"].as_array().unwrap().len(), 1);
+    assert_eq!(normalized["accounts"][0]["balanceCents"], 1234);
+    assert_eq!(
+        normalized["transactionCategories"][0]["mainCategory"],
+        "餐饮"
+    );
+    assert_eq!(normalized["transactionTags"][0]["name"], "项目");
+    assert_eq!(normalized["llmConfigs"][0]["provider"], "local");
+    assert!(normalized["ocrConfig"].as_array().unwrap().is_empty());
+
+    let section_wrapped = normalize_settings_bundle_sections(&json!({
+        "schemaVersion": 1,
+        "sections": {
+            "accounts": [{"externalRef": "account:bank", "name": "工资卡"}]
+        }
+    }))?;
+    assert_eq!(section_wrapped["accounts"][0]["name"], "工资卡");
+    assert!(section_wrapped["transactionCategories"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+
+    let err = normalize_settings_bundle_sections(&json!({
+        "schemaVersion": 1,
+        "sections": {
+            "accounts": {"externalRef": "account:not-list"}
+        }
+    }))
+    .expect_err("non-list sections must be rejected");
+    assert!(err
+        .to_string()
+        .contains("Settings bundle section accounts must be a list"));
+
+    Ok(())
+}
+
 #[tokio::test]
 async fn settings_bundle_import_upserts_templates_when_postgres_available(
 ) -> Result<(), Box<dyn Error>> {

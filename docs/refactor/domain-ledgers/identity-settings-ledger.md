@@ -192,6 +192,30 @@ G015 的 `behavior-lock` 必须补强或明确复用以下场景：
 - 金额合同：账户余额、期初余额、模板 amount/minor units、balance discrepancy 全部使用 cents/minor units。
 - 浏览器或 API smoke：账户/分类/标签桌面页至少一条列表/新增/编辑/导入导出入口 smoke；settings bundle 可用 API smoke 兜底。
 
+### 7.1 G015 behavior-lock 证据
+
+G015 已补强以下行为锁定入口，后续 `backend-shape`/`frontend-shape` 拆分必须保持这些测试通过：
+
+- `tests/backend/db/settings_bundle_postgres.rs::settings_bundle_normalization_locks_identity_sections_and_errors`
+  - 锁定 root-level 与 `sections` 包裹两种 settings bundle 载荷都能归一到 canonical section keys。
+  - 锁定账户、分类、标签、LLM/OCR section 的列表语义，以及非 object 条目会被过滤、非 list section 会报错。
+  - 锁定账户金额字段 `balanceCents` 在 normalize 后仍保留整数分，不被转成元或字符串。
+- `tests/web/stores/account.test.ts::keeps asset, liability, hidden and parent-account balance semantics stable`
+  - 锁定账户 store 在显式用户默认币种 `CNY` 下的 net assets、total assets、total liabilities 和分类余额聚合。
+  - 锁定隐藏账户/隐藏子账户不进入余额聚合，但主账户筛选展开仍保留全部子账户 id 的当前合同。
+  - 锁定可见账户列表按当前账户分类 display order 排序。
+
+本切片实际验证命令：
+
+- `cargo fmt --all -- --check`
+- `cargo test -p bill-analyser-db --test settings_bundle_postgres`
+- `cargo test -p bill-analyser-db --test account_rules_postgres`
+- `cargo test -p bill-analyser-db --test category_rules_postgres`
+- `Set-Location src/web; npm run test -- --runTestsByPath ../../tests/web/stores/account.test.ts ../../tests/web/models/transaction_category.test.ts ../../tests/web/models/transaction_tag.test.ts ../../tests/web/views/desktop/settingsJsonPerPageImportExport.test.ts`
+- `Set-Location src/web; npm run lint:ci`（通过，保留仓库既有 `no-explicit-any` warning）
+- `node scripts/check-backend-doc-map.mjs`
+- `git diff --check`
+
 ## 8. 后续切片执行顺序
 
 ### 8.1 behavior-lock
