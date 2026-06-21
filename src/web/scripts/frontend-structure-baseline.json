@@ -89,17 +89,6 @@
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
-      "path": "src/views/desktop/pairingcenter/components/RuleCenterPanel.vue",
-      "kind": "vue",
-      "lines": 1969,
-      "sections": {
-        "template": 287,
-        "script": 1144,
-        "style": 168
-      },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
-    },
-    {
       "path": "src/views/desktop/transactions/import/ImportDialog.vue",
       "kind": "vue",
       "lines": 1774,
@@ -111,13 +100,13 @@
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
-      "path": "src/views/desktop/pairingcenter/components/LearningCenterPanel.vue",
+      "path": "src/views/desktop/pairingcenter/components/RuleCenterPanel.vue",
       "kind": "vue",
-      "lines": 1627,
+      "lines": 1626,
       "sections": {
-        "template": 424,
-        "script": 699,
-        "style": 179
+        "template": 329,
+        "script": 751,
+        "style": 192
       },
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
@@ -129,6 +118,17 @@
         "template": 123,
         "script": 955,
         "style": 113
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/pairingcenter/components/LearningCenterPanel.vue",
+      "kind": "vue",
+      "lines": 1573,
+      "sections": {
+        "template": 424,
+        "script": 590,
+        "style": 183
       },
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
@@ -225,6 +225,17 @@
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
+      "path": "src/views/desktop/pairingcenter/components/AccountRulePanel.vue",
+      "kind": "vue",
+      "lines": 798,
+      "sections": {
+        "template": 198,
+        "script": 395,
+        "style": 133
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
       "path": "src/views/mobile/users/UserProfilePage.vue",
       "kind": "vue",
       "lines": 774,
@@ -258,6 +269,17 @@
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
+      "path": "src/views/desktop/pairingcenter/ListPage.vue",
+      "kind": "vue",
+      "lines": 721,
+      "sections": {
+        "template": 142,
+        "script": 460,
+        "style": 56
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
       "path": "src/models/account.ts",
       "kind": "ts",
       "lines": 705,
@@ -275,17 +297,6 @@
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
-      "path": "src/views/desktop/pairingcenter/ListPage.vue",
-      "kind": "vue",
-      "lines": 689,
-      "sections": {
-        "template": 133,
-        "script": 438,
-        "style": 56
-      },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
-    },
-    {
       "path": "src/components/common/keywordExpression.ts",
       "kind": "ts",
       "lines": 673,
@@ -295,17 +306,6 @@
       "path": "src/core/datetime.ts",
       "kind": "ts",
       "lines": 670,
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
-    },
-    {
-      "path": "src/views/desktop/categories/list/dialogs/EditDialog.vue",
-      "kind": "vue",
-      "lines": 628,
-      "sections": {
-        "template": 26,
-        "script": 508,
-        "style": 0
-      },
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
@@ -322,6 +322,17 @@
         "template": 4,
         "script": 615,
         "style": 13
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/categories/list/dialogs/EditDialog.vue",
+      "kind": "vue",
+      "lines": 628,
+      "sections": {
+        "template": 26,
+        "script": 508,
+        "style": 0
       },
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },

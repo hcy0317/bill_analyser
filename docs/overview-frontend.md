@@ -10,7 +10,7 @@
 
 ## 规则中心
 
-`desktop/pairingcenter/ListPage.vue` 是桌面端规则中心：一级导航分为“配对总览”“规则配置”“长期学习”“LLM 识别”。“规则配置”下有“分类识别 / 账户识别 / 周期识别”，分别承接 category rules、account rules 与 recurring matching 入口。
+`desktop/pairingcenter/ListPage.vue` 是桌面端规则中心：一级导航分为“配对总览”“规则配置”“长期学习”“LLM 识别”。“规则配置”下有“分类识别 / 账户识别 / 周期识别”，分别承接 category rules、account rules 与 recurring matching 入口。分类规则展示模型、账户规则弹窗、学习中心本地筛选映射已拆到 `pairingcenter/components/*Model.ts` 和 `AccountRuleDialogs.vue`，页面组件保留装配和动作流。
 
 `/pairing/list` 使用 `domain/tab` query 表达当前业务域与二级视图；前端导航和测试只依赖当前 query contract。
 

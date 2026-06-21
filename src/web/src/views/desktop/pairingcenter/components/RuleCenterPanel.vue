@@ -689,7 +689,6 @@ import {
     mdiTestTube, mdiCalendarSearch, mdiTextBoxEditOutline,
     mdiChevronDown, mdiChevronRight, mdiFilterVariant, mdiViewGridOutline,
 } from '@mdi/js';
-import type { ApiResponse, ErrorResponse } from '@/core/api.ts';
 import services from '@/lib/services.ts';
 import { useI18n } from '@/locales/helpers.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
@@ -699,6 +698,10 @@ import ItemIcon from '@/components/desktop/ItemIcon.vue';
 import SettingsJsonImportExportButton from '@/components/desktop/SettingsJsonImportExportButton.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 import TwoColumnSelect from '@/components/desktop/TwoColumnSelect.vue';
+import {
+    getRequestErrorMessage,
+    requireApiSuccess,
+} from './apiResultHelpers.ts';
 import RuleExpressionDisplay from './RuleExpressionDisplay.vue';
 import {
     buildRuleExpressionDisplayGroups,
@@ -710,11 +713,34 @@ import {
     primaryCategoryFilterTypeOrder,
 } from './ruleCenterFilters.ts';
 import type {
-    PrimaryCategoryDisplayInfo,
     PrimaryCategoryFilterGroup,
     RuleBooleanFilter,
     RuleFilterOption,
 } from './ruleCenterFilters.ts';
+import {
+    buildCategoryPickerItems,
+    buildCategoryRulePayload,
+    buildCategoryRuleTargetGroups,
+    buildDisplayCategoryRules,
+    buildGroupedCategoryRuleTargets,
+    buildLocalizedPresetPrimaryCategoryMap,
+    compareDisplayCategoryRuleOrder,
+    getCategoryRuleTargetRuleIds,
+    makePrimaryCategoryGroupKey,
+    normalizeCategoryRuleItem,
+    resolveRuleCategorySelection,
+} from './categoryRulesModel.ts';
+import type {
+    CategoryPickerPrimaryItem,
+    CategoryRuleForm,
+    CategoryRuleGroup,
+    CategoryRuleItem,
+    CategoryRuleTargetGroup,
+    CategoryRuleTestResult,
+    DisplayCategoryRuleItem,
+    ResolvedRuleCategorySelection,
+    RuleCenterOverview,
+} from './categoryRulesModel.ts';
 
 const categoryStore = useTransactionCategoriesStore();
 const { tt, getAllTransactionDefaultCategories, getCurrentLanguageTag } = useI18n();
@@ -758,33 +784,7 @@ function normalizeTab(tab?: string): RuleCenterPanelTab {
 
 const activeTab = ref<RuleCenterPanelTab>(normalizeTab(props.initTab));
 
-// ── Overview (existing tabs) ────────
-interface LearningRuleOverviewItem {
-    matchType: string;
-    matchValue: string;
-    learnedType: string;
-    appliedCount: number;
-    enabled: boolean;
-}
-
-interface RecurringRuleOverviewItem {
-    name: string;
-    amountCents: number | null;
-    frequency: string;
-    nextDate: string | null;
-    enabled: boolean;
-}
-
-interface Overview {
-    learningRules: LearningRuleOverviewItem[];
-    learningRuleCount: number;
-    categoryRuleCount: number;
-    recurringRules: RecurringRuleOverviewItem[];
-    recurringRuleCount: number;
-    totalRuleCount: number;
-}
-
-const overview = ref<Overview>({
+const overview = ref<RuleCenterOverview>({
     learningRules: [], learningRuleCount: 0,
     categoryRuleCount: 0,
     recurringRules: [], recurringRuleCount: 0,
@@ -792,99 +792,6 @@ const overview = ref<Overview>({
 });
 
 // ── Category Rules ────────
-interface CategoryRuleItem {
-    id: number;
-    name: string;
-    category_id: number | null;
-    category_name: string | null;
-    sub_category_name: string | null;
-    priority: number;
-    rule_expression: string;
-    regex_enabled: boolean;
-    enabled: boolean;
-    applied_count: number;
-}
-
-interface DisplayCategoryRuleItem extends CategoryRuleItem {
-    category_display_name: string;
-    category_full_name: string;
-    category_icon: string;
-    category_color: string;
-    category_group_key: string;
-    category_group_name: string;
-    category_group_icon: string;
-    category_group_color: string;
-}
-
-interface CategoryRuleTargetGroup {
-    key: string;
-    category_display_name: string;
-    category_full_name: string;
-    category_icon: string;
-    category_color: string;
-    category_group_key: string;
-    category_group_name: string;
-    category_group_icon: string;
-    category_group_color: string;
-    rules: DisplayCategoryRuleItem[];
-    ruleCount: number;
-}
-
-interface CategoryRuleGroup {
-    key: string;
-    title: string;
-    icon: string;
-    color: string;
-    targets: CategoryRuleTargetGroup[];
-    ruleCount: number;
-}
-
-interface CategoryRuleForm {
-    category_id: string;
-    priority: number;
-    rule_expression: string;
-    regex_enabled: boolean;
-    enabled: boolean;
-}
-
-interface CategoryRulePayload {
-    category_id: number;
-    name: string;
-    priority: number;
-    rule_expression: string;
-    regex_enabled: boolean;
-    enabled: boolean;
-}
-
-interface CategoryPickerSecondaryItem extends Record<string, unknown> {
-    id: string;
-    name: string;
-    icon: string;
-    color: string;
-    hidden: boolean;
-}
-
-interface CategoryPickerPrimaryItem extends Record<string, unknown> {
-    id: string;
-    name: string;
-    icon: string;
-    color: string;
-    hidden: boolean;
-    type: CategoryType;
-    typeLabel: string;
-    subCategories: CategoryPickerSecondaryItem[];
-}
-
-interface ResolvedRuleCategorySelection {
-    primaryText: string;
-    secondaryText: string;
-    label: string;
-}
-
-interface CategoryRuleTestResult {
-    matched?: boolean | null;
-}
-
 const categoryRules = ref<CategoryRuleItem[]>([]);
 const togglingRuleIds = ref<number[]>([]);
 const expandedExpressionClauseKeys = ref<string[]>([]);
@@ -924,21 +831,15 @@ const learningHeaders = computed(() => [
     { title: tt('Enabled'), key: 'enabled' },
 ]);
 
-const displayCategoryRules = computed<DisplayCategoryRuleItem[]>(() => categoryRules.value.map(item => {
-    const display = resolveCategoryDisplay(item);
-    const group = resolveCategoryGroup(item);
-    return {
-        ...item,
-        category_display_name: display.name,
-        category_full_name: display.fullName,
-        category_icon: display.icon,
-        category_color: display.color,
-        category_group_key: group.key,
-        category_group_name: group.name,
-        category_group_icon: group.icon,
-        category_group_color: group.color,
-    };
-}));
+const displayCategoryRules = computed<DisplayCategoryRuleItem[]>(() => buildDisplayCategoryRules(
+    categoryRules.value,
+    {
+        categoriesById: categoryStore.allTransactionCategoriesMap,
+        categoryPickerItems: categoryPickerItems.value,
+        localizedPresetPrimaryCategoryMap: localizedPresetPrimaryCategoryMap.value,
+        unassignedLabel: tt('Unassigned Category'),
+    }
+));
 
 // ── Category selector options ────────
 function getCategoryTypeLabel(type: number): string {
@@ -956,56 +857,14 @@ function getCategoryTypeLabel(type: number): string {
     }
 }
 
-const categoryPickerItems = computed<CategoryPickerPrimaryItem[]>(() => {
-    const orderedTypes = [
-        CategoryType.Expense,
-        CategoryType.Income,
-        CategoryType.Transfer,
-        CategoryType.Investment,
-    ];
+const categoryPickerItems = computed<CategoryPickerPrimaryItem[]>(() => buildCategoryPickerItems(
+    categoryStore.allTransactionCategories,
+    getCategoryTypeLabel
+));
 
-    return orderedTypes.flatMap(type => (
-        categoryStore.allTransactionCategories[type] || []
-    ).map(primaryCategory => ({
-        id: String(primaryCategory.id),
-        name: primaryCategory.name,
-        icon: primaryCategory.icon,
-        color: primaryCategory.color,
-        hidden: primaryCategory.hidden,
-        type: Number(primaryCategory.type) as CategoryType,
-        typeLabel: getCategoryTypeLabel(primaryCategory.type),
-        subCategories: (primaryCategory.subCategories || []).map(subCategory => ({
-            id: String(subCategory.id),
-            name: subCategory.name,
-            icon: subCategory.icon,
-            color: subCategory.color,
-            hidden: subCategory.hidden,
-        })),
-    })));
-});
-
-const localizedPresetPrimaryCategoryMap = computed<Map<string, PrimaryCategoryDisplayInfo>>(() => {
+const localizedPresetPrimaryCategoryMap = computed(() => {
     const localizedCategoryLocales = Array.from(new Set([getCurrentLanguageTag(), 'zh-Hans', 'en']));
-    const metadataByName = new Map<string, PrimaryCategoryDisplayInfo>();
-
-    for (const locale of localizedCategoryLocales) {
-        const localizedCategories = getAllTransactionDefaultCategories(0, locale);
-        for (const categories of Object.values(localizedCategories)) {
-            for (const category of categories ?? []) {
-                const categoryNameKey = normalizeCategoryNameKey(category.name);
-                if (!categoryNameKey || metadataByName.has(categoryNameKey)) {
-                    continue;
-                }
-                metadataByName.set(categoryNameKey, {
-                    name: category.name,
-                    icon: category.icon,
-                    color: String(category.color),
-                });
-            }
-        }
-    }
-
-    return metadataByName;
+    return buildLocalizedPresetPrimaryCategoryMap(localizedCategoryLocales, getAllTransactionDefaultCategories);
 });
 
 const primaryCategoryFilterGroups = computed<PrimaryCategoryFilterGroup[]>(() => (
@@ -1022,228 +881,6 @@ const primaryCategoryFilterGroups = computed<PrimaryCategoryFilterGroup[]>(() =>
             })),
     })).filter(group => group.options.length > 0)
 ));
-
-function resolveRuleCategorySelection(categoryId: string): ResolvedRuleCategorySelection {
-    const normalizedCategoryId = String(categoryId || '');
-
-    for (const primaryCategory of categoryPickerItems.value) {
-        if (primaryCategory.id === normalizedCategoryId) {
-            return {
-                primaryText: primaryCategory.name,
-                secondaryText: '',
-                label: primaryCategory.name,
-            };
-        }
-
-        for (const secondaryCategory of primaryCategory.subCategories) {
-            if (secondaryCategory.id === normalizedCategoryId) {
-                return {
-                    primaryText: primaryCategory.name,
-                    secondaryText: secondaryCategory.name,
-                    label: `${primaryCategory.name} / ${secondaryCategory.name}`,
-                };
-            }
-        }
-    }
-
-    return {
-        primaryText: '',
-        secondaryText: '',
-        label: '',
-    };
-}
-
-function normalizeCategoryNameKey(value: string | null | undefined): string {
-    return String(value || '').trim().toLocaleLowerCase();
-}
-
-function makePrimaryCategoryGroupKey(categoryId: string | number | null | undefined, name?: string | null): string {
-    const normalizedCategoryId = String(categoryId ?? '').trim();
-    if (normalizedCategoryId) {
-        return `category:${normalizedCategoryId}`;
-    }
-
-    const normalizedName = normalizeCategoryNameKey(name);
-    return normalizedName ? `category-name:${normalizedName}` : 'unassigned';
-}
-
-function findPrimaryCategoryByName(name: string | null | undefined): PrimaryCategoryDisplayInfo | null {
-    const normalizedName = normalizeCategoryNameKey(name);
-    if (!normalizedName) {
-        return null;
-    }
-
-    const storedCategory = categoryPickerItems.value.find(primaryCategory => (
-        normalizeCategoryNameKey(primaryCategory.name) === normalizedName
-    ));
-    if (storedCategory) {
-        return storedCategory;
-    }
-
-    return localizedPresetPrimaryCategoryMap.value.get(normalizedName) ?? null;
-}
-
-function resolveCategoryDisplay(item: CategoryRuleItem): { name: string; fullName: string; icon: string; color: string } {
-    const categoryId = item.category_id !== null && item.category_id !== undefined
-        ? String(item.category_id)
-        : '';
-    const category = categoryId ? categoryStore.allTransactionCategoriesMap[categoryId] : null;
-    const displayName = item.sub_category_name || category?.name || item.category_name || tt('Unassigned Category');
-    const fullName = item.category_name && item.sub_category_name
-        ? `${item.category_name} / ${item.sub_category_name}`
-        : displayName;
-
-    if (category) {
-        return {
-            name: displayName,
-            fullName,
-            icon: category.icon,
-            color: String(category.color),
-        };
-    }
-
-    const fallbackPrimaryCategory = findPrimaryCategoryByName(item.category_name);
-
-    if (item.sub_category_name) {
-        return {
-            name: item.sub_category_name,
-            fullName,
-            icon: fallbackPrimaryCategory?.icon ?? '',
-            color: fallbackPrimaryCategory?.color ?? '',
-        };
-    }
-
-    if (item.category_name) {
-        return {
-            name: item.category_name,
-            fullName,
-            icon: fallbackPrimaryCategory?.icon ?? '',
-            color: fallbackPrimaryCategory?.color ?? '',
-        };
-    }
-
-    return {
-        name: tt('Unassigned Category'),
-        fullName: tt('Unassigned Category'),
-        icon: '',
-        color: '',
-    };
-}
-
-function resolveCategoryGroup(item: CategoryRuleItem): { key: string; name: string; icon: string; color: string } {
-    const categoryId = item.category_id !== null && item.category_id !== undefined
-        ? String(item.category_id)
-        : '';
-    const category = categoryId ? categoryStore.allTransactionCategoriesMap[categoryId] : null;
-    const primaryCategory = category && category.parentId && category.parentId !== '0'
-        ? categoryStore.allTransactionCategoriesMap[category.parentId]
-        : category;
-
-    if (primaryCategory) {
-        return {
-            key: makePrimaryCategoryGroupKey(primaryCategory.id, primaryCategory.name),
-            name: primaryCategory.name,
-            icon: primaryCategory.icon,
-            color: String(primaryCategory.color),
-        };
-    }
-
-    const fallbackPrimaryCategory = findPrimaryCategoryByName(item.category_name);
-    if (fallbackPrimaryCategory) {
-        return {
-            key: makePrimaryCategoryGroupKey(fallbackPrimaryCategory.id, fallbackPrimaryCategory.name),
-            name: fallbackPrimaryCategory.name,
-            icon: fallbackPrimaryCategory.icon,
-            color: fallbackPrimaryCategory.color,
-        };
-    }
-
-    const fallbackName = item.category_name || item.sub_category_name || tt('Unassigned Category');
-    return {
-        key: makePrimaryCategoryGroupKey(null, fallbackName),
-        name: fallbackName || tt('Unassigned Category'),
-        icon: '',
-        color: '',
-    };
-}
-
-function compareDisplayCategoryRules(firstRule: DisplayCategoryRuleItem, secondRule: DisplayCategoryRuleItem): number {
-    return firstRule.category_full_name.localeCompare(secondRule.category_full_name, 'zh-Hans')
-        || firstRule.name.localeCompare(secondRule.name, 'zh-Hans')
-        || firstRule.id - secondRule.id;
-}
-
-function compareCategoryRuleExpressions(
-    firstRule: DisplayCategoryRuleItem,
-    secondRule: DisplayCategoryRuleItem
-): number {
-    return firstRule.priority - secondRule.priority
-        || firstRule.name.localeCompare(secondRule.name, 'zh-Hans')
-        || firstRule.id - secondRule.id;
-}
-
-function compareDisplayCategoryRuleOrder(
-    firstRule: DisplayCategoryRuleItem,
-    secondRule: DisplayCategoryRuleItem
-): number {
-    return firstRule.category_group_name.localeCompare(secondRule.category_group_name, 'zh-Hans')
-        || firstRule.category_group_key.localeCompare(secondRule.category_group_key, 'zh-Hans')
-        || compareDisplayCategoryRules(firstRule, secondRule);
-}
-
-function compareCategoryRuleTargetGroups(
-    firstGroup: CategoryRuleTargetGroup,
-    secondGroup: CategoryRuleTargetGroup
-): number {
-    return firstGroup.category_group_name.localeCompare(secondGroup.category_group_name, 'zh-Hans')
-        || firstGroup.category_group_key.localeCompare(secondGroup.category_group_key, 'zh-Hans')
-        || firstGroup.category_full_name.localeCompare(secondGroup.category_full_name, 'zh-Hans')
-        || firstGroup.key.localeCompare(secondGroup.key, 'zh-Hans');
-}
-
-function makeCategoryRuleTargetKey(item: DisplayCategoryRuleItem): string {
-    const categoryId = item.category_id !== null && item.category_id !== undefined
-        ? String(item.category_id).trim()
-        : '';
-    if (categoryId) {
-        return `category:${categoryId}`;
-    }
-
-    const normalizedCategoryName = normalizeCategoryNameKey(item.category_full_name);
-    return normalizedCategoryName ? `category-name:${normalizedCategoryName}` : 'unassigned';
-}
-
-function buildCategoryRuleTargetGroups(items: DisplayCategoryRuleItem[]): CategoryRuleTargetGroup[] {
-    const groupsByKey = new Map<string, CategoryRuleTargetGroup>();
-
-    for (const item of items) {
-        const targetKey = makeCategoryRuleTargetKey(item);
-        const group = groupsByKey.get(targetKey) ?? {
-            key: targetKey,
-            category_display_name: item.category_display_name,
-            category_full_name: item.category_full_name,
-            category_icon: item.category_icon,
-            category_color: item.category_color,
-            category_group_key: item.category_group_key,
-            category_group_name: item.category_group_name,
-            category_group_icon: item.category_group_icon,
-            category_group_color: item.category_group_color,
-            rules: [],
-            ruleCount: 0,
-        };
-        group.rules.push(item);
-        group.ruleCount = group.rules.length;
-        groupsByKey.set(targetKey, group);
-    }
-
-    return [...groupsByKey.values()]
-        .map(group => ({
-            ...group,
-            rules: [...group.rules].sort(compareCategoryRuleExpressions),
-            ruleCount: group.rules.length,
-        }))
-        .sort(compareCategoryRuleTargetGroups);
-}
 
 function matchesRuleExpressionFilter(expression: string): boolean {
     return matchesRuleExpressionFilterText(
@@ -1274,7 +911,10 @@ const ruleForm = ref<CategoryRuleForm>({
     regex_enabled: false,
     enabled: true,
 });
-const ruleCategorySelection = computed<ResolvedRuleCategorySelection>(() => resolveRuleCategorySelection(ruleForm.value.category_id));
+const ruleCategorySelection = computed<ResolvedRuleCategorySelection>(() => resolveRuleCategorySelection(
+    ruleForm.value.category_id,
+    categoryPickerItems.value
+));
 const autoRuleName = computed(() => {
     const selectionLabel = ruleCategorySelection.value.label || tt('Unassigned Category');
     return `${selectionLabel} · ${tt('Category Rule')}`;
@@ -1340,31 +980,9 @@ const rulePaginationLabel = computed(() => {
 
     return `${rulePaginationStart.value}-${rulePaginationEnd.value} / ${orderedCategoryRuleTargets.value.length}`;
 });
-const groupedCategoryRuleTargets = computed<CategoryRuleGroup[]>(() => {
-    const groupsByKey = new Map<string, CategoryRuleGroup>();
-
-    for (const targetGroup of paginatedCategoryRuleTargets.value) {
-        const group = groupsByKey.get(targetGroup.category_group_key) ?? {
-            key: targetGroup.category_group_key,
-            title: targetGroup.category_group_name,
-            icon: targetGroup.category_group_icon,
-            color: targetGroup.category_group_color,
-            targets: [],
-            ruleCount: 0,
-        };
-        group.targets.push(targetGroup);
-        group.ruleCount += targetGroup.ruleCount;
-        groupsByKey.set(targetGroup.category_group_key, group);
-    }
-
-    return [...groupsByKey.values()]
-        .map(group => ({
-            ...group,
-            targets: [...group.targets].sort(compareCategoryRuleTargetGroups),
-            ruleCount: group.targets.reduce((sum, item) => sum + item.ruleCount, 0),
-        }))
-        .sort((firstGroup, secondGroup) => firstGroup.title.localeCompare(secondGroup.title, 'zh-Hans'));
-});
+const groupedCategoryRuleTargets = computed<CategoryRuleGroup[]>(() => (
+    buildGroupedCategoryRuleTargets(paginatedCategoryRuleTargets.value)
+));
 const visibleRuleIds = computed(() => (
     paginatedCategoryRuleTargets.value.flatMap(targetGroup => targetGroup.rules.map(item => item.id))
 ));
@@ -1426,73 +1044,8 @@ const ruleBuilderModel = computed({
     },
 });
 
-function extractPayloadMessage(payload: unknown, depth = 0): string | null {
-    if (depth > 2) {
-        return null;
-    }
-
-    if (typeof payload === 'string' && payload) {
-        return payload;
-    }
-
-    if (!payload || typeof payload !== 'object') {
-        return null;
-    }
-
-    const typedPayload = payload as Partial<ErrorResponse> & {
-        error?: unknown;
-        message?: unknown;
-    };
-
-    return extractPayloadMessage(
-        typedPayload.error ?? typedPayload.message,
-        depth + 1
-    );
-}
-
-function getRequestErrorMessage(error: unknown, fallback: string): string {
-    if (axios.isAxiosError(error)) {
-        return extractPayloadMessage(error.response?.data) || error.message || fallback;
-    }
-
-    if (error instanceof Error && error.message) {
-        return error.message;
-    }
-
-    return fallback;
-}
-
-function requireApiSuccess<T>(response: { data?: ApiResponse<T> }, fallback: string): T {
-    if (response.data?.success) {
-        return response.data.result;
-    }
-
-    throw new Error(fallback);
-}
-
 function showSuccessMessage(message: string, options?: Record<string, unknown>): void {
     snackbar.value?.showMessage(message, options);
-}
-
-function buildCategoryRulePayload(form: CategoryRuleForm): CategoryRulePayload {
-    const categoryId = Number.parseInt(String(form.category_id || ''), 10);
-    if (!Number.isFinite(categoryId)) {
-        throw new Error(tt('Category is required'));
-    }
-
-    const ruleExpression = String(form.rule_expression || '').trim();
-    if (!ruleExpression) {
-        throw new Error(tt('Expression is required'));
-    }
-
-    return {
-        category_id: categoryId,
-        name: autoRuleName.value,
-        priority: form.priority,
-        rule_expression: ruleExpression,
-        regex_enabled: !!form.regex_enabled,
-        enabled: !!form.enabled,
-    };
 }
 
 function openCreateDialog() {
@@ -1517,7 +1070,10 @@ async function saveRule() {
     saving.value = true;
     error.value = null;
     try {
-        const payload = buildCategoryRulePayload(ruleForm.value);
+        const payload = buildCategoryRulePayload(ruleForm.value, autoRuleName.value, {
+            categoryRequired: tt('Category is required'),
+            expressionRequired: tt('Expression is required'),
+        });
         if (editingRule.value) {
             requireApiSuccess(
                 await services.updateCategoryRule(editingRule.value.id, payload),
@@ -1582,10 +1138,6 @@ async function toggleEnabled(item: CategoryRuleItem, nextEnabled: unknown) {
     } finally {
         setRuleToggling(item.id, false);
     }
-}
-
-function getCategoryRuleTargetRuleIds(targetGroup: CategoryRuleTargetGroup): number[] {
-    return targetGroup.rules.map(item => item.id);
 }
 
 function isCategoryRuleTargetSelected(targetGroup: CategoryRuleTargetGroup): boolean {
@@ -1787,14 +1339,7 @@ async function fetchCategoryRules() {
             throw new Error(response.data?.error || tt('Failed to load category rules'));
         }
         const result = response.data.data ?? [];
-        categoryRules.value = result.map(item => ({
-            ...item,
-            category_name: item.category_name ?? item.main_category ?? null,
-            sub_category_name: item.sub_category_name ?? item.sub_category ?? null,
-            regex_enabled: !!item.regex_enabled,
-            enabled: !!item.enabled,
-            applied_count: Number(item.applied_count ?? 0),
-        }));
+        categoryRules.value = result.map(item => normalizeCategoryRuleItem(item));
     } catch (e: unknown) {
         error.value = getRequestErrorMessage(e, tt('Failed to load category rules'));
     }
@@ -1802,7 +1347,7 @@ async function fetchCategoryRules() {
 
 async function fetchOverview() {
     try {
-        const result = requireApiSuccess<Overview>(
+        const result = requireApiSuccess<RuleCenterOverview>(
             await services.getRulesOverview(),
             tt('Failed to load rules overview')
         );

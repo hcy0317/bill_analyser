@@ -66,7 +66,8 @@ describe('desktop rule add/edit dialog layout contract', () => {
     });
 
     test('account rule add/edit dialog uses account-edit modal hierarchy instead of compact toolbar chrome', () => {
-        const source = readWebSource('src/views/desktop/pairingcenter/components/AccountRulePanel.vue');
+        const panelSource = readWebSource('src/views/desktop/pairingcenter/components/AccountRulePanel.vue');
+        const source = readWebSource('src/views/desktop/pairingcenter/components/AccountRuleDialogs.vue');
         const editDialog = extractDialogBlock(source, 'v-model="showEditDialog"');
 
         expectAddEditModalContract(editDialog, {
@@ -79,7 +80,8 @@ describe('desktop rule add/edit dialog layout contract', () => {
 
         expect(source).toContain('v-model="showTestDialog"');
         expect(source).toContain('v-model="showDeleteDialog"');
-        expect(source).toContain('<Teleport defer :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">');
+        expect(panelSource).toContain('<Teleport defer :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">');
+        expect(panelSource).toContain('<account-rule-dialogs');
     });
 
     test('style reference records add/edit modal hierarchy gate', () => {

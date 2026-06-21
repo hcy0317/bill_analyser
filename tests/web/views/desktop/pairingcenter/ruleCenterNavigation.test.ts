@@ -89,6 +89,7 @@ describe('rule center UX source guards', () => {
     test('category recognition table keeps selection/filter/pagination controls stable', () => {
         const source = readSource('src/views/desktop/pairingcenter/components/RuleCenterPanel.vue');
         const filterSource = readSource('src/views/desktop/pairingcenter/components/ruleCenterFilters.ts');
+        const categoryModelSource = readSource('src/views/desktop/pairingcenter/components/categoryRulesModel.ts');
 
         expect(source).toContain('v-if="showTabSwitcher"');
         expect(source).toContain("tt('Rows per page')");
@@ -104,7 +105,7 @@ describe('rule center UX source guards', () => {
         expect(filterOrder.indexOf('CategoryType.Income')).toBeLessThan(filterOrder.indexOf('CategoryType.Expense'));
         expect(filterOrder.indexOf('CategoryType.Expense')).toBeLessThan(filterOrder.indexOf('CategoryType.Transfer'));
         expect(filterOrder.indexOf('CategoryType.Transfer')).toBeLessThan(filterOrder.indexOf('CategoryType.Investment'));
-        expect(source).toContain('const fallbackPrimaryCategory = findPrimaryCategoryByName(item.category_name)');
+        expect(categoryModelSource).toContain('const fallbackPrimaryCategory = findPrimaryCategoryByName(');
         expect(source).toContain("const localizedCategoryLocales = Array.from(new Set([getCurrentLanguageTag(), 'zh-Hans', 'en']))");
         expect(source).not.toContain('v-if="option.icon && option.color"');
         expect(source).not.toContain('v-if="group.icon && group.color"');
@@ -122,6 +123,7 @@ describe('rule center UX source guards', () => {
     test('category and account recognition tabs own separate rule-builder surfaces', () => {
         const source = readSource('src/views/desktop/pairingcenter/components/RuleCenterPanel.vue');
         const accountSource = readSource('src/views/desktop/pairingcenter/components/AccountRulePanel.vue');
+        const accountDialogsSource = readSource('src/views/desktop/pairingcenter/components/AccountRuleDialogs.vue');
         const listSource = readSource('src/views/desktop/pairingcenter/ListPage.vue');
 
         expect(source).toContain("type RuleCenterPanelTab = 'rules' | 'learning' | 'recurring';");
@@ -129,6 +131,8 @@ describe('rule center UX source guards', () => {
         expect(source).toContain('rule-center-rules-table');
         expect(source).toContain("tt('No category rules')");
         expect(accountSource).toContain('account-recognition-rule-panel');
+        expect(accountSource).toContain('<account-rule-dialogs');
+        expect(accountDialogsSource).toContain('CategoryRuleBuilderFields');
         expect(accountSource).toContain('section-key="accountRecognitionRules"');
         expect(accountSource).toContain('services.getAccountRules');
         expect(accountSource).toContain('services.createAccountRule');

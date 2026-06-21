@@ -60,7 +60,7 @@ multipart 上传并行执行 dedicated parser 检测，每个文件必须且只�
 
 分类识别使用 `category_rules` 规则表达式；`category_rules` 后端核心当前以 facade + `types`、`parser`、`matching`、`terms`、`tests` 子文件组织，分别承载表达式 DTO、语法解析、文本匹配、term 转义/连接符工具和模块内合同测试。分类规则列表只暴露能投影出非空表达式的规则，避免旧恢复行或坏数据在规则中心显示为空匹配式。账户识别使用 `account_rules` 表和同一表达式匹配器模型；`account_rules` 后端核心当前以 facade + `engine`、`tests` 子文件组织，`engine` 承载候选编译、scope 归一、上下文字段准备和匹配解释，测试文件锁定拆分前行为。账户规则 API 和设置包导出不再传播旧 role/type/field scope 字段；旧 payload 或旧 bundle 中的 scope 字段会被忽略并返回兼容 warning。REST API 覆盖账户规则 list/create/update/delete/reorder/test，以及分类规则 list/create/update/delete/reorder/defaults/test。设置包按当前 PostgreSQL 主链导出并导入/upsert `accounts`、`transactionCategories`、`transactionTags`、`transactionTemplates`、`scheduledTransactions`、`categoryRecognitionRules` 与 `accountRecognitionRules`；`transactionTemplates` 和 `scheduledTransactions` 在账户、分类、标签引用重映射完成后写入 `transaction_templates`，有效导出不再以 unsupported section warning 跳过。
 
-桌面规则中心的“规则配置”包含分类识别、账户识别和周期识别三个二级页；分类识别按一级分类聚类展示，同一分类目标的多条规则表达式在同一行内分行呈现；账户识别按账户主分类、父账户/子账户分组展示，主分类行只呈现图标和规则数量，同一账户下的多条规则表达式在同一行内分行呈现，不重复显示规则名、优先级、匹配次数等运行态元数据；移动端通过 `/account/rules` 提供同样分组后的账户规则列表与紧凑编辑/测试入口。
+桌面规则中心的“规则配置”包含分类识别、账户识别和周期识别三个二级页；分类识别按一级分类聚类展示，同一分类目标的多条规则表达式在同一行内分行呈现，分类规则的展示归一、分类兜底、payload 构造和目标分组逻辑位于 `pairingcenter/components/categoryRulesModel.ts`，页面组件只装配响应式状态和动作流程。账户识别按账户主分类、父账户/子账户分组展示，主分类行只呈现图标和规则数量，同一账户下的多条规则表达式在同一行内分行呈现，不重复显示规则名、优先级、匹配次数等运行态元数据；账户规则编辑、测试、删除弹窗位于 `pairingcenter/components/AccountRuleDialogs.vue`。学习中心面板的本地 tab 归一、学习规则筛选、状态色和匹配类型展示映射位于 `pairingcenter/components/learningCenterPanelModel.ts`；LLM/OCR provider 配置和外部调用语义仍保留原运行链路，后续由 LLM/OCR/learning 域继续治理。移动端通过 `/account/rules` 提供同样分组后的账户规则列表与紧凑编辑/测试入口。
 
 ## Matching
 

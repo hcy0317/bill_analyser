@@ -798,7 +798,6 @@
 </template>
 
 <script setup lang="ts">
-import axios from 'axios';
 import { ref, computed, watch, useTemplateRef, onBeforeUnmount } from 'vue';
 
 import SnackBar from '@/components/desktop/SnackBar.vue';
@@ -808,6 +807,22 @@ import { useLearningStore } from '@/stores/learning.ts';
 import type { LearningRule } from '@/models/learning_center.ts';
 import { getSuggestionFeatureChips, getRuleFeatureChips, getRuleFeatureSummary } from '@/models/learning_center.ts';
 import services from '@/lib/services.ts';
+import {
+    extractPayloadMessage,
+    getRequestErrorMessage,
+} from './apiResultHelpers.ts';
+import {
+    confidenceColor,
+    createLearningRuleMatchTypeOptions,
+    createRuleAppliedFilterOptions,
+    createRuleEnabledFilterOptions,
+    filterLearningRules,
+    getLearningStatusColor,
+    getLearningStatusLabel,
+    getTranslatedLearningStatusLabel,
+    normalizeLearningPanelTab,
+    translateLearningMatchType,
+} from './learningCenterPanelModel.ts';
 import {
     buildAdvancedSettingsPayload,
     buildCredentialConfigPayload,
@@ -852,15 +867,7 @@ const { tt } = useI18n();
 const store = useLearningStore();
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
 
-function normalizePanelTab(tab?: string): string {
-    if (tab === 'rules' || tab === 'llm' || tab === 'llm-config') {
-        return tab;
-    }
-
-    return 'suggestions';
-}
-
-const activeTab = ref<string>(normalizePanelTab(props.initTab));
+const activeTab = ref<string>(normalizeLearningPanelTab(props.initTab));
 const statusFilter = ref<string>('');
 const selectedIds = ref<number[]>([]);
 const ruleMatchTypeFilter = ref<string>('');
@@ -911,31 +918,9 @@ const filteredSuggestions = computed(() => {
     return store.suggestions.filter(s => s.status === statusFilter.value);
 });
 
-const ruleMatchTypeOptions = computed<SelectOption[]>(() => {
-    const options = new Map<string, string>();
-    for (const rule of rules.value) {
-        if (rule.matchType) {
-            options.set(rule.matchType, translateMatchType(rule.matchType));
-        }
-    }
-
-    return [
-        { title: tt('All'), value: '' },
-        ...Array.from(options, ([value, title]) => ({ title, value }))
-    ];
-});
-
-const ruleEnabledFilterOptions = computed<SelectOption[]>(() => [
-    { title: tt('All'), value: 'all' },
-    { title: tt('Enabled'), value: 'enabled' },
-    { title: tt('Disabled'), value: 'disabled' },
-]);
-
-const ruleAppliedFilterOptions = computed<SelectOption[]>(() => [
-    { title: tt('All'), value: 'all' },
-    { title: tt('Applied'), value: 'applied' },
-    { title: tt('Not Applied'), value: 'not-applied' },
-]);
+const ruleMatchTypeOptions = computed<SelectOption[]>(() => createLearningRuleMatchTypeOptions(rules.value, tt));
+const ruleEnabledFilterOptions = computed<SelectOption[]>(() => createRuleEnabledFilterOptions(tt));
+const ruleAppliedFilterOptions = computed<SelectOption[]>(() => createRuleAppliedFilterOptions(tt));
 
 const ruleFeatureFilterActive = computed(() => ruleFeatureFilter.value.trim().length > 0);
 const ruleLearnedActionFilterActive = computed(() => ruleLearnedActionFilter.value.trim().length > 0);
@@ -963,47 +948,17 @@ function setRuleAppliedFilter(value: string): void {
     ruleAppliedFilterMenu.value = false;
 }
 
-function containsText(source: string, query: string): boolean {
-    const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) {
-        return true;
-    }
-
-    return source.toLowerCase().includes(normalizedQuery);
-}
-
-const filteredRules = computed(() => rules.value.filter((rule) => {
-    if (ruleMatchTypeFilter.value && rule.matchType !== ruleMatchTypeFilter.value) {
-        return false;
-    }
-
-    const featureText = `${rule.matchValue} ${getRuleFeatureSummary(rule)}`;
-    if (!containsText(featureText, ruleFeatureFilter.value)) {
-        return false;
-    }
-
-    if (!containsText(rule.learnedType, ruleLearnedActionFilter.value)) {
-        return false;
-    }
-
-    if (ruleEnabledFilter.value === 'enabled' && !rule.enabled) {
-        return false;
-    }
-
-    if (ruleEnabledFilter.value === 'disabled' && rule.enabled) {
-        return false;
-    }
-
-    if (ruleAppliedFilter.value === 'applied' && rule.appliedCount <= 0) {
-        return false;
-    }
-
-    if (ruleAppliedFilter.value === 'not-applied' && rule.appliedCount > 0) {
-        return false;
-    }
-
-    return true;
-}));
+const filteredRules = computed(() => filterLearningRules(
+    rules.value,
+    {
+        matchType: ruleMatchTypeFilter.value,
+        featureText: ruleFeatureFilter.value,
+        learnedAction: ruleLearnedActionFilter.value,
+        enabledState: ruleEnabledFilter.value,
+        appliedState: ruleAppliedFilter.value,
+    },
+    getRuleFeatureSummary
+));
 
 const selectAll = computed({
     get() {
@@ -1035,76 +990,20 @@ function showInfoMessage(message: string, options?: Record<string, unknown>): vo
     snackbar.value?.showMessage(message, options);
 }
 
-function extractPayloadMessage(payload: unknown, depth = 0): string | null {
-    if (depth > 2) {
-        return null;
-    }
-
-    if (typeof payload === 'string' && payload) {
-        return payload;
-    }
-
-    if (!payload || typeof payload !== 'object') {
-        return null;
-    }
-
-    const nestedErrorText = 'error' in payload ? extractPayloadMessage(payload.error, depth + 1) : null;
-    if (nestedErrorText) {
-        return nestedErrorText;
-    }
-
-    const message = 'message' in payload ? extractPayloadMessage(payload.message, depth + 1) : null;
-    if (message) {
-        return message;
-    }
-
-    return null;
-}
-
 function getPayloadErrorMessage(payload: unknown, fallback: string): string {
     return extractPayloadMessage(payload) || fallback;
 }
 
-function getRequestErrorMessage(error: unknown, fallback: string): string {
-    if (axios.isAxiosError(error)) {
-        return getPayloadErrorMessage(error.response?.data, fallback);
-    }
-
-    if (error instanceof Error && error.message) {
-        return error.message;
-    }
-
-    return fallback;
-}
-
 function statusColor(status: string): string {
-    switch (status) {
-        case 'pending': return 'warning';
-        case 'accepted': return 'success';
-        case 'rejected': return 'error';
-        default: return 'grey';
-    }
+    return getLearningStatusColor(status);
 }
 
 function statusLabel(status: string): string {
-    switch (status) {
-        case 'pending': return 'Pending';
-        case 'accepted': return 'Accepted';
-        case 'rejected': return 'Rejected';
-        default: return status;
-    }
+    return getLearningStatusLabel(status);
 }
 
 function translateMatchType(type: string): string {
-    const map: Record<string, string> = {
-        'composite': tt('Composite Rule'),
-        'counterparty': tt('Counterparty'),
-        'description': tt('Description'),
-        'keyword': tt('Keyword'),
-        'amount': tt('Amount'),
-        'payment_method': tt('Payment Method'),
-    };
-    return map[type] || type;
+    return translateLearningMatchType(type, tt);
 }
 
 async function refreshCurrentTab() {
@@ -1263,27 +1162,11 @@ const llmIndeterminate = computed(() => {
 });
 
 function llmStatusColor(status: string): string {
-    switch (status) {
-        case 'pending': return 'warning';
-        case 'accepted': return 'success';
-        case 'rejected': return 'error';
-        default: return 'grey';
-    }
+    return getLearningStatusColor(status);
 }
 
 function llmStatusLabel(status: string): string {
-    switch (status) {
-        case 'pending': return tt('Pending');
-        case 'accepted': return tt('Accepted');
-        case 'rejected': return tt('Rejected');
-        default: return status;
-    }
-}
-
-function confidenceColor(confidence: number): string {
-    if (confidence >= 0.8) return 'success';
-    if (confidence >= 0.5) return 'warning';
-    return 'error';
+    return getTranslatedLearningStatusLabel(status, tt);
 }
 
 function clearAutofillUnlockTimer(): void {
@@ -1487,7 +1370,7 @@ async function handleLLMReject(id: number) {
 watch(
     () => props.initTab,
     (initTab) => {
-        activeTab.value = normalizePanelTab(initTab);
+        activeTab.value = normalizeLearningPanelTab(initTab);
     },
     { immediate: true }
 );

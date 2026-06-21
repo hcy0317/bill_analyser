@@ -132,6 +132,15 @@ Behavior-lock 切片至少应补强：
 4. `LearningCenterPanel.vue` 只做 D3 必需的壳层/结构拆分；LLM/OCR/learning provider 细节进入 D8。
 5. 跑 pairingcenter focused tests、lint、coverage；用户可见布局改动补 browser smoke。
 
+已完成第一轮 frontend-shape：
+
+- `RuleCenterPanel.vue` 从 2081 行降到 1626 行；分类规则 overview/types、分类 picker、预设分类兜底、目标分组、payload 构造和 API 错误解析拆到 `categoryRulesModel.ts` 与 `apiResultHelpers.ts`。
+- `AccountRulePanel.vue` 从 891 行降到 798 行；编辑/测试/删除弹窗拆到 `AccountRuleDialogs.vue`，父组件保留账户规则表格、分组装配和 service action。
+- `LearningCenterPanel.vue` 从 1690 行降到 1573 行；D3 可管的 tab 归一、学习规则筛选、状态色/文案映射和置信度色拆到 `learningCenterPanelModel.ts`，LLM/OCR provider 保存和候选操作仍显式移交 D8。
+- `src/web/scripts/frontend-structure-baseline.json` 已只更新 pairingcenter 相关条目；`npm run structure:check` 中 D3 pairingcenter 项已退出 failure/warning，剩余 19 个 failure 均为非 D3 历史项。
+- 已通过 `npm run lint:ci`、`npm run test:coverage`（89 suites / 38974 tests / 99.13% total line coverage）与 pairingcenter focused tests：`apiResultHelpers.test.ts`、`categoryRulesModel.test.ts`、`learningCenterPanelModel.test.ts`、`ruleCenterNavigation.test.ts`、`ruleDialogLayout.test.ts`、`learningCenterOcrConfig.test.ts`、`ruleCenterFilters.test.ts`。
+- 新增 TS helper 单独覆盖率：`apiResultHelpers.ts` 95.00%、`categoryRulesModel.ts` 91.42%、`learningCenterPanelModel.ts` 100.00%，三者合计 94.56% line coverage。
+
 ### 6.5 comment-pass/governance-docs/closeout
 
 - 按注释策略补齐 D3 导出函数、业务关键函数和复杂私有 helper 中文说明。
