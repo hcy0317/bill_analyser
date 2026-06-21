@@ -1066,6 +1066,9 @@ function openEditDialog(item: CategoryRuleItem) {
     showEditDialog.value = true;
 }
 
+/**
+ * 保存分类规则创建/编辑表单，并在服务端成功后刷新规则表和 overview 汇总。
+ */
 async function saveRule() {
     saving.value = true;
     error.value = null;
@@ -1106,6 +1109,9 @@ function setRuleToggling(ruleId: number, enabled: boolean): void {
         : togglingRuleIds.value.filter(item => item !== ruleId);
 }
 
+/**
+ * 乐观切换分类规则启用状态；接口失败时回滚本地列表中的原状态。
+ */
 async function toggleEnabled(item: CategoryRuleItem, nextEnabled: unknown) {
     if (isRuleToggling(item.id)) {
         return;
@@ -1151,6 +1157,9 @@ function isCategoryRuleTargetPartiallySelected(targetGroup: CategoryRuleTargetGr
         && !isCategoryRuleTargetSelected(targetGroup);
 }
 
+/**
+ * 按目标分类分组批量勾选规则，保留其他分组已选中的规则。
+ */
 function setCategoryRuleTargetSelected(targetGroup: CategoryRuleTargetGroup, selected: unknown): void {
     const nextSelectedRuleIds = new Set(selectedRuleIds.value);
     for (const ruleId of getCategoryRuleTargetRuleIds(targetGroup)) {
@@ -1164,6 +1173,9 @@ function setCategoryRuleTargetSelected(targetGroup: CategoryRuleTargetGroup, sel
     selectedRuleIds.value = [...nextSelectedRuleIds];
 }
 
+/**
+ * 批量勾选当前筛选和分页可见规则，避免隐藏规则被意外加入本次操作。
+ */
 function setVisibleRulesSelected(selected: unknown): void {
     const nextSelectedRuleIds = new Set(selectedRuleIds.value);
     for (const ruleId of visibleRuleIds.value) {
@@ -1189,6 +1201,9 @@ function pruneSelectedRuleIds(): void {
     }
 }
 
+/**
+ * 更新当前选中分类规则的启用或正则开关，失败时回滚本地规则快照。
+ */
 async function bulkUpdateSelectedRules(patch: Partial<Pick<CategoryRuleItem, 'enabled' | 'regex_enabled'>>) {
     const targetRuleIds = getSelectedRuleIds();
     if (targetRuleIds.length < 1 || bulkOperating.value) {
@@ -1230,6 +1245,9 @@ function confirmDelete(item: CategoryRuleItem) {
     showDeleteDialog.value = true;
 }
 
+/**
+ * 删除当前确认弹窗中的单条分类规则，成功后刷新规则列表和概览。
+ */
 async function doDelete() {
     if (!deletingRule.value) return;
     deleting.value = true;
@@ -1257,6 +1275,9 @@ function confirmBulkDelete(): void {
     showBulkDeleteDialog.value = true;
 }
 
+/**
+ * 删除所有当前有效选中规则，失败时恢复删除前的本地规则列表。
+ */
 async function bulkDeleteSelectedRules() {
     const targetRuleIds = getSelectedRuleIds();
     if (targetRuleIds.length < 1 || bulkOperating.value) {
@@ -1302,6 +1323,9 @@ function openTestDialog(item: CategoryRuleItem) {
     showTestDialog.value = true;
 }
 
+/**
+ * 调用只读测试端点验证分类规则是否命中文本，不改变规则应用统计。
+ */
 async function runTest() {
     if (!testText.value) return;
     testing.value = true;
@@ -1321,6 +1345,9 @@ async function runTest() {
 }
 
 // ── Data fetching ────────
+/**
+ * 加载分类规则列表并归一前端展示字段，默认包含禁用规则。
+ */
 async function fetchCategoryRules() {
     try {
         const response = await axios.get<{
@@ -1345,6 +1372,9 @@ async function fetchCategoryRules() {
     }
 }
 
+/**
+ * 加载规则中心概览数据，合并学习规则、分类规则和周期规则数量。
+ */
 async function fetchOverview() {
     try {
         const result = requireApiSuccess<RuleCenterOverview>(
@@ -1366,6 +1396,9 @@ async function fetchOverview() {
     }
 }
 
+/**
+ * 同步刷新规则表与 overview，供创建、编辑、删除和批量操作后复用。
+ */
 async function refreshRuleTables() {
     await Promise.all([
         fetchCategoryRules(),

@@ -248,6 +248,9 @@ function ocrProviderLabel(provider: string): string {
     return labels[provider] ?? provider;
 }
 
+/**
+ * 将后端 OCR 配置响应映射到展示状态和编辑表单，保留未配置 provider 的默认值。
+ */
 function applyOCRConfig(config: OCRConfigResponse): void {
     ocrConfig.value = {
         provider: config.provider || 'disabled',
@@ -277,6 +280,9 @@ function applyOCRConfig(config: OCRConfigResponse): void {
     };
 }
 
+/**
+ * 解析可选 JSON 对象字段，空字符串表示不提交该配置段。
+ */
 function parseOptionalJsonObject(text: string, label: string): Record<string, unknown> {
     const trimmed = text.trim();
     if (!trimmed) {
@@ -289,6 +295,9 @@ function parseOptionalJsonObject(text: string, label: string): Record<string, un
     return parsed as Record<string, unknown>;
 }
 
+/**
+ * 根据 OCR 表单构造 credential_config，仅包含用户实际填写的凭据和刷新字段。
+ */
 function buildOcrCredentialConfig(): Record<string, unknown> {
     const credentialConfig: Record<string, unknown> = {
         credential_mode: ocrConfigForm.value.credential_mode,
@@ -313,6 +322,9 @@ function buildOcrCredentialConfig(): Record<string, unknown> {
     return credentialConfig;
 }
 
+/**
+ * 从嵌套错误 payload 中提取可读消息，限制递归深度避免异常响应导致死循环。
+ */
 function extractPayloadMessage(payload: unknown, depth = 0): string | null {
     if (depth > 2) {
         return null;
@@ -355,6 +367,9 @@ function getRequestErrorMessage(requestError: unknown, fallback: string): string
     return fallback;
 }
 
+/**
+ * 加载 OCR 配置并填充表单；加载失败保持当前表单状态不打断规则中心页面。
+ */
 async function loadOCRConfig() {
     ocrConfigLoading.value = true;
     try {
@@ -368,6 +383,9 @@ async function loadOCRConfig() {
     }
 }
 
+/**
+ * 保存 OCR 配置表单，提交前先校验 JSON 字段并组装 credential_config。
+ */
 async function saveOCRConfig() {
     ocrConfigSaving.value = true;
     try {

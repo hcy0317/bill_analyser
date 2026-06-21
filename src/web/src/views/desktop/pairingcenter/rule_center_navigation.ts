@@ -11,6 +11,9 @@ export interface RuleCenterSelection {
 
 export const RULE_CENTER_DOMAINS: RuleCenterDomain[] = ['transfer', 'duplicate', 'learning', 'llm'];
 
+/**
+ * 判断路由 query 中的 domain 是否属于规则中心当前支持的一级域。
+ */
 export function isRuleCenterDomain(value: unknown): value is RuleCenterDomain {
     return typeof value === 'string'
         && (RULE_CENTER_DOMAINS as readonly string[]).includes(value);
@@ -20,6 +23,9 @@ function firstString(value: unknown): string | undefined {
     return typeof value === 'string' ? value : undefined;
 }
 
+/**
+ * 根据一级域归一二级 tab，屏蔽投资域和重复域中不存在的规则配置入口。
+ */
 export function normalizeRuleCenterTab(domain: RuleCenterDomain, tab?: string): RuleCenterTab {
     if (domain === 'llm') {
         if (tab === 'ocr-config') {
@@ -47,6 +53,9 @@ function normalizeRuleConfigTab(tab?: string): RuleConfigTab {
     return 'rules';
 }
 
+/**
+ * 将路由 query 归一为规则中心选择状态，非法或废弃 investment 域回到默认入口。
+ */
 export function normalizeRuleCenterSelection(input: {
     domain?: unknown;
     tab?: unknown;
@@ -78,6 +87,9 @@ function defaultRuleCenterSelection(): RuleCenterSelection {
     };
 }
 
+/**
+ * 构造规则中心路由 query，保留无关 query 并把规则配置子 tab 映射回历史 tab 参数。
+ */
 export function buildRuleCenterQuery(
     currentQuery: Record<string, unknown>,
     domain: RuleCenterDomain,

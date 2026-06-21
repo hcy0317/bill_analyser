@@ -14,6 +14,7 @@ struct AccountAuditLogDraft {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 校验敏感账户操作密码，按用户密码、环境变量、旧 settings 密码的顺序兼容历史配置。
 async fn verify_sensitive_account_operation_password_postgres(
     pool: &PostgresPool,
     user_id: i64,
@@ -56,6 +57,7 @@ async fn verify_sensitive_account_operation_password_postgres(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 以 best-effort 方式写入账户审计日志，审计失败不得阻断原业务操作。
 async fn create_account_audit_log_best_effort_postgres(
     pool: &PostgresPool,
     user_id: i64,
@@ -85,6 +87,7 @@ async fn create_account_audit_log_best_effort_postgres(
     .await;
 }
 
+/// 从代理链优先提取审计 IP，缺失时返回空字符串避免伪造默认值。
 fn audit_ip_address(headers: &HeaderMap) -> String {
     header_string(headers, "x-forwarded-for")
         .split(',')
@@ -115,6 +118,7 @@ fn header_string(headers: &HeaderMap, name: &str) -> String {
         .to_string()
 }
 
+/// 兼容 settings 表中字符串或 `{ value }` 形式的旧操作密码配置。
 fn json_setting_string(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.clone()),
@@ -137,6 +141,7 @@ fn value_as_i64_or(value: Option<&Value>, default: i64) -> i64 {
     value.and_then(value_as_i64).unwrap_or(default)
 }
 
+/// 解析分类规则列表查询的 enabled_only 默认值，默认只返回启用规则。
 fn category_rules_enabled_only(query: &CategoryRulesQuery) -> bool {
     !query
         .enabled_only

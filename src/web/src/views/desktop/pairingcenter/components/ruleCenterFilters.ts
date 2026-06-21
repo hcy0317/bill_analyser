@@ -53,6 +53,9 @@ function splitRuleFilterAlternatives(value: string): string[] {
         .filter(item => item.length > 0);
 }
 
+/**
+ * 解析规则表达式筛选框，支持 include、! / NOT exclude 和 `|` 多候选写法。
+ */
 export function parseRuleExpressionFilterQuery(query: string): ParsedRuleExpressionFilter {
     const normalizedQuery = normalizeRuleFilterQuery(query);
     const includeGroups: string[][] = [];
@@ -140,6 +143,9 @@ function matchesAnyRuleFilterTerm(text: string, terms: string[], useRegex: boole
     return terms.some(term => matchesRuleFilterTerm(text, term, useRegex));
 }
 
+/**
+ * 对规则表达式应用已解析筛选条件；include 需要全部命中，exclude 任一命中即排除。
+ */
 export function matchesRuleExpressionFilterText(
     expression: string,
     parsedFilter: ParsedRuleExpressionFilter,

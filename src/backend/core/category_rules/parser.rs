@@ -8,6 +8,7 @@ use super::{
     types::{CompiledRuleDto, RuleExpressionNodeDto},
 };
 
+/// 将用户输入的分类规则表达式编译成 AST，并同步填充旧版 compiled 字段供兼容路径读取。
 pub fn compile_rule_expression(expr: &str, regex_enabled: bool) -> CompiledRuleDto {
     if expr.is_empty() {
         return CompiledRuleDto::empty();
@@ -45,6 +46,7 @@ impl RuleExpressionParser {
         }
     }
 
+    /// 解析完整表达式并拒绝尾部无法消费的 token，避免静默吞掉非法语法。
     fn parse(&mut self) -> Result<Option<RuleExpressionNodeDto>, String> {
         let (node, index) = self.parse_or_expression(0)?;
         let index = self.skip_space(index);
@@ -54,6 +56,7 @@ impl RuleExpressionParser {
         Ok(node)
     }
 
+    /// 解析 OR 层级，`|` 和 `/` 在分类规则语法中都表示任一条件命中。
     fn parse_or_expression(
         &self,
         mut index: usize,
@@ -85,6 +88,7 @@ impl RuleExpressionParser {
         Ok((collapse_children("any", children), index))
     }
 
+    /// 解析 AND/NOT 层级，处理 `+`、`×` 和词法 NOT 的优先级。
     fn parse_and_expression(
         &self,
         mut index: usize,
@@ -166,6 +170,7 @@ impl RuleExpressionParser {
         Ok((collapse_children("all", children), index))
     }
 
+    /// 解析括号或单个 clause，并保护 `={...}` 中的转义字符不被当作连接符。
     fn parse_factor(
         &self,
         mut index: usize,
@@ -218,6 +223,7 @@ impl RuleExpressionParser {
         Ok((Some(self.parse_clause(&block)?), index))
     }
 
+    /// 将一个 clause 文本转换为 AST 节点，兼容 OR/AND/NOT/REGEX 前缀和全局正则开关。
     fn parse_clause(&self, block: &str) -> Result<RuleExpressionNodeDto, String> {
         let Some(eq_idx) = block.find("={") else {
             let pattern = if self.regex_enabled {
@@ -261,6 +267,7 @@ impl RuleExpressionParser {
         index
     }
 
+    /// 识别 AND 或 NOT 连接符，并返回是否需要对右侧节点取反。
     fn read_and_connector(&self, index: usize, allow_word_not: bool) -> Option<(bool, usize)> {
         let char_value = *self.chars.get(index)?;
         if char_value == '+' {
@@ -277,6 +284,7 @@ impl RuleExpressionParser {
         None
     }
 
+    /// 识别独立的 NOT 词法连接符，避免匹配到字段名或关键词内部的 NOT。
     fn read_not_connector(&self, index: usize) -> Option<usize> {
         if index + 3 > self.chars.len() {
             return None;
@@ -312,6 +320,7 @@ impl RuleExpressionParser {
     }
 }
 
+/// 把同类子节点折叠为单节点或 all/any 组合节点，保持 AST 尽量扁平。
 fn collapse_children(
     kind: &str,
     children: Vec<RuleExpressionNodeDto>,
@@ -330,6 +339,7 @@ fn collapse_children(
     }
 }
 
+/// 将 `A × B` 或 `A NOT B` 的右侧节点包成 not 节点，已是 NOT clause 时保持原样。
 fn apply_not_connector(child: RuleExpressionNodeDto) -> RuleExpressionNodeDto {
     if child.kind == "clause" && child.operator == "NOT" {
         return child;
@@ -351,6 +361,7 @@ fn clause(operator: &str, patterns: Vec<String>) -> RuleExpressionNodeDto {
     }
 }
 
+/// 从 AST 回填旧版 `or_blocks`、`and_patterns`、`not_patterns` 字段，兼容未迁移调用方。
 fn collect_compiled_fields(node: &RuleExpressionNodeDto, compiled: &mut CompiledRuleDto) {
     match node.kind.as_str() {
         "all" | "any" => {

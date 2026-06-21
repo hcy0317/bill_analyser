@@ -409,6 +409,9 @@ function findPrimaryCategoryByName(
     return storedCategory ?? localizedPresetPrimaryCategoryMap.get(normalizedName) ?? null;
 }
 
+/**
+ * 解析单条规则的目标分类展示信息，兼容已有 category_id 和旧规则中的分类名称。
+ */
 function resolveCategoryDisplay(
     item: CategoryRuleItem,
     dependencies: CategoryDisplayDependencies
@@ -437,6 +440,9 @@ function resolveCategoryDisplay(
     };
 }
 
+/**
+ * 解析规则所属的主分类分组，缺少分类 id 时回退到本地化预设分类名。
+ */
 function resolveCategoryGroup(
     item: CategoryRuleItem,
     dependencies: CategoryDisplayDependencies
@@ -479,18 +485,27 @@ function resolveCategoryGroup(
     };
 }
 
+/**
+ * 在同一主分类下稳定排序规则，确保表格和批量选择顺序可预测。
+ */
 function compareDisplayCategoryRules(firstRule: DisplayCategoryRuleItem, secondRule: DisplayCategoryRuleItem): number {
     return firstRule.category_full_name.localeCompare(secondRule.category_full_name, 'zh-Hans')
         || firstRule.name.localeCompare(secondRule.name, 'zh-Hans')
         || firstRule.id - secondRule.id;
 }
 
+/**
+ * 在同一目标分类下按优先级和名称排序规则表达式。
+ */
 function compareCategoryRuleExpressions(firstRule: DisplayCategoryRuleItem, secondRule: DisplayCategoryRuleItem): number {
     return firstRule.priority - secondRule.priority
         || firstRule.name.localeCompare(secondRule.name, 'zh-Hans')
         || firstRule.id - secondRule.id;
 }
 
+/**
+ * 按主分类、目标分类和 fallback key 排序目标分组，稳定分组折叠状态。
+ */
 function compareCategoryRuleTargetGroups(firstGroup: CategoryRuleTargetGroup, secondGroup: CategoryRuleTargetGroup): number {
     return firstGroup.category_group_name.localeCompare(secondGroup.category_group_name, 'zh-Hans')
         || firstGroup.category_group_key.localeCompare(secondGroup.category_group_key, 'zh-Hans')
@@ -498,6 +513,9 @@ function compareCategoryRuleTargetGroups(firstGroup: CategoryRuleTargetGroup, se
         || firstGroup.key.localeCompare(secondGroup.key, 'zh-Hans');
 }
 
+/**
+ * 生成目标分类分组 key，优先使用 category_id，缺失时使用归一化分类全名。
+ */
 function makeCategoryRuleTargetKey(item: DisplayCategoryRuleItem): string {
     const categoryId = item.category_id !== null && item.category_id !== undefined ? String(item.category_id).trim() : '';
     if (categoryId) {

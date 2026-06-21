@@ -422,6 +422,9 @@ function getRuleExpressionGroups(rule: AccountRuleItem): RuleExpressionDisplayGr
     });
 }
 
+/**
+ * 校验账户规则 API envelope，避免后续流程在失败响应上继续更新本地状态。
+ */
 function requireApiSuccess<T>(response: { data?: { success?: boolean; result: T } }, fallback: string): T {
     if (response.data?.success) {
         return response.data.result;
@@ -469,6 +472,9 @@ function confirmDelete(item: AccountRuleItem): void {
     showDeleteDialog.value = true;
 }
 
+/**
+ * 保存账户识别规则创建/编辑表单，成功后刷新账户规则列表。
+ */
 async function saveRule(): Promise<void> {
     saving.value = true;
     error.value = null;
@@ -496,6 +502,9 @@ async function saveRule(): Promise<void> {
     }
 }
 
+/**
+ * 乐观切换账户识别规则启用状态；服务端失败时恢复切换前规则列表。
+ */
 async function toggleEnabled(item: AccountRuleItem, nextEnabled: unknown): Promise<void> {
     if (isRuleToggling(item.id)) {
         return;
@@ -527,6 +536,9 @@ async function toggleEnabled(item: AccountRuleItem, nextEnabled: unknown): Promi
     }
 }
 
+/**
+ * 调整账户识别规则优先级顺序，并把完整排序提交给后端。
+ */
 async function moveRule(item: AccountRuleItem, direction: -1 | 1): Promise<void> {
     const currentIndex = orderedAccountRules.value.findIndex(rule => rule.id === item.id);
     const targetIndex = currentIndex + direction;
@@ -556,6 +568,9 @@ async function moveRule(item: AccountRuleItem, direction: -1 | 1): Promise<void>
     }
 }
 
+/**
+ * 删除当前确认弹窗中的账户识别规则，成功后刷新规则列表。
+ */
 async function doDelete(): Promise<void> {
     if (!deletingRule.value) {
         return;
@@ -586,6 +601,9 @@ function openTestDialog(item: AccountRuleItem): void {
     showTestDialog.value = true;
 }
 
+/**
+ * 使用当前输入文本构造测试上下文并调用只读账户规则测试端点。
+ */
 async function runTest(): Promise<void> {
     if (!testText.value.trim()) {
         return;
@@ -610,6 +628,9 @@ async function runTest(): Promise<void> {
     }
 }
 
+/**
+ * 加载账户识别规则列表并归一前端展示模型。
+ */
 async function fetchAccountRules(): Promise<void> {
     try {
         const result = requireApiSuccess<Record<string, unknown>[]>(
@@ -622,6 +643,9 @@ async function fetchAccountRules(): Promise<void> {
     }
 }
 
+/**
+ * 同步加载账户下拉数据与账户规则列表，作为面板初始化入口。
+ */
 async function fetchAll(): Promise<void> {
     loading.value = true;
     error.value = null;

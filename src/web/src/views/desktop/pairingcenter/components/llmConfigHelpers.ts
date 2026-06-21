@@ -73,6 +73,9 @@ export interface SelectOption {
 
 type Translate = (key: string) => string;
 
+/**
+ * 构造规则中心 LLM provider 下拉选项和默认占位符，不参与实际 provider 调用。
+ */
 export function createLLMProviderOptions(tt: Translate): LLMProviderOption[] {
     return [
         {
@@ -143,6 +146,9 @@ export function createLLMProviderOptions(tt: Translate): LLMProviderOption[] {
     ];
 }
 
+/**
+ * 构造推理深度选项，保持前端值与后端 advanced settings 字段一致。
+ */
 export function createLLMReasoningDepthOptions(tt: Translate): SelectOption[] {
     return [
         { title: tt('Default'), value: '' },
@@ -152,6 +158,9 @@ export function createLLMReasoningDepthOptions(tt: Translate): SelectOption[] {
     ];
 }
 
+/**
+ * 构造凭据模式选项，覆盖 API key、JSON 凭据和 token 刷新等保存形态。
+ */
 export function createLLMCredentialModeOptions(tt: Translate): SelectOption[] {
     return [
         { title: tt('API Key'), value: 'api_key' },
@@ -164,6 +173,9 @@ export function createLLMCredentialModeOptions(tt: Translate): SelectOption[] {
     ];
 }
 
+/**
+ * 创建新增配置表单的默认值，确保 credential 和 advanced settings 字段都有稳定初始值。
+ */
 export function createEmptyLLMConfigForm(): LLMConfigForm {
     return {
         name: '',
@@ -187,6 +199,9 @@ export function createEmptyLLMConfigForm(): LLMConfigForm {
     };
 }
 
+/**
+ * 解析可选 JSON 对象字段，空字符串视为未配置，非对象 JSON 直接报错。
+ */
 function parseOptionalJsonObject(text: string, label: string): Record<string, unknown> {
     const trimmed = text.trim();
     if (!trimmed) {
@@ -201,6 +216,9 @@ function parseOptionalJsonObject(text: string, label: string): Record<string, un
     return parsed as Record<string, unknown>;
 }
 
+/**
+ * 根据表单构造 credential_config payload，只提交用户实际填写的 JSON 和 token 字段。
+ */
 export function buildCredentialConfigPayload(form: LLMConfigForm): Record<string, unknown> {
     const payload: Record<string, unknown> = {
         credential_mode: form.credential_mode || 'api_key',
@@ -229,6 +247,9 @@ export function buildCredentialConfigPayload(form: LLMConfigForm): Record<string
     return payload;
 }
 
+/**
+ * 根据高级模式构造 advanced_settings；未开启高级模式时不提交任何高级字段。
+ */
 export function buildAdvancedSettingsPayload(form: LLMConfigForm): LLMAdvancedSettings {
     if (!form.advancedMode) {
         return {};
@@ -267,6 +288,9 @@ export function buildAdvancedSettingsPayload(form: LLMConfigForm): LLMAdvancedSe
     return settings;
 }
 
+/**
+ * 将配置列表响应转成前端模型，并在进入组件状态前移除 api_key。
+ */
 export function toLLMConfigs(result: unknown): LLMConfigItem[] {
     if (!Array.isArray(result)) {
         return [];
@@ -279,6 +303,9 @@ export function toLLMConfigs(result: unknown): LLMConfigItem[] {
     });
 }
 
+/**
+ * 归一 LLM 候选响应，兼容数组响应和 `{ candidates }` 包装响应。
+ */
 export function toLLMCandidates(result: unknown): LLMCandidateItem[] {
     const rawItems = Array.isArray(result)
         ? result
@@ -347,6 +374,9 @@ export function toLLMCandidates(result: unknown): LLMCandidateItem[] {
     });
 }
 
+/**
+ * 解析 provider 展示名，兼容历史 provider key 和当前下拉配置。
+ */
 export function getLLMProviderLabel(provider: string, options: LLMProviderOption[]): string {
     const providerLabels: Record<string, string> = {
         anthropic: 'Claude (Anthropic)',

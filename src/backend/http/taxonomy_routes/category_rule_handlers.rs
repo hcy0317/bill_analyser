@@ -3,6 +3,7 @@
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 查询当前用户的分类规则列表，并按可选分类与启用状态过滤。
 async fn list_category_rules_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -33,6 +34,7 @@ async fn list_category_rules_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 创建分类规则并返回当前前端使用的 category rule 投影。
 async fn create_category_rule_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -76,6 +78,7 @@ async fn create_category_rule_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 更新分类规则，保持 rule_expression 必填校验和 user-scope 写入约束。
 async fn update_category_rule_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -117,6 +120,7 @@ async fn update_category_rule_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 删除当前用户拥有的分类规则，不跨用户暴露是否存在。
 async fn delete_category_rule_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -143,6 +147,7 @@ async fn delete_category_rule_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 按前端传入顺序重排分类规则，要求 rule_ids 全部属于当前用户。
 async fn reorder_category_rules_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -191,6 +196,7 @@ async fn reorder_category_rules_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 初始化内置分类规则和缺失分类，作为规则中心的手动修复入口。
 async fn ensure_category_rule_defaults_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -231,6 +237,7 @@ async fn ensure_category_rule_defaults_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 只读测试单条分类规则是否命中文本，不更新规则应用计数。
 async fn test_category_rule_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -276,6 +283,7 @@ async fn test_category_rule_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 聚合分类、学习和周期规则概览，为规则中心 overview tab 提供只读数据。
 async fn rules_overview_handler(State(state): State<HttpAppState>, headers: HeaderMap) -> Response {
     #[cfg(not(coverage))]
     tracing::info!(domain = "taxonomy", operation = "rules_overview_handler", "business operation entered");

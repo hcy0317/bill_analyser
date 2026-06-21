@@ -1006,6 +1006,9 @@ function translateMatchType(type: string): string {
     return translateLearningMatchType(type, tt);
 }
 
+/**
+ * 按当前 tab 刷新对应数据源，避免学习规则、LLM 候选和配置列表互相触发。
+ */
 async function refreshCurrentTab() {
     if (activeTab.value === 'suggestions') {
         await store.loadSuggestions();
@@ -1018,6 +1021,9 @@ async function refreshCurrentTab() {
     }
 }
 
+/**
+ * 生成普通学习建议，并把新增/更新数量反馈到页面提示。
+ */
 async function handleGenerate() {
     const result = await store.generateSuggestions();
     if (result) {
@@ -1036,16 +1042,25 @@ async function handleReject(id: number) {
     await store.rejectSuggestion(id);
 }
 
+/**
+ * 批量接受当前选中的普通学习建议，成功后清空选择集合。
+ */
 async function handleBatchAccept() {
     if (selectedIds.value.length === 0) return;
     await store.batchAcceptSuggestions([...selectedIds.value]);
     selectedIds.value = [];
 }
 
+/**
+ * 切换学习规则启用状态，具体持久化和错误处理由 learning store 负责。
+ */
 async function handleToggleRule(ruleId: number, enabled: boolean) {
     await store.toggleRule(ruleId, enabled);
 }
 
+/**
+ * 删除指定学习规则，保持规则列表刷新逻辑集中在 learning store。
+ */
 async function handleDeleteRule(ruleId: number) {
     await store.deleteRule(ruleId);
 }
@@ -1064,6 +1079,9 @@ function openEditRuleDialog(rule: LearningRule) {
     editRuleDialog.value = true;
 }
 
+/**
+ * 保存学习规则编辑弹窗，成功后关闭弹窗并重新加载规则列表。
+ */
 async function saveEditRule() {
     editRuleSaving.value = true;
     try {
@@ -1197,6 +1215,9 @@ function closeAddConfigDialog(): void {
     addConfigDialog.value = false;
 }
 
+/**
+ * 加载已保存 LLM 配置列表，进入组件状态前移除敏感 api_key 字段。
+ */
 async function loadLLMConfigs() {
     llmConfigLoading.value = true;
     try {
@@ -1217,6 +1238,9 @@ function openAddConfigDialog() {
     lockAutofillFieldsBriefly();
 }
 
+/**
+ * 创建新的 LLM 配置，提交前校验凭据 JSON、必填名称和 provider base URL 约束。
+ */
 async function saveNewConfig() {
     const form = newConfigForm.value;
     let credentialConfig: Record<string, unknown>;
@@ -1272,6 +1296,9 @@ function llmProviderLabel(provider: string): string {
     return getLLMProviderLabel(provider, llmProviderOptions);
 }
 
+/**
+ * 激活指定 LLM 配置并刷新配置列表，保证当前 active 状态来自服务端。
+ */
 async function handleActivateConfig(configId: number) {
     try {
         await services.activateLLMConfig(configId);
@@ -1281,6 +1308,9 @@ async function handleActivateConfig(configId: number) {
     }
 }
 
+/**
+ * 删除指定 LLM 配置并刷新配置列表。
+ */
 async function handleDeleteConfig(configId: number) {
     try {
         await services.deleteLLMConfig(configId);
@@ -1290,6 +1320,9 @@ async function handleDeleteConfig(configId: number) {
     }
 }
 
+/**
+ * 加载 LLM 规则候选并剔除已不再可选的本地选中 id。
+ */
 async function loadLLMCandidates() {
     llmLoading.value = true;
     try {
@@ -1307,6 +1340,9 @@ async function loadLLMCandidates() {
     }
 }
 
+/**
+ * 触发 LLM 规则候选生成，并在完成后刷新候选列表。
+ */
 async function handleLLMGenerate() {
     llmLoading.value = true;
     try {
@@ -1321,6 +1357,9 @@ async function handleLLMGenerate() {
     }
 }
 
+/**
+ * 逐条接受选中的 LLM 规则候选，全部完成后清空选择并刷新候选列表。
+ */
 async function handleLLMBatchAccept() {
     const ids = [...selectedLLMIds.value];
     if (ids.length === 0) {
@@ -1341,6 +1380,9 @@ async function handleLLMBatchAccept() {
     }
 }
 
+/**
+ * 接受单条 LLM 候选并移出本地选择集合。
+ */
 async function handleLLMAccept(id: number) {
     llmLoading.value = true;
     try {
@@ -1354,6 +1396,9 @@ async function handleLLMAccept(id: number) {
     }
 }
 
+/**
+ * 拒绝单条 LLM 候选并移出本地选择集合。
+ */
 async function handleLLMReject(id: number) {
     llmLoading.value = true;
     try {

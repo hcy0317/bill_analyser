@@ -6,6 +6,7 @@ use bill_analyser_core::account_rules::AccountRuleMatchContext;
 use bill_analyser_db::DbError;
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 查询当前用户的账户识别规则，并把废弃 scope 查询参数转换为兼容 warning。
 async fn list_account_rules_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -36,6 +37,7 @@ async fn list_account_rules_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 创建账户识别规则，写入前剥离已废弃的 role/type/field scope 字段。
 async fn create_account_rule_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -87,6 +89,7 @@ async fn create_account_rule_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 更新账户识别规则；若请求只包含废弃 scope 字段，则返回当前记录和 warning。
 async fn update_account_rule_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -147,6 +150,7 @@ async fn update_account_rule_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 删除当前用户拥有的账户识别规则，保持 user-scoped 查询边界。
 async fn delete_account_rule_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -171,6 +175,7 @@ async fn delete_account_rule_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 按前端传入顺序重排账户识别规则，要求 rule_ids 唯一且全部属于当前用户。
 async fn reorder_account_rules_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -217,6 +222,7 @@ async fn reorder_account_rules_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 只读测试单条账户识别规则，不更新 match_count 或 last_matched_at。
 async fn test_account_rule_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -304,6 +310,7 @@ async fn test_account_rule_handler(
         };
 }
 
+/// 构造账户规则列表响应，并在兼容字段被忽略时附带 warnings。
 fn format_account_rules_response(rules: Vec<AccountRuleRecord>, warnings: Vec<String>) -> Value {
     let total = rules.len();
     let mut response = json!({
@@ -317,6 +324,7 @@ fn format_account_rules_response(rules: Vec<AccountRuleRecord>, warnings: Vec<St
     response
 }
 
+/// 构造单条账户规则响应，复用同一 warning envelope 以保持前端处理路径一致。
 fn account_rule_data_response_with_warnings(
     status: StatusCode,
     rule: AccountRuleRecord,
@@ -332,6 +340,7 @@ fn account_rule_data_response_with_warnings(
     )
 }
 
+/// 投影账户规则 API 记录，显式移除已废弃的 scope 字段并保留 camelCase 别名。
 fn account_rule_api_record(mut rule: AccountRuleRecord) -> Value {
     rule.remove("account_role_scope");
     rule.remove("transaction_type_scope");
@@ -369,6 +378,7 @@ fn account_rule_api_record(mut rule: AccountRuleRecord) -> Value {
     })
 }
 
+/// 检测旧查询参数并返回兼容 warning，实际查询不再按 scope 过滤。
 fn account_rule_query_compat_warnings(query: &AccountRulesQuery) -> Vec<String> {
     if query.account_role_scope.is_some() || query.transaction_type_scope.is_some() {
         vec![
@@ -380,6 +390,7 @@ fn account_rule_query_compat_warnings(query: &AccountRulesQuery) -> Vec<String> 
     }
 }
 
+/// 检测旧 payload scope 字段并返回兼容 warning，提示前端这些字段已被忽略。
 fn deprecated_account_rule_scope_warnings(body: &Value) -> Vec<String> {
     let Some(object) = body.as_object() else {
         return Vec::new();
@@ -404,6 +415,7 @@ fn deprecated_account_rule_scope_warnings(body: &Value) -> Vec<String> {
     }
 }
 
+/// 从账户规则写入 payload 中移除旧 scope 字段，避免重新持久化已迁移合同。
 fn account_rule_payload_without_deprecated_scope(body: &Value) -> Value {
     let Some(object) = body.as_object() else {
         return body.clone();
@@ -430,6 +442,7 @@ fn account_rules_enabled_only(query: &AccountRulesQuery) -> bool {
         .eq_ignore_ascii_case("false")
 }
 
+/// 从测试端点 payload 构建账户规则匹配上下文，兼容平铺字段和 context 包装字段。
 fn account_rule_match_context_from_body(body: &Value) -> AccountRuleMatchContext {
     let context = body.get("context").unwrap_or(body);
     let text = string_or_default(context.get("text"), "");

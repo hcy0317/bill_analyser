@@ -120,6 +120,7 @@ pub struct AccountRuleMatch {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 编译账户规则候选并按优先级排序，避免导入链路每条账单重复解析表达式。
 pub fn compile_account_rule_candidates(
     rules: &[AccountRuleCandidate],
 ) -> Vec<CompiledAccountRuleCandidate> {
@@ -140,6 +141,7 @@ pub fn compile_account_rule_candidates(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 归一账户角色 scope，兼容历史 payload 中的大小写和连字符写法。
 pub fn normalize_account_role_scope(value: Option<&str>) -> Result<String, String> {
     normalize_scope(
         value,
@@ -150,6 +152,7 @@ pub fn normalize_account_role_scope(value: Option<&str>) -> Result<String, Strin
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 归一交易类型 scope，并把旧版 `any` 映射到当前的 `all` 合同。
 pub fn normalize_transaction_type_scope(value: Option<&str>) -> Result<String, String> {
     let normalized = value
         .map(|value| value.trim().to_ascii_lowercase().replace('-', "_"))
@@ -167,6 +170,7 @@ pub fn normalize_transaction_type_scope(value: Option<&str>) -> Result<String, S
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 解析账户规则字段 scope，支持数组、逗号字符串和默认三字段集合。
 pub fn normalize_account_rule_field_scope(value: Option<&Value>) -> Result<Vec<String>, String> {
     let raw_values = match value {
         None | Some(Value::Null) => DEFAULT_FIELD_SCOPES
@@ -202,6 +206,7 @@ pub fn normalize_account_rule_field_scope(value: Option<&Value>) -> Result<Vec<S
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 对未预编译的账户规则执行一次匹配，适用于测试端点和低频调用。
 pub fn match_account_rules(
     rules: &[AccountRuleCandidate],
     context: &AccountRuleMatchContext,
@@ -213,6 +218,7 @@ pub fn match_account_rules(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 在预编译账户规则中按优先级寻找首个命中规则，并返回命中字段解释。
 pub fn match_compiled_account_rules(
     rules: &[CompiledAccountRuleCandidate],
     context: &AccountRuleMatchContext,
@@ -263,12 +269,14 @@ pub fn match_compiled_account_rules(
 }
 
 #[cfg(test)]
+/// 测试入口：用未编译表达式验证账户规则单字段匹配合同。
 pub(super) fn match_account_rule_expression(text: &str, expr: &str, regex_enabled: bool) -> bool {
     let compiled = compile_rule_expression(expr, regex_enabled);
     let field = AccountRulePreparedField::new(String::new(), text.to_string());
     match_compiled_account_rule_expression_prepared(&field, &compiled, regex_enabled)
 }
 
+/// 在单个预处理字段上匹配已编译表达式，正则和普通表达式走不同合同。
 fn match_compiled_account_rule_expression_prepared(
     field: &AccountRulePreparedField,
     compiled: &CompiledRuleDto,
@@ -289,11 +297,13 @@ fn match_compiled_account_rule_expression_prepared(
 }
 
 #[cfg(test)]
+/// 测试入口：直接验证账户规则 AST 节点在单字段上的匹配语义。
 pub(super) fn match_account_rule_expression_node(text: &str, node: &RuleExpressionNodeDto) -> bool {
     let field = AccountRulePreparedField::new(String::new(), text.to_string());
     match_account_rule_expression_node_prepared(&field, node)
 }
 
+/// 在账户字段的预处理文本上执行分类规则 AST，保持非正则账户规则的 token 边界语义。
 fn match_account_rule_expression_node_prepared(
     field: &AccountRulePreparedField,
     node: &RuleExpressionNodeDto,
@@ -334,6 +344,7 @@ fn match_account_rule_expression_node_prepared(
 }
 
 #[cfg(test)]
+/// 测试入口：验证账户规则跨字段 fallback 是否保持 AND-only 合同。
 pub(super) fn account_rule_cross_field_match(
     field_values: &[(String, String)],
     expr: &str,
@@ -347,6 +358,7 @@ pub(super) fn account_rule_cross_field_match(
     account_rule_compiled_cross_field_match(&prepared, &compiled, regex_enabled)
 }
 
+/// 在单字段都未命中时执行跨字段 AND fallback，避免把 OR 表达式错误扩展到多字段拼接。
 fn account_rule_compiled_cross_field_match(
     field_values: &[AccountRulePreparedField],
     compiled: &CompiledRuleDto,
@@ -382,12 +394,14 @@ fn account_rule_compiled_cross_field_match(
 }
 
 #[cfg(test)]
+/// 测试入口：验证普通 pattern 的完整值和 token 边界匹配。
 pub(super) fn account_rule_plain_pattern_matches(text: &str, pattern: &str) -> bool {
     let field = AccountRulePreparedField::new(String::new(), text.to_string());
     let pattern = normalize_account_rule_match_piece(pattern);
     account_rule_plain_pattern_matches_prepared(&field, &pattern)
 }
 
+/// 对普通账户规则 pattern 执行完整值或分词匹配，防止 POS/渠道等短词命中嵌入文本。
 fn account_rule_plain_pattern_matches_prepared(
     field: &AccountRulePreparedField,
     pattern: &str,
@@ -406,6 +420,7 @@ fn normalize_account_rule_match_piece(value: &str) -> String {
     value.trim().to_lowercase()
 }
 
+/// 将账户规则候选文本按中英文常见分隔符拆成可精确比较的 token。
 fn account_rule_match_tokens(value: &str) -> Vec<String> {
     value
         .split(|ch: char| {
@@ -446,6 +461,7 @@ fn account_rule_match_tokens(value: &str) -> Vec<String> {
 }
 
 impl AccountRuleMatchContext {
+    /// 构造所有可参与账户识别的上下文字段，并预先生成归一文本与 token。
     fn contextual_prepared_field_values(&self) -> Vec<AccountRulePreparedField> {
         self.contextual_field_values()
             .into_iter()
@@ -453,6 +469,7 @@ impl AccountRuleMatchContext {
             .collect()
     }
 
+    /// 按稳定字段顺序展开账户识别上下文，保证匹配解释的字段顺序可预测。
     fn contextual_field_values(&self) -> Vec<(String, String)> {
         let fields = FIELD_SCOPES
             .iter()
@@ -461,6 +478,7 @@ impl AccountRuleMatchContext {
         self.field_values(&fields)
     }
 
+    /// 将请求中的字段 scope 映射到具体文本，parser 字段会合并 id、label 和 tags。
     fn field_values(&self, fields: &[String]) -> Vec<(String, String)> {
         fields
             .iter()
@@ -491,6 +509,7 @@ impl AccountRuleMatchContext {
 }
 
 impl AccountRulePreparedField {
+    /// 保存账户规则匹配所需的原文、归一文本和 token，避免匹配阶段重复拆词。
     fn new(field: String, value: String) -> Self {
         let normalized_value = normalize_account_rule_match_piece(&value);
         let tokens = account_rule_match_tokens(&normalized_value);
@@ -503,6 +522,7 @@ impl AccountRulePreparedField {
     }
 }
 
+/// 归一单值 scope，并在遇到未知值时返回可直接暴露给 API 的错误文案。
 fn normalize_scope(
     value: Option<&str>,
     default_value: &str,
@@ -524,6 +544,7 @@ fn normalize_scope(
     }
 }
 
+/// 解析旧版字段 scope 字符串，兼容 JSON 数组字符串和多种中英文分隔符。
 fn parse_field_scope_text(text: &str) -> Vec<String> {
     let text = text.trim();
     if text.is_empty() {

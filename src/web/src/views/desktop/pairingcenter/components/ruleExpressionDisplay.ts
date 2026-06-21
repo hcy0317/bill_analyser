@@ -13,6 +13,9 @@ interface RuleExpressionDisplayLabels {
     raw: string;
 }
 
+/**
+ * 将规则表达式解析结果转换为 UI 可展示的 clause 分组，无法解析时保留 RAW fallback。
+ */
 export function buildRuleExpressionDisplayGroups(
     expressionValue: string | null | undefined,
     labels: RuleExpressionDisplayLabels

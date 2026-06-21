@@ -538,6 +538,9 @@ function collapseNavOnMobile(): void {
     }
 }
 
+/**
+ * 将当前规则中心选择同步到路由 query，保留其他页面状态参数。
+ */
 function syncQuery(domain: RuleCenterDomain, tab: RuleCenterTab, ruleConfigTab: RuleConfigTab): void {
     void router.replace({
         path: '/pairing/list',
@@ -545,6 +548,9 @@ function syncQuery(domain: RuleCenterDomain, tab: RuleCenterTab, ruleConfigTab: 
     });
 }
 
+/**
+ * 应用一级域和二级 tab 选择，必要时同步 URL 并刷新当前激活面板。
+ */
 function applySelection(selection: Pick<RuleCenterSelection, 'domain' | 'tab' | 'ruleConfigTab'>): void {
     const nextTab = normalizeRuleCenterTab(selection.domain, selection.tab);
     const unchanged = activeDomain.value === selection.domain
@@ -584,6 +590,9 @@ function selectSecondaryNav(value: unknown): void {
     }
 }
 
+/**
+ * 刷新当前可见的配对概览或规则配置面板，避免隐藏面板发起无关请求。
+ */
 async function refreshActiveView(): Promise<void> {
     if (isPairingOverview.value) {
         await matchingStore.loadPairs();
@@ -613,6 +622,9 @@ function confirmDeletePair(pair: BillMatchingPairDetail): void {
     showDeleteDialog.value = true;
 }
 
+/**
+ * 删除当前确认的配对记录并刷新列表状态。
+ */
 async function doDeletePair(): Promise<void> {
     if (!pairToDelete.value) {
         return;
