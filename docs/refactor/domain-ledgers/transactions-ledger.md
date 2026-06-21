@@ -334,6 +334,17 @@ D4 `behavior-lock` 必须补强或明确复用以下场景：
   - `Set-Location src/web; npm run structure:check`（仍因 7 个非 D4 历史结构债失败；D4 前端目标仅保留 line-reduction warning）
   - `git diff --check`
 
+本次 governance-docs 切片执行证据（2026-06-21）：
+
+- 更新 `scripts/rust-backend-structure-baseline.json`：移除 D4 已拆分完成并低于阈值的旧后端 facade 条目，包括 `matching_routes.rs`、`core/adapters/transaction.rs`、`db/bills/postgres_reads.rs`、`db/recurring.rs`、`core/matching/session_learning.rs`。
+- 更新 `src/web/scripts/frontend-structure-baseline.json`：将仍超过阈值但已完成 D4 拆分的交易 store、桌面/移动交易页面入口和批量录入/编辑弹窗 baseline 校准到当前 facade 行数，并移除已低于阈值的 `src/models/transaction.ts` 条目。
+- 没有吞并非 D4 历史债：Rust 仍保留 auth/budgets/statistics 相关 failure；前端仍保留 budgets、`services.ts`、`stores/index.ts`、`core/theme.ts`、`models/imported_transaction.ts` failure。
+- 通过验证：
+  - `node scripts/check-rust-backend-structure.mjs`（预期仍因 6 个非 D4 历史结构债失败；D4 后端 warning/failure 为 0）
+  - `Set-Location src/web; npm run structure:check`（预期仍因 7 个非 D4 历史结构债失败；D4 前端 warning/failure 为 0）
+  - JSON baseline 文件解析检查
+  - `git diff --check`
+
 ## 9. 关键风险与阻断条件
 
 - `db/bills/postgres_reads.rs` 同时处理 SQL、事务、身份校验、标签、余额同步和 row mapping；拆分前必须先锁 user-scope、transaction rollback、cents 字段和账户余额副作用。

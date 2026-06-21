@@ -63,13 +63,13 @@
     {
       "path": "src/views/desktop/transactions/ListPage.vue",
       "kind": "vue",
-      "lines": 2122,
+      "lines": 1234,
       "sections": {
-        "template": 298,
-        "script": 1240,
-        "style": 188
+        "template": 1,
+        "script": 1230,
+        "style": 1
       },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+      "reason": "legacy oversized file tracked by the frontend structure ratchet; D4 governance baseline after transaction domain split and comment-pass"
     },
     {
       "path": "src/stores/statistics.ts",
@@ -80,13 +80,13 @@
     {
       "path": "src/views/desktop/transactions/list/dialogs/EditDialog.vue",
       "kind": "vue",
-      "lines": 1974,
+      "lines": 1256,
       "sections": {
-        "template": 286,
-        "script": 1257,
-        "style": 58
+        "template": 1,
+        "script": 1252,
+        "style": 1
       },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+      "reason": "legacy oversized file tracked by the frontend structure ratchet; D4 governance baseline after transaction domain split and comment-pass"
     },
     {
       "path": "src/views/desktop/transactions/import/ImportDialog.vue",
@@ -113,13 +113,13 @@
     {
       "path": "src/views/mobile/transactions/EditPage.vue",
       "kind": "vue",
-      "lines": 1602,
+      "lines": 935,
       "sections": {
-        "template": 123,
-        "script": 955,
-        "style": 113
+        "template": 1,
+        "script": 931,
+        "style": 1
       },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+      "reason": "legacy oversized file tracked by the frontend structure ratchet; D4 governance baseline after transaction domain split and comment-pass"
     },
     {
       "path": "src/views/desktop/pairingcenter/components/LearningCenterPanel.vue",
@@ -135,19 +135,19 @@
     {
       "path": "src/stores/transaction.ts",
       "kind": "ts",
-      "lines": 1557,
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+      "lines": 1492,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet; D4 governance baseline after transaction domain split and comment-pass"
     },
     {
       "path": "src/views/mobile/transactions/ListPage.vue",
       "kind": "vue",
-      "lines": 1490,
+      "lines": 811,
       "sections": {
-        "template": 209,
-        "script": 825,
-        "style": 195
+        "template": 1,
+        "script": 807,
+        "style": 1
       },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+      "reason": "legacy oversized file tracked by the frontend structure ratchet; D4 governance baseline after transaction domain split and comment-pass"
     },
     {
       "path": "src/views/desktop/statistics/TransactionPage.vue",
@@ -163,13 +163,13 @@
     {
       "path": "src/views/desktop/transactions/list/dialogs/BatchManualEntryDialog.vue",
       "kind": "vue",
-      "lines": 1299,
+      "lines": 690,
       "sections": {
-        "template": 18,
-        "script": 690,
-        "style": 309
+        "template": 1,
+        "script": 686,
+        "style": 1
       },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+      "reason": "legacy oversized file tracked by the frontend structure ratchet; D4 governance baseline after transaction domain split and comment-pass"
     },
     {
       "path": "src/consts/currency.ts",
@@ -187,12 +187,6 @@
       "path": "src/lib/datetime.ts",
       "kind": "ts",
       "lines": 1098,
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
-    },
-    {
-      "path": "src/models/transaction.ts",
-      "kind": "ts",
-      "lines": 964,
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
