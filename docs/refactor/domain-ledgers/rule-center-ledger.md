@@ -162,6 +162,17 @@ Behavior-lock 切片至少应补强：
 - `node scripts/check-rust-backend-structure.mjs` 仍失败 10 个非 D3 历史项，D3 后端项为 0。
 - `node scripts/check-frontend-structure.mjs` 仍失败 19 个非 D3 历史项，D3 pairingcenter 项为 0。
 
+当前 closeout 证据：
+
+- D3 `ledger`：PR #210，commit `4ee496fee603a9292c0e3f904a3ea0d4eaee2647`，CI run 14554 通过，squash merge `fc27146bf3095b6a471b1f677fa6e00141f9aad6`，来源分支已删除。
+- D3 `behavior-lock`：PR #211，commit `4d9067ce0a3c5bb250ec34e94abb2d2a2ff55e9e`，CI run 14557 通过，squash merge `98e2685cc2184473b7bcde4c82ba88b4a02253ae`，来源分支已删除。
+- D3 `backend-shape`：PR #212，commit `a79d9351b7ec9a716338850cd36d4dcc32506e9d`，CI run 14560 通过，squash merge `71bd5828ed46d3f4bb7be8c5dedb3cd0530358ef`，来源分支已删除。
+- D3 `frontend-shape`：PR #213，commit `1e1f3f75bea5a4e37418012a9fe99c551e5068e9`，CI run 14563 通过，squash merge `d37ebdae980440397755891af33244660b3c8b85`，来源分支已删除。
+- D3 `comment-pass`：PR #214，commit `8abb6c119583cd666d534ab83316f2fab397619f`，CI run 14566 通过，squash merge `cc13de18a60b205df92ec9e3645bf7b74dc40a0d`，来源分支已删除。
+- D3 `governance-docs`：PR #215，commit `fcb3f9f15c09b2f039a721c86d57bed39f07b92a`，CI run 14569 通过，squash merge `fb149f4be0dd167462e5d16678384be7d8aba64e`，来源分支已删除。
+- D3 结束时 `node scripts/check-rust-backend-structure.mjs` 仍失败 10 个非 D3 历史项，`node scripts/check-frontend-structure.mjs` 仍失败 19 个非 D3 历史项；规则中心后端和前端直接项均为 0。
+- D3 收口后 cursor 应推进到 D4 `budgets-forecast` 的 `ledger` 切片。
+
 ## 7. 关键风险与阻断条件
 
 - 规则表达式语法是业务合同；拆 parser/matcher 时不得改变 OR/AND/NOT/REGEX、括号、转义和 regex disabled 语义。
