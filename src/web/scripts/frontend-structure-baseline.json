@@ -224,17 +224,6 @@
       "reason": "legacy oversized file tracked by the frontend structure ratchet; D3 comment-pass baseline includes required Chinese function comments"
     },
     {
-      "path": "src/views/mobile/users/UserProfilePage.vue",
-      "kind": "vue",
-      "lines": 774,
-      "sections": {
-        "template": 176,
-        "script": 216,
-        "style": 0
-      },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
-    },
-    {
       "path": "src/components/common/KeywordInput.vue",
       "kind": "vue",
       "lines": 744,
@@ -274,17 +263,6 @@
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
-      "path": "src/views/desktop/user/settings/tabs/UserBasicSettingTab.vue",
-      "kind": "vue",
-      "lines": 702,
-      "sections": {
-        "template": 13,
-        "script": 237,
-        "style": 25
-      },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
-    },
-    {
       "path": "src/components/common/keywordExpression.ts",
       "kind": "ts",
       "lines": 673,
@@ -294,12 +272,6 @@
       "path": "src/core/datetime.ts",
       "kind": "ts",
       "lines": 670,
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
-    },
-    {
-      "path": "src/stores/user.ts",
-      "kind": "ts",
-      "lines": 650,
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {

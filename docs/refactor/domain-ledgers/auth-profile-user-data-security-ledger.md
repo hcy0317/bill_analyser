@@ -375,3 +375,18 @@ D6 comment-pass 切片按用户确认的注释标准补齐中文说明：导出�
 - `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过，生成 `workspace.lcov`。
 - `node scripts/check-rust-backend-structure.mjs` 通过；仅剩 baseline line-reduction warnings。
 - `Set-Location src/web; npm run structure:check` 预期失败仍为 D10 shared 四项：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`；D6 相关文件没有新增 FAIL。
+
+## 13. Governance-docs 记录
+
+D6 governance-docs 切片只收紧结构治理基线和记录现状，不改变认证、profile、2FA、user-data 的运行时代码、REST 合同、SQL、token/session 语义、localStorage key 或页面视觉。
+
+治理基线更新：
+
+- `scripts/rust-backend-structure-baseline.json`：将 `src/backend/db/auth_postgres.rs` 从旧 1830 行基线收紧到当前 633 行，移除已低于 Rust warning 阈值的 `src/backend/http/auth_routes/public_auth_handlers.rs` baseline；D6 backend-shape 后端结构债不再以 line-reduction warning 形式残留。
+- `src/web/scripts/frontend-structure-baseline.json`：移除已拆分且低于新文件阈值的 D6 前端入口 baseline：`src/views/mobile/users/UserProfilePage.vue`、`src/views/desktop/user/settings/tabs/UserBasicSettingTab.vue`、`src/stores/user.ts`。
+- `docs/PROJECT_OVERVIEW.md` 已在 backend-shape/frontend-shape 切片同步为当前 facade + 功能文件夹事实；本切片不重复改写项目总览。
+
+本切片本地验证：
+
+- `node scripts/check-rust-backend-structure.mjs` 通过，扫描 464 个 Rust 后端文件，baseline entries 从 9 收紧到 8。
+- `Set-Location src/web; npm run structure:check` 预期失败仍为 D10 shared 四项：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`；D6 已清理三项不再出现 line-reduction warning。

@@ -14,9 +14,9 @@
       "path": "src/backend/db/auth_postgres.rs",
       "kind": "rust",
       "area": "db",
-      "lines": 1830,
-      "physicalLines": 1979,
-      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
+      "lines": 633,
+      "physicalLines": 679,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet; D6 governance baseline after auth profile user-data split and comment-pass"
     },
     {
       "path": "src/backend/core/smart_dedup.rs",
@@ -72,14 +72,6 @@
       "area": "http",
       "lines": 673,
       "physicalLines": 722,
-      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/http/auth_routes/public_auth_handlers.rs",
-      "kind": "rust",
-      "area": "http",
-      "lines": 625,
-      "physicalLines": 680,
       "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     }
   ]
