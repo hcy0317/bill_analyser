@@ -298,6 +298,25 @@ G015 已补强以下行为锁定入口，后续 `backend-shape`/`frontend-shape`
 - `node scripts/check-backend-doc-map.mjs`
 - `git diff --check`
 
+### 7.6 G015 closeout 证据
+
+G015 身份设置域已按 ledger -> behavior-lock -> backend-shape -> frontend-shape -> comment-pass -> governance-docs 顺序完成，未引入业务合同、金额单位、settings bundle 顺序或 UI 视觉变更。
+
+- `#202 docs(identity): 固化身份设置域重构边界` 已建立 D2 结构债 ledger 与 owned/shared path 边界。
+- `#203 test(identity): 锁定身份设置域行为合同` 已补强账户、分类、标签、settings bundle 和每页导入导出合同测试。
+- `#204 refactor(identity): 拆分身份设置后端结构` 已将 taxonomy repository、settings bundle import/export、账户 handler 与 formatter 拆成 facade + 功能子文件。
+- `#205 refactor(identity): 拆分身份设置前端结构` 已将账户、分类、标签页面入口和账户编辑弹窗拆成 facade + template/style/composable 子文件。
+- `#206 docs(identity): 补齐身份设置域关键函数中文说明` 已按确认策略补齐导出函数、业务关键函数和复杂私有 helper 中文说明。
+- `#207 chore(governance): 收紧身份设置域结构基线` 已移除或下调 D2 完成项 structure baseline，D2 后端和前端 WARN/FAIL 均为 0。
+- 上述 PR 均已通过 Gitea Actions PR CI、squash merge，并删除来源分支；最新 D2 基线为 `f6d94c6cec9c20c67d54f3ed4bed4e0d6cf4c59f`。
+
+closeout 本地复核结论：
+
+- D2 后端已退出 `node scripts/check-rust-backend-structure.mjs` 的失败列表；剩余 12 项为 D3+ 或其他后续域历史结构债。
+- D2 前端已退出 `Set-Location src/web; npm run structure:check` 的失败和 warning 列表；剩余 30 项为 D3+ 或其他后续域历史结构债。
+- `docs/PROJECT_OVERVIEW.md` 已描述 taxonomy/settings 当前 facade + 功能子文件结构，本 closeout 不追加会话日志式内容。
+- D2 closeout PR/CI/merge/delete/writeback 完成后，cursor 可推进到 D3 `rule-center` 域。
+
 ## 8. 后续切片执行顺序
 
 ### 8.1 behavior-lock
