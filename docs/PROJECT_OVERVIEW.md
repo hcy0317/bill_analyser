@@ -88,6 +88,8 @@ multipart 上传并行执行 dedicated parser 检测，每个文件必须且只�
 
 认证后端当前以 facade + 功能子文件组织：`src/backend/db/auth_postgres.rs` 聚合身份存在性校验、登录/profile 读取、审计事件、session、2FA、profile 更新、cloud settings、注册和默认包 seed 子文件；`src/backend/db/auth_registration_defaults.rs` 聚合默认包类型、支出/收入/转账/投资分类、账户、分类规则、账户规则和合同测试子文件；`src/backend/http/auth_routes/public_auth_handlers.rs` 聚合 CORS、注册、登录、refresh 和 API/MCP token handler 子文件。该拆分不改变 REST path、JWT/refresh/session 语义、2FA/recovery code hash、注册默认包内容、user-scope SQL 或对外错误字段。
 
+认证前端当前以 facade + 功能文件夹组织：`src/web/src/stores/user.ts` 保留 `useUserStore` facade，basic info/localStorage、profile/avatar、cloud settings、user-data statistics/export 和 settings bundle 动作下沉到 `stores/user/**`；桌面 `UserBasicSettingTab.vue` 与移动 `UserProfilePage.vue` 保留页面入口，template/style 和展示 label helper 下沉到相邻 `basic/**`、`profile/**` 功能文件夹。该拆分不改变 Pinia store 导出名、localStorage key、profile 保存 payload、头像 URL、settings bundle/user-data 调用、桌面/移动路由或现有视觉布局。
+
 备份运行态负责本地 zip/Fernet 文件 I/O、公开名生成、文件 list/create/download/delete/verify/cleanup、job list/save 与 cloud sync 元数据；记录、任务和审计元数据写入 `backup_records`、`backup_jobs`、`backup_audit_logs`。
 
 ## LLM/OCR

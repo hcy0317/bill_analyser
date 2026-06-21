@@ -1,466 +1,25 @@
-<template>
-    <v-row>
-        <v-col cols="12">
-            <v-card :class="{ 'disabled': loading || saving }">
-                <template #title>
-                    <span>{{ tt('Basic Settings') }}</span>
-                    <v-progress-circular indeterminate size="20" class="ms-3" v-if="loading"></v-progress-circular>
-                </template>
-
-                <v-card-text class="d-flex">
-                    <v-avatar rounded="lg" variant="tonal" size="100" class="me-4 user-profile-avatar-icon"
-                              :class="{ 'cursor-pointer': avatarProvider === 'internal', 'user-profile-avatar-icon-modifiable': avatarProvider === 'internal' }"
-                              :color="currentUserAvatar ? 'rgba(0,0,0,0)' : 'primary'">
-                        <v-img :src="currentUserAvatar" v-if="currentUserAvatar">
-                            <template #placeholder>
-                                <div class="d-flex align-center justify-center fill-height bg-light-primary">
-                                    <v-icon color="primary" size="48" class="user-profile-avatar-placeholder" :icon="mdiAccount"/>
-                                </div>
-                            </template>
-                        </v-img>
-                        <v-icon size="48" class="user-profile-avatar-placeholder" :icon="mdiAccount" v-else-if="!currentUserAvatar"/>
-                        <div class="avatar-edit-icon" v-if="avatarProvider === 'internal'">
-                            <v-icon size="48" :icon="mdiAccountEditOutline"/>
-                        </div>
-                        <v-menu activator="parent" width="200" location="bottom" offset="14px" v-if="avatarProvider === 'internal'">
-                            <v-list>
-                                <v-list-item :disabled="saving" :title="tt('Update Avatar')" @click="showOpenAvatarDialog"></v-list-item>
-                                <v-list-item :disabled="!currentUserAvatar || saving" :title="tt('Remove Avatar')" @click="removeAvatar"></v-list-item>
-                            </v-list>
-                        </v-menu>
-                    </v-avatar>
-                    <div class="d-flex flex-column justify-center gap-3">
-                        <div class="d-flex text-body-1">
-                            <span class="me-1">{{ tt('Username:') }}</span>
-                            <v-skeleton-loader class="skeleton-no-margin" type="text" style="width: 100px" :loading="true" v-if="loading"></v-skeleton-loader>
-                            <span v-if="!loading">{{ oldProfile.username }}</span>
-                        </div>
-                        <div class="d-flex text-body-1 align-center" style="height: 38px;">
-                            <span v-if="!loading && emailVerified">{{ tt('Email address is verified') }}</span>
-                            <span v-if="!loading && !emailVerified">{{ tt('Email address is not verified') }}</span>
-                            <v-btn class="ms-2 px-2" size="small" variant="text" :disabled="loading || resending"
-                                   @click="resendVerifyEmail" v-if="isUserVerifyEmailEnabled() && !loading && !emailVerified">
-                                {{ tt('Resend Validation Email') }}
-                                <v-progress-circular indeterminate size="18" class="ms-2" v-if="resending"></v-progress-circular>
-                            </v-btn>
-                            <v-skeleton-loader class="skeleton-no-margin mt-2 mb-1" type="text" style="width: 160px" :loading="true" v-if="loading"></v-skeleton-loader>
-                        </div>
-                    </div>
-                </v-card-text>
-
-                <v-divider />
-
-                <v-form class="mt-6">
-                    <v-card-text>
-                        <v-row>
-                            <v-col cols="12" md="6">
-                                <v-text-field
-                                    type="text"
-                                    autocomplete="nickname"
-                                    persistent-placeholder
-                                    :disabled="loading || saving"
-                                    :label="tt('Nickname')"
-                                    :placeholder="tt('Your nickname')"
-                                    v-model="newProfile.nickname"
-                                />
-                            </v-col>
-
-                            <v-col cols="12" md="6">
-                                <v-text-field
-                                    type="email"
-                                    autocomplete="email"
-                                    persistent-placeholder
-                                    :disabled="loading || saving"
-                                    :label="tt('E-mail')"
-                                    :placeholder="tt('Your email address')"
-                                    v-model="newProfile.email"
-                                />
-                            </v-col>
-
-                            <v-col cols="12" md="6">
-                                <two-column-select primary-key-field="id" primary-value-field="category"
-                                                   primary-title-field="name"
-                                                   primary-icon-field="icon" primary-icon-type="account"
-                                                   primary-sub-items-field="accounts"
-                                                   :primary-title-i18n="true"
-                                                   secondary-key-field="id" secondary-value-field="id"
-                                                   secondary-title-field="name"
-                                                   secondary-icon-field="icon" secondary-icon-type="account" secondary-color-field="color"
-                                                   :disabled="loading || saving || !allVisibleAccounts.length"
-                                                   :enable-filter="true" :filter-placeholder="tt('Find account')" :filter-no-items-text="tt('No available account')"
-                                                   :custom-selection-primary-text="defaultAccountSelectionText"
-                                                   :label="tt('Default Account')"
-                                                   :placeholder="tt('Default Account')"
-                                                   :items="allVisibleCategorizedAccounts"
-                                                   :no-item-text="Account.findAccountNameById(allAccounts, newProfile.defaultAccountId, tt('Unspecified'))"
-                                                   v-model="newProfile.defaultAccountId">
-                                </two-column-select>
-                            </v-col>
-
-                            <v-col cols="12" md="6">
-                                <two-column-select primary-key-field="id" primary-value-field="category"
-                                                   primary-title-field="name"
-                                                   primary-icon-field="icon" primary-icon-type="account"
-                                                   primary-sub-items-field="accounts"
-                                                   :primary-title-i18n="true"
-                                                   secondary-key-field="id" secondary-value-field="id"
-                                                   secondary-title-field="name"
-                                                   secondary-icon-field="icon" secondary-icon-type="account" secondary-color-field="color"
-                                                   :disabled="loading || saving || !allVisibleAccounts.length"
-                                                   :enable-filter="true" :filter-placeholder="tt('Find account')" :filter-no-items-text="tt('No available account')"
-                                                   :custom-selection-primary-text="cashAccountSelectionText"
-                                                   :label="tt('Cash Account')"
-                                                   :placeholder="tt('Cash Account')"
-                                                   :items="allVisibleCategorizedAccounts"
-                                                   :no-item-text="Account.findAccountNameById(allAccounts, newProfile.cashAccountId, tt('Unspecified'))"
-                                                   v-model="newProfile.cashAccountId">
-                                </two-column-select>
-                            </v-col>
-
-                            <v-col cols="12" md="6">
-                                <two-column-select primary-key-field="id" primary-value-field="id"
-                                                   primary-title-field="name"
-                                                   primary-icon-field="icon" primary-icon-type="category" primary-color-field="color"
-                                                   primary-hidden-field="hidden" primary-sub-items-field="subCategories"
-                                                   secondary-key-field="id" secondary-value-field="id"
-                                                   secondary-title-field="name"
-                                                   secondary-icon-field="icon" secondary-icon-type="category" secondary-color-field="color"
-                                                   secondary-hidden-field="hidden"
-                                                   :disabled="loading || saving || !hasAvailableTransferCategories"
-                                                   :enable-filter="true" :filter-placeholder="tt('Find category')" :filter-no-items-text="tt('No available category')"
-                                                   :show-selection-primary-text="true"
-                                                   :custom-selection-primary-text="cashTransferCategoryPrimaryText"
-                                                   :custom-selection-secondary-text="cashTransferCategorySecondaryText"
-                                                   :label="tt('Cash Transfer Category')"
-                                                   :placeholder="tt('Cash Transfer Category')"
-                                                   :items="allCategories[CategoryType.Transfer] || []"
-                                                   v-model="newProfile.cashTransferCategoryId">
-                                </two-column-select>
-                            </v-col>
-
-                            <v-col cols="12" md="6">
-                                <v-select
-                                    item-title="displayName"
-                                    item-value="type"
-                                    persistent-placeholder
-                                    :disabled="loading || saving"
-                                    :label="tt('Editable Transaction Range')"
-                                    :placeholder="tt('Editable Transaction Range')"
-                                    :items="allTransactionEditScopeTypes"
-                                    v-model="newProfile.transactionEditScope"
-                                />
-                            </v-col>
-                        </v-row>
-                    </v-card-text>
-
-                    <v-divider />
-
-                    <v-card-text>
-                        <v-row>
-                            <v-col cols="12" md="6">
-                                <language-select :disabled="loading || saving"
-                                                 :label="languageTitle"
-                                                 :placeholder="languageTitle"
-                                                 :include-system-default="true"
-                                                 :use-model-value="true" v-model="newProfile.language" />
-                            </v-col>
-
-                            <v-col cols="12" md="6">
-                                <currency-select :disabled="loading || saving"
-                                                 :label="tt('Default Currency')"
-                                                 :placeholder="tt('Default Currency')"
-                                                 v-model="newProfile.defaultCurrency" />
-                            </v-col>
-
-                            <v-col cols="12" md="6">
-                                <v-select
-                                    item-title="displayName"
-                                    item-value="type"
-                                    persistent-placeholder
-                                    :disabled="loading || saving"
-                                    :label="tt('First Day of Week')"
-                                    :placeholder="tt('First Day of Week')"
-                                    :items="allWeekDays"
-                                    v-model="newProfile.firstDayOfWeek"
-                                />
-                            </v-col>
-
-                            <v-col cols="12" md="6">
-                                <fiscal-year-start-select
-                                    persistent-placeholder
-                                    :disabled="loading || saving"
-                                    :label="tt('Fiscal Year Start Date')"
-                                    :placeholder="tt('Fiscal Year Start Date')"
-                                    :numeral-system="newProfile.numeralSystem"
-                                    v-model="newProfile.fiscalYearStart"
-                                />
-                            </v-col>
-                        </v-row>
-                    </v-card-text>
-
-                    <v-divider />
-
-                    <v-card-text>
-                        <v-row>
-                            <v-col cols="12" md="6">
-                                <v-select
-                                    item-title="displayName"
-                                    item-value="type"
-                                    persistent-placeholder
-                                    :disabled="loading || saving"
-                                    :label="tt('Calendar Display Type')"
-                                    :placeholder="tt('Calendar Display Type')"
-                                    :items="allCalendarDisplayTypes"
-                                    v-model="newProfile.calendarDisplayType"
-                                />
-                            </v-col>
-
-                            <v-col cols="12" md="6">
-                                <v-select
-                                    item-title="displayName"
-                                    item-value="type"
-                                    persistent-placeholder
-                                    :disabled="loading || saving"
-                                    :label="tt('Date Display Type')"
-                                    :placeholder="tt('Date Display Type')"
-                                    :items="allDateDisplayTypes"
-                                    v-model="newProfile.dateDisplayType"
-                                />
-                            </v-col>
-
-                            <v-col cols="12" md="6">
-                                <v-select
-                                    item-title="displayName"
-                                    item-value="type"
-                                    persistent-placeholder
-                                    :disabled="loading || saving"
-                                    :label="tt('Long Date Format')"
-                                    :placeholder="tt('Long Date Format')"
-                                    :items="allLongDateFormats"
-                                    v-model="newProfile.longDateFormat"
-                                />
-                            </v-col>
-
-                            <v-col cols="12" md="6">
-                                <v-select
-                                    item-title="displayName"
-                                    item-value="type"
-                                    persistent-placeholder
-                                    :disabled="loading || saving"
-                                    :label="tt('Short Date Format')"
-                                    :placeholder="tt('Short Date Format')"
-                                    :items="allShortDateFormats"
-                                    v-model="newProfile.shortDateFormat"
-                                />
-                            </v-col>
-
-                            <v-col cols="12" md="6">
-                                <v-select
-                                    item-title="displayName"
-                                    item-value="type"
-                                    persistent-placeholder
-                                    :disabled="loading || saving"
-                                    :label="tt('Long Time Format')"
-                                    :placeholder="tt('Long Time Format')"
-                                    :items="allLongTimeFormats"
-                                    v-model="newProfile.longTimeFormat"
-                                />
-                            </v-col>
-
-                            <v-col cols="12" md="6">
-                                <v-select
-                                    item-title="displayName"
-                                    item-value="type"
-                                    persistent-placeholder
-                                    :disabled="loading || saving"
-                                    :label="tt('Short Time Format')"
-                                    :placeholder="tt('Short Time Format')"
-                                    :items="allShortTimeFormats"
-                                    v-model="newProfile.shortTimeFormat"
-                                />
-                            </v-col>
-
-                            <v-col cols="12" md="6">
-                                <v-select
-                                    item-title="displayName"
-                                    item-value="type"
-                                    persistent-placeholder
-                                    :disabled="loading || saving"
-                                    :label="tt('Fiscal Year Format')"
-                                    :placeholder="tt('Fiscal Year Format')"
-                                    :items="allFiscalYearFormats"
-                                    v-model="newProfile.fiscalYearFormat"
-                                />
-                            </v-col>
-                        </v-row>
-                    </v-card-text>
-
-                    <v-divider />
-
-                    <v-card-text>
-                        <v-row>
-                            <v-col cols="12" md="6">
-                                <v-select
-                                    item-title="displayName"
-                                    item-value="type"
-                                    persistent-placeholder
-                                    :disabled="loading || saving"
-                                    :label="tt('Currency Display Mode')"
-                                    :placeholder="tt('Currency Display Mode')"
-                                    :items="allCurrencyDisplayTypes"
-                                    v-model="newProfile.currencyDisplayType"
-                                />
-                            </v-col>
-
-                            <v-col cols="12" md="6">
-                                <v-select
-                                    item-title="displayName"
-                                    item-value="type"
-                                    persistent-placeholder
-                                    :disabled="loading || saving"
-                                    :label="tt('Numeral System')"
-                                    :placeholder="tt('Numeral System')"
-                                    :items="allNumeralSystemTypes"
-                                    v-model="newProfile.numeralSystem"
-                                />
-                            </v-col>
-
-                            <v-col cols="12" md="6">
-                                <v-select
-                                    item-title="displayName"
-                                    item-value="type"
-                                    persistent-placeholder
-                                    :disabled="loading || saving"
-                                    :label="tt('Digit Grouping')"
-                                    :placeholder="tt('Digit Grouping')"
-                                    :items="allDigitGroupingTypes"
-                                    v-model="newProfile.digitGrouping"
-                                />
-                            </v-col>
-
-                            <v-col cols="12" md="6">
-                                <v-select
-                                    item-title="displayName"
-                                    item-value="type"
-                                    persistent-placeholder
-                                    :disabled="loading || saving || !supportDigitGroupingSymbol"
-                                    :label="tt('Digit Grouping Symbol')"
-                                    :placeholder="tt('Digit Grouping Symbol')"
-                                    :items="allDigitGroupingSymbols"
-                                    v-model="newProfile.digitGroupingSymbol"
-                                />
-                            </v-col>
-
-                            <v-col cols="12" md="6">
-                                <v-select
-                                    item-title="displayName"
-                                    item-value="type"
-                                    persistent-placeholder
-                                    :disabled="loading || saving"
-                                    :label="tt('Decimal Separator')"
-                                    :placeholder="tt('Decimal Separator')"
-                                    :items="allDecimalSeparators"
-                                    v-model="newProfile.decimalSeparator"
-                                />
-                            </v-col>
-                        </v-row>
-                    </v-card-text>
-
-                    <v-divider />
-
-                    <v-card-text>
-                        <v-row>
-                            <v-col cols="12" md="6">
-                                <v-select
-                                    item-title="displayName"
-                                    item-value="type"
-                                    persistent-placeholder
-                                    :disabled="loading || saving"
-                                    :label="tt('Geographic Location Format')"
-                                    :placeholder="tt('Geographic Location Format')"
-                                    :items="allCoordinateDisplayTypes"
-                                    v-model="newProfile.coordinateDisplayType"
-                                />
-                            </v-col>
-                        </v-row>
-                    </v-card-text>
-
-                    <v-divider />
-
-                    <v-card-text>
-                        <v-row>
-                            <v-col cols="12" md="6">
-                                <v-select
-                                    item-title="displayName"
-                                    item-value="type"
-                                    persistent-placeholder
-                                    :disabled="loading || saving"
-                                    :label="tt('Expense Amount Color')"
-                                    :placeholder="tt('Expense Amount Color')"
-                                    :items="allExpenseAmountColorTypes"
-                                    v-model="newProfile.expenseAmountColor"
-                                />
-                            </v-col>
-
-                            <v-col cols="12" md="6">
-                                <v-select
-                                    item-title="displayName"
-                                    item-value="type"
-                                    persistent-placeholder
-                                    :disabled="loading || saving"
-                                    :label="tt('Income Amount Color')"
-                                    :placeholder="tt('Income Amount Color')"
-                                    :items="allIncomeAmountColorTypes"
-                                    v-model="newProfile.incomeAmountColor"
-                                />
-                            </v-col>
-                        </v-row>
-                    </v-card-text>
-
-                    <v-card-text class="d-flex flex-wrap gap-4">
-                        <v-btn :disabled="inputIsNotChanged || inputIsInvalid || saving" @click="save">
-                            {{ tt('Save Changes') }}
-                            <v-progress-circular indeterminate size="22" class="ms-2" v-if="saving"></v-progress-circular>
-                        </v-btn>
-
-                        <v-btn color="default" variant="tonal" @click="reset">
-                            {{ tt('Reset') }}
-                        </v-btn>
-                    </v-card-text>
-                </v-form>
-            </v-card>
-        </v-col>
-    </v-row>
-
-    <confirm-dialog ref="confirmDialog"/>
-    <snack-bar ref="snackbar" />
-    <input ref="avatarInput" type="file" style="display: none" :accept="SUPPORTED_IMAGE_EXTENSIONS" @change="updateAvatar($event)" />
-</template>
+<template src="./basic/UserBasicSettingTab.template.html"></template>
 
 <script setup lang="ts">
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
-
 import { ref, computed, useTemplateRef } from 'vue';
-
 import { useI18n } from '@/locales/helpers.ts';
 import { useUserProfilePageBase } from '@/views/base/users/UserProfilePageBase.ts';
-
 import { useRootStore } from '@/stores/index.ts';
 import { useUserStore } from '@/stores/user.ts';
 import { useAccountsStore } from '@/stores/account.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
-
 import { CategoryType } from '@/core/category.ts';
 import type { TransactionCategory } from '@/models/transaction_category.ts';
-
 import { SUPPORTED_IMAGE_EXTENSIONS } from '@/consts/file.ts';
 import type { UserProfileResponse } from '@/models/user.ts';
 import { Account } from '@/models/account.ts';
-import { getTransactionPrimaryCategoryName, getTransactionSecondaryCategoryName } from '@/lib/category.ts';
+import { createAccountCategorySelectionTexts } from './basic/accountCategoryLabels.ts';
 
 import { generateRandomUUID } from '@/lib/misc.ts';
 import { isUserVerifyEmailEnabled } from '@/lib/server_settings.ts';
+import { useExternalTemplateBindings } from '@/lib/vue_external_template.ts';
 
 import {
     mdiAccount,
@@ -519,16 +78,17 @@ const transactionCategoriesStore = useTransactionCategoriesStore();
 
 const allCategories = computed<Record<number, TransactionCategory[]>>(() => transactionCategoriesStore.allTransactionCategories);
 const hasAvailableTransferCategories = computed<boolean>(() => transactionCategoriesStore.hasAvailableTransferCategories);
-const defaultAccountSelectionText = computed<string>(() => Account.findAccountNameById(allAccounts.value, newProfile.value.defaultAccountId, tt('Unspecified')) || tt('Unspecified'));
-const cashAccountSelectionText = computed<string>(() => Account.findAccountNameById(allAccounts.value, newProfile.value.cashAccountId, tt('Unspecified')) || tt('Unspecified'));
-const cashTransferCategoryPrimaryText = computed<string>(() => getTransactionPrimaryCategoryName(
-    newProfile.value.cashTransferCategoryId,
-    allCategories.value[CategoryType.Transfer] || []
-));
-const cashTransferCategorySecondaryText = computed<string>(() => getTransactionSecondaryCategoryName(
-    newProfile.value.cashTransferCategoryId,
-    allCategories.value[CategoryType.Transfer] || []
-));
+const {
+    defaultAccountSelectionText,
+    cashAccountSelectionText,
+    cashTransferCategoryPrimaryText,
+    cashTransferCategorySecondaryText
+} = createAccountCategorySelectionTexts({
+    allAccounts,
+    allCategories,
+    newProfile,
+    tt
+});
 
 const confirmDialog = useTemplateRef<ConfirmDialogType>('confirmDialog');
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
@@ -672,31 +232,9 @@ function showOpenAvatarDialog(): void {
     avatarInput.value?.click();
 }
 
+useExternalTemplateBindings(ConfirmDialog, SnackBar, CategoryType, SUPPORTED_IMAGE_EXTENSIONS, Account, isUserVerifyEmailEnabled, mdiAccount, mdiAccountEditOutline, tt, newProfile, oldProfile, emailVerified, loading, resending, saving, allAccounts, allVisibleAccounts, allVisibleCategorizedAccounts, allWeekDays, allCalendarDisplayTypes, allDateDisplayTypes, allLongDateFormats, allShortDateFormats, allLongTimeFormats, allShortTimeFormats, allFiscalYearFormats, allCurrencyDisplayTypes, allNumeralSystemTypes, allDecimalSeparators, allDigitGroupingSymbols, allDigitGroupingTypes, allCoordinateDisplayTypes, allExpenseAmountColorTypes, allIncomeAmountColorTypes, allTransactionEditScopeTypes, languageTitle, supportDigitGroupingSymbol, inputIsNotChanged, inputIsInvalid, reset, allCategories, hasAvailableTransferCategories, defaultAccountSelectionText, cashAccountSelectionText, cashTransferCategoryPrimaryText, cashTransferCategorySecondaryText, confirmDialog, snackbar, avatarInput, avatarUrl, avatarProvider, currentUserAvatar, save, updateAvatar, removeAvatar, resendVerifyEmail, showOpenAvatarDialog);
+
 init();
 </script>
 
-<style>
-.user-profile-avatar-icon .avatar-edit-icon {
-    display: none;
-    position: absolute;
-    width: 100% !important;
-    height: 100% !important;
-    background-color: rgba(0, 0, 0, 0.4);
-}
-
-.user-profile-avatar-icon .avatar-edit-icon > i.v-icon {
-    background-color: transparent;
-    color: rgba(255, 255, 255, 0.8);
-}
-
-.user-profile-avatar-icon:hover .avatar-edit-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    vertical-align: middle;
-}
-
-.user-profile-avatar-icon-modifiable:hover .user-profile-avatar-placeholder {
-    display: none;
-}
-</style>
+<style src="./basic/UserBasicSettingTab.css"></style>

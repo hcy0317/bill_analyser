@@ -325,3 +325,20 @@ D6 backend-shape 切片按现有后端 facade 模板完成纯结构拆分，不�
 - `cargo clippy --workspace --all-targets -- -D warnings` 通过。
 - `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过，生成 `workspace.lcov`。
 - 独立 `security-reviewer` 审查结论 `APPROVE`：未发现安全 blocker；确认未新增硬编码 secret，SQL 仍使用 bind 参数，token/session/2FA/recovery-code/profile/cloud-settings/external-auth 语义和 user-scope 校验保持不变，CORS/preflight 只做文件移动。
+
+## 11. Frontend-shape 记录
+
+D6 frontend-shape 切片按前端 facade + 功能文件夹模板完成认证/用户资料前端结构拆分，不改变 `useUserStore` 导出名、localStorage key、profile 保存 payload、头像 URL 生成、settings bundle/user-data 调用、桌面/移动用户设置入口或现有视觉布局。
+
+- `src/web/src/stores/user.ts`：保留 `useUserStore` facade；basic info/localStorage getter、profile/avatar action、cloud settings action、user-data statistics/export action、settings bundle import/export action 分别下沉到 `stores/user/basicInfo.ts`、`profileActions.ts`、`cloudSettings.ts`、`dataManagement.ts`、`settingsBundle.ts`、`avatar.ts`。
+- `src/web/src/views/desktop/user/settings/tabs/UserBasicSettingTab.vue`：保留桌面基本信息 tab 入口；template/style 下沉到 `basic/UserBasicSettingTab.template.html` 和 `basic/UserBasicSettingTab.css`，账户/现金账户/现金转账分类展示文本下沉到 `basic/accountCategoryLabels.ts`。
+- `src/web/src/views/mobile/users/UserProfilePage.vue`：保留移动用户资料页入口；template 下沉到 `profile/UserProfilePage.template.html`，当前语言和星期展示文本下沉到 `profile/mobileProfileLabels.ts`。
+
+本切片本地验证：
+
+- `Set-Location src/web; npm run lint:ci` 通过，仅有既有 `no-explicit-any` warnings。
+- `Set-Location src/web; npm run test -- --runTestsByPath ../../tests/web/stores/user.test.ts ../../tests/web/stores/authSecurity.test.ts ../../tests/web/models/user.test.ts ../../tests/web/models/token.test.ts` 通过，4 suites / 20 tests。
+- `Set-Location src/web; npm run structure:check` 预期失败仅剩 D10 shared 四项：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`；D6 `UserBasicSettingTab.vue`、`UserProfilePage.vue` 和 `stores/user.ts` 均只剩 line-reduction warning。
+- `Set-Location src/web; npm run test:coverage` 通过，93 suites / 38996 tests，All files line coverage 99.13%。
+- `Set-Location src/web; npm run build` 通过；仅出现既有 Sass `@import` deprecation、`server_settings.js` 非 module、Framework7 空 CSS 和 chunk size warnings。
+- `git diff --check` 通过；仅有 Windows checkout 换行提示。
