@@ -257,6 +257,28 @@ D4 `behavior-lock` 必须补强或明确复用以下场景：
 6. 如 `core/matching/session_learning.rs` 仍触发结构门禁，拆 transfer/duplicate/investment/learning candidate builder 和 query/action helper。
 7. 每一步跑 focused Rust tests；最终运行 fmt、clippy、coverage 门禁。
 
+本次 backend-shape 切片执行证据（2026-06-21）：
+
+- 后端正式交易域按 facade + 功能子文件拆分，保留原 public API、REST route、SQL user-scope、金额 cents 字段和 response envelope：
+  - `src/backend/db/bills/postgres_reads.rs`：拆为 query、category/tag/account 读取、create/update/delete、mutation 准备、标签替换、筛选 SQL、row mapping、helper 和 tests 子文件。
+  - `src/backend/core/adapters/transaction.rs`：拆为交易 DTO、写入 payload、批量 route 响应、图片、对账、前端投影和 value helper 子文件。
+  - `src/backend/db/recurring.rs`：拆为周期建议、账单绑定、检测、accept/reject、linked bills、row mapping、模板候选、日期调度、helper 和 tests 子文件。
+  - `src/backend/core/matching/session_learning.rs`：拆为 transfer、duplicate、investment、session candidate、candidate action 和 learning candidate 子文件。
+  - `src/backend/http/matching_routes.rs`：保留 router facade，拆为 calendar/networth、recurring suggestions、matching candidates、manual pairs、reconcile history、payload、filter、runtime helper、response 和 tests 子文件。
+- 本切片只改变物理结构，不修改正式账单 CRUD、周期建议/绑定、matching candidate action、对账历史、账户余额同步或金额单位语义。
+- 通过验证：
+  - `cargo fmt --all -- --check`
+  - `cargo test -p bill-analyser-db --test bills_postgres`
+  - `cargo test -p bill-analyser-db --test matching_postgres`
+  - `cargo test -p bill-analyser-core --test transaction_adapter_contracts`
+  - `cargo test -p bill-analyser-core --test matching_contracts`
+  - `cargo test -p bill-analyser-http matching`
+  - `cargo clippy --workspace --all-targets -- -D warnings`
+  - `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35`
+  - `node scripts/check-backend-doc-map.mjs`
+  - `git diff --check`
+- 结构 gate 证据：`node scripts/check-rust-backend-structure.mjs` 仍因 6 个非 D4 历史结构债退出失败：`auth_postgres.rs`、`budgets/postgres_reads.rs`、`auth_registration_defaults.rs`、`statistics.rs`、`auth_routes/public_auth_handlers.rs`、`budgets.rs`；D4 后端目标文件均已退出 failure，仅保留 line-reduction warning。
+
 ### 8.3 frontend-shape
 
 建议顺序：
