@@ -1,3 +1,4 @@
+// 中文说明：从 PostgreSQL metadata 中恢复父账户 ID，兼容旧数据中的数值、字符串和布尔编码。
 fn postgres_metadata_parent_id(metadata: &Value) -> i64 {
     match metadata.get("parent_id") {
         Some(Value::Number(number)) => number.as_i64().unwrap_or_default(),
@@ -7,6 +8,7 @@ fn postgres_metadata_parent_id(metadata: &Value) -> i64 {
     }
 }
 
+// 中文说明：从现有分类 path/name 还原主分类和子分类名称，供 settings 导入去重索引使用。
 fn postgres_category_parts(path: Option<&str>, name: &str) -> (String, String) {
     let path = path.unwrap_or_default().trim();
     if let Some((main, sub)) = path.split_once('/') {
@@ -25,6 +27,7 @@ fn postgres_rule_expression_json(expression: &str, regex_enabled: bool) -> Value
     })
 }
 
+// 中文说明：读取当前 rule_expression JSON 的展示表达式，兼容历史字符串和当前对象结构。
 fn postgres_rule_expression_string(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
@@ -102,6 +105,7 @@ fn settings_zero_id_text(value: Option<&Value>) -> String {
     }
 }
 
+// 中文说明：把 settings 模板解析后的 tag 引用字符串转成 PostgreSQL tag_ids 数组。
 fn settings_template_tag_ids(payload: &Value) -> Value {
     Value::Array(
         safe_text(payload.get("tag"), "")
@@ -113,6 +117,7 @@ fn settings_template_tag_ids(payload: &Value) -> Value {
     )
 }
 
+// 中文说明：读取 settings 模板金额字段，只有显式整数 minor units 才会写入，异常值归零。
 fn settings_strict_minor_units(value: Option<&Value>) -> i64 {
     value.and_then(strict_minor_units).unwrap_or_default()
 }

@@ -1,4 +1,5 @@
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：敏感账户操作入口，校验密码后软删除当前账户关联的正式账单并写审计日志。
 async fn clear_account_transactions_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,

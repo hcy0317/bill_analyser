@@ -1,4 +1,5 @@
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：账户余额同步入口，重新按账单流水计算账户余额并返回差异明细。
 async fn sync_account_balances_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,

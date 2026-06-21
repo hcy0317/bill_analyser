@@ -169,6 +169,7 @@ pub const TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ),
 ];
 
+/// 中文说明：注册 taxonomy/settings 运行态路由，保持账户、分类、标签、模板、规则和设置包 API 主链。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn taxonomy_runtime_router() -> Router<HttpAppState> {
     Router::new()

@@ -1,3 +1,4 @@
+/// 中文说明：按用户、账户和启用状态读取账户识别规则，保持优先级排序合同。
 pub async fn list_postgres_account_rules(
     pool: &PostgresPool,
     user_id: i64,
@@ -24,6 +25,7 @@ pub async fn list_postgres_account_rules(
         .collect()
 }
 
+/// 中文说明：按规则 ID 与用户边界读取账户识别规则，并联表确认目标账户仍属于当前用户。
 pub async fn get_postgres_account_rule(
     pool: &PostgresPool,
     rule_id: i64,
@@ -40,6 +42,7 @@ pub async fn get_postgres_account_rule(
     row.map(account_rule_from_postgres_row).transpose()
 }
 
+/// 中文说明：创建账户识别规则，写入前校验目标账户归属并规范化表达式 JSON。
 pub async fn create_postgres_account_rule(
     pool: &PostgresPool,
     payload: &Value,
@@ -110,6 +113,7 @@ pub async fn create_postgres_account_rule(
     Ok(Some(row.try_get("id")?))
 }
 
+/// 中文说明：局部更新账户识别规则，忽略旧 scope 字段并保持表达式/正则开关同步。
 pub async fn update_postgres_account_rule(
     pool: &PostgresPool,
     rule_id: i64,
@@ -249,6 +253,7 @@ pub async fn update_postgres_account_rule(
     Ok(affected > 0)
 }
 
+/// 中文说明：按用户边界删除账户识别规则，避免影响其他用户的账户匹配配置。
 pub async fn delete_postgres_account_rule(
     pool: &PostgresPool,
     rule_id: i64,
@@ -263,6 +268,7 @@ pub async fn delete_postgres_account_rule(
     Ok(changed > 0)
 }
 
+/// 中文说明：批量重排账户识别规则优先级，先校验列表唯一性和用户归属再写入。
 pub async fn reorder_postgres_account_rules(
     pool: &PostgresPool,
     rule_ids: &[i64],
@@ -297,6 +303,7 @@ pub async fn reorder_postgres_account_rules(
     Ok(true)
 }
 
+/// 中文说明：用当前账户规则核心匹配器试跑单条规则，供规则编辑页测试入口调用。
 pub async fn test_postgres_account_rule_match(
     pool: &PostgresPool,
     rule_id: i64,

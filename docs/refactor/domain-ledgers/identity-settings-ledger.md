@@ -255,6 +255,31 @@ G015 已补强以下行为锁定入口，后续 `backend-shape`/`frontend-shape`
 - `Set-Location src/web; npm run test:coverage`
 - `Set-Location src/web; npm run build`
 
+### 7.4 G015 comment-pass 证据
+
+本切片只补齐中文函数说明，不改业务分支、REST payload、SQL 条件、store 调用或页面交互。
+
+- 后端 `postgres_reads/**` 的导出 repository 函数已补 `/// 中文说明`，覆盖账户、分类、标签、模板、分类规则、账户规则与规则概览边界。
+- 后端 `settings_bundle/postgres_import_export/**` 的导入编排、section importer、幂等 upsert、引用重映射、模板 minor units helper 已补中文说明。
+- 后端账户 HTTP 关键 helper 已补中文说明，覆盖余额同步、交易迁移、交易清理、子账户同步、前后端账户 payload 投影、legacy 账户分类推断和 cents 校验。
+- 前端桌面账户列表、账户编辑弹窗、桌面分类/标签列表和移动账户编辑页的复杂业务函数已补中文说明；简单 getter、字段映射和事件转发按注释策略不强制补。
+- 为避免注释切片反向制造结构债，已在超限敏感 Vue 入口中使用同声明行说明，保证 D2 前端文件不重新进入 structure FAIL 列表。
+
+本切片已通过的 focused 验证：
+
+- `cargo fmt --all -- --check`
+- `git diff --check`
+- `cargo test -p bill-analyser-db --test settings_bundle_postgres`
+- `cargo test -p bill-analyser-db --test account_rules_postgres`
+- `cargo test -p bill-analyser-db --test category_rules_postgres`
+- `cargo test -p bill-analyser-http taxonomy`
+- `Set-Location src/web; npx vue-tsc --noEmit --pretty false`
+- `Set-Location src/web; npm run lint:ci`（通过，保留仓库既有 145 个 warning、0 error）
+- `Set-Location src/web; npm run test -- --runTestsByPath ../../tests/web/stores/account.test.ts ../../tests/web/models/transaction_category.test.ts ../../tests/web/models/transaction_tag.test.ts ../../tests/web/views/desktop/accounts/listPageAddButton.test.ts ../../tests/web/views/desktop/accounts/editDialogLayout.test.ts ../../tests/web/views/desktop/categories/listPageAddButton.test.ts ../../tests/web/views/desktop/categories/editDialog.test.ts ../../tests/web/views/desktop/settingsJsonPerPageImportExport.test.ts`
+- `node scripts/check-rust-backend-structure.mjs`（预期仍失败；D2 后端失败项为 0，剩余 12 项为非 D2 历史结构债）
+- `Set-Location src/web; npm run structure:check`（预期仍失败；D2 前端失败项为 0，剩余 30 项为非 D2 历史结构债）
+- `node scripts/check-backend-doc-map.mjs`
+
 ## 8. 后续切片执行顺序
 
 ### 8.1 behavior-lock

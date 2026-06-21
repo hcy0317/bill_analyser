@@ -96,7 +96,7 @@ function edit(tag: TransactionTag): void {
     editingTag.value.name = tag.name;
 }
 
-function save(tag: TransactionTag): void {
+/** 中文说明：保存新增或编辑中的标签，成功后强制刷新列表以同步最新后端排序和展示字段。 */ function save(tag: TransactionTag): void {
     updating.value = true;
     tagUpdating.value[tag.id || ''] = true;
 
@@ -140,7 +140,7 @@ function cancelSave(tag: TransactionTag): void {
     }
 }
 
-function saveSortResult(): void {
+/** 中文说明：把拖拽后的标签顺序持久化到 store/API，未修改排序时不发请求。 */ function saveSortResult(): void {
     if (!displayOrderModified.value) {
         return;
     }
@@ -159,7 +159,7 @@ function saveSortResult(): void {
     });
 }
 
-function hide(tag: TransactionTag, hidden: boolean): void {
+/** 中文说明：切换标签隐藏状态，并维护单标签 loading 状态避免重复点击。 */ function hide(tag: TransactionTag, hidden: boolean): void {
     logger.debug(`[ListPage] Hiding tag: ${tag.id}, hidden: ${hidden}`);
     updating.value = true;
     tagHiding.value[tag.id] = true;
@@ -182,7 +182,7 @@ function hide(tag: TransactionTag, hidden: boolean): void {
     });
 }
 
-function remove(tag: TransactionTag): void {
+/** 中文说明：确认后删除标签，并维护单标签删除 loading 状态。 */ function remove(tag: TransactionTag): void {
     logger.debug(`[ListPage] Removing tag: ${tag.id}`);
     confirmDialog.value?.open('Are you sure you want to delete this tag?').then(() => {
         updating.value = true;
@@ -206,7 +206,7 @@ function remove(tag: TransactionTag): void {
     });
 }
 
-function onMove(event: { moved: { element: { id: string }; oldIndex: number; newIndex: number } }): void {
+/** 中文说明：接收拖拽组件的移动事件并更新标签排序草稿，等待用户保存后再持久化。 */ function onMove(event: { moved: { element: { id: string }; oldIndex: number; newIndex: number } }): void {
     if (!event || !event.moved) {
         return;
     }

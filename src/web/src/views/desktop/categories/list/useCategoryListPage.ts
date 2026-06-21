@@ -157,6 +157,7 @@ export function useDesktopCategoryListPage() {
         });
     }
 
+    // 中文说明：打开分类编辑弹窗创建主/子分类，并在返回后刷新卡片高度避免导航区域错位。
     function openCreateCategoryDialog(options: {
         parentId: string;
         type: CategoryType;
@@ -231,6 +232,7 @@ export function useDesktopCategoryListPage() {
         });
     }
 
+    // 中文说明：切换分类隐藏状态，并在完成后重算列表卡片高度。
     function hide(category: TransactionCategory, hidden: boolean): void {
         updating.value = true;
         categoryHiding.value[category.id] = true;
@@ -253,6 +255,7 @@ export function useDesktopCategoryListPage() {
         });
     }
 
+    // 中文说明：确认后删除分类，删除完成时同步重算分类列表高度。
     function remove(category: TransactionCategory): void {
         confirmDialog.value?.open('Are you sure you want to delete this category?').then(() => {
             updating.value = true;
@@ -276,6 +279,7 @@ export function useDesktopCategoryListPage() {
         });
     }
 
+    // 中文说明：把当前分类层级下的拖拽排序持久化，未修改排序时不发请求。
     function saveSortResult(): void {
         if (!displayOrderModified.value) {
             return;
@@ -298,6 +302,7 @@ export function useDesktopCategoryListPage() {
         });
     }
 
+    // 中文说明：接收拖拽组件的移动事件并更新分类排序草稿，等待用户保存后再持久化。
     function onMove(event: { moved: { element: { id: string }, oldIndex: number, newIndex: number } }): void {
         if (!event || !event.moved) {
             return;

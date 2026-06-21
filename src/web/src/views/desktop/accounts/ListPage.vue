@@ -216,7 +216,7 @@ function edit(account: Account): void {
     });
 }
 
-function showReconciliationStatementCustomDateRangeDialog(account: Account, dateRangeType?: number): void {
+/** 中文说明：打开账户对账明细；自定义日期会先缓存账户上下文，再由日期弹窗回填范围。 */ function showReconciliationStatementCustomDateRangeDialog(account: Account, dateRangeType?: number): void {
     if (!isNumber(dateRangeType) || dateRangeType === DateRange.Custom.type) {
         accountToShowReconciliationStatement.value = account;
         showCustomDateRangeDialog.value = true;
@@ -242,7 +242,7 @@ function showReconciliationStatementCustomDateRangeDialog(account: Account, date
     });
 }
 
-function moveAllTransactions(account: Account): void {
+/** 中文说明：触发账户流水迁移弹窗，成功后按 store invalid 标记刷新账户列表和余额。 */ function moveAllTransactions(account: Account): void {
     moveAllTransactionsDialog.value?.open(account).then(() => {
         snackbar.value?.showMessage('All transactions in this account has been moved.');
 
@@ -252,7 +252,7 @@ function moveAllTransactions(account: Account): void {
     });
 }
 
-function clearAllTransactions(account: Account): void {
+/** 中文说明：触发账户流水清理弹窗，成功后按 store invalid 标记刷新账户列表和余额。 */ function clearAllTransactions(account: Account): void {
     clearAllTransactionsDialog.value?.open(account).then(() => {
         snackbar.value?.showMessage('All transactions in this account has been cleared');
 
@@ -262,7 +262,7 @@ function clearAllTransactions(account: Account): void {
     });
 }
 
-function hide(account: Account, targetAccount: Account, hidden: boolean): void {
+/** 中文说明：切换账户或子账户隐藏状态；隐藏当前子账户时清空选中项以避免展示失效引用。 */ function hide(account: Account, targetAccount: Account, hidden: boolean): void {
     loading.value = true;
 
     accountsStore.hideAccount({
@@ -283,7 +283,7 @@ function hide(account: Account, targetAccount: Account, hidden: boolean): void {
     });
 }
 
-function remove(account: Account): void {
+/** 中文说明：删除账户或当前选中的子账户，父子账户删除路径在这里分流。 */ function remove(account: Account): void {
     if (activeSubAccount.value[account.id]) {
         const subAccount: Account | null = account.getSubAccount(activeSubAccount.value[account.id]);
 
@@ -327,7 +327,7 @@ function remove(account: Account): void {
     }
 }
 
-function saveSortResult(): void {
+/** 中文说明：把拖拽后的账户顺序持久化到 store/API，未发生排序修改时不发请求。 */ function saveSortResult(): void {
     if (!displayOrderModified.value) {
         return;
     }
@@ -346,7 +346,7 @@ function saveSortResult(): void {
     });
 }
 
-function onMove(event: { moved: { element: { id: string }, oldIndex: number, newIndex: number } }): void {
+/** 中文说明：接收拖拽组件的移动事件并更新账户排序草稿，等待用户保存后再持久化。 */ function onMove(event: { moved: { element: { id: string }, oldIndex: number, newIndex: number } }): void {
     if (!event || !event.moved) {
         return;
     }
@@ -371,7 +371,7 @@ function onMove(event: { moved: { element: { id: string }, oldIndex: number, new
     });
 }
 
-function onCustomDateRangeChanged(minUnixTime: number, maxUnixTime: number): void {
+/** 中文说明：自定义对账日期范围回填后打开对账弹窗，并清理临时账户上下文。 */ function onCustomDateRangeChanged(minUnixTime: number, maxUnixTime: number): void {
     if (!accountToShowReconciliationStatement.value) {
         snackbar.value?.showMessage('An error occurred');
         return;

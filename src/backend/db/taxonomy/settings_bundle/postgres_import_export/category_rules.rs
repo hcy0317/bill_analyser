@@ -1,4 +1,5 @@
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：导入分类识别规则 section，使用分类引用映射恢复目标分类并保持表达式兼容格式。
 async fn import_postgres_settings_category_rules(
     transaction: &mut PgTransaction<'_, Postgres>,
     rules: &[Value],

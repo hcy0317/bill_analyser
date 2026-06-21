@@ -1,3 +1,4 @@
+/// 中文说明：按当前用户读取分类主数据列表，保持前端树形分类的稳定排序输入。
 pub async fn list_postgres_categories(
     pool: &PostgresPool,
     user_id: i64,
@@ -17,6 +18,7 @@ pub async fn list_postgres_categories(
     rows.into_iter().map(category_from_postgres_row).collect()
 }
 
+/// 中文说明：按分类 ID 与用户边界读取分类，作为编辑、删除和引用校验的统一入口。
 pub async fn get_postgres_category_by_id(
     pool: &PostgresPool,
     category_id: i64,
@@ -30,6 +32,7 @@ pub async fn get_postgres_category_by_id(
     row.map(category_from_postgres_row).transpose()
 }
 
+/// 中文说明：按主/子分类名称解析 canonical 分类记录，用于导入、默认包和规则创建前校验。
 pub async fn get_postgres_category_by_name(
     pool: &PostgresPool,
     main_category: &str,
@@ -45,6 +48,7 @@ pub async fn get_postgres_category_by_name(
     row.map(category_from_postgres_row).transpose()
 }
 
+/// 中文说明：创建分类主数据，保持主分类去重、父分类解析和隐藏状态投影一致。
 pub async fn create_postgres_category(
     pool: &PostgresPool,
     payload: &Value,
@@ -88,6 +92,7 @@ pub async fn create_postgres_category(
     Ok(Some(row.try_get("id")?))
 }
 
+/// 中文说明：更新分类主数据，同时重算父分类、path、样式字段和 metadata 兼容字段。
 pub async fn update_postgres_category(
     pool: &PostgresPool,
     category_id: i64,
@@ -139,6 +144,7 @@ pub async fn update_postgres_category(
     Ok(changed > 0)
 }
 
+/// 中文说明：删除分类；删除主分类时按当前合同删除该主分类及其子分类。
 pub async fn delete_postgres_category(
     pool: &PostgresPool,
     category_id: i64,
@@ -161,6 +167,7 @@ pub async fn delete_postgres_category(
     Ok(changed > 0)
 }
 
+/// 中文说明：按主分类名称批量删除分类树，服务于前端删除主分类的兼容行为。
 pub async fn delete_postgres_categories_by_main_category(
     pool: &PostgresPool,
     main_category: &str,
@@ -182,6 +189,7 @@ pub async fn delete_postgres_categories_by_main_category(
     Ok(changed > 0)
 }
 
+/// 中文说明：保存单个分类 display_order，供前端拖拽排序逐项调用。
 pub async fn update_postgres_category_display_order(
     pool: &PostgresPool,
     category_id: i64,
@@ -204,6 +212,7 @@ pub async fn update_postgres_category_display_order(
     Ok(changed > 0)
 }
 
+/// 中文说明：查询账单分类统计，统一按 cents 聚合金额并支持前端日期范围筛选。
 pub async fn query_postgres_category_statistics(
     pool: &PostgresPool,
     start_date: Option<&str>,
@@ -265,6 +274,7 @@ pub async fn query_postgres_category_statistics(
         .collect()
 }
 
+/// 中文说明：重命名主分类并同步其子分类 path 前缀，保持 canonical path 不断裂。
 pub async fn update_postgres_main_category_name(
     pool: &PostgresPool,
     old_name: &str,

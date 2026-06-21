@@ -1,4 +1,5 @@
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：导入账户 section，先解析父账户引用，再建立 accountRef/accountName 引用映射供后续模板和规则使用。
 async fn import_postgres_settings_accounts(
     transaction: &mut PgTransaction<'_, Postgres>,
     accounts: &[Value],
@@ -102,6 +103,7 @@ async fn load_existing_postgres_accounts(
 }
 
 #[allow(clippy::too_many_arguments)]
+// 中文说明：按账户名称和父账户执行幂等 upsert，并同步余额分、分类、图标、期初余额等 metadata。
 async fn upsert_postgres_settings_account(
     transaction: &mut PgTransaction<'_, Postgres>,
     item: &Value,
@@ -200,6 +202,7 @@ async fn upsert_postgres_settings_account(
     Ok(Some(account_id))
 }
 
+// 中文说明：把 settings bundle 账户载荷中的展示字段压入 PostgreSQL metadata，保留父账户和期初余额合同。
 fn postgres_account_metadata(normalized: &Value, parent_id: i64) -> Value {
     let mut metadata = Map::new();
     for key in ["category", "icon", "color", "comment"] {

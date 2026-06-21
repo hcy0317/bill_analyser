@@ -1,3 +1,4 @@
+/// 中文说明：按当前用户读取标签列表，并保持 display_order 优先的展示顺序。
 pub async fn list_postgres_tags(pool: &PostgresPool, user_id: i64) -> DbResult<Vec<TagRecord>> {
     let rows = sqlx::query(
         r#"
@@ -13,6 +14,7 @@ pub async fn list_postgres_tags(pool: &PostgresPool, user_id: i64) -> DbResult<V
     rows.into_iter().map(tag_from_postgres_row).collect()
 }
 
+/// 中文说明：按标签 ID 与用户边界读取单个标签，供编辑和删除前校验复用。
 pub async fn get_postgres_tag(
     pool: &PostgresPool,
     tag_id: i64,
@@ -32,6 +34,7 @@ pub async fn get_postgres_tag(
     row.map(tag_from_postgres_row).transpose()
 }
 
+/// 中文说明：创建标签主数据，统一处理名称必填、颜色、排序和 metadata 字段。
 pub async fn create_postgres_tag(
     pool: &PostgresPool,
     payload: &Value,
@@ -61,6 +64,7 @@ pub async fn create_postgres_tag(
     Ok(row.try_get("id")?)
 }
 
+/// 中文说明：更新标签主数据，未传字段沿用已有值并保留 hidden/icon metadata。
 pub async fn update_postgres_tag(
     pool: &PostgresPool,
     tag_id: i64,
@@ -121,6 +125,7 @@ pub async fn update_postgres_tag(
     Ok(changed > 0)
 }
 
+/// 中文说明：按用户边界删除标签记录，避免跨用户标签被误删。
 pub async fn delete_postgres_tag(pool: &PostgresPool, tag_id: i64, user_id: i64) -> DbResult<bool> {
     let changed = sqlx::query("DELETE FROM tags WHERE id = $1 AND user_id = $2")
         .bind(tag_id)
@@ -131,6 +136,7 @@ pub async fn delete_postgres_tag(pool: &PostgresPool, tag_id: i64, user_id: i64)
     Ok(changed > 0)
 }
 
+/// 中文说明：批量保存标签 display_order，服务于桌面标签页拖拽排序。
 pub async fn update_postgres_tag_display_orders(
     pool: &PostgresPool,
     orders: &[TagDisplayOrder],

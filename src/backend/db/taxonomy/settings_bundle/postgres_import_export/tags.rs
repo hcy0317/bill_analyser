@@ -1,4 +1,5 @@
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：导入标签 section，维护 tagRef/tagName 引用映射供模板 tag_ids 重映射使用。
 async fn import_postgres_settings_tags(
     transaction: &mut PgTransaction<'_, Postgres>,
     tags: &[Value],
@@ -62,6 +63,7 @@ async fn load_existing_postgres_tags(
     Ok(existing)
 }
 
+// 中文说明：按标签名称执行幂等 upsert，并把隐藏状态和图标保存在 metadata 中。
 async fn upsert_postgres_settings_tag(
     transaction: &mut PgTransaction<'_, Postgres>,
     item: &Value,

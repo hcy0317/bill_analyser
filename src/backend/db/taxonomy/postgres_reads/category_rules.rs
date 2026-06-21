@@ -1,3 +1,4 @@
+/// 中文说明：按用户、分类和启用状态读取分类识别规则，并过滤无可展示表达式的旧记录。
 pub async fn list_postgres_category_rules(
     pool: &PostgresPool,
     user_id: i64,
@@ -25,6 +26,7 @@ pub async fn list_postgres_category_rules(
         .collect()
 }
 
+/// 中文说明：按规则 ID 与用户边界读取分类识别规则，并联表确认目标分类仍属于当前用户。
 pub async fn get_postgres_category_rule(
     pool: &PostgresPool,
     rule_id: i64,
@@ -41,6 +43,7 @@ pub async fn get_postgres_category_rule(
     row.map(category_rule_from_postgres_row).transpose()
 }
 
+/// 中文说明：创建分类识别规则，写入前校验目标分类归属并规范化表达式 JSON。
 pub async fn create_postgres_category_rule(
     pool: &PostgresPool,
     payload: &Value,
@@ -99,6 +102,7 @@ pub async fn create_postgres_category_rule(
     Ok(Some(row.try_get("id")?))
 }
 
+/// 中文说明：局部更新分类识别规则，保持表达式文本和 regex_enabled JSON 合同一致。
 pub async fn update_postgres_category_rule(
     pool: &PostgresPool,
     rule_id: i64,
@@ -202,6 +206,7 @@ pub async fn update_postgres_category_rule(
     Ok(affected > 0)
 }
 
+/// 中文说明：按用户边界删除分类识别规则，避免影响其他用户的自动分类配置。
 pub async fn delete_postgres_category_rule(
     pool: &PostgresPool,
     rule_id: i64,
@@ -216,6 +221,7 @@ pub async fn delete_postgres_category_rule(
     Ok(changed > 0)
 }
 
+/// 中文说明：批量重排分类识别规则优先级，服务于规则中心排序操作。
 pub async fn reorder_postgres_category_rules(
     pool: &PostgresPool,
     rule_ids: &[i64],
@@ -240,6 +246,7 @@ pub async fn reorder_postgres_category_rules(
     Ok(true)
 }
 
+/// 中文说明：写入标准日常默认分类与规则包，注册默认包和手动补种共用此入口。
 pub async fn ensure_postgres_category_rule_defaults(
     pool: &PostgresPool,
     user_id: i64,
@@ -313,6 +320,7 @@ pub async fn ensure_postgres_category_rule_defaults(
     Ok(summary)
 }
 
+/// 中文说明：聚合规则中心概览数据，把 learning、分类规则和周期模板合成前端概览 payload。
 pub async fn query_postgres_rules_overview_payload(
     pool: &PostgresPool,
     user_id: i64,

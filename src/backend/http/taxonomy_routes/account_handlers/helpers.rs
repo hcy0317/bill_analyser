@@ -13,6 +13,7 @@ struct AccountTransactionsClearResult {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：按正式账单重新计算所有账户余额，期初余额来自 metadata，流水 delta 使用 cents。
 async fn sync_all_postgres_account_balances(
     pool: &PostgresPool,
     user_id: UserId,
@@ -100,6 +101,7 @@ async fn sync_all_postgres_account_balances(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：把一个账户在账单表中的所有账户引用迁移到目标账户，覆盖普通、转账和投资相关字段。
 async fn move_all_postgres_account_transactions(
     pool: &PostgresPool,
     from_account_id: i64,
@@ -150,6 +152,7 @@ async fn move_all_postgres_account_transactions(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：软删除一个账户关联的正式账单，并先清理 bill_tags 关联以保持数据库一致性。
 async fn clear_postgres_account_transactions(
     pool: &PostgresPool,
     account_id: i64,
@@ -249,6 +252,7 @@ fn account_clear_failure(message: &str) -> AccountTransactionsClearResult {
     }
 }
 
+// 中文说明：根据账单类型计算账户余额 delta；转账/投资同时影响来源和目标账户。
 fn postgres_bill_balance_deltas(
     transaction_type: &str,
     amount_cents: i64,
@@ -288,6 +292,7 @@ fn value_to_cents(value: &Value) -> Option<i64> {
     }
 }
 
+// 中文说明：读取账户期初余额 metadata，缺失时回退到当前余额以避免无历史字段账户被清零。
 fn metadata_initial_balance_cents(metadata: &Value, fallback_cents: i64) -> i64 {
     metadata
         .get("initial_balance_cents")

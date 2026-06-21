@@ -1,3 +1,4 @@
+/// 中文说明：按当前用户读取账户主数据列表，并保持 display_order 与名称排序合同。
 pub async fn list_postgres_accounts(
     pool: &PostgresPool,
     user_id: i64,
@@ -17,6 +18,7 @@ pub async fn list_postgres_accounts(
     rows.into_iter().map(account_from_postgres_row).collect()
 }
 
+/// 中文说明：按账户 ID 与用户边界读取单个账户，避免跨用户访问恢复或编辑数据。
 pub async fn get_postgres_account_by_id(
     pool: &PostgresPool,
     account_id: i64,
@@ -30,6 +32,7 @@ pub async fn get_postgres_account_by_id(
     row.map(account_from_postgres_row).transpose()
 }
 
+/// 中文说明：读取指定父账户下的子账户，用于前端父子账户编辑和删除级联编排。
 pub async fn get_postgres_sub_accounts(
     pool: &PostgresPool,
     parent_id: i64,
@@ -51,6 +54,7 @@ pub async fn get_postgres_sub_accounts(
     rows.into_iter().map(account_from_postgres_row).collect()
 }
 
+/// 中文说明：创建账户主数据，并复用账户插入 helper 统一处理金额分、metadata 与排序字段。
 pub async fn create_postgres_account(
     pool: &PostgresPool,
     payload: &Value,
@@ -62,6 +66,7 @@ pub async fn create_postgres_account(
     Ok(account_id)
 }
 
+/// 中文说明：更新账户主数据，保留当前 metadata 兼容字段并强制余额使用整数分。
 pub async fn update_postgres_account(
     pool: &PostgresPool,
     account_id: i64,
@@ -123,6 +128,7 @@ pub async fn update_postgres_account(
     Ok(changed > 0)
 }
 
+/// 中文说明：按用户边界删除账户记录；父子账户级联由上层 handler 显式编排。
 pub async fn delete_postgres_account(
     pool: &PostgresPool,
     account_id: i64,
@@ -137,6 +143,7 @@ pub async fn delete_postgres_account(
     Ok(changed > 0)
 }
 
+/// 中文说明：批量保存账户展示顺序，事务内逐项校验 user-scope 防止排序串号。
 pub async fn update_postgres_account_display_orders(
     pool: &PostgresPool,
     orders: &[AccountDisplayOrder],

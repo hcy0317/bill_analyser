@@ -1,3 +1,4 @@
+/// 中文说明：读取当前用户交易模板或周期模板列表，按类型和 display_order 稳定排序。
 pub async fn list_postgres_templates(
     pool: &PostgresPool,
     user_id: i64,
@@ -25,6 +26,7 @@ pub async fn list_postgres_templates(
     rows.into_iter().map(template_from_postgres_row).collect()
 }
 
+/// 中文说明：按模板 ID、用户和可选模板类型读取单条模板，防止跨类型误更新。
 pub async fn get_postgres_template_by_id(
     pool: &PostgresPool,
     template_id: i64,
@@ -43,6 +45,7 @@ pub async fn get_postgres_template_by_id(
     row.map(template_from_postgres_row).transpose()
 }
 
+/// 中文说明：创建交易模板，并把金额字段统一写入 explicit minor units 列。
 pub async fn create_postgres_template(
     pool: &PostgresPool,
     payload: &Value,
@@ -102,6 +105,7 @@ pub async fn create_postgres_template(
     Ok(row.try_get("id")?)
 }
 
+/// 中文说明：更新交易模板，复用现有模板类型并保持账户、分类、标签引用字段不漂移。
 pub async fn update_postgres_template(
     pool: &PostgresPool,
     template_id: i64,
@@ -175,6 +179,7 @@ pub async fn update_postgres_template(
     Ok(changed > 0)
 }
 
+/// 中文说明：按用户和可选模板类型删除模板，避免周期模板与普通模板互相影响。
 pub async fn delete_postgres_template(
     pool: &PostgresPool,
     template_id: i64,
@@ -196,6 +201,7 @@ pub async fn delete_postgres_template(
     Ok(changed > 0)
 }
 
+/// 中文说明：批量保存模板 display_order，并限定在同一模板类型下更新。
 pub async fn update_postgres_template_display_orders(
     pool: &PostgresPool,
     orders: &[TemplateDisplayOrder],

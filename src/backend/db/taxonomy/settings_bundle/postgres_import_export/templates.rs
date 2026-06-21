@@ -1,5 +1,6 @@
 #[tracing::instrument(level = "debug", skip_all)]
 #[allow(clippy::too_many_arguments)]
+// 中文说明：导入交易模板或周期模板 section，消费账户、分类、标签引用映射后再写入模板表。
 async fn import_postgres_settings_templates(
     transaction: &mut PgTransaction<'_, Postgres>,
     section_key: &str,
@@ -101,6 +102,7 @@ async fn load_existing_postgres_templates(
 }
 
 #[allow(clippy::too_many_arguments)]
+// 中文说明：把 settings bundle 模板条目解析成 PostgreSQL 写入值，严格保留 minor units 和引用解析结果。
 fn settings_template_values_from_item(
     item: &Value,
     template_type: i64,
@@ -183,6 +185,7 @@ fn settings_template_values_from_item(
     })
 }
 
+// 中文说明：按模板 ID 更新 settings bundle 导入命中的现有模板，避免重建导致引用和排序漂移。
 async fn update_postgres_settings_template(
     transaction: &mut PgTransaction<'_, Postgres>,
     user_id: i64,
@@ -247,6 +250,7 @@ async fn update_postgres_settings_template(
     Ok(())
 }
 
+// 中文说明：插入 settings bundle 中的新模板，普通模板和周期模板共用同一 minor units 写入合同。
 async fn insert_postgres_settings_template(
     transaction: &mut PgTransaction<'_, Postgres>,
     user_id: i64,

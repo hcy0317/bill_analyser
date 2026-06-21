@@ -1,4 +1,5 @@
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：同步父账户的子账户集合，更新已有子账户、创建新子账户并删除已移除项。
 async fn update_postgres_sub_accounts(
     pool: &bill_analyser_db::PostgresPool,
     account_id: i64,
@@ -48,6 +49,7 @@ async fn update_postgres_sub_accounts(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：读取账户详情并附带子账户数组，保证编辑页拿到完整父子账户结构。
 async fn load_postgres_account_with_sub_accounts(
     pool: &bill_analyser_db::PostgresPool,
     account_id: i64,

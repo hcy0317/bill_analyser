@@ -1,3 +1,5 @@
+/// 中文说明：导入 PostgreSQL settings bundle，按账户、分类、标签、模板、规则的引用顺序编排事务。
+/// 维护重点：dry-run 必须 rollback，真实导入才 commit；引用重映射顺序不能改变。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_postgres_settings_bundle(
     pool: &PostgresPool,
@@ -114,6 +116,7 @@ pub async fn import_postgres_settings_bundle(
     }))
 }
 
+// 中文说明：把当前 PostgreSQL 主链尚不支持的 settings section 明确计入 skipped 和 warning。
 fn skip_postgres_settings_section(
     section_key: &str,
     items: &[Value],

@@ -1,4 +1,5 @@
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：导入账户识别规则 section，使用账户引用映射恢复目标账户并忽略旧 scope 兼容字段。
 async fn import_postgres_settings_account_rules(
     transaction: &mut PgTransaction<'_, Postgres>,
     rules: &[Value],

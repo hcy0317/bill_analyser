@@ -1,4 +1,5 @@
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：导入分类 section，维护 categoryRef/categoryName 引用映射供模板和分类规则重映射使用。
 async fn import_postgres_settings_categories(
     transaction: &mut PgTransaction<'_, Postgres>,
     categories: &[Value],
@@ -66,6 +67,7 @@ async fn load_existing_postgres_categories(
     Ok(existing)
 }
 
+// 中文说明：按主/子分类执行幂等 upsert，保持父分类、path、隐藏和样式字段与当前分类模型一致。
 async fn upsert_postgres_settings_category(
     transaction: &mut PgTransaction<'_, Postgres>,
     item: &Value,
@@ -162,6 +164,7 @@ async fn upsert_postgres_settings_category(
     Ok(Some(category_id))
 }
 
+// 中文说明：导入子分类前确保主分类存在，避免 settings bundle 中只有子分类时引用断裂。
 async fn ensure_postgres_parent_category(
     transaction: &mut PgTransaction<'_, Postgres>,
     user_id: i64,

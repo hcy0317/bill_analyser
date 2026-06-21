@@ -152,6 +152,7 @@ const isAccountModified = computed<boolean>(() => {
 let resolveFunc: ((value: AccountEditResponse) => void) | null = null;
 let rejectFunc: ((reason?: unknown) => void) | null = null;
 
+// 中文说明：重置当前账户规则编辑器，同时递增请求 ID 让旧异步加载结果自动失效。
 function resetSelectedAccountRuleEditor(accountId: number | null = selectedAccountRuleAccountId.value): void {
     accountRuleLoadRequestId += 1;
     accountRuleLoading.value = false;
@@ -196,6 +197,7 @@ function getSortedAccountRules(rules: AccountRuleItem[]): AccountRuleItem[] {
     ));
 }
 
+// 中文说明：加载当前账户的主账户识别规则，并用请求 ID 防止切换账户后的旧响应覆盖新草稿。
 async function loadSelectedAccountRule(accountId: number | null = selectedAccountRuleAccountId.value): Promise<void> {
     if (!showState.value || !canManageSelectedAccountRules.value || accountId === null) {
         resetSelectedAccountRuleEditor(accountId);
@@ -246,6 +248,7 @@ async function loadSelectedAccountRule(accountId: number | null = selectedAccoun
     }
 }
 
+// 中文说明：把当前规则草稿转成 API payload；空表达式代表删除已有规则。
 function buildSelectedAccountRulePayload(accountId: number): ReturnType<typeof buildAccountRulePayload> | null {
     const ruleExpression = selectedAccountRuleDraft.value.ruleExpression.trim();
 
@@ -259,6 +262,7 @@ function buildSelectedAccountRulePayload(accountId: number): ReturnType<typeof b
     }, autoSelectedAccountRuleName.value);
 }
 
+// 中文说明：保存账户时同步当前账户识别规则，按草稿状态创建、更新或删除主规则。
 async function syncSelectedAccountRule(accountId: number): Promise<void> {
     const payload = buildSelectedAccountRulePayload(accountId);
 
@@ -291,6 +295,7 @@ async function syncSelectedAccountRule(accountId: number): Promise<void> {
     }
 }
 
+// 中文说明：打开账户编辑弹窗并初始化账户、子账户、规则草稿和一次性 promise 回调。
 function open(options?: { id?: string, currentAccount?: Account, category?: number }): Promise<AccountEditResponse> {
     showState.value = true;
     loading.value = true;
@@ -340,6 +345,7 @@ function open(options?: { id?: string, currentAccount?: Account, category?: numb
     });
 }
 
+// 中文说明：保存账户和子账户后同步账户识别规则，保证编辑弹窗一次提交内主数据与规则一致。
 async function save(): Promise<void> {
     const problemMessage = inputEmptyProblemMessage.value;
 
@@ -387,6 +393,7 @@ async function save(): Promise<void> {
     }
 }
 
+// 中文说明：从编辑草稿中删除子账户，并修正当前选中索引防止越界。
 function removeSubAccount(currentSubAccount: Account): void {
     confirmDialog.value?.open('Are you sure you want to remove this sub-account?').then(() => {
         for (const [subAccount, index] of itemAndIndex(subAccounts.value)) {

@@ -145,7 +145,7 @@ function init(): void {
     }
 }
 
-function save(): void {
+/** 中文说明：移动端保存账户和子账户草稿，提交期间使用移动端全局 loading 避免重复保存。 */ function save(): void {
     const router = props.f7router;
     const problemMessage = inputEmptyProblemMessage.value;
 
@@ -183,7 +183,7 @@ function save(): void {
     });
 }
 
-function addSubAccountAndContext(): void {
+/** 中文说明：新增子账户时同步创建对应的移动端弹层上下文。 */ function addSubAccountAndContext(): void {
     if (addSubAccount()) {
         subAccountContexts.value.push(Object.assign({}, DEFAULT_ACCOUNT_CONTEXT));
     }
@@ -192,7 +192,7 @@ function addSubAccountAndContext(): void {
 // 中文说明：外置模板的子账户上下文访问器；兜底只修复异常索引空洞，不改变正常交互状态模型。
 function subAccountContext(index: number): AccountContext { return subAccountContexts.value[index] ?? (subAccountContexts.value[index] = Object.assign({}, DEFAULT_ACCOUNT_CONTEXT)); }
 
-function removeSubAccount(currentSubAccount: Account | null, confirm: boolean): void {
+/** 中文说明：移动端分两步删除子账户，首次打开确认面板，确认后同步删除上下文数组。 */ function removeSubAccount(currentSubAccount: Account | null, confirm: boolean): void {
     if (!currentSubAccount) {
         showAlert('An error occurred');
         return;

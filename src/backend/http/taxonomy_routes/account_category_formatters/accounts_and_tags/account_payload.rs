@@ -1,3 +1,4 @@
+// 中文说明：把前端账户 DTO 转成 repository payload，强制余额字段使用整数 cents。
 fn frontend_account_to_backend(payload: &Value) -> Result<Map<String, Value>, String> {
     let Some(object) = payload.as_object() else {
         return Err("Account payload must be an object".to_string());
@@ -94,6 +95,7 @@ fn frontend_account_to_backend(payload: &Value) -> Result<Map<String, Value>, St
     Ok(result)
 }
 
+// 中文说明：读取账户余额/期初余额 cents 字段，兼容当前 camelCase 与旧 snake_case 输入。
 fn account_balance_cents_value(object: &Map<String, Value>) -> Result<i64, String> {
     for field in [
         "balanceCents",

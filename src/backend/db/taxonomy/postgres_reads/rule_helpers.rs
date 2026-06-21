@@ -45,6 +45,7 @@ fn required_postgres_i64(value: &Value, field: &str) -> DbResult<i64> {
         .ok_or_else(|| DbError::InvalidOperation(format!("{field} must be an integer-like value")))
 }
 
+// 中文说明：解析规则表达式必填字段，兼容标量输入并拒绝空表达式。
 fn required_postgres_rule_expression(value: Option<&Value>) -> DbResult<String> {
     match value {
         Some(Value::Null) | None => Err(DbError::InvalidOperation(
@@ -70,6 +71,7 @@ fn rule_expression_json(expression: &str, regex_enabled: bool) -> Value {
     })
 }
 
+// 中文说明：从当前或旧式 rule_expression JSON 中还原可展示表达式文本。
 fn rule_expression_string(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
@@ -92,6 +94,7 @@ fn rule_expression_regex_enabled(value: &Value) -> bool {
         .unwrap_or(false)
 }
 
+// 中文说明：把历史 contains_any 表达式对象转换为当前 OR={...} 文本表达式。
 fn contains_any_expression(object: &Map<String, Value>) -> Option<String> {
     let operator = object
         .get("operator")
@@ -174,6 +177,7 @@ async fn count_postgres_account_rules(
     row.try_get("count").map_err(Into::into)
 }
 
+// 中文说明：把数据库账户规则记录转换成核心匹配器候选，保持 expression-only 规则合同。
 fn account_rule_candidate_from_record(record: AccountRuleRecord) -> DbResult<AccountRuleCandidate> {
     Ok(AccountRuleCandidate {
         rule_id: int_value(record.get("id")).unwrap_or_default(),
@@ -189,6 +193,7 @@ fn account_rule_candidate_from_record(record: AccountRuleRecord) -> DbResult<Acc
     })
 }
 
+// 中文说明：读取可选金额字段，只有显式整数 cents/minor units 才允许进入业务 payload。
 fn optional_strict_minor_units(value: Option<&Value>, field: &str) -> DbResult<Option<i64>> {
     value
         .map(|value| strict_minor_units_value(value, field))

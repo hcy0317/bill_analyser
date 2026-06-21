@@ -1,3 +1,4 @@
+// 中文说明：把后端账户记录投影成当前前端账户 DTO，并在边界补齐 legacy 类型/分类兼容值。
 fn backend_account_to_frontend(mut account: AccountRecord) -> Map<String, Value> {
     let hidden = account.get("hidden").map(value_truthy).unwrap_or(false);
     let sub_accounts = account.remove("subAccounts");
@@ -116,6 +117,7 @@ fn normalize_frontend_account_type(value: Option<&Value>) -> i64 {
     }
 }
 
+// 中文说明：归一化账户分类；优先保留合法显式分类，再从名称、类型和图标推断旧恢复数据。
 fn normalize_frontend_account_category(
     category: Option<&Value>,
     account_type: Option<&Value>,
@@ -153,6 +155,7 @@ fn hint_contains_any(hint: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| hint.contains(needle))
 }
 
+// 中文说明：从旧式账户名称、类型或分类文本推断当前前端账户分类枚举。
 fn category_from_account_hint(hint: &str) -> Option<i64> {
     if hint.is_empty() {
         return None;
@@ -234,6 +237,7 @@ fn category_from_account_hint(hint: &str) -> Option<i64> {
     None
 }
 
+// 中文说明：从旧 icon 编号推断账户分类，作为文本线索无法识别时的恢复兜底。
 fn category_from_account_icon(icon: &str) -> Option<i64> {
     if icon.is_empty() {
         return None;
