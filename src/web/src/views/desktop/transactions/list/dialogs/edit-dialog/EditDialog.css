@@ -1,0 +1,90 @@
+.transaction-edit-amount .v-field__prepend-inner,
+.transaction-edit-amount .v-field__append-inner,
+.transaction-edit-amount .v-field__field > input {
+    font-size: 1.25rem;
+}
+
+.transaction-edit-timezone.v-input input::placeholder {
+    color: rgba(var(--v-theme-on-background), var(--v-high-emphasis-opacity)) !important;
+}
+
+.transaction-edit-map-view {
+    height: 220px;
+}
+
+.transaction-type-tabs-readonly .v-tab {
+    opacity: 1 !important;
+    color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)) !important;
+    cursor: default !important;
+    pointer-events: none;
+    user-select: none;
+}
+
+.transaction-type-tabs-readonly .v-tab--selected {
+    background-color: transparent !important;
+    border: 1px solid rgba(var(--v-theme-on-surface), 0.24);
+    color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)) !important;
+}
+
+.transaction-type-tabs-readonly .v-tab__overlay {
+    opacity: 0 !important;
+}
+
+.transaction-readonly-form .v-field {
+    background-color: transparent !important;
+    border-color: rgba(var(--v-theme-on-surface), 0.24) !important;
+    border-radius: 8px;
+    color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)) !important;
+}
+
+.transaction-readonly-form .v-field__overlay {
+    opacity: 0 !important;
+}
+
+.transaction-readonly-form .v-input--readonly .v-field {
+    pointer-events: none;
+}
+
+.transaction-readonly-form .v-field__input,
+.transaction-readonly-form .v-field input,
+.transaction-readonly-form .v-select__selection,
+.transaction-readonly-form textarea {
+    color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)) !important;
+    cursor: default !important;
+    user-select: text;
+}
+
+.transaction-readonly-form .v-field__append-inner .v-icon,
+.transaction-readonly-form .v-field__prepend-inner .v-icon {
+    color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)) !important;
+}
+
+.recurring-match-card {
+    background-color: rgba(var(--v-theme-on-surface), 0.08) !important;
+    border: 1px solid rgba(var(--v-theme-on-surface), 0.10);
+    border-radius: 8px;
+}
+
+@media (min-height: 630px) {
+    .transaction-edit-map-view {
+        height: 300px;
+    }
+}
+
+@media (min-height: 700px) {
+    .transaction-edit-map-view {
+        height: 350px;
+    }
+}
+
+@media (min-height: 800px) {
+    .transaction-edit-map-view {
+        height: 450px;
+    }
+}
+
+@media (min-height: 900px) {
+    .transaction-edit-map-view {
+        height: 550px;
+    }
+}

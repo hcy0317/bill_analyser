@@ -1,12 +1,13 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import { readSource as readPlainSource, readVueSourceWithExternalBlocks } from '../../helpers/vueSource';
 
 const LIST_PAGE_PATH = 'src/views/mobile/transactions/ListPage.vue';
 const MONTH_BLOCK_PATH = 'src/views/mobile/transactions/components/MobileTransactionMonthBlock.vue';
 const AMOUNT_FILTER_PAGE_PATH = 'src/views/mobile/transactions/AmountFilterPage.vue';
 
 function readSource(relativePath: string): string {
-    return fs.readFileSync(path.resolve(process.cwd(), relativePath), 'utf-8');
+    return relativePath === LIST_PAGE_PATH
+        ? readVueSourceWithExternalBlocks(relativePath)
+        : readPlainSource(relativePath);
 }
 
 describe('mobile ListPage.vue Investment parity (S3)', () => {

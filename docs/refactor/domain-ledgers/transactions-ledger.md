@@ -291,6 +291,21 @@ D4 `behavior-lock` 必须补强或明确复用以下场景：
 6. `models/transaction.ts` 若仍触发结构门禁，作为 shared lease 拆 DTO/types/factory/response mapping/helper。
 7. 跑前端 focused tests、lint、coverage；页面结构变化补 browser smoke 或源码合同说明。
 
+本次 frontend-shape 切片执行证据（2026-06-21）：
+
+- 前端正式交易域按 facade + 功能子文件拆分，保留原 import 路径、Pinia store 名、页面入口、桌面/移动视觉和交互合同：
+  - `src/web/src/stores/transaction.ts` 保留 `useTransactionsStore` facade；筛选/month-list 类型下沉到 `stores/transaction/types.ts`，receipt image error 和 draft normalization 下沉到 `stores/transaction/receiptDraft.ts`。
+  - `src/web/src/models/transaction.ts` 保留 `Transaction` 与 `TransactionGeoLocation` facade；request/response、统计、overview 与 `EMPTY_TRANSACTION_RESULT` 合同下沉到 `models/transaction/contracts.ts`。
+  - 桌面 `ListPage.vue`、`EditDialog.vue`、`BatchManualEntryDialog.vue` 和移动 `ListPage.vue`、`EditPage.vue` 改为入口 SFC + 外置 template/style；无状态展示/规则 helper 下沉到相邻功能文件夹。
+  - 源码合同测试新增 `tests/web/helpers/vueSource.ts`，使测试能读取外置 Vue template/style，并显式拼接本切片抽出的纯 helper。
+- 本切片只改变物理结构，不修改交易列表筛选、投资/转账字段、图片 OCR、批量手工录入、桌面/移动页面入口或 store/model 公开导出。
+- 通过验证：
+  - `Set-Location src/web; npm run lint:ci`（0 errors，保留既有 `no-explicit-any` warnings）
+  - `Set-Location src/web; npm run test -- --runTestsByPath ../../tests/web/stores/transaction.core.test.ts ../../tests/web/stores/transaction.recognizeReceiptImage.test.ts ../../tests/web/models/bill_matching.test.ts ../../tests/web/views/desktop/transactions/editDialogPictureOcr.test.ts ../../tests/web/views/desktop/transactions/batchManualEntryDialog.test.ts ../../tests/web/views/mobile/transactionEditPagePictureOcr.test.ts ../../tests/web/views/mobile/transactionListPageInvestment.test.ts ../../tests/web/views/mobile/transactionEditPageInvestment.test.ts`
+  - `Set-Location src/web; npm run test:coverage`（90 suites / 38980 tests passed；总行覆盖 99.13%，总分支覆盖 91.48%）
+  - `git diff --check`
+- 结构 gate 证据：`Set-Location src/web; npm run structure:check` 仍因 7 个非 D4 历史结构债退出失败：desktop budgets、`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`；D4 frontend 目标文件均已退出 failure，仅保留 line-reduction warning。
+
 ### 8.4 comment-pass/governance-docs/closeout
 
 - 按用户确认策略补齐 D4 导出函数、业务关键函数和复杂私有 helper 中文说明；简单 getter、字段映射和事件转发不强制。

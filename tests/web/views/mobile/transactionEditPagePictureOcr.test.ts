@@ -1,14 +1,14 @@
-import fs from 'node:fs';
-import path from 'node:path';
-
 import { describe, expect, test } from '@jest/globals';
+import { readSource as readPlainSource, readVueSourceWithExternalBlocks } from '../../helpers/vueSource';
 
 const EDIT_PAGE_PATH = 'src/views/mobile/transactions/EditPage.vue';
 const PICTURES_PANEL_PATH = 'src/views/mobile/transactions/components/MobileTransactionPicturesPanel.vue';
 const RECEIPT_DRAFT_HELPER_PATH = 'src/lib/receiptDraft.ts';
 
 function readSource(relativePath: string): string {
-    return fs.readFileSync(path.resolve(process.cwd(), relativePath), 'utf-8');
+    return relativePath === EDIT_PAGE_PATH
+        ? readVueSourceWithExternalBlocks(relativePath)
+        : readPlainSource(relativePath);
 }
 
 describe('mobile transaction EditPage picture OCR source contract', () => {

@@ -1,10 +1,13 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import { readSource as readPlainSource, readVueSourceWithExternalBlocks } from '../../helpers/vueSource';
 
 const EDIT_PAGE_PATH = 'src/views/mobile/transactions/EditPage.vue';
+const EDIT_PAGE_DISPLAY_HELPERS_PATH = 'src/views/mobile/transactions/edit-page/displayHelpers.ts';
 
 function readSource(): string {
-    return fs.readFileSync(path.resolve(process.cwd(), EDIT_PAGE_PATH), 'utf-8');
+    return [
+        readVueSourceWithExternalBlocks(EDIT_PAGE_PATH),
+        readPlainSource(EDIT_PAGE_DISPLAY_HELPERS_PATH)
+    ].join('\n');
 }
 
 describe('mobile EditPage.vue Investment branch parity (S2)', () => {

@@ -1,8 +1,9 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import { readSource as readPlainSource, readVueSourceWithExternalBlocks } from '../../../helpers/vueSource';
 
 function readSource(relativePath: string): string {
-    return fs.readFileSync(path.resolve(process.cwd(), relativePath), 'utf-8');
+    return relativePath === EDIT_DIALOG_PATH
+        ? readVueSourceWithExternalBlocks(relativePath)
+        : readPlainSource(relativePath);
 }
 
 const EDIT_DIALOG_PATH = 'src/views/desktop/transactions/list/dialogs/EditDialog.vue';

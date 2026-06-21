@@ -1,0 +1,111 @@
+.category-separate-icon.icon {
+    margin-inline-start: 5px;
+    margin-inline-end: 5px;
+    font-size: var(--ebk-category-separate-icon-font-size);
+    line-height: 16px;
+    color: var(--f7-color-gray-tint);
+}
+
+.transaction-type-segmented-readonly {
+    opacity: 0.7;
+}
+
+.transaction-edit-amount {
+    line-height: 53px;
+}
+
+.transaction-edit-amount .item-title {
+    font-weight: bolder;
+}
+
+.transaction-edit-amount .item-header {
+    padding-top: calc(var(--f7-typography-padding) / 2);
+}
+
+.transaction-edit-datetime .item-title {
+    width: 100%;
+}
+
+.transaction-edit-datetime .item-title > .item-header > .transaction-edit-datetime-header {
+    display: block;
+    width: 100%;
+}
+
+.transaction-edit-datetime .item-title > .transaction-edit-datetime-title {
+    display: flex;
+    width: 100%;
+}
+
+.transaction-edit-datetime .item-title > .transaction-edit-datetime-title > .transaction-edit-datetime-time {
+    flex-grow: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.transaction-edit-timezone-name {
+    padding-inline-start: 4px;
+}
+
+.transaction-edit-tag {
+    --f7-chip-bg-color: var(--ebk-transaction-tag-chip-bg-color);
+    margin-inline-end: 4px;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.chip.transaction-edit-tag .chip-media+.chip-label {
+    margin-inline-start: 0;
+}
+
+.chip.transaction-edit-tag .chip-media i.icon {
+    font-size: calc(var(--f7-chip-media-size) - 12px);
+    height: calc(var(--f7-chip-media-size) - 12px);
+}
+
+.transaction-pictures {
+    height: var(--ebk-transaction-picture-size);
+}
+
+.transaction-picture-container,
+.transaction-picture {
+    width: var(--ebk-transaction-picture-size);
+    height: var(--ebk-transaction-picture-size);
+}
+
+.transaction-picture .transaction-picture-control-backdrop {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    z-index: 10;
+    background-color: rgba(0, 0, 0, 0.4);
+    border-radius: 8px;
+}
+
+.transaction-picture .picture-control-icon {
+    z-index: 15;
+    font-size: var(--ebk-transaction-picture-add-icon-size);
+}
+
+.transaction-picture .picture-remove-icon {
+    background-color: transparent;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: var(--ebk-transaction-picture-remove-icon-size);
+}
+
+.transaction-picture > img {
+    object-fit: cover;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 8px;
+}
+
+.transaction-picture-add {
+    width: calc(var(--ebk-transaction-picture-size) - 2px);
+    height: calc(var(--ebk-transaction-picture-size) - 4px);
+    border: 2px dashed #ccc;
+    border-radius: 8px;
+}

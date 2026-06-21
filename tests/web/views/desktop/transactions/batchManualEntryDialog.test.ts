@@ -1,18 +1,20 @@
-import fs from 'node:fs';
-import path from 'node:path';
-
 import { describe, expect, test } from '@jest/globals';
-
-function readSource(relativePath: string): string {
-    return fs.readFileSync(path.resolve(process.cwd(), relativePath), 'utf-8').replace(/\r\n/g, '\n');
-}
+import { readSource as readPlainSource, readVueSourceWithExternalBlocks } from '../../../helpers/vueSource';
 
 const BATCH_DIALOG_PATH = 'src/views/desktop/transactions/list/dialogs/BatchManualEntryDialog.vue';
+const BATCH_DESTINATION_RULES_PATH = 'src/views/desktop/transactions/list/dialogs/batch-manual-entry-dialog/destinationRules.ts';
 const LIST_PAGE_PATH = 'src/views/desktop/transactions/ListPage.vue';
+
+function readBatchDialogSource(): string {
+    return [
+        readVueSourceWithExternalBlocks(BATCH_DIALOG_PATH),
+        readPlainSource(BATCH_DESTINATION_RULES_PATH)
+    ].join('\n');
+}
 
 describe('BatchManualEntryDialog source contract', () => {
     test('keeps transfer and investment destination fields in the keyboard grid only when needed', () => {
-        const source = readSource(BATCH_DIALOG_PATH);
+        const source = readBatchDialogSource();
 
         expect(source).toContain("type BatchEntryFieldKey = 'time' | 'type' | 'category' | 'sourceAccount' | 'sourceAmountCents' | 'destinationAccount' | 'destinationAmountCents' | 'comment' | 'tags';");
         expect(source).toContain("data-batch-field=\"destinationAccount\"");
@@ -26,7 +28,7 @@ describe('BatchManualEntryDialog source contract', () => {
     });
 
     test('keeps destination amount auto-sync explicit and reversible', () => {
-        const source = readSource(BATCH_DIALOG_PATH);
+        const source = readBatchDialogSource();
 
         expect(source).toContain('destinationAmountSyncState.value[rowId] = shouldSyncDestinationAmount(transaction);');
         expect(source).toContain('&& (!transaction.destinationAmountCents || transaction.destinationAmountCents === transaction.sourceAmountCents);');
@@ -37,7 +39,7 @@ describe('BatchManualEntryDialog source contract', () => {
     });
 
     test('validates non-empty rows before submitting one batch transaction request', () => {
-        const source = readSource(BATCH_DIALOG_PATH);
+        const source = readBatchDialogSource();
 
         expect(source).toContain('const invalidNonEmptyRowCount = computed<number>(() => {');
         expect(source).toContain('return rows.value.filter(row => !isRowEmpty(row) && !isRowValid(row)).length;');
@@ -52,7 +54,7 @@ describe('BatchManualEntryDialog source contract', () => {
     });
 
     test('bulk fill actions separate overwrite-all from fill-empty behavior', () => {
-        const source = readSource(BATCH_DIALOG_PATH);
+        const source = readBatchDialogSource();
 
         expect(source).toContain('function applyCommonFields(target: Transaction, source: Transaction, rowId: string): void {');
         expect(source).toContain('target.type = source.type;');
@@ -69,7 +71,7 @@ describe('BatchManualEntryDialog source contract', () => {
 
 describe('desktop transaction ListPage batch manual entry affordance', () => {
     test('passes the active filter context into the batch entry dialog and reloads after save', () => {
-        const source = readSource(LIST_PAGE_PATH);
+        const source = readVueSourceWithExternalBlocks(LIST_PAGE_PATH);
 
         expect(source).toContain('function batchAdd(): void {');
         expect(source).toContain('batchManualEntryDialog.value?.open({');

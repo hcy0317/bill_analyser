@@ -1,10 +1,10 @@
-import fs from 'fs';
-import path from 'path';
-
 import { describe, expect, test } from '@jest/globals';
+import { readSource as readPlainSource, readVueSourceWithExternalBlocks } from '../../../helpers/vueSource';
 
 function readSource(relativePath: string): string {
-    return fs.readFileSync(path.resolve(process.cwd(), relativePath), 'utf-8').replace(/\r\n/g, '\n');
+    return relativePath === 'src/views/desktop/transactions/list/dialogs/EditDialog.vue'
+        ? readVueSourceWithExternalBlocks(relativePath)
+        : readPlainSource(relativePath);
 }
 
 describe('desktop transaction edit dialog readonly affordance', () => {
