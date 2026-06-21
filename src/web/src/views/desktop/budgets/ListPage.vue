@@ -1,649 +1,7 @@
-<template>
-    <v-row class="match-height" data-testid="desktop.budgets.page">
-        <v-col cols="12">
-            <v-card>
-                <v-layout>
-                    <!-- 左侧导航抽屉 -->
-                    <v-navigation-drawer :permanent="alwaysShowNav" v-model="showNav">
-                        <div class="mx-6 mt-4">
-                            <btn-vertical-group
-                                class="budget-nav-buttons"
-                                :disabled="loading || forecastLoading"
-                                :buttons="viewModeButtons"
-                                v-model="activeViewMode"
-                                @update:model-value="switchViewMode"
-                            />
-                        </div>
-                        <v-divider class="mt-4" />
-                        <div class="mx-6 mt-4">
-                            <!-- 类型切换：支出 / 投资（横向排列，宽度与上方按钮一致）-->
-                            <btn-horizontal-group class="budget-nav-buttons" :disabled="loading" :buttons="[
-                                { name: tt('Expense'), value: BudgetType.Expense },
-                                { name: tt('Investment'), value: BudgetType.Investment }
-                            ]" v-model="activeBudgetType" @update:model-value="switchBudgetType" />
-                        </div>
-                        <template v-if="activeViewMode === 'history'">
-                            <v-divider class="mt-4" />
-                            <v-tabs show-arrows
-                                    class="my-4 budget-level-tabs"
-                                    direction="vertical"
-                                    :disabled="loading"
-                                    v-model="historicalBudgetLevel">
-                                <v-tab class="tab-text-truncate"
-                                       v-for="level in historicalLevelButtons"
-                                       :key="level.value"
-                                       :value="level.value">
-                                    <span class="text-truncate">{{ level.name }}</span>
-                                </v-tab>
-                            </v-tabs>
-                        </template>
-                        <template v-else>
-                            <v-divider class="mt-4" />
-                            <!-- 时间筛选列表（类似交易列表的月份选择）-->
-                            <v-tabs show-arrows class="my-4" direction="vertical"
-                                    :disabled="loading" v-model="activePeriodFilterIndex">
-                                <v-tab class="tab-text-truncate" :key="idx" :value="idx"
-                                       v-for="(filter, idx) in visiblePeriodFilters"
-                                       @click="setPeriodFilter(filter.value)">
-                                    <span class="text-truncate">{{ filter.name }}</span>
-                                </v-tab>
-                            </v-tabs>
-                        </template>
-                    </v-navigation-drawer>
-
-                    <!-- 主内容区 -->
-                    <v-main>
-                        <v-card variant="flat" min-height="920">
-                            <template #title>
-                                <div class="title-and-toolbar d-flex align-center text-no-wrap">
-                                    <v-btn class="me-3 d-md-none" density="compact" color="default" variant="plain"
-                                           :ripple="false" :icon="true" @click="showNav = !showNav">
-                                        <v-icon :icon="mdiMenu" size="24" />
-                                    </v-btn>
-                                    <span>{{ currentViewTitle }}</span>
-                                    <!-- 操作按钮 -->
-                                    <v-btn class="ms-3" color="default" variant="outlined"
-                                           data-testid="desktop.budgets.action.add"
-                                           :disabled="loading || updating" @click="add" v-if="activeViewMode === 'budget'">
-                                        {{ tt('Add') }}
-                                    </v-btn>
-                                    <v-btn class="ms-3" color="default" variant="outlined"
-                                           :disabled="loading || updating" @click="importBudgets" v-if="activeViewMode === 'budget'">
-                                        {{ tt('Import') }}
-                                        <v-menu activator="parent" :open-on-hover="true" :open-delay="1500">
-                                            <v-list density="compact" min-width="180">
-                                                <v-list-item :disabled="loading || updating" @click.stop="exportBudgets">
-                                                    <v-list-item-title>{{ tt('Export') }}</v-list-item-title>
-                                                </v-list-item>
-                                            </v-list>
-                                        </v-menu>
-                                    </v-btn>
-                                    <div v-if="activeViewMode === 'budget'" class="ms-3 budget-period-toolbar">
-                                        <btn-horizontal-group
-                                            :disabled="loading || updating"
-                                            :buttons="budgetPeriodTypeButtons"
-                                            v-model="activeBudgetPeriodType"
-                                        />
-                                    </div>
-                                    <input type="file" ref="fileInput" style="display: none" accept=".json" @change="onFileSelected" />
-
-                                    <!-- 全部展开/折叠切换按钮（单一按钮带动画） -->
-                                    <v-btn class="ms-2" density="compact" color="default" variant="text" size="24"
-                                           :icon="true" :disabled="loading || updating || groupedBudgets.length === 0"
-                                           @click="toggleAllCategories" v-if="activeViewMode === 'budget'">
-                                        <v-icon
-                                            :icon="isAllExpanded ? mdiUnfoldLessHorizontal : mdiUnfoldMoreHorizontal"
-                                            size="20"
-                                            class="toggle-icon"
-                                            :class="{ 'rotated': !isAllExpanded }"
-                                        />
-                                        <v-tooltip activator="parent">{{ isAllExpanded ? tt('Collapse All') : tt('Expand All') }}</v-tooltip>
-                                    </v-btn>
-
-                                    <!-- 刷新按钮 -->
-                                    <v-btn v-if="activeViewMode === 'budget'"
-                                           density="compact" color="default" variant="text" size="24"
-                                           class="ms-2" :icon="true" :loading="loading || updating" @click="reload(true)">
-                                        <template #loader>
-                                            <v-progress-circular indeterminate size="20"/>
-                                        </template>
-                                        <v-icon :icon="mdiRefresh" size="24" />
-                                        <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
-                                    </v-btn>
-
-                                    <v-btn-group v-if="activeViewMode === 'history'" class="ms-4" color="default" density="comfortable" variant="outlined" divided>
-                                        <v-btn class="button-icon-with-direction" :icon="mdiArrowLeft"
-                                               :disabled="loading || !canShiftHistoricalDateRange"
-                                               @click="shiftHistoricalDateRange(-1)"/>
-                                        <v-menu location="bottom">
-                                            <template #activator="{ props }">
-                                                <v-btn :disabled="loading" v-bind="props">{{ historicalDateRangeName }}</v-btn>
-                                            </template>
-                                            <v-list :selected="[historicalDateType]">
-                                                <v-list-item :key="dateRange.type" :value="dateRange.type"
-                                                             :append-icon="(historicalDateType === dateRange.type ? mdiCheck : undefined)"
-                                                             v-for="dateRange in allHistoricalDateRanges">
-                                                    <v-list-item-title class="cursor-pointer"
-                                                                       @click="setHistoricalDateFilter(dateRange.type)">
-                                                        <div class="d-flex align-center">
-                                                            <span>{{ dateRange.displayName }}</span>
-                                                        </div>
-                                                        <div class="statistics-custom-datetime-range smaller"
-                                                             v-if="dateRange.isUserCustomRange && canShowHistoricalCustomDateRange(dateRange.type)">
-                                                            <span>{{ historicalDateStartText }}</span>
-                                                            <span>&nbsp;-&nbsp;</span>
-                                                            <br/>
-                                                            <span>{{ historicalDateEndText }}</span>
-                                                        </div>
-                                                    </v-list-item-title>
-                                                </v-list-item>
-                                            </v-list>
-                                        </v-menu>
-                                        <v-btn class="button-icon-with-direction" :icon="mdiArrowRight"
-                                               :disabled="loading || !canShiftHistoricalDateRange"
-                                               @click="shiftHistoricalDateRange(1)"/>
-                                    </v-btn-group>
-
-                                    <div v-if="activeViewMode === 'history'" class="ms-3 budget-period-toolbar">
-                                        <btn-horizontal-group
-                                            :disabled="loading"
-                                            :buttons="historyAggregationButtons"
-                                            v-model="activeHistoricalAggregationType"
-                                        />
-                                    </div>
-
-                                    <v-btn v-if="activeViewMode === 'history'"
-                                           density="compact" color="default" variant="text" size="32"
-                                           class="ms-3" :icon="true" :loading="loading || updating" @click="reload(true)">
-                                        <template #loader>
-                                            <v-progress-circular indeterminate size="20"/>
-                                        </template>
-                                        <v-icon :icon="mdiRefresh" size="24" />
-                                        <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
-                                    </v-btn>
-
-                                    <div v-if="activeViewMode === 'forecast'" class="budget-forecast-title-actions d-flex align-center ga-2 ms-4">
-                                        <v-btn class="budget-forecast-title-button"
-                                               density="compact"
-                                               :color="forecastOnlyLowConfidence ? 'warning' : 'default'"
-                                               :variant="forecastOnlyLowConfidence ? 'flat' : 'outlined'"
-                                               :disabled="loading || forecastLoading"
-                                               @click="forecastOnlyLowConfidence = !forecastOnlyLowConfidence">
-                                            {{ tt('Low Confidence Only') }}
-                                        </v-btn>
-
-                                        <v-btn class="budget-forecast-title-button"
-                                               density="compact"
-                                               :color="forecastOnlyOverBudget ? 'error' : 'default'"
-                                               :variant="forecastOnlyOverBudget ? 'flat' : 'outlined'"
-                                               :disabled="loading || forecastLoading"
-                                               @click="forecastOnlyOverBudget = !forecastOnlyOverBudget">
-                                            {{ tt('Over Budget Only') }}
-                                        </v-btn>
-
-                                        <v-btn class="budget-forecast-title-button"
-                                               color="default"
-                                               variant="outlined"
-                                               density="compact"
-                                               :disabled="loading || forecastLoading"
-                                               @click="showForecastSettingsDialog = true">
-                                            {{ tt('Forecast Settings') }}
-                                        </v-btn>
-
-                                        <v-btn density="compact"
-                                               color="default"
-                                               variant="text"
-                                               size="24"
-                                               :icon="true"
-                                               :loading="loading || forecastLoading"
-                                               @click="reload(true)">
-                                            <template #loader>
-                                                <v-progress-circular indeterminate size="20"/>
-                                            </template>
-                                            <v-icon :icon="mdiRefresh" size="24" />
-                                            <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
-                                        </v-btn>
-                                    </div>
-
-                                    <v-spacer />
-
-                                    <div class="budget-right-tools d-flex align-center">
-                                        <!-- 搜索框 -->
-                                        <div class="budget-keyword-filter" v-if="activeViewMode !== 'history'">
-                                            <v-text-field density="compact" :disabled="loading"
-                                                          :prepend-inner-icon="mdiMagnify"
-                                                          :append-inner-icon="filterKeyword !== searchKeyword ? mdiCheck : undefined"
-                                                          :placeholder="tt('Filter budget description')"
-                                                          hide-details
-                                                          v-model="filterKeyword"
-                                                          @click:append-inner="setKeywordFilter(filterKeyword)"
-                                                          @keyup.enter="setKeywordFilter(filterKeyword)"
-                                            />
-                                        </div>
-
-                                        <!-- 更多选项菜单（包含所有筛选功能） -->
-                                        <v-btn density="comfortable" color="default" variant="text" class="ms-2"
-                                               :disabled="loading" :icon="true">
-                                            <v-icon :icon="mdiDotsVertical" />
-                                            <v-menu activator="parent" :close-on-content-click="false" width="320">
-                                                <v-list density="compact" class="budget-filter-menu">
-                                                <!-- 分类筛选 -->
-                                                <v-list-item :disabled="loading"
-                                                             :prepend-icon="mdiShapeOutline"
-                                                             @click="showFilterCategoryDialog = true">
-                                                    <v-list-item-title class="d-flex align-center justify-space-between">
-                                                        <span>{{ tt('Filter Categories') }}</span>
-                                                        <v-chip v-if="categoryFilter" size="x-small" color="primary" class="ms-2">
-                                                            {{ getCategoryFilterDisplayName() }}
-                                                        </v-chip>
-                                                    </v-list-item-title>
-                                                </v-list-item>
-
-                                                <!-- 账户筛选 -->
-                                                <v-list-item :disabled="loading"
-                                                             :prepend-icon="mdiWalletOutline"
-                                                             @click="showFilterAccountDialog = true">
-                                                    <v-list-item-title class="d-flex align-center justify-space-between">
-                                                        <span>{{ tt('Filter Accounts') }}</span>
-                                                        <v-chip v-if="accountFilter.length > 0" size="x-small" color="primary" class="ms-2">
-                                                            {{ accountFilter.length }}
-                                                        </v-chip>
-                                                    </v-list-item-title>
-                                                </v-list-item>
-
-                                                <!-- 标签筛选 -->
-                                                <v-list-item :disabled="loading"
-                                                             :prepend-icon="mdiTagOutline"
-                                                             @click="showFilterTagDialog = true">
-                                                    <v-list-item-title class="d-flex align-center justify-space-between">
-                                                        <span>{{ tt('Filter Tags') }}</span>
-                                                        <v-chip v-if="tagFilter.length > 0" size="x-small" color="primary" class="ms-2">
-                                                            {{ tagFilter.length }}
-                                                        </v-chip>
-                                                    </v-list-item-title>
-                                                </v-list-item>
-
-                                                <v-divider class="my-2" />
-
-                                                <!-- 执行率筛选 -->
-                                                <v-list-group>
-                                                    <template #activator="{ props }">
-                                                        <v-list-item v-bind="props" :disabled="loading" :prepend-icon="mdiChartDonut">
-                                                            <v-list-item-title class="d-flex align-center justify-space-between">
-                                                                <span>{{ tt('Execution Rate') }}</span>
-                                                                <v-chip v-if="executionRateFilter" size="x-small" color="primary" class="ms-2">
-                                                                    {{ executionRateFilter.label }}
-                                                                </v-chip>
-                                                            </v-list-item-title>
-                                                        </v-list-item>
-                                                    </template>
-                                                    <v-list-item key="" class="text-sm"
-                                                                 :class="{ 'list-item-selected': !executionRateFilter }"
-                                                                 @click="setExecutionRateFilter(null)">
-                                                        <v-list-item-title>{{ tt('All') }}</v-list-item-title>
-                                                    </v-list-item>
-                                                    <v-list-item v-for="option in executionRateOptions" :key="option.value"
-                                                                 class="text-sm"
-                                                                 :class="{ 'list-item-selected': executionRateFilter?.value === option.value }"
-                                                                 @click="setExecutionRateFilter(option)">
-                                                        <v-list-item-title>{{ option.label }}</v-list-item-title>
-                                                    </v-list-item>
-                                                </v-list-group>
-
-                                                <!-- 已花费筛选 -->
-                                                <v-list-group>
-                                                    <template #activator="{ props }">
-                                                        <v-list-item v-bind="props" :disabled="loading" :prepend-icon="mdiCashMinus">
-                                                            <v-list-item-title class="d-flex align-center justify-space-between">
-                                                                <span>{{ tt('Spent Amount') }}</span>
-                                                                <v-chip v-if="spentAmountFilterCents" size="x-small" color="primary" class="ms-2">
-                                                                    {{ getSpentFilterLabel() }}
-                                                                </v-chip>
-                                                            </v-list-item-title>
-                                                        </v-list-item>
-                                                    </template>
-                                                    <v-list-item class="text-sm"
-                                                                 :class="{ 'list-item-selected': !spentAmountFilterCents }"
-                                                                 @click="changeSpentFilter('')">
-                                                        <v-list-item-title>{{ tt('All') }}</v-list-item-title>
-                                                    </v-list-item>
-                                                    <template v-for="filterType in AmountFilterType.values()" :key="filterType.type">
-                                                        <v-list-item class="text-sm"
-                                                                     :class="{ 'list-item-selected': currentSpentFilterType === filterType.type }"
-                                                                     @click="onSpentFilterTypeClick(filterType.type)">
-                                                            <v-list-item-title class="d-flex align-center flex-wrap ga-2">
-                                                                <span>{{ tt(filterType.name) }}</span>
-                                                                <template v-if="currentSpentFilterType === filterType.type">
-                                                                    <amount-input class="budget-amount-filter-value" density="compact"
-                                                                                  :currency="defaultCurrency"
-                                                                                  v-model="currentSpentFilterValue1" />
-                                                                    <template v-if="filterType.paramCount === 2">
-                                                                        <span>~</span>
-                                                                        <amount-input class="budget-amount-filter-value" density="compact"
-                                                                                      :currency="defaultCurrency"
-                                                                                      v-model="currentSpentFilterValue2" />
-                                                                    </template>
-                                                                    <v-btn size="x-small" color="primary" variant="tonal"
-                                                                           @click.stop="changeSpentFilter(filterType.type)">
-                                                                        {{ tt('Apply') }}
-                                                                    </v-btn>
-                                                                </template>
-                                                            </v-list-item-title>
-                                                        </v-list-item>
-                                                    </template>
-                                                </v-list-group>
-
-                                                <!-- 总预算筛选 -->
-                                                <v-list-group>
-                                                    <template #activator="{ props }">
-                                                        <v-list-item v-bind="props" :disabled="loading" :prepend-icon="mdiCashPlus">
-                                                            <v-list-item-title class="d-flex align-center justify-space-between">
-                                                                <span>{{ tt('Budget Amount') }}</span>
-                                                                <v-chip v-if="budgetAmountFilterCents" size="x-small" color="primary" class="ms-2">
-                                                                    {{ getBudgetFilterLabel() }}
-                                                                </v-chip>
-                                                            </v-list-item-title>
-                                                        </v-list-item>
-                                                    </template>
-                                                    <v-list-item class="text-sm"
-                                                                 :class="{ 'list-item-selected': !budgetAmountFilterCents }"
-                                                                 @click="changeBudgetFilter('')">
-                                                        <v-list-item-title>{{ tt('All') }}</v-list-item-title>
-                                                    </v-list-item>
-                                                    <template v-for="filterType in AmountFilterType.values()" :key="filterType.type">
-                                                        <v-list-item class="text-sm"
-                                                                     :class="{ 'list-item-selected': currentBudgetFilterType === filterType.type }"
-                                                                     @click="onBudgetFilterTypeClick(filterType.type)">
-                                                            <v-list-item-title class="d-flex align-center flex-wrap ga-2">
-                                                                <span>{{ tt(filterType.name) }}</span>
-                                                                <template v-if="currentBudgetFilterType === filterType.type">
-                                                                    <amount-input class="budget-amount-filter-value" density="compact"
-                                                                                  :currency="defaultCurrency"
-                                                                                  v-model="currentBudgetFilterValue1" />
-                                                                    <template v-if="filterType.paramCount === 2">
-                                                                        <span>~</span>
-                                                                        <amount-input class="budget-amount-filter-value" density="compact"
-                                                                                      :currency="defaultCurrency"
-                                                                                      v-model="currentBudgetFilterValue2" />
-                                                                    </template>
-                                                                    <v-btn size="x-small" color="primary" variant="tonal"
-                                                                           @click.stop="changeBudgetFilter(filterType.type)">
-                                                                        {{ tt('Apply') }}
-                                                                    </v-btn>
-                                                                </template>
-                                                            </v-list-item-title>
-                                                        </v-list-item>
-                                                    </template>
-                                                </v-list-group>
-
-                                                <v-divider class="my-2" />
-
-                                                <!-- 清除所有筛选 -->
-                                                <v-list-item :prepend-icon="mdiFilterRemoveOutline"
-                                                             :title="tt('Clear All Filters')"
-                                                             :disabled="!hasActiveFilters"
-                                                             @click="clearAllFilters"></v-list-item>
-
-                                                <v-divider class="my-2" />
-
-                                                <!-- 筛选预设管理 -->
-                                                <v-list-group>
-                                                    <template #activator="{ props }">
-                                                        <v-list-item v-bind="props" :prepend-icon="mdiBookmarkOutline">
-                                                            <v-list-item-title>{{ tt('Filter Presets') }}</v-list-item-title>
-                                                        </v-list-item>
-                                                    </template>
-
-                                                    <!-- 保存当前筛选 -->
-                                                    <v-list-item @click="showSavePresetDialog = true" :disabled="!hasActiveFilters">
-                                                        <template #prepend>
-                                                            <v-icon :icon="mdiContentSaveOutline" size="20" class="ms-4" />
-                                                        </template>
-                                                        <v-list-item-title>{{ tt('Save Current Filters') }}</v-list-item-title>
-                                                    </v-list-item>
-
-                                                    <v-divider v-if="filterPresets.length > 0" class="my-1" />
-
-                                                    <!-- 预设列表 -->
-                                                    <v-list-item v-for="preset in filterPresets" :key="preset.id"
-                                                                 @click="loadPreset(preset)">
-                                                        <template #prepend>
-                                                            <v-icon :icon="mdiBookmark" size="20" class="ms-4" />
-                                                        </template>
-                                                        <v-list-item-title>{{ preset.name }}</v-list-item-title>
-                                                        <template #append>
-                                                            <v-btn icon size="x-small" variant="text"
-                                                                   @click.stop="deletePreset(preset.id)">
-                                                                <v-icon :icon="mdiClose" size="16" />
-                                                            </v-btn>
-                                                        </template>
-                                                    </v-list-item>
-
-                                                    <v-list-item v-if="filterPresets.length === 0" class="text-medium-emphasis">
-                                                        <template #prepend>
-                                                            <v-icon :icon="mdiInformationOutline" size="20" class="ms-4" />
-                                                        </template>
-                                                        <v-list-item-title class="text-body-2">{{ tt('No saved presets') }}</v-list-item-title>
-                                                    </v-list-item>
-                                                </v-list-group>
-                                                </v-list>
-                                            </v-menu>
-                                        </v-btn>
-                                    </div>
-                                </div>
-                            </template>
-
-                            <!-- 汇总信息行（在工具栏下方，参考统计分析页面的样式） -->
-                            <v-card-text v-if="currentExecution && activeViewMode === 'budget'" class="py-3 border-b budget-summary-row">
-                                <div class="d-flex align-center flex-wrap ga-6">
-                                    <div class="d-flex align-center">
-                                        <span class="budget-summary-label me-2">{{ tt('Total Budget') }}:</span>
-                                        <span class="budget-summary-amount text-expense">{{ formatAmount(filteredSummary.totalBudgetCents / 100) }}</span>
-                                    </div>
-                                    <div class="d-flex align-center">
-                                        <span class="budget-summary-label me-2">{{ tt('Total Spent') }}:</span>
-                                        <span class="budget-summary-amount text-income">{{ formatAmount(filteredSummary.totalSpentCents / 100) }}</span>
-                                    </div>
-                                    <div class="d-flex align-center">
-                                        <span class="budget-summary-label me-2">{{ tt('Overall Execution Rate') }}:</span>
-                                        <span class="budget-summary-amount" :class="getExecutionRateColorClass(filteredSummary.totalExecutionRate)">
-                                            {{ filteredSummary.totalExecutionRate.toFixed(1) }}%
-                                        </span>
-                                    </div>
-                                </div>
-                            </v-card-text>
-
-                            <v-window class="d-flex flex-grow-1 disable-tab-transition w-100-window-container" v-model="activeViewMode">
-                                <!-- 预算管理视图 -->
-                                <v-window-item value="budget">
-                                    <!-- 活动筛选器标签 -->
-                                    <v-card-text v-if="hasActiveFilters" class="py-2 border-b">
-                                        <div class="d-flex align-center flex-wrap ga-2">
-                                            <span class="text-body-2 text-medium-emphasis">{{ tt('Active Filters') }}:</span>
-                                            <v-chip v-if="categoryFilter" closable size="small" @click:close="categoryFilter = null">
-                                                {{ tt('Category') }}: {{ getCategoryFilterDisplayName() }}
-                                            </v-chip>
-                                            <v-chip v-if="accountFilter.length > 0" closable size="small" @click:close="accountFilter = []">
-                                                {{ tt('Account') }}: {{ getAccountFilterDisplayName() }}
-                                            </v-chip>
-                                            <v-chip v-if="tagFilter.length > 0" closable size="small" @click:close="tagFilter = []">
-                                                {{ tt('Tag') }}: {{ getTagFilterDisplayName() }}
-                                            </v-chip>
-                                            <v-chip v-if="executionRateFilter" closable size="small" @click:close="executionRateFilter = null">
-                                                {{ tt('Execution Rate') }}: {{ executionRateFilter.label }}
-                                            </v-chip>
-                                            <v-chip v-if="spentAmountFilterCents" closable size="small" @click:close="spentAmountFilterCents = ''">
-                                                {{ getSpentFilterDisplayName() }}
-                                            </v-chip>
-                                            <v-chip v-if="budgetAmountFilterCents" closable size="small" @click:close="budgetAmountFilterCents = ''">
-                                                {{ getBudgetFilterDisplayName() }}
-                                            </v-chip>
-                                        </div>
-                                    </v-card-text>
-
-                                    <budget-list-table
-                                        :loading="loading"
-                                        :updating="updating"
-                                        :is-dark-mode="isDarkMode"
-                                        :filtered-budgets="filteredBudgets"
-                                        :grouped-budgets="groupedBudgets"
-                                        :budget-removing="budgetRemoving"
-                                        :group-has-expanded-rows="groupHasExpandedRows"
-                                        :get-primary-budget-for-header="getPrimaryBudgetForHeader"
-                                        :get-expanded-primary-budgets="getExpandedPrimaryBudgets"
-                                        :get-budget-category-icon="getBudgetCategoryIcon"
-                                        :get-budget-category-color="getBudgetCategoryColor"
-                                        :get-group-execution-rate="getGroupExecutionRate"
-                                        :get-group-execution-rate-text="getGroupExecutionRateText"
-                                        :get-execution-rate-text-class="getExecutionRateTextClass"
-                                        :get-group-progress-color="getGroupProgressColor"
-                                        :get-budget-progress-color="getBudgetProgressColor"
-                                        :format-amount="formatAmount"
-                                        @toggle-category-collapse="toggleCategoryCollapse"
-                                        @add-primary-budget="addPrimaryBudget"
-                                        @edit="edit"
-                                        @remove="remove"
-                                        @navigate-to-transactions="navigateToTransactions"
-                                    />
-                                </v-window-item>
-
-                                <v-window-item value="history">
-                                    <budget-history-panel
-                                        ref="historicalChartRef"
-                                        :loading="loading"
-                                        :is-historical-history-ready="isHistoricalHistoryReady"
-                                        :can-show-historical-budget-panel="canShowHistoricalBudgetPanel"
-                                        :historical-chart-model="historicalChartModel"
-                                        :historical-chart-render-key="historicalChartRenderKey"
-                                        :historical-chart-options="historicalChartOptions"
-                                        :historical-chart-update-options="historicalChartUpdateOptions"
-                                        :historical-legend-groups="historicalLegendGroups"
-                                        :historical-budget-level="historicalBudgetLevel"
-                                        :historical-budget-groups="historicalBudgetGroups"
-                                        :visible-historical-budget-groups="visibleHistoricalBudgetGroups"
-                                        :selected-historical-period-key="selectedHistoricalPeriodKey"
-                                        :are-all-historical-groups-expanded="areAllHistoricalGroupsExpanded"
-                                        :historical-expanded-group-keys="historicalExpandedGroupKeys"
-                                        :is-dark-mode="isDarkMode"
-                                        :format-amount="formatAmount"
-                                        :get-execution-rate-color-class="getExecutionRateColorClass"
-                                        :get-execution-rate-text-class="getExecutionRateTextClass"
-                                        :get-progress-color-by-rate="getProgressColorByRate"
-                                        :is-historical-primary-collapsed="isHistoricalPrimaryCollapsed"
-                                        @update:historical-expanded-group-keys="historicalExpandedGroupKeys = $event"
-                                        @clear-selected-period="selectedHistoricalPeriodKey = null"
-                                        @toggle-all-historical-groups="toggleAllHistoricalGroups"
-                                        @toggle-historical-period-focus="toggleHistoricalPeriodFocus"
-                                        @toggle-historical-primary-legend="toggleHistoricalPrimaryLegend"
-                                        @toggle-historical-secondary-legend="toggleHistoricalSecondaryLegend"
-                                        @toggle-historical-primary-collapse="toggleHistoricalPrimaryCollapse"
-                                    />
-                                </v-window-item>
-
-                                <!-- 周期预计视图 -->
-                                <v-window-item value="forecast">
-                                    <budget-forecast-panel
-                                        :forecast-loading="forecastLoading"
-                                        :current-forecast="currentForecast"
-                                        :display-forecasts="displayForecasts"
-                                        :forecast-months-history="forecastMonthsHistory"
-                                        :forecast-risk-summary="forecastRiskSummary"
-                                        :format-amount="formatAmount"
-                                        :get-forecast-confidence-label="getForecastConfidenceLabel"
-                                        :get-forecast-confidence-class="getForecastConfidenceClass"
-                                    />
-                                </v-window-item>
-                            </v-window>
-                        </v-card>
-                    </v-main>
-                </v-layout>
-            </v-card>
-        </v-col>
-    </v-row>
-
-    <!-- 编辑对话框 -->
-    <edit-dialog ref="editDialog" @budget:saved="onBudgetSaved" />
-
-    <!-- 确认对话框 -->
-    <confirm-dialog ref="confirmDialog"/>
-    <snack-bar ref="snackbar" />
-
-    <!-- 筛选账户对话框 -->
-    <v-dialog width="800" v-model="showFilterAccountDialog">
-        <account-filter-settings-card type="statisticsCurrent" :dialog-mode="true"
-            @settings:change="setAccountFilter" />
-    </v-dialog>
-
-    <!-- 筛选标签对话框 -->
-    <v-dialog width="800" v-model="showFilterTagDialog">
-        <transaction-tag-filter-settings-card type="statisticsCurrent" :dialog-mode="true"
-            @settings:change="setTagFilter" />
-    </v-dialog>
-
-    <!-- 筛选分类对话框 -->
-    <v-dialog width="800" v-model="showFilterCategoryDialog">
-        <category-filter-settings-card type="statisticsCurrent" :dialog-mode="true"
-            :category-types="allowedCategoryTypes"
-            @settings:change="onCategoryFilterDialogChange" />
-    </v-dialog>
-
-    <!-- 自定义日期范围对话框 - 使用日期范围选择对话框组件 -->
-    <date-range-selection-dialog
-        :title="tt('Select Custom Date Range')"
-        :min-time="customMinDatetime"
-        :max-time="customMaxDatetime"
-        v-model:show="showCustomDateDialog"
-        @dateRange:change="onCustomDateRangeChange"
-        @error="onDateRangeError"
-    />
-
-    <date-range-selection-dialog
-        :title="tt('Select Custom Date Range')"
-        :min-time="historicalMinDatetime"
-        :max-time="historicalMaxDatetime"
-        v-model:show="showHistoricalDateDialog"
-        @dateRange:change="onHistoricalDateRangeChange"
-        @error="onDateRangeError"
-    />
-
-    <!-- 保存筛选预设对话框 -->
-    <v-dialog v-model="showSavePresetDialog" max-width="400">
-        <v-card>
-            <v-card-title>{{ tt('Save Filter Preset') }}</v-card-title>
-            <v-card-text>
-                <v-text-field
-                    v-model="presetName"
-                    :label="tt('Preset Name')"
-                    variant="outlined"
-                    autofocus
-                    @keyup.enter="savePreset"
-                />
-            </v-card-text>
-            <v-card-actions>
-                <v-spacer />
-                <v-btn @click="showSavePresetDialog = false">{{ tt('Cancel') }}</v-btn>
-                <v-btn color="primary" @click="savePreset" :disabled="!presetName.trim()">{{ tt('Save') }}</v-btn>
-            </v-card-actions>
-        </v-card>
-    </v-dialog>
-
-    <budget-forecast-settings-dialog
-        v-model="showForecastSettingsDialog"
-        :loading="loading"
-        :forecast-loading="forecastLoading"
-        :forecast-sort-options="forecastSortOptions"
-        :forecast-strategies="forecastStrategies"
-        :history-period-options="historyPeriodOptions"
-        :forecast-sort-by="forecastSortBy"
-        :forecast-strategy="forecastStrategy"
-        :forecast-months-history="forecastMonthsHistory"
-        @update:forecast-sort-by="forecastSortBy = $event"
-        @update:forecast-strategy="forecastStrategy = $event"
-        @update:forecast-months-history="forecastMonthsHistory = $event"
-    />
-</template>
+<template src="./list/ListPage.template.html"></template>
 
 <script setup lang="ts">
+import { useExternalTemplateBindings } from '@/lib/vue_external_template.ts';
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 import BtnHorizontalGroup from '@/components/desktop/BtnHorizontalGroup.vue';
@@ -686,6 +44,41 @@ import {
     toBudgetRelativePeriodFilter,
     type BudgetRelativePeriodScope
 } from './periodFilters.ts';
+import {
+    type BudgetViewMode,
+    type FilterPreset,
+    type PeriodFilter,
+    type RangeFilter,
+    isBudgetViewMode
+} from './list/ListPage.types.ts';
+import {
+    getAmountFilterParameterCount,
+    isDateInRange,
+    matchAmountFilterCents,
+    parseAmountFilterCents
+} from './list/budgetAmountFilters.ts';
+import {
+    HISTORICAL_FISCAL_YEAR,
+    type HistoricalAggregationType,
+    type HistoricalPeriodRange,
+    addMonths,
+    buildBudgetHistoryRequestSignature,
+    isValidHistoricalUnixTime,
+    normalizeHistoryAmountCents,
+    parseDateOnly
+} from './list/budgetHistoryPeriods.ts';
+import {
+    CATEGORY_CHART_PALETTE,
+    getExecutionRateColor,
+    getExecutionRateColorClass,
+    getExecutionRateTextClass,
+    getForecastConfidenceClass,
+    getForecastConfidenceLabel,
+    getProgressColorByRate,
+    normalizeCategoryColor,
+    toCssCategoryColor,
+    formatAmount
+} from './list/budgetPresentation.ts';
 
 import { ref, computed, useTemplateRef, watch, onMounted, nextTick } from 'vue';
 import { useDisplay, useTheme } from 'vuetify';
@@ -762,29 +155,6 @@ interface ResizableChartComponent {
         resize?: () => void;
     };
 }
-
-interface PeriodFilter {
-    name: string;
-    value: string;
-}
-
-interface RangeFilter {
-    label: string;
-    value: string;
-    min?: number;
-    max?: number;
-}
-
-type BudgetViewMode = 'budget' | 'forecast' | 'history';
-
-function isBudgetViewMode(value: string): value is BudgetViewMode {
-    return value === 'budget' || value === 'forecast' || value === 'history';
-}
-
-const CATEGORY_CHART_PALETTE = [
-    '#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de',
-    '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc', '#48b8d0'
-];
 
 // ============================================================================
 // 属性
@@ -887,17 +257,6 @@ const showForecastSettingsDialog = ref<boolean>(false);
 // 筛选预设
 const showSavePresetDialog = ref<boolean>(false);
 const presetName = ref<string>('');
-
-interface FilterPreset {
-    id: string;
-    name: string;
-    categoryFilter: string | null;
-    accountFilter: string[];
-    tagFilter: string[];
-    executionRateFilter: RangeFilter | null;
-    spentAmountFilterCents: string;
-    budgetAmountFilterCents: string;
-}
 
 const filterPresets = ref<FilterPreset[]>([]);
 
@@ -1182,15 +541,6 @@ function getExpandedPrimaryBudgets(group: BudgetGroup): Budget[] {
     return group.primaryBudgets.length > 1 ? group.primaryBudgets : [];
 }
 
-function normalizeCategoryColor(color: string | null | undefined): string {
-    return String(color || '').trim().replace(/^#/, '');
-}
-
-function toCssCategoryColor(color: string | null | undefined): string {
-    const normalizedColor = normalizeCategoryColor(color);
-    return normalizedColor ? `#${normalizedColor}` : '';
-}
-
 function getBudgetCategoryIcon(budget: Budget, group: BudgetGroup): string {
     return budget.categoryIcon || group.categoryIcon;
 }
@@ -1372,19 +722,9 @@ const filteredSummary = computed(() => {
     };
 });
 
-type HistoricalAggregationType = BudgetPeriodType | 'fiscal_year';
-
-interface HistoricalPeriodRange {
-    key: string;
-    label: string;
-    startDate: string;
-    endDate: string;
-}
-
 /**
  * 往期预算趋势数据（一级分类）
  */
-const HISTORICAL_FISCAL_YEAR = 'fiscal_year' as const;
 const historicalAggregationType = ref<HistoricalAggregationType>(BudgetPeriodType.Monthly);
 const historyAggregationButtons = computed(() => [
     { name: tt('Monthly'), value: BudgetPeriodType.Monthly },
@@ -1415,28 +755,6 @@ const fiscalYearStartValue = computed<number>(() => userStore.currentUserFiscalY
 const fiscalYearStartInfo = computed(() => {
     return FiscalYearStart.valueOf(fiscalYearStartValue.value) || FiscalYearStart.Default;
 });
-
-function parseDateOnly(text: string): Date | null {
-    if (!text) {
-        return null;
-    }
-
-    const parsed = new Date(`${text}T00:00:00`);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function normalizeHistoryAmountCents(value: number): number {
-    const amount = Number(value);
-    return Number.isFinite(amount) ? Math.max(0, amount) : 0;
-}
-
-function addMonths(sourceDate: Date, months: number): Date {
-    return new Date(sourceDate.getFullYear(), sourceDate.getMonth() + months, 1);
-}
-
-function isValidHistoricalUnixTime(value: number): boolean {
-    return Number.isFinite(value) && value > 0;
-}
 
 function getDefaultHistoricalDateRange(): { dateType: number; minTime: number; maxTime: number } | null {
     return getDateRangeByDateType(
@@ -1489,21 +807,6 @@ function getHistoricalRequestPeriodType(): BudgetPeriodType {
     return historicalAggregationType.value === HISTORICAL_FISCAL_YEAR
         ? BudgetPeriodType.Yearly
         : historicalAggregationType.value;
-}
-
-function buildBudgetHistoryRequestSignature(req: BudgetHistoryRequest): string {
-    return JSON.stringify({
-        type: req.type ?? null,
-        periodType: req.periodType ?? null,
-        year: req.year ?? null,
-        month: req.month ?? null,
-        quarter: req.quarter ?? null,
-        startDate: req.startDate ?? null,
-        endDate: req.endDate ?? null,
-        categoryId: req.categoryId ?? null,
-        accountIds: req.accountIds ?? [],
-        tagIds: req.tagIds ?? []
-    });
 }
 
 const activeHistoricalHistoryRequestSignature = computed<string>(() => {
@@ -2324,74 +1627,8 @@ function filterByPeriod(budgets: Budget[]): Budget[] {
     }
 }
 
-/**
- * 检查预算是否在日期范围内
- */
-function isDateInRange(budget: Budget, startDate: Date, endDate: Date): boolean {
-    if (!budget.startDate || !budget.endDate) return true;
-    const budgetStart = new Date(budget.startDate);
-    const budgetEnd = new Date(budget.endDate);
-    // 预算周期与筛选范围有交集即可
-    return budgetStart <= endDate && budgetEnd >= startDate;
-}
-
-/**
- * 解析金额筛选字符串，filterType 后的金额值均为整数分。
- * 格式: 'filterType:value1Cents' 或 'filterType:value1Cents:value2Cents'
- */
-function parseAmountFilterCents(filter: string): { type: string; value1Cents: number; value2Cents?: number } | null {
-    if (!filter) return null;
-    const parts = filter.split(':');
-    if (parts.length < 2) return null;
-
-    const type = parts[0] || '';
-    const value1Str = parts[1] || '';
-    const value1Cents = parseInt(value1Str, 10);
-
-    if (!Number.isInteger(value1Cents)) return null;
-
-    if (parts.length >= 3) {
-        const value2Str = parts[2] || '';
-        const value2Cents = parseInt(value2Str, 10);
-        if (!Number.isInteger(value2Cents)) return null;
-        return { type, value1Cents, value2Cents };
-    }
-
-    return { type, value1Cents };
-}
-
-/**
- * 匹配金额筛选条件
- */
-function matchAmountFilterCents(amountCents: number, filter: { type: string; value1Cents: number; value2Cents?: number }): boolean {
-    switch (filter.type) {
-        case 'gt': // Greater than
-            return amountCents > filter.value1Cents;
-        case 'lt': // Less than
-            return amountCents < filter.value1Cents;
-        case 'eq': // Equal to
-            return amountCents === filter.value1Cents;
-        case 'ne': // Not equal to
-            return amountCents !== filter.value1Cents;
-        case 'bt': // Between
-            return filter.value2Cents !== undefined && amountCents >= filter.value1Cents && amountCents <= filter.value2Cents;
-        case 'nb': // Not between
-            return filter.value2Cents !== undefined && (amountCents < filter.value1Cents || amountCents > filter.value2Cents);
-        default:
-            return true;
-    }
-}
-
 function formatFilterAmountCents(amountCents: number): string {
     return formatAmountToLocalizedNumeralsWithCurrency(amountCents, defaultCurrency.value);
-}
-
-/**
- * 获取金额筛选参数个数
- */
-function getAmountFilterParameterCount(filterType: string): number {
-    const filterTypeObj = AmountFilterType.valueOf(filterType);
-    return filterTypeObj ? filterTypeObj.paramCount : 0;
 }
 
 /**
@@ -2768,16 +2005,6 @@ function setExecutionRateFilter(option: RangeFilter | null): void {
 }
 
 /**
- * 获取执行率颜色
- */
-function getExecutionRateColor(rate: number): string {
-    if (rate >= 100) return 'error';
-    if (rate >= 80) return 'warning';
-    if (rate >= 50) return 'info';
-    return 'success';
-}
-
-/**
  * 获取预算进度条颜色（优先使用分类颜色，否则使用执行率颜色）
  */
 function getBudgetProgressColor(budget: Budget): string {
@@ -2815,10 +2042,6 @@ function getGroupProgressColor(group: BudgetGroup): string {
     return getExecutionRateColor(getGroupExecutionRate(group));
 }
 
-function getProgressColorByRate(rate: number): string {
-    return getExecutionRateColor(rate);
-}
-
 function toggleHistoricalPeriodFocus(periodKey: string): void {
     if (selectedHistoricalPeriodKey.value === periodKey) {
         selectedHistoricalPeriodKey.value = null;
@@ -2826,26 +2049,6 @@ function toggleHistoricalPeriodFocus(periodKey: string): void {
     }
     selectedHistoricalPeriodKey.value = periodKey;
     historicalExpandedGroupKeys.value = [periodKey];
-}
-
-/**
- * 获取执行率文本样式类
- */
-function getExecutionRateTextClass(rate: number): string {
-    // 使用黑色显示百分比，超支时显示红色
-    if (rate >= 100) return 'text-error';
-    return 'text-default';  // 黑色/默认色
-}
-
-/**
- * 获取执行率颜色类（用于汇总行，按阈值着色）
- * 50以下绿色，50-80黄色，80-100橙色，100以上红色
- */
-function getExecutionRateColorClass(rate: number): string {
-    if (rate >= 100) return 'text-error';          // 红色 - 超支
-    if (rate >= 80) return 'text-warning';         // 橙色 - 接近超支
-    if (rate >= 50) return 'text-orange';          // 黄色 - 中等使用
-    return 'text-success';                         // 绿色 - 低使用
 }
 
 /**
@@ -2887,41 +2090,6 @@ function getGroupExecutionRate(group: BudgetGroup): number {
 function getGroupExecutionRateText(group: BudgetGroup): string {
     const rate = getGroupExecutionRate(group);
     return rate.toFixed(1) + '%';
-}
-
-/**
- * 获取预测置信等级文案键
- */
-function getForecastConfidenceLabel(confidence?: 'high' | 'medium' | 'low' | null): string {
-    switch (confidence) {
-        case 'high':
-            return 'High Confidence';
-        case 'medium':
-            return 'Medium Confidence';
-        default:
-            return 'Low Confidence';
-    }
-}
-
-/**
- * 获取预测置信等级颜色
- */
-function getForecastConfidenceClass(confidence?: 'high' | 'medium' | 'low' | null): string {
-    switch (confidence) {
-        case 'high':
-            return 'text-success';
-        case 'medium':
-            return 'text-warning';
-        default:
-            return 'text-error';
-    }
-}
-
-/**
- * 格式化金额
- */
-function formatAmount(amount: number): string {
-    return '¥' + amount.toFixed(2);
 }
 
 /**
@@ -3373,121 +2541,7 @@ watch(filterKeyword, (newVal) => {
     // 实时搜索
     searchKeyword.value = newVal;
 });
+useExternalTemplateBindings(accountFilter, AccountFilterSettingsCard, accountsStore, activeBudgetPeriodType, activeBudgetRelativeScope, activeBudgetType, activeHistoricalAggregationType, activeHistoricalHistoryRequestSignature, activePeriodFilter, activePeriodFilterIndex, activeViewMode, add, addMonths, addPrimaryBudget, allAccounts, allBudgets, allCategoriesMap, allHistoricalDateRanges, allowedCategoryTypes, allTransactionTags, alwaysShowNav, AmountFilterType, AmountInput, areAllHistoricalGroupsExpanded, BtnHorizontalGroup, BtnVerticalGroup, Budget, budgetAmountFilterCents, BudgetForecastPanel, BudgetForecastSettingsDialog, BudgetForecastStrategy, BudgetHistoryPanel, BudgetListTable, BudgetPeriodType, budgetPeriodTypeButtons, budgetPrimaryCategories, budgetRemoving, budgetStore, BudgetType, buildBudgetDrilldownRouteQuery, buildBudgetForecastLoadRequest, buildBudgetHistoryRequestSignature, buildFiscalYearPeriod, buildHistoricalAggregationPeriods, buildHistoricalBudgetPeriodGroups, buildHistoricalPolarChartModel, buildHistoricalPolarChartOption, buildHistoricalPrimaryCollapseKey, canShiftHistoricalDateRange, canShowHistoricalBudgetPanel, canShowHistoricalCustomDateRange, CATEGORY_CHART_PALETTE, categoryFilter, CategoryFilterSettingsCard, CategoryType, changeBudgetFilter, changeSpentFilter, clearAllFilters, collapsedCategories, computed, confirmDialog, ConfirmDialog, createHistoricalLabelAnimationState, currentBudgetFilterType, currentBudgetFilterValue1, currentBudgetFilterValue2, currentCategoryType, currentExecution, currentForecast, currentHistory, currentHistoryRequestSignature, currentSpentFilterType, currentSpentFilterValue1, currentSpentFilterValue2, currentViewTitle, customEndDate, customMaxDatetime, customMinDatetime, customStartDate, DateRange, DateRangeScene, DateRangeSelectionDialog, defaultCurrency, deletePreset, display, displayForecasts, edit, editDialog, EditDialog, ensureHistoricalDateRangeInitialized, executionRateFilter, executionRateOptions, exportBudgets, fileInput, filterAndSortForecasts, filterByPeriod, filteredBudgets, filteredHistoricalItems, filteredSummary, filterHistoricalBudgetItemsByType, filterKeyword, filterPresets, firstDayOfWeek, FiscalYearStart, fiscalYearStartInfo, fiscalYearStartValue, forecastLoading, forecastMonthsHistory, forecastOnlyLowConfidence, forecastOnlyOverBudget, forecastPeriodFilters, forecastRiskSummary, forecastSortBy, forecastSortOptions, forecastStrategies, forecastStrategy, formatAmount, formatDateOnly, formatFilterAmountCents, getAccountFilterDisplayName, getAmountFilterParameterCount, getBudgetCategoryColor, getBudgetCategoryIcon, getBudgetDrilldownDateRange, getBudgetFilterDisplayName, getBudgetFilterLabel, getBudgetPeriodTypeFromFilter, getBudgetProgressColor, getBudgetRelativeScopeFromFilter, getCategoryFilterDisplayName, getCurrentPeriodRequest, getCurrentPeriodType, getCurrentUnixTime, getDateRangeByDateType, getDateTypeByDateRange, getDefaultHistoricalDateRange, getExecutionRateColor, getExecutionRateColorClass, getExecutionRateTextClass, getExpandedPrimaryBudgets, getForecastConfidenceClass, getForecastConfidenceLabel, getGroupExecutionRate, getGroupExecutionRateText, getGroupProgressColor, getHistoricalBudgetQueryRange, getHistoricalDateRangeSnapshot, getHistoricalRequestPeriodType, getPrimaryBudgetForHeader, getProgressColorByRate, getShiftedDateRangeAndDateType, getSpentFilterDisplayName, getSpentFilterLabel, getTagFilterDisplayName, getTodayFirstUnixTime, groupedBudgets, groupHasExpandedRows, hasActiveFilters, HISTORICAL_CHART_RENDER_REVISION, HISTORICAL_FISCAL_YEAR, historicalAggregationType, historicalBudgetGroups, historicalBudgetLevel, historicalCategoryChartData, historicalCategoryMeta, historicalChartModel, historicalChartOptions, historicalChartRef, historicalChartRenderKey, historicalChartUpdateOptions, historicalCollapsedPrimaryKeys, historicalDateEndText, historicalDateRangeName, historicalDateStartText, historicalDateType, historicalExpandedGroupKeys, historicalLabelAnimationState, historicalLegendGroups, historicalLegendSelection, historicalLevelButtons, historicalMaxDatetime, historicalMinDatetime, historicalPeriods, historyAggregationButtons, historyPeriodOptions, importBudgets, isAllExpanded, isBudgetViewMode, isDarkApplicationTheme, isDarkMode, isDateInRange, isHistoricalHistoryReady, isHistoricalPrimaryCollapsed, isValidHistoricalUnixTime, loadBudgetHistoryForExpired, loadForecast, loadHistoricalBudgetView, loading, loadPreset, loadPresetsFromStorage, logger, matchAmountFilterCents, mdiArrowLeft, mdiArrowRight, mdiBookmark, mdiBookmarkOutline, mdiCashMinus, mdiCashPlus, mdiChartDonut, mdiCheck, mdiClose, mdiContentSaveOutline, mdiDotsVertical, mdiFilterRemoveOutline, mdiInformationOutline, mdiMagnify, mdiMenu, mdiRefresh, mdiShapeOutline, mdiTagOutline, mdiUnfoldLessHorizontal, mdiUnfoldMoreHorizontal, mdiWalletOutline, navigateToTransactions, nextTick, normalizeCategoryColor, normalizeHistoryAmountCents, onBudgetFilterTypeClick, onBudgetSaved, onCategoryFilterDialogChange, onCustomDateRangeChange, onDateRangeError, onFileSelected, onHistoricalDateRangeChange, onMounted, onSpentFilterTypeClick, parseAmountFilterCents, parseDateOnly, periodFilteredHistoricalItems, presetName, props, ref, reload, reloadRequestId, remove, resetHistoricalCategoryAnimationState, resetHistoricalLabelAnimationState, resolveHistoricalPeriodByDate, router, savePreset, savePresetsToStorage, scheduleHistoricalChartResize, searchKeyword, selectedHistoricalPeriodKey, setAccountFilter, setExecutionRateFilter, setHistoricalDateFilter, setKeywordFilter, setPeriodFilter, setTagFilter, settingsStore, shiftHistoricalDateRange, showCustomDateDialog, showFilterAccountDialog, showFilterCategoryDialog, showFilterTagDialog, showForecastSettingsDialog, showHistoricalDateDialog, showNav, showSavePresetDialog, snackbar, SnackBar, sortBy, sortDesc, sortedBudgets, spentAmountFilterCents, summarizeForecastRisks, switchBudgetType, switchViewMode, syncHistoricalLegendSelection, tagFilter, theme, toBudgetRelativePeriodFilter, toCssCategoryColor, toggleAllCategories, toggleAllHistoricalGroups, toggleCategoryCollapse, toggleHistoricalPeriodFocus, toggleHistoricalPrimaryCollapse, toggleHistoricalPrimaryLegend, toggleHistoricalPrimarySelection, toggleHistoricalSecondaryLegend, toggleHistoricalSecondarySelection, transactionCategoriesStore, TransactionCategory, TransactionTagFilterSettingsCard, transactionTagsStore, updating, useAccountsStore, useBudgetStore, useDisplay, useI18n, useRouter, userStore, useSettingsStore, useTemplateRef, useTheme, useTransactionCategoriesStore, useTransactionTagsStore, useUserStore, viewModeButtons, visibleHistoricalBudgetGroups, visiblePeriodFilters, watch);
 </script>
 
-<style scoped>
-.budget-keyword-filter {
-    min-width: 200px;
-    max-width: 300px;
-    flex: 0 1 300px;
-}
-
-.budget-right-tools {
-    flex: 0 0 auto;
-    margin-left: auto;
-}
-
-.budget-forecast-title-actions {
-    flex: 0 0 auto;
-}
-
-.budget-period-toolbar {
-    flex: 0 0 228px;
-    width: 228px;
-}
-
-.budget-period-toolbar :deep(.v-btn) {
-    text-transform: none;
-    letter-spacing: normal;
-}
-
-.budget-forecast-title-button {
-    flex: 0 0 112px;
-    width: 112px;
-    max-width: 112px;
-    height: 38px;
-    min-height: 38px;
-    padding-inline: 10px;
-    text-transform: none;
-    letter-spacing: normal;
-    white-space: nowrap;
-}
-
-.tab-text-truncate {
-    justify-content: flex-start;
-    padding-inline: 12px;
-}
-
-.tab-text-truncate .text-truncate {
-    width: 100%;
-    text-align: left;
-}
-
-.cursor-pointer {
-    cursor: pointer;
-}
-
-.list-item-selected {
-    background-color: rgba(var(--v-theme-primary), 0.1);
-}
-
-/* 导航栏按钮宽度统一（适应默认宽度256px） */
-.budget-nav-buttons {
-    width: 100%;
-}
-
-/* 使用深层穿透选择器作用到子组件 */
-.budget-nav-buttons:deep(.v-btn) {
-    width: 100%;
-}
-
-.budget-level-tabs :deep(.v-tab) {
-    justify-content: flex-start;
-}
-
-/* 水平按钮组样式 - 总宽度100%，每个按钮各占一半 */
-.budget-nav-buttons.btn-horizontal-group {
-    width: 100%;
-    display: flex;
-}
-
-.budget-nav-buttons.btn-horizontal-group:deep(.v-btn) {
-    flex: 1 1 0;
-    min-width: 0;
-    max-width: 50%;
-}
-
-/* 折叠/展开图标动画 */
-.toggle-icon {
-    transition: transform 0.3s ease-in-out;
-}
-
-/* 筛选菜单固定宽度 */
-.budget-filter-menu {
-    width: 320px;
-    min-width: 320px;
-    max-width: 320px;
-}
-
-/* 汇总行样式（参考统计分析页面） */
-.budget-summary-row {
-    background-color: transparent;
-}
-
-.budget-summary-label {
-    font-size: 1rem;
-    color: rgba(var(--v-theme-on-surface), 0.7);
-}
-
-.budget-summary-amount {
-    font-size: 1.5rem;
-    font-weight: bold;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-/* 执行率颜色 - 橙黄色(50-80%) */
-.text-orange {
-    color: rgb(226, 182, 10) !important;
-}
-</style>
+<style scoped src="./list/ListPage.css"></style>

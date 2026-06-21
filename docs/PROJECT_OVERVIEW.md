@@ -78,6 +78,8 @@ multipart 上传并行执行 dedicated parser 检测，每个文件必须且只�
 
 预算与统计后端当前以 facade + 功能子文件组织：`src/backend/db/budgets.rs` 聚合预算 DTO、payload normalization、execution/history helper 和 record helper 子文件，`src/backend/db/budgets/postgres_reads.rs` 聚合预算 PostgreSQL listing、mutation、import/export、execution、forecast、history、period sync、row mapping 和 value helper 子文件；`src/backend/db/statistics.rs` 聚合统计 category、asset/analyzer、exchange、range、loader 和 helper 子文件；`src/backend/core/statistics.rs` 聚合统计 range、category、asset、anomaly、calendar、breakdown、Analyzer、exchange 和通用 helper 子文件。该拆分不改变 REST 路由、PostgreSQL user-scope、预算 period 层级同步、统计 cents/minor units、汇率 fallback 或图表 response 合同。
 
+预算与统计前端当前以页面/store facade + 功能文件夹组织：桌面预算 `ListPage.vue` 保留页面装配入口，template/style、预算页类型、金额筛选、历史周期 helper 和展示 helper 下沉到 `views/desktop/budgets/list/**`；统计 `stores/statistics.ts` 保留 `useStatisticsStore` facade，统计筛选类型与页面/交易列表 query 构建下沉到 `stores/statistics/**`；桌面统计 `TransactionPage.vue` 保留页面装配入口，template/style 和统计/交易跳转链接构建下沉到 `views/desktop/statistics/transaction/**`；`consts/currency.ts` 保留 `ALL_CURRENCIES`、默认货币与父账户占位符 facade，ISO 4217 静态表按代码范围拆到 `consts/currency/**`。该拆分不改变预算筛选、历史图、预测面板、导入导出、统计日期/图表筛选、图表 drilldown、导出 dialog、currency code/symbol/fraction 或原 import 路径。
+
 ## 认证与备份
 
 认证运行态校验 Bearer access token 签名、过期时间和 PostgreSQL token session。登录、注册、邮箱验证、密码重置、refresh、logout、2FA、profile、cloud settings、external auth、user-data statistics/export/clear 直接读写 PostgreSQL 表。敏感动作通过当前密码、操作密码或签名 step-up token 校验，并写入认证或业务审计。

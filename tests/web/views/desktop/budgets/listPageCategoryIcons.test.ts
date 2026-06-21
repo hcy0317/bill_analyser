@@ -60,6 +60,15 @@ describe('desktop budget list page source contract', () => {
         'utf-8'
     );
 
+    const readBudgetPageDomainSource = () => [
+        'src/views/desktop/budgets/ListPage.vue',
+        'src/views/desktop/budgets/list/ListPage.template.html',
+        'src/views/desktop/budgets/list/ListPage.types.ts',
+        'src/views/desktop/budgets/list/budgetAmountFilters.ts',
+        'src/views/desktop/budgets/list/budgetHistoryPeriods.ts',
+        'src/views/desktop/budgets/list/budgetPresentation.ts'
+    ].map(sourcePath => fs.readFileSync(path.resolve(process.cwd(), sourcePath), 'utf-8')).join('\n');
+
     test('keeps the budget page facade wired to stores, dialogs, and helper modules', () => {
         const source = readListPageSource();
 
@@ -81,7 +90,7 @@ describe('desktop budget list page source contract', () => {
     });
 
     test('keeps reload, forecast, import/export, saved callback, delete, and drilldown actions attached', () => {
-        const source = readListPageSource();
+        const source = readBudgetPageDomainSource();
 
         [
             'async function reload(force: boolean): Promise<void>',

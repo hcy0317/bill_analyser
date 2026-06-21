@@ -10,7 +10,7 @@ import { useTransactionCategoriesStore } from './transactionCategory.ts';
 import { useExchangeRatesStore } from './exchangeRates.ts';
 
 import { entries, values } from '@/core/base.ts';
-import { type DateTime, type TextualYearMonth, type TimeRangeAndDateType, DateRange, DateRangeScene } from '@/core/datetime.ts';
+import { type DateTime, type TimeRangeAndDateType, DateRange, DateRangeScene } from '@/core/datetime.ts';
 import { TimezoneTypeForStatistics } from '@/core/timezone.ts';
 import { CategoryType } from '@/core/category.ts';
 import {
@@ -23,7 +23,6 @@ import {
     TrendChartType,
     ChartDataType,
     ChartSortingType,
-    ChartDateAggregationType,
     DEFAULT_CATEGORICAL_CHART_DATA_RANGE,
     DEFAULT_TREND_CHART_DATA_RANGE,
     DEFAULT_ASSET_TRENDS_CHART_DATA_RANGE
@@ -41,7 +40,6 @@ import {
     type TransactionStatisticResponseWithInfo,
     type TransactionStatisticTrendsResponseItemWithInfo,
     type TransactionStatisticAssetTrendsResponseItemWithInfo,
-    type TransactionStatisticDataItemType,
     type TransactionStatisticDataItemBase,
     type TransactionCategoricalOverviewAnalysisData,
     type TransactionCategoricalOverviewAnalysisDataItem,
@@ -49,7 +47,6 @@ import {
     type TransactionCategoricalAnalysisDataItem,
     type TransactionTrendsAnalysisData,
     type TransactionTrendsAnalysisDataItem,
-    type TransactionTrendsAnalysisDataAmount,
     type TransactionAssetTrendsAnalysisData,
     type TransactionAssetTrendsAnalysisDataItem,
     type TransactionAssetTrendsAnalysisDataAmount,
@@ -63,9 +60,7 @@ import {
     isObject,
     isInteger,
     isYearMonth,
-    isYearMonthEquals,
-    isObjectEmpty,
-    objectFieldToArrayItem
+    isYearMonthEquals
 } from '@/lib/common.ts';
 import {
     getYearMonthDayDateTime,
@@ -73,98 +68,26 @@ import {
     getDayDifference,
     getDateRangeByDateType
 } from '@/lib/datetime.ts';
-import { getFinalAccountIdsByFilteredAccountIds } from '@/lib/account.ts';
-import { getFinalCategoryIdsByFilteredCategoryIds } from '@/lib/category.ts';
 import { sortStatisticsItems } from '@/lib/statistics.ts';
 import logger from '@/lib/logger.ts';
 import services from '@/lib/services.ts';
+import type {
+    TransactionStatisticsFilter,
+    TransactionStatisticsPartialFilter,
+    WritableTransactionAssetTrendsAnalysisDataItem,
+    WritableTransactionCategoricalAnalysisData,
+    WritableTransactionCategoricalAnalysisDataItem,
+    WritableTransactionTrendsAnalysisDataItem
+} from './statistics/types.ts';
+import {
+    buildTransactionListPageParams,
+    buildTransactionStatisticsPageParams
+} from './statistics/pageParams.ts';
 
-interface WritableTransactionCategoricalAnalysisData {
-    totalAmountCents: number;
-    totalNonNegativeAmountCents: number;
-    items: Record<string, WritableTransactionCategoricalAnalysisDataItem>;
-}
-
-interface WritableTransactionCategoricalAnalysisDataItem extends Record<string, unknown> {
-    name: string;
-    type: TransactionStatisticDataItemType;
-    id: string;
-    icon: string;
-    color: string;
-    hidden: boolean;
-    displayOrders: number[];
-    totalAmountCents: number;
-    percent?: number;
-}
-
-interface WritableTransactionTrendsAnalysisDataItem extends Record<string, unknown>, TransactionTrendsAnalysisDataItem {
-    name: string;
-    type: TransactionStatisticDataItemType;
-    id: string;
-    icon: string;
-    color: string;
-    hidden: boolean;
-    displayOrders: number[];
-    totalAmountCents: number;
-    items: TransactionTrendsAnalysisDataAmount[];
-}
-
-interface WritableTransactionAssetTrendsAnalysisDataItem extends Record<string, unknown>, TransactionAssetTrendsAnalysisDataItem {
-    name: string;
-    type: TransactionStatisticDataItemType;
-    id: string;
-    icon: string;
-    color: string;
-    hidden: boolean;
-    displayOrders: number[];
-    totalAmountCents: number;
-    totalOpeningAmountCents?: number;
-    items: TransactionAssetTrendsAnalysisDataAmount[];
-}
-
-export interface TransactionStatisticsPartialFilter {
-    chartDataType?: number;
-    categoricalChartType?: number;
-    categoricalChartDateType?: number;
-    categoricalChartStartTime?: number;
-    categoricalChartEndTime?: number;
-    trendChartType?: number;
-    trendChartDateType?: number;
-    trendChartStartYearMonth?: TextualYearMonth | '';
-    trendChartEndYearMonth?: TextualYearMonth | '';
-    assetTrendsChartType?: number;
-    assetTrendsChartDateType?: number;
-    assetTrendsChartStartTime?: number;
-    assetTrendsChartEndTime?: number;
-    filterAccountIds?: Record<string, boolean>;
-    filterCategoryIds?: Record<string, boolean>;
-    tagIds?: string;
-    tagFilterType?: number;
-    keyword?: string;
-    sortingType?: number;
-}
-
-export interface TransactionStatisticsFilter extends TransactionStatisticsPartialFilter {
-    chartDataType: number;
-    categoricalChartType: number;
-    categoricalChartDateType: number;
-    categoricalChartStartTime: number;
-    categoricalChartEndTime: number;
-    trendChartType: number;
-    trendChartDateType: number;
-    trendChartStartYearMonth: TextualYearMonth | '';
-    trendChartEndYearMonth: TextualYearMonth | '';
-    assetTrendsChartType: number;
-    assetTrendsChartDateType: number;
-    assetTrendsChartStartTime: number;
-    assetTrendsChartEndTime: number;
-    filterAccountIds: Record<string, boolean>;
-    filterCategoryIds: Record<string, boolean>;
-    tagIds: string;
-    tagFilterType: number;
-    keyword: string;
-    sortingType: number;
-}
+export type {
+    TransactionStatisticsFilter,
+    TransactionStatisticsPartialFilter
+} from './statistics/types.ts';
 
 export const useStatisticsStore = defineStore('statistics', () => {
     const { tt } = useI18n();
@@ -1716,196 +1639,23 @@ export const useStatisticsStore = defineStore('statistics', () => {
     }
 
     function getTransactionStatisticsPageParams(analysisType: StatisticsAnalysisType, trendDateAggregationType: number, assetTrendsDateAggregationType: number): string {
-        const querys: string[] = [];
-
-        querys.push('analysisType=' + analysisType);
-        querys.push('chartDataType=' + transactionStatisticsFilter.value.chartDataType);
-
-        if (analysisType === StatisticsAnalysisType.CategoricalAnalysis) {
-            querys.push('chartType=' + transactionStatisticsFilter.value.categoricalChartType);
-            querys.push('chartDateType=' + transactionStatisticsFilter.value.categoricalChartDateType);
-
-            if (transactionStatisticsFilter.value.categoricalChartDateType === DateRange.Custom.type) {
-                querys.push('startTime=' + transactionStatisticsFilter.value.categoricalChartStartTime);
-                querys.push('endTime=' + transactionStatisticsFilter.value.categoricalChartEndTime);
-            }
-        } else if (analysisType === StatisticsAnalysisType.TrendAnalysis) {
-            querys.push('chartType=' + transactionStatisticsFilter.value.trendChartType);
-            querys.push('chartDateType=' + transactionStatisticsFilter.value.trendChartDateType);
-
-            if (transactionStatisticsFilter.value.trendChartDateType === DateRange.Custom.type) {
-                querys.push('startTime=' + transactionStatisticsFilter.value.trendChartStartYearMonth);
-                querys.push('endTime=' + transactionStatisticsFilter.value.trendChartEndYearMonth);
-            }
-
-            if (trendDateAggregationType !== ChartDateAggregationType.Default.type) {
-                querys.push('trendDateAggregationType=' + trendDateAggregationType);
-            }
-        } else if (analysisType === StatisticsAnalysisType.AssetTrends) {
-            querys.push('chartType=' + transactionStatisticsFilter.value.assetTrendsChartType);
-            querys.push('chartDateType=' + transactionStatisticsFilter.value.assetTrendsChartDateType);
-
-            if (transactionStatisticsFilter.value.assetTrendsChartDateType === DateRange.Custom.type) {
-                querys.push('startTime=' + transactionStatisticsFilter.value.assetTrendsChartStartTime);
-                querys.push('endTime=' + transactionStatisticsFilter.value.assetTrendsChartEndTime);
-            }
-
-            if (assetTrendsDateAggregationType !== ChartDateAggregationType.Default.type) {
-                querys.push('assetTrendsDateAggregationType=' + assetTrendsDateAggregationType);
-            }
-        }
-
-        if (transactionStatisticsFilter.value.filterAccountIds) {
-            const ids = objectFieldToArrayItem(transactionStatisticsFilter.value.filterAccountIds);
-
-            if (ids && ids.length) {
-                querys.push('filterAccountIds=' + ids.join(','));
-            }
-        }
-
-        if (transactionStatisticsFilter.value.filterCategoryIds) {
-            const ids = objectFieldToArrayItem(transactionStatisticsFilter.value.filterCategoryIds);
-
-            if (ids && ids.length) {
-                querys.push('filterCategoryIds=' + ids.join(','));
-            }
-        }
-
-        if (transactionStatisticsFilter.value.tagIds) {
-            querys.push('tagIds=' + transactionStatisticsFilter.value.tagIds);
-        }
-
-        if (transactionStatisticsFilter.value.tagFilterType) {
-            querys.push('tagFilterType=' + transactionStatisticsFilter.value.tagFilterType);
-        }
-
-        if (transactionStatisticsFilter.value.keyword) {
-            querys.push('keyword=' + encodeURIComponent(transactionStatisticsFilter.value.keyword));
-        }
-
-        querys.push('sortingType=' + transactionStatisticsFilter.value.sortingType);
-
-        return querys.join('&');
+        return buildTransactionStatisticsPageParams(
+            transactionStatisticsFilter.value,
+            analysisType,
+            trendDateAggregationType,
+            assetTrendsDateAggregationType
+        );
     }
 
     function getTransactionListPageParams(analysisType: StatisticsAnalysisType, itemId: string, dateRange?: TimeRangeAndDateType): string {
-        const querys: string[] = [];
-
-        if (transactionStatisticsFilter.value.chartDataType === ChartDataType.IncomeByAccount.type
-            || transactionStatisticsFilter.value.chartDataType === ChartDataType.IncomeByPrimaryCategory.type
-            || transactionStatisticsFilter.value.chartDataType === ChartDataType.IncomeBySecondaryCategory.type
-            || transactionStatisticsFilter.value.chartDataType === ChartDataType.TotalIncome.type) {
-            querys.push('type=2');
-        } else if (transactionStatisticsFilter.value.chartDataType === ChartDataType.ExpenseByAccount.type
-            || transactionStatisticsFilter.value.chartDataType === ChartDataType.ExpenseByPrimaryCategory.type
-            || transactionStatisticsFilter.value.chartDataType === ChartDataType.ExpenseBySecondaryCategory.type
-            || transactionStatisticsFilter.value.chartDataType === ChartDataType.TotalExpense.type) {
-            querys.push('type=3');
-        }
-
-        if (itemId && transactionStatisticsFilter.value.chartDataType === ChartDataType.Overview.type) {
-            const items = itemId.split('-');
-            const sourceItems = (items[0] || '').split(':');
-            const queryAccountIds: string[] = [];
-            const queryCategoryIds: string[] = [];
-
-            if (sourceItems.length === 2) {
-                if (sourceItems[0] === 'account') {
-                    queryAccountIds.push(sourceItems[1] as string);
-                } else if (sourceItems[0] === 'category') {
-                    queryCategoryIds.push(sourceItems[1] as string);
-                }
-            }
-
-            if (items.length === 2) {
-                const targetItems = (items[1] || '').split(':');
-
-                if (targetItems.length === 2) {
-                    if (targetItems[0] === 'account') {
-                        queryAccountIds.push(targetItems[1] as string);
-                    } else if (targetItems[0] === 'category') {
-                        queryCategoryIds.push(targetItems[1] as string);
-                    }
-                }
-            }
-
-            if (queryAccountIds.length) {
-                if (queryAccountIds.length === 2) {
-                    querys.push('type=4');
-                }
-
-                querys.push('accountIds=' + queryAccountIds.join(','));
-            } else {
-                querys.push('accountIds=' + getFinalAccountIdsByFilteredAccountIds(accountsStore.allAccountsMap, transactionStatisticsFilter.value.filterAccountIds));
-            }
-
-            if (queryCategoryIds.length) {
-                querys.push('categoryIds=' + queryCategoryIds.join(','));
-            } else {
-                querys.push('categoryIds=' + getFinalCategoryIdsByFilteredCategoryIds(transactionCategoriesStore.allTransactionCategoriesMap, transactionStatisticsFilter.value.filterCategoryIds));
-            }
-        } else if (itemId && (transactionStatisticsFilter.value.chartDataType === ChartDataType.InflowsByAccount.type ||
-            transactionStatisticsFilter.value.chartDataType === ChartDataType.IncomeByAccount.type ||
-            transactionStatisticsFilter.value.chartDataType === ChartDataType.OutflowsByAccount.type ||
-            transactionStatisticsFilter.value.chartDataType === ChartDataType.ExpenseByAccount.type ||
-            transactionStatisticsFilter.value.chartDataType === ChartDataType.AccountTotalAssets.type ||
-            transactionStatisticsFilter.value.chartDataType === ChartDataType.AccountTotalLiabilities.type)
-        ) {
-            querys.push('accountIds=' + itemId);
-
-            if ((analysisType === StatisticsAnalysisType.CategoricalAnalysis || analysisType === StatisticsAnalysisType.TrendAnalysis) && !isObjectEmpty(transactionStatisticsFilter.value.filterCategoryIds)) {
-                querys.push('categoryIds=' + getFinalCategoryIdsByFilteredCategoryIds(transactionCategoriesStore.allTransactionCategoriesMap, transactionStatisticsFilter.value.filterCategoryIds));
-            }
-        } else if (itemId && (transactionStatisticsFilter.value.chartDataType === ChartDataType.IncomeByPrimaryCategory.type ||
-            transactionStatisticsFilter.value.chartDataType === ChartDataType.IncomeBySecondaryCategory.type ||
-            transactionStatisticsFilter.value.chartDataType === ChartDataType.ExpenseByPrimaryCategory.type ||
-            transactionStatisticsFilter.value.chartDataType === ChartDataType.ExpenseBySecondaryCategory.type)
-        ) {
-            querys.push('categoryIds=' + itemId);
-
-            if (!isObjectEmpty(transactionStatisticsFilter.value.filterAccountIds)) {
-                querys.push('accountIds=' + getFinalAccountIdsByFilteredAccountIds(accountsStore.allAccountsMap, transactionStatisticsFilter.value.filterAccountIds));
-            }
-        } else if (!itemId) {
-            if (!isObjectEmpty(transactionStatisticsFilter.value.filterCategoryIds)) {
-                querys.push('categoryIds=' + getFinalCategoryIdsByFilteredCategoryIds(transactionCategoriesStore.allTransactionCategoriesMap, transactionStatisticsFilter.value.filterCategoryIds));
-            }
-
-            if (!isObjectEmpty(transactionStatisticsFilter.value.filterAccountIds)) {
-                querys.push('accountIds=' + getFinalAccountIdsByFilteredAccountIds(accountsStore.allAccountsMap, transactionStatisticsFilter.value.filterAccountIds));
-            }
-        }
-
-        if (analysisType === StatisticsAnalysisType.CategoricalAnalysis || analysisType === StatisticsAnalysisType.TrendAnalysis) {
-            if (transactionStatisticsFilter.value.tagIds) {
-                querys.push('tagIds=' + transactionStatisticsFilter.value.tagIds);
-            }
-
-            if (transactionStatisticsFilter.value.tagFilterType) {
-                querys.push('tagFilterType=' + transactionStatisticsFilter.value.tagFilterType);
-            }
-
-            if (transactionStatisticsFilter.value.keyword) {
-                querys.push('keyword=' + encodeURIComponent(transactionStatisticsFilter.value.keyword));
-            }
-        }
-
-        if (analysisType === StatisticsAnalysisType.CategoricalAnalysis
-            && transactionStatisticsFilter.value.chartDataType !== ChartDataType.AccountTotalAssets.type
-            && transactionStatisticsFilter.value.chartDataType !== ChartDataType.AccountTotalLiabilities.type) {
-            querys.push('dateType=' + transactionStatisticsFilter.value.categoricalChartDateType);
-
-            if (transactionStatisticsFilter.value.categoricalChartDateType === DateRange.Custom.type) {
-                querys.push('minTime=' + transactionStatisticsFilter.value.categoricalChartStartTime);
-                querys.push('maxTime=' + transactionStatisticsFilter.value.categoricalChartEndTime);
-            }
-        } else if ((analysisType === StatisticsAnalysisType.TrendAnalysis || analysisType === StatisticsAnalysisType.AssetTrends) && dateRange) {
-            querys.push('dateType=' + dateRange.dateType);
-            querys.push('minTime=' + dateRange.minTime);
-            querys.push('maxTime=' + dateRange.maxTime);
-        }
-
-        return querys.join('&');
+        return buildTransactionListPageParams({
+            filter: transactionStatisticsFilter.value,
+            accountsMap: accountsStore.allAccountsMap,
+            categoriesMap: transactionCategoriesStore.allTransactionCategoriesMap,
+            analysisType,
+            itemId,
+            dateRange
+        });
     }
 
     function loadCategoricalAnalysis({ force }: { force: boolean }): Promise<TransactionStatisticResponse> {

@@ -340,6 +340,20 @@ D5 需要提前记录的共享面：
 5. 必要时拆 `stores/budget.ts` 和 `stores/exchangeRates.ts`，但必须先有 behavior-lock 覆盖。
 6. 跑 lint、focused tests、coverage、build 和 frontend structure gate；保持 UI 视觉不变。
 
+本切片执行结果：
+
+- `src/web/src/views/desktop/budgets/ListPage.vue` 保留预算页 facade，template/style 下沉到 `views/desktop/budgets/list/ListPage.template.html` 与 `ListPage.css`，预算页类型、金额筛选、历史周期 helper 和展示 helper 下沉到 `views/desktop/budgets/list/**`。
+- `src/web/src/stores/statistics.ts` 保留 `useStatisticsStore` facade，统计筛选类型下沉到 `stores/statistics/types.ts`，统计页和交易列表 query 构建下沉到 `stores/statistics/pageParams.ts`。
+- `src/web/src/views/desktop/statistics/TransactionPage.vue` 保留桌面统计页 facade，template/style 下沉到 `views/desktop/statistics/transaction/TransactionPage.template.html` 与 `TransactionPage.css`，统计页/交易页链接构建下沉到 `transaction/pageLinks.ts`。
+- `src/web/src/consts/currency.ts` 保留 `ALL_CURRENCIES`、`DEFAULT_CURRENCY_CODE`、`DEFAULT_CURRENCY_SYMBOL` 和 `PARENT_ACCOUNT_CURRENCY_PLACEHOLDER` facade，ISO 4217 静态表按代码范围拆到 `consts/currency/aToG.ts`、`hToP.ts`、`qToZ.ts`。
+- 源码合同测试已改为读取页面 facade + 外置 template + 功能 helper，继续锁定预算页 `useBudgetStore`、导入导出、forecast、drilldown、`@budget:saved` 以及统计页 `useStatisticsStore`、filter params、chart drilldown、date controls 和 export dialog 接线。
+
+本切片本地验证：
+
+- `Set-Location src/web; npm run test -- --runTestsByPath ../../tests/web/views/desktop/budgets/listPageCategoryIcons.test.ts ../../tests/web/views/desktop/statistics/transactionPageSourceContract.test.ts ../../tests/web/stores/statistics.test.ts ../../tests/web/lib/services.statistics.test.ts ../../tests/web/lib/services.budget.test.ts`：5 suites / 18 tests passed。
+- `Set-Location src/web; npm run lint:ci`：通过；仅保留既有 `no-explicit-any` warning。
+- `Set-Location src/web; npm run structure:check`：D5 frontend failure 清零；剩余失败为 `src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`，均归 D10/shared shell 或非 D5 历史债。
+
 ### 7.4 comment-pass/governance-docs/closeout
 
 - 按“导出函数、业务关键函数、复杂私有 helper 必须有中文说明；简单 getter/映射/事件转发不强制”补齐 D5 中文说明。

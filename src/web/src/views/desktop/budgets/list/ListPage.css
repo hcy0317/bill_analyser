@@ -1,0 +1,114 @@
+.budget-keyword-filter {
+    min-width: 200px;
+    max-width: 300px;
+    flex: 0 1 300px;
+}
+
+.budget-right-tools {
+    flex: 0 0 auto;
+    margin-left: auto;
+}
+
+.budget-forecast-title-actions {
+    flex: 0 0 auto;
+}
+
+.budget-period-toolbar {
+    flex: 0 0 228px;
+    width: 228px;
+}
+
+.budget-period-toolbar :deep(.v-btn) {
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+.budget-forecast-title-button {
+    flex: 0 0 112px;
+    width: 112px;
+    max-width: 112px;
+    height: 38px;
+    min-height: 38px;
+    padding-inline: 10px;
+    text-transform: none;
+    letter-spacing: normal;
+    white-space: nowrap;
+}
+
+.tab-text-truncate {
+    justify-content: flex-start;
+    padding-inline: 12px;
+}
+
+.tab-text-truncate .text-truncate {
+    width: 100%;
+    text-align: left;
+}
+
+.cursor-pointer {
+    cursor: pointer;
+}
+
+.list-item-selected {
+    background-color: rgba(var(--v-theme-primary), 0.1);
+}
+
+/* 导航栏按钮宽度统一（适应默认宽度256px） */
+.budget-nav-buttons {
+    width: 100%;
+}
+
+/* 使用深层穿透选择器作用到子组件 */
+.budget-nav-buttons:deep(.v-btn) {
+    width: 100%;
+}
+
+.budget-level-tabs :deep(.v-tab) {
+    justify-content: flex-start;
+}
+
+/* 水平按钮组样式 - 总宽度100%，每个按钮各占一半 */
+.budget-nav-buttons.btn-horizontal-group {
+    width: 100%;
+    display: flex;
+}
+
+.budget-nav-buttons.btn-horizontal-group:deep(.v-btn) {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 50%;
+}
+
+/* 折叠/展开图标动画 */
+.toggle-icon {
+    transition: transform 0.3s ease-in-out;
+}
+
+/* 筛选菜单固定宽度 */
+.budget-filter-menu {
+    width: 320px;
+    min-width: 320px;
+    max-width: 320px;
+}
+
+/* 汇总行样式（参考统计分析页面） */
+.budget-summary-row {
+    background-color: transparent;
+}
+
+.budget-summary-label {
+    font-size: 1rem;
+    color: rgba(var(--v-theme-on-surface), 0.7);
+}
+
+.budget-summary-amount {
+    font-size: 1.5rem;
+    font-weight: bold;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 执行率颜色 - 橙黄色(50-80%) */
+.text-orange {
+    color: rgb(226, 182, 10) !important;
+}
