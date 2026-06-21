@@ -269,3 +269,29 @@ D7 完成前必须满足：
 - `Set-Location src/web; npm run lint:ci` 和 `npm run test:coverage` 通过，必要时补桌面/移动云同步页或 store 单测。
 - 安全审查结论不含 blocker；如发现真实安全缺陷，必须拆出独立 fix/prerequisite slice，不能混入结构搬迁。
 - PR CI 通过、自动 squash merge、来源分支删除、进度 JSON 与 ultragoal ledger 回写完成。
+
+## 9. Behavior-lock 记录
+
+D7 `behavior-lock` 切片新增测试范围：
+
+- 后端 `src/backend/http/backup_sync/tests.rs` 锁定云备份同步 endpoint 安全合同：OSS/S3/COS/Azure provider host 匹配、非 HTTPS provider endpoint 拒绝、凭据/query/fragment 拒绝、metadata host 与 link-local/loopback 拒绝、显式 allowlist 对本地 HTTP 的例外、公开 HTTP 仍拒绝、WebDAV 本地 allowlist 和 provider-specific 必填字段校验。
+- 后端保留 `backup_sync.rs` public/private 行为不变，只把原模块内 region 测试外置到 `backup_sync/tests.rs`；生产上传、签名、endpoint、防 SSRF 逻辑没有移动。
+- 后端 `ops_contracts` 和 `runtime_governance_contracts` 继续锁定 backup filename/archive/file info、cleanup retention、job/encryption、secret redaction 与 `/api/backup/*` Rust ownership。
+- 前端 `tests/web/views/base/settings/appCloudSyncPageBase.test.ts` 锁定应用设置云同步 catalog 与允许 key 合同一致、移动/桌面标记、初始同步 key 复制、全选/全不选/反选、分类半选、server settings 应用和 false response 清空。
+- 前端 `tests/web/stores/user.test.ts` 补充 user store 云同步读取、full update payload、成功后刷新本地 synced keys 和 disable 后清空 synced keys 的合同。
+
+本切片本地验证记录：
+
+- `cargo fmt --all -- --check` 通过。
+- `cargo test -p bill-analyser-http backup_sync` 通过，9 个 `backup_sync` 测试全部通过。
+- `cargo test -p bill-analyser-core --test ops_contracts backup` 通过，3 个 backup core 合同测试全部通过。
+- `cargo test -p bill-analyser-core --test runtime_governance_contracts backup` 通过，backup route ownership 合同通过。
+- `node scripts/check-rust-backend-structure.mjs` 通过，`src/backend/http/backup_sync.rs` 较 baseline 减少 22 行。
+- `git diff --check` 通过。
+- `node scripts/check-backend-doc-map.mjs` 通过。
+- `Set-Location src/web; npm run test -- --runTestsByPath ../../tests/web/views/base/settings/appCloudSyncPageBase.test.ts ../../tests/web/stores/user.test.ts` 通过，2 个 suite、14 个测试全部通过。
+- `Set-Location src/web; npm run lint:ci` 通过，保留历史 `no-explicit-any` warnings，无 errors。
+- `Set-Location src/web; npm run test:coverage` 通过，94 个 suite、39003 个测试通过，coverage gate 为 99.13% lines、91.48% branches。
+- `cargo clippy --workspace --all-targets -- -D warnings` 通过。
+- `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过。
+- `Set-Location src/web; npm run structure:check` 仍预期失败 4 项，均属于 D10 shared：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`。

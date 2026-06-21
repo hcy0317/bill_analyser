@@ -52,6 +52,9 @@ const mockGetExportedUserData = jest.fn<(fileType: string, req?: unknown) => Pro
 const mockGetExportedSettingsBundleSection = jest.fn<(sectionKey: string, auth?: unknown) => Promise<BlobResponse>>();
 const mockPreviewImportSettingsBundleSection = jest.fn<(sectionKey: string, bundle: unknown) => Promise<ApiResponse<SettingsBundleImportResult>>>();
 const mockGetInternalAvatarUrlWithToken = jest.fn<(avatarUrl: string, disableBrowserCache: boolean | string) => string>();
+const mockGetUserApplicationCloudSettings = jest.fn<() => Promise<ApiResponse<false | Array<{ settingKey: string; settingValue: string }>>>>();
+const mockUpdateUserApplicationCloudSettings = jest.fn<(payload: unknown) => Promise<ApiResponse<boolean>>>();
+const mockDisableUserApplicationCloudSettings = jest.fn<() => Promise<ApiResponse<boolean>>>();
 
 jest.mock('@/stores/setting.ts', () => ({
     __esModule: true,
@@ -67,7 +70,10 @@ jest.mock('@/lib/services.ts', () => ({
         getExportedUserData: (fileType: string, req?: unknown) => mockGetExportedUserData(fileType, req),
         getExportedSettingsBundleSection: (sectionKey: string, auth?: unknown) => mockGetExportedSettingsBundleSection(sectionKey, auth),
         previewImportSettingsBundleSection: (sectionKey: string, bundle: unknown) => mockPreviewImportSettingsBundleSection(sectionKey, bundle),
-        getInternalAvatarUrlWithToken: (avatarUrl: string, disableBrowserCache: boolean | string) => mockGetInternalAvatarUrlWithToken(avatarUrl, disableBrowserCache)
+        getInternalAvatarUrlWithToken: (avatarUrl: string, disableBrowserCache: boolean | string) => mockGetInternalAvatarUrlWithToken(avatarUrl, disableBrowserCache),
+        getUserApplicationCloudSettings: () => mockGetUserApplicationCloudSettings(),
+        updateUserApplicationCloudSettings: (payload: unknown) => mockUpdateUserApplicationCloudSettings(payload),
+        disableUserApplicationCloudSettings: () => mockDisableUserApplicationCloudSettings()
     }
 }));
 
@@ -116,6 +122,9 @@ describe('user store auth/profile/data-management contracts', () => {
         mockGetExportedSettingsBundleSection.mockReset();
         mockPreviewImportSettingsBundleSection.mockReset();
         mockGetInternalAvatarUrlWithToken.mockReset();
+        mockGetUserApplicationCloudSettings.mockReset();
+        mockUpdateUserApplicationCloudSettings.mockReset();
+        mockDisableUserApplicationCloudSettings.mockReset();
     });
 
     test('storeUserBasicInfo normalizes profile fields and preserves localStorage contract', () => {
@@ -247,5 +256,50 @@ describe('user store auth/profile/data-management contracts', () => {
         expect(store.getUserAvatarUrl(userProfile({ avatar: 'avatar.png' }), true)).toBe('/avatar/avatar.png?token=demo');
         expect(mockGetInternalAvatarUrlWithToken).toHaveBeenCalledWith('avatar.png', true);
         expect(store.getUserAvatarUrl(userProfile({ avatar: '' }), true)).toBeNull();
+    });
+
+    test('cloud settings load returns false or server settings without local mutation', async () => {
+        mockGetUserApplicationCloudSettings.mockResolvedValueOnce(apiResponse(false));
+        const store = useUserStore();
+
+        await expect(store.getUserApplicationCloudSettings()).resolves.toBe(false);
+        expect(mockSettingsStore.updateApplicationSyncSettingKeys).not.toHaveBeenCalled();
+
+        const cloudSettings = [
+            { settingKey: 'showAccountBalance', settingValue: 'false' },
+            { settingKey: 'autoSaveTransactionDraft', settingValue: 'enabled' }
+        ];
+        mockGetUserApplicationCloudSettings.mockResolvedValueOnce(apiResponse(cloudSettings));
+
+        await expect(store.getUserApplicationCloudSettings()).resolves.toStrictEqual(cloudSettings);
+        expect(mockSettingsStore.updateApplicationSyncSettingKeys).not.toHaveBeenCalled();
+    });
+
+    test('full cloud settings update sends enabled keys and refreshes local synced keys', async () => {
+        mockUpdateUserApplicationCloudSettings.mockResolvedValue(apiResponse(true));
+        const store = useUserStore();
+        const enabledKeys = ['showAccountBalance', 'autoSaveTransactionDraft'];
+
+        await expect(store.fullUpdateUserApplicationCloudSettings(enabledKeys)).resolves.toBe(true);
+
+        expect(mockSettingsStore.createApplicationCloudSettings).toHaveBeenCalledWith(enabledKeys);
+        expect(mockUpdateUserApplicationCloudSettings).toHaveBeenCalledWith({
+            settings: [
+                { settingKey: 'showAccountBalance', settingValue: 'true' },
+                { settingKey: 'autoSaveTransactionDraft', settingValue: 'true' }
+            ],
+            fullUpdate: true
+        });
+        expect(mockSettingsStore.updateApplicationSyncSettingKeys).toHaveBeenCalledWith(enabledKeys);
+    });
+
+    test('disable cloud settings clears local synced keys after server success', async () => {
+        mockDisableUserApplicationCloudSettings.mockResolvedValue(apiResponse(true));
+        const store = useUserStore();
+
+        await expect(store.disableUserApplicationCloudSettings()).resolves.toBe(true);
+
+        expect(mockDisableUserApplicationCloudSettings).toHaveBeenCalledTimes(1);
+        expect(mockSettingsStore.updateApplicationSyncSettingKeys).toHaveBeenCalledWith(undefined);
     });
 });

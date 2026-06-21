@@ -695,28 +695,4 @@ fn hex_lower(bytes: &[u8]) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn s3_region_is_derived_from_endpoint_host() {
-        assert_eq!(
-            region_from_s3_endpoint(&json!({
-                "endpoint": "https://s3.us-west-2.amazonaws.com",
-            }))
-            .as_deref(),
-            Some("us-west-2")
-        );
-    }
-
-    #[test]
-    fn s3_region_ignores_non_s3_endpoint_hosts() {
-        assert_eq!(
-            region_from_s3_endpoint(&json!({
-                "endpoint": "https://storage.example.com",
-            })),
-            None
-        );
-    }
-}
+mod tests;
