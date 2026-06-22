@@ -152,9 +152,9 @@ fn stage2_materialization_dispatches_decision_groups_after_preview() {
 
 #[test]
 fn ocr_llm_vision_runtime_validates_url_and_caps_payload_before_network_post() {
-    let source = source("src/backend/http/import_routes/multipart_and_ocr.rs");
+    let multipart_source = source("src/backend/http/import_routes/multipart_and_ocr.rs");
     let input_parser = section_between(
-        &source,
+        &multipart_source,
         "fn ocr_recognition_input_from_request",
         "fn ocr_rate_limit_try_acquire",
     );
@@ -167,21 +167,18 @@ fn ocr_llm_vision_runtime_validates_url_and_caps_payload_before_network_post() {
         "raw OCR image bytes are size-checked before provider execution"
     );
 
-    let network_provider = section_between(
-        &source,
-        "async fn run_network_llm_ocr",
-        "fn llm_not_found_response",
-    );
-    let validate_base_url = position(network_provider, "validate_llm_vision_base_url(base_url)");
+    let network_provider =
+        source("src/backend/http/import_routes/multipart_and_ocr/network_llm_ocr.rs");
+    let validate_base_url = position(&network_provider, "validate_llm_vision_base_url(base_url)");
     let encode_payload = position(
-        network_provider,
+        &network_provider,
         "let encoded = general_purpose::STANDARD.encode(&image_bytes);",
     );
     let clamp_tokens = position(
-        network_provider,
+        &network_provider,
         "normalize_ocr_llm_max_tokens(&config.parameters)",
     );
-    let post_request = position(network_provider, ".post(&url)");
+    let post_request = position(&network_provider, ".post(&url)");
 
     assert!(validate_base_url < encode_payload);
     assert!(encode_payload < post_request);

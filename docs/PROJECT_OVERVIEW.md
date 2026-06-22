@@ -100,6 +100,8 @@ multipart 上传并行执行 dedicated parser 检测，每个文件必须且只�
 
 LLM 临时配置保存在 Rust 进程内 user-scoped map，saved config、候选项、memory event 与 annotation sample 由 PostgreSQL 迁移表承载并按 API key 规则脱敏。provider 生成保留 allowlist/SSRF 防护、响应体上限、候选截断和 rate limit。OCR recognition 默认 disabled，配置后可通过 Tesseract、本地 JSON OCR 或 LLM vision provider 返回结构化交易草稿。
 
+LLM/OCR、导入学习与 provider 配置后端当前以 facade + 功能子文件组织：`src/backend/http/import_routes/multipart_and_ocr.rs` 聚合 route facade、multipart 输入、OCR provider 分发、runtime config 和错误投影，multipart 解析、网络 LLM vision OCR、本地 JSON OCR、Tesseract OCR 与 provider auth refresh 分别下沉到 `multipart_and_ocr/**`；`src/backend/core/import_learning.rs` 聚合导入学习 public facade，feature/hash/token、green/blue policy、model registry、LLM preview memory 和 route response helper 下沉到 `core/import_learning/**`；`src/backend/db/llm.rs` 保留 LLM PostgreSQL facade 与共享 row/helper，saved config 与 candidate review 写入下沉到 `db/llm/**`。该拆分不改变 REST route、PostgreSQL user-scope、provider SSRF/secret redaction、OCR 错误合同、LLM memory lifecycle、Weaviate authority 或任何 live external-provider 调用边界。
+
 ## 文档入口
 
 - [后端导航图](backend-map.md) — Rust 后端分层、请求生命周期、导入管线、repository 数据流和验证矩阵

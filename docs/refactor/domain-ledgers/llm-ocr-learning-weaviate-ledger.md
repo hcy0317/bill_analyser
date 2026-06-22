@@ -330,3 +330,23 @@ D8 `behavior-lock` 切片新增测试范围：
 - `cargo test -p bill-analyser-db --test llm_postgres --test vector_outbox` 通过，2 个 PostgreSQL 持久化合同测试全部通过。
 - `Set-Location src/web; npm run test -- --runTestsByPath ../../tests/web/views/desktop/pairingcenter/llmConfigHelpers.test.ts` 通过，新增 1 个 suite、4 个测试全部通过。
 - `Set-Location src/web; npm run test -- --runTestsByPath ../../tests/web/views/desktop/pairingcenter/llmConfigHelpers.test.ts ../../tests/web/views/desktop/pairingcenter/learningCenterPanelModel.test.ts ../../tests/web/views/desktop/pairingcenter/learningCenterOcrConfig.test.ts ../../tests/web/models/learning_center.test.ts ../../tests/web/views/desktop/transactions/import/llmSignalMemory.test.ts ../../tests/web/views/desktop/transactions/import/services.llmMemory.test.ts ../../tests/web/views/desktop/transactions/import/checkDataLearning.test.ts` 通过，7 个 suite、25 个测试全部通过。
+
+## 10. Backend-shape 记录
+
+D8 `backend-shape` 切片将三个后端结构债主文件拆为 facade + 功能子文件：
+
+- `src/backend/http/import_routes/multipart_and_ocr.rs` 保留 route facade、OCR input/rate limit/provider 分发、runtime config 和错误投影；`multipart_and_ocr/multipart_form.rs` 承载 multipart 解析与导入文本解码，`network_llm_ocr.rs` 承载 LLM vision OCR 请求构造与 response cap，`ocr_local_json.rs` 与 `ocr_tesseract.rs` 承载本地 OCR provider，`provider_auth_refresh.rs` 承载 token endpoint 校验与 provider auth refresh。
+- `src/backend/core/import_learning.rs` 保留 public facade、常量和共享 JSON/value helper；`core/import_learning/features.rs` 承载 feature/hash/sample/token，`policy.rs` 承载 green/blue policy 与 label counts，`model_registry.rs` 承载 dataset/model registry payload，`llm_memory.rs` 承载 LLM preview memory apply/revert policy，`route_response.rs` 承载 learning/LLM route response helper。
+- `src/backend/db/llm.rs` 保留 LLM PostgreSQL facade、默认 runtime config、candidate-to-rule materialization 和共享 row/helper；`db/llm/configs.rs` 承载 saved config CRUD、脱敏和 effective config projection，`db/llm/candidates.rs` 承载 candidate list/count/create/status/accept/reject。
+
+本切片同步调整了 `tests/backend/http/import_runtime_contract.rs` 的源码扫描锚点，使 OCR LLM vision 合同继续检查新 `network_llm_ocr.rs` 中 “URL 校验、base64 payload、token cap 先于 network post” 的顺序。拆分不改变 REST route、PostgreSQL user-scope、SQL bind、provider SSRF/secret redaction、OCR 错误合同、learning lifecycle、LLM preview memory、Weaviate authority 或 UI 视觉布局；验证未发起 live external-provider 调用。
+
+本切片当前本地验证记录：
+
+- `cargo test -p bill-analyser-core --test ai_ocr_llm_contracts --test provider_auth_contracts --test import_learning_contracts --test weaviate_derived_contracts` 通过，D8 core 合同测试全部通过。
+- `cargo test -p bill-analyser-db --test llm_postgres --test vector_outbox` 通过，LLM PostgreSQL 与 vector outbox 持久化合同测试通过。
+- `cargo test -p bill-analyser-http --test weaviate_runtime_contract --test import_runtime_contract` 通过，OCR runtime 顺序与 Weaviate runtime 合同测试通过。
+- `node scripts/check-rust-backend-structure.mjs` 通过，D8 三个直接 baseline 文件分别收敛为 facade，并由结构 gate 报告行数下降。
+- `cargo fmt --all -- --check`、`node scripts/check-backend-doc-map.mjs` 与 `git diff --check` 通过。
+- `cargo clippy --workspace --all-targets -- -D warnings` 通过。
+- `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过，完整 Rust 工作区 coverage gate 达标。
