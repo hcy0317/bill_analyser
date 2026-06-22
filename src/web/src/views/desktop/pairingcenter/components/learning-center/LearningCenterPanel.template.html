@@ -1,0 +1,796 @@
+    <v-card variant="flat" class="learning-center-panel">
+
+        <v-progress-linear v-if="loading" indeterminate color="primary" />
+
+        <v-card-text>
+            <v-alert v-if="error" type="error" closable class="mb-4"
+                     @click:close="clearError">
+                {{ error }}
+            </v-alert>
+
+                            <!-- ── Suggestions Tab ── -->
+                            <template v-if="activeTab === 'suggestions'">
+                                <div class="learning-section-header"
+                                     :class="{ 'learning-section-header--empty': hideSectionTitle && hasHeaderActionsTarget }">
+                                    <h3 v-if="!hideSectionTitle" class="learning-section-title">{{ tt('Auto Suggestions') }}</h3>
+                                    <Teleport :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
+                                     <div class="learning-section-actions"
+                                          :class="{
+                                              'learning-section-actions--external': hasHeaderActionsTarget,
+                                              'learning-section-actions--split': true,
+                                          }">
+                                        <div class="learning-section-actions__primary">
+                                            <v-btn class="learning-panel-action"
+                                                   variant="outlined"
+                                                   color="default"
+                                                   :disabled="loading"
+                                                   @click="handleGenerate">
+                                                {{ tt('Generate Suggestions') }}
+                                            </v-btn>
+                                            <v-btn class="learning-panel-action"
+                                                   variant="outlined"
+                                                   color="default"
+                                                   :disabled="loading || selectedIds.length === 0"
+                                                   @click="handleBatchAccept">
+                                                {{ tt('Batch Accept') }} ({{ selectedIds.length }})
+                                            </v-btn>
+                                            <v-chip size="small" variant="tonal" color="info">
+                                                {{ filteredSuggestions.length }} / {{ suggestionsTotal }}
+                                            </v-chip>
+                                            <v-btn class="learning-panel-refresh"
+                                                   variant="text"
+                                                   color="default"
+                                                   :icon="true"
+                                                   :loading="loading"
+                                                   @click="refreshCurrentTab">
+                                                <v-icon :icon="mdiRefresh" />
+                                                <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
+                                            </v-btn>
+                                        </div>
+                                        <div class="learning-section-actions__spacer" />
+                                        <v-select v-model="statusFilter"
+                                                  class="learning-status-select"
+                                                  :items="suggestionStatusOptions"
+                                                  item-title="title"
+                                                  item-value="value"
+                                                  density="compact"
+                                                  variant="outlined"
+                                                  hide-details
+                                                  :aria-label="tt('Status')" />
+                                    </div>
+                                    </Teleport>
+                                </div>
+
+                                <v-table v-if="!loading && filteredSuggestions.length > 0" hover density="comfortable">
+                                    <thead>
+                                        <tr>
+                                            <th style="width:38px">
+                                                <v-checkbox-btn v-model="selectAll" :indeterminate="indeterminate"
+                                                                density="compact" hide-details />
+                                            </th>
+                                            <th>{{ tt('Match Pattern') }}</th>
+                                            <th>{{ tt('Features') }}</th>
+                                            <th>{{ tt('Suggested Action') }}</th>
+                                            <th class="text-center">{{ tt('Samples') }}</th>
+                                            <th>{{ tt('Status') }}</th>
+                                            <th class="text-center">{{ tt('Actions') }}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="item in filteredSuggestions" :key="item.id">
+                                            <td>
+                                                <v-checkbox-btn v-model="selectedIds" :value="item.id"
+                                                                density="compact" hide-details
+                                                                :disabled="item.status !== 'pending'" />
+                                            </td>
+                                            <td>
+                                                <div class="text-body-2 font-weight-medium">{{ translateMatchType(item.matchType) }}</div>
+                                                <div class="text-caption text-grey">{{ item.matchValue }}</div>
+                                            </td>
+                                            <td>
+                                                <div class="d-flex flex-wrap ga-1">
+                                                    <v-chip v-for="feat in getSuggestionFeatureChips(item)"
+                                                            :key="`${item.id}-${feat.key}`" size="x-small" variant="tonal" color="secondary">
+                                                        {{ tt(feat.labelKey) }}: {{ feat.value }}
+                                                    </v-chip>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div class="text-body-2">{{ item.summary || item.suggestedType }}</div>
+                                            </td>
+                                            <td class="text-center">
+                                                <v-chip size="x-small" color="info" variant="tonal">{{ item.sampleCount }}</v-chip>
+                                            </td>
+                                            <td>
+                                                <v-chip size="small" :color="statusColor(item.status)">
+                                                    {{ tt(statusLabel(item.status)) }}
+                                                </v-chip>
+                                            </td>
+                                            <td class="text-center">
+                                                <template v-if="item.status === 'pending'">
+                                                    <v-btn size="small" variant="text" color="success"
+                                                           :icon="true" @click="handleAccept(item.id)">
+                                                        <v-icon :icon="mdiCheck" />
+                                                        <v-tooltip activator="parent">{{ tt('Accept') }}</v-tooltip>
+                                                    </v-btn>
+                                                    <v-btn size="small" variant="text" color="error"
+                                                           :icon="true" @click="handleReject(item.id)">
+                                                        <v-icon :icon="mdiClose" />
+                                                        <v-tooltip activator="parent">{{ tt('Reject') }}</v-tooltip>
+                                                    </v-btn>
+                                                </template>
+                                                <span v-else class="text-grey text-caption">—</span>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </v-table>
+
+                                <v-empty-state v-if="!loading && filteredSuggestions.length === 0"
+                                               :icon="mdiLightbulbOutline"
+                                               :headline="tt('No Suggestions')"
+                                               :text="tt('Click Generate Suggestions to mine patterns from your transaction history.')" />
+                            </template>
+
+                            <!-- ── Rules Tab ── -->
+                            <template v-if="activeTab === 'rules'">
+                                <div class="learning-section-header"
+                                     :class="{ 'learning-section-header--empty': hideSectionTitle && hasHeaderActionsTarget }">
+                                    <h3 v-if="!hideSectionTitle" class="learning-section-title">{{ tt('Learning Rules') }}</h3>
+                                    <Teleport :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
+                                    <div class="learning-section-actions"
+                                         :class="{ 'learning-section-actions--external': hasHeaderActionsTarget }">
+                                        <v-chip size="small" variant="tonal" color="info">
+                                            {{ filteredRules.length }} / {{ rulesTotal }}
+                                        </v-chip>
+                                        <v-btn variant="text"
+                                               class="learning-panel-refresh"
+                                               color="default"
+                                               :icon="true"
+                                               :loading="loading"
+                                               @click="refreshCurrentTab">
+                                            <v-icon :icon="mdiRefresh" />
+                                            <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
+                                        </v-btn>
+                                    </div>
+                                    </Teleport>
+                                </div>
+
+                                <v-table v-if="!loading && filteredRules.length > 0"
+                                         class="learning-rules-table"
+                                         hover
+                                         density="comfortable">
+                                    <thead>
+                                        <tr>
+                                            <th>
+                                                <v-menu v-model="ruleMatchTypeFilterMenu" location="bottom">
+                                                    <template #activator="{ props: menuProps }">
+                                                        <v-btn v-bind="menuProps"
+                                                               variant="text"
+                                                               density="compact"
+                                                               size="small"
+                                                               class="learning-header-button"
+                                                               :color="ruleMatchTypeFilter ? 'primary' : undefined">
+                                                            {{ tt('Match Pattern') }}
+                                                            <v-icon end size="16"
+                                                                    :icon="ruleMatchTypeFilter ? mdiFilterVariant : mdiChevronDown" />
+                                                        </v-btn>
+                                                    </template>
+                                                    <v-list class="learning-header-menu" density="compact" min-width="180">
+                                                        <v-list-item v-for="option in ruleMatchTypeOptions"
+                                                                     :key="option.value"
+                                                                     :value="option.value"
+                                                                     :class="{ 'list-item-selected': ruleMatchTypeFilter === option.value }"
+                                                                     :append-icon="ruleMatchTypeFilter === option.value ? mdiCheck : undefined"
+                                                                     @click="setRuleMatchTypeFilter(option.value)">
+                                                            <v-list-item-title>{{ option.title }}</v-list-item-title>
+                                                        </v-list-item>
+                                                    </v-list>
+                                                </v-menu>
+                                            </th>
+                                            <th>
+                                                <v-menu v-model="ruleFeatureFilterMenu"
+                                                        :close-on-content-click="false"
+                                                        location="bottom">
+                                                    <template #activator="{ props: menuProps }">
+                                                        <v-btn v-bind="menuProps"
+                                                               variant="text"
+                                                               density="compact"
+                                                               size="small"
+                                                               class="learning-header-button"
+                                                               :color="ruleFeatureFilterActive ? 'primary' : undefined">
+                                                            {{ tt('Features') }}
+                                                            <v-icon end size="16"
+                                                                    :icon="ruleFeatureFilterActive ? mdiFilterVariant : mdiChevronDown" />
+                                                        </v-btn>
+                                                    </template>
+                                                    <v-card class="learning-header-menu" min-width="280">
+                                                        <v-card-text class="pb-2">
+                                                            <v-text-field v-model="ruleFeatureFilter"
+                                                                          density="compact"
+                                                                          variant="outlined"
+                                                                          hide-details
+                                                                          clearable
+                                                                          :label="tt('Features')"
+                                                                          :placeholder="tt('Filter')" />
+                                                        </v-card-text>
+                                                        <v-card-actions class="pt-0">
+                                                            <v-spacer />
+                                                            <v-btn variant="text" size="small" @click="clearRuleFeatureFilter">
+                                                                {{ tt('Clear') }}
+                                                            </v-btn>
+                                                        </v-card-actions>
+                                                    </v-card>
+                                                </v-menu>
+                                            </th>
+                                            <th>
+                                                <v-menu v-model="ruleLearnedActionFilterMenu"
+                                                        :close-on-content-click="false"
+                                                        location="bottom">
+                                                    <template #activator="{ props: menuProps }">
+                                                        <v-btn v-bind="menuProps"
+                                                               variant="text"
+                                                               density="compact"
+                                                               size="small"
+                                                               class="learning-header-button"
+                                                               :color="ruleLearnedActionFilterActive ? 'primary' : undefined">
+                                                            {{ tt('Learned Action') }}
+                                                            <v-icon end size="16"
+                                                                    :icon="ruleLearnedActionFilterActive ? mdiFilterVariant : mdiChevronDown" />
+                                                        </v-btn>
+                                                    </template>
+                                                    <v-card class="learning-header-menu" min-width="280">
+                                                        <v-card-text class="pb-2">
+                                                            <v-text-field v-model="ruleLearnedActionFilter"
+                                                                          density="compact"
+                                                                          variant="outlined"
+                                                                          hide-details
+                                                                          clearable
+                                                                          :label="tt('Learned Action')"
+                                                                          :placeholder="tt('Filter')" />
+                                                        </v-card-text>
+                                                        <v-card-actions class="pt-0">
+                                                            <v-spacer />
+                                                            <v-btn variant="text" size="small" @click="clearRuleLearnedActionFilter">
+                                                                {{ tt('Clear') }}
+                                                            </v-btn>
+                                                        </v-card-actions>
+                                                    </v-card>
+                                                </v-menu>
+                                            </th>
+                                            <th>
+                                                <v-menu v-model="ruleEnabledFilterMenu" location="bottom">
+                                                    <template #activator="{ props: menuProps }">
+                                                        <v-btn v-bind="menuProps"
+                                                               variant="text"
+                                                               density="compact"
+                                                               size="small"
+                                                               class="learning-header-button"
+                                                               :color="ruleEnabledFilter !== 'all' ? 'primary' : undefined">
+                                                            {{ tt('Enabled') }}
+                                                            <v-icon end size="16"
+                                                                    :icon="ruleEnabledFilter !== 'all' ? mdiFilterVariant : mdiChevronDown" />
+                                                        </v-btn>
+                                                    </template>
+                                                    <v-list class="learning-header-menu" density="compact" min-width="160">
+                                                        <v-list-item v-for="option in ruleEnabledFilterOptions"
+                                                                     :key="option.value"
+                                                                     :value="option.value"
+                                                                     :class="{ 'list-item-selected': ruleEnabledFilter === option.value }"
+                                                                     :append-icon="ruleEnabledFilter === option.value ? mdiCheck : undefined"
+                                                                     @click="setRuleEnabledFilter(option.value)">
+                                                            <v-list-item-title>{{ option.title }}</v-list-item-title>
+                                                        </v-list-item>
+                                                    </v-list>
+                                                </v-menu>
+                                            </th>
+                                            <th>
+                                                <v-menu v-model="ruleAppliedFilterMenu" location="bottom">
+                                                    <template #activator="{ props: menuProps }">
+                                                        <v-btn v-bind="menuProps"
+                                                               variant="text"
+                                                               density="compact"
+                                                               size="small"
+                                                               class="learning-header-button"
+                                                               :color="ruleAppliedFilter !== 'all' ? 'primary' : undefined">
+                                                            {{ tt('Applied') }}
+                                                            <v-icon end size="16"
+                                                                    :icon="ruleAppliedFilter !== 'all' ? mdiFilterVariant : mdiChevronDown" />
+                                                        </v-btn>
+                                                    </template>
+                                                    <v-list class="learning-header-menu" density="compact" min-width="160">
+                                                        <v-list-item v-for="option in ruleAppliedFilterOptions"
+                                                                     :key="option.value"
+                                                                     :value="option.value"
+                                                                     :class="{ 'list-item-selected': ruleAppliedFilter === option.value }"
+                                                                     :append-icon="ruleAppliedFilter === option.value ? mdiCheck : undefined"
+                                                                     @click="setRuleAppliedFilter(option.value)">
+                                                            <v-list-item-title>{{ option.title }}</v-list-item-title>
+                                                        </v-list-item>
+                                                    </v-list>
+                                                </v-menu>
+                                            </th>
+                                            <th class="text-center">{{ tt('Actions') }}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="rule in filteredRules" :key="rule.id">
+                                            <td class="text-center">
+                                                <v-chip size="small" variant="tonal" color="info">
+                                                    {{ translateMatchType(rule.matchType) }}
+                                                </v-chip>
+                                            </td>
+                                            <td class="text-center">
+                                                <div class="learning-rules-feature-cell d-flex flex-wrap ga-1 align-center justify-center">
+                                                    <v-chip v-if="rule.matchValue && getRuleFeatureChips(rule).length === 0"
+                                                            size="x-small"
+                                                            variant="outlined"
+                                                            color="primary">
+                                                        {{ rule.matchValue }}
+                                                    </v-chip>
+                                                    <v-chip v-for="feat in getRuleFeatureChips(rule)"
+                                                            :key="`${rule.id}-${feat.key}`" size="x-small" variant="tonal" color="secondary">
+                                                        {{ tt(feat.labelKey) }}: {{ feat.value }}
+                                                    </v-chip>
+                                                </div>
+                                            </td>
+                                            <td class="text-center">
+                                                <div class="text-body-2">{{ rule.learnedType }}</div>
+                                            </td>
+                                            <td class="text-center">
+                                                <v-switch density="compact" color="success" hide-details
+                                                          :model-value="rule.enabled"
+                                                          @update:model-value="(v: boolean | null) => handleToggleRule(rule.id, !!v)" />
+                                            </td>
+                                            <td class="text-center">
+                                                <v-chip size="x-small" color="info" variant="tonal">{{ rule.appliedCount }}</v-chip>
+                                            </td>
+                                            <td class="text-center">
+                                                <div class="learning-rules-actions">
+                                                    <v-btn size="small" variant="text" color="primary"
+                                                           :icon="true" @click="openEditRuleDialog(rule)">
+                                                        <v-icon :icon="mdiPencil" />
+                                                        <v-tooltip activator="parent">{{ tt('Edit') }}</v-tooltip>
+                                                    </v-btn>
+                                                    <v-btn size="small" variant="text" color="error"
+                                                           :icon="true" @click="handleDeleteRule(rule.id)">
+                                                        <v-icon :icon="mdiDelete" />
+                                                        <v-tooltip activator="parent">{{ tt('Delete') }}</v-tooltip>
+                                                    </v-btn>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </v-table>
+
+                                <v-empty-state v-if="!loading && filteredRules.length === 0"
+                                               :icon="mdiBookOpenPageVariant"
+                                               :headline="tt('No Rules')"
+                                               :text="tt('Accept suggestions to create learning rules that auto-classify future imports.')" />
+                            </template>
+
+            <template v-if="activeTab === 'llm-config'">
+                                <!-- LLM 多配置管理 -->
+                                <div class="learning-section-header"
+                                     :class="{ 'learning-section-header--empty': hideSectionTitle && hasHeaderActionsTarget }">
+                                    <h3 v-if="!hideSectionTitle" class="learning-section-title">{{ tt('LLM Config') }}</h3>
+                                    <Teleport :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
+                                    <div class="learning-section-actions"
+                                         :class="{ 'learning-section-actions--external': hasHeaderActionsTarget }">
+                                        <v-btn class="learning-panel-action"
+                                               variant="outlined"
+                                               color="default"
+                                               :disabled="loading"
+                                               @click="openAddConfigDialog">
+                                            {{ tt('Add Config') }}
+                                        </v-btn>
+                                        <settings-json-import-export-button
+                                            section-key="llmConfigs"
+                                            filename-prefix="llm-configs"
+                                            :disabled="loading || llmConfigLoading"
+                                            password-required-for-export
+                                            @imported="loadLLMConfigs"
+                                        />
+                                        <v-btn class="learning-panel-refresh"
+                                               variant="text"
+                                               color="default"
+                                               :icon="true"
+                                               :loading="loading"
+                                               @click="refreshCurrentTab">
+                                            <v-icon :icon="mdiRefresh" />
+                                            <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
+                                        </v-btn>
+                                    </div>
+                                    </Teleport>
+                                </div>
+                                <v-card variant="outlined" class="mb-4">
+                                    <v-card-text class="pt-4">
+                                        <v-table v-if="llmSavedConfigs.length > 0" density="compact" hover>
+                                            <thead>
+                                                <tr>
+                                                    <th>{{ tt('Name') }}</th>
+                                                    <th>{{ tt('Provider') }}</th>
+                                                    <th>{{ tt('Model') }}</th>
+                                                    <th class="text-center">{{ tt('Active') }}</th>
+                                                    <th class="text-center">{{ tt('Actions') }}</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr v-for="cfg in llmSavedConfigs" :key="cfg.id">
+                                                    <td>{{ cfg.name }}</td>
+                                                    <td>{{ llmProviderLabel(cfg.provider) }}</td>
+                                                    <td>{{ cfg.model }}</td>
+                                                    <td class="text-center">
+                                                        <v-icon v-if="cfg.is_active" :icon="mdiCheck" color="success" size="small" />
+                                                    </td>
+                                                    <td class="text-center">
+                                                        <v-btn v-if="!cfg.is_active" size="x-small" variant="text" color="primary"
+                                                               @click="handleActivateConfig(cfg.id)">
+                                                            {{ tt('Activate') }}
+                                                        </v-btn>
+                                                        <v-btn size="x-small" variant="text" color="error"
+                                                               @click="handleDeleteConfig(cfg.id)">
+                                                            <v-icon :icon="mdiDelete" size="small" />
+                                                        </v-btn>
+                                                    </td>
+                                                </tr>
+                                            </tbody>
+                                        </v-table>
+                                        <div v-else class="text-center text-caption text-medium-emphasis py-3">
+                                            {{ tt('No saved configs. Click Add Config to create one.') }}
+                                        </div>
+                                    </v-card-text>
+                                </v-card>
+
+            </template>
+
+            <template v-if="activeTab === 'llm'">
+                                <!-- 建议规则列表 -->
+                                <div class="learning-section-header"
+                                     :class="{ 'learning-section-header--empty': hideSectionTitle && hasHeaderActionsTarget }">
+                                    <h3 v-if="!hideSectionTitle" class="learning-section-title">{{ tt('Suggested Rules') }}</h3>
+                                     <Teleport :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
+                                     <div class="learning-section-actions"
+                                          :class="{
+                                              'learning-section-actions--external': hasHeaderActionsTarget,
+                                              'learning-section-actions--split': true,
+                                          }">
+                                        <div class="learning-section-actions__primary">
+                                            <v-btn class="learning-panel-action"
+                                                   variant="outlined"
+                                                   color="default"
+                                                   :disabled="loading"
+                                                   @click="handleLLMGenerate">
+                                                {{ tt('Generate Suggestions') }}
+                                            </v-btn>
+                                            <v-btn class="learning-panel-action"
+                                                   variant="outlined"
+                                                   color="default"
+                                                   :disabled="loading || selectedLLMIds.length === 0"
+                                                   @click="handleLLMBatchAccept">
+                                                {{ tt('Batch Accept') }} ({{ selectedLLMIds.length }})
+                                            </v-btn>
+                                            <v-btn class="learning-panel-refresh"
+                                                   variant="text"
+                                                   color="default"
+                                                   :icon="true"
+                                                   :loading="loading"
+                                                   @click="refreshCurrentTab">
+                                                <v-icon :icon="mdiRefresh" />
+                                                <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
+                                            </v-btn>
+                                            <v-chip v-if="llmPendingCount > 0"
+                                                    size="small"
+                                                    color="warning"
+                                                    variant="tonal">
+                                                {{ llmPendingCount }} {{ tt('Pending') }}
+                                            </v-chip>
+                                        </div>
+                                        <div class="learning-section-actions__spacer" />
+                                        <v-select v-model="llmStatusFilter"
+                                                  class="learning-status-select"
+                                                  :items="llmStatusOptions"
+                                                  item-title="title"
+                                                  item-value="value"
+                                                  density="compact"
+                                                  variant="outlined"
+                                                  hide-details
+                                                  :aria-label="tt('Status')" />
+                                    </div>
+                                    </Teleport>
+                                </div>
+
+                                <v-table v-if="filteredLLMCandidates.length > 0" hover density="comfortable">
+                                    <thead>
+                                        <tr>
+                                            <th style="width:38px">
+                                                <v-checkbox-btn v-model="selectAllLLM"
+                                                                :indeterminate="llmIndeterminate"
+                                                                density="compact"
+                                                                hide-details />
+                                            </th>
+                                            <th>{{ tt('Type') }}</th>
+                                            <th>{{ tt('Rule Content') }}</th>
+                                            <th>{{ tt('Target Category') }}</th>
+                                            <th>{{ tt('Confidence') }}</th>
+                                            <th>{{ tt('Status') }}</th>
+                                            <th class="text-center">{{ tt('Actions') }}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="candidate in filteredLLMCandidates" :key="candidate.id">
+                                            <td>
+                                                <v-checkbox-btn v-model="selectedLLMIds"
+                                                                :value="candidate.id"
+                                                                density="compact"
+                                                                hide-details
+                                                                :disabled="candidate.status !== 'pending'" />
+                                            </td>
+                                            <td>
+                                                <v-chip size="x-small" variant="tonal" color="info">
+                                                    {{ candidate.rule_type || candidate.type || 'keyword' }}
+                                                </v-chip>
+                                            </td>
+                                            <td>
+                                                <div class="text-body-2 font-weight-medium">{{ candidate.rule_content || candidate.expression || '-' }}</div>
+                                                <div v-if="candidate.reason" class="text-caption text-grey">{{ candidate.reason }}</div>
+                                            </td>
+                                            <td>{{ candidate.category_name || candidate.target_category || '-' }}</td>
+                                            <td>
+                                                <v-chip size="x-small" :color="confidenceColor(candidate.confidence ?? 0)">
+                                                    {{ ((candidate.confidence || 0) * 100).toFixed(0) }}%
+                                                </v-chip>
+                                            </td>
+                                            <td>
+                                                <v-chip size="small" :color="llmStatusColor(candidate.status)">
+                                                    {{ llmStatusLabel(candidate.status) }}
+                                                </v-chip>
+                                            </td>
+                                            <td class="text-center">
+                                                <template v-if="candidate.status === 'pending'">
+                                                    <v-btn size="small" variant="text" color="success"
+                                                           :icon="true" @click="handleLLMAccept(candidate.id)">
+                                                        <v-icon :icon="mdiCheck" />
+                                                        <v-tooltip activator="parent">{{ tt('Accept') }}</v-tooltip>
+                                                    </v-btn>
+                                                    <v-btn size="small" variant="text" color="error"
+                                                           :icon="true" @click="handleLLMReject(candidate.id)">
+                                                        <v-icon :icon="mdiClose" />
+                                                        <v-tooltip activator="parent">{{ tt('Reject') }}</v-tooltip>
+                                                    </v-btn>
+                                                </template>
+                                                <span v-else class="text-grey text-caption">—</span>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </v-table>
+
+                                <v-empty-state v-if="filteredLLMCandidates.length === 0"
+                                               :icon="mdiRobotOutline"
+                                               :headline="tt('No Suggested Rules')"
+                                               :text="tt('No LLM suggested rules are waiting for review.')" />
+            </template>
+        </v-card-text>
+    </v-card>
+
+    <!-- Edit Rule Dialog -->
+    <v-dialog v-model="editRuleDialog" max-width="640" persistent>
+        <v-card class="pa-2 pa-sm-4 pa-md-8">
+            <template #title>
+                <div class="d-flex align-center justify-center">
+                    <div class="d-flex w-100 align-center justify-center">
+                        <h4 class="text-h4">{{ tt('Edit Rule') }}</h4>
+                    </div>
+                    <v-btn density="comfortable" color="default" variant="text" class="ms-2"
+                           :icon="true" @click="editRuleDialog = false">
+                        <v-icon :icon="mdiClose" size="24" />
+                    </v-btn>
+                </div>
+            </template>
+            <v-card-text class="mt-md-4 pt-0">
+                <v-text-field v-model="editRuleForm.matchValue" :label="tt('Match Value')"
+                              density="compact" class="mb-3" />
+                <v-text-field v-model="editRuleForm.learnedType" :label="tt('Learned Type')"
+                              density="compact" class="mb-3" />
+            </v-card-text>
+            <v-card-actions>
+                <v-spacer />
+                <v-btn variant="text" @click="editRuleDialog = false">{{ tt('Cancel') }}</v-btn>
+                <v-btn color="primary" variant="tonal" :loading="editRuleSaving"
+                       @click="saveEditRule">{{ tt('Save') }}</v-btn>
+            </v-card-actions>
+        </v-card>
+    </v-dialog>
+
+    <!-- Add Config Dialog -->
+    <v-dialog v-model="addConfigDialog" max-width="800" persistent>
+        <v-card class="pa-2 pa-sm-4 pa-md-8">
+            <template #title>
+                <div class="d-flex align-center justify-center">
+                    <div class="d-flex w-100 align-center justify-center">
+                        <h4 class="text-h4">{{ tt('Add Config') }}</h4>
+                    </div>
+                    <v-btn density="comfortable" color="default" variant="text" class="ms-2"
+                           :icon="true" @click="closeAddConfigDialog">
+                        <v-icon :icon="mdiClose" size="24" />
+                    </v-btn>
+                </div>
+            </template>
+            <form autocomplete="off" @submit.prevent="saveNewConfig">
+                <v-card-text class="mt-md-4 pt-0">
+                    <input class="llm-config-autofill-decoy"
+                           type="text"
+                           name="username"
+                           autocomplete="username"
+                           tabindex="-1"
+                           aria-hidden="true" />
+                    <input class="llm-config-autofill-decoy"
+                           type="password"
+                           name="password"
+                           autocomplete="current-password"
+                           tabindex="-1"
+                           aria-hidden="true" />
+                    <v-text-field v-model="newConfigForm.name" :label="tt('Name')"
+                                  :name="llmConfigFieldNames.name"
+                                  :readonly="autofillFieldsLocked"
+                                  autocomplete="off"
+                                  data-lpignore="true"
+                                  data-1p-ignore="true"
+                                  @focus="unlockAutofillFields"
+                                  density="compact" class="mb-3" placeholder="My OpenAI Config" />
+                    <v-select v-model="newConfigForm.provider" :label="tt('Provider')"
+                              :items="llmProviderOptions"
+                              item-title="title"
+                              item-value="value"
+                              :name="llmConfigFieldNames.provider"
+                              autocomplete="off"
+                              density="compact" class="mb-3" />
+                    <v-text-field v-model="newConfigForm.model" :label="tt('Model')"
+                                  :name="llmConfigFieldNames.model"
+                                  :readonly="autofillFieldsLocked"
+                                  autocomplete="off"
+                                  data-lpignore="true"
+                                  data-1p-ignore="true"
+                                  @focus="unlockAutofillFields"
+                                  density="compact" class="mb-3"
+                                  :placeholder="selectedLLMProviderOption.modelPlaceholder" />
+                    <v-text-field v-model="newConfigForm.api_key" label="API Key"
+                                  :name="llmConfigFieldNames.apiKey"
+                                  :readonly="autofillFieldsLocked"
+                                  autocomplete="new-password"
+                                  data-lpignore="true"
+                                  data-1p-ignore="true"
+                                  @focus="unlockAutofillFields"
+                                  density="compact" class="mb-3" type="password"
+                                  :placeholder="selectedLLMProviderOption.apiKeyPlaceholder" />
+                    <v-text-field v-model="newConfigForm.base_url" :label="baseUrlFieldLabel"
+                                  :name="llmConfigFieldNames.baseUrl"
+                                  :readonly="autofillFieldsLocked"
+                                  autocomplete="off"
+                                  data-lpignore="true"
+                                  data-1p-ignore="true"
+                                  @focus="unlockAutofillFields"
+                                  density="compact"
+                                  :placeholder="selectedLLMProviderOption.baseUrlPlaceholder" />
+                    <v-select v-model="newConfigForm.credential_mode"
+                              :label="tt('Credential Mode')"
+                              :items="llmCredentialModeOptions"
+                              item-title="title"
+                              item-value="value"
+                              autocomplete="off"
+                              density="compact"
+                              class="mb-3" />
+                    <v-textarea v-model="newConfigForm.credential_json"
+                                :label="tt('Credential JSON')"
+                                :name="llmConfigFieldNames.credentialJson"
+                                autocomplete="off"
+                                data-lpignore="true"
+                                data-1p-ignore="true"
+                                density="compact"
+                                rows="3"
+                                auto-grow
+                                class="mb-3" />
+                    <v-text-field v-model="newConfigForm.token_endpoint"
+                                  :label="tt('Token Endpoint')"
+                                  :name="llmConfigFieldNames.tokenEndpoint"
+                                  autocomplete="off"
+                                  density="compact"
+                                  class="mb-3"
+                                  placeholder="https://provider.example.com/oauth/token" />
+                    <div class="d-flex flex-wrap ga-3">
+                        <v-textarea v-model="newConfigForm.refresh_headers"
+                                    :label="tt('Refresh Headers')"
+                                    :name="llmConfigFieldNames.refreshHeaders"
+                                    autocomplete="off"
+                                    density="compact"
+                                    rows="2"
+                                    auto-grow
+                                    class="llm-config-json-field mb-3" />
+                        <v-textarea v-model="newConfigForm.refresh_body"
+                                    :label="tt('Refresh Body')"
+                                    :name="llmConfigFieldNames.refreshBody"
+                                    autocomplete="off"
+                                    density="compact"
+                                    rows="2"
+                                    auto-grow
+                                    class="llm-config-json-field mb-3" />
+                        <v-textarea v-model="newConfigForm.refresh_params"
+                                    :label="tt('Refresh Params')"
+                                    :name="llmConfigFieldNames.refreshParams"
+                                    autocomplete="off"
+                                    density="compact"
+                                    rows="2"
+                                    auto-grow
+                                    class="llm-config-json-field mb-3" />
+                    </div>
+                    <v-switch v-model="newConfigForm.advancedMode"
+                              :label="tt('Advanced Mode')"
+                              color="primary"
+                              density="compact"
+                              hide-details
+                              class="mb-2" />
+                    <v-expand-transition>
+                        <div v-if="newConfigForm.advancedMode" class="llm-config-advanced-fields">
+                            <v-select v-model="newConfigForm.reasoning_depth"
+                                      :label="tt('Reasoning Depth')"
+                                      :items="llmReasoningDepthOptions"
+                                      item-title="title"
+                                      item-value="value"
+                                      autocomplete="off"
+                                      density="compact"
+                                      class="mb-3" />
+                            <div class="d-flex flex-wrap ga-3">
+                                <v-text-field v-model="newConfigForm.temperature"
+                                              :label="tt('Temperature')"
+                                              :name="llmConfigFieldNames.temperature"
+                                              type="number"
+                                              min="0"
+                                              max="2"
+                                              step="0.1"
+                                              density="compact"
+                                              class="llm-config-number-field mb-3" />
+                                <v-text-field v-model="newConfigForm.max_tokens"
+                                              :label="tt('Max Tokens')"
+                                              :name="llmConfigFieldNames.maxTokens"
+                                              type="number"
+                                              min="1"
+                                              step="1"
+                                              density="compact"
+                                              class="llm-config-number-field mb-3" />
+                            </div>
+                            <v-textarea v-model="newConfigForm.system_prompt"
+                                        :label="tt('System Prompt')"
+                                        :name="llmConfigFieldNames.systemPrompt"
+                                        autocomplete="off"
+                                        density="compact"
+                                        rows="2"
+                                        auto-grow
+                                        class="mb-3" />
+                            <v-textarea v-model="newConfigForm.classification_prompt_template"
+                                        :label="tt('Classification Prompt Template')"
+                                        :name="llmConfigFieldNames.classificationPrompt"
+                                        autocomplete="off"
+                                        density="compact"
+                                        rows="2"
+                                        auto-grow
+                                        class="mb-3" />
+                            <v-textarea v-model="newConfigForm.rule_prompt_template"
+                                        :label="tt('Rule Prompt Template')"
+                                        :name="llmConfigFieldNames.rulePrompt"
+                                        autocomplete="off"
+                                        density="compact"
+                                        rows="2"
+                                        auto-grow />
+                        </div>
+                    </v-expand-transition>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer />
+                    <v-btn variant="text" type="button" @click="closeAddConfigDialog">{{ tt('Cancel') }}</v-btn>
+                    <v-btn color="primary" variant="tonal" :loading="addConfigSaving"
+                           type="submit">{{ tt('Save') }}</v-btn>
+                </v-card-actions>
+            </form>
+        </v-card>
+    </v-dialog>
+
+    <snack-bar ref="snackbar" />

@@ -1,0 +1,181 @@
+.learning-center-panel {
+    background: transparent;
+}
+
+.learning-section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 38px;
+    margin-bottom: 12px;
+}
+
+.learning-section-header--empty {
+    min-height: 0;
+    margin-bottom: 0;
+}
+
+.learning-section-title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.5;
+}
+
+.learning-section-actions {
+    display: flex;
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+}
+
+.learning-section-actions--external {
+    min-width: 0;
+    width: 100%;
+}
+
+.learning-section-actions--split {
+    flex-wrap: nowrap;
+}
+
+.learning-section-actions__primary {
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.learning-section-actions__spacer {
+    flex: 1 1 auto;
+    min-width: 16px;
+}
+
+.learning-panel-action {
+    height: 38px;
+    min-height: 38px;
+    min-width: 136px;
+    padding-inline: 18px;
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+.learning-panel-refresh {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+    min-height: 38px;
+}
+
+.learning-panel-refresh :deep(.v-icon) {
+    font-size: 22px;
+    width: 22px;
+    height: 22px;
+}
+
+.learning-status-select {
+    flex: 0 0 200px;
+    max-width: 210px;
+}
+
+.learning-status-select :deep(.v-field) {
+    min-height: 38px;
+    height: 38px;
+}
+
+.learning-status-select :deep(.v-field__input) {
+    min-height: 38px;
+    padding-top: 0;
+    padding-bottom: 0;
+    text-align: center;
+    justify-content: center;
+}
+
+.learning-status-select :deep(.v-select__selection) {
+    justify-content: center;
+    width: 100%;
+}
+
+.learning-status-select :deep(.v-select__selection-text) {
+    width: 100%;
+    text-align: center;
+}
+
+.learning-rules-table :deep(th) {
+    padding-block: 8px;
+}
+
+.learning-rules-table :deep(td) {
+    text-align: center;
+}
+
+.learning-rules-feature-cell {
+    margin-inline: auto;
+}
+
+.learning-rules-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    flex-wrap: nowrap;
+}
+
+.learning-rules-table :deep(.v-switch) {
+    display: inline-flex;
+    justify-content: center;
+}
+
+.learning-header-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 32px;
+    width: 100%;
+    padding-inline: 4px;
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+.learning-header-menu {
+    max-width: min(360px, 90vw);
+}
+
+.llm-config-autofill-decoy {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    border: 0;
+}
+
+.llm-config-advanced-fields {
+    border-top: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+    margin-top: 8px;
+    padding-top: 12px;
+}
+
+.llm-config-number-field {
+    flex: 1 1 180px;
+}
+
+.llm-config-json-field {
+    flex: 1 1 220px;
+}
+
+.v-table :deep(td) {
+    padding-block: 12px;
+    vertical-align: middle;
+}
+
+.v-table :deep(th) {
+    white-space: nowrap;
+    text-align: center;
+    vertical-align: middle;
+}

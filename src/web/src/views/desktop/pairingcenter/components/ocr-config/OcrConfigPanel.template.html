@@ -1,0 +1,161 @@
+    <div>
+        <div class="learning-section-header"
+             :class="{ 'learning-section-header--empty': hideSectionTitle && hasHeaderActionsTarget }">
+            <h3 v-if="!hideSectionTitle" class="learning-section-title">{{ tt('OCR Config') }}</h3>
+            <Teleport :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
+                <div class="learning-section-actions"
+                     :class="{ 'learning-section-actions--external': hasHeaderActionsTarget }">
+                    <settings-json-import-export-button
+                        section-key="ocrConfig"
+                        filename-prefix="ocr-config"
+                        :disabled="ocrConfigLoading || ocrConfigSaving"
+                        password-required-for-export
+                        @imported="loadOCRConfig"
+                    />
+                    <v-btn class="learning-panel-refresh"
+                           variant="text"
+                           color="default"
+                           :icon="true"
+                           :loading="ocrConfigLoading"
+                           @click="loadOCRConfig">
+                        <v-icon :icon="mdiRefresh" />
+                        <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
+                    </v-btn>
+                </div>
+            </Teleport>
+        </div>
+
+        <v-card variant="outlined" class="mb-4">
+            <v-card-title class="text-subtitle-1 d-flex align-center">
+                <span>{{ tt('OCR Config') }}</span>
+                <v-spacer />
+                <v-chip size="small"
+                        :color="ocrConfig.configured ? 'success' : 'warning'"
+                        variant="tonal">
+                    {{ tt(ocrConfig.configured ? 'Enabled' : 'Disabled') }}
+                </v-chip>
+            </v-card-title>
+            <v-divider />
+            <v-card-text class="pt-4">
+                <v-row>
+                    <v-col cols="12" md="5">
+                        <v-select v-model="ocrConfigForm.provider"
+                                  :items="ocrProviderOptions"
+                                  item-title="title"
+                                  item-value="value"
+                                  :label="tt('Provider')"
+                                  variant="outlined"
+                                  density="comfortable"
+                                  hide-details
+                                  :loading="ocrConfigLoading"
+                                  :disabled="ocrConfigLoading || ocrConfigSaving" />
+                    </v-col>
+                    <v-col cols="12" md="5">
+                        <v-text-field v-model="ocrConfigForm.lang"
+                                      :label="tt('OCR Language')"
+                                      variant="outlined"
+                                      density="comfortable"
+                                      hide-details
+                                      :disabled="ocrConfigForm.provider === 'disabled' || ocrConfigLoading || ocrConfigSaving" />
+                    </v-col>
+                    <v-col cols="12" md="6">
+                        <v-text-field v-model="ocrConfigForm.model"
+                                      :label="tt('Model')"
+                                      variant="outlined"
+                                      density="comfortable"
+                                      hide-details
+                                      :disabled="ocrConfigForm.provider === 'disabled' || ocrConfigLoading || ocrConfigSaving" />
+                    </v-col>
+                    <v-col cols="12" md="6">
+                        <v-text-field v-model="ocrConfigForm.base_url"
+                                      :label="tt('Base URL')"
+                                      variant="outlined"
+                                      density="comfortable"
+                                      hide-details
+                                      :disabled="ocrConfigForm.provider !== 'llm_vision' || ocrConfigLoading || ocrConfigSaving" />
+                    </v-col>
+                    <v-col cols="12" md="6">
+                        <v-select v-model="ocrConfigForm.credential_mode"
+                                  :label="tt('Credential Mode')"
+                                  :items="credentialModeOptions"
+                                  item-title="title"
+                                  item-value="value"
+                                  variant="outlined"
+                                  density="comfortable"
+                                  hide-details
+                                  :disabled="ocrConfigForm.provider !== 'llm_vision' || ocrConfigLoading || ocrConfigSaving" />
+                    </v-col>
+                    <v-col cols="12" md="6">
+                        <v-text-field v-model="ocrConfigForm.token_endpoint"
+                                      :label="tt('Token Endpoint')"
+                                      variant="outlined"
+                                      density="comfortable"
+                                      hide-details
+                                      :disabled="ocrConfigForm.provider !== 'llm_vision' || ocrConfigLoading || ocrConfigSaving" />
+                    </v-col>
+                    <v-col cols="12" md="6">
+                        <v-textarea v-model="ocrConfigForm.credential_json"
+                                    :label="tt('Credential JSON')"
+                                    variant="outlined"
+                                    density="comfortable"
+                                    rows="3"
+                                    auto-grow
+                                    hide-details
+                                    :disabled="ocrConfigForm.provider !== 'llm_vision' || ocrConfigLoading || ocrConfigSaving" />
+                    </v-col>
+                    <v-col cols="12" md="6">
+                        <v-textarea v-model="ocrConfigForm.parameters"
+                                    :label="tt('Parameters JSON')"
+                                    variant="outlined"
+                                    density="comfortable"
+                                    rows="3"
+                                    auto-grow
+                                    hide-details
+                                    :disabled="ocrConfigForm.provider === 'disabled' || ocrConfigLoading || ocrConfigSaving" />
+                    </v-col>
+                    <v-col cols="12" md="4">
+                        <v-textarea v-model="ocrConfigForm.refresh_headers"
+                                    :label="tt('Refresh Headers')"
+                                    variant="outlined"
+                                    density="comfortable"
+                                    rows="2"
+                                    auto-grow
+                                    hide-details
+                                    :disabled="ocrConfigForm.provider !== 'llm_vision' || ocrConfigLoading || ocrConfigSaving" />
+                    </v-col>
+                    <v-col cols="12" md="4">
+                        <v-textarea v-model="ocrConfigForm.refresh_body"
+                                    :label="tt('Refresh Body')"
+                                    variant="outlined"
+                                    density="comfortable"
+                                    rows="2"
+                                    auto-grow
+                                    hide-details
+                                    :disabled="ocrConfigForm.provider !== 'llm_vision' || ocrConfigLoading || ocrConfigSaving" />
+                    </v-col>
+                    <v-col cols="12" md="4">
+                        <v-textarea v-model="ocrConfigForm.refresh_params"
+                                    :label="tt('Refresh Params')"
+                                    variant="outlined"
+                                    density="comfortable"
+                                    rows="2"
+                                    auto-grow
+                                    hide-details
+                                    :disabled="ocrConfigForm.provider !== 'llm_vision' || ocrConfigLoading || ocrConfigSaving" />
+                    </v-col>
+                    <v-col cols="12" md="2" class="d-flex align-center">
+                        <v-btn class="learning-panel-action w-100"
+                               variant="outlined"
+                               color="default"
+                               :loading="ocrConfigSaving"
+                               :disabled="ocrConfigLoading"
+                               @click="saveOCRConfig">
+                            {{ tt('Save') }}
+                        </v-btn>
+                    </v-col>
+                </v-row>
+            </v-card-text>
+        </v-card>
+
+        <snack-bar ref="snackbar" />
+    </div>

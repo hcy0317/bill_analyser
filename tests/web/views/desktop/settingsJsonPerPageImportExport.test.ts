@@ -61,7 +61,10 @@ describe('settings JSON per-page import/export controls', () => {
         const templates = readSource('src/views/desktop/templates/ListPage.vue');
         const rules = readSource('src/views/desktop/pairingcenter/components/RuleCenterPanel.vue');
         const accountRules = readSource('src/views/desktop/pairingcenter/components/AccountRulePanel.vue');
-        const learning = readSource('src/views/desktop/pairingcenter/components/LearningCenterPanel.vue');
+        const learning = readJoinedSource([
+            'src/views/desktop/pairingcenter/components/LearningCenterPanel.vue',
+            'src/views/desktop/pairingcenter/components/learning-center/LearningCenterPanel.template.html',
+        ]);
 
         expect(accounts).toContain('section-key="accounts"');
         expect(categories).toContain('section-key="transactionCategories"');

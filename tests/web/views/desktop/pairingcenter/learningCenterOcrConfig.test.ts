@@ -6,12 +6,28 @@ function readSource(relativePath: string): string {
 }
 
 const PANEL_PATH = 'src/views/desktop/pairingcenter/components/LearningCenterPanel.vue';
+const PANEL_TEMPLATE_PATH = 'src/views/desktop/pairingcenter/components/learning-center/LearningCenterPanel.template.html';
 const OCR_PANEL_PATH = 'src/views/desktop/pairingcenter/components/OcrConfigPanel.vue';
+const OCR_PANEL_TEMPLATE_PATH = 'src/views/desktop/pairingcenter/components/ocr-config/OcrConfigPanel.template.html';
 const LIST_PAGE_PATH = 'src/views/desktop/pairingcenter/ListPage.vue';
+
+function readLearningPanelSource(): string {
+    return [
+        readSource(PANEL_PATH),
+        readSource(PANEL_TEMPLATE_PATH),
+    ].join('\n');
+}
+
+function readOcrPanelSource(): string {
+    return [
+        readSource(OCR_PANEL_PATH),
+        readSource(OCR_PANEL_TEMPLATE_PATH),
+    ].join('\n');
+}
 
 describe('LearningCenterPanel OCR config placement', () => {
     test('LLM config tab no longer renders OCR config controls', () => {
-        const source = readSource(PANEL_PATH);
+        const source = readLearningPanelSource();
 
         expect(source).toContain("activeTab === 'llm-config'");
         expect(source).not.toContain('v-model="ocrConfigForm.provider"');
@@ -20,7 +36,7 @@ describe('LearningCenterPanel OCR config placement', () => {
     });
 
     test('OCR config is a standalone sibling page with import/export controls', () => {
-        const source = readSource(OCR_PANEL_PATH);
+        const source = readOcrPanelSource();
         const listPage = readSource(LIST_PAGE_PATH);
 
         expect(listPage).toContain("value: 'ocr-config'");
@@ -34,7 +50,7 @@ describe('LearningCenterPanel OCR config placement', () => {
 
 describe('LearningCenterPanel feature display', () => {
     test('learning suggestions and rules render typed feature chips instead of splitting raw summaries', () => {
-        const source = readSource(PANEL_PATH);
+        const source = readLearningPanelSource();
 
         expect(source).toContain('getSuggestionFeatureChips(item)');
         expect(source).toContain('getRuleFeatureChips(rule)');

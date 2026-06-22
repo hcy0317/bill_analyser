@@ -350,3 +350,22 @@ D8 `backend-shape` 切片将三个后端结构债主文件拆为 facade + 功能
 - `cargo fmt --all -- --check`、`node scripts/check-backend-doc-map.mjs` 与 `git diff --check` 通过。
 - `cargo clippy --workspace --all-targets -- -D warnings` 通过。
 - `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过，完整 Rust 工作区 coverage gate 达标。
+
+## 11. Frontend-shape 记录
+
+D8 `frontend-shape` 切片将学习中心与 OCR/LLM 配置前端拆为 facade + 功能文件夹：
+
+- `LearningCenterPanel.vue` 保留页面入口、学习规则动作、tab 刷新编排和外置模板绑定合同；`learning-center/LearningCenterPanel.template.html` 与 `LearningCenterPanel.scss` 承载原模板和样式，`learning-center/useLearningCenterLlmConfig.ts` 承载 LLM saved config、candidate review、provider options、advanced settings payload 和浏览器 autofill 防护状态。
+- `OcrConfigPanel.vue` 保留 OCR 配置入口和保存/加载逻辑；`ocr-config/OcrConfigPanel.template.html` 与 `OcrConfigPanel.scss` 承载原模板和样式。
+- `llmConfigHelpers.ts` 保留兼容导出 facade；`llm-config/types.ts`、`options.ts`、`payload.ts` 与 `transforms.ts` 分别承载类型、provider/credential 选项、payload 构造和服务端响应归一。
+- 源码扫描测试同步读取 facade + 外置模板，避免测试继续绑定单文件布局；运行态 import path、props、store action、按钮文案、禁用状态、settings bundle section、provider secret 脱敏和现有视觉布局保持不变。
+- 外置模板 facade 通过 `useExternalTemplateBindings` 标记模板使用的绑定，沿用仓库既有外置模板 noUnusedLocals 约定。
+
+本切片本地验证记录：
+
+- `Set-Location src/web; npm run test -- --runTestsByPath ../../tests/web/views/desktop/pairingcenter/llmConfigHelpers.test.ts ../../tests/web/views/desktop/pairingcenter/learningCenterPanelModel.test.ts ../../tests/web/views/desktop/pairingcenter/learningCenterOcrConfig.test.ts ../../tests/web/models/learning_center.test.ts ../../tests/web/views/desktop/transactions/import/llmSignalMemory.test.ts ../../tests/web/views/desktop/transactions/import/services.llmMemory.test.ts ../../tests/web/views/desktop/transactions/import/checkDataLearning.test.ts ../../tests/web/views/desktop/settingsJsonPerPageImportExport.test.ts` 通过，8 个 suite、34 个测试全部通过。
+- `Set-Location src/web; npm run lint:ci` 通过；仅保留仓库既有 `no-explicit-any` warning，无本切片错误。
+- `Set-Location src/web; npm run test:coverage` 通过，96 个 suite、39011 个测试全部通过，coverage gate 达标。
+- `Set-Location src/web; npm run structure:check` 仍只失败于 D10 shared 四项：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`；D8 直接前端文件未新增失败，并报告 `LearningCenterPanel.vue` 较 baseline 减少 1177 行。
+- `node scripts/check-backend-doc-map.mjs` 与 `git diff --check` 通过。
+- 本切片没有发起 live external-provider 调用；验证范围为源码、Jest、lint、coverage 和结构 gate。
