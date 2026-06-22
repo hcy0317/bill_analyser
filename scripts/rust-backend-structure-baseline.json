@@ -9,30 +9,5 @@
   },
   "generatedBy": "scripts/check-rust-backend-structure.mjs --print-baseline",
   "countMode": "non-comment-non-observability-rust-lines",
-  "files": [
-    {
-      "path": "src/backend/db/auth_postgres.rs",
-      "kind": "rust",
-      "area": "db",
-      "lines": 633,
-      "physicalLines": 679,
-      "reason": "existing oversized Rust backend file tracked by the structure ratchet; D6 governance baseline after auth profile user-data split and comment-pass"
-    },
-    {
-      "path": "src/backend/core/smart_dedup.rs",
-      "kind": "rust",
-      "area": "core",
-      "lines": 1786,
-      "physicalLines": 1986,
-      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/core/import_pipeline.rs",
-      "kind": "rust",
-      "area": "core",
-      "lines": 1017,
-      "physicalLines": 1216,
-      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
-    }
-  ]
+  "files": []
 }

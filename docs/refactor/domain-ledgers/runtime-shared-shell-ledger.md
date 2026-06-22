@@ -101,3 +101,27 @@ D10 `behavior-lock` 切片只补共享壳行为锁，不移动生产结构、不
 - `node scripts/check-rust-backend-structure.mjs` 通过，扫描 507 个 Rust backend 文件并保留 3 个 baseline entry。
 - `node scripts/check-backend-doc-map.mjs` 通过。
 - `git diff --check` 通过，仅提示 Windows LF/CRLF 工作区 warning。
+
+## 8. Backend-shape 切片记录
+
+D10 `backend-shape` 切片关闭 Rust backend structure baseline 的最终尾债。该切片只做物理结构拆分和治理 baseline 收紧，不改变 REST route、PostgreSQL schema、金额单位、导入链路、认证/session 或去重匹配语义。
+
+本切片结构调整：
+
+- `src/backend/core/smart_dedup.rs` 退化为 DTO/public facade 并保留 serde 合同，去重 engine、platform-bank 候选、转账候选、相似重复、拆单候选、merge helper、matching helper 和 reconciliation helper 下沉到 `smart_dedup/**`。
+- `src/backend/core/import_pipeline.rs` 保留导入预览 pipeline 合同 facade，preview query、filter index、matching payload、类型映射、route response DTO、response envelope 和 value helper 下沉到 `import_pipeline/**`。
+- `src/backend/db/auth_postgres.rs` 保留 PostgreSQL auth facade 和 shared helper，模块内测试下沉到 `auth_postgres/tests.rs`；该文件原本只比 600 行 warning 线高 33 行，测试外置即可关闭 baseline，不移动未覆盖的数据库 I/O helper。
+- `scripts/rust-backend-structure-baseline.json` 删除最后 3 个历史 oversized baseline entry；Rust backend structure gate 现在以 0 baseline entry 通过。
+
+本切片本地验证记录：
+
+- `node scripts/check-rust-backend-structure.mjs` 通过，扫描 523 个 Rust backend 文件，baseline entries 为 0。
+- `cargo test -p bill-analyser-core --test import_pipeline_contracts` 通过：14 个测试。
+- `cargo test -p bill-analyser-core --test smart_dedup_contracts` 通过：12 个测试。
+- `cargo test -p bill-analyser-db auth_postgres` 通过：5 个 auth postgres 单元测试。
+- `cargo fmt --all -- --check` 通过。
+- `cargo clippy --workspace --all-targets -- -D warnings` 通过。
+- `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过，生成完整 Rust 工作区 coverage 报告。
+- `node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .omx\ultragoal\evidence\d10-backend-shape-rust.diff --threshold 90` 通过：1830 个可执行 changed lines，1716 行覆盖，changed-line coverage 93.77%。
+- `node scripts/check-backend-doc-map.mjs` 通过。
+- `Set-Location src\web; npm run structure:check` 仍按预期失败 4 项，全部属于 D10 后续 `frontend-shape`：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`。

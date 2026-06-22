@@ -21,7 +21,7 @@ Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预
 
 解析来源标准化后端当前以 facade + 功能子文件组织：`src/backend/parsers/lib.rs` 聚合 parser public API，registry、DTO、parser tag、金额 serde、类型/金额归一和 post-process 分别下沉到 `registry.rs`、`types.rs`、`tags.rs`、`money_serde.rs`、`normalization.rs` 与 `post_process.rs`；`src/backend/parsers/dedicated/mod.rs` 聚合 dedicated parser dispatcher facade，来源 registry、filename/content hint、selection、candidate evidence 与选择 DTO 分别下沉到 `dedicated/registry.rs`、`hints.rs`、`selection.rs`、`evidence.rs` 与 `types.rs`。该拆分不改变 parser registry 顺序、exactly-one/no_match/conflict 决策、金额元/分兼容边界、日期标准化或导入 staging 前的 `StandardBill` 合同。
 
-导入预览后端当前以 facade + 功能子文件组织：`src/backend/db/import_staging.rs` 聚合 session、parser/source staging、preview query/predicate/selection/write/identity/confirm/materialization/row mapping/filter matching 等子文件；`src/backend/http/import_routes/stage_handlers.rs`、`preview_mutation_helpers.rs` 与 `stage_vector_recall.rs` 聚合 dedup/stage2、preview page/selection/update/reclassify、confirm、learning、vector recall 等子文件。该拆分只改变物理结构，公开函数名、REST 路由、PostgreSQL 合同与导入语义保持不变。
+导入预览后端当前以 facade + 功能子文件组织：`src/backend/db/import_staging.rs` 聚合 session、parser/source staging、preview query/predicate/selection/write/identity/confirm/materialization/row mapping/filter matching 等子文件；`src/backend/http/import_routes/stage_handlers.rs`、`preview_mutation_helpers.rs` 与 `stage_vector_recall.rs` 聚合 dedup/stage2、preview page/selection/update/reclassify、confirm、learning、vector recall 等子文件；`src/backend/core/import_pipeline.rs` 聚合导入预览 pipeline 合同，preview page query、filter index、matching payload、类型映射、route response DTO、response envelope 和 value helper 下沉到 `import_pipeline/**`。该拆分只改变物理结构，公开函数名、REST 路由、PostgreSQL 合同与导入语义保持不变。
 
 身份设置后端当前以 facade + 功能子文件组织：`src/backend/db/taxonomy/postgres_reads.rs` 聚合账户、分类、分类规则、账户规则、标签、模板、row mapping 与 helper 子文件；`settings_bundle/postgres_import_export.rs` 聚合 settings bundle 导入编排、账户/分类/标签/模板/规则 section importer 与金额/ref helper；`src/backend/http/taxonomy_routes/account_handlers.rs` 聚合账户 CRUD、排序、余额同步、交易迁移和清理；`account_category_formatters/accounts_and_tags.rs` 聚合账户子账户、响应格式化、请求 payload、legacy 类型分类归一化、标签和模板格式化。该拆分不改变 REST route、user-scope SQL、settings bundle 顺序、legacy 恢复兼容或 cents/minor units 金额合同。
 
@@ -72,6 +72,8 @@ multipart 上传并行执行 dedicated parser 检测，每个文件必须且只�
 
 正式账单的转账候选与导入配对保持同一核心约束：同日、5 分钟内、金额绝对值在 1 分容差内且方向相反、来源账户不同，并排除已配对或已 suppressed 的账单。接受候选会合并或删除对应账单并写入审计；拒绝候选会写入 suppression，避免同一对账单再次提示。
 
+智能去重核心当前以 facade + 功能子文件组织：`src/backend/core/smart_dedup.rs` 聚合去重 DTO、public engine 和 serde 合同，exact/same-batch、platform-bank、transfer pair、similar duplicate、split group、merge helper、文本/金额匹配和 reconciliation helper 分别下沉到 `smart_dedup/**`。该拆分不改变 source priority、同批/跨批去重、转账候选、拆单候选、reconciliation candidate 或金额序列化语义。
+
 规则中心的配对总览展示转账配对和重复配对；投资相关识别规则保留在分类/规则治理链路中。
 
 ## 预算与统计
@@ -88,7 +90,7 @@ multipart 上传并行执行 dedicated parser 检测，每个文件必须且只�
 
 注册请求支持可选 `defaultPackage`。缺失、`null` 或 `none` 保持旧注册行为；`standard_daily_v1` 会在注册事务内一次性写入面向中国大陆个人/家庭账单的默认账户、交易分类、分类规则和账户识别规则，并在注册响应中返回 `defaultSeed` 写入摘要。桌面端和移动端注册页都提供独立 opt-in 开关；未勾选的新用户和所有现有用户不会自动写入这套默认包。该默认包写入的数据仍走当前 taxonomy/settings 主链，可随设置包导出并导入到其他账号。
 
-认证后端当前以 facade + 功能子文件组织：`src/backend/db/auth_postgres.rs` 聚合身份存在性校验、登录/profile 读取、审计事件、session、2FA、profile 更新、cloud settings、注册和默认包 seed 子文件；`src/backend/db/auth_registration_defaults.rs` 聚合默认包类型、支出/收入/转账/投资分类、账户、分类规则、账户规则和合同测试子文件；`src/backend/http/auth_routes/public_auth_handlers.rs` 聚合 CORS、注册、登录、refresh 和 API/MCP token handler 子文件。该拆分不改变 REST path、JWT/refresh/session 语义、2FA/recovery code hash、注册默认包内容、user-scope SQL 或对外错误字段。
+认证后端当前以 facade + 功能子文件组织：`src/backend/db/auth_postgres.rs` 聚合身份存在性校验、登录/profile 读取、审计事件、session、2FA、profile 更新、cloud settings、注册、默认包 seed 和 shared helper，模块内测试下沉到 `auth_postgres/tests.rs`；`src/backend/db/auth_registration_defaults.rs` 聚合默认包类型、支出/收入/转账/投资分类、账户、分类规则、账户规则和合同测试子文件；`src/backend/http/auth_routes/public_auth_handlers.rs` 聚合 CORS、注册、登录、refresh 和 API/MCP token handler 子文件。该拆分不改变 REST path、JWT/refresh/session 语义、2FA/recovery code hash、注册默认包内容、user-scope SQL 或对外错误字段。
 
 认证前端当前以 facade + 功能文件夹组织：`src/web/src/stores/user.ts` 保留 `useUserStore` facade，basic info/localStorage、profile/avatar、cloud settings、user-data statistics/export 和 settings bundle 动作下沉到 `stores/user/**`；桌面 `UserBasicSettingTab.vue` 与移动 `UserProfilePage.vue` 保留页面入口，template/style 和展示 label helper 下沉到相邻 `basic/**`、`profile/**` 功能文件夹。该拆分不改变 Pinia store 导出名、localStorage key、profile 保存 payload、头像 URL、settings bundle/user-data 调用、桌面/移动路由或现有视觉布局。
 
