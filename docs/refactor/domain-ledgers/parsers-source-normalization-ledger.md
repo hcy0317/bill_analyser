@@ -154,3 +154,23 @@ D9 `comment-pass` 切片只补充 parser/source normalization 域的中文函数
 - `node scripts/check-rust-backend-structure.mjs` 通过，507 个 Rust backend 文件仍只保留 3 个既有 baseline entry。
 - `node scripts/check-backend-doc-map.mjs` 通过。
 - `git diff --check` 通过，仅输出 Windows 换行提示。
+
+## 11. Governance-docs 记录
+
+D9 `governance-docs` 切片只复核并记录 parser/source normalization 域的治理状态，不放宽结构基线、不修改运行时代码、不改变 `docs/PROJECT_OVERVIEW.md` 已记录的 parser facade + 功能子文件事实。
+
+本切片治理结论：
+
+- `scripts/rust-backend-structure-baseline.json` 当前 3 个 baseline entry 均不属于 `src/backend/parsers/**`；D9 parser 后端结构已经通过 gate，无需新增或放宽 parser baseline。
+- `docs/PROJECT_OVERVIEW.md` 已记录 `src/backend/parsers/lib.rs`、`src/backend/parsers/dedicated/mod.rs` 及其功能子文件边界；本切片复核后不做措辞 churn。
+- `src/web` 前端 structure check 仍只暴露 D10 shared 债务：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`；D9 不接管这些 shared 文件。
+- parser 金额、日期、registry、dedicated exactly-one/no_match/conflict 和 staging 前 `StandardBill` 合同仍以 `tests/backend/parsers/parser_contracts.rs` 为行为锁。
+
+本切片本地验证记录：
+
+- `node scripts/check-rust-backend-structure.mjs` 通过，507 个 Rust backend 文件仍只保留 3 个非 D9 baseline entry。
+- `node scripts/check-backend-doc-map.mjs` 通过。
+- `Set-Location src/web; npm run structure:check` 仍只失败 4 个 D10 shared 文件，D9 没有新增前端 structure failure。
+- `cargo test -p bill-analyser-parsers --test parser_contracts` 通过，19 个 parser 合同测试全部通过。
+- `rg` 复核 `docs/PROJECT_OVERVIEW.md` 中 parser 当前结构事实仍存在。
+- `git diff --check` 通过，仅输出 Windows 换行提示。
