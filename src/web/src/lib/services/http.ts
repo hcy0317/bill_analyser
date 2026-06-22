@@ -18,6 +18,9 @@ export interface ApiDataResponse<T> {
     data: T;
 }
 
+/**
+ * 中文说明：把新后端 data envelope 适配回旧前端 `ApiResponse.result` 形态，避免拆分 services 时改变调用方契约。
+ */
 export function buildApiResponse<T>(response: AxiosResponse<any>, result: T): AxiosResponse<ApiResponse<T>> {
     return {
         ...response,

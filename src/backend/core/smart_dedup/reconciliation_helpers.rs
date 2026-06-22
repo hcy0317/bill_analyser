@@ -1,4 +1,5 @@
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：为导入账单生成稳定 reconciliation key，优先使用 preview/session/template，缺失时才 hash 业务字段。
 fn build_reconciliation_import_key(bill: &DedupBill) -> String {
     if let Some(preview_id) = &bill.preview_id {
         if !preview_id.trim().is_empty() {
@@ -29,6 +30,7 @@ fn build_reconciliation_import_key(bill: &DedupBill) -> String {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：生成 reconciliation 候选 id，把候选类型、历史账单和导入 key 绑定为前端可追踪标识。
 fn build_reconciliation_candidate_id(
     candidate_type: ReconciliationCandidateType,
     existing_bill_id: &str,
@@ -52,6 +54,7 @@ fn reconciliation_candidate_time_tolerance_seconds(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：判断导入账单与历史账单可提示为重复还是转账，并返回前端展示用 reason token。
 fn resolve_reconciliation_candidate_type(
     imported_bill: &DedupBill,
     existing_bill: &DedupBill,
@@ -85,6 +88,7 @@ fn resolve_reconciliation_candidate_type(
     None
 }
 
+// 中文说明：汇总 counterparty、description、payment 和组合文本相似度，作为历史重复候选的文本证据。
 fn has_reconciliation_duplicate_evidence(
     imported_bill: &DedupBill,
     existing_bill: &DedupBill,
@@ -107,6 +111,7 @@ fn has_reconciliation_duplicate_evidence(
     text_evidence_matches(&imported_text, &existing_text, 0.62)
 }
 
+// 中文说明：确认转账候选来自不同真实来源，防止同账户或 history_db 自身被误判为跨来源转账。
 fn has_distinct_reconciliation_transfer_sources(left: &DedupBill, right: &DedupBill) -> bool {
     let left_account = normalized_non_zero_source(&left.source_account_id);
     let right_account = normalized_non_zero_source(&right.source_account_id);
@@ -156,6 +161,7 @@ fn normalized_non_zero_source(value: &str) -> String {
     value
 }
 
+// 中文说明：使用固定 FNV-1a 风格 hash 生成跨平台稳定 key，避免 reconciliation id 依赖随机 hasher。
 fn stable_hash_hex(input: &str) -> String {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for byte in input.as_bytes() {
@@ -165,6 +171,7 @@ fn stable_hash_hex(input: &str) -> String {
     format!("{hash:016x}")
 }
 
+// 中文说明：计算 LCS 长度供轻量文本相似度使用，不引入额外依赖或运行时状态。
 fn longest_common_subsequence_len(left: &[char], right: &[char]) -> usize {
     let mut previous = vec![0; right.len() + 1];
     let mut current = vec![0; right.len() + 1];

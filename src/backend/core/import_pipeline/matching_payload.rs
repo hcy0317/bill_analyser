@@ -1,9 +1,11 @@
+/// 中文说明：为导入预览行补齐标准 matching payload，供前端统一读取 transfer、learning、dedup 等信号。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn attach_import_preview_matching_payload(preview_item: &mut Map<String, Value>) {
     let matching = build_import_preview_matching_payload(preview_item);
     preview_item.insert("matching".to_string(), matching);
 }
 
+/// 中文说明：从新旧预览字段合成标准 matching payload，保留已记录反馈并补齐 parser、dedup、recurring 和 annotation 默认值。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_import_preview_matching_payload(preview_item: &Map<String, Value>) -> Value {
     #[cfg(not(coverage))]
@@ -55,6 +57,7 @@ fn preview_matching_payload(preview_item: &Map<String, Value>) -> Option<&Map<St
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：把旧 matching 子对象字段覆盖到标准 payload section，保留用户反馈优先级。
 fn merge_object_fields(target: &mut Map<String, Value>, source: &Map<String, Value>) {
     for (key, value) in source {
         target.insert(key.clone(), value.clone());
@@ -82,6 +85,7 @@ fn populate_parser_matching_section(
     payload_object: &mut Map<String, Value>,
     preview_item: &Map<String, Value>,
 ) {
+    // 中文说明：同步 parser id/tags 的新旧字段名，保证前端和行为锁测试看到同一来源链。
     let parser = section_object_mut(payload_object, "parser");
     let parser_id = first_non_empty_string_field(
         parser,
@@ -108,6 +112,7 @@ fn populate_dedup_matching_section(
     payload_object: &mut Map<String, Value>,
     preview_item: &Map<String, Value>,
 ) {
+    // 中文说明：把去重类型和来源 id 归一进 dedup section，兼容字符串和数组两种历史来源 id。
     let dedup = section_object_mut(payload_object, "dedup");
     let dedup_type = get_first_non_empty_string([
         string_field_from_map(dedup, "type"),
@@ -136,6 +141,7 @@ fn populate_recurring_matching_section(
     payload_object: &mut Map<String, Value>,
     preview_item: &Map<String, Value>,
 ) {
+    // 中文说明：补齐周期候选 section 的 id、名称、数量、得分和原因，避免旧预览字段丢失候选提示。
     let recurring = section_object_mut(payload_object, "recurring");
     if recurring
         .get("id")
@@ -195,6 +201,7 @@ fn populate_annotation_matching_section(
     payload_object: &mut Map<String, Value>,
     preview_item: &Map<String, Value>,
 ) {
+    // 中文说明：统一手动标注标志，matching payload 和 preview 旧字段任一为真都视为已人工处理。
     let annotation = section_object_mut(payload_object, "annotation");
     let is_manually_annotated = annotation
         .get("is_manually_annotated")
@@ -222,6 +229,7 @@ fn first_non_empty_string_field<'a>(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：按优先级选择第一个非空字符串，服务于新旧 matching 字段兼容合并。
 fn get_first_non_empty_string(values: impl IntoIterator<Item = String>) -> String {
     values
         .into_iter()
@@ -230,6 +238,7 @@ fn get_first_non_empty_string(values: impl IntoIterator<Item = String>) -> Strin
 }
 
 fn first_non_empty_value_list<'a>(values: impl IntoIterator<Item = &'a Value>) -> Vec<Value> {
+    // 中文说明：按优先级选择第一个非空数组或逗号分隔列表，专门兼容 dedup source ids。
     values
         .into_iter()
         .map(|value| parse_dedup_source_ids(Some(value)))

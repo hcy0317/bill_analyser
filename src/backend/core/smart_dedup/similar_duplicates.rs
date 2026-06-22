@@ -1,3 +1,4 @@
+// 中文说明：在不同来源之间识别金额、时间和文本相近的重复账单，按来源优先级决定保留项。
 #[tracing::instrument(level = "debug", skip_all)]
 fn find_similar_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup> {
     let mut groups = Vec::new();

@@ -1,4 +1,5 @@
 impl SmartDeduplicationEngine {
+    /// 中文说明：按固定顺序执行同批重复、平台银行重复、转账、相似重复和拆分账单识别，返回清理 runtime 标记后的结果。
     #[tracing::instrument(level = "debug", skip_all)]
     pub fn process(&self, bills: Vec<DedupBill>) -> DeduplicationResult {
         let original_count = bills.len();
@@ -32,6 +33,7 @@ impl SmartDeduplicationEngine {
     }
 }
 
+/// 中文说明：把本次导入账单与数据库历史账单做去重匹配，命中后标记导入账单为数据库重复。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn find_database_duplicates(
     imported_bills: &mut [DedupBill],
@@ -104,6 +106,7 @@ pub fn find_database_duplicates(
     matches
 }
 
+/// 中文说明：识别本次导入与历史账单之间的跨批次转账配对，并补齐目标账户、来源快照和展示字段。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn find_cross_batch_transfer_pairs(
     imported_bills: &mut [DedupBill],
@@ -187,6 +190,7 @@ pub fn find_cross_batch_transfer_pairs(
     matches
 }
 
+/// 中文说明：生成导入账单与历史账单的 reconciliation 候选，用于前端人工确认重复或转账历史关系。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn find_import_reconciliation_candidates(
     imported_bills: &[DedupBill],

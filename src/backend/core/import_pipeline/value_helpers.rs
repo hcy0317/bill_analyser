@@ -95,6 +95,7 @@ fn object_field(value: Option<&Value>) -> Option<&Map<String, Value>> {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：把 dedup source ids 的逗号字符串或数组表示归一为 JSON 数组，供筛选索引和 matching payload 复用。
 fn parse_dedup_source_ids(value: Option<&Value>) -> Vec<Value> {
     match value {
         Some(Value::String(text)) => text
@@ -144,6 +145,7 @@ fn value_to_i64(value: &Value) -> i64 {
 }
 
 fn json_value_is_truthy(value: &Value) -> bool {
+    // 中文说明：统一导入预览旧字段中的 bool/number/string/list/object 真值判断，避免 selected 与 signal 状态分歧。
     match value {
         Value::Null => false,
         Value::Bool(value) => *value,

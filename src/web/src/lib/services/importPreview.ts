@@ -73,6 +73,9 @@ interface UpdateImportPreviewItemResponse {
     previewItem?: Record<string, unknown>;
 }
 
+/**
+ * 中文说明：统一提交匹配候选 accept/reject/clear 动作，并保持返回值仍映射成旧 ApiResponse.result 形态。
+ */
 function postMatchingCandidateAction(
     action: MatchingCandidateActionName,
     candidateId: string,
@@ -86,7 +89,9 @@ function postMatchingCandidateAction(
     });
 }
 
+// 中文说明：导入预览域服务 facade，集中保留旧 endpoint、timeout 和 payload 字段名，供根 services.ts 继续透出。
 const importPreviewServices = {
+    // 中文说明：提交通用导入文件解析请求，按旧表单字段发送列映射、类型映射和文件格式参数。
     parseImportTransaction: ({ fileType, fileEncoding, importFile, columnMapping, transactionTypeMapping, hasHeaderLine, timeFormat, timezoneFormat, amountDecimalSeparator, amountDigitGroupingSymbol, geoSeparator, geoOrder, tagSeparator, delimiter }: { fileType: string, fileEncoding?: string, importFile: File, columnMapping?: Record<number, number>, transactionTypeMapping?: Record<string, TransactionType>, hasHeaderLine?: boolean, timeFormat?: string, timezoneFormat?: string, amountDecimalSeparator?: string, amountDigitGroupingSymbol?: string, geoSeparator?: string, geoOrder?: string, tagSeparator?: string, delimiter?: string }): ApiResponsePromise<ImportTransactionResponsePageWrapper> => {
         let textualColumnMapping: string | undefined = undefined;
         let textualTransactionTypeMapping: string | undefined = undefined;
@@ -123,6 +128,7 @@ const importPreviewServices = {
             timeout: DEFAULT_UPLOAD_API_TIMEOUT
         } as ApiRequestConfig);
     },
+    // 中文说明：按 session 获取导入学习建议；有局部预览更新时使用 POST，否则保持 GET 兼容旧调用路径。
     getImportLearningSuggestions: ({
         sessionId,
         previewUpdates,
@@ -149,6 +155,7 @@ const importPreviewServices = {
             return buildApiResponse(response, response.data?.data);
         });
     },
+    // 中文说明：把当前预览更新提升为导入学习规则，payload 字段名保持后端 learning lifecycle 契约。
     promoteImportLearning: ({
         sessionId,
         previewUpdates,
@@ -171,6 +178,7 @@ const importPreviewServices = {
             return buildApiResponse(response, response.data?.data);
         });
     },
+    // 中文说明：更新单条预览草稿并把后端 success/data.updated 归一成前端使用的 updated 布尔值。
     updateImportPreviewItem: ({
         sessionId,
         payload
@@ -185,6 +193,7 @@ const importPreviewServices = {
             });
         });
     },
+    // 中文说明：读取导入预览分页数据，显式透传 page、selected_only、preview_ids 和 signal 筛选条件。
     getImportPreviewPage: ({
         sessionId,
         page,
@@ -223,6 +232,7 @@ const importPreviewServices = {
             return buildApiResponse(response, response.data?.data);
         });
     },
+    // 中文说明：确认导入预览，保留未 patch 选择状态和历史重写确认字段，避免确认链路丢失用户选择。
     confirmImportPreview: ({
         sessionId,
         previewUpdates,
@@ -249,6 +259,7 @@ const importPreviewServices = {
             return buildApiResponse(response, response.data?.data);
         });
     },
+    // 中文说明：提交导入预览转账建议的人工审核决定，兼容 accept/reject/clear 三种状态。
     reviewImportTransferDecision: ({
         previewId,
         decision,
@@ -265,6 +276,7 @@ const importPreviewServices = {
             return buildApiResponse(response, response.data?.data);
         });
     },
+    // 中文说明：按导入 session 读取匹配候选，供导入预览页面展示同批候选摘要。
     getMatchingSessionCandidates: ({
         sessionId
     }: {
@@ -274,6 +286,7 @@ const importPreviewServices = {
             return buildApiResponse(response, response.data?.data);
         });
     },
+    // 中文说明：按账单 id 读取匹配候选，供账单详情或匹配中心复用同一候选接口。
     getMatchingBillCandidates: ({
         billId
     }: {
@@ -283,6 +296,7 @@ const importPreviewServices = {
             return buildApiResponse(response, response.data?.data);
         });
     },
+    // 中文说明：读取账单匹配反馈，维持 matching feedback 与导入预览反馈共用的响应适配。
     getMatchingBillFeedback: ({
         billId
     }: {
@@ -328,6 +342,7 @@ const importPreviewServices = {
             return buildApiResponse(response, response.data?.data);
         });
     },
+    // 中文说明：读取匹配 pair 列表并保留 pair_type/page/page_size 查询字段，供历史匹配中心分页展示。
     getMatchingPairs: ({
         pairType,
         page,
@@ -345,6 +360,7 @@ const importPreviewServices = {
             return buildApiResponse(response, response.data?.data);
         });
     },
+    // 中文说明：触发历史匹配重算，按账单 id 和可选 family 限定 reconciliation 范围。
     reconcileMatchingHistory: ({
         billIds,
         families
@@ -360,6 +376,7 @@ const importPreviewServices = {
             return buildApiResponse(response, response.data?.data);
         });
     },
+    // 中文说明：创建人工匹配 pair，默认 pairType 为 transfer 以兼容导入预览转账确认入口。
     createManualPair: ({
         billId,
         candidateBillId,
@@ -402,6 +419,7 @@ const importPreviewServices = {
             timeout: DEFAULT_UPLOAD_API_TIMEOUT
         } as ApiRequestConfig);
     },
+    // 中文说明：把临时预览文件按用户列映射解析进既有导入 session，保持 v2 parse_generic payload 字段名。
     parseGenericIntoSession: ({ sessionId, tempPath, columnMapping, transactionTypeMapping, hasHeaderLine, timeFormat, timezoneFormat, amountDecimalSeparator, amountDigitGroupingSymbol, delimiter }: {
         sessionId: string;
         tempPath: string;

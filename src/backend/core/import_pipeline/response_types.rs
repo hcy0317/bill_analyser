@@ -160,6 +160,7 @@ pub struct ExpectedPreviewState {
     pub destination_account_id: Option<Value>,
 }
 
+/// 中文说明：从前端回传的 JSON 对象解析预览期望状态，用于确认导入前的状态冲突校验。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn expected_preview_state_from_value(value: Option<&Value>) -> Option<ExpectedPreviewState> {
     value.and_then(|value| serde_json::from_value(value.clone()).ok())

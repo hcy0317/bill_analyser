@@ -13,6 +13,7 @@ fn dedup_key(bill: &DedupBill) -> String {
 }
 
 fn clean_runtime_markers(mut bill: DedupBill) -> DedupBill {
+    // 中文说明：返回给后续阶段前清理仅用于本轮算法内部的删除和数据库重复标记。
     bill.removed = false;
     bill.duplicate_of_db_id = None;
     bill
@@ -26,6 +27,7 @@ fn merge_template_id(target: &mut DedupBill, template_id: &Option<String>) {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：把被合并账单的模板 id 传递到保留账单，保留 parser template 来源链。
 fn merge_template_ids_from_bill(target: &mut DedupBill, secondary: &DedupBill) {
     append_optional_id(&mut target.merged_template_ids, &secondary.template_id);
     append_ids(
@@ -35,6 +37,7 @@ fn merge_template_ids_from_bill(target: &mut DedupBill, secondary: &DedupBill) {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：合并保留账单与被移除账单的可展示字段、来源记录和模板 id，保留 parser tag 可选合并策略。
 fn merge_bill_fields(target: &mut DedupBill, secondary: &DedupBill, merge_parser_tags: bool) {
     target.counterparty = merge_field_values(&target.counterparty, &secondary.counterparty);
     target.payment_method = merge_field_values(&target.payment_method, &secondary.payment_method);
@@ -52,6 +55,7 @@ fn merge_bill_fields(target: &mut DedupBill, secondary: &DedupBill, merge_parser
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：合并 counterparty/payment/description 等文本字段，去重包含关系并用分隔符保留互补信息。
 fn merge_field_values(left: &str, right: &str) -> String {
     let left = left.trim();
     let right = right.trim();
@@ -94,6 +98,7 @@ fn merge_field_values(left: &str, right: &str) -> String {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：合并 parser tags 并去重，确保跨来源合并后仍能追踪 parser 家族。
 fn merge_parser_tags_from_bill(target: &mut DedupBill, secondary: &DedupBill) {
     let mut tags = normalized_parser_tags(target);
     for tag in normalized_parser_tags(secondary) {
@@ -105,6 +110,7 @@ fn merge_parser_tags_from_bill(target: &mut DedupBill, secondary: &DedupBill) {
 }
 
 fn normalized_parser_tags(bill: &DedupBill) -> Vec<String> {
+    // 中文说明：归一 parser tag 并在缺失时回退到 parser 来源，确保合并后的来源链仍可追踪。
     let mut tags = Vec::new();
     for tag in &bill.parser_tags {
         let tag = tag.trim().to_lowercase();
@@ -121,6 +127,7 @@ fn normalized_parser_tags(bill: &DedupBill) -> Vec<String> {
     tags
 }
 
+/// 中文说明：构造转账来源快照，记录原始类型、parser、账户、模板和标签，供前端展示转出/转入链路。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_transfer_source_snapshot(bill: &DedupBill, role: &str) -> TransferSourceSnapshot {
     TransferSourceSnapshot {

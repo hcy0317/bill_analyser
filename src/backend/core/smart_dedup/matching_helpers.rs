@@ -2,6 +2,7 @@ fn is_platform_bank_duplicate_candidate(platform_bill: &DedupBill, bank_bill: &D
     amount_same_direction(platform_bill.amount, bank_bill.amount)
 }
 
+// 中文说明：判断两笔账单是否有足够文本证据可合并，平台-银行组合比同源去重更严格。
 fn duplicate_text_match(left: &DedupBill, right: &DedupBill, is_platform_bank_pair: bool) -> bool {
     let desc_similar =
         text_evidence_matches(&left.description, &right.description, SIMILARITY_THRESHOLD);
@@ -86,6 +87,7 @@ fn abs_cents(amount: Money) -> i128 {
 }
 
 fn normalized_similarity(left: &str, right: &str) -> f64 {
+    // 中文说明：用包含关系和 LCS 相似度判断账单文本接近程度，支撑重复、相似和 reconciliation 证据。
     let left = left.trim().to_lowercase();
     let right = right.trim().to_lowercase();
     if left.is_empty() && right.is_empty() {

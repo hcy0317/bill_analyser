@@ -1,3 +1,4 @@
+// 中文说明：识别一笔总账单被拆成多笔分账单的场景，按来源、时间窗口和金额求和范围生成 split group。
 #[tracing::instrument(level = "debug", skip_all)]
 fn find_split_bills(bills: &mut [DedupBill]) -> Vec<SplitGroup> {
     let mut groups = Vec::new();
@@ -80,6 +81,7 @@ fn find_split_bills(bills: &mut [DedupBill]) -> Vec<SplitGroup> {
     groups
 }
 
+// 中文说明：确认当前批次至少存在两个有效来源，避免单一来源内误触发跨来源去重或拆分逻辑。
 fn has_multiple_active_sources<F>(bills: &[DedupBill], mut source_for: F) -> bool
 where
     F: FnMut(&DedupBill) -> String,
@@ -145,6 +147,7 @@ fn amount_cents_for_bills(bills: &[DedupBill]) -> Vec<i128> {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：按时间桶和金额建立候选索引，供转账、平台银行、相似和拆分算法快速查找邻近账单。
 fn build_time_amount_buckets<I, F>(
     indices: I,
     timestamps: &[Option<i64>],
@@ -191,6 +194,7 @@ fn amount_tolerance_values(amount_cents: i128) -> impl Iterator<Item = i128> {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：按来源、时间桶和金额方向聚合拆分候选，后续用金额范围快速剪枝。
 fn build_split_source_groups<I>(
     indices: I,
     timestamps: &[Option<i64>],
@@ -226,6 +230,7 @@ where
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：预计算每个来源组可能形成的金额和区间，减少拆分候选组合搜索。
 fn build_split_group_ranges(
     groups: &HashMap<SplitSourceKey, Vec<usize>>,
     amount_cents: &[i128],
@@ -242,6 +247,7 @@ fn split_group_possible_sum_range(
     indices: &[usize],
     amount_cents: &[i128],
 ) -> Option<SplitAmountRange> {
+    // 中文说明：为同来源同方向候选估算至少两笔到全量求和的可能范围，用于总账单匹配剪枝。
     if indices.len() < 2 {
         return None;
     }
@@ -288,6 +294,7 @@ fn split_group_range_can_match(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：为某笔总账单寻找可相加匹配的分账候选，要求不同来源、近邻时间和金额和落入容差。
 fn find_split_candidates_for_total(
     groups: &HashMap<SplitSourceKey, Vec<usize>>,
     group_ranges: &HashMap<SplitSourceKey, SplitAmountRange>,

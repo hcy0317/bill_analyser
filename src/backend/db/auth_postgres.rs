@@ -38,6 +38,7 @@ include!("auth_postgres/cloud_settings.rs");
 include!("auth_postgres/registration.rs");
 include!("auth_postgres/registration_defaults_seed.rs");
 
+// 中文说明：把前端资料更新枚举应用到 users 表字段与 JSONB metadata，邮箱变更时同步撤销验证状态。
 fn apply_postgres_profile_update(
     update: &AuthUserProfileUpdate,
     email: &mut String,
@@ -139,6 +140,7 @@ fn apply_postgres_profile_update(
     }
 }
 
+// 中文说明：在认证事务内写入审计事件，保证登录、2FA、重置等事件与业务提交同生命周期。
 async fn insert_postgres_auth_log_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     draft: &AuthLogDraft,
@@ -168,6 +170,7 @@ async fn insert_postgres_auth_log_in_transaction(
     row.try_get("id").map_err(postgres_auth_error)
 }
 
+// 中文说明：在认证事务内创建 token session，统一访问 token、refresh token 和过期时间的 Postgres 写入。
 async fn create_postgres_token_session_in_tx(
     transaction: &mut sqlx::Transaction<'_, Postgres>,
     draft: &CreateTokenSessionDraft,
@@ -198,6 +201,7 @@ async fn create_postgres_token_session_in_tx(
     row.try_get("id").map_err(postgres_auth_error)
 }
 
+// 中文说明：组装认证审计 metadata，保留客户端、错误和额外 JSON 字段但不暴露为顶层表字段。
 fn auth_log_metadata(draft: &AuthLogDraft) -> Value {
     json!({
         "username": draft.username,
@@ -209,6 +213,7 @@ fn auth_log_metadata(draft: &AuthLogDraft) -> Value {
     })
 }
 
+// 中文说明：读取用户 JSONB metadata，作为 Postgres auth/profile 设置字段的 authoritative 来源。
 async fn load_user_metadata(pool: &PostgresPool, user_id: UserId) -> DbResult<Value> {
     let row = sqlx::query("SELECT metadata FROM users WHERE id = $1")
         .bind(user_id_i64(user_id)?)
@@ -220,6 +225,7 @@ async fn load_user_metadata(pool: &PostgresPool, user_id: UserId) -> DbResult<Va
     Ok(metadata)
 }
 
+// 中文说明：原子更新用户 metadata 和 updated_at，供 profile、锁定状态和设置同步复用。
 async fn update_user_metadata(
     pool: &PostgresPool,
     user_id: UserId,
@@ -243,6 +249,7 @@ async fn update_user_metadata(
     Ok(result.rows_affected() > 0)
 }
 
+// 中文说明：把 users 查询行投影为登录校验模型，合并 profile 字段与登录锁定/2FA metadata。
 fn postgres_login_user_from_row(row: &PgRow) -> DbResult<AuthLoginUserRow> {
     let profile = postgres_profile_from_row(row)?;
     let Json(metadata): Json<Value> = row.try_get("metadata").map_err(postgres_auth_error)?;
@@ -257,6 +264,7 @@ fn postgres_login_user_from_row(row: &PgRow) -> DbResult<AuthLoginUserRow> {
     })
 }
 
+// 中文说明：把 users 行投影为前端 profile 响应，统一 JSONB 设置字段的默认值和 nickname 兜底。
 fn postgres_profile_from_row(row: &PgRow) -> DbResult<AuthUserProfileRow> {
     let raw_id: i64 = row.try_get("id").map_err(postgres_auth_error)?;
     let user_id = user_id_from_i64(raw_id)?;
@@ -315,6 +323,7 @@ fn postgres_profile_from_row(row: &PgRow) -> DbResult<AuthUserProfileRow> {
     })
 }
 
+// 中文说明：把 external_auth 行转换为外部认证绑定模型，隔离 SQLx 行字段读取细节。
 fn postgres_external_auth_from_row(row: &PgRow) -> DbResult<ExternalAuthRow> {
     Ok(ExternalAuthRow {
         external_auth_category: row
@@ -330,6 +339,7 @@ fn postgres_external_auth_from_row(row: &PgRow) -> DbResult<ExternalAuthRow> {
     })
 }
 
+// 中文说明：从 metadata 多候选键读取字符串设置，兼容数字和布尔旧值并应用默认值。
 fn metadata_string(metadata: &Value, keys: &[&str], default: &str) -> String {
     keys.iter()
         .find_map(|key| metadata.get(*key))
@@ -343,6 +353,7 @@ fn metadata_string(metadata: &Value, keys: &[&str], default: &str) -> String {
         .unwrap_or_else(|| default.to_string())
 }
 
+// 中文说明：从 metadata 读取可空字符串设置，空字符串按缺失处理以保持前端默认值逻辑。
 fn metadata_optional_string(metadata: &Value, keys: &[&str]) -> Option<String> {
     let value = metadata_string(metadata, keys, "");
     if value.is_empty() {
@@ -352,6 +363,7 @@ fn metadata_optional_string(metadata: &Value, keys: &[&str]) -> Option<String> {
     }
 }
 
+// 中文说明：从 metadata 多候选键读取整数设置，兼容字符串和布尔旧值并应用默认值。
 fn metadata_i64(metadata: &Value, keys: &[&str], default: i64) -> i64 {
     keys.iter()
         .find_map(|key| metadata.get(*key))
@@ -364,6 +376,7 @@ fn metadata_i64(metadata: &Value, keys: &[&str], default: i64) -> i64 {
         .unwrap_or(default)
 }
 
+// 中文说明：从 metadata 读取可空整数设置，空字符串和缺失字段保持 None。
 fn metadata_optional_i64(metadata: &Value, keys: &[&str]) -> Option<i64> {
     keys.iter()
         .find_map(|key| metadata.get(*key))
@@ -381,6 +394,7 @@ fn metadata_optional_i64(metadata: &Value, keys: &[&str]) -> Option<i64> {
         })
 }
 
+// 中文说明：从 metadata 读取布尔设置，兼容 1/0、true/false、yes/no 等历史表示。
 fn metadata_bool(metadata: &Value, keys: &[&str], default: bool) -> bool {
     keys.iter()
         .find_map(|key| metadata.get(*key))
@@ -397,18 +411,22 @@ fn metadata_bool(metadata: &Value, keys: &[&str], default: bool) -> bool {
         .unwrap_or(default)
 }
 
+// 中文说明：写入字符串 metadata 字段，确保非对象 metadata 先被重置为对象。
 fn metadata_set_string(metadata: &mut Value, key: &str, value: &str) {
     ensure_metadata_object(metadata).insert(key.to_string(), Value::String(value.to_string()));
 }
 
+// 中文说明：写入整数 metadata 字段，供 profile 数值设置统一落到 JSONB。
 fn metadata_set_i64(metadata: &mut Value, key: &str, value: i64) {
     ensure_metadata_object(metadata).insert(key.to_string(), Value::from(value));
 }
 
+// 中文说明：写入布尔 metadata 字段，供登录锁定、邮箱验证和用户偏好复用。
 fn metadata_set_bool(metadata: &mut Value, key: &str, value: bool) {
     ensure_metadata_object(metadata).insert(key.to_string(), Value::from(value));
 }
 
+// 中文说明：写入可空整数 metadata，None 表示删除字段而不是写入 JSON null。
 fn metadata_set_optional_i64(metadata: &mut Value, key: &str, value: Option<i64>) {
     let object = ensure_metadata_object(metadata);
     if let Some(value) = value {
@@ -418,6 +436,7 @@ fn metadata_set_optional_i64(metadata: &mut Value, key: &str, value: Option<i64>
     }
 }
 
+// 中文说明：确保 metadata 可写为对象，遇到旧的 null/非对象值时重置为空对象。
 fn ensure_metadata_object(metadata: &mut Value) -> &mut Map<String, Value> {
     if !metadata.is_object() {
         *metadata = Value::Object(Map::new());
@@ -425,6 +444,7 @@ fn ensure_metadata_object(metadata: &mut Value) -> &mut Map<String, Value> {
     metadata.as_object_mut().expect("metadata object")
 }
 
+// 中文说明：解析审计扩展 metadata，非法 JSON 保留为 Null 以避免中断认证事务。
 fn parse_auth_metadata(raw: Option<&str>) -> Value {
     raw.and_then(|text| serde_json::from_str(text).ok())
         .unwrap_or(Value::Null)
@@ -446,12 +466,14 @@ fn json_setting_string(value: &Value) -> Option<String> {
     }
 }
 
+// 中文说明：把核心 UserId 转为 PostgreSQL BIGINT，防止超出数据库范围的 id 进入 SQL bind。
 fn user_id_i64(user_id: UserId) -> DbResult<i64> {
     i64::try_from(user_id.get()).map_err(|_| {
         DbError::InvalidOperation("user id is outside PostgreSQL BIGINT range".to_string())
     })
 }
 
+// 中文说明：把 PostgreSQL BIGINT id 转回核心 UserId，拒绝负数和零值。
 fn user_id_from_i64(raw_id: i64) -> DbResult<UserId> {
     let raw_id = u64::try_from(raw_id)
         .map_err(|_| DbError::InvalidOperation("Postgres user id must be positive".to_string()))?;
@@ -459,6 +481,7 @@ fn user_id_from_i64(raw_id: i64) -> DbResult<UserId> {
         .map_err(|_| DbError::InvalidOperation("Postgres user id must be non-zero".to_string()))
 }
 
+// 中文说明：把 SQLx 错误收敛为 auth repository 的 DbError，避免调用方依赖 Postgres 具体错误类型。
 fn postgres_auth_error(error: sqlx::Error) -> DbError {
     DbError::InvalidOperation(format!("postgres auth error: {error}"))
 }

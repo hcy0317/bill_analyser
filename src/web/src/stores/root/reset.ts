@@ -11,6 +11,9 @@ interface RootResetContext {
     readonly clearNotification: () => void;
 }
 
+/**
+ * 中文说明：集中执行根 store 退出/切换用户时的跨域状态清理，按参数决定是否同步清理用户资料和设置缓存。
+ */
 export function resetRootDomainStores(context: RootResetContext, resetUserInfoAndSettings: boolean): void {
     if (resetUserInfoAndSettings) {
         context.exchangeRatesStore.resetLatestExchangeRates();

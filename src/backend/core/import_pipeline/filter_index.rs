@@ -44,6 +44,7 @@ pub struct ImportPreviewFilterIndexItem {
     pub recurring_matched_date: String,
 }
 
+/// 中文说明：把一行导入预览原始 JSON 投影为前端筛选索引，统一分类、账户、parser、去重和信号状态字段。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_import_preview_filter_index_item(
     preview_item: &Map<String, Value>,
@@ -151,6 +152,7 @@ pub fn build_import_preview_filter_index_item(
     }
 }
 
+/// 中文说明：根据 matching payload 与旧字段判断转账建议是否仍待用户处理，避免已接受或已拒绝的建议重复提示。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn resolve_import_preview_transfer_signal_status(
     preview_item: &Map<String, Value>,
@@ -192,6 +194,7 @@ pub fn resolve_import_preview_transfer_signal_status(
     }
 }
 
+/// 中文说明：根据 learning matching 状态和旧推荐字段判断学习建议展示状态，兼容 auto-applied 与 suppressed 语义。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn resolve_import_preview_learning_signal_status(
     preview_item: &Map<String, Value>,

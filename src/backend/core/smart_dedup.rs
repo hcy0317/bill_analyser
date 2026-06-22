@@ -439,6 +439,7 @@ fn default_money() -> Money {
     Money::ZERO
 }
 
+// 中文说明：把导入/去重 JSON 中的元单位金额转换为核心 Money，兼容数字、字符串和空值。
 fn deserialize_yuan_money<'de, D>(deserializer: D) -> Result<Money, D::Error>
 where
     D: Deserializer<'de>,
@@ -467,6 +468,7 @@ where
     serializer.serialize_f64(amount.to_cents() as f64 / 100.0)
 }
 
+// 中文说明：把任意 JSON 标量归一为字符串，供导入去重 DTO 兼容数字、布尔和对象旧值。
 fn deserialize_stringish<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: Deserializer<'de>,
@@ -475,6 +477,7 @@ where
     Ok(value_to_string(&value).unwrap_or_default())
 }
 
+// 中文说明：把任意 JSON 标量归一为可空字符串，空白值保持 None 以避免制造伪来源字段。
 fn deserialize_optional_stringish<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where
     D: Deserializer<'de>,
@@ -483,6 +486,7 @@ where
     Ok(value_to_string(&value).filter(|value| !value.trim().is_empty()))
 }
 
+// 中文说明：把来源 id、parser tags 等字段兼容解析为字符串数组，支持 JSON 数组、逗号文本和单值。
 fn deserialize_string_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
 where
     D: Deserializer<'de>,
@@ -503,6 +507,7 @@ where
     })
 }
 
+// 中文说明：兼容导入数据中的 bool、数字和字符串布尔值，保持旧 payload 的 suppressed/selected 语义。
 fn deserialize_boolish<'de, D>(deserializer: D) -> Result<bool, D::Error>
 where
     D: Deserializer<'de>,
@@ -530,6 +535,7 @@ fn value_to_string(value: &Value) -> Option<String> {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：解析字符串数组字段，优先兼容 JSON 数组文本，再回退到逗号分隔形式。
 fn parse_string_vec_text(text: &str) -> Vec<String> {
     let text = text.trim();
     if text.is_empty() {

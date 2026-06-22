@@ -1,3 +1,4 @@
+// 中文说明：在同批导入内识别相反金额的转账配对，保留转出记录并把转入记录折叠为目标账户信息。
 #[tracing::instrument(level = "debug", skip_all)]
 fn find_transfer_pairs(bills: &mut [DedupBill]) -> Vec<TransferPair> {
     let mut pairs = Vec::new();

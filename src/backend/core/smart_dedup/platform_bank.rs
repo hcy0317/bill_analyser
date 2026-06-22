@@ -1,3 +1,4 @@
+// 中文说明：识别同批导入内支付平台与银行流水的重复记账，优先保留平台账单并合并银行来源信息。
 #[tracing::instrument(level = "debug", skip_all)]
 fn find_platform_bank_duplicates(bills: &mut [DedupBill]) -> Vec<DuplicateGroup> {
     let mut groups = Vec::new();

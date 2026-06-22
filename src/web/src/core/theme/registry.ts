@@ -18,6 +18,9 @@ import type {
 import { darkVuetifyTheme, lightVuetifyTheme } from './base.ts';
 import { themePairByFamily, themeVariants } from './variants.ts';
 
+/**
+ * 中文说明：合并基础 Vuetify 主题与品牌覆盖项，保证新增主题只覆盖差异 token。
+ */
 function mergeVuetifyTheme(baseTheme: ApplicationVuetifyThemeDefinition, override: ApplicationThemeOverride = {}): ApplicationVuetifyThemeDefinition {
     return {
         dark: override.dark ?? baseTheme.dark,
@@ -32,6 +35,9 @@ function mergeVuetifyTheme(baseTheme: ApplicationVuetifyThemeDefinition, overrid
     };
 }
 
+/**
+ * 中文说明：把 Vuetify 主题 token 投影到 Framework7/mobile CSS variables，保持桌面和移动端配色同步。
+ */
 function createMobileThemeConfig(vuetifyTheme: ApplicationVuetifyThemeDefinition, override?: Partial<ApplicationMobileThemeConfig>): ApplicationMobileThemeConfig {
     const primary = override?.primary ?? vuetifyTheme.colors['primary']!;
     const background = vuetifyTheme.colors['background']!;
@@ -63,6 +69,9 @@ function createMobileThemeConfig(vuetifyTheme: ApplicationVuetifyThemeDefinition
     };
 }
 
+/**
+ * 中文说明：由主题变体生成完整应用主题定义，集中补齐 paired theme、Vuetify 和移动端配置。
+ */
 function createThemeDefinition(variant: ApplicationThemeVariant): ApplicationThemeDefinition {
     const baseTheme = variant.mode === 'dark' ? darkVuetifyTheme : lightVuetifyTheme;
     const vuetify = mergeVuetifyTheme(baseTheme, variant.override);
@@ -85,10 +94,16 @@ export const APPLICATION_THEMES: Readonly<Record<ApplicationThemeName, Applicati
     return themes;
 }, {} as Record<ApplicationThemeName, ApplicationThemeDefinition>);
 
+/**
+ * 中文说明：判断外部偏好值是否是已注册应用主题名，供设置读取和路由恢复时做白名单校验。
+ */
 export function isApplicationThemeName(value: string | undefined | null): value is ApplicationThemeName {
     return !!value && Object.prototype.hasOwnProperty.call(APPLICATION_THEMES, value);
 }
 
+/**
+ * 中文说明：规范化主题偏好，非法值统一回落到 system，避免本地存储旧值破坏主题初始化。
+ */
 export function normalizeThemePreference(value: string | undefined | null): ThemePreference {
     if (value === SYSTEM_THEME_PREFERENCE || isApplicationThemeName(value)) {
         return value;
@@ -97,6 +112,9 @@ export function normalizeThemePreference(value: string | undefined | null): Them
     return SYSTEM_THEME_PREFERENCE;
 }
 
+/**
+ * 中文说明：把当前偏好折叠到主题家族选项值，system 保持独立，其余值回到该家族 light 入口。
+ */
 export function getThemeFamilyOptionValue(preference: string | undefined | null): ThemePreference {
     const normalizedPreference = normalizeThemePreference(preference);
 
@@ -108,6 +126,9 @@ export function getThemeFamilyOptionValue(preference: string | undefined | null)
     return themePairByFamily[definition.family].light;
 }
 
+/**
+ * 中文说明：解析实际应用主题；system 偏好根据系统明暗模式落到默认 light/dark 主题。
+ */
 export function resolveThemePreference(preference: string | undefined | null, systemTheme: string = ThemeType.Light): ApplicationThemeName {
     const normalizedPreference = normalizeThemePreference(preference);
 
@@ -118,15 +139,24 @@ export function resolveThemePreference(preference: string | undefined | null, sy
     return systemTheme === ThemeType.Dark ? ThemeType.Dark : ThemeType.Light;
 }
 
+/**
+ * 中文说明：判断主题是否为暗色模式，未知主题按浅色处理以避免移动端误切 dark class。
+ */
 export function isDarkApplicationTheme(themeName: string | undefined | null): boolean {
     return isApplicationThemeName(themeName) ? APPLICATION_THEMES[themeName].dark : false;
 }
 
+/**
+ * 中文说明：读取完整主题定义，未知主题回退默认浅色定义，保护调用方不处理 undefined。
+ */
 export function getApplicationThemeDefinition(themeName: string | undefined | null): ApplicationThemeDefinition {
     const normalizedThemeName = isApplicationThemeName(themeName) ? themeName : ThemeType.Light;
     return APPLICATION_THEMES[normalizedThemeName];
 }
 
+/**
+ * 中文说明：在同一主题家族内切换明暗配对主题，支撑快速切换和显式 targetMode。
+ */
 export function getPairedApplicationThemeName(themeName: string | undefined | null, targetMode?: ApplicationThemeMode): ApplicationThemeName {
     const normalizedThemeName = normalizeThemePreference(themeName);
     const definition = getApplicationThemeDefinition(normalizedThemeName);
@@ -135,6 +165,9 @@ export function getPairedApplicationThemeName(themeName: string | undefined | nu
     return themePairByFamily[definition.family][nextMode];
 }
 
+/**
+ * 中文说明：生成 Vuetify themes 注册表，保持注册顺序和主题定义集中来自 APPLICATION_THEMES。
+ */
 export function getVuetifyThemes(): Record<ApplicationThemeName, ApplicationVuetifyThemeDefinition> {
     return APPLICATION_THEME_ORDER.reduce((themes, themeName) => {
         themes[themeName] = APPLICATION_THEMES[themeName].vuetify;
@@ -142,10 +175,16 @@ export function getVuetifyThemes(): Record<ApplicationThemeName, ApplicationVuet
     }, {} as Record<ApplicationThemeName, ApplicationVuetifyThemeDefinition>);
 }
 
+/**
+ * 中文说明：读取移动端主题配置，先规范化偏好再返回 Framework7 需要的 CSS variables。
+ */
 export function getMobileThemeConfig(themeName: string | undefined | null): ApplicationMobileThemeConfig {
     return getApplicationThemeDefinition(normalizeThemePreference(themeName)).mobile;
 }
 
+/**
+ * 中文说明：生成设置页主题家族选项，显示文案由调用方翻译函数提供。
+ */
 export function getThemePreferenceOptions(translate: (key: string) => string): ThemePreferenceOption[] {
     return [
         { name: translate('System Default'), value: SYSTEM_THEME_PREFERENCE },
@@ -161,6 +200,9 @@ export function getThemePreferenceOptions(translate: (key: string) => string): T
     ];
 }
 
+/**
+ * 中文说明：把应用主题偏好转换为 Framework7 darkMode 配置，system 保持 auto。
+ */
 export function getFramework7DarkModePreference(preference: string | undefined | null): boolean | 'auto' {
     const normalizedPreference = normalizeThemePreference(preference);
 
@@ -171,6 +213,9 @@ export function getFramework7DarkModePreference(preference: string | undefined |
     return isDarkApplicationTheme(normalizedPreference);
 }
 
+/**
+ * 中文说明：计算快速切换按钮的下一主题偏好，system 先落到默认浅色再按配对主题切换。
+ */
 export function getNextQuickThemePreference(preference: string | undefined | null): ThemePreference {
     const normalizedPreference = normalizeThemePreference(preference);
 

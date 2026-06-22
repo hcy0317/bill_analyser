@@ -2,6 +2,9 @@ import { TransactionType } from '@/core/transaction.ts';
 
 import type { ImportMatchingPayload } from '../import_matching.ts';
 
+/**
+ * 中文说明：按优先级读取第一个非空字符串，兼容导入 matching payload 的新旧候选字段。
+ */
 export function getFirstNonEmptyString(...values: Array<string | null | undefined>): string {
     for (const value of values) {
         if (typeof value === 'string' && value) {
@@ -12,6 +15,9 @@ export function getFirstNonEmptyString(...values: Array<string | null | undefine
     return '';
 }
 
+/**
+ * 中文说明：读取第一个可用 id 并转成字符串，保留数字 id 与历史字符串 id 的兼容性。
+ */
 export function getFirstDefinedIdString(...values: Array<number | string | null | undefined>): string {
     for (const value of values) {
         if (typeof value === 'number') {
@@ -26,6 +32,9 @@ export function getFirstDefinedIdString(...values: Array<number | string | null 
     return '';
 }
 
+/**
+ * 中文说明：把 matching candidate 中的转账类型提示转换为前端 TransactionType，用于预览行建议类型回填。
+ */
 export function getSuggestedTypeFromMatchingCandidate(candidateType: string | undefined): number | undefined {
     const normalizedCandidateType = (candidateType || '').trim().toLowerCase();
     if (
@@ -39,6 +48,9 @@ export function getSuggestedTypeFromMatchingCandidate(candidateType: string | un
     return undefined;
 }
 
+/**
+ * 中文说明：归一去重来源 id，支持数组、逗号字符串、数字字符串和非数字来源 token。
+ */
 export function normalizeDedupSourceIds(rawValue: Array<number | string> | string | undefined): Array<number | string> {
     if (Array.isArray(rawValue)) {
         return rawValue.map(value => {
@@ -62,6 +74,9 @@ export function normalizeDedupSourceIds(rawValue: Array<number | string> | strin
     return [];
 }
 
+/**
+ * 中文说明：判断去重来源 id 是否存在，统一复用 normalizeDedupSourceIds 的兼容解析。
+ */
 export function hasDedupSourceIds(rawValue: Array<number | string> | string | undefined): boolean {
     return normalizeDedupSourceIds(rawValue).length > 0;
 }
@@ -78,6 +93,9 @@ export type SparseImportMatchingPayload = {
     stage2_baseline?: ImportMatchingPayload['stage2_baseline'];
 };
 
+/**
+ * 中文说明：把稀疏 matching payload 补齐为前端稳定结构，保证导入预览组件不直接处理缺失 section。
+ */
 export function normalizeImportMatchingPayload(matching?: SparseImportMatchingPayload): ImportMatchingPayload | undefined {
     if (!matching) {
         return undefined;

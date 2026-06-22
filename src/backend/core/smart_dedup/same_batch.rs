@@ -87,6 +87,7 @@ fn append_same_batch_duplicate_group(
     }
 }
 
+// 中文说明：识别同批同金额同时间窗口内的重复组件，按来源优先级保留一笔并合并其余来源信息。
 fn append_same_batch_duplicate_component(
     bills: &mut [DedupBill],
     datetimes: &[Option<NaiveDateTime>],
@@ -127,6 +128,7 @@ fn append_same_batch_duplicate_component(
 }
 
 fn same_batch_duplicate_components(bills: &[DedupBill], indices: Vec<usize>) -> Vec<Vec<usize>> {
+    // 中文说明：把同时间金额簇继续拆成有文本证据连通的重复组件，避免无关同金额账单误合并。
     let mut remaining = indices;
     let mut components = Vec::new();
     while let Some(seed) = remaining.pop() {
@@ -152,6 +154,7 @@ fn same_batch_duplicate_components(bills: &[DedupBill], indices: Vec<usize>) -> 
     components
 }
 
+// 中文说明：复用 reconciliation 文本证据判断同批重复，避免同金额但描述无关的账单被合并。
 fn same_batch_pair_has_duplicate_evidence(left: &DedupBill, right: &DedupBill) -> bool {
     has_reconciliation_duplicate_evidence(left, right)
 }
