@@ -1,8 +1,8 @@
 use bill_analyser_parsers::{
     aggregate_description, build_parser_tags, detect_dedicated_import_bytes, normalize_amount_text,
     normalize_parser_tags, normalize_transaction_type, parse_dedicated_import_bytes,
-    parser_registry, parser_source_label, post_process_raw_bills, resolve_parser_tags,
-    serialize_parser_tags, RawBill, StandardBill,
+    parse_dedicated_import_bytes_with_decision, parser_registry, parser_source_label,
+    post_process_raw_bills, resolve_parser_tags, serialize_parser_tags, RawBill, StandardBill,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -312,6 +312,70 @@ fn post_process_demotes_no_income_expenditure_by_signed_amount_before_staging() 
 }
 
 #[test]
+fn post_process_normalizes_excel_serial_and_fractional_day_dates() {
+    let processed = post_process_raw_bills(
+        "icbc",
+        &[
+            RawBill {
+                date: "45323.5".to_string(),
+                amount: "10.00".to_string(),
+                transaction_type: "收入".to_string(),
+                description: "Excel serial datetime".to_string(),
+                ..Default::default()
+            },
+            RawBill {
+                date: "2024-02-02 0.25".to_string(),
+                amount: "8.50".to_string(),
+                transaction_type: "支出".to_string(),
+                description: "date plus fractional day".to_string(),
+                ..Default::default()
+            },
+        ],
+    );
+
+    assert_eq!(processed.len(), 2);
+    assert_eq!(processed[0].date, "2024-02-01 12:00:00");
+    assert_eq!(processed[0].amount.to_yuan_string(), "10.00");
+    assert_eq!(processed[1].date, "2024-02-02 06:00:00");
+    assert_eq!(processed[1].amount.to_yuan_string(), "-8.50");
+}
+
+#[test]
+fn post_process_preserves_source_fields_while_normalizing_sign_and_tags() {
+    let processed = post_process_raw_bills(
+        "cmbc",
+        &[RawBill {
+            date: "2026-03-04".to_string(),
+            amount: "-99.99".to_string(),
+            transaction_type: "投资理财".to_string(),
+            description: "基金申购".to_string(),
+            counterparty: "基金公司".to_string(),
+            channel: "民生银行手机银行".to_string(),
+            original_category: "理财".to_string(),
+            parser_tags: vec!["Parser:CMBC".to_string(), "channel:bank".to_string()],
+            order_id: "order-123".to_string(),
+            merchant_id: "merchant-456".to_string(),
+            status: "success".to_string(),
+            ..Default::default()
+        }],
+    );
+
+    assert_eq!(processed.len(), 1);
+    let bill = &processed[0];
+    assert_eq!(bill.transaction_type, "支出");
+    assert_eq!(bill.amount.to_yuan_string(), "-99.99");
+    assert_eq!(bill.original_type, "投资理财");
+    assert_eq!(bill.original_category, "理财");
+    assert_eq!(bill.payment_method, "民生银行手机银行");
+    assert_eq!(bill.transaction_id, "order-123");
+    assert_eq!(bill.merchant_id, "merchant-456");
+    assert_eq!(bill.status, "success");
+    assert_eq!(bill.parser_tags, ["parser:cmbc", "channel:bank"]);
+    assert!(bill.description.contains("基金申购"));
+    assert!(bill.description.contains("基金公司"));
+}
+
+#[test]
 fn dedicated_rust_parsers_detect_and_parse_repository_fixtures() {
     let cases = [
         ("wechat_statement_sample.csv", "wechat", 7),
@@ -426,6 +490,43 @@ fn dedicated_dispatcher_respects_requested_parser_and_rejects_non_dedicated_ids(
     assert!(parse_dedicated_import_bytes(filename, &bytes, "generic").is_none());
     assert!(parse_dedicated_import_bytes(filename, &bytes, "unknown-parser").is_none());
     assert!(parse_dedicated_import_bytes(filename, &bytes, "abc").is_none());
+}
+
+#[test]
+fn dedicated_dispatcher_returns_decision_evidence_for_requested_parser() {
+    let filename = "wechat_statement_sample.csv";
+    let bytes = std::fs::read(import_sample_path(filename)).expect("fixture reads");
+    let result = parse_dedicated_import_bytes_with_decision(filename, &bytes, " WeChat ");
+
+    assert!(result.parsed.is_some());
+    assert_eq!(result.decision.requested_parser, "wechat");
+    assert_eq!(result.decision.status, "matched");
+    assert_eq!(
+        result.decision.selected_parser_id.as_deref(),
+        Some("wechat")
+    );
+    assert!(result.decision.conflict_group.is_empty());
+    assert_eq!(
+        result.decision.reason,
+        "Exactly one dedicated Rust parser matched the uploaded file"
+    );
+    assert_eq!(result.decision.candidates.len(), 1);
+    let candidate = &result.decision.candidates[0];
+    assert_eq!(candidate.parser_id, "wechat");
+    assert_eq!(candidate.parser_label, "微信");
+    assert_eq!(candidate.parsed_count, 7);
+    assert!(candidate
+        .evidence
+        .iter()
+        .any(|item| item == "parser_tag=parser:wechat"));
+    assert!(candidate
+        .evidence
+        .iter()
+        .any(|item| item == "has_transaction_time=true"));
+    assert!(candidate
+        .evidence
+        .iter()
+        .any(|item| item == "has_amount=true"));
 }
 
 #[test]

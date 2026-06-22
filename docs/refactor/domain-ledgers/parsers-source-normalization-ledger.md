@@ -70,3 +70,22 @@ D9 `ledger` 切片只建立 parser/source normalization 域边界，不修改 Ru
 - `cargo test -p bill-analyser-parsers --test parser_contracts` 覆盖 parser registry、source split、golden contracts、fixtures、exactly-one/no_match/conflict 和 dedicated source edge cases。
 - `node scripts/check-backend-doc-map.mjs` 通过。
 - `git diff --check` 通过。
+
+## 7. Behavior-lock 记录
+
+D9 `behavior-lock` 切片补强 `tests/backend/parsers/parser_contracts.rs`，继续只修改测试与本 ledger，不修改 parser 生产逻辑、fixtures、导入 staging、API、SQL 或 UI。
+
+新增锁定范围：
+
+- `post_process_normalizes_excel_serial_and_fractional_day_dates` 覆盖 Excel serial datetime 与“日期 + 小数日时间”进入 `YYYY-MM-DD HH:MM:SS` 的标准化，同时锁定收入/支出金额方向。
+- `post_process_preserves_source_fields_while_normalizing_sign_and_tags` 覆盖投资/理财 source-local 类型降级、`original_type`/`original_category` 保留、channel 到 payment method 兜底、order id 到 transaction id 兜底、merchant/status 保留和 parser tag 归一。
+- `dedicated_dispatcher_returns_decision_evidence_for_requested_parser` 覆盖 requested parser trim/lowercase、matched decision、selected parser、空 conflict group、稳定 reason 和 candidate evidence。
+
+本切片本地验证记录：
+
+- `cargo fmt --all -- --check` 通过。
+- `cargo test -p bill-analyser-parsers --test parser_contracts` 通过，17 个 parser 合同测试全部通过。
+- `cargo clippy --workspace --all-targets -- -D warnings` 通过。
+- `node scripts/check-rust-backend-structure.mjs` 通过。
+- `node scripts/check-backend-doc-map.mjs` 通过。
+- `git diff --check` 通过。
