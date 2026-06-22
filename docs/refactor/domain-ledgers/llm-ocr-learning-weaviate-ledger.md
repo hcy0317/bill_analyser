@@ -400,3 +400,21 @@ D8 `comment-pass` 切片按用户确认的注释标准补齐中文说明：“�
 - `Set-Location src/web; npm run structure:check` 仍只失败于 D10 shared 四项：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`；D8 直接前端文件未新增失败。
 - `git diff --check` 通过。
 - 本切片没有发起 live external-provider 调用；验证范围为源码、合同测试、lint、structure 和 coverage gate。
+
+## 13. Governance-docs 记录
+
+D8 `governance-docs` 切片收紧 LLM/OCR、导入学习、学习中心与 Weaviate 域的结构治理基线：
+
+- `scripts/rust-backend-structure-baseline.json` 删除 D8 已完成拆分并低于 600 行 warning 线的三条历史 oversized entry：`src/backend/http/import_routes/multipart_and_ocr.rs`、`src/backend/core/import_learning.rs`、`src/backend/db/llm.rs`。
+- `src/web/scripts/frontend-structure-baseline.json` 删除已收敛为 facade 的 `src/views/desktop/pairingcenter/components/LearningCenterPanel.vue` 历史 oversized entry；D8 不吸收 `src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts` 这四项 D10 shared debt。
+- `docs/PROJECT_OVERVIEW.md` 同步补充 Weaviate 派生索引、vector outbox 和 HTTP Weaviate route/config facade 的当前结构边界，保持文档描述为系统现状而非会话日志。
+
+本切片不修改 Rust/TypeScript/Vue 业务源码，不修改 REST route、SQL、provider 调用、learning lifecycle、Weaviate authority、前端状态逻辑或 UI 视觉布局；所有变更均为治理基线与架构文档。
+
+本切片本地验证记录：
+
+- `node scripts/check-rust-backend-structure.mjs` 通过，扫描 496 个 Rust 后端文件，baseline entries 从 6 收紧到 3，D8 三个后端 facade 不再占用历史 oversized 豁免。
+- `Set-Location src/web; npm run structure:check` 仍只失败于 D10 shared 四项：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`；D8 `LearningCenterPanel.vue` 的历史 baseline 警告已消失。
+- `node scripts/check-backend-doc-map.mjs` 通过。
+- `git diff --check` 通过。
+- 本切片没有发起 live external-provider 调用；验证范围为治理脚本、文档地图和结构 baseline。

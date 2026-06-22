@@ -27,35 +27,11 @@
       "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     },
     {
-      "path": "src/backend/http/import_routes/multipart_and_ocr.rs",
-      "kind": "rust",
-      "area": "http",
-      "lines": 1031,
-      "physicalLines": 1105,
-      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
       "path": "src/backend/core/import_pipeline.rs",
       "kind": "rust",
       "area": "core",
       "lines": 1017,
       "physicalLines": 1216,
-      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/core/import_learning.rs",
-      "kind": "rust",
-      "area": "core",
-      "lines": 827,
-      "physicalLines": 999,
-      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
-    },
-    {
-      "path": "src/backend/db/llm.rs",
-      "kind": "rust",
-      "area": "db",
-      "lines": 677,
-      "physicalLines": 792,
       "reason": "existing oversized Rust backend file tracked by the structure ratchet"
     }
   ]

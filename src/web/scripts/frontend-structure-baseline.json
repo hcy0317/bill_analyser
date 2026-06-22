@@ -122,17 +122,6 @@
       "reason": "legacy oversized file tracked by the frontend structure ratchet; D4 governance baseline after transaction domain split and comment-pass"
     },
     {
-      "path": "src/views/desktop/pairingcenter/components/LearningCenterPanel.vue",
-      "kind": "vue",
-      "lines": 1618,
-      "sections": {
-        "template": 424,
-        "script": 635,
-        "style": 183
-      },
-      "reason": "legacy oversized file tracked by the frontend structure ratchet; D3 comment-pass baseline includes required Chinese function comments"
-    },
-    {
       "path": "src/stores/transaction.ts",
       "kind": "ts",
       "lines": 1492,
