@@ -113,3 +113,21 @@ D9 `backend-shape` 切片把 parser/source normalization 后端拆成 facade + �
 - `node scripts/check-rust-backend-structure.mjs` 通过，507 个 Rust backend 文件仍只保留 3 个既有 baseline entry。
 - `node scripts/check-backend-doc-map.mjs` 通过。
 - `git diff --check` 通过，仅输出 Windows 换行提示。
+
+## 9. Frontend-shape 记录
+
+D9 `frontend-shape` 切片不修改前端运行时代码。parser/source normalization 域的前端可见内容只通过导入预览读取 parser id、parser tag、source chain 和 matching summary 的只读投影；这些展示锚点已经归属 D1 导入预览域，剩余 shared services/store/router/model 结构债归 D10 终扫域。
+
+本切片确认边界：
+
+- D9 不拥有 `src/web/**` 前端实现，不重构 `ImportDialog.vue`、`ImportTransactionCheckDataTab.vue`、`importPreviewIndex.ts`、`checkDataMatching.ts` 或 `models/imported_transaction.ts`。
+- parser 前端信号展示继续消费后端已有 `preview_parser_id`、`preview_parser_tags` 与 matching parser payload，不新增 parser API、store action 或 UI 视觉变更。
+- 若后续发现 parser 展示锚点需要结构调整，应通过 D1 导入预览域或 D10 shared lease 执行，不在 D9 backend parser 域吸收前端结构债。
+
+本切片本地验证记录：
+
+- `cargo test -p bill-analyser-parsers --test parser_contracts` 通过，确认 D9 frontend-shape 没有削弱 parser 后端行为锁。
+- `node scripts/check-rust-backend-structure.mjs` 通过，确认 parser 后端结构仍满足治理基线。
+- `Set-Location src/web; npm run structure:check` 仍只暴露 D10 shared 前端债务；D9 未新增或接管前端 structure failure。
+- `node scripts/check-backend-doc-map.mjs` 通过。
+- `git diff --check` 通过。
