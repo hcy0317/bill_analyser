@@ -366,3 +366,20 @@ D7 `comment-pass` 切片按用户确认的注释标准补齐中文说明：导�
 - `cargo clippy --workspace --all-targets -- -D warnings` 通过。
 - `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过。
 - `Set-Location src/web; npm run test:coverage` 通过，95 个 suite、39007 个测试通过，coverage gate 为 99.13% lines、91.48% branches。
+
+## 13. Governance-docs 记录
+
+D7 `governance-docs` 切片完成备份与云同步域结构治理收口：
+
+- `scripts/rust-backend-structure-baseline.json` 移除 `src/backend/core/ops.rs` 与 `src/backend/http/backup_sync.rs` 两个历史 oversized 豁免项；这两个文件在 D7 backend-shape 后已退化为 facade，当前行数低于 600，不再需要结构债 baseline 保护。
+- `docs/PROJECT_OVERVIEW.md` 已在 D7 backend/frontend shape 中同步当前事实：后端 `ops.rs`、`backup_sync.rs` 为 facade + 功能子文件，前端应用设置云同步为 facade + 功能文件夹；本切片复核后不再制造纯措辞 churn。
+- 前端 structure baseline 未调整；D7 前端拆分没有新增 oversized failure，当前剩余 structure failure 仍全部归属 D10 shared 终扫域。
+- 本切片只修改结构治理 baseline 与域 ledger，不改运行时代码、REST/API 合同、数据库 schema、测试逻辑或 UI 视觉布局。
+
+本切片本地验证记录：
+
+- `node scripts/check-rust-backend-structure.mjs` 通过，D7 已拆分后端 facade 不再出现在 oversized baseline 中。
+- `node scripts/check-backend-doc-map.mjs` 通过。
+- `Set-Location src/web; npm run structure:check` 仍预期失败 4 项，均属于 D10 shared：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`。
+- `cargo fmt --all -- --check` 通过。
+- `git diff --check` 通过。
