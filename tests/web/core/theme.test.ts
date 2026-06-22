@@ -6,6 +6,8 @@ import {
     SYSTEM_THEME_PREFERENCE,
     ThemeType,
     getFramework7DarkModePreference,
+    getApplicationThemeDefinition,
+    getMobileThemeConfig,
     getThemeFamilyOptionValue,
     getNextQuickThemePreference,
     getPairedApplicationThemeName,
@@ -171,6 +173,16 @@ describe('application theme registry', () => {
         expect(getThemeFamilyOptionValue(ThemeType.HalloweenDark)).toBe(ThemeType.HalloweenLight);
         expect(getThemeFamilyOptionValue(ThemeType.ForestLight)).toBe(ThemeType.ForestLight);
         expect(getThemeFamilyOptionValue(SYSTEM_THEME_PREFERENCE)).toBe(SYSTEM_THEME_PREFERENCE);
+    });
+
+    test('theme definition and mobile config helpers keep current invalid preference fallbacks', () => {
+        const lightDefinition = APPLICATION_THEMES[ThemeType.Light];
+
+        expect(getThemePreferenceOptions(key => key).map(option => option.value)).toContain(ThemeType.BusinessLight);
+        expect(getFramework7DarkModePreference('unknown-theme')).toBe(SYSTEM_THEME_PREFERENCE);
+        expect(getPairedApplicationThemeName(null)).toBe(ThemeType.Dark);
+        expect(getMobileThemeConfig('unknown-theme')).toStrictEqual(lightDefinition.mobile);
+        expect(getApplicationThemeDefinition(undefined)).toStrictEqual(lightDefinition);
     });
 
     test('vuetify theme adapter emits complete token sets', () => {

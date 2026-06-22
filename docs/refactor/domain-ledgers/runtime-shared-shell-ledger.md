@@ -79,3 +79,25 @@ D10 `ledger` 切片只建立 shared/runtime shell 终扫边界，不修改运行
 - `node scripts/check-rust-backend-structure.mjs` 通过，当前 3 个 Rust baseline entry 已在本 ledger 作为 final-sweep 决策项记录。
 - `node scripts/check-backend-doc-map.mjs` 通过。
 - 通过文件行数与源码扫描确认 router shell 未触发当前结构 failure，但属于 D10 后续治理面。
+
+## 7. Behavior-lock 切片记录
+
+D10 `behavior-lock` 切片只补共享壳行为锁，不移动生产结构、不改 UI 视觉、不调整 API/金额/数据库合同。
+
+本切片新增和扩展的行为锁：
+
+- `tests/web/lib/services.sharedShell.test.ts`：锁定 services 模块初始化、axios request/response interceptor、public no-auth 路径、refresh token unblock、cancel request，以及导入预览 page/confirm facade 的 session encoding、query params 和 payload。
+- `tests/web/stores/rootStore.test.ts`：锁定 root store 的 lock/forceLogout reset 范围、profile token/profile/依赖视图 invalidation、账户级清理与全量 user-data 清理的跨 store invalidation 边界。
+- `tests/web/router/runtimeShell.test.ts`：用 source contract 锁定桌面 guard redirect、交易/统计 query prop 名、移动 guard redirect options、关键移动路由和 fallback shell。当前 Jest node harness 不直接加载 `.vue` 页面，因此 router 行为锁采用源码合同断言。
+- `tests/web/core/theme.test.ts`：补锁 invalid theme preference 到 light/mobile config 的 fallback，以及 paired theme helper 的默认行为。
+- `tests/web/models/imported_transaction.test.ts`：补锁 Investment 预览行 `toCreateRequest()` 保留目标账户和目标金额的 payload 合同。
+
+本切片本地验证记录：
+
+- `Set-Location src\web; npm test -- --runTestsByPath ..\..\tests\web\lib\services.sharedShell.test.ts ..\..\tests\web\stores\rootStore.test.ts ..\..\tests\web\router\runtimeShell.test.ts ..\..\tests\web\core\theme.test.ts ..\..\tests\web\models\imported_transaction.test.ts` 通过：5 个 suite、42 个测试。
+- `Set-Location src\web; npm run lint:ci` 通过；仅保留既有 `no-explicit-any` warning，无 error。
+- `Set-Location src\web; npm run test:coverage` 通过：全量 Jest 99 个 suite、39028 个测试；coverage gate 6 个 suite、81 个测试，line coverage 99.13%。
+- `Set-Location src\web; npm run structure:check` 仍按预期失败 4 项，均为 D10 后续 `frontend-shape` 要关闭的 shared debt：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`。
+- `node scripts/check-rust-backend-structure.mjs` 通过，扫描 507 个 Rust backend 文件并保留 3 个 baseline entry。
+- `node scripts/check-backend-doc-map.mjs` 通过。
+- `git diff --check` 通过，仅提示 Windows LF/CRLF 工作区 warning。

@@ -755,6 +755,24 @@ describe('ImportTransaction model', () => {
         });
     });
 
+    test('toCreateRequest keeps investment destination account and amount fields', () => {
+        const investment = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            type: TransactionType.Investment,
+            destinationAccountId: 'fund-account',
+            destinationAmountCents: 2500,
+            sourceAmountCents: 2500
+        }, 2);
+
+        expect(investment.toCreateRequest()).toMatchObject({
+            type: TransactionType.Investment,
+            sourceAccountId: '201',
+            destinationAccountId: 'fund-account',
+            sourceAmountCents: 2500,
+            destinationAmountCents: 2500
+        });
+    });
+
     test('isTransactionValid rejects missing category, accounts, destination accounts, and invalid tags', () => {
         const modifyBalance = ImportTransaction.of({
             ...BASE_RESPONSE,
