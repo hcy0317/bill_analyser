@@ -180,3 +180,33 @@ D10 `governance-docs` 切片只更新结构治理基线和当前事实文档，�
 - `node scripts/check-rust-backend-structure.mjs` 通过，扫描 523 个 Rust backend 文件，baseline entries 为 0。
 - `node scripts/check-backend-doc-map.mjs` 通过。
 - `git diff --check` 通过，仅提示 Windows LF/CRLF 工作区 warning。
+
+## 12. Closeout 切片记录
+
+D10 `closeout` 切片只固化最终验收证据，不再调整业务代码、测试逻辑、结构 baseline、REST/API、数据库 schema、金额单位、导入语义或 UI 视觉。closeout PR 自身的 PR CI、squash merge、source branch 删除和最终 `.omx` 写回 evidence 在本 PR 合并后由 ultragoal ledger 记录。
+
+D10 已闭环 PR 链：
+
+| 切片 | PR | PR CI | merge | post-merge main CI | branch |
+| --- | --- | --- | --- | --- | --- |
+| `ledger` | #260 `docs(shared): 建立运行时共享壳终扫 ledger (#260)` | run #14690，`backend-ci #16593`、`frontend-ci #16594`、`repo-governance #16595` | squash merge `63b5901a3f837bed3f1189e30bd646fef761b23a` | run #14691，`backend-ci #16596`、`frontend-ci #16597`、`repo-governance #16598` | source branch deleted |
+| `behavior-lock` | #261 `test(shared): 锁定运行时共享壳行为合同 (#261)` | run #14693，`backend-ci #16600`、`frontend-ci #16601`、`repo-governance #16602` | squash merge `638d34a7253d50a311e1ed51d8d34e97ec425764` | run #14694，`backend-ci #16603`、`frontend-ci #16604`、`repo-governance #16605` | source branch deleted |
+| `backend-shape` | #262 `refactor(shared): 拆分运行时共享后端结构 (#262)` | run #14696，`backend-ci #16607`、`frontend-ci #16608`、`repo-governance #16609` | squash merge `222f9f213b2c30151445dfcbdfcab84c4ab322fe` | run #14698，`backend-ci #16611`、`frontend-ci #16612`、`repo-governance #16613` | source branch deleted |
+| `frontend-shape` | #263 `refactor(shared): 拆分运行时共享前端结构 (#263)` | run #14699，`backend-ci #16614`、`frontend-ci #16615`、`repo-governance #16616` | squash merge `5e5e5c62dd5e8c2d964e2d5ee5b32eb7e86ed3b1` | run #14701，`backend-ci #16618`、`frontend-ci #16619`、`repo-governance #16620` | source branch deleted |
+| `comment-pass` | #264 `docs(shared): 补齐运行时共享壳中文说明 (#264)` | run #14703，`backend-ci #16622`、`frontend-ci #16623`、`repo-governance #16624` | squash merge `ad469f2bb3991a798e85d9fa2609c594429d6763` | run #14704，`backend-ci #16625`、`frontend-ci #16626`、`repo-governance #16627` | source branch deleted |
+| `governance-docs` | #265 `chore(shared): 收紧运行时共享壳结构治理基线 (#265)` | run #14706，`backend-ci #16629`、`frontend-ci #16630`、`repo-governance #16631` | squash merge `fe1eaf4c5fab9428a3a057324f28d5e5fe788e43` | run #14707，`backend-ci #16632`、`frontend-ci #16633`、`repo-governance #16634` | source branch deleted |
+
+closeout 本地最终验收记录：
+
+- `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace` 和 `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过；`workspace.lcov` 已刷新。
+- `Set-Location src\web; npm run lint:ci` 通过，仅保留既有 `no-explicit-any` warning；`npm run test:coverage` 通过：99 个 suite、39028 个测试，line coverage 99.13%，branch coverage 91.48%，functions 100%；`npm run build` 通过，保留既有 Vite/PWA/Sass/chunk size warning。
+- `Set-Location src\web; npm run structure:check` 通过，扫描 596 个文件和 39 个 baseline entry。
+- `node scripts/check-rust-backend-structure.mjs` 通过，扫描 523 个 Rust backend 文件，baseline entries 为 0。
+- `node scripts/check-backend-doc-map.mjs` 通过。
+- `git diff --check` 通过。
+- `.\一键启动.ps1 -NoBrowser` 通过，后端 `/api/health` 返回 200，前端 `http://127.0.0.1:8081` 返回 200；随后使用 `.\停止服务器.ps1 -OnlyBackend` 与 `.\停止服务器.ps1 -OnlyFrontend` 停止本次启动的后端和前端进程。
+
+全域 ledger 完整性：
+
+- D1-D10 的 domain ledger 均已存在：`import-preview-ledger.md`、`identity-settings-ledger.md`、`rule-center-ledger.md`、`transactions-ledger.md`、`budget-statistics-ledger.md`、`auth-profile-user-data-security-ledger.md`、`backup-cloud-sync-ledger.md`、`llm-ocr-learning-weaviate-ledger.md`、`parsers-source-normalization-ledger.md` 与本 `runtime-shared-shell-ledger.md`。
+- D10 已完成 `ledger`、`behavior-lock`、`backend-shape`、`frontend-shape`、`comment-pass`、`governance-docs`；closeout PR 合并后将把本切片的 PR/CI/merge/delete/writeback 和最终 ultragoal quality gate 写入 `.omx/plans/progress-code-structure-domain-conveyor.json` 与 `.omx/ultragoal/ledger.jsonl`。
