@@ -22,20 +22,20 @@ D10 不覆盖：
 
 ## 2. 当前结构快照
 
-当前 `Set-Location src/web; npm run structure:check` 失败 4 项，均属于 D10 shared debt：
+当前 `Set-Location src/web; npm run structure:check` 已通过，不再出现 D10 shared debt failure：
 
 | 文件 | 当前行数 | gate 状态 | 当前职责密度 |
 | --- | ---: | --- | --- |
-| `src/web/src/lib/services.ts` | 2342 | 超过 baseline 2214 | axios 初始化/auth refresh、URL builder、REST endpoint facade 和多域 response 适配混在同一 default export |
-| `src/web/src/stores/index.ts` | 833 | 超过 baseline 824 | root store 同时承担 auth flow、profile、email、password reset、user-data clear/export 和跨 store invalidation |
-| `src/web/src/core/theme.ts` | 796 | 新文件 warning limit 600 | theme enum、基础 Vuetify 颜色、18 个 light/dark variant、mobile F7 config 和 preference helper 同文件 |
-| `src/web/src/models/imported_transaction.ts` | 623 | 新文件 warning limit 600 | 导入预览 DTO、matching payload 默认值、信号 helper、有效性校验和 confirm create request 投影同文件 |
+| `src/web/src/lib/services.ts` | baseline 1883 | 通过，D10 收紧后的 legacy facade baseline | axios/auth interceptor 与兼容 facade 保留，HTTP envelope 和导入预览 endpoint 已下沉到 `lib/services/**` |
+| `src/web/src/stores/index.ts` | baseline 822 | 通过，D10 收紧后的 legacy facade baseline | `useRootStore` facade 保留，跨 store reset 与 OAuth URL helper 已下沉到 `stores/root/**` |
+| `src/web/src/core/theme.ts` | 低于新文件 warning | 通过，无 baseline entry | theme 类型、基础色板、主题变体与 preference/paired helper 已下沉到 `core/theme/**` |
+| `src/web/src/models/imported_transaction.ts` | 低于新文件 warning | 通过，无 baseline entry | matching payload 归一、dedup source id 与信号 helper 已下沉到 `models/imported_transaction/matching.ts` |
 
 辅助结构状态：
 
 - `src/web/src/router/desktop.ts` 当前 284 行，`src/web/src/router/mobile.ts` 当前 366 行，未触发结构 gate 失败，但仍是 D10 shared router shell。
-- `src/web/scripts/frontend-structure-baseline.json` 当前 39 个 baseline entry；`src/lib/services.ts` 和 `src/stores/index.ts` 是 legacy oversized baseline，`src/core/theme.ts` 与 `src/models/imported_transaction.ts` 当前没有 baseline entry，按新文件 warning limit 失败。
-- `node scripts/check-rust-backend-structure.mjs` 当前通过，扫描 507 个 Rust backend 文件并保留 3 个 baseline entry：`src/backend/db/auth_postgres.rs`、`src/backend/core/smart_dedup.rs`、`src/backend/core/import_pipeline.rs`。D10 final sweep 必须显式决定这些 baseline 是继续作为已治理 ratchet 保留，还是另开 backend shared cleanup；不能在最终验收中忽略。
+- `src/web/scripts/frontend-structure-baseline.json` 当前 39 个 baseline entry；`src/lib/services.ts` 与 `src/stores/index.ts` 已收紧到 D10 facade 拆分后的当前行数，`src/core/theme.ts` 与 `src/models/imported_transaction.ts` 不再需要 baseline entry。
+- `node scripts/check-rust-backend-structure.mjs` 当前通过，扫描 523 个 Rust backend 文件并保留 0 个 baseline entry；D10 backend-shape 已关闭 Rust backend final-sweep decision item。
 - `node scripts/check-backend-doc-map.mjs` 当前通过。
 
 ## 3. 行为不变式
@@ -144,3 +144,39 @@ D10 `frontend-shape` 切片关闭剩余 shared runtime shell 前端结构门禁�
 - `Set-Location src\web; npm test -- --runTestsByPath ..\..\tests\web\styles\desktopTableTheme.test.ts` 通过；该 source-contract 测试已改为读取拆分后的 `src/core/theme/base.ts`。
 - `Set-Location src\web; npm run lint:ci` 通过；仅保留既有 `no-explicit-any` warning，无 error。
 - `Set-Location src\web; npm run test:coverage` 通过：全量 Jest 99 个 suite、39028 个测试；coverage gate 6 个 suite、81 个测试，line coverage 99.13%，branch coverage 91.48%。
+
+## 10. Comment-pass 切片记录
+
+D10 `comment-pass` 切片只补齐用户确认范围内的中文说明，不修改运行时逻辑、REST/API、数据库 schema、金额单位、导入确认语义或 UI 视觉。
+
+本切片覆盖：
+
+- 后端导入预览共享壳：筛选索引、匹配载荷、预览查询、响应包裹、类型映射和值解析 helper。
+- 后端智能去重共享壳：去重 engine、跨批转账、对账候选、同批合并、拆分组、平台/银行判定和合并 helper。
+- 后端认证 Postgres helper：profile 更新、metadata/audit/session/row 转换相关业务 helper。
+- 前端共享壳：theme registry、HTTP adapter、导入预览 service、导入交易 matching normalizer、OAuth URL 与 root reset helper。
+
+本切片本地验证记录：
+
+- D10 comment scan 通过：导出函数、业务关键函数和复杂私有 helper 均有中文说明；简单 getter、映射和事件转发按用户策略豁免。
+- `cargo fmt --all -- --check`、D10 相关 Rust 合同测试、`cargo clippy --workspace --all-targets -- -D warnings` 和 `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过。
+- `Set-Location src\web; npm run structure:check`、`npm run lint:ci` 和 `npm run test:coverage` 通过。
+- `node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .omx\ultragoal\evidence\d10-comment-pass.diff --threshold 90` 通过，comment-only diff 没有可执行 changed lines。
+- `node scripts/check-rust-backend-structure.mjs`、`node scripts/check-backend-doc-map.mjs` 和 `git diff --check` 通过。
+
+## 11. Governance-docs 切片记录
+
+D10 `governance-docs` 切片只更新结构治理基线和当前事实文档，不改业务源码、测试逻辑、API/DB/金额/导入合同或 UI 视觉。
+
+本切片治理动作：
+
+- `src/web/scripts/frontend-structure-baseline.json` 按当前结构 gate 输出收紧所有已有 line-reduction entry；其中 D10 shared `src/lib/services.ts` baseline 收紧到 1883 行，`src/stores/index.ts` baseline 收紧到 822 行，并在 reason 中标记 D10 shared facade 拆分与 comment-pass 后基线。
+- `scripts/rust-backend-structure-baseline.json` 已在 D10 backend-shape 清空，governance-docs 复核为 0 baseline entry。
+- `docs/PROJECT_OVERVIEW.md` 补充运行时共享前端 router shell 的当前事实，明确桌面/移动 router guard、query prop 和导航合同仍由原 router 入口承载并由 shared shell 行为锁覆盖。
+
+本切片本地验证记录：
+
+- `Set-Location src\web; npm run structure:check` 通过，扫描 596 个文件，保留 39 个 baseline entry，且不再输出 line-reduction warning。
+- `node scripts/check-rust-backend-structure.mjs` 通过，扫描 523 个 Rust backend 文件，baseline entries 为 0。
+- `node scripts/check-backend-doc-map.mjs` 通过。
+- `git diff --check` 通过，仅提示 Windows LF/CRLF 工作区 warning。

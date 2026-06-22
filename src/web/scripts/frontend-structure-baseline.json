@@ -51,14 +51,14 @@
     {
       "path": "src/locales/helpers.ts",
       "kind": "ts",
-      "lines": 2514,
+      "lines": 2505,
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
       "path": "src/lib/services.ts",
       "kind": "ts",
-      "lines": 2214,
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+      "lines": 1883,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet; D10 governance baseline after shared services facade split and comment-pass"
     },
     {
       "path": "src/views/desktop/transactions/ListPage.vue",
@@ -169,7 +169,7 @@
     {
       "path": "src/lib/datetime.ts",
       "kind": "ts",
-      "lines": 1098,
+      "lines": 1076,
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
@@ -192,13 +192,13 @@
     {
       "path": "src/stores/index.ts",
       "kind": "ts",
-      "lines": 824,
-      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+      "lines": 822,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet; D10 governance baseline after root store facade split and comment-pass"
     },
     {
       "path": "src/styles/mobile/global.scss",
       "kind": "style",
-      "lines": 824,
+      "lines": 823,
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
@@ -248,13 +248,13 @@
     {
       "path": "src/models/account.ts",
       "kind": "ts",
-      "lines": 705,
+      "lines": 694,
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
       "path": "src/components/common/keywordExpression.ts",
       "kind": "ts",
-      "lines": 673,
+      "lines": 608,
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
     },
     {
@@ -372,10 +372,10 @@
     {
       "path": "src/views/desktop/app/settings/tabs/AppBasicSettingTab.vue",
       "kind": "vue",
-      "lines": 408,
+      "lines": 403,
       "sections": {
         "template": 292,
-        "script": 115,
+        "script": 110,
         "style": 0
       },
       "reason": "legacy oversized file tracked by the frontend structure ratchet"
