@@ -33,6 +33,9 @@ function normalizePreviewId(previewId?: number | null): number | null {
     return previewId;
 }
 
+/**
+ * 构造学习建议文本同步 payload，preview id 无效时返回 null 以阻止无效提交。
+ */
 export function buildImportCheckLearningPreviewTextSyncPayload(
     state: ImportCheckLearningPreviewTextSyncState
 ): ImportCheckLearningPreviewTextSyncPayload | null {
@@ -50,6 +53,9 @@ export function buildImportCheckLearningPreviewTextSyncPayload(
     };
 }
 
+/**
+ * 判断学习建议输入文本是否发生漂移，用于阻止基于旧文本的决策继续应用。
+ */
 export function hasImportCheckLearningTextDrift(
     baseline: ImportCheckLearningDecisionBaseline,
     current: ImportCheckLearningDecisionBaseline
@@ -57,6 +63,9 @@ export function hasImportCheckLearningTextDrift(
     return baseline.inputFingerprint !== current.inputFingerprint;
 }
 
+/**
+ * 判断学习建议期望状态是否漂移，覆盖类型、分类、周期和账户字段。
+ */
 export function hasImportCheckLearningExpectedStateDrift(
     baseline: ImportCheckLearningDecisionBaseline,
     current: ImportCheckLearningDecisionBaseline
@@ -68,6 +77,9 @@ export function hasImportCheckLearningExpectedStateDrift(
         || baseline.destinationAccountId !== current.destinationAccountId;
 }
 
+/**
+ * 归一化导入预览金额分值，保持学习链路使用严格绝对分合同。
+ */
 export function normalizeImportPreviewAmountCents(amountInCents: unknown, fallbackInCents: number): number {
     return normalizeStrictAbsoluteCents(amountInCents, fallbackInCents);
 }

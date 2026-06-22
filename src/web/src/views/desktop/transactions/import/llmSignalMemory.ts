@@ -39,6 +39,9 @@ function resolveLLMSignalMemoryPriority(signal: LLMSignalMemoryState): number {
     return 0;
 }
 
+/**
+ * 将单条 LLM memory event 解析为导入预览信号状态，兼容 llm_response_raw 内的建议字段。
+ */
 export function parseLLMMemoryEventSignal(event: LLMMemoryEventItem): LLMSignalMemoryState | null {
     const previewId = Number(event.preview_id || 0);
     if (!previewId) {
@@ -80,6 +83,9 @@ export function parseLLMMemoryEventSignal(event: LLMMemoryEventItem): LLMSignalM
     return signal;
 }
 
+/**
+ * 判断新的 LLM 信号是否应覆盖当前状态，用户已审核状态优先于 pending 状态。
+ */
 export function shouldReplaceLLMSignalMemoryState(
     current: LLMSignalMemoryState,
     next: LLMSignalMemoryState,
@@ -87,6 +93,9 @@ export function shouldReplaceLLMSignalMemoryState(
     return resolveLLMSignalMemoryPriority(next) > resolveLLMSignalMemoryPriority(current);
 }
 
+/**
+ * 按 preview_id 构建 LLM 信号记忆表，保留每行最高优先级的审核信号。
+ */
 export function buildLLMSignalMemoryMap(events: LLMMemoryEventItem[]): Map<number, LLMSignalMemoryState> {
     const nextMemoryMap = new Map<number, LLMSignalMemoryState>();
 

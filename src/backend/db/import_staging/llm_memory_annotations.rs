@@ -43,6 +43,7 @@ pub fn create_llm_memory_event(pool: &PostgresPool, draft: &LlmMemoryEventDraft)
     })
 }
 
+/// 按用户和可选 session 读取最新 LLM memory 事件，供 prompt 上下文和学习中心展示使用。
 pub fn get_llm_memory_events(
     pool: &PostgresPool,
     user_id: UserId,
@@ -110,6 +111,7 @@ pub fn save_import_annotation_samples(
     })
 }
 
+/// 读取指定导入 session 的人工标注样本，供 learning/LLM 召回和训练样本生成使用。
 pub fn get_import_annotation_samples(
     pool: &PostgresPool,
     session_id: &str,

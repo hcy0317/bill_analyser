@@ -163,6 +163,9 @@ function mapRule(r: Record<string, unknown>): LearningRule {
     };
 }
 
+/**
+ * 归一化学习建议分页响应，防御缺失字段和非数组 items。
+ */
 export function normalizeSuggestionsResponse(payload: unknown): LearningSuggestionsResponse {
     const data = toRecord(payload);
     return {
@@ -173,6 +176,9 @@ export function normalizeSuggestionsResponse(payload: unknown): LearningSuggesti
     };
 }
 
+/**
+ * 归一化学习规则分页响应，保持列表页依赖的 total/limit/offset 形状稳定。
+ */
 export function normalizeRulesResponse(payload: unknown): LearningRulesResponse {
     const data = toRecord(payload);
     return {
@@ -183,6 +189,9 @@ export function normalizeRulesResponse(payload: unknown): LearningRulesResponse 
     };
 }
 
+/**
+ * 归一化批量接受响应，拆分成功与失败项并补齐计数字段。
+ */
 export function normalizeBatchAcceptResponse(payload: unknown): BatchAcceptResponse {
     const data = toRecord(payload);
     return {
@@ -199,6 +208,9 @@ export function normalizeBatchAcceptResponse(payload: unknown): BatchAcceptRespo
     };
 }
 
+/**
+ * 归一化学习建议生成响应，兼容后端 snake_case skipped_existing 字段。
+ */
 export function normalizeGenerateResponse(payload: unknown): GenerateSuggestionsResponse {
     const data = toRecord(payload);
     return {
@@ -291,16 +303,22 @@ function getLearningFeatureChips(featuresJson: string): LearningFeatureChip[] {
         }));
 }
 
+/**
+ * 解析学习建议特征为 chip 列表，统一字段别名和展示顺序。
+ */
 export function getSuggestionFeatureChips(suggestion: LearningSuggestion): LearningFeatureChip[] {
     return getLearningFeatureChips(suggestion.matchFeaturesJson);
 }
 
+/**
+ * 解析学习规则特征为 chip 列表，统一字段别名和展示顺序。
+ */
 export function getRuleFeatureChips(rule: LearningRule): LearningFeatureChip[] {
     return getLearningFeatureChips(rule.matchFeaturesJson);
 }
 
 /**
- * Parse match_features_json into a readable summary string.
+ * 将学习建议 match_features_json 转为可读摘要字符串。
  */
 export function getSuggestionFeatureSummary(suggestion: LearningSuggestion): string {
     return getSuggestionFeatureChips(suggestion)
@@ -309,7 +327,7 @@ export function getSuggestionFeatureSummary(suggestion: LearningSuggestion): str
 }
 
 /**
- * Parse match_features_json for a rule.
+ * 将学习规则 match_features_json 转为可读摘要字符串。
  */
 export function getRuleFeatureSummary(rule: LearningRule): string {
     return getRuleFeatureChips(rule)

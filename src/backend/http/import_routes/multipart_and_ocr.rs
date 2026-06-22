@@ -74,6 +74,7 @@ struct OcrRecognitionInput {
 #[derive(Debug)]
 struct ProviderAuthRefreshError;
 
+/// 从请求头和 body 构造 OCR 输入，兼容 multipart 上传和原始二进制图片两种入口。
 fn ocr_recognition_input_from_request(
     headers: &HeaderMap,
     body: &[u8],
@@ -134,6 +135,7 @@ fn ocr_rate_limit_try_acquire(user_id: i64) -> bool {
     true
 }
 
+/// 按 OCR provider 分发到本地 Tesseract、本地 JSON 或网络 LLM vision provider。
 #[tracing::instrument(level = "debug", skip_all)]
 async fn run_ocr_provider(
     config: &OcrConfigContract,
@@ -162,6 +164,7 @@ fn first_text_from_object(object: &Map<String, Value>, keys: &[&str]) -> Option<
         .filter(|value| !value.is_empty())
 }
 
+/// 解析 JSON 请求体，空 body 等价为空对象，错误时保持 import v2 400 响应。
 fn json_body_or_empty(body: &[u8]) -> Result<Value, ImportV2RouteResponse> {
     if body.is_empty() {
         return Ok(json!({}));
@@ -183,6 +186,7 @@ fn text_from_map_or(object: &Map<String, Value>, key: &str, default: &str) -> St
     }
 }
 
+/// 基于请求增量更新 runtime LLM 配置，并通过 copy_runtime_llm_config 统一规范字段。
 #[tracing::instrument(level = "debug", skip_all)]
 fn update_runtime_llm_config_payload(base_config: &Value, object: &Map<String, Value>) -> Value {
     let mut config = copy_runtime_llm_config(base_config)
@@ -207,6 +211,7 @@ fn update_runtime_llm_config_payload(base_config: &Value, object: &Map<String, V
     copy_runtime_llm_config(&Value::Object(config))
 }
 
+/// 构建 runtime LLM config 响应数据，只返回前端需要字段并可选带 provider 列表。
 fn llm_runtime_config_response_data(config: &Value, include_available_providers: bool) -> Value {
     let copied = copy_runtime_llm_config(config);
     let object = copied.as_object();
@@ -251,6 +256,7 @@ fn llm_runtime_config_response_data(config: &Value, include_available_providers:
     Value::Object(response)
 }
 
+/// 将前端保存配置 payload 转为数据库 update DTO，保留脱敏占位符代表“不修改密钥”语义。
 fn llm_config_update_from_map(object: &Map<String, Value>) -> LlmConfigUpdate {
     let api_key = object
         .get("api_key")

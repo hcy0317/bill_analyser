@@ -34,6 +34,7 @@ pub struct LearningRouteResponse {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 构造学习中心错误响应，保持 success=false 与 HTTP status 的双通道合同。
 pub fn learning_error_response(status_code: u16, error: &str) -> LearningRouteResponse {
     LearningRouteResponse {
         status_code,
@@ -42,6 +43,7 @@ pub fn learning_error_response(status_code: u16, error: &str) -> LearningRouteRe
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 构造学习中心 data envelope 成功响应。
 pub fn learning_data_response<T>(data: T) -> LearningRouteResponse
 where
     T: Serialize,
@@ -53,6 +55,7 @@ where
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 构造学习建议分页响应，并限制返回 limit 的上界。
 pub fn learning_center_page_response(
     items: Vec<Value>,
     total: i64,
@@ -68,6 +71,7 @@ pub fn learning_center_page_response(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 构造学习规则分页响应，兼容 pageSize=-1 的全量读取合同。
 pub fn learning_rules_page_response(
     result: Vec<Value>,
     total_count: i64,
@@ -104,6 +108,7 @@ pub fn learning_rules_page_response(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 解析可选 previewIds，要求传入值必须是正整数数组。
 pub fn parse_preview_ids(value: Option<&Value>) -> Result<Option<Vec<i64>>, &'static str> {
     let Some(value) = value else {
         return Ok(None);
@@ -130,6 +135,7 @@ pub fn parse_preview_ids(value: Option<&Value>) -> Result<Option<Vec<i64>>, &'st
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 解析批量学习建议 ID，去重并限制单次处理数量。
 pub fn parse_learning_suggestion_ids(value: Option<&Value>) -> Result<Vec<i64>, String> {
     let Some(Value::Array(values)) = value else {
         return Err("suggestionIds must be a non-empty array".to_string());
@@ -154,6 +160,7 @@ pub fn parse_learning_suggestion_ids(value: Option<&Value>) -> Result<Vec<i64>, 
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 构造批量接受学习建议的成功/失败汇总响应。
 pub fn learning_batch_accept_response(
     accepted: Vec<Value>,
     failed: Vec<Value>,
@@ -169,6 +176,7 @@ pub fn learning_batch_accept_response(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 构造 LLM memory events 列表响应，保留总数供前端分页展示。
 pub fn llm_memory_events_success(
     events: Vec<LlmMemoryEventContract>,
     total: i64,
@@ -180,6 +188,7 @@ pub fn llm_memory_events_success(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 构造 LLM 错误响应，同时输出 code 与 error_code 兼容字段。
 pub fn llm_error_response(status_code: u16, message: &str, code: &str) -> LearningRouteResponse {
     LearningRouteResponse {
         status_code,

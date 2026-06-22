@@ -20,6 +20,7 @@ const OCR_ERROR_CANCELLED: &str = "cancelled";
 const OCR_ERROR_RATE_LIMITED: &str = "rate_limited";
 const OCR_ERROR_PROVIDER_RELOGIN_REQUIRED: &str = "provider_relogin_required";
 
+/// 归一化 OCR 配置，兼容 camelCase/legacy 字段并规范 provider auth profile。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_ocr_config(value: Option<&Value>) -> OcrConfigContract {
     let object = value.and_then(Value::as_object);
@@ -68,6 +69,7 @@ pub fn normalize_ocr_config(value: Option<&Value>) -> OcrConfigContract {
     }
 }
 
+/// 归一化 OCR provider 名称，未知 provider 统一退回 disabled，避免误触外部调用。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_ocr_provider_name(provider: &str) -> String {
     let normalized = provider.trim().to_lowercase();
@@ -83,6 +85,7 @@ pub fn normalize_ocr_provider_name(provider: &str) -> String {
     }
 }
 
+/// 校验 OCR 语言参数，只允许短 ASCII 标识并在异常时回退默认语言。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_ocr_lang(lang: &str) -> String {
     let normalized = lang.trim();
@@ -97,6 +100,7 @@ pub fn normalize_ocr_lang(lang: &str) -> String {
     normalized.to_string()
 }
 
+/// 返回包含 disabled 的 OCR provider 列表，供前端配置页展示完整选择。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn ocr_available_providers_with_disabled() -> Vec<String> {
     std::iter::once(OCR_DISABLED_PROVIDER_NAME)
@@ -105,6 +109,7 @@ pub fn ocr_available_providers_with_disabled() -> Vec<String> {
         .collect()
 }
 
+/// 构建 OCR 配置响应载荷，递归脱敏 parameters 和 credential_config。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_ocr_config_response_payload(config: &OcrConfigContract) -> Value {
     #[cfg(not(coverage))]
@@ -127,6 +132,7 @@ pub fn build_ocr_config_response_payload(config: &OcrConfigContract) -> Value {
     })
 }
 
+/// 构建 OCR 配置读取/保存成功响应，维持 success/result envelope。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_ocr_config_success_response(config: &OcrConfigContract) -> AiRouteResponse {
     AiRouteResponse {
@@ -138,6 +144,7 @@ pub fn build_ocr_config_success_response(config: &OcrConfigContract) -> AiRouteR
     }
 }
 
+/// 构建未知 OCR provider 的 400 响应，避免 route 层重复错误形状。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_unknown_ocr_provider_response() -> AiRouteResponse {
     AiRouteResponse {
@@ -150,6 +157,7 @@ pub fn build_unknown_ocr_provider_response() -> AiRouteResponse {
     }
 }
 
+/// 构建 OCR 错误响应，并按错误码映射 HTTP 状态与默认文案。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_ocr_error_response(code: &str, message: Option<&str>) -> AiRouteResponse {
     let message_text = message.unwrap_or_default().trim();
@@ -174,6 +182,7 @@ pub fn build_ocr_error_response(code: &str, message: Option<&str>) -> AiRouteRes
     }
 }
 
+/// 构建无上下文的 OCR 识别成功响应，用于旧调用点保持行为兼容。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_ocr_recognition_success_response(
     provider_name: &str,
@@ -188,6 +197,7 @@ pub fn build_ocr_recognition_success_response(
     )
 }
 
+/// 将 OCR 文本结果解析为交易草稿响应，明确金额仍以元值进入草稿字段。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_ocr_recognition_success_response_with_context(
     provider_name: &str,
@@ -229,6 +239,7 @@ pub fn build_ocr_recognition_success_response_with_context(
     }
 }
 
+/// 将 OCR 业务错误码映射为 HTTP 状态码，保持 provider/runtime 错误对前端稳定。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn ocr_error_http_status(code: &str) -> u16 {
     match code {

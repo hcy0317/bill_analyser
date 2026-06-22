@@ -369,3 +369,34 @@ D8 `frontend-shape` 切片将学习中心与 OCR/LLM 配置前端拆为 facade +
 - `Set-Location src/web; npm run structure:check` 仍只失败于 D10 shared 四项：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`；D8 直接前端文件未新增失败，并报告 `LearningCenterPanel.vue` 较 baseline 减少 1177 行。
 - `node scripts/check-backend-doc-map.mjs` 与 `git diff --check` 通过。
 - 本切片没有发起 live external-provider 调用；验证范围为源码、Jest、lint、coverage 和结构 gate。
+
+## 12. Comment-pass 记录
+
+D8 `comment-pass` 切片按用户确认的注释标准补齐中文说明：“导出函数、业务关键函数、复杂私有 helper 必须有中文说明，简单 getter/映射/事件转发不强制”。
+
+本切片补充范围：
+
+- `src/backend/core/ai_ocr_llm/**`：补充 LLM config 高级参数、provider URL/SSRF 校验、prompt/response、OCR config、OCR parser、provider auth、secret redaction 和 OCR receipt draft 的职责/边界说明。
+- `src/backend/core/import_learning.rs` 与 `src/backend/core/import_learning/**`：补充 feature/hash/sample/token、green/blue policy、model registry、LLM preview memory、route response、学习 token 化和 JSON int 兼容错误说明。
+- `src/backend/core/import_learning_lifecycle.rs` 与 `src/backend/core/weaviate_derived.rs`：补充 recommendation key、lifecycle 状态转换、Weaviate collection/schema/filter/object/vector/query 等派生索引合同说明。
+- `src/backend/db/llm.rs`、`src/backend/db/llm/**`、`src/backend/db/vector_outbox.rs` 与 import staging LLM/learning 子文件：补充 user-scope、saved config、candidate review、rule materialization、outbox claim/mark/retry、memory event 和 annotation sample 说明。
+- `src/backend/http/import_routes/multipart_and_ocr.rs` 与子文件、`ocr_learning_handlers.rs`、LLM candidate/review/config handlers、stage learning handlers、`config_weaviate.rs`、`weaviate.rs`、`weaviate_recall.rs`：补充 route 编排、runtime config、provider auth refresh、multipart/OCR 外部命令、LLM/OCR/Weaviate 边界说明。
+- `src/web/src/models/import_learning.ts`、`src/web/src/models/learning_center.ts`、`src/web/src/stores/learning.ts`、`checkDataLearning.ts`、`llmSignalMemory.ts`：补充前端 learning/LLM 模型归一、store、drift 判断和 signal memory 说明。
+
+本切片不修改 REST route、SQL、provider 调用、SSRF/secret redaction、学习生命周期、Weaviate authority、前端状态逻辑或 UI 视觉布局；所有变更均为注释和本 ledger 记录。注释扫描显示剩余未带中文说明的导出项仅为简单空判断/default 字段映射 helper，符合本轮例外标准。
+
+本切片本地验证记录：
+
+- 中文说明扫描通过：D8 目标路径中导出函数、业务关键函数、复杂私有 helper 已补中文说明；剩余 `ReceiptTransactionDraft::is_empty` 与 `string_field_or` 属于简单 getter/映射例外。
+- `cargo fmt --all -- --check` 通过。
+- `cargo test -p bill-analyser-core --test ai_ocr_llm_contracts --test provider_auth_contracts --test import_learning_contracts --test weaviate_derived_contracts` 通过，24 个 D8 core 合同测试全部通过。
+- `cargo test -p bill-analyser-db --test llm_postgres --test vector_outbox` 通过，2 个 PostgreSQL 持久化合同测试全部通过。
+- `cargo test -p bill-analyser-http --test weaviate_runtime_contract --test import_runtime_contract` 通过，13 个 HTTP runtime 合同测试全部通过。
+- `cargo clippy --workspace --all-targets -- -D warnings` 通过。
+- `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过，完整 Rust 工作区 coverage gate 达标。
+- `node scripts/check-rust-backend-structure.mjs` 通过，仍报告 D8 三个后端 facade 相对 baseline 的行数下降。
+- `node scripts/check-backend-doc-map.mjs` 通过。
+- `Set-Location src/web; npm run lint:ci` 通过；仅保留仓库既有 `no-explicit-any` warning，无本切片错误。
+- `Set-Location src/web; npm run structure:check` 仍只失败于 D10 shared 四项：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`；D8 直接前端文件未新增失败。
+- `git diff --check` 通过。
+- 本切片没有发起 live external-provider 调用；验证范围为源码、合同测试、lint、structure 和 coverage gate。

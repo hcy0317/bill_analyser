@@ -6,6 +6,7 @@ use serde_json::{json, Map, Value};
 
 use super::types::AiRouteResponse;
 
+/// 构建 LLM 合同错误响应，同时保留 code 与 error_code 以兼容前端旧字段。
 pub fn build_llm_contract_error_response(
     message: &str,
     code: &str,
@@ -22,6 +23,7 @@ pub fn build_llm_contract_error_response(
     }
 }
 
+/// 构建导入预览 LLM 推荐响应，按 session_id 回传建议数量和建议列表。
 pub fn build_llm_preview_recommend_response(session_id: &str, suggestions: Vec<Value>) -> Value {
     json!({
         "success": true,
@@ -33,6 +35,7 @@ pub fn build_llm_preview_recommend_response(session_id: &str, suggestions: Vec<V
     })
 }
 
+/// 构建候选列表响应，保持 data 数组和 total 分页字段的接口合同。
 pub fn build_llm_candidate_list_response(candidates: Vec<Value>, total: i64) -> Value {
     json!({
         "success": true,
@@ -41,6 +44,7 @@ pub fn build_llm_candidate_list_response(candidates: Vec<Value>, total: i64) -> 
     })
 }
 
+/// 构建候选拒绝响应，明确返回本次状态更新是否成功。
 pub fn build_llm_candidate_reject_response(rejected: bool) -> Value {
     json!({
         "success": true,
@@ -50,6 +54,7 @@ pub fn build_llm_candidate_reject_response(rejected: bool) -> Value {
     })
 }
 
+/// 判断指定 review endpoint 是否需要真实 provider，接受/拒绝类动作只更新本地状态。
 pub fn llm_review_endpoint_requires_live_provider(endpoint: &str) -> bool {
     let normalized = endpoint.trim_matches('/');
     if matches!(
@@ -72,6 +77,7 @@ pub fn llm_review_endpoint_requires_live_provider(endpoint: &str) -> bool {
     )
 }
 
+/// 构建 LLM 分析响应，按上下文区分导入 session、持久化选择或未分类交易模式。
 pub fn build_llm_analysis_response(candidates: Vec<Value>, context: &Value) -> Value {
     let context_object = context.as_object();
     let session_id = context_object

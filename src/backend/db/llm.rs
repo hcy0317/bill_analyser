@@ -55,6 +55,7 @@ mod configs;
 pub use candidates::*;
 pub use configs::*;
 
+/// 返回系统默认 LLM 运行时配置，明确关闭外部 provider 并保留标准字段形状。
 pub fn default_llm_runtime_config() -> Value {
     json!({
         "enabled": false,
@@ -64,6 +65,7 @@ pub fn default_llm_runtime_config() -> Value {
     })
 }
 
+/// 在 user_id 边界内按 id 读取 LLM 配置，供 CRUD 写后回读和存在性检查复用。
 #[tracing::instrument(level = "debug", skip_all)]
 async fn get_postgres_llm_config_by_id(
     pool: &PostgresPool,
@@ -120,6 +122,7 @@ async fn deactivate_postgres_llm_configs(
     Ok(())
 }
 
+/// 将 llm_configs 行投影为 API/运行时共享 JSON，并统一规范凭据和高级设置。
 fn llm_config_from_row(row: sqlx::postgres::PgRow) -> DbResult<Value> {
     let advanced_settings: Value = row.try_get("advanced_settings")?;
     let credential_config: Value = row.try_get("credential_config")?;
@@ -171,6 +174,7 @@ fn serialize_advanced_settings(value: &Value) -> Value {
     normalized_settings_value(value)
 }
 
+/// 序列化凭据配置；当旧 api_key 字段仍有值时补入 access_token 兼容运行时。
 fn serialize_credential_config(value: &Value, api_key: &str) -> Value {
     let mut normalized = normalized_credential_value(value);
     if normalized
@@ -204,6 +208,7 @@ fn normalized_settings_value(value: &Value) -> Value {
     Value::Object(normalize_llm_advanced_settings(Some(value)))
 }
 
+/// 判断 LLM 候选是否应物化为分类规则，仅规则类且表达式非空才允许落库。
 fn should_materialize_rule_candidate(candidate: &Value) -> bool {
     candidate
         .get("type")
@@ -215,6 +220,7 @@ fn should_materialize_rule_candidate(candidate: &Value) -> bool {
             .is_some_and(|expression| !expression.trim().is_empty())
 }
 
+/// 将审核通过的规则类 LLM 候选写入 category_rules，去重并绑定当前用户分类。
 #[tracing::instrument(level = "debug", skip_all)]
 async fn create_postgres_rule_for_llm_candidate(
     pool: &PostgresPool,

@@ -4,6 +4,7 @@
 
 use serde_json::Value;
 
+/// 为已落库交易构造分类推荐 prompt，约束 LLM 只返回分类候选 JSON。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_llm_classification_prompt(transactions: &[Value]) -> String {
     #[cfg(not(coverage))]
@@ -35,6 +36,7 @@ pub fn build_llm_classification_prompt(transactions: &[Value]) -> String {
     )
 }
 
+/// 为同分类样本构造规则归纳 prompt，要求输出可人工审核的规则表达式候选。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_llm_rule_induction_prompt(category_name: &str, transactions: &[Value]) -> String {
     #[cfg(not(coverage))]
@@ -63,6 +65,7 @@ pub fn build_llm_rule_induction_prompt(category_name: &str, transactions: &[Valu
     )
 }
 
+/// 为导入预览行构造 LLM 推荐 prompt，带入分类、账户和用户反馈记忆上下文。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_llm_import_preview_recommendation_prompt(
     transactions: &[Value],
@@ -151,6 +154,7 @@ pub fn build_llm_import_preview_recommendation_prompt(
     )
 }
 
+/// 基于长期学习摘要构造规则合成 prompt，限制候选数量并要求分类来自既有体系。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_llm_rule_expression_synthesis_prompt(
     knowledge_summary_pack: &Value,
@@ -169,6 +173,7 @@ pub fn build_llm_rule_expression_synthesis_prompt(
     )
 }
 
+/// 渲染用户自定义 prompt 模板，保留默认 prompt、交易 JSON 和分类名占位符合同。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn render_llm_prompt_template(
     template: &str,
@@ -193,6 +198,7 @@ pub fn render_llm_prompt_template(
         .replace("{category_name}", category_name)
 }
 
+/// 从 LLM 文本响应中提取 JSON 数组，兼容 Markdown code fence 和前后解释文本。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_llm_json_array_response(content: &str) -> Result<Vec<Value>, String> {
     let stripped = strip_json_code_fence(content.trim());
@@ -224,6 +230,7 @@ fn strip_json_code_fence(content: &str) -> &str {
     }
 }
 
+/// 将 prompt 输入字段投影为纯文本，确保数组和对象也能稳定进入 prompt。
 fn prompt_value(value: &Value, key: &str) -> String {
     value
         .get(key)

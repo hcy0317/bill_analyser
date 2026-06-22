@@ -14,6 +14,7 @@ use super::value_helpers::string_field_or;
 
 const LLM_PROMPT_TEXT_LIMIT: usize = 12_000;
 
+/// 归一化 LLM 高级参数，只保留受支持且有边界限制的推理深度、温度、token 和 prompt 模板。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_llm_advanced_settings(settings: Option<&Value>) -> Map<String, Value> {
     let loaded = decode_settings_object(settings);
@@ -55,6 +56,7 @@ pub fn normalize_llm_advanced_settings(settings: Option<&Value>) -> Map<String, 
     normalized
 }
 
+/// 生成可返回给前端的安全 LLM 配置，递归脱敏密钥并保留 has_api_key 状态。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn safe_llm_config_payload(config: &Value) -> Value {
     let mut safe_config = config.as_object().cloned().unwrap_or_default();
@@ -73,6 +75,7 @@ pub fn safe_llm_config_payload(config: &Value) -> Value {
     Value::Object(safe_config)
 }
 
+/// 将数据库保存配置投影成运行时配置，合并 credential_config 与旧 api_key 字段。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_runtime_llm_config_from_saved_config(config: &Value) -> Value {
     #[cfg(not(coverage))]
@@ -103,6 +106,7 @@ pub fn build_runtime_llm_config_from_saved_config(config: &Value) -> Value {
     })
 }
 
+/// 复制并规范化运行时 LLM 配置，兼容 provider_config 内旧 advanced_settings 位置。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn copy_runtime_llm_config(config: &Value) -> Value {
     let object = config.as_object();
@@ -133,6 +137,7 @@ pub fn copy_runtime_llm_config(config: &Value) -> Value {
     })
 }
 
+/// 构建 LLM 配置读取接口响应，确保 credential_config 已脱敏且 provider 列表同步返回。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_llm_config_get_response(config: &Value) -> AiRouteResponse {
     let copied = copy_runtime_llm_config(config);
@@ -176,6 +181,7 @@ fn decode_settings_object(settings: Option<&Value>) -> Map<String, Value> {
     }
 }
 
+/// 判断高级配置值是否等价为空，避免旧 provider_config 中的空值覆盖有效设置。
 fn is_falsy_settings_value(value: &Value) -> bool {
     match value {
         Value::Null => true,
@@ -187,6 +193,7 @@ fn is_falsy_settings_value(value: &Value) -> bool {
     }
 }
 
+/// 解析并限制浮点型高级参数，非法或越界值直接忽略。
 #[tracing::instrument(level = "debug", skip_all)]
 fn normalize_float_setting(value: Option<&Value>, minimum: f64, maximum: f64) -> Option<f64> {
     let parsed = match value {
@@ -197,6 +204,7 @@ fn normalize_float_setting(value: Option<&Value>, minimum: f64, maximum: f64) ->
     (minimum..=maximum).contains(&parsed).then_some(parsed)
 }
 
+/// 解析并限制整数型高级参数，避免外部 provider 请求使用异常 token 上限。
 #[tracing::instrument(level = "debug", skip_all)]
 fn normalize_int_setting(value: Option<&Value>, minimum: i64, maximum: i64) -> Option<i64> {
     let parsed = match value {
@@ -207,6 +215,7 @@ fn normalize_int_setting(value: Option<&Value>, minimum: i64, maximum: i64) -> O
     (minimum..=maximum).contains(&parsed).then_some(parsed)
 }
 
+/// 截断自定义 prompt 模板，避免配置层把超长文本送入运行时请求。
 #[tracing::instrument(level = "debug", skip_all)]
 fn normalize_prompt_text(value: &str) -> String {
     value.trim().chars().take(LLM_PROMPT_TEXT_LIMIT).collect()

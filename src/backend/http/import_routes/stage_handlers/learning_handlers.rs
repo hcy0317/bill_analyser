@@ -1,4 +1,5 @@
 #[tracing::instrument(level = "debug", skip_all)]
+/// 导入 session 内获取学习建议的运行时 handler，保持 D1 preview route envelope。
 pub async fn import_learning_suggestions_get_runtime_handler(
     State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
@@ -10,6 +11,7 @@ pub async fn import_learning_suggestions_get_runtime_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 导入 session 内生成学习建议的运行时 handler，复用当前 preview/stage 数据。
 pub async fn import_learning_suggestions_post_runtime_handler(
     State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
@@ -142,6 +144,7 @@ fn build_import_learning_suggestions_from_preview(
 
 /// 把用户选中的 preview rows 晋升为 learning 样本，并记录后续自动应用所需特征。
 #[tracing::instrument(level = "debug", skip_all)]
+/// 将导入学习样本提升为训练/规则候选的 handler，目前保持 no-op 合同占位。
 pub async fn import_learning_promote_runtime_handler(
     State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
@@ -213,6 +216,7 @@ pub async fn import_learning_promote_runtime_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 查询导入学习规则列表，供导入预览阶段展示可解释规则来源。
 pub async fn import_learning_rules_list_runtime_handler(
     State(state): State<HttpAppState>,
     Query(query): Query<ImportLearningRulesQuery>,
@@ -268,6 +272,7 @@ pub async fn import_learning_rules_list_runtime_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 更新导入学习规则状态或字段，保持 user-scope 和规则 envelope。
 pub async fn import_learning_rule_update_runtime_handler(
     State(state): State<HttpAppState>,
     Path(rule_id): Path<i64>,
@@ -307,6 +312,7 @@ pub async fn import_learning_rule_update_runtime_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 删除导入学习规则，供导入预览阶段撤销学习结果。
 pub async fn import_learning_rule_delete_runtime_handler(
     State(state): State<HttpAppState>,
     Path(rule_id): Path<i64>,

@@ -34,6 +34,7 @@ pub struct WeaviateRuntimeConfig {
 }
 
 impl WeaviateRuntimeConfig {
+    /// 构建默认必需 Weaviate 配置，本地运行态默认启用派生索引。
     pub fn required_default() -> Result<Self, HttpShellConfigError> {
         Ok(Self {
             enabled: true,
@@ -47,6 +48,7 @@ impl WeaviateRuntimeConfig {
         })
     }
 
+    /// 构建测试用禁用配置，避免单元测试意外访问真实 Weaviate。
     pub fn disabled_for_test() -> Self {
         Self {
             enabled: false,
@@ -60,6 +62,7 @@ impl WeaviateRuntimeConfig {
         }
     }
 
+    /// 从环境变量加载 Weaviate 配置并校验 endpoint、prefix、timeout、重试和批量上限。
     pub fn from_env_with(
         lookup: &mut impl FnMut(&'static str) -> Option<String>,
     ) -> Result<Self, HttpShellConfigError> {
@@ -127,10 +130,12 @@ impl WeaviateRuntimeConfig {
         })
     }
 
+    /// 判断 API key 是否已配置，只暴露布尔值避免泄露密钥。
     pub fn api_key_configured(&self) -> bool {
         self.api_key.is_some()
     }
 
+    /// 返回脱敏后的 endpoint，供 health/config 输出使用。
     pub fn redacted_endpoint(&self) -> String {
         self.endpoint
             .as_deref()
@@ -138,6 +143,7 @@ impl WeaviateRuntimeConfig {
             .unwrap_or_else(|| "unconfigured".to_string())
     }
 
+    /// 在不发起网络探测时返回配置状态摘要。
     pub fn status_without_probe(&self) -> &'static str {
         if !self.enabled {
             "degraded:disabled"
@@ -149,6 +155,7 @@ impl WeaviateRuntimeConfig {
     }
 }
 
+/// 归一化并校验 Weaviate endpoint，拒绝凭据、query、fragment 和无 host URL。
 #[tracing::instrument(level = "debug", skip_all)]
 fn normalize_weaviate_endpoint(
     value: Option<String>,
@@ -174,6 +181,7 @@ fn normalize_weaviate_endpoint(
     Ok(Some(trimmed.to_string()))
 }
 
+/// 脱敏 Weaviate endpoint，清理 query/fragment/凭据后用于健康状态展示。
 pub fn redact_weaviate_endpoint(endpoint: &str) -> String {
     let Ok(mut parsed) = Url::parse(endpoint.trim()) else {
         return "<invalid-weaviate-endpoint>".to_string();
@@ -185,6 +193,7 @@ pub fn redact_weaviate_endpoint(endpoint: &str) -> String {
     parsed.to_string().trim_end_matches('/').to_string()
 }
 
+/// 解析布尔环境变量，非法值返回带变量名的配置错误。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_env_bool_value(
     name: &'static str,
@@ -201,6 +210,7 @@ fn parse_env_bool_value(
     }
 }
 
+/// 解析 u64 环境变量，缺失时使用默认值。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_env_u64_value(
     name: &'static str,
@@ -215,6 +225,7 @@ fn parse_env_u64_value(
     }
 }
 
+/// 解析并限制 u64 环境变量范围，避免异常 timeout 进入运行时。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_env_u64_range_value(
     name: &'static str,
@@ -230,6 +241,7 @@ fn parse_env_u64_range_value(
     Ok(parsed)
 }
 
+/// 解析 usize 环境变量，缺失时使用默认值。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_env_usize_value(
     name: &'static str,
@@ -244,6 +256,7 @@ fn parse_env_usize_value(
     }
 }
 
+/// 解析并限制 usize 环境变量范围，避免异常批量或重试参数进入运行时。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_env_usize_range_value(
     name: &'static str,

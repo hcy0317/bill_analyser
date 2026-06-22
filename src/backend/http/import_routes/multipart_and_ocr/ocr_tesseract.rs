@@ -1,5 +1,6 @@
 use super::*;
 
+/// 运行 Tesseract OCR 的异步入口，通过 blocking 线程隔离外部命令执行。
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn run_tesseract_ocr(
     lang: String,
@@ -17,6 +18,7 @@ pub(super) async fn run_tesseract_ocr(
     }
 }
 
+/// 调用 Tesseract CLI 并写入图片字节到 stdin，负责超时、stderr 和 UTF-8 输出处理。
 fn run_tesseract_ocr_blocking(
     lang: String,
     image_bytes: Vec<u8>,
@@ -111,6 +113,7 @@ fn run_tesseract_ocr_blocking(
     }
 }
 
+/// 将 Tesseract IO 错误归一为 OCR provider 错误，兼容 Windows partial copy 错误。
 pub(super) fn ocr_io_error_response(error: io::Error) -> AiRouteResponse {
     if matches!(error.kind(), io::ErrorKind::BrokenPipe) || error.raw_os_error() == Some(299) {
         return build_ocr_error_response(

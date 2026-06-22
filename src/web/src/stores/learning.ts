@@ -11,6 +11,9 @@ import type {
 import services from '@/lib/services.ts';
 import logger from '@/lib/logger.ts';
 
+/**
+ * 学习中心 Pinia store，集中管理学习建议、学习规则、加载状态和后端动作。
+ */
 export const useLearningStore = defineStore('learning', () => {
     // ── Suggestions ─────────────────────────
     const suggestions = ref<LearningSuggestion[]>([]);

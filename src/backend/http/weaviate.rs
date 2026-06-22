@@ -33,6 +33,7 @@ pub struct WeaviateHealthStatus {
 }
 
 impl WeaviateHealthStatus {
+    /// 构建 disabled 健康状态投影。
     pub fn disabled() -> Self {
         Self {
             status: "disabled".to_string(),
@@ -40,6 +41,7 @@ impl WeaviateHealthStatus {
         }
     }
 
+    /// 构建 ready 健康状态投影。
     pub fn healthy() -> Self {
         Self {
             status: "healthy".to_string(),
@@ -47,6 +49,7 @@ impl WeaviateHealthStatus {
         }
     }
 
+    /// 构建 degraded 健康状态投影并携带可诊断详情。
     pub fn degraded(detail: impl Into<String>) -> Self {
         Self {
             status: "degraded".to_string(),
@@ -54,6 +57,7 @@ impl WeaviateHealthStatus {
         }
     }
 
+    /// 将健康状态压缩为 /api/health 使用的单字段详情。
     pub fn health_detail_value(&self) -> String {
         if self.status == "disabled" || self.status == "healthy" {
             self.status.clone()
@@ -117,6 +121,7 @@ pub struct WeaviateHttpClient {
 }
 
 impl WeaviateHttpClient {
+    /// 基于运行配置创建 Weaviate HTTP client，禁用重定向并保留 timeout。
     pub fn new(config: &WeaviateRuntimeConfig) -> Result<Self, WeaviateRuntimeError> {
         if !config.enabled {
             return Err(WeaviateRuntimeError::Disabled);
@@ -134,6 +139,7 @@ impl WeaviateHttpClient {
         })
     }
 
+    /// 探测 Weaviate ready endpoint，作为运行态健康检查的最小证明。
     pub async fn readiness(&self) -> Result<(), WeaviateRuntimeError> {
         let response = self
             .authenticated(
@@ -145,6 +151,7 @@ impl WeaviateHttpClient {
         ensure_success(response).await
     }
 
+    /// 初始化派生索引 schema，仅创建缺失 collection，不删除已有数据。
     pub async fn bootstrap_schema(&self) -> Result<WeaviateBootstrapReport, WeaviateRuntimeError> {
         let classes = build_weaviate_schema_classes(&self.config.collection_prefix)
             .ok_or(WeaviateRuntimeError::InvalidCollectionPrefix)?;
@@ -167,6 +174,7 @@ impl WeaviateHttpClient {
         })
     }
 
+    /// 批量 upsert 派生对象，空批次返回 skipped_empty。
     pub async fn upsert_objects(
         &self,
         objects: &[WeaviateDerivedObject],
@@ -187,6 +195,7 @@ impl WeaviateHttpClient {
         })
     }
 
+    /// 删除单个派生对象，404 视为幂等成功。
     pub async fn delete_object(
         &self,
         class_name: &str,
@@ -203,6 +212,7 @@ impl WeaviateHttpClient {
         ensure_success(response).await
     }
 
+    /// 删除指定用户在某个 collection 下的派生对象，用于 rebuild 前清理。
     pub async fn delete_user_objects(
         &self,
         class_name: &str,
@@ -238,6 +248,7 @@ impl WeaviateHttpClient {
         }
     }
 
+    /// 发起 Weaviate nearVector 查询，调用方负责传入 user/schema/ruleState filter。
     pub async fn search(
         &self,
         class_name: &str,
@@ -301,6 +312,7 @@ impl WeaviateHttpClient {
     }
 }
 
+/// 探测 Weaviate 健康状态，失败时降级为 detail 而不影响 PostgreSQL 权威业务。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn probe_weaviate_health(config: &HttpShellConfig) -> WeaviateHealthStatus {
     if !config.weaviate.enabled {
@@ -320,6 +332,7 @@ pub async fn probe_weaviate_health(config: &HttpShellConfig) -> WeaviateHealthSt
     }
 }
 
+/// 消费一次 vector outbox，将 PostgreSQL 权威变更同步到 Weaviate 派生索引。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn process_weaviate_outbox_once(
     pool: &PostgresPool,
@@ -375,6 +388,7 @@ pub async fn process_weaviate_outbox_once(
     })
 }
 
+/// 从 PostgreSQL 重新构建 Weaviate 派生索引，支持按用户清理后重写。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn rebuild_weaviate_from_postgres(
     pool: &PostgresPool,
@@ -423,6 +437,7 @@ pub async fn rebuild_weaviate_from_postgres(
     })
 }
 
+/// 将导入学习特征来源转换为 Weaviate 派生对象，写入 user/schema/source 元数据。
 pub fn build_object_from_feature_source(
     config: &WeaviateRuntimeConfig,
     source: &ImportLearningFeatureVectorSource,

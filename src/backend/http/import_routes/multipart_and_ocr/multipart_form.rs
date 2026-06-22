@@ -1,5 +1,6 @@
 use super::*;
 
+/// 解析 multipart/form-data body，提取文本字段和文件 part，保留原始文件字节。
 pub(super) fn parse_multipart_form_data(
     content_type: &str,
     body: &[u8],
@@ -52,6 +53,7 @@ pub(super) fn parse_multipart_form_data(
     Ok(form)
 }
 
+/// 从 Content-Type 中读取 boundary，支持带引号的浏览器标准格式。
 fn multipart_boundary_from_content_type(content_type: &str) -> Option<String> {
     content_type.split(';').find_map(|part| {
         let part = part.trim();
@@ -69,6 +71,7 @@ fn disposition_param(disposition: &str, param: &str) -> Option<String> {
     })
 }
 
+/// 按字节 marker 拆分 body，避免把上传图片内容当作 UTF-8 文本处理。
 fn split_bytes<'a>(body: &'a [u8], marker: &[u8]) -> Vec<&'a [u8]> {
     if marker.is_empty() {
         return vec![body];
@@ -83,11 +86,13 @@ fn split_bytes<'a>(body: &'a [u8], marker: &[u8]) -> Vec<&'a [u8]> {
     parts
 }
 
+/// 按字节 marker 拆分一次，用于 multipart header/body 分界。
 fn split_once_bytes<'a>(body: &'a [u8], marker: &[u8]) -> Option<(&'a [u8], &'a [u8])> {
     let offset = find_bytes(body, marker)?;
     Some((&body[..offset], &body[offset + marker.len()..]))
 }
 
+/// 在二进制 body 中查找 marker，确保 multipart 解析不依赖字符串转换。
 #[tracing::instrument(level = "debug", skip_all)]
 fn find_bytes(body: &[u8], marker: &[u8]) -> Option<usize> {
     if marker.is_empty() || marker.len() > body.len() {
@@ -97,6 +102,7 @@ fn find_bytes(body: &[u8], marker: &[u8]) -> Option<usize> {
         .position(|window| window == marker)
 }
 
+/// 去除 part 前导换行，避免边界分隔符后的 CRLF 干扰 header 解析。
 fn trim_part_boundary(mut part: &[u8]) -> &[u8] {
     while part.starts_with(b"\r\n") {
         part = &part[2..];
@@ -107,6 +113,7 @@ fn trim_part_boundary(mut part: &[u8]) -> &[u8] {
     part
 }
 
+/// 去除 part body 末尾换行，只清理 multipart 分隔带来的包装字符。
 fn strip_trailing_newline(mut body: &[u8]) -> &[u8] {
     if body.ends_with(b"\r\n") {
         body = &body[..body.len().saturating_sub(2)];
@@ -116,6 +123,7 @@ fn strip_trailing_newline(mut body: &[u8]) -> &[u8] {
     body
 }
 
+/// 解码导入文本字段，优先 UTF-8，失败时回退 GBK 并去除 BOM。
 pub(super) fn decode_import_text(bytes: &[u8]) -> String {
     let decoded = if let Ok(text) = std::str::from_utf8(bytes) {
         text.to_string()

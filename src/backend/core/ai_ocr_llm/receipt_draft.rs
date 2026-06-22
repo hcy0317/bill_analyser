@@ -20,6 +20,7 @@ use super::types::{
 const AUTO_FILL_THRESHOLD: f64 = 0.80;
 const CANDIDATE_THRESHOLD: f64 = 0.55;
 
+/// 根据 OCR 解析结果、provider 行文本和本地规则上下文构建交易草稿。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_receipt_transaction_draft(
     parsed: &PaymentScreenshotParseContract,
@@ -119,6 +120,7 @@ pub fn build_receipt_transaction_draft(
     draft
 }
 
+/// 按置信度把草稿字段放入 auto_fill 或 candidates，保持阈值集中一致。
 #[tracing::instrument(level = "debug", skip_all)]
 fn insert_field(draft: &mut ReceiptTransactionDraft, key: &str, field: ReceiptDraftField) {
     let confidence = field.confidence.clamp(0.0, 1.0);
@@ -149,6 +151,7 @@ fn receipt_evidence_text(provider_result: &OcrProviderTextResult) -> String {
     provider_result.text.clone()
 }
 
+/// 选取 OCR 主要证据行，优先使用 provider 行级结果，缺失时回退原始文本。
 fn primary_evidence_lines(
     provider_result: &OcrProviderTextResult,
     parsed: &PaymentScreenshotParseContract,
@@ -191,6 +194,7 @@ fn evidence_containing(evidence: &[String], needle: &str) -> Vec<String> {
     }
 }
 
+/// 根据 OCR 文本关键词推断交易类型，并附带类型代码、置信度和命中证据。
 fn infer_transaction_type(
     text: &str,
     payment_platform: Option<&str>,
@@ -248,6 +252,7 @@ fn infer_transaction_type(
     None
 }
 
+/// 使用分类规则和分类名称对 OCR 草稿做分类映射，严格尊重已知交易类型边界。
 #[tracing::instrument(level = "debug", skip_all)]
 fn apply_category_mapping(
     draft: &mut ReceiptTransactionDraft,
@@ -321,6 +326,7 @@ fn apply_category_mapping(
     }
 }
 
+/// 使用账户规则对 OCR 草稿做来源账户映射，复用正式账户规则匹配上下文。
 #[tracing::instrument(level = "debug", skip_all)]
 fn apply_account_mapping(
     draft: &mut ReceiptTransactionDraft,
@@ -379,6 +385,7 @@ fn apply_account_mapping(
     );
 }
 
+/// 根据 tag 名称命中 OCR 文本，为草稿提供自动标签或候选标签。
 #[tracing::instrument(level = "debug", skip_all)]
 fn apply_tag_mapping(draft: &mut ReceiptTransactionDraft, text: &str, tags: &[ReceiptDraftTag]) {
     let matched = tags

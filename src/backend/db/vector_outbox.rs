@@ -54,6 +54,7 @@ pub struct ImportLearningFeatureVectorSource {
     pub source_payload: Value,
 }
 
+/// 写入向量派生 outbox 事件，后续由 Weaviate 消费器异步处理。
 pub async fn enqueue_vector_outbox_event(
     pool: &PostgresPool,
     draft: &VectorOutboxEventDraft,
@@ -78,6 +79,7 @@ pub async fn enqueue_vector_outbox_event(
     Ok(row.try_get("id")?)
 }
 
+/// 批量 claim 可处理的 pending outbox 事件，使用事务和 SKIP LOCKED 避免并发重复。
 pub async fn claim_pending_vector_outbox_events(
     pool: &PostgresPool,
     limit: usize,
@@ -116,6 +118,7 @@ pub async fn claim_pending_vector_outbox_events(
     rows.into_iter().map(vector_outbox_event_from_row).collect()
 }
 
+/// 标记 outbox 事件处理成功，并清理锁与错误信息。
 pub async fn mark_vector_outbox_event_succeeded(
     pool: &PostgresPool,
     event_id: i64,
@@ -136,6 +139,7 @@ pub async fn mark_vector_outbox_event_succeeded(
     Ok(())
 }
 
+/// 标记 outbox 事件处理失败；未达最大次数时延迟重试，超过后进入 failed。
 pub async fn mark_vector_outbox_event_failed(
     pool: &PostgresPool,
     event_id: i64,
@@ -169,6 +173,7 @@ pub async fn mark_vector_outbox_event_failed(
     Ok(())
 }
 
+/// 加载导入学习特征向量来源，供 Weaviate rebuild 或补偿索引使用。
 pub async fn load_import_learning_feature_vector_sources(
     pool: &PostgresPool,
     user_id: Option<i64>,
@@ -223,6 +228,7 @@ pub async fn load_import_learning_feature_vector_sources(
         .collect()
 }
 
+/// 判断指定用户是否存在可派生的导入学习特征向量来源。
 pub async fn has_import_learning_feature_vector_sources(
     pool: &PostgresPool,
     user_id: i64,

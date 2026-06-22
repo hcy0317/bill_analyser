@@ -61,6 +61,7 @@ impl Default for ImportLearningRecommendationKeyInput {
     }
 }
 
+/// 基于用户、推荐 tuple、特征桶和转账保护信息生成稳定的导入学习 recommendation key。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_import_learning_recommendation_key(
     input: &ImportLearningRecommendationKeyInput,
@@ -177,6 +178,7 @@ pub struct ImportLearningLifecycleTransition {
     pub suppressed: bool,
 }
 
+/// 根据用户反馈推进导入学习生命周期，维护 yellow/green/auto_applied/suppressed 状态。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn transition_import_learning_lifecycle(
     current: &ImportLearningLifecycleState,
@@ -265,6 +267,7 @@ pub fn transition_import_learning_lifecycle(
     }
 }
 
+/// 归一化学习生命周期状态，未知值回退 yellow，避免前端/数据库状态漂移。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_learning_lifecycle_status(status: &str) -> String {
     match status.trim().to_ascii_lowercase().as_str() {
@@ -277,6 +280,7 @@ pub fn normalize_learning_lifecycle_status(status: &str) -> String {
     .to_string()
 }
 
+/// 判断当前生命周期状态是否允许自动应用建议。
 pub fn learning_lifecycle_is_auto_eligible(status: &str) -> bool {
     matches!(
         normalize_learning_lifecycle_status(status).as_str(),
@@ -284,6 +288,7 @@ pub fn learning_lifecycle_is_auto_eligible(status: &str) -> bool {
     )
 }
 
+/// 将生命周期状态投影为前端信号灯状态。
 pub fn learning_lifecycle_signal_state(status: &str) -> &'static str {
     match normalize_learning_lifecycle_status(status).as_str() {
         LEARNING_LIFECYCLE_STATUS_GREEN | LEARNING_LIFECYCLE_STATUS_AUTO_APPLIED => "green",

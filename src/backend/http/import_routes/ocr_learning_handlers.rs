@@ -3,6 +3,7 @@
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 读取当前用户 OCR 配置，返回前会脱敏 provider 参数和凭据。
 pub async fn ocr_config_get_runtime_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -28,6 +29,7 @@ pub async fn ocr_config_get_runtime_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 保存当前用户 OCR 配置，保持 provider/lang/model/base_url/credential 合同一致。
 pub async fn ocr_config_put_runtime_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -59,6 +61,7 @@ pub async fn ocr_config_put_runtime_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 执行 OCR 识别请求，负责 user-scope、取消状态、rate limit 和 provider 分发。
 pub async fn ocr_recognition_runtime_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -262,6 +265,7 @@ fn load_receipt_draft_tags(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 查询导入学习建议列表，按当前用户和筛选条件返回分页数据。
 pub async fn learning_suggestions_list_runtime_handler(
     State(state): State<HttpAppState>,
     Query(query): Query<LearningCenterListQuery>,
@@ -304,6 +308,7 @@ pub async fn learning_suggestions_list_runtime_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 触发生成导入学习建议，保持规则/建议生成仍在本地运行态内完成。
 pub async fn learning_suggestions_generate_runtime_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -328,6 +333,7 @@ pub async fn learning_suggestions_generate_runtime_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 接受单条导入学习建议，并记录 lifecycle feedback。
 pub async fn learning_suggestion_accept_runtime_handler(
     State(state): State<HttpAppState>,
     Path(suggestion_id): Path<i64>,
@@ -355,6 +361,7 @@ pub async fn learning_suggestion_accept_runtime_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 批量接受导入学习建议，统一校验 preview_ids 与 suggestion_ids。
 pub async fn learning_suggestions_batch_accept_runtime_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -430,6 +437,7 @@ pub async fn learning_suggestions_batch_accept_runtime_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 拒绝单条导入学习建议，并写入 lifecycle reject feedback。
 pub async fn learning_suggestion_reject_runtime_handler(
     State(state): State<HttpAppState>,
     Path(suggestion_id): Path<i64>,
@@ -462,6 +470,7 @@ pub async fn learning_suggestion_reject_runtime_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 查询当前用户导入学习规则列表，保持 learning center 所需分页响应。
 pub async fn learning_rules_list_runtime_handler(
     State(state): State<HttpAppState>,
     Query(query): Query<LearningCenterListQuery>,
@@ -509,6 +518,7 @@ pub async fn learning_rules_list_runtime_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 启停当前用户导入学习规则，权限和 user-scope 由运行时上下文控制。
 pub async fn learning_rule_toggle_runtime_handler(
     State(state): State<HttpAppState>,
     Path(rule_id): Path<i64>,
@@ -546,6 +556,7 @@ pub async fn learning_rule_toggle_runtime_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 更新当前用户导入学习规则，保持规则字段和状态投影一致。
 pub async fn learning_rule_update_runtime_handler(
     State(state): State<HttpAppState>,
     Path(rule_id): Path<i64>,
@@ -594,6 +605,7 @@ pub async fn learning_rule_update_runtime_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 删除当前用户导入学习规则，未命中时返回标准学习域错误。
 pub async fn learning_rule_delete_runtime_handler(
     State(state): State<HttpAppState>,
     Path(rule_id): Path<i64>,

@@ -1,3 +1,4 @@
+/// 校验 LLM 建议的交易类型，未获得结构化转账授权时禁止应用转账语义。
 fn llm_suggested_type_for_preview(
     preview: &ImportPreviewRow,
     suggestion: &ImportPreviewLlmSuggestion,
@@ -22,6 +23,7 @@ fn llm_suggested_type_for_preview(
     (Some(normalized_type), None)
 }
 
+/// 解析 LLM 建议分类并在用户分类范围内匹配，转账保护会限制可选分类类型。
 fn resolve_llm_suggested_category(
     pool: &PostgresPool,
     user_id: i64,
@@ -95,6 +97,7 @@ fn resolve_llm_suggested_category(
     })
 }
 
+/// 判断预览行是否已有用户确认的转账候选反馈，作为 LLM 转账应用的前置授权。
 fn preview_has_authorized_transfer_feedback(preview: &ImportPreviewRow) -> bool {
     let Some(transfer) = preview
         .preview_matching_feedback
@@ -133,6 +136,7 @@ fn preview_type_label_from_code(type_code: i64) -> Option<&'static str> {
     }
 }
 
+/// 判断分类建议为何无法应用，便于写入 LLM signal 供前端解释。
 fn category_ignored_reason_for_llm_suggestion(
     suggestion: &ImportPreviewLlmSuggestion,
     suggested_category: Option<&ImportPreviewLlmCategoryMatch>,

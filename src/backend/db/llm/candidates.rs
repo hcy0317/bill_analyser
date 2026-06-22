@@ -1,5 +1,6 @@
 use super::*;
 
+/// 查询用户的 LLM 候选建议列表，支持按状态和候选类型分页过滤。
 pub async fn list_postgres_llm_candidates(
     pool: &PostgresPool,
     user_id: i64,
@@ -39,6 +40,7 @@ pub async fn list_postgres_llm_candidates(
     rows.into_iter().map(llm_candidate_from_row).collect()
 }
 
+/// 统计用户当前筛选条件下的 LLM 候选建议数量，供分页元数据使用。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn count_postgres_llm_candidates(
     pool: &PostgresPool,
@@ -66,6 +68,7 @@ pub async fn count_postgres_llm_candidates(
         .map_err(Into::into)
 }
 
+/// 按候选编号和用户边界读取单条 LLM 候选建议，防止跨用户访问。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn get_postgres_llm_candidate_by_id(
     pool: &PostgresPool,
@@ -88,6 +91,7 @@ pub async fn get_postgres_llm_candidate_by_id(
     row.map(llm_candidate_from_row).transpose()
 }
 
+/// 写入 LLM 生成的候选建议并立即回读，确保返回值与数据库投影格式一致。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn create_postgres_llm_candidate(
     pool: &PostgresPool,
@@ -138,6 +142,7 @@ pub async fn create_postgres_llm_candidate(
         })
 }
 
+/// 更新候选建议审核状态，并写入 reviewed_at 与版本号供审计和同步使用。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn update_postgres_llm_candidate_status(
     pool: &PostgresPool,
@@ -166,6 +171,7 @@ pub async fn update_postgres_llm_candidate_status(
     Ok(updated.rows_affected() > 0)
 }
 
+/// 接受 LLM 候选建议；规则类候选会同步物化为导入规则并返回新规则编号。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn accept_postgres_llm_candidate(
     pool: &PostgresPool,
@@ -197,6 +203,7 @@ pub async fn accept_postgres_llm_candidate(
     Ok(Some(Value::Object(result)))
 }
 
+/// 拒绝 LLM 候选建议；候选不存在时返回 None 保持 API 的未找到语义。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn reject_postgres_llm_candidate(
     pool: &PostgresPool,

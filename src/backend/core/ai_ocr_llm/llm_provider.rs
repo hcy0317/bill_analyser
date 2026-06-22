@@ -11,6 +11,7 @@ use super::value_helpers::first_non_empty_field;
 
 const LLM_BASE_URL_ALLOWLIST_ENV: &str = "BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST";
 
+/// 返回当前运行时支持的 LLM provider 标识列表，供配置页和错误提示使用。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn llm_available_providers() -> Vec<String> {
     LLM_AVAILABLE_PROVIDERS
@@ -19,6 +20,7 @@ pub fn llm_available_providers() -> Vec<String> {
         .collect()
 }
 
+/// 归一化 provider 别名，兼容前端表单和历史配置中的命名差异。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_llm_provider_name(provider: &str) -> String {
     match provider.trim().to_lowercase().as_str() {
@@ -30,6 +32,7 @@ pub fn normalize_llm_provider_name(provider: &str) -> String {
     }
 }
 
+/// 构建 LLM provider 运行时合同，校验 base_url、默认模型和 provider kind。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_llm_provider_config(
     provider: &str,
@@ -118,6 +121,7 @@ fn default_llm_base_url(provider: &str) -> Option<&'static str> {
     }
 }
 
+/// 校验显式 LLM base_url 的 SSRF 边界，只允许默认域名、allowlist 或安全本地端点。
 #[tracing::instrument(level = "debug", skip_all)]
 fn validate_llm_base_url(provider: &str, base_url: &str, explicit: bool) -> Result<(), String> {
     let parsed = parse_llm_base_url(base_url)?;
@@ -148,6 +152,7 @@ fn validate_llm_base_url(provider: &str, base_url: &str, explicit: bool) -> Resu
     ))
 }
 
+/// 校验 LLM vision OCR 使用的 base_url，禁止未经 allowlist 的内网、metadata 和凭据 URL。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn validate_llm_vision_base_url(base_url: &str) -> Result<(), String> {
     let parsed = parse_llm_base_url(base_url)?;
@@ -170,6 +175,7 @@ pub fn validate_llm_vision_base_url(base_url: &str) -> Result<(), String> {
     ))
 }
 
+/// 解析 provider URL 并拒绝控制字符、反斜杠、非 http/https、凭据和无 host 输入。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_llm_base_url(base_url: &str) -> Result<Url, String> {
     let trimmed = base_url.trim();
@@ -271,6 +277,7 @@ fn llm_url_origin(parsed: &Url) -> String {
     }
 }
 
+/// 检查 Azure OpenAI base_url 是否为 https 且 host 位于 openai.azure.com 名下。
 #[tracing::instrument(level = "debug", skip_all)]
 fn validate_azure_base_url(base_url: &str) -> Result<(), String> {
     let trimmed = base_url.trim();

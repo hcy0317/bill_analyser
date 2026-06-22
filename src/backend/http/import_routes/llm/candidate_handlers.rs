@@ -3,6 +3,7 @@
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 查询当前用户 LLM 候选建议列表，支持状态和类型筛选并返回分页 total。
 pub async fn llm_candidates_list_runtime_handler(
     State(state): State<HttpAppState>,
     Query(query): Query<LlmCandidatesQuery>,
@@ -54,6 +55,7 @@ pub async fn llm_candidates_list_runtime_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 按用户边界读取单条 LLM 候选建议。
 pub async fn llm_candidate_get_runtime_handler(
     State(state): State<HttpAppState>,
     Path(candidate_id): Path<i64>,
@@ -92,6 +94,7 @@ pub async fn llm_candidate_get_runtime_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 接受当前用户 LLM 候选建议，规则候选会由 DB 层尝试物化为分类规则。
 pub async fn llm_candidate_accept_runtime_handler(
     State(state): State<HttpAppState>,
     Path(candidate_id): Path<i64>,
@@ -124,6 +127,7 @@ pub async fn llm_candidate_accept_runtime_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 拒绝当前用户 LLM 候选建议，仅更新审核状态不调用外部 provider。
 pub async fn llm_candidate_reject_runtime_handler(
     State(state): State<HttpAppState>,
     Path(candidate_id): Path<i64>,

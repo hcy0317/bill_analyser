@@ -63,6 +63,7 @@ pub struct WeaviateCollectionNames {
 }
 
 impl WeaviateCollectionNames {
+    /// 按派生类返回实际 Weaviate collection 名称，避免调用方重复拼接 prefix。
     pub fn name_for(&self, class: WeaviateDerivedClass) -> &str {
         match class {
             WeaviateDerivedClass::ImportLearningSample => &self.import_learning_sample,
@@ -105,6 +106,7 @@ pub struct WeaviateImportLearningRecallQuery {
     pub limit: usize,
 }
 
+/// 校验 Weaviate collection prefix，要求短 ASCII 标识并以字母开头。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn validate_weaviate_collection_prefix(prefix: &str) -> bool {
     let trimmed = prefix.trim();
@@ -123,6 +125,7 @@ pub fn validate_weaviate_collection_prefix(prefix: &str) -> bool {
     chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
+/// 基于合法 prefix 构建 D8 派生索引的所有 collection 名称。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_weaviate_collection_names(prefix: &str) -> Option<WeaviateCollectionNames> {
     let prefix = prefix.trim();
@@ -140,6 +143,7 @@ pub fn build_weaviate_collection_names(prefix: &str) -> Option<WeaviateCollectio
     })
 }
 
+/// 构建 Weaviate schema class payload，固定 vectorizer=none 以使用应用自带 vector。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_weaviate_schema_classes(prefix: &str) -> Option<Vec<Value>> {
     let names = build_weaviate_collection_names(prefix)?;
@@ -176,6 +180,7 @@ fn build_schema_class(class_name: &str) -> Value {
     })
 }
 
+/// 构建所有派生对象必须携带的用户、特征版本和 PostgreSQL 来源元数据。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_weaviate_required_metadata(
     user_id: i64,
@@ -194,6 +199,7 @@ pub fn build_weaviate_required_metadata(
     properties
 }
 
+/// 归一化交易类型 scope，保证 recall filter 使用稳定英文枚举。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_weaviate_transaction_type_scope(value: &str) -> String {
     match normalize_import_learning_text(Some(&json!(value))).as_str() {
@@ -206,6 +212,7 @@ pub fn normalize_weaviate_transaction_type_scope(value: &str) -> String {
     .to_string()
 }
 
+/// 构建导入学习向量召回过滤条件，强制 user、schema 和 PostgreSQL 权威状态。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_import_learning_vector_recall_filters(
     user_id: i64,
@@ -237,6 +244,7 @@ pub fn build_import_learning_vector_recall_filters(
     filters
 }
 
+/// 根据导入学习特征构建 counterparty、description 和 composite 三类 recall 查询。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_import_learning_vector_recall_queries(
     collection_prefix: &str,
@@ -294,6 +302,7 @@ pub fn build_import_learning_vector_recall_queries(
     queries
 }
 
+/// 构建 Weaviate 派生对象，使用 deterministic id 让同一来源可幂等 upsert。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_weaviate_derived_object(
     class_name: impl Into<String>,
@@ -314,6 +323,7 @@ pub fn build_weaviate_derived_object(
     }
 }
 
+/// 为 class/source_key 生成稳定 UUID，避免派生索引重复对象。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn deterministic_weaviate_object_id(class_name: &str, source_key: &str) -> String {
     let mut hasher = Sha1::new();
@@ -351,6 +361,7 @@ fn format_uuid(bytes: [u8; 16]) -> String {
     )
 }
 
+/// 从 payload 派生固定维度伪向量，保证无外部 embedding provider 时仍可构建测试合同。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn derive_weaviate_feature_vector(payload: &Value, dimensions: usize) -> Vec<f32> {
     let dimensions = dimensions.max(1);
@@ -369,6 +380,7 @@ pub fn derive_weaviate_feature_vector(payload: &Value, dimensions: usize) -> Vec
         .collect()
 }
 
+/// 构建 Weaviate batch upsert 请求体，保持 class/id/properties/vector 四元组不变。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_weaviate_batch_upsert_payload(objects: &[WeaviateDerivedObject]) -> Value {
     json!({
@@ -386,11 +398,13 @@ pub fn build_weaviate_batch_upsert_payload(objects: &[WeaviateDerivedObject]) ->
     })
 }
 
+/// 构建单个 Weaviate 对象删除路径。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_weaviate_delete_path(class_name: &str, object_id: &str) -> String {
     format!("/v1/objects/{class_name}/{object_id}")
 }
 
+/// 构建 Weaviate GraphQL nearVector 查询，包含 recall filter 和固定返回字段。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_weaviate_graphql_query(
     class_name: &str,

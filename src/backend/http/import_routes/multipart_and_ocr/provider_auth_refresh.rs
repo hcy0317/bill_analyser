@@ -1,5 +1,6 @@
 use super::*;
 
+/// 刷新 provider auth profile，先校验 token endpoint，再发起受限 JSON refresh 请求。
 pub(super) async fn refresh_provider_auth_profile(
     client: &reqwest::Client,
     credential_config: &Value,
@@ -74,6 +75,7 @@ pub(super) async fn refresh_provider_auth_profile(
         .ok_or(ProviderAuthRefreshError)
 }
 
+/// 合并刷新响应和原 profile，保留 refresh token/token endpoint 并重新归一化。
 #[tracing::instrument(level = "debug", skip_all)]
 fn merge_refreshed_provider_auth_profile(current: &Value, response: &Value) -> Option<Value> {
     let mut merged = current.as_object().cloned().unwrap_or_default();
@@ -105,6 +107,7 @@ fn merge_refreshed_provider_auth_profile(current: &Value, response: &Value) -> O
     Some(normalized)
 }
 
+/// 校验 token endpoint 的 SSRF 边界，只允许同源、allowlist 或安全本地 https/http 端点。
 #[tracing::instrument(level = "debug", skip_all)]
 fn validate_provider_token_endpoint(
     token_endpoint: &str,
@@ -125,6 +128,7 @@ fn validate_provider_token_endpoint(
     Err("token endpoint is not allowed".to_string())
 }
 
+/// 解析 provider runtime URL，拒绝空值、控制字符、反斜杠、非 http/https 或无 host 输入。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_provider_runtime_url(value: &str) -> Result<Url, String> {
     let trimmed = value.trim();
@@ -149,6 +153,7 @@ fn provider_url_is_same_origin(parsed: &Url, other_url: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// 判断 token endpoint 是否位于环境变量 allowlist 中，支持完整 URL 或 origin。
 fn provider_url_is_allowlisted(parsed: &Url, env_key: &str) -> bool {
     let origin = provider_url_origin(parsed);
     let full = parsed.as_str().trim_end_matches('/').to_ascii_lowercase();
@@ -161,6 +166,7 @@ fn provider_url_is_allowlisted(parsed: &Url, env_key: &str) -> bool {
         .any(|entry| entry == full || entry == origin)
 }
 
+/// 仅允许本地 HTTP 例外，其他非 HTTPS token endpoint 必须被拒绝。
 fn provider_url_is_local_http(parsed: &Url) -> bool {
     parsed.scheme() == "http"
         && parsed.host_str().is_some_and(|host| {

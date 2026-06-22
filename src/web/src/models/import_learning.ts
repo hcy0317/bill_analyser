@@ -35,6 +35,9 @@ export interface ImportLearningPromoteResponse {
     updated: number;
 }
 
+/**
+ * 生成导入学习建议的稳定前端 key，优先使用后端 recommendation_key。
+ */
 export function getImportLearningSuggestionKey(suggestion: ImportLearningSuggestion): string {
     const stableKey = suggestion.recommendationKey || suggestion.recommendation_key || '';
     if (stableKey.trim()) {
@@ -47,6 +50,9 @@ export function getImportLearningSuggestionKey(suggestion: ImportLearningSuggest
     ].join('::');
 }
 
+/**
+ * 汇总学习建议关联的 preview id，去重后用于批量选择和同步状态。
+ */
 export function collectImportLearningSuggestionPreviewIds(
     suggestions: ImportLearningSuggestion[]
 ): number[] {
@@ -63,6 +69,9 @@ export function collectImportLearningSuggestionPreviewIds(
     return [...previewIds];
 }
 
+/**
+ * 将学习建议的特征字段转换为可读摘要，供导入预览页展示命中依据。
+ */
 export function getImportLearningSuggestionFeatureSummary(
     suggestion: ImportLearningSuggestion
 ): string {

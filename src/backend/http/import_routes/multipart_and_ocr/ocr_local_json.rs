@@ -1,5 +1,6 @@
 use super::*;
 
+/// 运行本地 JSON OCR provider 的异步入口，通过 blocking 线程隔离外部命令执行。
 pub(super) async fn run_local_json_ocr(
     image_bytes: Vec<u8>,
     mime: String,
@@ -14,6 +15,7 @@ pub(super) async fn run_local_json_ocr(
     }
 }
 
+/// 执行本地 JSON OCR 命令，支持 stdin/file 两种输入模式、超时和临时文件清理。
 fn run_local_json_ocr_blocking(
     image_bytes: Vec<u8>,
     mime: String,
@@ -140,6 +142,7 @@ fn ocr_local_json_io_error_response(error: io::Error) -> AiRouteResponse {
     )
 }
 
+/// 解析本地 JSON OCR stdout，兼容单个 JSON 值和 JSON Lines 输出。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_local_json_ocr_output(
     stdout: &str,
@@ -158,6 +161,7 @@ fn parse_local_json_ocr_output(
     local_json_ocr_result_from_value(parsed, mime)
 }
 
+/// 将 JSON Lines OCR 输出组装成数组，供后续统一解析为行结果。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_local_json_ocr_json_lines(text: &str) -> serde_json::Result<Value> {
     let mut items = Vec::new();
@@ -167,6 +171,7 @@ fn parse_local_json_ocr_json_lines(text: &str) -> serde_json::Result<Value> {
     Ok(Value::Array(items))
 }
 
+/// 将本地 OCR JSON 投影为统一 provider result，兼容 text/confidence/model/lines 多种字段。
 fn local_json_ocr_result_from_value(
     value: Value,
     mime: &str,
@@ -214,6 +219,7 @@ fn local_json_ocr_result_from_value(
     })
 }
 
+/// 从字符串、对象或数组 JSON 中提取 OCR 文本行、置信度和 bbox。
 fn local_json_ocr_lines_from_value(value: &Value) -> Result<Vec<OcrProviderTextLine>, AiRouteResponse> {
     let values = match value {
         Value::Array(items) => items.clone(),
@@ -255,6 +261,7 @@ fn local_json_ocr_lines_from_value(value: &Value) -> Result<Vec<OcrProviderTextL
     Ok(lines)
 }
 
+/// 计算行级置信度均值，缺失行级分数时让上层回退默认值。
 fn average_ocr_line_confidence(lines: &[OcrProviderTextLine]) -> Option<f64> {
     let scores = lines
         .iter()

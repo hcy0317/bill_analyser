@@ -2,6 +2,7 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+/// 接受导入预览 LLM 建议，记录 memory 事件并返回更新后的预览行投影。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn llm_preview_recommend_accept_runtime_handler(
     State(state): State<HttpAppState>,
@@ -20,6 +21,7 @@ pub async fn llm_preview_recommend_accept_runtime_handler(
     .await
 }
 
+/// 拒绝导入预览 LLM 建议，清理预览信号并记录用户反馈 memory。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn llm_preview_recommend_reject_runtime_handler(
     State(state): State<HttpAppState>,
@@ -147,6 +149,7 @@ async fn llm_preview_recommend_review_response(
     }
 }
 
+/// 查询用户 LLM memory 事件，供学习中心和 prompt 上下文复用。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn llm_memory_runtime_handler(
     State(state): State<HttpAppState>,
@@ -184,6 +187,7 @@ pub async fn llm_memory_runtime_handler(
     }
 }
 
+/// 读取当前用户有效 LLM runtime 配置，优先使用内存覆盖，再回退已保存配置。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn llm_config_get_runtime_handler(
     State(state): State<HttpAppState>,
@@ -214,6 +218,7 @@ pub async fn llm_config_get_runtime_handler(
     ai_route_response(build_llm_config_get_response(&config))
 }
 
+/// 更新当前用户临时 runtime LLM 配置，不直接写入 saved config 表。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn llm_config_post_runtime_handler(
     State(state): State<HttpAppState>,
@@ -260,6 +265,7 @@ pub async fn llm_config_post_runtime_handler(
     })
 }
 
+/// 查询当前用户 saved LLM 配置列表，返回前统一脱敏。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn llm_configs_list_runtime_handler(
     State(state): State<HttpAppState>,
@@ -291,6 +297,7 @@ pub async fn llm_configs_list_runtime_handler(
     }
 }
 
+/// 创建当前用户 saved LLM 配置，支持 credential_config 和 advanced_settings 持久化。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn llm_configs_create_runtime_handler(
     State(state): State<HttpAppState>,
@@ -362,6 +369,7 @@ pub async fn llm_configs_create_runtime_handler(
     }
 }
 
+/// 更新当前用户 saved LLM 配置，保留密钥脱敏占位符“不变更”语义。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn llm_config_update_runtime_handler(
     State(state): State<HttpAppState>,
@@ -414,6 +422,7 @@ pub async fn llm_config_update_runtime_handler(
     }
 }
 
+/// 删除当前用户 saved LLM 配置，未命中时返回 config_not_found。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn llm_config_delete_runtime_handler(
     State(state): State<HttpAppState>,
@@ -444,6 +453,7 @@ pub async fn llm_config_delete_runtime_handler(
     }
 }
 
+/// 激活当前用户指定 saved LLM 配置，并清理 runtime 覆盖缓存。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn llm_config_activate_runtime_handler(
     State(state): State<HttpAppState>,

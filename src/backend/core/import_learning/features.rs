@@ -9,12 +9,14 @@ pub struct ImportLearningTrainingSample {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 归一普通学习文本，用于分类、账户和规则标签的稳定比较。
 pub fn normalize_learning_text(raw_value: Option<&Value>) -> String {
     let text = value_to_string(raw_value).trim().to_lowercase();
     collapse_whitespace(&text)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 归一导入学习文本，额外保留复合字段中的管道分隔语义。
 pub fn normalize_import_learning_text(raw_value: Option<&Value>) -> String {
     let text = value_to_string(raw_value).trim().to_lowercase();
     if text.is_empty() {
@@ -35,12 +37,14 @@ pub fn normalize_import_learning_text(raw_value: Option<&Value>) -> String {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 从 JSON 值中提取合法的正数学习建议 ID。
 pub fn normalize_import_learning_suggestion_id(raw_value: Option<&Value>) -> Option<i64> {
     let normalized = optional_positive_i64(raw_value);
     normalized.filter(|value| *value > 0)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 构造复合匹配特征，至少保留两个非空维度才允许进入学习匹配。
 pub fn build_composite_match_features(
     parser_id: &str,
     counterparty: &str,
@@ -74,6 +78,7 @@ pub fn build_composite_match_features(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 基于复合匹配特征生成稳定哈希字符串，供导入学习候选复用。
 pub fn build_composite_match_hash(
     parser_id: &str,
     counterparty: &str,
@@ -91,6 +96,7 @@ pub fn build_composite_match_hash(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 将复合特征 map 序列化为稳定短键格式，避免顺序差异影响匹配。
 pub fn composite_hash_from_features(features: &BTreeMap<String, String>) -> String {
     features
         .iter()
@@ -109,6 +115,7 @@ pub fn composite_hash_from_features(features: &BTreeMap<String, String>) -> Stri
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 解析历史复合匹配值，兼容短键和旧式字段名。
 pub fn parse_composite_match_value(raw_value: Option<&Value>) -> Option<BTreeMap<String, String>> {
     let mut features = BTreeMap::new();
     for part in value_to_string(raw_value).split('|') {
@@ -138,6 +145,7 @@ pub fn parse_composite_match_value(raw_value: Option<&Value>) -> Option<BTreeMap
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 将金额分桶为粗粒度区间，避免学习特征直接绑定精确金额。
 pub fn amount_cents_bucket(raw_amount_cents: Option<&Value>) -> &'static str {
     let amount_cents = raw_amount_cents.map(value_to_i64).unwrap_or_default().abs();
     if amount_cents == 0 {
@@ -154,6 +162,7 @@ pub fn amount_cents_bucket(raw_amount_cents: Option<&Value>) -> &'static str {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 构造分类语义标签，记录学习样本的交易类型和分类 ID。
 pub fn build_semantic_label(row: &Map<String, Value>) -> String {
     #[cfg(not(coverage))]
     tracing::debug!(
@@ -167,6 +176,7 @@ pub fn build_semantic_label(row: &Map<String, Value>) -> String {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 构造账户路由标签，记录学习样本的来源和目标账户 ID。
 pub fn build_route_label(row: &Map<String, Value>) -> String {
     #[cfg(not(coverage))]
     tracing::debug!(
@@ -181,6 +191,7 @@ pub fn build_route_label(row: &Map<String, Value>) -> String {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 解析分类语义标签，供模型评估或回放时恢复业务字段。
 pub fn parse_semantic_label(label: &str) -> SemanticLabelParts {
     let mut result = SemanticLabelParts::default();
     for part in label.split('|') {
@@ -201,6 +212,7 @@ pub fn parse_semantic_label(label: &str) -> SemanticLabelParts {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 解析账户路由标签，供模型评估或回放时恢复账户字段。
 pub fn parse_route_label(label: &str) -> RouteLabelParts {
     let mut result = RouteLabelParts::default();
     for part in label.split('|') {
@@ -232,6 +244,7 @@ pub struct RouteLabelParts {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 汇总学习样本的文本、金额区间和预览类型特征。
 pub fn build_feature_payload(row: &Map<String, Value>) -> BTreeMap<String, String> {
     #[cfg(not(coverage))]
     tracing::debug!(
@@ -272,6 +285,7 @@ pub fn build_feature_payload(row: &Map<String, Value>) -> BTreeMap<String, Strin
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 从数据库行集合中筛出可训练样本，并丢弃无标签或特征不足的数据。
 pub fn prepare_training_samples(rows: &[Value]) -> Vec<ImportLearningTrainingSample> {
     rows.iter()
         .filter_map(Value::as_object)
@@ -304,6 +318,7 @@ pub fn prepare_training_samples(rows: &[Value]) -> Vec<ImportLearningTrainingSam
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 将特征 map 展开为召回 token，供向量或规则学习索引消费。
 pub fn iter_feature_tokens(features: &BTreeMap<String, String>) -> Vec<String> {
     let mut tokens = Vec::new();
     if let Some(parser_id) = features

@@ -9,6 +9,7 @@ use super::secret_redaction::redact_secrets_in_value;
 
 const DEFAULT_EXPIRY_SKEW_SECONDS: i64 = 60;
 
+/// 归一化 provider 凭据配置，抽取 access/refresh token、过期时间、刷新 endpoint 和请求参数。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn normalize_provider_auth_config(value: Option<&Value>) -> Value {
     let Some(value) = value else {
@@ -153,6 +154,7 @@ pub fn normalize_provider_auth_config(value: Option<&Value>) -> Value {
     Value::Object(normalized)
 }
 
+/// 返回脱敏后的 provider auth 配置，保证嵌套 credential_json 也不会泄露 secret。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn redact_provider_auth_config(value: &Value) -> Value {
     let mut redacted = normalize_provider_auth_config(Some(value));
@@ -160,6 +162,7 @@ pub fn redact_provider_auth_config(value: &Value) -> Value {
     redacted
 }
 
+/// 从归一化 auth profile 中读取可用 access token，忽略空值和脱敏占位符。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn provider_auth_access_token(value: &Value) -> Option<String> {
     value
@@ -170,6 +173,7 @@ pub fn provider_auth_access_token(value: &Value) -> Option<String> {
         .map(ToString::to_string)
 }
 
+/// 从归一化 auth profile 中读取可用 refresh token，忽略空值和脱敏占位符。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn provider_auth_refresh_token(value: &Value) -> Option<String> {
     value
@@ -180,11 +184,13 @@ pub fn provider_auth_refresh_token(value: &Value) -> Option<String> {
         .map(ToString::to_string)
 }
 
+/// 判断 auth profile 是否具备刷新凭据，供运行时决定是否尝试 refresh。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn provider_auth_has_refresh_credential(value: &Value) -> bool {
     provider_auth_refresh_token(value).is_some()
 }
 
+/// 判断 provider auth 是否已过期，包含提前刷新偏移以降低请求时失效风险。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn provider_auth_is_expired(value: &Value, now: DateTime<Utc>) -> bool {
     let Some(expires_at) = value
@@ -233,6 +239,7 @@ fn credential_source_value(value: &Value) -> Option<Value> {
     None
 }
 
+/// 从外层配置读取原始 credential_json，保留给安全响应和后续刷新流程。
 fn credential_json_value(value: &Value) -> Option<Value> {
     let object = value.as_object()?;
     for key in [
@@ -254,6 +261,7 @@ fn credential_json_value(value: &Value) -> Option<Value> {
     None
 }
 
+/// 解析可能是 JSON 字符串或 JSON 对象/数组的凭据字段。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_jsonish_value(value: &Value) -> Option<Value> {
     match value {
@@ -275,6 +283,7 @@ fn is_empty_jsonish(value: &Value) -> bool {
     }
 }
 
+/// 归一化凭据模式别名，兼容 session/auth/account/sub2api 等历史命名。
 #[tracing::instrument(level = "debug", skip_all)]
 fn normalize_credential_mode(value: &str) -> String {
     match value.trim().to_ascii_lowercase().replace('-', "_").as_str() {
@@ -311,6 +320,7 @@ fn first_object_value(object: Option<&Map<String, Value>>, keys: &[&str]) -> Opt
     })
 }
 
+/// 递归查找嵌套凭据文本字段，支持 session_json 等 provider 返回的复杂结构。
 fn first_deep_text(value: &Value, keys: &[&str]) -> Option<String> {
     if let Some(object) = value.as_object() {
         for key in keys {

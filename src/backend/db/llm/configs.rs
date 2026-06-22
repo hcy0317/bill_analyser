@@ -1,5 +1,6 @@
 use super::*;
 
+/// 查询指定用户的 LLM 配置列表，按启用状态和更新时间返回给配置页展示。
 pub async fn list_postgres_llm_configs(pool: &PostgresPool, user_id: i64) -> DbResult<Vec<Value>> {
     #[cfg(not(coverage))]
     tracing::info!(
@@ -22,6 +23,7 @@ pub async fn list_postgres_llm_configs(pool: &PostgresPool, user_id: i64) -> DbR
     rows.into_iter().map(llm_config_from_row).collect()
 }
 
+/// 读取指定用户当前启用的 LLM 配置，缺失时返回 None 让上层回退默认运行时配置。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn get_postgres_active_llm_config(
     pool: &PostgresPool,
@@ -43,6 +45,7 @@ pub async fn get_postgres_active_llm_config(
     row.map(llm_config_from_row).transpose()
 }
 
+/// 新增用户 LLM 配置；当草稿要求启用时，会先关闭同用户其他配置以保持单活约束。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn create_postgres_llm_config(
     pool: &PostgresPool,
@@ -90,6 +93,7 @@ pub async fn create_postgres_llm_config(
         })
 }
 
+/// 按增量字段更新 LLM 配置，并在设为启用时维护同用户配置的单活状态。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn update_postgres_llm_config(
     pool: &PostgresPool,
@@ -179,6 +183,7 @@ pub async fn update_postgres_llm_config(
     get_postgres_llm_config_by_id(pool, config_id, user_id).await
 }
 
+/// 删除指定用户可见的 LLM 配置，返回是否真实删除了数据库记录。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn delete_postgres_llm_config(
     pool: &PostgresPool,
@@ -199,6 +204,7 @@ pub async fn delete_postgres_llm_config(
     Ok(deleted.rows_affected() > 0)
 }
 
+/// 激活指定 LLM 配置，并同步停用同用户的其他配置以避免运行时配置冲突。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn activate_postgres_llm_config(
     pool: &PostgresPool,
@@ -226,6 +232,7 @@ pub async fn activate_postgres_llm_config(
     Ok(true)
 }
 
+/// 生成运行时实际使用的 LLM 配置；优先采用用户启用配置，缺失时使用系统默认值。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn effective_postgres_llm_config_from_saved(
     pool: &PostgresPool,

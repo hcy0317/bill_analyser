@@ -7,6 +7,7 @@ use unicode_normalization::UnicodeNormalization;
 
 use super::types::PaymentScreenshotParseContract;
 
+/// 解析支付截图 OCR 文本，提取金额、时间、描述、支付平台和整体置信度。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_payment_screenshot_text(text: &str) -> PaymentScreenshotParseContract {
     let normalized_text = normalize_text(text);
@@ -41,6 +42,7 @@ pub fn parse_payment_screenshot_text(text: &str) -> PaymentScreenshotParseContra
     }
 }
 
+/// 标准化 OCR 原始文本，统一 Unicode 形态并去除不可见空白差异。
 #[tracing::instrument(level = "debug", skip_all)]
 fn normalize_text(text: &str) -> String {
     text.nfkc()
@@ -50,6 +52,7 @@ fn normalize_text(text: &str) -> String {
         .to_string()
 }
 
+/// 标准化多行 OCR 文本，去掉空行和常见冒号前后噪声。
 #[tracing::instrument(level = "debug", skip_all)]
 fn normalize_lines(text: &str) -> Vec<String> {
     text.lines()
@@ -66,6 +69,7 @@ fn collapse_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// 根据中文/英文关键词识别支付平台，用于草稿 provenance 和账户规则上下文。
 #[tracing::instrument(level = "debug", skip_all)]
 fn detect_payment_platform(text: &str) -> Option<&'static str> {
     let lowered = text.to_lowercase();
@@ -83,6 +87,7 @@ fn detect_payment_platform(text: &str) -> Option<&'static str> {
     }
 }
 
+/// 从 OCR 文本中提取金额元值，优先使用金额标签，其次使用货币符号或单位邻近值。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_amount(text: &str) -> Option<f64> {
     for marker in [
@@ -121,6 +126,7 @@ fn parse_amount(text: &str) -> Option<f64> {
     }
 }
 
+/// 在标签或货币符号之后解析数字，遇到非分隔字符时停止以降低误识别。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_number_after_prefix(text: &str, start: usize) -> Option<f64> {
     let mut number_start = None;
@@ -136,6 +142,7 @@ fn parse_number_after_prefix(text: &str, start: usize) -> Option<f64> {
     number_start.and_then(|index| parse_number_at(text, index))
 }
 
+/// 从 CNY/RMB/元 等单位附近解析金额，兼容单位前后两种排列。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_currency_adjacent_amount(text: &str) -> Option<f64> {
     for marker in ["CNY", "cny", "RMB", "rmb"] {
@@ -159,6 +166,7 @@ fn parse_currency_adjacent_amount(text: &str) -> Option<f64> {
     None
 }
 
+/// 从指定索引前反向解析数字，支持千分位逗号和小数点。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_number_before_index(text: &str, end: usize) -> Option<f64> {
     let mut trimmed_end = end;
@@ -193,6 +201,7 @@ fn parse_number_before_index(text: &str, end: usize) -> Option<f64> {
     has_digit.then(|| parse_number_at(text, start)).flatten()
 }
 
+/// 从指定位置读取一个金额数字片段，忽略千分位逗号并保留符号/小数点。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_number_at(text: &str, start: usize) -> Option<f64> {
     let mut raw = String::new();
@@ -220,6 +229,7 @@ fn parse_number_at(text: &str, start: usize) -> Option<f64> {
     }
 }
 
+/// 从 OCR 文本中提取交易日期时间，兼容只有日期或日期加时分秒的格式。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_trade_time(text: &str) -> Option<String> {
     let search_text = normalize_datetime_text(text);
@@ -236,6 +246,7 @@ fn parse_trade_time(text: &str) -> Option<String> {
     None
 }
 
+/// 将中文日期分隔符规范为 ASCII 形式，方便后续 token 解析。
 #[tracing::instrument(level = "debug", skip_all)]
 fn normalize_datetime_text(text: &str) -> String {
     text.nfkc()
@@ -249,6 +260,7 @@ fn normalize_datetime_text(text: &str) -> String {
         .collect()
 }
 
+/// 解析日期 token，缺少年份时使用当前年份并通过 chrono 校验合法性。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_date_token(token: &str) -> Option<(i32, u32, u32)> {
     let cleaned = trim_to_ascii_date_token(token);
@@ -270,6 +282,7 @@ fn parse_date_token(token: &str) -> Option<(i32, u32, u32)> {
     }
 }
 
+/// 解析时间 token，区分是否包含秒，供最终格式化保留精度。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_time_token(token: &str) -> Option<(u32, u32, u32, bool)> {
     let cleaned = trim_to_ascii_time_token(token);
@@ -308,11 +321,13 @@ fn trim_to_ascii_time_token(token: &str) -> String {
         .collect()
 }
 
+/// 校验日期组件是否真实存在，防止 OCR 噪声进入草稿时间。
 #[tracing::instrument(level = "debug", skip_all)]
 fn validate_date(parts: (i32, u32, u32)) -> Option<(i32, u32, u32)> {
     NaiveDate::from_ymd_opt(parts.0, parts.1, parts.2).map(|_| parts)
 }
 
+/// 校验时间组件是否真实存在，防止非法小时/分钟/秒进入草稿。
 #[tracing::instrument(level = "debug", skip_all)]
 fn validate_time(parts: (u32, u32, u32, bool)) -> Option<(u32, u32, u32, bool)> {
     NaiveTime::from_hms_opt(parts.0, parts.1, parts.2).map(|_| parts)
@@ -334,6 +349,7 @@ fn format_date_time(
     }
 }
 
+/// 从 OCR 行中提取交易描述，优先使用带标签字段，否则寻找可信候选行。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_description(lines: &[String]) -> Option<String> {
     parse_labeled_description(lines).or_else(|| {
@@ -344,6 +360,7 @@ fn parse_description(lines: &[String]) -> Option<String> {
     })
 }
 
+/// 解析“交易对方/商户/备注”等标签后的描述值，兼容值在下一行的截图布局。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_labeled_description(lines: &[String]) -> Option<String> {
     for (index, line) in lines.iter().enumerate() {
@@ -417,6 +434,7 @@ fn clean_description(value: &str) -> String {
         .collect()
 }
 
+/// 按已解析字段覆盖率计算 OCR 草稿置信度，用于前端展示而非自动入账判定。
 fn score_ocr_confidence(
     amount: Option<f64>,
     trade_time: Option<&str>,

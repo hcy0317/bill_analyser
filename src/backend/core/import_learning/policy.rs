@@ -1,5 +1,6 @@
 use super::*;
 
+/// 按语义标签与路由标签联合键统计人工确认次数，供学习策略判断自动应用门槛。
 pub fn build_label_confirmation_counts(
     samples: &[ImportLearningTrainingSample],
 ) -> BTreeMap<String, i64> {
@@ -17,6 +18,7 @@ pub fn build_label_confirmation_counts(
     counts
 }
 
+/// 统计语义标签出现次数，用于训练数据快照和模型诊断展示。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_semantic_label_counts(
     samples: &[ImportLearningTrainingSample],
@@ -55,6 +57,7 @@ pub struct LearningPolicyDecision {
     pub rejection_reasons: Vec<String>,
 }
 
+/// 根据预测置信度、边际、确认次数和冲突原因计算导入学习的 green/blue 策略决策。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn evaluate_learning_policy(
     prediction: &ImportLearningPrediction,

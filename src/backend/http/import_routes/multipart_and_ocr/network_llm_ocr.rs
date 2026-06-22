@@ -1,5 +1,6 @@
 use super::*;
 
+/// 调用网络 LLM vision OCR provider，包含 base_url 校验、auth 刷新、payload cap 和响应解析。
 pub(super) async fn run_network_llm_ocr(
     config: &OcrConfigContract,
     image_bytes: Vec<u8>,

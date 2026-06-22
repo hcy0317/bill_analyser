@@ -36,6 +36,7 @@ pub struct WeaviateImportLearningRecallHit {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 使用 Weaviate 派生索引召回导入学习候选；结果只作为 evidence，不越过 PostgreSQL 权威状态。
 pub async fn recall_import_learning_candidates(
     config: &WeaviateRuntimeConfig,
     request: &WeaviateImportLearningRecallRequest,

@@ -28,6 +28,7 @@ pub struct LlmPreviewApplyPlan {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 计算 LLM 预览建议的可应用计划，只填补当前预览仍为空的分类或账户字段。
 pub fn build_llm_preview_apply_plan(
     current: LlmPreviewSnapshot,
     suggestion: &LlmPreviewSuggestion,
@@ -89,6 +90,7 @@ pub fn build_llm_preview_apply_plan(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 归一 LLM 预览复核动作，只接受当前支持的 accept/reject 决策。
 pub fn normalize_llm_preview_review_decision(decision: &str) -> Option<&'static str> {
     match decision.trim().to_lowercase().as_str() {
         "accept" => Some("accept"),
@@ -98,6 +100,7 @@ pub fn normalize_llm_preview_review_decision(decision: &str) -> Option<&'static 
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 判断拒绝 LLM 建议时是否可以安全回滚自动应用的预览字段。
 pub fn should_revert_llm_preview_application(
     decision: &str,
     previous_preview_snapshot: Option<&LlmPreviewSnapshot>,

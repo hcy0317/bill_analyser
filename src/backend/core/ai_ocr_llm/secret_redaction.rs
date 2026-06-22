@@ -4,6 +4,7 @@
 
 use serde_json::{json, Map, Value};
 
+/// 判断对象及其嵌套值中是否存在非空 secret，用于前端 has_api_key 状态。
 pub(super) fn object_has_non_empty_secret(object: &Map<String, Value>) -> bool {
     object.iter().any(|(key, value)| {
         let current_key_has_secret = is_secret_key(key) && secret_value_present(value);
@@ -19,6 +20,7 @@ fn value_has_non_empty_secret(value: &Value) -> bool {
     }
 }
 
+/// 递归脱敏对象中的 secret 字段，非空 secret 用统一占位符替代。
 pub(super) fn redact_secrets_in_map(object: &mut Map<String, Value>) {
     for (key, value) in object.iter_mut() {
         if is_secret_key(key) {
@@ -34,6 +36,7 @@ pub(super) fn redact_secrets_in_map(object: &mut Map<String, Value>) {
     }
 }
 
+/// 递归脱敏 JSON 值中的 secret 字段，覆盖数组和对象嵌套结构。
 pub(super) fn redact_secrets_in_value(value: &mut Value) {
     match value {
         Value::Object(object) => redact_secrets_in_map(object),

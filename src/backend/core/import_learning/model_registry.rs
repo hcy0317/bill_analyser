@@ -9,6 +9,7 @@ pub struct ImportLearningDatasetSnapshotPayload {
     pub joint_label_confirmation_counts: BTreeMap<String, i64>,
 }
 
+/// 构建训练数据快照的持久化载荷，固定记录特征版本、策略版本和标签分布。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_dataset_snapshot_payload(
     samples: &[ImportLearningTrainingSample],
@@ -28,6 +29,7 @@ pub fn build_dataset_snapshot_payload(
     }
 }
 
+/// 将数据快照编号转换为模型版本号，保证模型登记表与快照记录可追溯。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn import_learning_model_version(dataset_snapshot_id: i64) -> String {
     #[cfg(not(coverage))]
@@ -49,6 +51,7 @@ pub struct ImportLearningModelRegistryPayload {
     pub joint_label_confirmation_counts: BTreeMap<String, i64>,
 }
 
+/// 汇总模型参数、训练指标和确认计数，生成模型登记表使用的业务载荷。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn build_model_registry_payload(
     model_parameters: Value,

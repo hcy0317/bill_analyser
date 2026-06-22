@@ -32,6 +32,7 @@ pub use model_registry::*;
 pub use policy::*;
 pub use route_response::*;
 
+/// 将指定字段的归一化文本拆成完整值、分词和二元字符 token，供学习特征向量使用。
 fn iter_text_tokens(field: &str, value: &str) -> Vec<String> {
     let normalized_value = normalize_learning_text(Some(&Value::String(value.to_string())));
     if normalized_value.is_empty() {
@@ -50,6 +51,7 @@ fn iter_text_tokens(field: &str, value: &str) -> Vec<String> {
     tokens
 }
 
+/// 按中英文常见分隔符拆分学习文本，避免商户、描述、支付方式混成单一 token。
 fn split_learning_token_parts(value: &str) -> Vec<String> {
     value
         .split(|ch: char| {
@@ -81,6 +83,7 @@ fn split_learning_token_parts(value: &str) -> Vec<String> {
         .collect()
 }
 
+/// 将快照字段安全转换为 JSON object，兼容数据库中保存为 JSON 字符串的历史值。
 fn snapshot_payload(value: Option<&Value>) -> Map<String, Value> {
     match value {
         Some(Value::Object(object)) => object.clone(),
@@ -132,6 +135,7 @@ fn value_to_i64(value: &Value) -> i64 {
     }
 }
 
+/// 按 Python int() 风格转换 JSON 值并返回兼容错误文案，供学习合同测试锁定边界。
 fn coerce_json_int(value: &Value) -> Result<i64, String> {
     match value {
         Value::Number(number) => number
