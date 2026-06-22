@@ -10,7 +10,7 @@ function readSource(relativePath: string): string {
 describe('desktop table theme styling', () => {
     test('striped rows use theme tokens instead of hard-coded light and dark bars', () => {
         const source = readSource('src/styles/desktop/global.scss');
-        const themeSource = readSource('src/core/theme.ts');
+        const themeSource = readSource('src/core/theme/base.ts');
 
         expect(source).toContain('rgb(var(--v-theme-table-row-striped))');
         expect(source).not.toContain('background: #fcfcfc');

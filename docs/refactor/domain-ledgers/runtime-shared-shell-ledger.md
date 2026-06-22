@@ -125,3 +125,22 @@ D10 `backend-shape` 切片关闭 Rust backend structure baseline 的最终尾债
 - `node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .omx\ultragoal\evidence\d10-backend-shape-rust.diff --threshold 90` 通过：1830 个可执行 changed lines，1716 行覆盖，changed-line coverage 93.77%。
 - `node scripts/check-backend-doc-map.mjs` 通过。
 - `Set-Location src\web; npm run structure:check` 仍按预期失败 4 项，全部属于 D10 后续 `frontend-shape`：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`。
+
+## 9. Frontend-shape 切片记录
+
+D10 `frontend-shape` 切片关闭剩余 shared runtime shell 前端结构门禁。该切片只做 facade + 功能文件夹拆分，不改变现有 UI 视觉、REST/API 调用、金额字段、认证/session、导入预览、theme preference 或 router 合同。
+
+本切片结构调整：
+
+- `src/web/src/lib/services.ts` 保留 axios/auth interceptor、通用 services facade 和 `ApiResponsePromise` 兼容导出，HTTP 类型/response envelope helper 下沉到 `lib/services/http.ts`，导入预览、导入学习、matching candidate 和导入配置 endpoint 下沉到 `lib/services/importPreview.ts`。
+- `src/web/src/stores/index.ts` 保留 `useRootStore` facade，跨 store reset 编排下沉到 `stores/root/reset.ts`，OAuth URL helper 下沉到 `stores/root/oauthUrls.ts`。
+- `src/web/src/core/theme.ts` 保留兼容导出，theme 类型/常量、基础 Vuetify/F7 色板、主题变体表和 preference/paired helper 分别下沉到 `core/theme/types.ts`、`base.ts`、`variants.ts` 与 `registry.ts`。
+- `src/web/src/models/imported_transaction.ts` 保留 `ImportTransaction` 模型和响应接口，matching payload 归一化、dedup source id 与信号 helper 下沉到 `models/imported_transaction/matching.ts`。
+
+本切片本地验证记录：
+
+- `Set-Location src\web; npm run structure:check` 通过，扫描 596 个文件，保留 39 个 baseline entry；原 D10 失败项 `src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts` 均退出 failure。
+- `Set-Location src\web; npm test -- --runTestsByPath ..\..\tests\web\lib\services.sharedShell.test.ts ..\..\tests\web\stores\rootStore.test.ts ..\..\tests\web\router\runtimeShell.test.ts ..\..\tests\web\core\theme.test.ts ..\..\tests\web\models\imported_transaction.test.ts` 通过：5 个 suite、42 个测试。
+- `Set-Location src\web; npm test -- --runTestsByPath ..\..\tests\web\styles\desktopTableTheme.test.ts` 通过；该 source-contract 测试已改为读取拆分后的 `src/core/theme/base.ts`。
+- `Set-Location src\web; npm run lint:ci` 通过；仅保留既有 `no-explicit-any` warning，无 error。
+- `Set-Location src\web; npm run test:coverage` 通过：全量 Jest 99 个 suite、39028 个测试；coverage gate 6 个 suite、81 个测试，line coverage 99.13%，branch coverage 91.48%。

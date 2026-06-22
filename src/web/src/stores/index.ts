@@ -45,6 +45,8 @@ import logger from '@/lib/logger.ts';
 import {
     updateApplicationSettingsValue
 } from '@/lib/settings.ts';
+import { generateOAuth2LinkUrl, generateOAuth2LoginUrl } from './root/oauthUrls.ts';
+import { resetRootDomainStores } from './root/reset.ts';
 
 export const useRootStore = defineStore('root', () => {
     const settingsStore = useSettingsStore();
@@ -61,35 +63,22 @@ export const useRootStore = defineStore('root', () => {
     const currentNotification = ref<string | null>(null);
 
     function resetAllStates(resetUserInfoAndSettings: boolean): void {
-        if (resetUserInfoAndSettings) {
-            exchangeRatesStore.resetLatestExchangeRates();
-        }
-
-        setNotificationContent(null);
-
-        statisticsStore.resetTransactionStatistics();
-        overviewStore.resetTransactionOverview();
-        transactionsStore.resetTransactions();
-        transactionTagsStore.resetTransactionTags();
-        transactionCategoriesStore.resetTransactionCategories();
-        transactionTemplatesStore.resetTransactionTemplates();
-        accountsStore.resetAccounts();
-
-        if (resetUserInfoAndSettings) {
-            userStore.resetUserBasicInfo();
-        }
+        resetRootDomainStores({
+            accountsStore,
+            exchangeRatesStore,
+            overviewStore,
+            statisticsStore,
+            transactionCategoriesStore,
+            transactionTagsStore,
+            transactionTemplatesStore,
+            transactionsStore,
+            userStore,
+            clearNotification: () => setNotificationContent(null)
+        }, resetUserInfoAndSettings);
     }
 
     function setNotificationContent(content: string | null): void {
         currentNotification.value = content;
-    }
-
-    function generateOAuth2LoginUrl(platform: 'mobile' | 'desktop', clientSessionId: string): string {
-        return services.generateOAuth2LoginUrl(platform, clientSessionId);
-    }
-
-    function generateOAuth2LinkUrl(platform: 'mobile' | 'desktop', clientSessionId: string): string {
-        return services.generateOAuth2LinkUrl(platform, clientSessionId);
     }
 
     function authorize(req: UserLoginRequest): Promise<AuthResponse> {
