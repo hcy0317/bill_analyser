@@ -68,11 +68,29 @@ fn backup_filename_archive_and_file_info_contracts_preserve_archive_safety_shape
     assert!(!is_safe_backup_archive_member("data/../escape.txt"));
     assert!(!is_safe_backup_archive_member("C:/escape.txt"));
     assert!(!is_safe_backup_archive_member("/absolute/escape.txt"));
+    assert!(!is_safe_backup_archive_member(
+        "data/postgres-export.json:ads"
+    ));
+    assert!(!is_safe_backup_archive_member("data/postgres\u{0007}.json"));
+    assert!(!is_safe_backup_archive_member("data/postgres.json\n"));
+    assert!(!is_safe_backup_archive_member("\tdata/postgres.json"));
 
     let unsafe_summary =
         backup_archive_summary_from_entries(["data/postgres-export.json", "..\\escape.txt"]);
     assert!(!unsafe_summary.valid_zip);
     assert!(unsafe_summary.error.contains("备份文件包含不安全路径"));
+
+    for unsafe_member in [
+        "data/postgres-export.json:ads",
+        "data/postgres\u{0007}.json",
+        "data/postgres.json\n",
+        "\tdata/postgres.json",
+    ] {
+        let unsafe_summary =
+            backup_archive_summary_from_entries(["data/postgres-export.json", unsafe_member]);
+        assert!(!unsafe_summary.valid_zip);
+        assert!(unsafe_summary.error.contains("备份文件包含不安全路径"));
+    }
 
     let info = build_backup_file_info(BackupFileInfoInput {
         filename: "backup_20260505.zip.enc".to_string(),

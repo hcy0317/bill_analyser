@@ -294,6 +294,7 @@ D7 `behavior-lock` 切片新增测试范围：
 - `Set-Location src/web; npm run test:coverage` 通过，94 个 suite、39003 个测试通过，coverage gate 为 99.13% lines、91.48% branches。
 - `cargo clippy --workspace --all-targets -- -D warnings` 通过。
 - `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过。
+- security-reviewer post-fix 复核结论为 `APPROVE`，`rust_skill_gate: passed`；复核确认 `backup_archive.rs` 已在 trim 前拒绝控制字符，测试覆盖 ADS、嵌入/尾随/前置控制字符和 archive summary invalid 投影，`blockers: none`。
 - `Set-Location src/web; npm run structure:check` 仍预期失败 4 项，均属于 D10 shared：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`。
 
 ## 10. Backend-shape 记录
@@ -383,3 +384,25 @@ D7 `governance-docs` 切片完成备份与云同步域结构治理收口：
 - `Set-Location src/web; npm run structure:check` 仍预期失败 4 项，均属于 D10 shared：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`。
 - `cargo fmt --all -- --check` 通过。
 - `git diff --check` 通过。
+
+## 14. Security-fix 记录
+
+D7 closeout 前的独立安全复核发现 `src/backend/core/ops/backup_archive.rs` 的 zip 成员名校验仍未拒绝 ADS 冒号和控制字符；这与本 ledger 第 6 节 file safety 门禁不一致，因此按“真实安全缺陷必须拆独立 fix/prerequisite slice”的规则先完成修复，再继续 closeout。
+
+本切片修复内容：
+
+- `is_safe_backup_archive_member` 在规范化 zip 成员名后拒绝任意 `:` 和控制字符，覆盖 Windows drive、ADS stream 名称和不可见控制字符。
+- `tests/backend/core/ops_contracts.rs` 补充 ADS 成员名与控制字符成员名的直接校验，并确认 `backup_archive_summary_from_entries` 会把这两类成员投影为无效备份摘要。
+- `docs/PROJECT_OVERVIEW.md` 同步当前备份 zip 成员安全合同：只允许包内相对路径，拒绝绝对路径、盘符、ADS、控制字符和 `..` 穿越。
+
+本切片本地验证记录：
+
+- RED：`cargo test -p bill-analyser-core --test ops_contracts backup_filename_archive_and_file_info_contracts_preserve_archive_safety_shape` 在新增 ADS 断言处失败。
+- GREEN：`cargo test -p bill-analyser-core --test ops_contracts` 通过，5 个 ops 合同测试全部通过。
+- `cargo test -p bill-analyser-http backup_routes` 通过，7 个备份路由测试全部通过。
+- `cargo fmt --all -- --check` 通过。
+- `node scripts/check-rust-backend-structure.mjs` 通过。
+- `node scripts/check-backend-doc-map.mjs` 通过。
+- `git diff --check` 通过。
+- `cargo clippy --workspace --all-targets -- -D warnings` 通过。
+- `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过。

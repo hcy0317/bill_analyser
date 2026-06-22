@@ -90,7 +90,7 @@ multipart 上传并行执行 dedicated parser 检测，每个文件必须且只�
 
 认证前端当前以 facade + 功能文件夹组织：`src/web/src/stores/user.ts` 保留 `useUserStore` facade，basic info/localStorage、profile/avatar、cloud settings、user-data statistics/export 和 settings bundle 动作下沉到 `stores/user/**`；桌面 `UserBasicSettingTab.vue` 与移动 `UserProfilePage.vue` 保留页面入口，template/style 和展示 label helper 下沉到相邻 `basic/**`、`profile/**` 功能文件夹。该拆分不改变 Pinia store 导出名、localStorage key、profile 保存 payload、头像 URL、settings bundle/user-data 调用、桌面/移动路由或现有视觉布局。
 
-备份运行态负责本地 zip/Fernet 文件 I/O、公开名生成、文件 list/create/download/delete/verify/cleanup、job list/save 与 cloud sync 元数据；记录、任务和审计元数据写入 `backup_records`、`backup_jobs`、`backup_audit_logs`。
+备份运行态负责本地 zip/Fernet 文件 I/O、公开名生成、文件 list/create/download/delete/verify/cleanup、job list/save 与 cloud sync 元数据；记录、任务和审计元数据写入 `backup_records`、`backup_jobs`、`backup_audit_logs`。备份 zip 成员名只允许包内相对路径，并拒绝绝对路径、Windows 盘符、ADS 冒号、控制字符和 `..` 穿越。
 
 备份与云同步后端当前以 facade + 功能子文件组织：`src/backend/core/ops.rs` 保留备份/用户数据/报表/同步合同 facade，文件名、archive、cleanup、job、crypto、user-data、backup sync 和 report export 规则下沉到 `src/backend/core/ops/**`；`src/backend/http/backup_sync.rs` 保留云上传 facade，config、endpoint 防 SSRF、hash/signing 和 WebDAV/OSS/S3/COS/Azure provider 上传下沉到 `src/backend/http/backup_sync/**`。该拆分不改变 REST route、公开导出名、文件安全、Fernet key 派生、endpoint allowlist、provider 签名、secret redaction 或 backup audit 语义。
 

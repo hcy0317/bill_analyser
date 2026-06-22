@@ -5,15 +5,18 @@ use super::types::{
 };
 
 #[tracing::instrument(level = "debug", skip_all)]
-/// 校验 zip 成员名是否只指向备份包内部相对路径，阻断绝对路径、盘符和 `..` 穿越。
+/// 校验 zip 成员名是否只指向备份包内部相对路径，阻断绝对路径、盘符、ADS、控制字符和 `..` 穿越。
 pub fn is_safe_backup_archive_member(member_name: &str) -> bool {
-    let normalized = member_name.replace('\\', "/").trim().to_string();
-    if normalized.is_empty() || normalized.starts_with('/') {
+    let normalized_raw = member_name.replace('\\', "/");
+    if normalized_raw.chars().any(char::is_control) {
         return false;
     }
 
-    let bytes = normalized.as_bytes();
-    if bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
+    let normalized = normalized_raw.trim().to_string();
+    if normalized.is_empty() || normalized.starts_with('/') {
+        return false;
+    }
+    if normalized.contains(':') {
         return false;
     }
 
