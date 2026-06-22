@@ -1,5 +1,6 @@
 use super::{abc, alipay, ccb, cmbc, icbc, types::DedicatedParser, wechat};
 
+/// dedicated parser 自动检测的稳定顺序，冲突检测和合同测试依赖该注册表。
 pub(super) const AUTO_PARSERS: &[DedicatedParser] = &[
     DedicatedParser {
         id: "wechat",

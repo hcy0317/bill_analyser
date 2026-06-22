@@ -10,6 +10,7 @@ use super::common::{
     sheet_or_html_rows, RowMap,
 };
 
+/// 解析工商银行导出文件，按扩展名分派 CSV/TXT 或 Excel/HTML 表格分支。
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
@@ -26,6 +27,7 @@ pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     }
 }
 
+/// 解析工商银行 CSV/TXT 内容，先排除其他银行标记再确认工行表头。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_csv(bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
@@ -54,12 +56,14 @@ fn parse_csv(bytes: &[u8]) -> Vec<StandardBill> {
     )
 }
 
+/// 判断文本是否符合工商银行交易明细表头，兼容多种金额列命名。
 fn row_text_like_header(line: &str) -> bool {
     contains_all_text(line, &["交易日期", "交易金额", "对方户名", "对方账号"])
         || contains_all_text(line, &["记账日期", "金额", "对方户名", "对方账号"])
         || contains_all_text(line, &["交易日期", "收入/支出金额", "对方户名"])
 }
 
+/// 解析工商银行 Excel/HTML 表格导出，使用银行名称或交易附言列确认来源。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_sheet_or_html(bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
@@ -98,6 +102,7 @@ fn parse_sheet_or_html(bytes: &[u8]) -> Vec<StandardBill> {
     )
 }
 
+/// 将工商银行表格行映射为 RawBill，并用借贷标志或金额符号推断收支。
 #[tracing::instrument(level = "debug", skip_all)]
 fn raw_icbc(row: &RowMap) -> Option<RawBill> {
     let date = get(row, &["交易日期", "记账日期"]);

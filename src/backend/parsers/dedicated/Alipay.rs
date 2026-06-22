@@ -6,6 +6,7 @@ use crate::{post_process_raw_bills, RawBill, StandardBill};
 
 use super::common::{csv_records_from_text, decode_text, file_suffix, get, RowMap};
 
+/// 解析支付宝导出文件，只接受 CSV/TXT 来源并返回标准化后的账单。
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
@@ -21,6 +22,7 @@ pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     }
 }
 
+/// 解析支付宝 CSV/TXT 内容，先用文件前缀探测支付宝标记再读取业务表头。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_csv(bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
@@ -53,6 +55,7 @@ fn parse_csv(bytes: &[u8]) -> Vec<StandardBill> {
     )
 }
 
+/// 将支付宝行映射为 RawBill，保留对方、订单号、状态和原始分类等来源字段。
 #[tracing::instrument(level = "debug", skip_all)]
 fn raw_alipay(row: &RowMap) -> Option<RawBill> {
     let date = get(row, &["交易时间", "交易创建时间"]);

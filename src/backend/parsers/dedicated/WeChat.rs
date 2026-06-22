@@ -9,6 +9,7 @@ use super::common::{
     sheet_or_html_rows, RowMap,
 };
 
+/// 解析微信支付导出文件，按扩展名分派 CSV/TXT 或 Excel/HTML 表格分支。
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
@@ -25,6 +26,7 @@ pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     }
 }
 
+/// 解析微信 CSV/TXT 内容，使用文件名、账单标记和表头共同确认来源。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_csv(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
@@ -55,6 +57,7 @@ fn parse_csv(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     )
 }
 
+/// 判断一行文本是否符合微信账单业务表头，兼容不同导出字段命名。
 fn row_text_like_header(line: &str) -> bool {
     line.contains("交易时间")
         && (line.contains("金额(元)") || line.contains("金额"))
@@ -62,6 +65,7 @@ fn row_text_like_header(line: &str) -> bool {
         && (line.contains("商品") || line.contains("交易对方") || line.contains("支付方式"))
 }
 
+/// 将微信表格行映射为 RawBill，保留商品、交易单号、商户单号和原始类型。
 #[tracing::instrument(level = "debug", skip_all)]
 fn raw_wechat(row: &RowMap) -> Option<RawBill> {
     let date = get(row, &["交易时间"]);
@@ -84,6 +88,7 @@ fn raw_wechat(row: &RowMap) -> Option<RawBill> {
     })
 }
 
+/// 解析微信 Excel 或 HTML 表格导出，要求前几行包含微信账单标记。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_sheet_or_html(bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]

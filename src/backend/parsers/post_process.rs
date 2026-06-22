@@ -149,6 +149,7 @@ pub fn post_process_raw_bills(parser_id: &str, raw_bills: &[RawBill]) -> Vec<Sta
     processed
 }
 
+/// RawBill 描述聚合的候选字段顺序，保持来源描述可复核且不混入账户/分类推断。
 #[allow(dead_code)]
 fn _description_fields() -> &'static [&'static str] {
     DESCRIPTION_FIELDS

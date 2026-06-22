@@ -8,8 +8,10 @@ use calamine::{open_workbook_auto_from_rs, Data, Reader};
 use encoding_rs::{GB18030, GBK};
 use regex::Regex;
 
+/// dedicated parser 行数据的统一键值视图，key 是清洗后的来源表头。
 pub(super) type RowMap = HashMap<String, String>;
 
+/// 读取上传文件扩展名，用于来源 parser 选择 CSV、Excel 或 HTML 表格分支。
 pub(super) fn file_suffix(filename: &str) -> String {
     Path::new(filename)
         .extension()
@@ -18,6 +20,7 @@ pub(super) fn file_suffix(filename: &str) -> String {
         .to_ascii_lowercase()
 }
 
+/// 按 UTF-8、GB18030、GBK 顺序解码来源文本，并去除 BOM。
 pub(super) fn decode_text(bytes: &[u8]) -> String {
     if let Ok(text) = std::str::from_utf8(bytes) {
         return text.trim_start_matches('\u{feff}').to_string();
@@ -30,6 +33,7 @@ pub(super) fn decode_text(bytes: &[u8]) -> String {
     text.trim_start_matches('\u{feff}').to_string()
 }
 
+/// 从文本中定位业务表头后解析 CSV/TSV/分号表格，返回清洗后的行映射和分隔符。
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn csv_records_from_text(
     text: &str,
@@ -65,6 +69,7 @@ pub(super) fn csv_records_from_text(
     Some((records, delimiter))
 }
 
+/// 根据表头行中常见分隔符出现次数推断 CSV reader 使用的分隔符。
 fn detect_delimiter(line: &str) -> char {
     [
         (',', line.matches(',').count()),
@@ -77,6 +82,7 @@ fn detect_delimiter(line: &str) -> char {
     .unwrap_or(',')
 }
 
+/// 读取第一个 Excel 工作表并把所有单元格转换为 parser 可比较的文本。
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn workbook_rows(bytes: &[u8]) -> Option<Vec<Vec<String>>> {
     let cursor = Cursor::new(bytes.to_vec());
@@ -90,6 +96,7 @@ pub(super) fn workbook_rows(bytes: &[u8]) -> Option<Vec<Vec<String>>> {
     )
 }
 
+/// 读取银行导出的 Excel 或 HTML 表格；Excel 失败时回退到 HTML 表格解析。
 pub(super) fn sheet_or_html_rows(bytes: &[u8]) -> Vec<Vec<String>> {
     if looks_like_html_table_payload(bytes) {
         html_rows(bytes)
@@ -98,6 +105,7 @@ pub(super) fn sheet_or_html_rows(bytes: &[u8]) -> Vec<Vec<String>> {
     }
 }
 
+/// 只在 payload 确认为 HTML 表格时执行关键词探测，避免把二进制 Excel 当文本扫描。
 pub(super) fn html_payload_contains_any(bytes: &[u8], needles: &[&str]) -> Option<bool> {
     if !looks_like_html_table_payload(bytes) {
         return None;
@@ -106,6 +114,7 @@ pub(super) fn html_payload_contains_any(bytes: &[u8], needles: &[&str]) -> Optio
     Some(needles.iter().any(|needle| text.contains(needle)))
 }
 
+/// 用有限字节判断上传内容是否像 HTML 表格导出，兼容 BOM 和大小写前缀。
 pub(super) fn looks_like_html_table_payload(bytes: &[u8]) -> bool {
     let mut probe = bytes;
     if probe.starts_with(&[0xef, 0xbb, 0xbf]) {
@@ -121,12 +130,14 @@ pub(super) fn looks_like_html_table_payload(bytes: &[u8]) -> bool {
         || starts_with_ignore_ascii_case(probe, b"<table")
 }
 
+/// ASCII 前缀比较 helper，用于 HTML payload 的轻量格式探测。
 fn starts_with_ignore_ascii_case(value: &[u8], prefix: &[u8]) -> bool {
     value
         .get(..prefix.len())
         .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
 }
 
+/// 将 Excel 单元格转换为稳定文本，整数浮点值避免带上无意义小数。
 fn cell_to_string(cell: &Data) -> String {
     match cell {
         Data::Empty => String::new(),
@@ -137,6 +148,7 @@ fn cell_to_string(cell: &Data) -> String {
     }
 }
 
+/// 从 HTML 表格中抽取行列文本，供银行 `.xls` 实为 HTML 的导出文件复用。
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn html_rows(bytes: &[u8]) -> Vec<Vec<String>> {
     let text = decode_text(bytes);
@@ -159,6 +171,7 @@ pub(super) fn html_rows(bytes: &[u8]) -> Vec<Vec<String>> {
         .collect()
 }
 
+/// 清除简单 HTML 标签并反转义常见实体，保留来源单元格可读文本。
 fn strip_html_tags(value: &str) -> String {
     let tag_re = Regex::new(r"(?is)<[^>]+>").expect("valid tag regex");
     tag_re
@@ -170,6 +183,7 @@ fn strip_html_tags(value: &str) -> String {
         .replace("&#13;", " ")
 }
 
+/// 从二维表格中定位业务表头并生成 RowMap，丢弃空表头列。
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn rows_to_maps(
     rows: &[Vec<String>],
@@ -202,6 +216,7 @@ pub(super) fn rows_to_maps(
         .collect()
 }
 
+/// 清洗来源单元格文本，统一去除 BOM、引号、转义 tab 和不间断空格。
 pub(super) fn clean_cell(value: &str) -> String {
     value
         .trim_matches(|ch: char| ch == '\u{feff}' || ch == '"' || ch == '\'')
@@ -212,15 +227,18 @@ pub(super) fn clean_cell(value: &str) -> String {
         .to_string()
 }
 
+/// 判断文本是否同时包含来源 parser 需要的所有关键词。
 pub(super) fn contains_all_text(text: &str, needles: &[&str]) -> bool {
     needles.iter().all(|needle| text.contains(needle))
 }
 
+/// 判断表格行是否同时包含来源 parser 需要的所有关键词。
 pub(super) fn row_contains_all(row: &[String], needles: &[&str]) -> bool {
     let joined = row.join(" ");
     contains_all_text(&joined, needles)
 }
 
+/// 按候选表头顺序读取首个非空、非占位来源字段。
 pub(super) fn get(row: &RowMap, keys: &[&str]) -> String {
     keys.iter()
         .find_map(|key| {
@@ -231,11 +249,13 @@ pub(super) fn get(row: &RowMap, keys: &[&str]) -> String {
         .unwrap_or_default()
 }
 
+/// 判断来源字段是否是空值占位，避免把 nan/null 写进 RawBill。
 fn is_empty_placeholder(value: &str) -> bool {
     let text = value.trim();
     text.is_empty() || matches!(text, "nan" | "NaN" | "None" | "null")
 }
 
+/// 解析来源金额文本，兼容货币符号和中英文千分位。
 pub(super) fn parse_amount(value: &str) -> Option<f64> {
     let cleaned = value.replace(['¥', '$', ',', '，'], "").trim().to_string();
     if cleaned.is_empty() {
@@ -244,6 +264,7 @@ pub(super) fn parse_amount(value: &str) -> Option<f64> {
     cleaned.parse::<f64>().ok()
 }
 
+/// 把已判定方向的金额转换为正数文本，保留来源小数精度。
 pub(super) fn positive_amount_text(value: f64) -> String {
     let abs = value.abs();
     if abs.fract() == 0.0 {
@@ -253,6 +274,7 @@ pub(super) fn positive_amount_text(value: f64) -> String {
     }
 }
 
+/// 将 `YYYYMMDD` 形式的银行日期压缩值转换为标准日期文本。
 pub(super) fn compact_date(date: &str) -> String {
     let text = date.trim();
     if text.len() >= 8 && text.chars().take(8).all(|ch| ch.is_ascii_digit()) {
@@ -263,6 +285,7 @@ pub(super) fn compact_date(date: &str) -> String {
     }
 }
 
+/// 将 `HHMMSS` 形式的银行时间压缩值转换为标准时间文本。
 pub(super) fn compact_time(time: &str) -> String {
     let text = time.trim();
     if text.len() >= 6 && text.chars().take(6).all(|ch| ch.is_ascii_digit()) {

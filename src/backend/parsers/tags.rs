@@ -88,6 +88,7 @@ pub fn serialize_parser_tags(
     .unwrap_or_else(|_| "[]".to_string())
 }
 
+/// 根据 parser id、支付方式和渠道推断 channel tag，保证导入信号来源可分组。
 fn detect_channel_tag(
     parser_id: &str,
     payment_method: &str,
@@ -121,6 +122,7 @@ fn detect_channel_tag(
     None
 }
 
+/// 将 JSON tag 标量归一为文本，过滤 null、false 和数值零这类无效来源标签。
 fn normalize_json_tag(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
@@ -133,6 +135,7 @@ fn normalize_json_tag(value: &Value) -> String {
     }
 }
 
+/// 判断 JSON number 是否表示零，避免把旧 payload 的占位 0 当成 parser tag。
 fn is_json_zero_number(number: &serde_json::Number) -> bool {
     number.as_i64() == Some(0) || number.as_u64() == Some(0) || number.as_f64() == Some(0.0)
 }

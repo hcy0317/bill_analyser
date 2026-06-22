@@ -10,6 +10,7 @@ use super::common::{
     sheet_or_html_rows, RowMap,
 };
 
+/// 解析民生银行导出文件，按扩展名分派 CSV/TXT 或 Excel/HTML 表格分支。
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
@@ -26,6 +27,7 @@ pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     }
 }
 
+/// 解析民生银行 CSV/TXT 内容，使用银行标记或交易列组合确认来源。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_csv(bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
@@ -53,6 +55,7 @@ fn parse_csv(bytes: &[u8]) -> Vec<StandardBill> {
     )
 }
 
+/// 解析民生银行 Excel/HTML 表格，兼容个人账户对账单导出字段。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_sheet_or_html(bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
@@ -92,6 +95,7 @@ fn parse_sheet_or_html(bytes: &[u8]) -> Vec<StandardBill> {
     )
 }
 
+/// 将民生银行表格行映射为 RawBill，兼容单金额列和存入/支出拆分列。
 #[tracing::instrument(level = "debug", skip_all)]
 fn raw_cmbc(row: &RowMap) -> Option<RawBill> {
     let raw_date = get(row, &["交易日期", "记账日期", "交易时间"]);
@@ -132,6 +136,7 @@ fn raw_cmbc(row: &RowMap) -> Option<RawBill> {
     })
 }
 
+/// 归一民生银行压缩日期时间文本，保留非压缩来源原文。
 fn build_trade_time(value: &str) -> String {
     let text = value.replace('\t', " ");
     let compact = text.trim();

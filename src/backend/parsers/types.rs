@@ -102,6 +102,7 @@ impl StandardBill {
     }
 }
 
+/// 从兼容 JSON 字段中读取字符串，兼容旧 payload 中数字或布尔被误传为标量的情况。
 fn string_field(data: &Value, key: &str) -> String {
     match data.get(key) {
         Some(Value::String(text)) => text.clone(),
@@ -111,6 +112,7 @@ fn string_field(data: &Value, key: &str) -> String {
     }
 }
 
+/// 从兼容 JSON 字段中读取金额，继续支持旧 parser/API 的元单位数值或文本。
 fn number_field(data: &Value, key: &str) -> Money {
     match data.get(key) {
         Some(Value::Number(number)) => {
@@ -121,6 +123,7 @@ fn number_field(data: &Value, key: &str) -> Money {
     }
 }
 
+/// 恢复兼容 JSON 中的交易类型，缺省时沿用 parser 层默认支出合同。
 fn normalized_json_type(data: &Value) -> String {
     let transaction_type = string_field(data, "type");
     if transaction_type.trim().is_empty() {

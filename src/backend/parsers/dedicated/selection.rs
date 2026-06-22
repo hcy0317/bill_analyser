@@ -109,6 +109,7 @@ fn select_dedicated_import_bytes(
     dedicated_selection_from_matches(requested, matches)
 }
 
+/// 尝试运行单个来源 parser；只有解析出账单时才生成候选证据。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_with_parser(
     parser: &DedicatedParser,
@@ -183,6 +184,7 @@ fn dedicated_selection_from_matches(
     }
 }
 
+/// 构造未命中决策，保持 API 暴露的 no_match 字段结构一致。
 fn no_match_decision(requested_parser: String, reason: &str) -> DedicatedParserDecision {
     DedicatedParserDecision {
         requested_parser,

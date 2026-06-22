@@ -10,6 +10,7 @@ use super::common::{
     sheet_or_html_rows, RowMap,
 };
 
+/// 解析农业银行导出文件，按扩展名分派文本或表格解析分支。
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
@@ -26,6 +27,7 @@ pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     }
 }
 
+/// 解析农业银行 CSV/TXT 内容，兼容常见中文表头和少数字形差异。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_csv(bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
@@ -50,6 +52,7 @@ fn parse_csv(bytes: &[u8]) -> Vec<StandardBill> {
     post_process_raw_bills("abc", &rows.iter().filter_map(raw_abc).collect::<Vec<_>>())
 }
 
+/// 解析农业银行 Excel/HTML 表格，先用来源关键词排除非农行文件。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_sheet(bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
@@ -91,6 +94,7 @@ fn parse_sheet(bytes: &[u8]) -> Vec<StandardBill> {
     post_process_raw_bills("abc", &maps.iter().filter_map(raw_abc).collect::<Vec<_>>())
 }
 
+/// 将农业银行表格行映射为 RawBill，并从收支列或单金额列推断方向。
 #[tracing::instrument(level = "debug", skip_all)]
 fn raw_abc(row: &RowMap) -> Option<RawBill> {
     let mut date = get(row, &["交易日期", "交易⽇期", "记账日期"]);

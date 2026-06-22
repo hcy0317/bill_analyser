@@ -9,6 +9,7 @@ use super::common::{
     parse_amount, positive_amount_text, row_contains_all, rows_to_maps, sheet_or_html_rows, RowMap,
 };
 
+/// 解析建设银行导出文件，目前只接受 Excel/HTML 表格来源。
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
@@ -24,6 +25,7 @@ pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
     }
 }
 
+/// 解析建设银行 Excel/HTML 表格，使用银行名称和记账日/收支列确认来源。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_sheet_or_html(bytes: &[u8]) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
@@ -51,6 +53,7 @@ fn parse_sheet_or_html(bytes: &[u8]) -> Vec<StandardBill> {
     post_process_raw_bills("ccb", &maps.iter().filter_map(raw_ccb).collect::<Vec<_>>())
 }
 
+/// 将建设银行表格行映射为 RawBill，分别从收入/支出列确定金额方向。
 #[tracing::instrument(level = "debug", skip_all)]
 fn raw_ccb(row: &RowMap) -> Option<RawBill> {
     let trade_time = build_trade_time(row);
@@ -85,6 +88,7 @@ fn raw_ccb(row: &RowMap) -> Option<RawBill> {
     })
 }
 
+/// 组合建设银行交易日期和压缩时间，生成 parser 层标准时间文本。
 fn build_trade_time(row: &RowMap) -> String {
     let date = compact_date(&get(row, &["交易日期", "记账日"]));
     if date.is_empty() {

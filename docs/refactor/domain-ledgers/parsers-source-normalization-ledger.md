@@ -131,3 +131,26 @@ D9 `frontend-shape` 切片不修改前端运行时代码。parser/source normali
 - `Set-Location src/web; npm run structure:check` 仍只暴露 D10 shared 前端债务；D9 未新增或接管前端 structure failure。
 - `node scripts/check-backend-doc-map.mjs` 通过。
 - `git diff --check` 通过。
+
+## 10. Comment-pass 记录
+
+D9 `comment-pass` 切片只补充 parser/source normalization 域的中文函数说明，不改变 parser registry 顺序、来源识别条件、字段映射、金额/日期标准化、dedicated exactly-one/no_match/conflict 决策或导入 staging 前的 `StandardBill` 合同。
+
+本切片补充范围：
+
+- dedicated parser DTO、注册表、选择器和候选证据 helper 的中文说明。
+- `dedicated/common.rs` 中 CSV/Excel/HTML 表格读取、字段清洗、金额解析、日期时间压缩值归一和 row map helper 的中文说明。
+- 微信、支付宝、工商、民生、农业、建设银行来源 parser 的 parse、格式探测和 RawBill 映射函数中文说明。
+- parser JSON 兼容、parser tag 归一和 RawBill description 聚合的复杂私有 helper 中文说明。
+
+本切片本地验证记录：
+
+- `cargo fmt --all` 已执行。
+- `cargo fmt --all -- --check` 通过。
+- `cargo test -p bill-analyser-parsers --test parser_contracts` 通过，19 个 parser 合同测试全部通过。
+- `cargo clippy --workspace --all-targets -- -D warnings` 通过。
+- `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过，完整 Rust 工作区 coverage gate 生成 `workspace.lcov`。
+- `node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .omx\ultragoal\evidence\d9-comment-pass-parser.diff --threshold 90` 通过，新增 0 行可执行代码。
+- `node scripts/check-rust-backend-structure.mjs` 通过，507 个 Rust backend 文件仍只保留 3 个既有 baseline entry。
+- `node scripts/check-backend-doc-map.mjs` 通过。
+- `git diff --check` 通过，仅输出 Windows 换行提示。
