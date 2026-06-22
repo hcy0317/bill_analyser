@@ -295,3 +295,25 @@ D7 `behavior-lock` 切片新增测试范围：
 - `cargo clippy --workspace --all-targets -- -D warnings` 通过。
 - `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过。
 - `Set-Location src/web; npm run structure:check` 仍预期失败 4 项，均属于 D10 shared：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`。
+
+## 10. Backend-shape 记录
+
+D7 `backend-shape` 切片完成后端备份与云同步结构拆分：
+
+- `src/backend/core/ops.rs` 改为 public facade，原 `bill_analyser_core::ops::*` 导出名保持不变；备份文件名、archive 摘要、cleanup plan、job payload、Fernet key、云同步合同、user-data audit 和 report export 分别落到 `src/backend/core/ops/**` 功能文件。
+- `src/backend/http/backup_sync.rs` 改为 cloud upload facade，原 `upload_backup_to_cloud`、`validate_sync_upload_config`、`CloudBackupUploadError` 和 `CloudBackupUploadResult` 对外合同保持不变；provider 配置、endpoint/SSRF 防护、body/hash、WebDAV/OSS/S3/COS/Azure 上传实现分别落到 `src/backend/http/backup_sync/**` 功能文件。
+- 后端结构 gate 显示 `src/backend/core/ops.rs` 较 baseline 减少 870 行，`src/backend/http/backup_sync.rs` 较 baseline 减少 613 行，两个 D7 直接 oversized 对象已退化为 facade。
+- 行为保持不变：REST route、public exports、备份文件安全、zip member 安全、Fernet 派生、云同步 endpoint allowlist、provider host 匹配、签名算法、secret redaction、provider status 502 投影和 user-data/report 合同均沿用行为锁定切片的测试锚点。
+- 按用户确认的注释标准，本切片为导出函数、业务关键函数和复杂私有 helper 补充中文说明；简单 getter、字段映射和事件转发不强制补注释。
+
+本切片本地验证记录：
+
+- `cargo fmt --all -- --check` 通过。
+- `node scripts/check-rust-backend-structure.mjs` 通过，`src/backend/core/ops.rs` 较 baseline 减少 870 行，`src/backend/http/backup_sync.rs` 较 baseline 减少 613 行。
+- `node scripts/check-backend-doc-map.mjs` 通过。
+- `cargo test -p bill-analyser-core --test ops_contracts` 通过，5 个 ops 合同测试全部通过。
+- `cargo test -p bill-analyser-http backup_sync` 通过，9 个云同步测试全部通过。
+- `cargo test -p bill-analyser-core --test runtime_governance_contracts backup` 通过，backup route ownership 合同通过。
+- `git diff --check` 通过。
+- `cargo clippy --workspace --all-targets -- -D warnings` 通过。
+- `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过。
