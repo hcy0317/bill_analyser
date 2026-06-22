@@ -314,3 +314,19 @@ D8 完成前必须满足：
 - 安全审查结论不含 blocker；如发现真实安全缺陷，必须拆出独立 fix/prerequisite slice，不能混入结构搬迁。
 - 全程不得发起未授权 live external-provider 调用；验证证据必须说明 mock/local/payload-only 边界。
 - PR CI 通过、自动 squash merge、来源分支删除、进度 JSON 与 ultragoal ledger 回写完成。
+
+## 9. Behavior-lock 记录
+
+D8 `behavior-lock` 切片新增测试范围：
+
+- 前端 `tests/web/views/desktop/pairingcenter/llmConfigHelpers.test.ts` 锁定 LLM 配置 helper 合同：provider 列表与 base URL 必填标记、credential payload 只提交显式 JSON/token 字段、advanced settings 只在高级模式开启时提交、配置列表进入组件状态前移除 top-level `api_key`、候选响应从 wrapped/array payload 归一并解析 `llm_response_raw` reason。
+- 后端复用现有合同测试作为行为锚点：LLM/OCR provider alias/default、SSRF allowlist、secret redaction、provider auth refresh 归一化、OCR draft/provenance、learning lifecycle、LLM preview memory、Weaviate derived filter/vectorizer none、HTTP Weaviate health/outbox/rebuild、LLM DB 与 vector outbox user-scope 持久化。
+- 本切片不移动生产代码，不修改 REST route、PostgreSQL schema、Weaviate policy、provider 调用边界或 UI 视觉布局；所有验证均为 mock、本地或 payload-only，没有发起 live external-provider 调用。
+
+本切片本地验证记录：
+
+- `cargo test -p bill-analyser-core --test ai_ocr_llm_contracts --test provider_auth_contracts --test import_learning_contracts --test weaviate_derived_contracts` 通过，24 个 D8 core 合同测试全部通过。
+- `cargo test -p bill-analyser-http --test weaviate_runtime_contract` 通过，10 个 Weaviate runtime 合同测试全部通过。
+- `cargo test -p bill-analyser-db --test llm_postgres --test vector_outbox` 通过，2 个 PostgreSQL 持久化合同测试全部通过。
+- `Set-Location src/web; npm run test -- --runTestsByPath ../../tests/web/views/desktop/pairingcenter/llmConfigHelpers.test.ts` 通过，新增 1 个 suite、4 个测试全部通过。
+- `Set-Location src/web; npm run test -- --runTestsByPath ../../tests/web/views/desktop/pairingcenter/llmConfigHelpers.test.ts ../../tests/web/views/desktop/pairingcenter/learningCenterPanelModel.test.ts ../../tests/web/views/desktop/pairingcenter/learningCenterOcrConfig.test.ts ../../tests/web/models/learning_center.test.ts ../../tests/web/views/desktop/transactions/import/llmSignalMemory.test.ts ../../tests/web/views/desktop/transactions/import/services.llmMemory.test.ts ../../tests/web/views/desktop/transactions/import/checkDataLearning.test.ts` 通过，7 个 suite、25 个测试全部通过。
