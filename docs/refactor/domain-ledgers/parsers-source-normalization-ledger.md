@@ -174,3 +174,26 @@ D9 `governance-docs` 切片只复核并记录 parser/source normalization 域的
 - `cargo test -p bill-analyser-parsers --test parser_contracts` 通过，19 个 parser 合同测试全部通过。
 - `rg` 复核 `docs/PROJECT_OVERVIEW.md` 中 parser 当前结构事实仍存在。
 - `git diff --check` 通过，仅输出 Windows 换行提示。
+
+## 12. Closeout 记录
+
+D9 `closeout` 切片关闭 parser/source normalization 域，不再修改 parser 运行时代码、测试 fixture、API、导入 staging 或前端视觉。D9 已按 D1 模板完成 ledger、behavior-lock、backend-shape、frontend-shape、comment-pass、governance-docs 和 closeout 的端到端治理链路。
+
+本域 PR 链：
+
+- #253 `docs(parser): 建立解析来源标准化域治理边界`：建立 D9 ledger，映射 parser/source normalization 范围、非范围、结构快照、行为不变式和验收门槛；PR CI 与 post-merge main CI 均通过，来源分支已删除。
+- #254 `test(parser): 锁定解析来源标准化行为合同`：补强 parser contracts，覆盖 Excel serial/fractional date、source 字段保留、金额方向、parser tag、requested parser evidence 和 dedicated fixture 合同；PR CI 与 post-merge main CI 均通过，来源分支已删除。
+- #255 `refactor(parser): 拆分解析来源标准化后端结构`：把 parser crate 和 dedicated dispatcher 拆成 facade + 功能子文件，保留导出 API、registry 顺序、金额/日期归一和 exactly-one/no_match/conflict 语义；PR CI 与 post-merge main CI 均通过，来源分支已删除。
+- #256 `docs(parser): 记录 D9 前端切片无直接实现`：确认 parser 前端展示锚点归 D1/D10，不在 D9 接管 shared frontend 结构债；PR CI 与 post-merge main CI 均通过，来源分支已删除。
+- #257 `docs(parser): 补齐解析来源标准化中文说明`：按用户确认标准补齐导出函数、业务关键函数和复杂私有 helper 的中文说明；PR CI 与 post-merge main CI 均通过，来源分支已删除。
+- #258 `docs(parser): 记录解析域治理基线复核`：复核 parser 结构 baseline、`PROJECT_OVERVIEW` parser 当前事实和 D10 shared frontend 剩余债务；PR CI 与 post-merge main CI 均通过，来源分支已删除。
+
+本域关闭结论：
+
+- D9 parser 后端结构已经通过 `node scripts/check-rust-backend-structure.mjs`，不需要 parser baseline 豁免。
+- `src/backend/parsers/lib.rs` 和 `src/backend/parsers/dedicated/mod.rs` 已退化为 public facade；DTO、registry、tag、normalization、post-process、money serde、source registry、hint、selection、evidence 和 decision types 已分别进入功能子文件。
+- `tests/backend/parsers/parser_contracts.rs` 是 D9 行为锁，覆盖 registry、source split、golden contracts、fixtures、StandardBill JSON/serde 兼容、exactly-one/no_match/conflict、requested parser 和 source-local edge cases。
+- 金额复核：parser JSON 兼容边界仍输出元数值，Rust 内部通过 `Money` 保留分单位，进入导入运行态前保持显式金额合同。
+- 日期复核：常规日期/时间、Excel 日期序列和“日期 + 小数日时间”仍标准化为 `YYYY-MM-DD HH:MM:SS` 文本。
+- D9 未修改 REST route、PostgreSQL schema、导入 staging、分类/账户/learning/LLM/Weaviate 行为或 UI 视觉。
+- D10 handoff 保留 shared frontend/runtime shell 债务：`src/web/src/lib/services.ts`、`src/web/src/stores/index.ts`、`src/web/src/core/theme.ts`、`src/web/src/models/imported_transaction.ts` 仍由 D10 终扫域处理。
