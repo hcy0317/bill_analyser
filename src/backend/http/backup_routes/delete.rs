@@ -5,6 +5,7 @@
 use super::*;
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：处理备份删除响应，删除物理文件和元数据，并把持久化记录标记为 deleted。
 pub(super) fn delete_backup_response(
     state: &HttpAppState,
     headers: &HeaderMap,

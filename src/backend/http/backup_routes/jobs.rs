@@ -5,6 +5,7 @@
 use super::*;
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：生成备份任务列表响应，从运行时仓库读取当前用户的任务配置。
 pub(super) fn list_backup_jobs_response(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -19,6 +20,7 @@ pub(super) fn list_backup_jobs_response(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：保存备份任务配置，校验用户认证后写入任务仓库并记录审计。
 pub(super) fn save_backup_job_response(
     state: &HttpAppState,
     headers: &HeaderMap,

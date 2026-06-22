@@ -336,3 +336,33 @@ D7 `frontend-shape` 切片完成应用设置云同步前端结构拆分：
 - `Set-Location src/web; npm run lint:ci` 通过，保留历史 `no-explicit-any` warnings，无 errors。
 - `Set-Location src/web; npm run test:coverage` 通过，95 个 suite、39007 个测试通过，coverage gate 为 99.13% lines、91.48% branches。
 - `Set-Location src/web; npm run structure:check` 仍预期失败 4 项，均属于 D10 shared：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`；D7 前端入口未新增 failure。
+
+## 12. Comment-pass 记录
+
+D7 `comment-pass` 切片按用户确认的注释标准补齐中文说明：导出函数、业务关键函数、复杂私有 helper 必须说明；简单 getter、字段映射和事件转发不强制。
+
+- 后端 `src/backend/db/backup_postgres.rs` 补充备份记录、备份任务、审计日志和 Postgres 行转换/元数据合并 helper 的中文说明。
+- 后端 `src/backend/http/backup_routes/**` 补充认证、step-up token、归档创建/加密/解密/元数据、审计脱敏、创建/下载/删除/清理/同步/任务响应、handler、payload、response 和 runtime DB bridge helper 的中文说明。
+- 后端 `src/backend/core/ops/helpers.rs` 补充 ops 合同字段解析、secret redaction 和敏感 key 识别 helper 的中文说明。
+- 后端 `src/backend/http/backup_sync/body_hash.rs` 与 `config.rs` 补充 hex 编码和可选 provider 配置读取说明。
+- 前端 `src/web/src/stores/user/cloudSettings.ts`、`src/web/src/stores/setting/cloudSync.ts`、`AppCloudSyncPageBase` 拆分后的 shared/desktop/mobile composable 补充云同步加载、启用/更新、禁用、全选/反选、服务端 settings 应用和 synced key map 刷新说明。
+- 本切片只增加注释和 ledger 文档，不修改运行时代码、REST/API 合同、数据库 schema、测试逻辑或 UI 视觉布局。
+
+本切片本地验证记录：
+
+- D7 注释缺口扫描通过：`src/backend/db/backup_postgres.rs`、`src/backend/http/backup_routes/**`、`src/backend/core/ops/**`、`src/backend/http/backup_sync/**`、`src/web/src/stores/**cloudSync**` 和应用云同步 composable 范围内，`pub`/`pub(super)`/`export function`/返回给页面的关键函数前 8 行均有中文说明；简单 getter/映射/事件转发不作为强制项。
+- `cargo fmt --all` 通过。
+- `cargo fmt --all -- --check` 通过。
+- `node scripts/check-rust-backend-structure.mjs` 通过，保留 D7 facade 行数减少 WARN：`src/backend/core/ops.rs` 减少 870 行，`src/backend/http/backup_sync.rs` 减少 613 行。
+- `node scripts/check-backend-doc-map.mjs` 通过。
+- `git diff --check` 通过。
+- `cargo test -p bill-analyser-core --test ops_contracts` 通过，5 个 ops 合同测试全部通过。
+- `cargo test -p bill-analyser-http backup_sync` 通过，9 个云同步测试全部通过。
+- `cargo test -p bill-analyser-core --test runtime_governance_contracts backup` 通过，backup route ownership 合同通过。
+- `cargo test -p bill-analyser-http backup_routes` 通过，7 个备份路由认证/响应/清理测试全部通过。
+- `Set-Location src/web; npm run test -- --runTestsByPath ../../tests/web/views/base/settings/appCloudSyncPageBase.test.ts ../../tests/web/stores/user.test.ts ../../tests/web/stores/settingCloudSync.test.ts` 通过，3 个 suite、18 个测试全部通过。
+- `Set-Location src/web; npm run lint:ci` 通过，保留历史 `no-explicit-any` warnings，无 errors。
+- `Set-Location src/web; npm run structure:check` 仍预期失败 4 项，均属于 D10 shared：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`。
+- `cargo clippy --workspace --all-targets -- -D warnings` 通过。
+- `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过。
+- `Set-Location src/web; npm run test:coverage` 通过，95 个 suite、39007 个测试通过，coverage gate 为 99.13% lines、91.48% branches。

@@ -5,6 +5,7 @@
 use super::*;
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：准备备份下载响应，解析安全路径、按需解密，并回写下载审计状态。
 pub(super) fn prepare_download_backup_response(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -96,6 +97,7 @@ pub(super) fn prepare_download_backup_response(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：把备份文件流包装为下载响应，设置安全文件名和 zip 内容类型。
 pub(super) fn stream_backup_download_response(file: File, safe_filename: &str) -> Response {
     let stream = ReaderStream::new(tokio::fs::File::from_std(file));
     let mut response = Response::new(Body::from_stream(stream));

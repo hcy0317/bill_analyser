@@ -4,14 +4,17 @@
 
 use super::*;
 
+/// 中文说明：把业务错误状态码转换为 HTTP 状态码，非法状态统一兜底为 500。
 pub(super) fn status_or_internal(status: u16) -> StatusCode {
     StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
 }
 
+/// 中文说明：生成备份路由 JSON 响应，统一 Axum 响应封装。
 pub(super) fn json_response(status: StatusCode, body: Value) -> Response {
     (status, Json(body)).into_response()
 }
 
+/// 中文说明：生成备份数据库读取失败响应，避免向客户端泄露底层错误细节。
 pub(super) fn db_error_response() -> Response {
     error_response(
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -19,10 +22,12 @@ pub(super) fn db_error_response() -> Response {
     )
 }
 
+/// 中文说明：把认证错误映射为备份路由响应，保留认证层给出的状态和消息。
 pub(super) fn auth_error_response(error: crate::auth::RustRouteAuthError) -> Response {
     error_response(status_or_internal(error.status), error.message)
 }
 
+/// 中文说明：把数据库写入错误映射为客户端响应，区分权限不足和一般写入失败。
 pub(super) fn db_write_error_response(error: DbError) -> Response {
     match error {
         DbError::InvalidOperation(message) if message == "backup job not found" => {
@@ -32,10 +37,12 @@ pub(super) fn db_write_error_response(error: DbError) -> Response {
     }
 }
 
+/// 中文说明：把备份文件运行时错误转换为 boxed 响应，降低调用链 Result 类型体积。
 pub(super) fn file_error_response(error: BackupFileRuntimeError) -> Box<Response> {
     Box::new(error_response(error.status, error.message))
 }
 
+/// 中文说明：生成备份路由标准错误响应，统一 `error` JSON 字段。
 pub(super) fn error_response(status: StatusCode, message: impl ToString) -> Response {
     json_response(
         status,

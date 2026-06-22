@@ -5,6 +5,7 @@
 use super::*;
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：解析备份接口认证上下文，绑定当前用户 ID、敏感操作认证方式和备份运行时。
 pub(super) fn authenticated_backup_runtime(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -22,6 +23,7 @@ pub(super) fn authenticated_backup_runtime(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：读取无需用户上下文的备份运行时，仅供开放型健康/配置校验路径复用。
 pub(super) fn open_backup_ops_runtime(state: &HttpAppState) -> RouteResult<BackupOpsRuntime> {
     let runtime = state
         .open_postgres_repository_runtime("backup ops")
@@ -35,6 +37,7 @@ pub(super) fn open_backup_ops_runtime(state: &HttpAppState) -> RouteResult<Backu
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：根据可信头识别本次备份请求的认证强度，敏感操作必须区分普通 JWT 与本地可信通道。
 fn backup_auth_kind_from_headers(headers: &HeaderMap) -> BackupAuthKind {
     if headers.contains_key(TRUSTED_USER_SECRET_HEADER)
         || headers.contains_key("x-user-id")
@@ -47,6 +50,7 @@ fn backup_auth_kind_from_headers(headers: &HeaderMap) -> BackupAuthKind {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：校验备份敏感操作的认证边界，必要时要求 step-up token 补充确认。
 pub(super) fn ensure_sensitive_backup_auth(
     auth_runtime: &AuthenticatedBackupRuntime,
     state: &HttpAppState,
@@ -63,6 +67,7 @@ pub(super) fn ensure_sensitive_backup_auth(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+// 中文说明：按认证类型执行敏感操作 gate，集中保持 trusted header、JWT 和 step-up 的授权语义。
 fn ensure_sensitive_backup_auth_for_kind(
     auth_kind: BackupAuthKind,
     state: &HttpAppState,
@@ -84,6 +89,7 @@ fn ensure_sensitive_backup_auth_for_kind(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：从请求头或 JSON payload 中读取备份 step-up token，兼容桌面与移动端提交方式。
 pub(super) fn backup_step_up_token(headers: &HeaderMap, payload: Option<&Value>) -> Option<String> {
     header_text(headers, STEP_UP_TOKEN_HEADER).or_else(|| {
         payload
@@ -100,6 +106,7 @@ pub(super) fn backup_step_up_token(headers: &HeaderMap, payload: Option<&Value>)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：校验备份 step-up token 的签名、算法、用途、用户归属和过期时间。
 pub(super) fn validate_backup_step_up_token(
     token: &str,
     state: &HttpAppState,
@@ -161,6 +168,7 @@ pub(super) fn validate_backup_step_up_token(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：解码 JWT 头或载荷片段，供 step-up token 校验流程读取算法和声明。
 pub(super) fn decode_backup_jwt_part(encoded: &str) -> Result<Value, &'static str> {
     let decoded = general_purpose::URL_SAFE_NO_PAD
         .decode(encoded)
@@ -170,11 +178,13 @@ pub(super) fn decode_backup_jwt_part(encoded: &str) -> Result<Value, &'static st
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：规范化 JWT HMAC 算法名称，避免大小写或空白导致算法匹配不一致。
 pub(super) fn normalize_jwt_algorithm(algorithm: &str) -> String {
     algorithm.trim().to_ascii_uppercase()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：把允许的 JWT HMAC 算法名映射到 ring 实现，拒绝备份 step-up 不支持的算法。
 pub(super) fn jwt_hmac_algorithm(algorithm: &str) -> Result<hmac::Algorithm, &'static str> {
     match normalize_jwt_algorithm(algorithm).as_str() {
         "HS256" => Ok(hmac::HMAC_SHA256),

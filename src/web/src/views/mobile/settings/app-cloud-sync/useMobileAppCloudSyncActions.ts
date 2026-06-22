@@ -22,6 +22,7 @@ export function useMobileAppCloudSyncActions(state: MobileAppCloudSyncActionStat
     const loadingError = ref<unknown | null>(null);
     const showMoreActionSheet = ref<boolean>(false);
 
+    /** 中文说明：初始化移动端云同步设置，加载服务端配置并处理首屏加载错误。 */
     function init(): void {
         state.loading.value = true;
 
@@ -38,6 +39,7 @@ export function useMobileAppCloudSyncActions(state: MobileAppCloudSyncActionStat
         });
     }
 
+    /** 中文说明：移动端启用或更新云同步配置，提交当前选择并管理 loading/toast 状态。 */
     function enable(update: boolean): void {
         state.enabling.value = true;
         showLoading(() => state.enabling.value);
@@ -61,6 +63,7 @@ export function useMobileAppCloudSyncActions(state: MobileAppCloudSyncActionStat
         });
     }
 
+    /** 中文说明：移动端禁用云同步配置，成功后清空本地选择并恢复 loading 状态。 */
     function disable(): void {
         state.disabling.value = true;
         showLoading(() => state.disabling.value);
@@ -80,6 +83,7 @@ export function useMobileAppCloudSyncActions(state: MobileAppCloudSyncActionStat
         });
     }
 
+    /** 中文说明：页面进入后根据首屏加载错误执行移动端回退逻辑。 */
     function onPageAfterIn(): void {
         routeBackOnError(state.f7router, loadingError);
     }

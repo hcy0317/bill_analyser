@@ -5,6 +5,7 @@
 use super::*;
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：创建完整备份文件，串联临时 zip、可选加密、运行态信息和元数据落盘。
 pub(super) fn create_backup_file(
     data_dir: &Path,
     backup_dir: &Path,
@@ -30,6 +31,7 @@ pub(super) fn create_backup_file(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：生成带时间和进程内计数器的备份 zip 路径，降低同秒并发创建时的文件名冲突风险。
 pub(super) fn unique_backup_zip_path(backup_dir: &Path) -> PathBuf {
     let counter = BACKUP_FILENAME_COUNTER.fetch_add(1, Ordering::Relaxed);
     backup_dir.join(format!(
@@ -40,6 +42,7 @@ pub(super) fn unique_backup_zip_path(backup_dir: &Path) -> PathBuf {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：把数据目录打包为备份 zip，跳过已有备份目录并保留相对路径。
 pub(super) fn create_backup_zip(data_dir: &Path, backup_path: &Path) -> FileRouteResult<()> {
     let data_parent = data_dir
         .parent()
@@ -92,6 +95,7 @@ pub(super) fn create_backup_zip(data_dir: &Path, backup_path: &Path) -> FileRout
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：计算 zip 内部条目路径，确保归档名称相对数据目录且使用统一分隔符。
 pub(super) fn relative_zip_name(base_dir: &Path, file_path: &Path) -> FileRouteResult<String> {
     let relative = file_path
         .strip_prefix(base_dir)
@@ -114,6 +118,7 @@ pub(super) fn relative_zip_name(base_dir: &Path, file_path: &Path) -> FileRouteR
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：用备份密钥加密 zip 文件，成功后移除明文临时文件并返回加密存储路径。
 pub(super) fn encrypt_backup_file(file_path: &Path, secret: &str) -> FileRouteResult<PathBuf> {
     let key = derive_backup_fernet_key(secret)
         .ok_or_else(|| BackupFileRuntimeError::bad_request("备份加密密钥未配置"))?;
@@ -168,6 +173,7 @@ pub(super) fn encrypt_backup_file(file_path: &Path, secret: &str) -> FileRouteRe
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：从物理备份文件构建运行时备份信息，统一计算大小、校验和、公开文件名和时间戳。
 pub(super) fn build_runtime_backup_info(
     file_path: &Path,
     encryption_key: Option<&str>,
@@ -206,11 +212,13 @@ pub(super) fn build_runtime_backup_info(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：把物理备份路径转换为前端/API 暴露的 `backup/<filename>` 引用。
 pub(super) fn public_backup_reference(file_path: &Path) -> String {
     format!("backup/{}", public_backup_filename(file_path))
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：读取备份文件概要，兼容加密备份和普通 zip，用于列表与同步响应展示。
 pub(super) fn archive_summary_for_backup_file(
     file_path: &Path,
     encryption_key: Option<&str>,
@@ -231,6 +239,7 @@ pub(super) fn archive_summary_for_backup_file(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：解密加密备份文件并返回明文 zip 字节，供下载和归档检查流程复用。
 pub(super) fn decrypted_backup_bytes(file_path: &Path, secret: &str) -> FileRouteResult<Vec<u8>> {
     let key = derive_backup_fernet_key(secret)
         .ok_or_else(|| BackupFileRuntimeError::bad_request("备份加密密钥未配置"))?;
@@ -244,6 +253,7 @@ pub(super) fn decrypted_backup_bytes(file_path: &Path, secret: &str) -> FileRout
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：检查 zip 内容并统计文件数，同时拒绝损坏或不可读取的备份归档。
 pub(super) fn inspect_zip_reader<R: Read + Seek>(
     reader: R,
 ) -> bill_analyser_core::BackupArchiveSummary {
@@ -262,6 +272,7 @@ pub(super) fn inspect_zip_reader<R: Read + Seek>(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：构建备份元数据快照，记录公开名称、物理名称、加密状态、校验和和归档摘要。
 pub(super) fn build_backup_metadata(
     file_path: &Path,
     checksum: &str,
@@ -282,6 +293,7 @@ pub(super) fn build_backup_metadata(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：读取备份旁路元数据文件；缺失或解析失败时返回空对象以保持列表接口可用。
 pub(super) fn read_backup_metadata(file_path: &Path) -> Value {
     fs::read_to_string(backup_metadata_path(file_path))
         .ok()
@@ -290,11 +302,13 @@ pub(super) fn read_backup_metadata(file_path: &Path) -> Value {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：计算备份文件对应的旁路元数据路径，保持 `.meta.json` 命名约定集中。
 pub(super) fn backup_metadata_path(file_path: &Path) -> PathBuf {
     PathBuf::from(format!("{}.meta.json", file_path.to_string_lossy()))
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：按流式读取计算备份文件 SHA-256 校验和，避免大文件一次性载入内存。
 pub(super) fn calculate_file_checksum(file_path: &Path) -> FileRouteResult<String> {
     let mut file = File::open(file_path).map_err(|error| {
         io_context_error(
@@ -315,11 +329,13 @@ pub(super) fn calculate_file_checksum(file_path: &Path) -> FileRouteResult<Strin
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：把 IO 错误包装为带上下文的备份文件运行时错误，便于接口返回可排障信息。
 pub(super) fn io_context_error(error: io::Error, context: impl ToString) -> BackupFileRuntimeError {
     BackupFileRuntimeError::internal(format!("{}: {error}", context.to_string()))
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：把运行时备份信息写回记录仓库，统一维护 created/updated/synced 等状态字段。
 pub(super) fn upsert_backup_record_from_info(
     runtime: &BackupOpsRuntime,
     backup_info: &BackupFileInfoContract,
@@ -343,6 +359,7 @@ pub(super) fn upsert_backup_record_from_info(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：把文件运行态信息与持久化记录合并，优先保留数据库中的业务状态和云端位置。
 pub(super) fn backup_info_with_record(
     info: BackupFileInfoContract,
     record: Option<&BackupRecordRow>,
@@ -357,6 +374,7 @@ pub(super) fn backup_info_with_record(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：枚举本地备份目录中的有效备份文件，过滤元数据文件、临时明文和无效扩展名。
 pub(super) fn list_local_backup_files(backup_dir: &Path) -> FileRouteResult<Vec<PathBuf>> {
     fs::create_dir_all(backup_dir)?;
     let mut files = BTreeMap::new();
@@ -377,6 +395,7 @@ pub(super) fn list_local_backup_files(backup_dir: &Path) -> FileRouteResult<Vec<
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：清理加密流程遗留的明文临时 zip，防止敏感备份在本地长期残留。
 pub(super) fn remove_stale_plaintext_backup_temps(backup_dir: &Path) -> FileRouteResult<()> {
     if !backup_dir.exists() {
         return Ok(());
@@ -396,6 +415,7 @@ pub(super) fn remove_stale_plaintext_backup_temps(backup_dir: &Path) -> FileRout
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：删除备份文件对应的旁路元数据文件；文件不存在时视为成功。
 pub(super) fn remove_metadata_file(file_path: &Path) -> FileRouteResult<()> {
     let metadata_path = backup_metadata_path(file_path);
     if metadata_path.exists() {
@@ -405,6 +425,7 @@ pub(super) fn remove_metadata_file(file_path: &Path) -> FileRouteResult<()> {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：把用户传入的公开/物理备份文件名解析为备份目录内的安全路径，禁止路径穿越。
 pub(super) fn resolve_backup_path(backup_dir: &Path, filename: &str) -> FileRouteResult<PathBuf> {
     let resolution = resolve_backup_filename(filename).map_err(|error| {
         BackupFileRuntimeError::new(status_or_internal(error.status_code), error.message)
@@ -443,6 +464,7 @@ pub(super) fn resolve_backup_path(backup_dir: &Path, filename: &str) -> FileRout
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：读取并创建备份目录，确保后续列表、创建和清理流程有稳定根目录。
 pub(super) fn backup_dir(config: &HttpShellConfig) -> RouteResult<PathBuf> {
     let backup_dir = PathBuf::from(&config.backup_dir);
     fs::create_dir_all(&backup_dir)
@@ -451,16 +473,19 @@ pub(super) fn backup_dir(config: &HttpShellConfig) -> RouteResult<PathBuf> {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：读取运行时数据目录，供备份打包流程定位源数据。
 pub(super) fn data_dir(config: &HttpShellConfig) -> PathBuf {
     PathBuf::from(&config.data_dir)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：返回对外展示的备份文件名，隐藏加密存储后缀。
 pub(super) fn backup_filename(path: &Path) -> String {
     public_backup_filename(path)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：把物理备份文件名转换为公开文件名，加密文件对外仍表现为 `.zip`。
 pub(super) fn public_backup_filename(path: &Path) -> String {
     let filename = physical_backup_filename(path);
     if filename.ends_with(RUST_ENCRYPTED_BACKUP_STORAGE_SUFFIX) {
@@ -474,6 +499,7 @@ pub(super) fn public_backup_filename(path: &Path) -> String {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：读取物理文件名，文件名缺失时返回空串以保持历史响应兼容。
 pub(super) fn physical_backup_filename(path: &Path) -> String {
     path.file_name()
         .and_then(|value| value.to_str())
@@ -482,6 +508,7 @@ pub(super) fn physical_backup_filename(path: &Path) -> String {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：判断物理路径是否为加密备份存储文件，供列表、下载和清理流程分支使用。
 pub(super) fn is_encrypted_backup_storage_path(path: &Path) -> bool {
     let filename = physical_backup_filename(path);
     filename.ends_with(PUBLIC_ENCRYPTED_BACKUP_SUFFIX)
@@ -489,6 +516,7 @@ pub(super) fn is_encrypted_backup_storage_path(path: &Path) -> bool {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：把明文 zip 路径映射为加密备份物理存储路径，保留公开文件名和加密扩展约定。
 pub(super) fn encrypted_storage_path_for_zip(file_path: &Path) -> PathBuf {
     let raw = file_path.to_string_lossy();
     PathBuf::from(format!(
@@ -499,6 +527,7 @@ pub(super) fn encrypted_storage_path_for_zip(file_path: &Path) -> PathBuf {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：把公开备份文件名转换为加密存储文件名，兼容历史 `.zip` 公开名称。
 pub(super) fn encrypted_storage_filename_for_public(filename: &str) -> String {
     format!(
         "{}{}",
@@ -508,6 +537,7 @@ pub(super) fn encrypted_storage_filename_for_public(filename: &str) -> String {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：读取文件修改时间的 Unix 秒时间戳，供备份列表排序和响应展示使用。
 pub(super) fn file_modified_at(path: &Path) -> FileRouteResult<i64> {
     Ok(path
         .metadata()?
@@ -519,12 +549,14 @@ pub(super) fn file_modified_at(path: &Path) -> FileRouteResult<i64> {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：把系统时间格式化为本地 ISO 字符串，保持既有备份响应时间格式。
 pub(super) fn system_time_iso(value: SystemTime) -> String {
     let datetime: chrono::DateTime<Local> = value.into();
     datetime.format("%Y-%m-%dT%H:%M:%S%.f").to_string()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：生成当前 UTC ISO 时间，供备份记录状态更新时间使用。
 pub(super) fn now_iso() -> String {
     Utc::now()
         .naive_utc()

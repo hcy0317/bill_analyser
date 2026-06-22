@@ -5,6 +5,7 @@
 use super::*;
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：生成备份列表响应，合并本地文件扫描结果和持久化备份记录状态。
 pub(super) fn list_backup_files_response(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -45,6 +46,7 @@ pub(super) fn list_backup_files_response(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：处理创建备份业务响应，负责敏感认证、文件创建、持久化记录和审计写入。
 pub(super) fn create_backup_response(
     state: &HttpAppState,
     headers: &HeaderMap,

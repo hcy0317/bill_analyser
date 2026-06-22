@@ -56,6 +56,7 @@ pub(super) fn string_config(config: &Value, key: &str) -> String {
         .unwrap_or_default()
 }
 
+/// 读取非空 provider 配置字段，空白值按缺失处理，供可选配置如 S3 region 使用。
 pub(super) fn non_empty_config(config: &Value, key: &str) -> Option<String> {
     let value = string_config(config, key);
     (!value.is_empty()).then_some(value)

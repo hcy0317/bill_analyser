@@ -5,6 +5,7 @@
 use super::*;
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：备份文件列表路由入口，将异步 handler 收口到同步响应构建函数。
 pub(super) async fn list_backup_files_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -19,6 +20,7 @@ pub(super) async fn list_backup_files_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：创建备份路由入口，透传请求头并由业务响应层完成认证、打包和审计。
 pub(super) async fn create_backup_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -33,6 +35,7 @@ pub(super) async fn create_backup_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：云同步路由入口，根据路径区分 prepare/finish/config/validate 等同步动作。
 pub(super) async fn sync_backup_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -85,6 +88,7 @@ pub(super) async fn sync_backup_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：备份下载路由入口，准备下载上下文后以文件流响应客户端。
 pub(super) async fn download_backup_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -111,6 +115,7 @@ pub(super) async fn download_backup_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：备份删除路由入口，委托业务响应层处理路径解析、删除和记录回写。
 pub(super) async fn delete_backup_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -126,6 +131,7 @@ pub(super) async fn delete_backup_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：备份清理路由入口，解析 JSON 请求体并执行保留策略。
 pub(super) async fn cleanup_backups_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -141,6 +147,7 @@ pub(super) async fn cleanup_backups_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：备份任务列表路由入口，返回当前用户可见的自动备份任务配置。
 pub(super) async fn list_backup_jobs_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -155,6 +162,7 @@ pub(super) async fn list_backup_jobs_handler(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：备份任务保存路由入口，接收任务配置 JSON 并交由业务层校验写入。
 pub(super) async fn save_backup_job_handler(
     State(state): State<HttpAppState>,
     headers: HeaderMap,

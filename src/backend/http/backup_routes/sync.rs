@@ -5,6 +5,7 @@
 use super::*;
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：准备云同步上传响应，选择待同步备份、生成 step-up token，并返回安全的云配置快照。
 pub(super) fn prepare_sync_backup_response(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -183,6 +184,7 @@ pub(super) fn prepare_sync_backup_response(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：完成云同步上传回调，校验 step-up token 后更新备份同步状态和审计记录。
 pub(super) fn finish_sync_backup_response(
     state: &HttpAppState,
     headers: &HeaderMap,

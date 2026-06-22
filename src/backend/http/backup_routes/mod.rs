@@ -135,6 +135,7 @@ pub const BACKUP_OPS_ROUTE_PATTERNS: &[(&str, &str)] = &[
 ];
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：组装备份运行时路由表，集中挂载备份创建、下载、清理、任务和云同步接口。
 pub fn backup_ops_runtime_router() -> Router<HttpAppState> {
     Router::new()
         .route("/api/backup/", get(list_backup_files_handler))
@@ -201,6 +202,7 @@ where
     }
 }
 
+// 中文说明：在同步备份路由 helper 中阻塞执行异步数据库操作，桥接 SQLite/Postgres 两种运行时。
 fn block_on_backup_db<T, F>(future: F) -> DbResult<T>
 where
     F: Future<Output = DbResult<T>>,
@@ -212,6 +214,7 @@ where
     runtime.block_on(future)
 }
 
+// 中文说明：按当前备份运行时读取备份记录，屏蔽 SQLite 与 Postgres 仓库差异。
 fn list_backup_records_for_runtime(runtime: &BackupOpsRuntime) -> DbResult<Vec<BackupRecordRow>> {
     match runtime {
         BackupOpsRuntime::Postgres(runtime) => {
@@ -220,6 +223,7 @@ fn list_backup_records_for_runtime(runtime: &BackupOpsRuntime) -> DbResult<Vec<B
     }
 }
 
+// 中文说明：按当前备份运行时写入备份记录，确保路由层不直接分散数据库分支。
 fn upsert_backup_record_for_runtime(
     runtime: &BackupOpsRuntime,
     draft: BackupRecordDraft,
@@ -231,6 +235,7 @@ fn upsert_backup_record_for_runtime(
     }
 }
 
+// 中文说明：按当前备份运行时更新备份记录状态，统一处理文件名定位和用户归属。
 fn update_backup_record_for_runtime(
     runtime: &BackupOpsRuntime,
     filename: &str,
@@ -249,6 +254,7 @@ fn update_backup_record_for_runtime(
     }
 }
 
+// 中文说明：按当前备份运行时读取备份任务配置，保持路由层接口不感知底层存储类型。
 fn list_backup_jobs_for_runtime(
     runtime: &BackupOpsRuntime,
     user_id: UserId,
@@ -260,6 +266,7 @@ fn list_backup_jobs_for_runtime(
     }
 }
 
+// 中文说明：按当前备份运行时创建或更新备份任务，集中封装任务仓库写入分支。
 fn create_or_update_backup_job_for_runtime(
     runtime: &BackupOpsRuntime,
     user_id: UserId,

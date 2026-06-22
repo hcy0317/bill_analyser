@@ -5,6 +5,7 @@
 use super::*;
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：执行备份清理请求，校验保留数量、删除本地文件和元数据，并回写持久化状态。
 pub(super) fn cleanup_backups_response(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -110,6 +111,7 @@ pub(super) fn cleanup_backups_response(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：解析备份保留数量，保证清理计划至少保留一个备份并拒绝非法类型。
 pub(super) fn parse_keep_count(payload: &Value) -> Result<usize, String> {
     let Some(value) = payload.get("keep_count") else {
         return Ok(10);
@@ -132,6 +134,7 @@ pub(super) fn parse_keep_count(payload: &Value) -> Result<usize, String> {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：按清理计划更新备份记录状态，保留被留下的文件并把删除项标记为 deleted。
 pub(super) fn apply_cleanup_plan(
     runtime: &BackupOpsRuntime,
     backup_dir: &Path,

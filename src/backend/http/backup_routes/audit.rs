@@ -5,6 +5,7 @@
 use super::*;
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：构建云同步配置校验审计详情，只保留 provider 和脱敏后的 endpoint 信息。
 pub(super) fn sync_config_validation_audit_details(config: &Value) -> Value {
     json!({
         "provider": audit_safe_json_field(config, "provider"),
@@ -15,6 +16,7 @@ pub(super) fn sync_config_validation_audit_details(config: &Value) -> Value {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：构建云同步配置保存审计详情，记录启用状态、provider 和脱敏端点。
 pub(super) fn sync_config_audit_details(contract: &SyncConfigContract) -> Value {
     json!({
         "provider": contract.provider.clone(),
@@ -28,6 +30,7 @@ pub(super) fn sync_config_audit_details(contract: &SyncConfigContract) -> Value 
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：构建通用请求校验审计详情，避免把原始敏感 payload 写入审计日志。
 pub(super) fn validation_audit_details(payload: &Value) -> Value {
     json!({
         "job_type": audit_safe_json_field(payload, "job_type"),
@@ -38,6 +41,7 @@ pub(super) fn validation_audit_details(payload: &Value) -> Value {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：写入云同步配置/校验审计事件，统一补充操作者、IP 和 user-agent。
 pub(super) fn write_backup_sync_audit(
     runtime: &BackupOpsRuntime,
     user_id: UserId,
@@ -60,6 +64,7 @@ pub(super) fn write_backup_sync_audit(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：写入备份任务审计事件，记录任务启用、频率和保留数量等关键配置。
 pub(super) fn write_backup_job_audit(
     runtime: &BackupOpsRuntime,
     user_id: UserId,
@@ -83,6 +88,7 @@ pub(super) fn write_backup_job_audit(
 
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：写入备份域底层审计事件，并在审计存储失败时不影响主业务响应。
 pub(super) fn write_backup_audit_event(
     runtime: &BackupOpsRuntime,
     user_id: UserId,
@@ -114,6 +120,7 @@ pub(super) fn write_backup_audit_event(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：向审计详情中补充 actor_user_id，保留非对象详情的原始形态。
 pub(super) fn with_audit_actor(mut details: Value, user_id: UserId) -> Value {
     let Value::Object(object) = &mut details else {
         return json!({ "user_id": user_id.get(), "details": details });
@@ -123,6 +130,7 @@ pub(super) fn with_audit_actor(mut details: Value, user_id: UserId) -> Value {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：从代理链头中提取客户端 IP，优先使用 x-forwarded-for 的首个地址。
 pub(super) fn client_ip(headers: &HeaderMap) -> Option<String> {
     let forwarded_for = header_text(headers, "x-forwarded-for");
     if let Some(value) = forwarded_for {
@@ -135,6 +143,7 @@ pub(super) fn client_ip(headers: &HeaderMap) -> Option<String> {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：读取请求头文本并过滤非法 UTF-8/空白值，供审计和认证流程复用。
 pub(super) fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
     headers
         .get(name)
@@ -145,11 +154,13 @@ pub(super) fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：从 JSON 字段提取审计安全文本，对长值和敏感值进行统一规整。
 pub(super) fn audit_safe_json_field(payload: &Value, key: &str) -> String {
     payload.get(key).map(audit_safe_value).unwrap_or_default()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：从 endpoint 字段提取审计安全文本，额外清理 URL 用户信息和查询参数。
 pub(super) fn audit_safe_endpoint_json_field(payload: &Value, key: &str) -> String {
     payload
         .get(key)
@@ -158,6 +169,7 @@ pub(super) fn audit_safe_endpoint_json_field(payload: &Value, key: &str) -> Stri
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：把 JSON endpoint 值转换为审计安全文本，非字符串值先转 JSON 再脱敏。
 pub(super) fn audit_safe_endpoint_value(value: &Value) -> String {
     value
         .as_str()
@@ -166,6 +178,7 @@ pub(super) fn audit_safe_endpoint_value(value: &Value) -> String {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：脱敏 endpoint 文本中的凭据、查询参数和片段，只保留可排障的协议/主机/路径。
 pub(super) fn audit_safe_endpoint_text(raw: &str) -> String {
     let raw = raw.trim();
     if raw.is_empty() {
@@ -184,6 +197,7 @@ pub(super) fn audit_safe_endpoint_text(raw: &str) -> String {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：复制并脱敏云同步配置，避免 secret、access key 或 endpoint 凭据进入审计日志。
 pub(super) fn audit_safe_sync_config(config: &Value) -> Value {
     let mut config = config.clone();
     audit_sanitize_endpoint_keys(&mut config);
@@ -191,6 +205,7 @@ pub(super) fn audit_safe_sync_config(config: &Value) -> Value {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：递归清理 endpoint 相关字段，统一处理对象和数组中的嵌套云端配置。
 pub(super) fn audit_sanitize_endpoint_keys(value: &mut Value) {
     match value {
         Value::Object(map) => {
@@ -212,6 +227,7 @@ pub(super) fn audit_sanitize_endpoint_keys(value: &mut Value) {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：把任意 JSON 值转换为审计安全短文本，避免超长或结构化敏感内容直接落库。
 pub(super) fn audit_safe_value(value: &Value) -> String {
     let raw = value.as_str().map(str::to_string).unwrap_or_else(|| {
         if value.is_null() {
@@ -224,6 +240,7 @@ pub(super) fn audit_safe_value(value: &Value) -> String {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：从 JSON 中读取字符串字段并去空白，供审计详情构建读取非敏感标识。
 pub(super) fn json_string_field(value: &Value, key: &str) -> String {
     value
         .get(key)

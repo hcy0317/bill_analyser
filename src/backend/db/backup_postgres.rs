@@ -14,6 +14,7 @@ use crate::{
     DbError, DbResult, PostgresPool,
 };
 
+/// 中文说明：读取 Postgres 中的备份记录列表，按最新修改时间返回给备份运行时展示和同步流程使用。
 pub async fn list_postgres_backup_records(pool: &PostgresPool) -> DbResult<Vec<BackupRecordRow>> {
     let rows = sqlx::query(
         r#"
@@ -29,6 +30,7 @@ pub async fn list_postgres_backup_records(pool: &PostgresPool) -> DbResult<Vec<B
     rows.into_iter().map(backup_record_from_row).collect()
 }
 
+/// 中文说明：按文件名和用户写入备份记录，保留已有记录元数据并合并本次运行态状态。
 pub async fn upsert_postgres_backup_record(
     pool: &PostgresPool,
     draft: BackupRecordDraft,
@@ -64,6 +66,7 @@ pub async fn upsert_postgres_backup_record(
     Ok(row.try_get("id")?)
 }
 
+/// 中文说明：按文件名更新备份记录的状态、元数据和时间戳，用于下载、删除、同步等后续操作回写。
 pub async fn update_postgres_backup_record_by_filename(
     pool: &PostgresPool,
     filename: &str,
@@ -128,6 +131,7 @@ pub async fn update_postgres_backup_record_by_filename(
     Ok(affected > 0)
 }
 
+/// 中文说明：读取当前用户的备份任务配置，保持本地运行时与 Postgres 持久化任务视图一致。
 pub async fn list_postgres_backup_jobs(
     pool: &PostgresPool,
     user_id: UserId,
@@ -150,6 +154,7 @@ pub async fn list_postgres_backup_jobs(
     rows.into_iter().map(backup_job_from_row).collect()
 }
 
+/// 中文说明：创建或更新备份任务配置，同时合并任务元数据，避免覆盖调度端保留的状态字段。
 pub async fn create_or_update_postgres_backup_job(
     pool: &PostgresPool,
     user_id: UserId,
@@ -224,6 +229,7 @@ pub async fn create_or_update_postgres_backup_job(
     Ok(row.try_get("id")?)
 }
 
+/// 中文说明：尽最大努力写入备份审计日志；失败时只记录错误，不阻断主业务请求。
 pub async fn create_postgres_backup_audit_log_best_effort(
     pool: &PostgresPool,
     draft: BackupAuditLogDraft,
@@ -253,6 +259,7 @@ pub async fn create_postgres_backup_audit_log_best_effort(
     Ok(())
 }
 
+// 中文说明：把 Postgres 原始行转换为运行时备份记录，集中处理 user_id 边界转换。
 fn backup_record_from_row(row: sqlx::postgres::PgRow) -> DbResult<BackupRecordRow> {
     Ok(BackupRecordRow {
         id: row.try_get("id")?,
@@ -268,6 +275,7 @@ fn backup_record_from_row(row: sqlx::postgres::PgRow) -> DbResult<BackupRecordRo
     })
 }
 
+// 中文说明：把 Postgres 任务行转换为运行时任务结构，避免调用方重复理解列名和类型转换。
 fn backup_job_from_row(row: sqlx::postgres::PgRow) -> DbResult<BackupJobRow> {
     Ok(BackupJobRow {
         id: row.try_get("id")?,
@@ -285,6 +293,7 @@ fn backup_job_from_row(row: sqlx::postgres::PgRow) -> DbResult<BackupJobRow> {
     })
 }
 
+// 中文说明：合并备份记录/任务元数据，新值覆盖同名字段，旧值中的其他字段继续保留。
 fn merge_metadata(existing: Value, update: Value) -> Value {
     let mut existing = existing.as_object().cloned().unwrap_or_default();
     if let Some(update) = update.as_object() {
@@ -295,6 +304,7 @@ fn merge_metadata(existing: Value, update: Value) -> Value {
     Value::Object(existing)
 }
 
+// 中文说明：将领域用户 ID 安全转换为 Postgres 使用的 i64，防止超界 ID 静默截断。
 fn postgres_user_id(user_id: UserId) -> DbResult<i64> {
     i64::try_from(user_id.get()).map_err(|_| {
         DbError::InvalidOperation("user_id does not fit PostgreSQL BIGINT".to_string())

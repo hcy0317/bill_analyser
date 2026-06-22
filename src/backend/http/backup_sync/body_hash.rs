@@ -73,6 +73,7 @@ pub(super) fn sha1_hex(value: &[u8]) -> String {
     hex_lower(digest.as_ref())
 }
 
+/// 将原始字节编码为小写 hex，确保不同 provider 的签名摘要格式一致。
 pub(super) fn hex_lower(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut output = String::with_capacity(bytes.len() * 2);

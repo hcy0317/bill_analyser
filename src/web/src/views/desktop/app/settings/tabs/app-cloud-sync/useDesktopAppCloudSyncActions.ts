@@ -25,6 +25,7 @@ export interface DesktopAppCloudSyncActionState {
 export function useDesktopAppCloudSyncActions(state: DesktopAppCloudSyncActionState) {
     const userStore = useUserStore();
 
+    /** 中文说明：初始化桌面端云同步设置，加载服务端配置并同步本地选择状态。 */
     function init(): void {
         state.loading.value = true;
 
@@ -40,6 +41,7 @@ export function useDesktopAppCloudSyncActions(state: DesktopAppCloudSyncActionSt
         });
     }
 
+    /** 中文说明：桌面端启用或更新云同步配置，提交当前选择并展示 snackbar 反馈。 */
     function enable(update: boolean): void {
         state.enabling.value = true;
 
@@ -60,6 +62,7 @@ export function useDesktopAppCloudSyncActions(state: DesktopAppCloudSyncActionSt
         });
     }
 
+    /** 中文说明：桌面端禁用云同步配置，成功后清空本地选择状态并展示反馈。 */
     function disable(): void {
         state.disabling.value = true;
 

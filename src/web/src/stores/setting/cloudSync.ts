@@ -52,6 +52,7 @@ export function createSettingCloudSyncActions(runtime: SettingCloudSyncRuntime) 
         }
     }
 
+    /** 中文说明：把本地 appSettings 中的指定 key 序列化为服务端云同步 setting，过滤不支持或非法 key。 */
     function createUserApplicationCloudSetting(key: string): ApplicationCloudSetting | null {
         const settingType = ALL_ALLOWED_CLOUD_SYNC_APP_SETTING_KEY_TYPES[key];
 
@@ -211,6 +212,7 @@ export function createSettingCloudSyncActions(runtime: SettingCloudSyncRuntime) 
         }
     }
 
+    /** 中文说明：刷新本地已启用云同步的 setting key map，禁用或空数组时清空同步状态。 */
     function updateApplicationSyncSettingKeys(settingKeys?: string[]): void {
         if (!settingKeys || settingKeys.length < 1) {
             runtime.syncedAppSettings.value = {};

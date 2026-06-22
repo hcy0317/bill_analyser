@@ -4,6 +4,7 @@
 
 use super::*;
 
+/// 中文说明：解析可选 JSON 请求体，允许空 body 映射为空对象，拒绝非法 JSON。
 pub(super) fn optional_json_body(body: &Bytes) -> Result<Value, String> {
     if body.is_empty() {
         return Ok(Value::Object(Map::new()));
@@ -17,6 +18,7 @@ pub(super) fn optional_json_body(body: &Bytes) -> Result<Value, String> {
     }
 }
 
+/// 中文说明：从请求 payload 中提取云同步配置对象，兼容直接提交配置或包裹在 config 字段内的格式。
 pub(super) fn backup_sync_config_payload(payload: &Value) -> Value {
     if let Some(config) = payload.get("config").filter(|value| value.is_object()) {
         return config.clone();

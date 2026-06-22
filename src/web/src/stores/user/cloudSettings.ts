@@ -10,6 +10,7 @@ type UserCloudSettingsStore = {
 
 /** 中文说明：创建用户应用云同步设置动作，负责服务端配置读写和本地同步 key 刷新。 */
 export function createUserCloudSettingsActions(settingsStore: UserCloudSettingsStore) {
+    /** 中文说明：从服务端读取用户应用云同步设置，保留 false 结果表示服务端未启用或无配置。 */
     function getUserApplicationCloudSettings(): Promise<ApplicationCloudSetting[] | false> {
         return new Promise((resolve, reject) => {
             services.getUserApplicationCloudSettings().then(response => {
@@ -35,6 +36,7 @@ export function createUserCloudSettingsActions(settingsStore: UserCloudSettingsS
         });
     }
 
+    /** 中文说明：按当前选择的 setting key 全量覆盖服务端云同步配置，并刷新本地 synced key map。 */
     function fullUpdateUserApplicationCloudSettings(enabledSettingKeys: string[]): Promise<boolean> {
         const settings = settingsStore.createApplicationCloudSettings(enabledSettingKeys);
 
@@ -66,6 +68,7 @@ export function createUserCloudSettingsActions(settingsStore: UserCloudSettingsS
         });
     }
 
+    /** 中文说明：禁用用户应用设置云同步，并清空本地 synced key map，避免后续本地变更继续写回。 */
     function disableUserApplicationCloudSettings(): Promise<boolean> {
         return new Promise((resolve, reject) => {
             services.disableUserApplicationCloudSettings().then(response => {
