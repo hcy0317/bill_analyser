@@ -294,7 +294,6 @@ D7 `behavior-lock` 切片新增测试范围：
 - `Set-Location src/web; npm run test:coverage` 通过，94 个 suite、39003 个测试通过，coverage gate 为 99.13% lines、91.48% branches。
 - `cargo clippy --workspace --all-targets -- -D warnings` 通过。
 - `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过。
-- security-reviewer post-fix 复核结论为 `APPROVE`，`rust_skill_gate: passed`；复核确认 `backup_archive.rs` 已在 trim 前拒绝控制字符，测试覆盖 ADS、嵌入/尾随/前置控制字符和 archive summary invalid 投影，`blockers: none`。
 - `Set-Location src/web; npm run structure:check` 仍预期失败 4 项，均属于 D10 shared：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`。
 
 ## 10. Backend-shape 记录
@@ -406,3 +405,30 @@ D7 closeout 前的独立安全复核发现 `src/backend/core/ops/backup_archive.
 - `git diff --check` 通过。
 - `cargo clippy --workspace --all-targets -- -D warnings` 通过。
 - `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过。
+- security-reviewer post-fix 复核结论为 `APPROVE`，`rust_skill_gate: passed`；复核确认 `backup_archive.rs` 已在 trim 前拒绝控制字符，测试覆盖 ADS、嵌入/尾随/前置控制字符和 archive summary invalid 投影，`blockers: none`。
+
+## 15. Closeout 记录
+
+D7 backup-cloud-sync 域已完成 ledger、behavior-lock、backend-shape、frontend-shape、comment-pass、governance-docs 和 security-fix 前置修复切片，均已通过 PR CI、squash merge 并删除来源分支。closeout 不再修改运行时代码，只确认域证据完整后把进度游标推进到 D8 `llm-ocr-learning-weaviate/ledger`。
+
+PR 链路证据：
+
+- #238 `docs(backup): 建立备份云同步域结构治理边界`，merge commit `d5590ab4c313aece9af796a39b89e6dbb0573b89`。
+- #239 `test(backup): 锁定备份云同步行为合同`，merge commit `f6e09df0b80fb8c3a96fb23190b378779bbd2ca7`。
+- #240 `refactor(backup): 拆分备份云同步后端结构`，merge commit `9c2322e842b79c6012a1896105e21a63e4c1674d`。
+- #241 `refactor(backup): 拆分应用云同步前端结构`，merge commit `9c280a6d95a756c38e98d3453eb4edff4345dfe9`。
+- #242 `docs(backup): 补齐备份云同步关键函数说明`，merge commit `0ccffa4a5e18de0b945bca07689b64bd538a9048`。
+- #243 `chore(backup): 收紧备份云同步结构治理基线`，merge commit `4103372430fdcad294ccbe3171786092069e30c1`。
+- #244 `fix(backup): 拒绝不安全备份 zip 成员名`，merge commit `9bff0e67b777d836e7ecc100b57879f055779560`。
+
+关闭门禁：
+
+- Gitea Actions PR CI 均已成功；最后一个 D7 前置切片为 run #14643，`backend-ci #16482`、`frontend-ci #16483`、`repo-governance #16484` 全部通过。
+- #244 post-merge main run #14645 首次因 runner 拉取 `docker.gitea.com/runner-images:ubuntu-latest` 超时失败，rerun 后 `backend-ci #16486`、`frontend-ci #16487`、`repo-governance #16488` 全部通过。
+- 远端分支检查只返回 `refs/heads/main`，D7 七个 feature branch 均已删除。
+- `node scripts/check-rust-backend-structure.mjs` 通过，D7 `ops.rs` 与 `backup_sync.rs` 已退出 oversized baseline，当前 Rust backend baseline entries 为 6。
+- `Set-Location src/web; npm run structure:check` 仍只保留 D10 shared 四项失败：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`；D7 前端拆分未新增 failure。
+- D7 安全审查先阻塞再闭环：security-reviewer 初次复核发现 zip member 未拒绝 ADS/control char；#244 修复后 post-fix 复核结论为 `APPROVE`，`rust_skill_gate: passed`，`blockers: none`。
+- D7 行为锁定覆盖备份文件名、zip archive member、archive summary、Fernet key 派生、backup cleanup、backup job、cloud sync endpoint allowlist/SSRF 防护、provider 必填字段、secret redaction、应用设置云同步选择和 store 写回。
+
+后续游标推进到 D8 `llm-ocr-learning-weaviate/ledger`；D8 继续沿用同一套切片顺序，并因 LLM/OCR/provider/Weaviate 外部调用面继续要求 security-reviewer 证据，不得发起未授权 live external-provider 调用。
