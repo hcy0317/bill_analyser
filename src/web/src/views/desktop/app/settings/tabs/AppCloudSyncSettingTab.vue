@@ -132,8 +132,7 @@ import { ref, useTemplateRef } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
 import { useAppCloudSyncBase } from '@/views/base/settings/AppCloudSyncPageBase.ts';
-
-import { useUserStore } from '@/stores/user.ts';
+import { useDesktopAppCloudSyncActions } from './app-cloud-sync/useDesktopAppCloudSyncActions.ts';
 
 import {
     mdiDotsVertical,
@@ -165,62 +164,18 @@ const {
     setUserApplicationCloudSettings
 } = useAppCloudSyncBase();
 
-const userStore = useUserStore();
-
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
 
 const openedPanel = ref<string[]>(['synchronizedSettings']);
-
-function init(): void {
-    loading.value = true;
-
-    userStore.getUserApplicationCloudSettings().then(response => {
-        setUserApplicationCloudSettings(response);
-        loading.value = false;
-    }).catch(error => {
-        loading.value = false;
-
-        if (!error.processed) {
-            snackbar.value?.showError(error);
-        }
-    });
-}
-
-function enable(update: boolean): void {
-    enabling.value = true;
-
-    userStore.fullUpdateUserApplicationCloudSettings(enabledApplicationCloudSettingKeys.value).then(() => {
-        enabling.value = false;
-
-        if (!update) {
-            snackbar.value?.showMessage('Settings sync has been enabled');
-        } else {
-            snackbar.value?.showMessage('Synchronized settings have been updated');
-        }
-    }).catch(error => {
-        enabling.value = false;
-
-        if (!error.processed) {
-            snackbar.value?.showError(error);
-        }
-    });
-}
-
-function disable(): void {
-    disabling.value = true;
-
-    userStore.disableUserApplicationCloudSettings().then(() => {
-        enabledApplicationCloudSettings.value = {};
-        disabling.value = false;
-        snackbar.value?.showMessage('Settings sync has been disabled');
-    }).catch(error => {
-        disabling.value = false;
-
-        if (!error.processed) {
-            snackbar.value?.showError(error);
-        }
-    });
-}
+const { init, enable, disable } = useDesktopAppCloudSyncActions({
+    loading,
+    enabling,
+    disabling,
+    enabledApplicationCloudSettings,
+    enabledApplicationCloudSettingKeys,
+    snackbar,
+    setUserApplicationCloudSettings
+});
 
 init();
 </script>

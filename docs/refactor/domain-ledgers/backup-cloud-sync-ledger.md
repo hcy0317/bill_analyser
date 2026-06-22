@@ -317,3 +317,22 @@ D7 `backend-shape` 切片完成后端备份与云同步结构拆分：
 - `git diff --check` 通过。
 - `cargo clippy --workspace --all-targets -- -D warnings` 通过。
 - `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过。
+
+## 11. Frontend-shape 记录
+
+D7 `frontend-shape` 切片完成应用设置云同步前端结构拆分：
+
+- `src/web/src/views/base/settings/AppCloudSyncPageBase.ts` 改为 shared facade，原 `ALL_APPLICATION_CLOUD_SETTINGS` 和 `useAppCloudSyncBase` 导出保持不变；catalog/type 下沉到 `src/web/src/views/base/settings/app-cloud-sync/cloudSettingCatalog.ts`，选择状态、全选/全不选/反选、分类半选和服务端 settings 应用逻辑下沉到 `useAppCloudSyncSelection.ts`。
+- 桌面 `AppCloudSyncSettingTab.vue` 保留 template、style、按钮文案和原路由入口；加载、启用/更新、禁用和 snackbar 成功/错误投影下沉到 `src/web/src/views/desktop/app/settings/tabs/app-cloud-sync/useDesktopAppCloudSyncActions.ts`。
+- 移动 `ApplicationCloudSyncSettingsPage.vue` 保留 Framework7 template、style、路由和现有视觉布局；加载、启用/更新、禁用、toast、loading overlay 和 `routeBackOnError` 下沉到 `src/web/src/views/mobile/settings/app-cloud-sync/useMobileAppCloudSyncActions.ts`。
+- `src/web/src/stores/setting.ts` 保留 Pinia store 导出名与 action 名；应用设置云同步序列化、云端 setting 反序列化、增量写回和 synced key map helper 下沉到 `src/web/src/stores/setting/cloudSync.ts`。
+- 新增 `tests/web/stores/settingCloudSync.test.ts` 锁定 cloud sync helper 合同：enabled map 判定、root/nested setting 序列化、typed value 应用、synced key map 和仅已启用 key 才增量写回。
+- 新增功能文件体量：`cloudSettingCatalog.ts` 93 行、`useAppCloudSyncSelection.ts` 108 行、桌面 action 68 行、移动 action 81 行、`stores/setting/cloudSync.ts` 190 行；原 facade 文件明显缩小且未新增 D7 前端 structure failure。
+- 行为保持不变：按钮文案、禁用状态、桌面/移动路由、catalog key 集合、全选/全不选/反选、分类半选、settings store action 名、full update payload、disable 清空 synced key、toast/snackbar 文案和现有视觉布局均沿用 behavior-lock 测试锚点。
+
+本切片本地验证记录：
+
+- `Set-Location src/web; npm run test -- --runTestsByPath ../../tests/web/views/base/settings/appCloudSyncPageBase.test.ts ../../tests/web/stores/user.test.ts ../../tests/web/stores/settingCloudSync.test.ts` 通过，3 个 suite、18 个测试全部通过。
+- `Set-Location src/web; npm run lint:ci` 通过，保留历史 `no-explicit-any` warnings，无 errors。
+- `Set-Location src/web; npm run test:coverage` 通过，95 个 suite、39007 个测试通过，coverage gate 为 99.13% lines、91.48% branches。
+- `Set-Location src/web; npm run structure:check` 仍预期失败 4 项，均属于 D10 shared：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`；D7 前端入口未新增 failure。

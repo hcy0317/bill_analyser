@@ -88,21 +88,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
 import type { Router } from 'framework7/types';
 
 import { useI18n } from '@/locales/helpers.ts';
-import { useI18nUIComponents, showLoading, hideLoading } from '@/lib/ui/mobile.ts';
 import { useAppCloudSyncBase } from '@/views/base/settings/AppCloudSyncPageBase.ts';
-
-import { useUserStore } from '@/stores/user.ts';
+import { useMobileAppCloudSyncActions } from './app-cloud-sync/useMobileAppCloudSyncActions.ts';
 
 const props = defineProps<{
     f7router: Router.Router;
 }>();
 
 const { tt } = useI18n();
-const { showToast, routeBackOnError } = useI18nUIComponents();
 const {
     ALL_APPLICATION_CLOUD_SETTINGS,
     loading,
@@ -121,72 +117,21 @@ const {
     setUserApplicationCloudSettings
 } = useAppCloudSyncBase();
 
-const userStore = useUserStore();
-
-const loadingError = ref<unknown | null>(null);
-const showMoreActionSheet = ref<boolean>(false);
-
-function init(): void {
-    loading.value = true;
-
-    userStore.getUserApplicationCloudSettings().then(response => {
-        setUserApplicationCloudSettings(response);
-        loading.value = false;
-    }).catch(error => {
-        if (error.processed) {
-            loading.value = false;
-        } else {
-            loadingError.value = error;
-            showToast(error.message || error);
-        }
-    });
-}
-
-function enable(update: boolean): void {
-    enabling.value = true;
-    showLoading(() => enabling.value);
-
-    userStore.fullUpdateUserApplicationCloudSettings(enabledApplicationCloudSettingKeys.value).then(() => {
-        enabling.value = false;
-        hideLoading();
-
-        if (!update) {
-            showToast('Settings sync has been enabled');
-        } else {
-            showToast('Synchronized settings have been updated');
-        }
-    }).catch(error => {
-        enabling.value = false;
-        hideLoading();
-
-        if (!error.processed) {
-            showToast(error.message || error);
-        }
-    });
-}
-
-function disable(): void {
-    disabling.value = true;
-    showLoading(() => disabling.value);
-
-    userStore.disableUserApplicationCloudSettings().then(() => {
-        enabledApplicationCloudSettings.value = {};
-        disabling.value = false;
-        hideLoading();
-        showToast('Settings sync has been disabled');
-    }).catch(error => {
-        disabling.value = false;
-        hideLoading();
-
-        if (!error.processed) {
-            showToast(error.message || error);
-        }
-    });
-}
-
-function onPageAfterIn(): void {
-    routeBackOnError(props.f7router, loadingError);
-}
+const {
+    showMoreActionSheet,
+    init,
+    enable,
+    disable,
+    onPageAfterIn
+} = useMobileAppCloudSyncActions({
+    loading,
+    enabling,
+    disabling,
+    enabledApplicationCloudSettings,
+    enabledApplicationCloudSettingKeys,
+    f7router: props.f7router,
+    setUserApplicationCloudSettings
+});
 
 init();
 </script>

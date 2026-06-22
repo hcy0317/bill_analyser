@@ -2,27 +2,10 @@ import { ref, computed } from 'vue';
 import { defineStore } from 'pinia';
 
 import {
-    values
-} from '@/core/base.ts';
-
-import {
-    type ApplicationSettingValue,
-    type ApplicationSettingSubValue,
     type ApplicationSettings,
-    type ApplicationCloudSetting,
     type LocaleDefaultSettings,
-    UserApplicationCloudSettingType,
-    ALL_ALLOWED_CLOUD_SYNC_APP_SETTING_KEY_TYPES
 } from '@/core/setting.ts';
 import { normalizeThemePreference } from '@/core/theme.ts';
-
-import {
-    isObject,
-    isString,
-    isBoolean,
-    getObjectOwnFieldCount,
-    arrayItemToObjectField
-} from '@/lib/common.ts';
 
 import {
     getApplicationSettings,
@@ -32,102 +15,23 @@ import {
     clearSettings
 } from '@/lib/settings.ts';
 
-import logger from '@/lib/logger.ts';
-import services from '@/lib/services.ts';
+import {
+    createSettingCloudSyncActions,
+    hasEnabledApplicationCloudSync
+} from './setting/cloudSync.ts';
 
 export const useSettingsStore = defineStore('settings', () => {
     const appSettings = ref<ApplicationSettings>(getApplicationSettings());
     const syncedAppSettings = ref<Record<string, boolean>>({});
     const localeDefaultSettings = ref<LocaleDefaultSettings>(getLocaleDefaultSettings());
 
-    const enableApplicationCloudSync = computed<boolean>(() => getObjectOwnFieldCount(syncedAppSettings.value) > 0);
-
-    function updateApplicationSettingsValueAndAppSettingsFromCloudSetting(key: string, value: string | number | boolean | Record<string, boolean>): void {
-        const keyItems = key.split('.');
-        const keyFirstPart = keyItems[0] as string;
-
-        if (keyItems.length === 1) {
-            updateApplicationSettingsValue(keyFirstPart, value);
-            appSettings.value[keyFirstPart] = value;
-        } else if (keyItems.length === 2) {
-            const subKey = keyItems[1] as string;
-            updateApplicationSettingsSubValue(keyFirstPart, subKey, value);
-            (appSettings.value[keyFirstPart] as Record<string, ApplicationSettingSubValue>)[subKey] = value;
-        } else {
-            logger.warn(`cannot load application cloud setting "${key}", because it has invalid key format`);
-        }
-    }
-
-    function createUserApplicationCloudSetting(key: string): ApplicationCloudSetting | null {
-        const settingType = ALL_ALLOWED_CLOUD_SYNC_APP_SETTING_KEY_TYPES[key];
-
-        if (!settingType) {
-            logger.warn(`cannot get application cloud setting "${key}", because it is not supported to sync`);
-            return null;
-        }
-
-        const keyItems = key.split('.');
-        let value: ApplicationSettingValue | ApplicationSettingSubValue = appSettings.value[key] as (ApplicationSettingValue | ApplicationSettingSubValue);
-
-        if (keyItems.length === 2) {
-            const primaryKey = keyItems[0] as string;
-            const subKey = keyItems[1] as string;
-            value = (appSettings.value[primaryKey] as Record<string, ApplicationSettingSubValue>)[subKey] as ApplicationSettingSubValue;
-        } else if (keyItems.length > 2) {
-            logger.warn(`cannot get application cloud setting "${key}", because it has invalid key format`);
-            return null;
-        }
-
-        let settingValue = '';
-
-        if (settingType === UserApplicationCloudSettingType.String) {
-            if (!value) {
-                settingValue = '';
-            } else {
-                settingValue = value.toString();
-            }
-        } else {
-            settingValue = JSON.stringify(value);
-        }
-
-        return {
-            settingKey: key,
-            settingValue: settingValue
-        };
-    }
-
-    function updateUserApplicationCloudSettingValue(key: string, value: string | number | boolean | Record<string, boolean>): void {
-        if (!syncedAppSettings.value || !syncedAppSettings.value[key]) {
-            return;
-        }
-
-        const settingType = ALL_ALLOWED_CLOUD_SYNC_APP_SETTING_KEY_TYPES[key];
-
-        if (!settingType) {
-            return;
-        }
-
-        const settingValue = isString(value) ? value : JSON.stringify(value);
-
-        services.updateUserApplicationCloudSettings({
-            settings: [{
-                settingKey: key,
-                settingValue: settingValue
-            }],
-            fullUpdate: false
-        }).then(response => {
-            const data = response.data;
-
-            if (!data || !data.success || !data.result) {
-                logger.debug(`failed to update user application cloud setting "${key}" with value "${settingValue}"`);
-                return;
-            }
-
-            logger.debug(`update user application cloud setting "${key}" with value "${settingValue}" successfully`);
-        }).catch(error => {
-            logger.debug(`failed to update user application cloud setting "${key}" with value "${settingValue}"`, error);
-        });
-    }
+    const enableApplicationCloudSync = computed<boolean>(() => hasEnabledApplicationCloudSync(syncedAppSettings.value));
+    const {
+        updateUserApplicationCloudSettingValue,
+        createApplicationCloudSettings,
+        setApplicationSettingsFromCloudSettings,
+        updateApplicationSyncSettingKeys
+    } = createSettingCloudSyncActions({ appSettings, syncedAppSettings });
 
     // 基础设置
     function setTheme(value: string): void {
@@ -332,99 +236,6 @@ export const useSettingsStore = defineStore('settings', () => {
     function clearAppSettings(): void {
         clearSettings();
         appSettings.value = getApplicationSettings();
-    }
-
-    function createApplicationCloudSettings(applicationSettingKeys: string[]): ApplicationCloudSetting[] {
-        if (!applicationSettingKeys || applicationSettingKeys.length < 1) {
-            return [];
-        }
-
-        const settings: ApplicationCloudSetting[] = [];
-
-        for (const settingKey of applicationSettingKeys) {
-            const cloudSetting = createUserApplicationCloudSetting(settingKey);
-
-            if (cloudSetting) {
-                settings.push(cloudSetting);
-            }
-        }
-
-        return settings;
-    }
-
-    function setApplicationSettingsFromCloudSettings(cloudSettings?: ApplicationCloudSetting[]): void {
-        if (!cloudSettings || cloudSettings.length < 1) {
-            syncedAppSettings.value = {};
-            return;
-        }
-
-        syncedAppSettings.value = arrayItemToObjectField(cloudSettings.map(item => item.settingKey), true);
-
-        for (const setting of cloudSettings) {
-            if (!setting || !setting.settingKey) {
-                continue;
-            }
-
-            const settingType = ALL_ALLOWED_CLOUD_SYNC_APP_SETTING_KEY_TYPES[setting.settingKey];
-
-            if (!settingType) {
-                logger.warn(`cannot load application cloud setting "${setting.settingKey}", because it is not supported to sync`);
-                continue;
-            }
-
-            if (settingType === UserApplicationCloudSettingType.String) {
-                updateApplicationSettingsValueAndAppSettingsFromCloudSetting(setting.settingKey, setting.settingValue);
-            } else if (settingType === UserApplicationCloudSettingType.Number) {
-                const value = parseFloat(setting.settingValue);
-
-                if (isNaN(value)) {
-                    logger.warn(`cannot load application cloud setting "${setting.settingKey}", because it has invalid number value`);
-                    continue;
-                }
-
-                updateApplicationSettingsValueAndAppSettingsFromCloudSetting(setting.settingKey, value);
-            } else if (settingType === UserApplicationCloudSettingType.Boolean) {
-                if (setting.settingValue !== 'true' && setting.settingValue !== 'false') {
-                    logger.warn(`cannot load application cloud setting "${setting.settingKey}", because it has invalid boolean value`);
-                    continue;
-                }
-
-                updateApplicationSettingsValueAndAppSettingsFromCloudSetting(setting.settingKey, setting.settingValue === 'true');
-            } else if (settingType === UserApplicationCloudSettingType.StringBooleanMap) {
-                try {
-                    const map = JSON.parse(setting.settingValue);
-                    let isValid = isObject(map);
-
-                    if (isValid) {
-                        for (const value of values(map)) {
-                            if (!isBoolean(value)) {
-                                isValid = false;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (!isValid) {
-                        logger.warn(`cannot load application cloud setting "${setting.settingKey}", because it has invalid map value`);
-                        continue;
-                    }
-
-                    updateApplicationSettingsValueAndAppSettingsFromCloudSetting(setting.settingKey, map as Record<string, boolean>);
-                } catch (error) {
-                    logger.warn(`cannot load application cloud setting "${setting.settingKey}", because cannot parse JSON (${error})`);
-                }
-            } else {
-                logger.warn(`cannot load application cloud setting "${setting.settingKey}", because it has unknown type "${settingType}"`);
-            }
-        }
-    }
-
-    function updateApplicationSyncSettingKeys(settingKeys?: string[]): void {
-        if (!settingKeys || settingKeys.length < 1) {
-            syncedAppSettings.value = {};
-        } else {
-            syncedAppSettings.value = arrayItemToObjectField(settingKeys, true);
-        }
     }
 
     function updateLocalizedDefaultSettings(newLocaleDefaultSettings: LocaleDefaultSettings | null) {

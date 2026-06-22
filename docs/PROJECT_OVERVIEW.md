@@ -94,6 +94,8 @@ multipart 上传并行执行 dedicated parser 检测，每个文件必须且只�
 
 备份与云同步后端当前以 facade + 功能子文件组织：`src/backend/core/ops.rs` 保留备份/用户数据/报表/同步合同 facade，文件名、archive、cleanup、job、crypto、user-data、backup sync 和 report export 规则下沉到 `src/backend/core/ops/**`；`src/backend/http/backup_sync.rs` 保留云上传 facade，config、endpoint 防 SSRF、hash/signing 和 WebDAV/OSS/S3/COS/Azure provider 上传下沉到 `src/backend/http/backup_sync/**`。该拆分不改变 REST route、公开导出名、文件安全、Fernet key 派生、endpoint allowlist、provider 签名、secret redaction 或 backup audit 语义。
 
+应用设置云同步前端当前以 facade + 功能文件夹组织：`AppCloudSyncPageBase.ts` 保留 shared base 入口，catalog 与选择状态下沉到 `views/base/settings/app-cloud-sync/**`；桌面 `AppCloudSyncSettingTab.vue` 与移动 `ApplicationCloudSyncSettingsPage.vue` 保留模板和路由入口，加载、启用/更新、禁用、toast/snackbar 处理分别下沉到相邻 `app-cloud-sync/**` action composable；`stores/setting.ts` 保留 Pinia 导出名，应用设置云同步序列化、反序列化、增量写回和 synced key map helper 下沉到 `stores/setting/cloudSync.ts`。该拆分不改变按钮文案、禁用状态、selection 行为、store action 名、路由或现有视觉布局。
+
 ## LLM/OCR
 
 LLM 临时配置保存在 Rust 进程内 user-scoped map，saved config、候选项、memory event 与 annotation sample 由 PostgreSQL 迁移表承载并按 API key 规则脱敏。provider 生成保留 allowlist/SSRF 防护、响应体上限、候选截断和 rate limit。OCR recognition 默认 disabled，配置后可通过 Tesseract、本地 JSON OCR 或 LLM vision provider 返回结构化交易草稿。
