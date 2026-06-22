@@ -418,3 +418,35 @@ D8 `governance-docs` 切片收紧 LLM/OCR、导入学习、学习中心与 Weavi
 - `node scripts/check-backend-doc-map.mjs` 通过。
 - `git diff --check` 通过。
 - 本切片没有发起 live external-provider 调用；验证范围为治理脚本、文档地图和结构 baseline。
+
+## 14. Closeout 记录
+
+D8 `llm-ocr-learning-weaviate` 域已按功能域切片完成关闭，覆盖 ledger、behavior-lock、backend-shape、frontend-shape、comment-pass、governance-docs 与本 closeout 记录。
+
+本域 PR 链路：
+
+- PR #246 `docs(learning): 建立 LLM OCR 学习向量域治理边界`：建立 D8 ledger、owned path、非覆盖边界与验收门槛；PR CI #14649 和 post-merge main CI #14651 通过，squash merge 为 `c074e171f3d433c3ba0b32e452d50807373aa78d`。
+- PR #247 `test(learning): 锁定 LLM 学习中心行为合同`：锁定 provider/OCR/learning/Weaviate 行为合同；PR CI #14652 和 post-merge main CI #14653 通过，squash merge 为 `3b04a4fbae7870bfa29dc119b9dc9cf5037d0064`。
+- PR #248 `refactor(learning): 拆分 LLM OCR 学习后端结构`：拆分 `multipart_and_ocr.rs`、`import_learning.rs`、`db/llm.rs` 为 facade + 功能子文件；PR CI #14655 和 post-merge main CI #14657 通过，squash merge 为 `6a10c4a4f44bd2b72f82afbee2b9aa27504e2708`。
+- PR #249 `refactor(learning): 拆分 LLM OCR 学习前端结构`：拆分 `LearningCenterPanel.vue`、`OcrConfigPanel.vue` 与 `llmConfigHelpers.ts` 为 facade + 功能文件夹；PR CI #14659 和 post-merge main CI #14660 通过，squash merge 为 `f96d031f632db34009cefc918af02e8f5f4a1ce9`。
+- PR #250 `docs(learning): 补齐 LLM OCR 学习域中文说明`：按用户注释标准补齐 D8 导出函数、业务关键函数与复杂私有 helper 的中文说明；PR CI #14662 和 post-merge main CI #14664 通过，squash merge 为 `87fe8956e51055540ffcb48489ba6c0f7608cac0`。
+- PR #251 `chore(learning): 收紧 LLM OCR 学习域结构治理基线`：删除 D8 已健康化文件的历史 structure baseline 豁免并同步架构文档；PR CI #14665 和 post-merge main CI #14666 通过，squash merge 为 `72e041a124d2c691e473338d2a5384f2a118eb54`。
+
+D8 验收结果：
+
+- D8 后端直接 oversized baseline 已清零：`src/backend/http/import_routes/multipart_and_ocr.rs`、`src/backend/core/import_learning.rs`、`src/backend/db/llm.rs` 均低于 600 行 warning 线，并从 Rust backend structure baseline 删除。
+- D8 前端直接 oversized baseline 已清零：`LearningCenterPanel.vue` 低于 frontend structure warning 线，并从 frontend structure baseline 删除。
+- `Set-Location src/web; npm run structure:check` 仍只允许并保留 D10 shared 四项失败：`src/lib/services.ts`、`src/stores/index.ts`、`src/core/theme.ts`、`src/models/imported_transaction.ts`；D8 不吸收这些 shared debt。
+- D8 行为合同覆盖 provider config、provider auth refresh、secret redaction、OCR draft/provenance、LLM preview memory、import learning lifecycle、LLM DB candidate/config、vector outbox、Weaviate health/outbox/rebuild 与学习中心前端 helper。
+- 注释标准已执行：导出函数、业务关键函数、复杂私有 helper 已补中文说明；简单 getter、默认映射和事件转发不强制。
+- 本域未修改 REST route、SQL schema、PostgreSQL user-scope、provider SSRF/secret redaction、learning lifecycle、Weaviate authority、金额合同或 UI 视觉布局；验证未发起 live external-provider 调用。
+
+后续边界：
+
+- D9 继续处理 parser/source normalization，不复用 D8 的 OCR/LLM 外部 provider 边界作为 parser-first 主链。
+- D10 处理 shared shell/final sweep，包含 services/store/theme/imported_transaction 等当前仍由 frontend structure gate 报告的 shared debt。
+
+本 closeout 切片本地验证记录：
+
+- `node scripts/check-backend-doc-map.mjs` 通过。
+- `git diff --check` 通过。
