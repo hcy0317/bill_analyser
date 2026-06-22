@@ -127,6 +127,90 @@ fn standard_bill_json_round_trip_matches_existing_keys() {
 }
 
 #[test]
+fn standard_bill_from_json_value_covers_compat_scalar_edges() {
+    let bill = StandardBill::from_json_value(&json!({
+        "date": true,
+        "amount": 45.67,
+        "description": 12345,
+        "source_account_id": 123,
+        "payment_method": "信用卡",
+        "counterparty": false,
+        "status": true
+    }));
+
+    assert_eq!(bill.date, "true");
+    assert_eq!(bill.amount.to_yuan_string(), "45.67");
+    assert_eq!(bill.transaction_type, "支出");
+    assert_eq!(bill.description, "12345");
+    assert_eq!(bill.source_account_id, "123");
+    assert_eq!(bill.counterparty, "false");
+    assert_eq!(bill.status, "true");
+    assert_eq!(bill.parser_tags, ["parser:123", "channel:credit_card"]);
+}
+
+#[test]
+fn standard_bill_serde_deserializes_current_amount_compat_shapes() {
+    let bill: StandardBill = serde_json::from_value(json!({
+        "date": "2026-03-28 00:00:00",
+        "amount": "$1,234.50",
+        "type": "收入",
+        "description": "工资",
+        "source_account_id": "icbc",
+        "counterparty": "公司",
+        "payment_method": "储蓄卡",
+        "parser_tags": ["parser:icbc", "channel:bank"],
+        "original_type": "收入",
+        "original_category": "工资",
+        "transaction_id": "txn-1",
+        "merchant_id": "merchant-1",
+        "status": "success",
+        "main_category": "",
+        "sub_category": ""
+    }))
+    .unwrap();
+    assert_eq!(bill.amount.to_yuan_string(), "1234.50");
+
+    let zero_amount: StandardBill = serde_json::from_value(json!({
+        "date": "2026-03-28 00:00:00",
+        "amount": null,
+        "type": "支出",
+        "description": "空金额兼容",
+        "source_account_id": "wechat",
+        "counterparty": "",
+        "payment_method": "零钱",
+        "parser_tags": [],
+        "original_type": "",
+        "original_category": "",
+        "transaction_id": "",
+        "merchant_id": "",
+        "status": "",
+        "main_category": "",
+        "sub_category": ""
+    }))
+    .unwrap();
+    assert_eq!(zero_amount.amount.to_cents(), 0);
+
+    let invalid = serde_json::from_value::<StandardBill>(json!({
+        "date": "2026-03-28 00:00:00",
+        "amount": [],
+        "type": "支出",
+        "description": "非法金额",
+        "source_account_id": "wechat",
+        "counterparty": "",
+        "payment_method": "零钱",
+        "parser_tags": [],
+        "original_type": "",
+        "original_category": "",
+        "transaction_id": "",
+        "merchant_id": "",
+        "status": "",
+        "main_category": "",
+        "sub_category": ""
+    }));
+    assert!(invalid.is_err());
+}
+
+#[test]
 fn base_normalization_matches_current_parser_helpers() {
     let mut raw = RawBill {
         date: "2026/01/02".to_string(),

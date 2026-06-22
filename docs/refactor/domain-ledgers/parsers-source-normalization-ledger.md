@@ -22,11 +22,13 @@ D9 不覆盖：
 
 ## 2. 当前结构快照
 
-- `src/backend/parsers/lib.rs` 当前 578 行，是 parser crate 的 public facade，同时仍承载 `ParserInfo` registry、`RawBill`/`StandardBill` DTO、tag/type/amount/description helper 与 `post_process_raw_bills`。
-- `src/backend/parsers/dedicated/mod.rs` 当前 394 行，承载 source parser registry、auto filename/content hint、requested parser 分支、match selection、decision/candidate/evidence DTO 和单元测试。
-- `src/backend/parsers/dedicated/common.rs` 当前 329 行，承载 CSV/Excel/HTML 表格读取和通用 source-local helper。
+- `src/backend/parsers/lib.rs` 当前 25 行，是 parser crate 的 public facade，只声明功能子文件并 re-export 既有 public API。
+- `src/backend/parsers/{types,registry,tags,normalization,post_process,money_serde}.rs` 分别承载 `ParserInfo`/`RawBill`/`StandardBill` DTO、稳定 registry/source label、parser tag 归一、类型/金额归一、RawBill 到 StandardBill post-process 和 parser JSON 金额 serde 边界。
+- `src/backend/parsers/dedicated/mod.rs` 当前 32 行，是 dedicated dispatcher facade，只声明来源 parser 与选择子文件并 re-export 既有 public API。
+- `src/backend/parsers/dedicated/{registry,hints,selection,evidence,types}.rs` 分别承载 source parser registry、filename/content hint、requested/auto selection、candidate evidence 和 decision/result DTO。
+- `src/backend/parsers/dedicated/common.rs` 当前 329 行，继续承载 CSV/Excel/HTML 表格读取和通用 source-local helper；本切片未进一步拆分，因为当前结构 gate 通过且 helper 仍服务单一 source-local 读取职责。
 - 各 dedicated source parser 当前为小文件：Alipay 78 行、WeChat 113 行、ICBC 132 行、ABC 130 行、CCB 99 行、CMBC 149 行。
-- `tests/backend/parsers/parser_contracts.rs` 当前 509 行，是 D9 behavior-lock 的主要锚点，已覆盖 registry、source split、golden contracts、fixtures、exactly-one detection、conflict/no_match 和 source-local edge cases。
+- `tests/backend/parsers/parser_contracts.rs` 当前 694 行，是 D9 behavior-lock/backend-shape 的主要锚点，已覆盖 registry、source split、golden contracts、fixtures、StandardBill JSON/serde 兼容、exactly-one detection、conflict/no_match 和 source-local edge cases。
 - 当前 `node scripts/check-rust-backend-structure.mjs` 通过，D9 没有进入 Rust backend oversized baseline；后续 backend-shape 的目标是降低 facade 职责密度，而不是为了修复现有 structure gate failure。
 
 ## 3. 行为不变式
@@ -89,3 +91,25 @@ D9 `behavior-lock` 切片补强 `tests/backend/parsers/parser_contracts.rs`，�
 - `node scripts/check-rust-backend-structure.mjs` 通过。
 - `node scripts/check-backend-doc-map.mjs` 通过。
 - `git diff --check` 通过。
+
+## 8. Backend-shape 记录
+
+D9 `backend-shape` 切片把 parser/source normalization 后端拆成 facade + 功能子文件，保持导出名、parser registry 顺序、dedicated exactly-one/no_match/conflict 决策、金额元/分兼容边界、日期标准化和导入 staging 前 `StandardBill` 合同不变。
+
+本切片结构变化：
+
+- `src/backend/parsers/lib.rs` 从混合 facade/DTO/helper 收敛为 public facade，`types.rs`、`registry.rs`、`tags.rs`、`normalization.rs`、`post_process.rs` 与 `money_serde.rs` 分别承接 DTO、注册表、tag、归一化、post-process 和金额 serde 职责。
+- `src/backend/parsers/dedicated/mod.rs` 从 dispatcher 混合文件收敛为 facade，`dedicated/registry.rs`、`hints.rs`、`selection.rs`、`evidence.rs` 与 `types.rs` 分别承接来源 parser 注册、自动检测 hint、选择流程、候选证据和选择 DTO。
+- 新增和迁移的导出函数、业务关键函数和复杂私有 helper 已补中文说明；简单 DTO 字段和直通 re-export 不强制逐项注释。
+
+本切片本地验证记录：
+
+- `cargo fmt --all` 已执行。
+- `cargo fmt --all -- --check` 通过。
+- `cargo test -p bill-analyser-parsers --test parser_contracts` 通过，19 个 parser 合同测试全部通过。
+- `cargo clippy --workspace --all-targets -- -D warnings` 通过。
+- `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 通过，完整 Rust 工作区 coverage gate 生成 `workspace.lcov`。
+- `node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .omx\ultragoal\evidence\d9-backend-shape-parser.diff --threshold 90` 通过，parser 源码 diff-line coverage 为 96.63%。
+- `node scripts/check-rust-backend-structure.mjs` 通过，507 个 Rust backend 文件仍只保留 3 个既有 baseline entry。
+- `node scripts/check-backend-doc-map.mjs` 通过。
+- `git diff --check` 通过，仅输出 Windows 换行提示。
