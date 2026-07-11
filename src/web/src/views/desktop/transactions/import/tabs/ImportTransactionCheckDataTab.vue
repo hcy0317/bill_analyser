@@ -880,6 +880,8 @@ import { useI18n } from '@/locales/helpers.ts';
 import {
     buildImportPreviewHistoryRewriteOperationAcknowledgement,
     buildImportPreviewSignalViewModel,
+    IMPORT_PREVIEW_VISIBLE_SIGNAL_FILTERS,
+    normalizeImportPreviewSignalStatusAlias,
     type ImportCheckMatchingSourceContext,
     type ImportPreviewHistoryRewriteAcknowledgementOperation,
     type ImportPreviewSignalStatus,
@@ -984,6 +986,57 @@ type ImportLearningSuggestionDialogType = InstanceType<typeof ImportLearningSugg
 type CategoryEditDialogType = InstanceType<typeof CategoryEditDialog>;
 type AccountEditDialogType = InstanceType<typeof AccountEditDialog>;
 
+const importPreviewEditableDraftKeys = [
+    'selected',
+    'type',
+    'categoryId',
+    'sourceAmountCents',
+    'destinationAmountCents',
+    'sourceAccountId',
+    'destinationAccountId',
+    'tagIds',
+    'counterparty',
+    'paymentMethod',
+    'comment',
+    'isManuallyAnnotated',
+    'recurringTemplateId',
+    'recurringTemplateName',
+    'recurringCandidateCount',
+    'recurringMatchScore',
+    'recurringMatchReasons',
+    'recurringMatchedDate'
+] as const;
+
+type ImportPreviewEditableDraftKey = typeof importPreviewEditableDraftKeys[number];
+type ImportPreviewEditableDraftValue = string | number | boolean | string[];
+type ImportPreviewEditableDraftState = Record<ImportPreviewEditableDraftKey, ImportPreviewEditableDraftValue>;
+
+function resolveSignalStatusAuthority(...values: unknown[]): {
+    status: ImportPreviewSignalStatus | string | null | undefined;
+    authoritative: boolean;
+} {
+    const status = normalizeImportPreviewSignalStatusAlias(...values);
+    if (status !== null) {
+        return { status, authoritative: true };
+    }
+
+    const hasExplicitNull = values.some(value => value === null);
+    return {
+        status: hasExplicitNull ? null : undefined,
+        authoritative: hasExplicitNull
+    };
+}
+
+function serializeSignalCacheValue(value: unknown): string {
+    if (value === null) {
+        return '<null>';
+    }
+    if (typeof value === 'undefined') {
+        return '<undefined>';
+    }
+    return String(value);
+}
+
 const props = defineProps<{
     importTransactions?: ImportTransaction[]
     disabled?: boolean;
@@ -1060,6 +1113,7 @@ const tableSortBy = ref<PreviewTableSortItem[]>([]);
 const currentSortKey = ref<string>('');
 const currentSortDirection = ref<PreviewTableSortDirection>('asc');
 const serverPagedDrafts = ref<Map<number, ImportTransaction>>(new Map());
+const serverPagedDraftBaselines = ref<Map<number, ImportPreviewEditableDraftState>>(new Map());
 const serverPagedSelectionBaselines = ref<Map<number, {
     selected: boolean;
     invalid: boolean;
@@ -1086,8 +1140,47 @@ const isMatchingDecisionBusy = computed<boolean>(() => transferDecisionLoadingId
     || llmDecisionLoadingIds.value.length > 0
     || recurringDecisionLoadingIds.value.length > 0);
 const llmSessionSignalMemory = ref<Map<number, LLMSignalMemoryState>>(new Map());
+const localLLMSignalTombstonePreviewIds = new Set<number>();
+const serverAuthoritativeLLMPreviewIds = new Set<number>();
+const llmMemoryAppliedPreviewIds = new Set<number>();
+const observedLLMTransactionByPreviewId = new Map<number, ImportTransaction>();
 const serverPagedMode = computed<boolean>(() => !!props.serverPaged && !!props.sessionId);
 const importTransactions = computed<ImportTransaction[]>(() => props.importTransactions || []);
+
+function hasCurrentV2PreviewSignalProtocol(metadata: ImportPreviewMetadata | null | undefined): boolean {
+    const signalCounts = metadata?.counts?.signals;
+    if (!signalCounts) {
+        return false;
+    }
+
+    for (const family of IMPORT_PREVIEW_VISIBLE_SIGNAL_FILTERS) {
+        if (!Object.prototype.hasOwnProperty.call(signalCounts, family)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function recordCurrentV2ServerLLMAuthority(
+    transactions: ImportTransaction[],
+    metadata: ImportPreviewMetadata | null | undefined
+): void {
+    if (!hasCurrentV2PreviewSignalProtocol(metadata)) {
+        return;
+    }
+
+    for (const transaction of transactions) {
+        const previewId = getPreviewId(transaction);
+        if (previewId !== null) {
+            if (llmMemoryAppliedPreviewIds.has(previewId)) {
+                clearLLMRecommendationState(transaction, false);
+                llmMemoryAppliedPreviewIds.delete(previewId);
+            }
+            serverAuthoritativeLLMPreviewIds.add(previewId);
+        }
+    }
+}
+
 const totalImportTransactionCount = computed<number>(() => serverPagedMode.value
     ? Math.max(props.totalImportTransactionCount || 0, 0)
     : importTransactions.value.length);
@@ -1577,8 +1670,8 @@ function buildTransferDecisionBaseline(item: ImportTransaction): TransferDecisio
         recurringMatchReasons: item.recurringMatchReasons || '',
         recurringMatchedDate: item.recurringMatchedDate || '',
         reviewStatus: item.getTransferSuggestionReviewStatus(),
-        reviewedType: item.matching?.transfer.reviewed_type || '',
-        suppressed: !!item.matching?.transfer.suppressed
+        reviewedType: item.matching?.transfer?.reviewed_type || '',
+        suppressed: !!item.matching?.transfer?.suppressed
     };
 }
 
@@ -1656,7 +1749,7 @@ function clearLearningRecommendationState(item: ImportTransaction): void {
     syncLearningDecisionBaseline(item);
 }
 
-function clearLLMRecommendationState(item: ImportTransaction): void {
+function clearLLMRecommendationState(item: ImportTransaction, rememberTombstone: boolean = true): void {
     const llmPayload = ensureLLMMatchingPayload(item);
     llmPayload.suggested_type = '';
     llmPayload.suggested_category_id = undefined;
@@ -1668,7 +1761,31 @@ function clearLLMRecommendationState(item: ImportTransaction): void {
     llmPayload.reason = '';
     llmPayload.review_status = '';
     llmPayload.suppressed = false;
+    const previewId = getPreviewId(item);
+    if (previewId !== null && rememberTombstone) {
+        localLLMSignalTombstonePreviewIds.add(previewId);
+        const nextMemory = new Map(llmSessionSignalMemory.value);
+        nextMemory.set(previewId, createLLMSignalMemoryTombstone());
+        llmSessionSignalMemory.value = nextMemory;
+    }
+    if (previewId !== null) {
+        llmMemoryAppliedPreviewIds.delete(previewId);
+    }
     updateTransactionData(item);
+}
+
+function createLLMSignalMemoryTombstone(): LLMSignalMemoryState {
+    return {
+        reviewStatus: '',
+        suppressed: false,
+        tombstone: true,
+        suggestedMainCategory: '',
+        suggestedSubCategory: '',
+        suggestedSourceAccount: '',
+        suggestedDestinationAccount: '',
+        confidence: 0,
+        reason: ''
+    };
 }
 
 function syncLearningCandidateFromSessionCandidate(item: ImportTransaction, candidate: MatchingSessionCandidateItem): void {
@@ -1752,20 +1869,6 @@ function getLLMSignalStatus(item: ImportTransaction): ImportPreviewSignalStatus 
     return hasPendingSignal && !llmPayload.suppressed ? 'pending' : null;
 }
 
-function hasMeaningfulLLMMatchingPayload(llmPayload: ImportPreviewLLMMatchingPayload | undefined): boolean {
-    if (!llmPayload) {
-        return false;
-    }
-
-    return !!getLLMSignalCategoryPath(llmPayload)
-        || !!getLLMSignalType(llmPayload)
-        || !!getLLMSignalAccountRoute(llmPayload)
-        || Number(llmPayload.confidence || 0) > 0
-        || !!String(llmPayload.reason || '').trim()
-        || !!String(llmPayload.review_status || '').trim()
-        || !!llmPayload.suppressed;
-}
-
 function buildLLMSignalSummary(llmPayload: ImportPreviewLLMMatchingPayload): string {
     return [
         getLLMSignalType(llmPayload),
@@ -1784,7 +1887,6 @@ function mergePreviewMatchingPayload(
 
     const currentRecord = ((currentMatching as unknown as Record<string, unknown>) || {});
     const incomingRecord = (incomingMatching as unknown as Record<string, unknown>);
-    const currentLLM = currentRecord['llm'] as ImportPreviewLLMMatchingPayload | undefined;
     const incomingLLM = incomingRecord['llm'] as ImportPreviewLLMMatchingPayload | undefined;
 
     const {
@@ -1794,9 +1896,14 @@ function mergePreviewMatchingPayload(
     } = currentRecord;
     const nextMatching = {
         ...currentWithoutClearableReviewState,
-        ...incomingRecord,
-        llm: hasMeaningfulLLMMatchingPayload(incomingLLM) ? incomingLLM : currentLLM,
+        ...incomingRecord
     } as Record<string, unknown>;
+
+    if (Object.prototype.hasOwnProperty.call(incomingRecord, 'llm')) {
+        nextMatching['llm'] = incomingLLM;
+    } else {
+        delete nextMatching['llm'];
+    }
 
     if (!Object.prototype.hasOwnProperty.call(incomingRecord, 'annotation')) {
         delete nextMatching['annotation'];
@@ -1856,6 +1963,12 @@ function syncTransactionFromLLMPreviewPayload(
     }
 
     mergeLLMMatchingFromPayload(item, payload.matching?.llm);
+    const previewId = getPreviewId(item);
+    if (previewId !== null) {
+        serverAuthoritativeLLMPreviewIds.add(previewId);
+        localLLMSignalTombstonePreviewIds.delete(previewId);
+        llmMemoryAppliedPreviewIds.delete(previewId);
+    }
 
     updateTransactionData(item);
     syncTransferDecisionBaseline(item);
@@ -1875,6 +1988,22 @@ function applyLLMSignalMemoryToTransactions(transactions: ImportTransaction[] = 
             continue;
         }
 
+        const llmPayload = getLLMMatchingPayload(transaction);
+        const statusAuthority = resolveSignalStatusAuthority(
+            llmPayload.review_status,
+            llmPayload.status,
+            llmPayload.lifecycle_status,
+            llmPayload.signal_state
+        );
+        if (serverAuthoritativeLLMPreviewIds.has(previewId) || statusAuthority.authoritative) {
+            continue;
+        }
+
+        if (memorySignal.tombstone) {
+            clearLLMRecommendationState(transaction);
+            continue;
+        }
+
         mergeLLMMatchingFromPayload(transaction, {
             suggested_type: memorySignal.suggestedType,
             suggested_category_id: memorySignal.suggestedCategoryId,
@@ -1887,6 +2016,7 @@ function applyLLMSignalMemoryToTransactions(transactions: ImportTransaction[] = 
             review_status: memorySignal.reviewStatus,
             suppressed: memorySignal.suppressed,
         });
+        llmMemoryAppliedPreviewIds.add(previewId);
         updateTransactionData(transaction);
     }
 }
@@ -1911,6 +2041,9 @@ async function refreshLLMSessionSignalMemory(force: boolean = false): Promise<vo
             ? response.data.result.events as LLMMemoryEventItem[]
             : [];
         const nextMemoryMap = buildLLMSignalMemoryMap(events);
+        for (const previewId of localLLMSignalTombstonePreviewIds) {
+            nextMemoryMap.set(previewId, createLLMSignalMemoryTombstone());
+        }
         llmSessionSignalMemory.value = nextMemoryMap;
         applyLLMSignalMemoryToTransactions(importTransactions.value);
     } catch (error) {
@@ -2013,6 +2146,11 @@ function syncLLMDecisionDraftState(item: ImportTransaction): void {
     }
 
     if (getLLMSignalStatus(item) !== 'pending') {
+        previewState._shouldClearLlmDecision = false;
+        return;
+    }
+
+    if (!hasLearningDecisionTextDraftChanges(item) && !shouldBlockLearningDecisionOnSync(item)) {
         previewState._shouldClearLlmDecision = false;
         return;
     }
@@ -2254,6 +2392,13 @@ function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData
         ? previewData.dedup_source_ids
         : item.dedupSourceIds;
     item.matching = mergePreviewMatchingPayload(item.matching, previewData.matching) as unknown as typeof item.matching;
+    const previewId = getPreviewId(item);
+    if (previewId !== null) {
+        serverAuthoritativeLLMPreviewIds.add(previewId);
+        if (!previewData.matching?.llm) {
+            localLLMSignalTombstonePreviewIds.add(previewId);
+        }
+    }
     item.isManuallyAnnotated = !!previewData.preview_is_manually_annotated || !!previewData.matching?.annotation?.is_manually_annotated;
 
     item.recurringTemplateId = previewData.preview_recurring_id ? String(previewData.preview_recurring_id) : '';
@@ -2468,6 +2613,14 @@ async function reviewLearningSuggestion(
         logger.info(`[学习建议决策] 完成: preview_id=${previewId}, decision=${decision}`);
         snackbar.value?.showMessage(tt(getLearningDecisionMessageKey(decision)));
     } catch (error) {
+        try {
+            const refreshedCandidate = await fetchMatchingSessionCandidate(candidateId);
+            if (refreshedCandidate) {
+                syncLearningCandidateFromSessionCandidate(item, refreshedCandidate);
+            }
+        } catch (refreshError) {
+            logger.error('[学习建议决策] 服务端状态回读失败:', refreshError);
+        }
         const actionErrorText = getActionErrorMessage(error, 'Learning decision failed');
         logger.error(`[学习建议决策] 失败: ${actionErrorText}`, error);
         snackbar.value?.showMessage(actionErrorText);
@@ -2524,6 +2677,7 @@ async function reviewLLMRecommendation(
         logger.info(`[LLM 建议决策] 完成: preview_id=${previewId}, decision=${decision}`);
         snackbar.value?.showMessage(tt(decision === 'accept' ? 'LLM Suggestion Accepted' : 'LLM Suggestion Rejected'));
     } catch (error) {
+        await refreshLLMSessionSignalMemory(true);
         const actionErrorText = getActionErrorMessage(error, 'LLM recommendation decision failed');
         logger.error(`[LLM 建议决策] 失败: ${actionErrorText}`, error);
         snackbar.value?.showMessage(actionErrorText);
@@ -2766,6 +2920,7 @@ function buildImportPreviewSignalCacheSignature(item: ImportTransaction): string
     const dedupSourceIds = Array.isArray(item.dedupSourceIds) ? item.dedupSourceIds : [];
     const dedupSourceLabels = Array.isArray(item.matching?.dedup.source_labels) ? item.matching?.dedup.source_labels : [];
     const parserTags = Array.isArray(item.parserTags) ? item.parserTags : [];
+    const learningPayload = item.matching?.learning;
     const llmPayload = getLLMMatchingPayload(item);
 
     return [
@@ -2788,6 +2943,8 @@ function buildImportPreviewSignalCacheSignature(item: ImportTransaction): string
         item.matching?.reconciliation?.planned_operation || '',
         item.matching?.reconciliation?.history_bill_id || '',
         item.matching?.reconciliation?.history_bill_version || '',
+        item.matching?.reconciliation?.history_role || '',
+        item.matching?.reconciliation?.group_key || '',
         item.matching?.reconciliation?.operation_id || '',
         item.matching?.reconciliation?.acknowledgement_token || '',
         String(!!item.matching?.reconciliation?.destructive_ack_required),
@@ -2798,27 +2955,37 @@ function buildImportPreviewSignalCacheSignature(item: ImportTransaction): string
         getTransferSignalTitle(item),
         item.matching?.transfer.pair_order || '',
         serializeImportPreviewSignalSourceChain(item.matching?.transfer.source_chain),
-        getLearningSignalStatus(item) || '',
-        item.learningRecommendationReason || '',
-        item.learningRecommendationSummary || '',
-        item.matching?.learning.mode || '',
-        String(!!item.matching?.learning.auto_apply),
-        item.matching?.learning.recommendation_key || '',
-        item.matching?.learning.lifecycle_status || '',
-        item.matching?.learning.signal_state || '',
-        Number(item.matching?.learning.accepted_count || 0),
-        Number(item.matching?.learning.rejected_count || 0),
-        Number(item.matching?.learning.auto_applied_count || 0),
+        serializeSignalCacheValue(learningPayload?.review_status),
+        serializeSignalCacheValue(learningPayload?.status),
+        serializeSignalCacheValue(learningPayload?.lifecycle_status),
+        serializeSignalCacheValue(learningPayload?.signal_state),
+        String(learningPayload?.reason ?? item.learningRecommendationReason ?? ''),
+        String(learningPayload?.summary ?? item.learningRecommendationSummary ?? ''),
+        String(learningPayload?.mode ?? ''),
+        String(learningPayload?.rule_id ?? ''),
+        String(learningPayload?.score ?? item.learningRecommendationScore ?? ''),
+        String(learningPayload?.confidence ?? ''),
+        String(learningPayload?.margin ?? ''),
+        String(learningPayload?.accepted_count ?? ''),
+        String(learningPayload?.rejected_count ?? ''),
+        String(learningPayload?.auto_applied_count ?? ''),
+        String(learningPayload?.suppressed ?? ''),
+        String(learningPayload?.auto_apply ?? ''),
+        String(learningPayload?.recommendation_key ?? ''),
         getLLMSignalStatus(item) || '',
+        serializeSignalCacheValue(llmPayload.review_status),
+        serializeSignalCacheValue(llmPayload.status),
+        serializeSignalCacheValue(llmPayload.lifecycle_status),
+        serializeSignalCacheValue(llmPayload.signal_state),
         String(llmPayload.suggested_type || ''),
-        String(llmPayload.suggested_category_id || ''),
+        String(llmPayload.suggested_category_id ?? ''),
         String(llmPayload.suggested_main_category || ''),
         String(llmPayload.suggested_sub_category || ''),
         String(llmPayload.suggested_source_account || ''),
         String(llmPayload.suggested_destination_account || ''),
         String(llmPayload.reason || ''),
-        Number(llmPayload.confidence || 0),
-        String(!!llmPayload.suppressed),
+        String(llmPayload.confidence ?? ''),
+        String(llmPayload.suppressed ?? ''),
         String(!!item.hasRecurringMatch()),
         getRecurringMatchSummary(item),
         Number(item.recurringCandidateCount || 0),
@@ -2833,7 +3000,22 @@ function getImportPreviewSignalViewModel(item: ImportTransaction): ImportPreview
         return cached.viewModel;
     }
 
+    const learningPayload = item.matching?.learning;
     const llmPayload = getLLMMatchingPayload(item);
+    const learningStatusAuthority = item.isTransferProtectedLearningSkip()
+        ? { status: null, authoritative: true }
+        : resolveSignalStatusAuthority(
+            learningPayload?.review_status,
+            learningPayload?.status,
+            learningPayload?.lifecycle_status,
+            learningPayload?.signal_state
+        );
+    const llmStatusAuthority = resolveSignalStatusAuthority(
+        llmPayload.review_status,
+        llmPayload.status,
+        llmPayload.lifecycle_status,
+        llmPayload.signal_state
+    );
     const viewModel = buildImportPreviewSignalViewModel({
         parserId: item.parserId,
         parserTags: item.parserTags,
@@ -2861,19 +3043,36 @@ function getImportPreviewSignalViewModel(item: ImportTransaction): ImportPreview
         transferTitle: getTransferSignalTitle(item),
         transferPairOrder: item.matching?.transfer.pair_order,
         transferSourceChain: item.matching?.transfer.source_chain,
-        learningStatus: getLearningSignalStatus(item),
-        learningTitle: item.learningRecommendationReason,
-        learningSummary: item.learningRecommendationSummary,
-        learningMode: item.matching?.learning.mode || '',
-        learningSignalState: item.matching?.learning.signal_state || '',
-        learningAutoApplied: !!item.matching?.learning.auto_apply,
-        llmStatus: getLLMSignalStatus(item),
+        learningStatus: learningStatusAuthority.authoritative
+            ? learningStatusAuthority.status
+            : getLearningSignalStatus(item),
+        learningTitle: String(learningPayload?.reason ?? item.learningRecommendationReason ?? ''),
+        learningSummary: String(learningPayload?.summary ?? item.learningRecommendationSummary ?? ''),
+        learningMode: String(learningPayload?.mode || ''),
+        learningLifecycleStatus: String(learningPayload?.lifecycle_status || ''),
+        learningSignalState: String(learningPayload?.signal_state || ''),
+        learningAutoApplied: learningPayload?.auto_apply,
+        learningSuppressed: learningPayload?.suppressed,
+        learningStatusAuthoritative: learningStatusAuthority.authoritative,
+        learningRuleId: learningPayload?.rule_id,
+        learningScore: learningPayload?.score ?? item.learningRecommendationScore,
+        learningConfidence: learningPayload?.confidence,
+        learningMargin: learningPayload?.margin,
+        learningAcceptedCount: learningPayload?.accepted_count,
+        learningRejectedCount: learningPayload?.rejected_count,
+        learningAutoAppliedCount: learningPayload?.auto_applied_count,
+        llmStatus: llmStatusAuthority.status,
         llmTitle: String(llmPayload.reason || ''),
         llmSummary: buildLLMSignalSummary(llmPayload),
-        llmConfidence: Number(llmPayload.confidence || 0),
+        llmConfidence: llmPayload.confidence,
+        llmSuggestedCategoryId: llmPayload.suggested_category_id,
         llmCategoryPath: getLLMSignalCategoryPath(llmPayload),
         llmSourceAccount: String(llmPayload.suggested_source_account || ''),
         llmDestinationAccount: String(llmPayload.suggested_destination_account || ''),
+        llmLifecycleStatus: String(llmPayload.lifecycle_status || ''),
+        llmSignalState: String(llmPayload.signal_state || ''),
+        llmSuppressed: llmPayload.suppressed,
+        llmStatusAuthoritative: llmStatusAuthority.authoritative,
         hasRecurringMatch: item.hasRecurringMatch(),
         recurringTitle: getRecurringMatchSummary(item),
         recurringCandidateCount: item.recurringCandidateCount,
@@ -3823,6 +4022,99 @@ function cloneImportTransaction(transaction: ImportTransaction): ImportTransacti
     return cloneImportPreviewDraftTransaction(getPreviewState(transaction));
 }
 
+function cloneImportPreviewEditableDraftValue(
+    value: ImportPreviewEditableDraftValue
+): ImportPreviewEditableDraftValue {
+    return Array.isArray(value) ? [...value] : value;
+}
+
+function captureImportPreviewEditableDraftState(
+    transaction: ImportTransaction
+): ImportPreviewEditableDraftState {
+    return {
+        selected: !!transaction.selected,
+        type: transaction.type,
+        categoryId: String(transaction.categoryId || ''),
+        sourceAmountCents: transaction.sourceAmountCents,
+        destinationAmountCents: transaction.destinationAmountCents,
+        sourceAccountId: String(transaction.sourceAccountId || ''),
+        destinationAccountId: String(transaction.destinationAccountId || ''),
+        tagIds: [...(transaction.tagIds || [])],
+        counterparty: String(transaction.counterparty || ''),
+        paymentMethod: String(transaction.paymentMethod || ''),
+        comment: String(transaction.comment || ''),
+        isManuallyAnnotated: !!transaction.isManuallyAnnotated,
+        recurringTemplateId: String(transaction.recurringTemplateId || ''),
+        recurringTemplateName: String(transaction.recurringTemplateName || ''),
+        recurringCandidateCount: Number(transaction.recurringCandidateCount || 0),
+        recurringMatchScore: Number(transaction.recurringMatchScore || 0),
+        recurringMatchReasons: String(transaction.recurringMatchReasons || ''),
+        recurringMatchedDate: String(transaction.recurringMatchedDate || '')
+    };
+}
+
+function isImportPreviewEditableDraftValueEqual(
+    left: ImportPreviewEditableDraftValue,
+    right: ImportPreviewEditableDraftValue
+): boolean {
+    if (Array.isArray(left) || Array.isArray(right)) {
+        return Array.isArray(left)
+            && Array.isArray(right)
+            && left.length === right.length
+            && left.every((value, index) => value === right[index]);
+    }
+    return left === right;
+}
+
+function applyImportPreviewEditableDraftDeltas(
+    transaction: ImportTransaction,
+    draftState: ImportPreviewEditableDraftState,
+    baselineState: ImportPreviewEditableDraftState
+): void {
+    const target = transaction as unknown as Record<ImportPreviewEditableDraftKey, ImportPreviewEditableDraftValue>;
+    for (const key of importPreviewEditableDraftKeys) {
+        if (!isImportPreviewEditableDraftValueEqual(draftState[key], baselineState[key])) {
+            target[key] = cloneImportPreviewEditableDraftValue(draftState[key]);
+        }
+    }
+}
+
+function mergeImportPreviewEditableDraftBaseline(
+    serverState: ImportPreviewEditableDraftState,
+    draftState: ImportPreviewEditableDraftState,
+    baselineState: ImportPreviewEditableDraftState
+): ImportPreviewEditableDraftState {
+    const nextBaseline = Object.fromEntries(
+        importPreviewEditableDraftKeys.map(key => [
+            key,
+            cloneImportPreviewEditableDraftValue(serverState[key])
+        ])
+    ) as ImportPreviewEditableDraftState;
+    for (const key of importPreviewEditableDraftKeys) {
+        if (!isImportPreviewEditableDraftValueEqual(draftState[key], baselineState[key])) {
+            Object.assign(nextBaseline, {
+                [key]: cloneImportPreviewEditableDraftValue(baselineState[key])
+            });
+        }
+    }
+    return nextBaseline;
+}
+
+function recordServerPagedDraftBaselines(transactions: ImportTransaction[]): void {
+    if (!serverPagedMode.value) {
+        return;
+    }
+
+    const nextBaselines = new Map(serverPagedDraftBaselines.value);
+    for (const transaction of transactions) {
+        const previewId = getPreviewId(transaction);
+        if (previewId !== null && !nextBaselines.has(previewId)) {
+            nextBaselines.set(previewId, captureImportPreviewEditableDraftState(transaction));
+        }
+    }
+    serverPagedDraftBaselines.value = nextBaselines;
+}
+
 function cacheCurrentPageDrafts(): void {
     if (!serverPagedMode.value) {
         return;
@@ -3839,25 +4131,58 @@ function cacheCurrentPageDrafts(): void {
     serverPagedDrafts.value = nextDrafts;
 }
 
-function rehydrateCurrentPageDrafts(): void {
+function rehydrateCurrentPageDrafts(): Set<number> {
+    const rehydratedPreviewIds = new Set<number>();
     if (!serverPagedMode.value) {
-        return;
+        return rehydratedPreviewIds;
     }
 
+    const nextDrafts = new Map(serverPagedDrafts.value);
+    const nextBaselines = new Map(serverPagedDraftBaselines.value);
     for (const transaction of importTransactions.value) {
         const previewId = getPreviewId(transaction);
         if (previewId === null) {
             continue;
         }
         const draft = serverPagedDrafts.value.get(previewId);
-        if (!draft) {
+        const baselineState = serverPagedDraftBaselines.value.get(previewId);
+        if (!draft || !baselineState) {
             continue;
         }
 
-        Object.assign(transaction, cloneImportTransaction(draft));
+        const authoritativeMatching = cloneImportTransaction(transaction).matching;
+        serverAuthoritativeLLMPreviewIds.add(previewId);
+        if (!authoritativeMatching?.llm) {
+            localLLMSignalTombstonePreviewIds.add(previewId);
+        }
+        const authoritativeTransferBaseline = buildTransferDecisionBaseline(transaction);
+        const authoritativeLearningBaseline = buildLearningDecisionBaseline(transaction);
+        const incomingServerState = captureImportPreviewEditableDraftState(transaction);
+        const draftState = captureImportPreviewEditableDraftState(draft);
+        applyImportPreviewEditableDraftDeltas(transaction, draftState, baselineState);
         updateTransactionData(transaction);
-        syncTransferDecisionDraftState(transaction);
+        transaction.matching = authoritativeMatching;
+
+        const transactionPreviewState = getPreviewState(transaction);
+        transactionPreviewState._previewDecisionBaseline = authoritativeTransferBaseline;
+        transactionPreviewState._learningDecisionBaseline = authoritativeLearningBaseline;
+        transactionPreviewState._shouldClearTransferDecision = hasTransferDecisionRelevantDraftChanges(transaction)
+            && authoritativeTransferBaseline.reviewStatus === 'pending';
+        transactionPreviewState._shouldClearLearningDecision = transaction.hasPendingLearningRecommendation()
+            && (hasLearningDecisionTextDraftChanges(transaction) || shouldBlockLearningDecisionOnSync(transaction));
+        transactionPreviewState._shouldClearLlmDecision = getLLMSignalStatus(transaction) === 'pending'
+            && (hasLearningDecisionTextDraftChanges(transaction) || shouldBlockLearningDecisionOnSync(transaction));
+
+        nextBaselines.set(
+            previewId,
+            mergeImportPreviewEditableDraftBaseline(incomingServerState, draftState, baselineState)
+        );
+        nextDrafts.set(previewId, cloneImportTransaction(transaction));
+        rehydratedPreviewIds.add(previewId);
     }
+    serverPagedDraftBaselines.value = nextBaselines;
+    serverPagedDrafts.value = nextDrafts;
+    return rehydratedPreviewIds;
 }
 
 function getTrackedTransactionsForSelection(): ImportTransaction[] {
@@ -4038,21 +4363,52 @@ function updatePreviewTableSort(sortBy: PreviewTableSortInputItem[] = []): void 
 watch(
     () => props.importTransactions,
     transactions => {
+        const nextObservedTransactions = new Map<number, ImportTransaction>();
+        for (const transaction of transactions || []) {
+            const previewId = getPreviewId(transaction);
+            if (previewId === null) {
+                continue;
+            }
+            const previousTransaction = observedLLMTransactionByPreviewId.get(previewId);
+            if (previousTransaction && previousTransaction !== transaction) {
+                llmMemoryAppliedPreviewIds.delete(previewId);
+                serverAuthoritativeLLMPreviewIds.add(previewId);
+                if (!getLLMMatchingPayload(transaction).review_status
+                    && !getLLMMatchingPayload(transaction).status
+                    && !getLLMMatchingPayload(transaction).lifecycle_status
+                    && !getLLMMatchingPayload(transaction).signal_state
+                    && !(transaction.matching as unknown as Record<string, unknown> | undefined)?.['llm']) {
+                    localLLMSignalTombstonePreviewIds.add(previewId);
+                }
+            }
+            nextObservedTransactions.set(previewId, transaction);
+        }
+        observedLLMTransactionByPreviewId.clear();
+        nextObservedTransactions.forEach((transaction, previewId) => {
+            observedLLMTransactionByPreviewId.set(previewId, transaction);
+        });
+        recordCurrentV2ServerLLMAuthority(transactions || [], props.previewMetadata);
         recordServerPagedSelectionBaselines(transactions || []);
-        rehydrateCurrentPageDrafts();
+        recordServerPagedDraftBaselines(transactions || []);
+        const rehydratedPreviewIds = rehydrateCurrentPageDrafts();
         (transactions || []).forEach(transaction => {
+            const previewId = getPreviewId(transaction);
+            if (previewId !== null && rehydratedPreviewIds.has(previewId)) {
+                return;
+            }
             syncTransferDecisionBaseline(transaction);
-        syncLearningDecisionBaseline(transaction);
-    });
-    applyLLMSignalMemoryToTransactions(transactions || []);
+            syncLearningDecisionBaseline(transaction);
+        });
+        applyLLMSignalMemoryToTransactions(transactions || []);
     },
     { immediate: true }
 );
 
 watch(
     () => props.previewMetadata,
-    () => {
+    metadata => {
         serverPagedSelectionMetadataOverride.value = null;
+        recordCurrentV2ServerLLMAuthority(importTransactions.value, metadata);
     }
 );
 
@@ -4060,10 +4416,15 @@ watch(
     () => props.sessionId,
     sessionId => {
         llmSessionSignalMemory.value = new Map();
+        localLLMSignalTombstonePreviewIds.clear();
+        serverAuthoritativeLLMPreviewIds.clear();
+        llmMemoryAppliedPreviewIds.clear();
+        observedLLMTransactionByPreviewId.clear();
         if (!sessionId) {
             return;
         }
 
+        recordCurrentV2ServerLLMAuthority(importTransactions.value, props.previewMetadata);
         void refreshLLMSessionSignalMemory(true);
     },
     { immediate: true }
@@ -4074,6 +4435,7 @@ watch(
     ([isServerPaged]) => {
         if (!isServerPaged) {
             serverPagedDrafts.value = new Map();
+            serverPagedDraftBaselines.value = new Map();
             serverPagedSelectionBaselines.value = new Map();
             currentSortKey.value = '';
             currentSortDirection.value = 'asc';
@@ -4702,6 +5064,7 @@ async function applyServerPagedSelection(action: ServerPagedSelectionAction): Pr
 
         serverPagedSelectionMetadataOverride.value = result.data?.metadata || null;
         serverPagedDrafts.value = new Map();
+        serverPagedDraftBaselines.value = new Map();
         serverPagedSelectionBaselines.value = new Map();
         recordServerPagedSelectionBaselines(importTransactions.value);
         emitServerPagedRequest(currentPage.value, countPerPage.value, {
@@ -4975,6 +5338,7 @@ function onShowDateRangeError(message: string): void {
 
 function reset(): void {
     serverPagedDrafts.value = new Map();
+    serverPagedDraftBaselines.value = new Map();
     serverPagedSelectionBaselines.value = new Map();
     serverPagedSelectionMetadataOverride.value = null;
     editingTransaction.value = null;

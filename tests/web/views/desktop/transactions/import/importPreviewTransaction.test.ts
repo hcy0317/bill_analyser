@@ -174,6 +174,48 @@ describe('import preview transaction helper', () => {
         expect(transaction.hasTransferSuggestion()).toBe(true);
     });
 
+    test('keeps structured LLM matching feedback visible on full preview rows', () => {
+        const transaction = buildImportTransactionFromPreviewRecord({
+            id: 44,
+            preview_type: '支出',
+            preview_date: '2026-06-01T00:00:00Z',
+            preview_amount_cents: -1234,
+            preview_source_account_id: 101,
+            matching: {
+                llm: {
+                    suggested_type: '支出',
+                    suggested_category_id: 3,
+                    suggested_main_category: '餐饮',
+                    suggested_sub_category: '咖啡',
+                    suggested_source_account: '招商银行',
+                    suggested_destination_account: '支付宝',
+                    confidence: 0.87,
+                    reason: '根据历史记忆推荐',
+                    review_status: 'pending',
+                    suppressed: false
+                }
+            } as unknown as ImportPreviewRecord['matching']
+        }, 9, {
+            categoriesById,
+            transferCategories,
+            cashTransferCategoryId: 'transferSub',
+            timeZone: 'Asia/Shanghai'
+        }) as ImportPreviewTransactionDraft;
+
+        expect((transaction.matching as unknown as Record<string, unknown> | undefined)?.['llm']).toMatchObject({
+            suggested_type: '支出',
+            suggested_category_id: 3,
+            suggested_main_category: '餐饮',
+            suggested_sub_category: '咖啡',
+            suggested_source_account: '招商银行',
+            suggested_destination_account: '支付宝',
+            confidence: 0.87,
+            reason: '根据历史记忆推荐',
+            review_status: 'pending',
+            suppressed: false
+        });
+    });
+
     test('preserves invalid-date fallback and expense category/name mapping', () => {
         const transaction = buildImportTransactionFromPreviewRecord({
             id: 9,

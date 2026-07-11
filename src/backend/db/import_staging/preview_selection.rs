@@ -58,30 +58,7 @@ pub fn get_preview_filter_index_by_session(
 ) -> DbResult<Vec<ImportPreviewFilterIndexRow>> {
     Ok(get_preview_by_session(pool, session_id, user_id, false)?
         .into_iter()
-        .map(|row| ImportPreviewFilterIndexRow {
-            id: row.id,
-            preview_date: row.preview_date,
-            preview_type: row.preview_type,
-            preview_amount_cents: row.preview_amount_cents,
-            category_id: row.category_id,
-            preview_main_category: row.preview_main_category,
-            preview_sub_category: row.preview_sub_category,
-            preview_source_account_id: row.preview_source_account_id,
-            preview_destination_account_id: row.preview_destination_account_id,
-            preview_counterparty: row.preview_counterparty,
-            preview_payment_method: row.preview_payment_method,
-            preview_description: row.preview_description,
-            preview_parser_id: row.preview_parser_id,
-            preview_parser_tags: row.preview_parser_tags,
-            preview_recurring_id: row.preview_recurring_id,
-            preview_recurring_candidate_count: row.preview_recurring_candidate_count,
-            preview_recurring_match_reasons: row.preview_recurring_match_reasons,
-            preview_recurring_matched_date: row.preview_recurring_matched_date,
-            preview_selected: row.preview_selected,
-            dedup_type: row.dedup_type,
-            dedup_source_ids: row.dedup_source_ids,
-            preview_matching_feedback: row.preview_matching_feedback,
-        })
+        .map(ImportPreviewFilterIndexRow::from)
         .collect())
 }
 
@@ -112,19 +89,54 @@ pub fn replace_preview_selection_with_patches(
     patches: &[ImportPreviewPatch],
 ) -> DbResult<usize> {
     block_on_db(async move {
-        let session_db_id = session_db_id(pool, session_id, user_id).await?;
-        let user_id_i64 = user_id_i64(user_id)?;
-        let identity_maps = load_import_identity_maps(pool, user_id_i64).await?;
-        let mut changed = 0usize;
-        for patch in patches {
-            if apply_preview_patch_async(pool, session_db_id, user_id_i64, patch, &identity_maps)
-                .await?
-            {
-                changed += 1;
-            }
-        }
+        let user_id = user_id_i64(user_id)?;
+        let mut tx = pool.begin().await?;
+        let session_db_id =
+            lock_active_import_session_on_tx(&mut tx, session_id, user_id).await?;
+        let changed =
+            apply_preview_patches_on_tx(&mut tx, session_db_id, user_id, patches).await?;
+        tx.commit().await?;
         Ok(changed)
     })
+}
+
+async fn apply_preview_patches_on_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    session_db_id: i64,
+    user_id: i64,
+    patches: &[ImportPreviewPatch],
+) -> DbResult<usize> {
+    let identity_maps = load_import_identity_maps_for_confirm(tx, user_id).await?;
+    let mut changed = 0usize;
+    for patch in patches {
+        if apply_preview_patch_on_tx(tx, session_db_id, user_id, patch, &identity_maps).await? {
+            changed += 1;
+        }
+    }
+    Ok(changed)
+}
+
+async fn load_preview_bill_by_id_on_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    session_db_id: i64,
+    preview_id: i64,
+    user_id: i64,
+) -> DbResult<Option<ImportPreviewRow>> {
+    let row = sqlx::query(
+        r#"
+        SELECT p.*, s.session_key
+        FROM import_preview_rows p
+        JOIN import_sessions s ON s.id = p.session_id
+        WHERE p.id = $1 AND p.session_id = $2 AND p.user_id = $3
+        FOR UPDATE OF p
+        "#,
+    )
+    .bind(preview_id)
+    .bind(session_db_id)
+    .bind(user_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    row.as_ref().map(preview_from_pg_row).transpose()
 }
 
 /// 批量应用 preview patch 但保留现有 selection，用于 update/reclassify 不意外改变跨页选择。
@@ -147,21 +159,71 @@ pub fn update_preview_selection(
         if preview_ids.is_empty() {
             return Ok(0);
         }
+        let user_id = user_id_i64(user_id)?;
+        let mut tx = pool.begin().await?;
+        let Some(session_db_id) =
+            lock_active_preview_parent_for_ids_on_tx(&mut tx, preview_ids, user_id).await?
+        else {
+            tx.commit().await?;
+            return Ok(0);
+        };
         let mut query = QueryBuilder::<Postgres>::new("UPDATE import_preview_rows SET selected = ");
         query.push_bind(selected);
         query.push(", preview_payload = jsonb_set(preview_payload, '{preview_selected}', ");
         query.push_bind(Value::Bool(selected));
         query.push("::jsonb, true), updated_at = now(), version = version + 1 WHERE user_id = ");
-        query.push_bind(user_id_i64(user_id)?);
+        query.push_bind(user_id);
+        query.push(" AND session_id = ");
+        query.push_bind(session_db_id);
         query.push(" AND id IN (");
         let mut separated = query.separated(", ");
         for id in preview_ids {
             separated.push_bind(id);
         }
         separated.push_unseparated(")");
-        let changed = query.build().execute(pool).await?.rows_affected();
+        let changed = query.build().execute(&mut *tx).await?.rows_affected();
+        tx.commit().await?;
         Ok(usize::try_from(changed).unwrap_or(usize::MAX))
     })
+}
+
+async fn lock_active_preview_parent_for_ids_on_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    preview_ids: &[i64],
+    user_id: i64,
+) -> DbResult<Option<i64>> {
+    let rows = sqlx::query(
+        r#"
+        SELECT session.id, session.status
+        FROM import_sessions session
+        WHERE session.user_id = $1
+          AND session.id IN (
+              SELECT preview.session_id
+              FROM import_preview_rows preview
+              WHERE preview.user_id = $1 AND preview.id = ANY($2)
+          )
+        ORDER BY session.id ASC
+        FOR UPDATE OF session
+        "#,
+    )
+    .bind(user_id)
+    .bind(preview_ids.to_vec())
+    .fetch_all(&mut **tx)
+    .await?;
+    if rows.len() > 1 {
+        return Err(DbError::InvalidOperation(
+            "preview ids span multiple import sessions".to_string(),
+        ));
+    }
+    let Some(row) = rows.first() else {
+        return Ok(None);
+    };
+    if row.try_get::<String, _>("status")? == "confirmed" {
+        return Err(DbError::InvalidOperation(
+            "confirmed import session is terminal".to_string(),
+        ));
+    }
+    Ok(Some(row.try_get("id")?))
 }
 
 pub fn reset_session_preview_selection(
@@ -170,7 +232,10 @@ pub fn reset_session_preview_selection(
     user_id: UserId,
 ) -> DbResult<usize> {
     block_on_db(async move {
-        let session_db_id = session_db_id(pool, session_id, user_id).await?;
+        let user_id = user_id_i64(user_id)?;
+        let mut tx = pool.begin().await?;
+        let session_db_id =
+            lock_active_import_session_on_tx(&mut tx, session_id, user_id).await?;
         let changed = sqlx::query(
             r#"
             UPDATE import_preview_rows
@@ -182,10 +247,11 @@ pub fn reset_session_preview_selection(
             "#,
         )
         .bind(session_db_id)
-        .bind(user_id_i64(user_id)?)
-        .execute(pool)
+        .bind(user_id)
+        .execute(&mut *tx)
         .await?
         .rows_affected();
+        tx.commit().await?;
         Ok(usize::try_from(changed).unwrap_or(usize::MAX))
     })
 }
@@ -200,11 +266,14 @@ pub fn update_session_preview_selection_by_query(
     request: &ImportPreviewPageRequest,
 ) -> DbResult<usize> {
     block_on_db(async move {
-        let session_db_id = session_db_id(pool, session_id, user_id).await?;
-        let user_id_i64 = user_id_i64(user_id)?;
+        let user_id = user_id_i64(user_id)?;
+        let mut tx = pool.begin().await?;
+        let session_db_id =
+            lock_active_import_session_on_tx(&mut tx, session_id, user_id).await?;
         let mut query =
-            build_preview_selection_update_query(session_db_id, user_id_i64, mode, target, request);
-        let changed = query.build().execute(pool).await?.rows_affected();
+            build_preview_selection_update_query(session_db_id, user_id, mode, target, request);
+        let changed = query.build().execute(&mut *tx).await?.rows_affected();
+        tx.commit().await?;
         Ok(usize::try_from(changed).unwrap_or(usize::MAX))
     })
 }

@@ -12,8 +12,7 @@ fn preview_sql_query_builder_covers_server_filter_and_sort_contract() {
         description: Some("手续费".to_string()),
         selected_only: true,
     };
-    let mut query =
-        build_preview_page_query(1, 2, &filters, "sourceAmountCents", "desc", 50, 100);
+    let mut query = build_preview_page_query(1, 2, &filters, "sourceAmountCents", "desc", 50, 100);
 
     let built = query.build();
     let sql = built.sql();
@@ -24,8 +23,9 @@ fn preview_sql_query_builder_covers_server_filter_and_sort_contract() {
     assert!(!sql.contains("preview_main_category"));
     assert!(!sql.contains("preview_sub_category"));
     assert!(sql.contains("p.account_id IS NULL"));
-    assert!(sql.contains("preview_payload#>'{preview_matching_feedback,learning}'"));
-    assert!(!sql.contains("preview_payload#>'{preview_matching_feedback,transfer}'"));
+    assert!(sql.contains("COALESCE(NULLIF(LOWER("));
+    assert!(sql.contains("preview_matching_feedback,learning,review_status"));
+    assert!(!sql.contains("preview_matching_feedback,transfer"));
     assert!(!sql.contains("preview_matching_feedback')::text ILIKE"));
     assert!(sql.contains("ORDER BY p.amount_cents DESC"));
     assert!(sql.contains("LIMIT"));
@@ -105,9 +105,47 @@ fn preview_sql_query_builder_filters_transfer_by_feedback_signal_only() {
     assert!(sql.contains("preview_matching_feedback' ? 'transfer'"));
     assert!(sql.contains("review_status"));
     assert!(sql.contains("candidate_type"));
+    assert!(sql.contains("= 'pending' OR ("));
+    assert!(sql.contains("= '' AND LOWER"));
+    assert!(sql.contains("jsonb_typeof"));
+    assert!(sql.contains("candidate_type}') = 'string'"));
+    assert!(sql.contains("reason}') = 'string'"));
     assert!(!sql.contains("transfer_cross_batch"));
     assert!(!sql.contains("IN ('transfer'"));
     assert!(!sql.contains("transaction_type"));
+    assert_sql_parentheses_balanced(&sql);
+}
+
+fn assert_sql_parentheses_balanced(sql: &str) {
+    let mut depth = 0_i32;
+    let mut in_single_quoted_string = false;
+    let mut chars = sql.chars().peekable();
+
+    while let Some(character) = chars.next() {
+        if character == '\'' {
+            if in_single_quoted_string && chars.peek() == Some(&'\'') {
+                chars.next();
+            } else {
+                in_single_quoted_string = !in_single_quoted_string;
+            }
+            continue;
+        }
+        if in_single_quoted_string {
+            continue;
+        }
+
+        match character {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                assert!(depth >= 0, "SQL closes a parenthesis before one is opened: {sql}");
+            }
+            _ => {}
+        }
+    }
+
+    assert!(!in_single_quoted_string, "SQL contains an unterminated string: {sql}");
+    assert_eq!(depth, 0, "SQL contains unbalanced parentheses: {sql}");
 }
 
 #[test]
@@ -154,6 +192,18 @@ fn preview_sql_query_builder_preserves_invalid_sentinel_semantics() {
     assert!(sql.contains("jsonb_array_length"));
     assert!(sql.contains("p.transfer_target_account_id IS NULL"));
     assert!(sql.contains("identity_validation"));
+}
+
+#[test]
+fn preview_identity_feedback_predicate_coalesces_missing_and_preserves_nonempty_issues() {
+    let mut query = QueryBuilder::<Postgres>::new("SELECT ");
+    push_preview_identity_feedback_condition(&mut query, "p");
+
+    let sql = query.build().sql().to_string();
+
+    assert!(sql.contains("COALESCE((jsonb_typeof("));
+    assert!(sql.contains("identity_validation,issues}') = 'array'"));
+    assert!(sql.contains("identity_validation,issues}') > 0), false)"));
 }
 
 #[test]

@@ -2,8 +2,7 @@ import { describe, expect, test } from '@jest/globals';
 
 import {
     buildLLMSignalMemoryMap,
-    parseLLMMemoryEventSignal,
-    shouldReplaceLLMSignalMemoryState
+    parseLLMMemoryEventSignal
 } from '@/views/desktop/transactions/import/llmSignalMemory.ts';
 
 describe('llm signal memory helpers', () => {
@@ -78,18 +77,8 @@ describe('llm signal memory helpers', () => {
         });
     });
 
-    test('prefers reviewed feedback over pending recommendation when the same preview appears twice', () => {
+    test('keeps the newest event for each preview because the server returns newest-first', () => {
         const memoryMap = buildLLMSignalMemoryMap([
-            {
-                id: 10,
-                preview_id: 9,
-                llm_response_raw: JSON.stringify({
-                    suggested_main_category: '餐饮',
-                    suggested_sub_category: '咖啡',
-                    confidence: 0.82,
-                    reason: '初始推荐'
-                })
-            },
             {
                 id: 11,
                 preview_id: 9,
@@ -99,6 +88,16 @@ describe('llm signal memory helpers', () => {
                     suggested_sub_category: '咖啡',
                     confidence: 0.82,
                     reason: '用户接受'
+                })
+            },
+            {
+                id: 10,
+                preview_id: 9,
+                llm_response_raw: JSON.stringify({
+                    suggested_main_category: '餐饮',
+                    suggested_sub_category: '咖啡',
+                    confidence: 0.82,
+                    reason: '初始推荐'
                 })
             }
         ]);
@@ -111,32 +110,33 @@ describe('llm signal memory helpers', () => {
         });
     });
 
-    test('keeps the first reviewed state when a later pending recommendation should not downgrade it', () => {
-        const current = {
-            reviewStatus: 'accepted' as const,
-            suppressed: false,
-            suggestedMainCategory: '餐饮',
-            suggestedSubCategory: '咖啡',
-            suggestedSourceAccount: '',
-            suggestedDestinationAccount: '',
-            confidence: 0.8,
-            reason: 'accepted'
-        };
-        const next = {
-            reviewStatus: 'pending' as const,
-            suppressed: false,
-            suggestedMainCategory: '餐饮',
-            suggestedSubCategory: '咖啡',
-            suggestedSourceAccount: '',
-            suggestedDestinationAccount: '',
-            confidence: 0.8,
-            reason: 'pending'
-        };
+    test('treats the newest clear event as a tombstone instead of a pending signal', () => {
+        const memoryMap = buildLLMSignalMemoryMap([
+            { id: 13, preview_id: 9, event_type: 'preview_review', decision: 'clear' },
+            {
+                id: 12,
+                preview_id: 9,
+                event_type: 'preview_review',
+                decision: 'reject',
+                llm_response_raw: JSON.stringify({ reason: '旧的拒绝结果' })
+            },
+            {
+                id: 11,
+                preview_id: 9,
+                event_type: 'preview_review',
+                decision: 'accept',
+                llm_response_raw: JSON.stringify({ reason: '更旧的接受结果' })
+            }
+        ]);
 
-        expect(shouldReplaceLLMSignalMemoryState(current, next)).toBe(false);
+        expect(memoryMap.get(9)).toMatchObject({
+            reviewStatus: '',
+            tombstone: true,
+            suppressed: false
+        });
     });
 
-    test('ignores invalid preview ids during memory-map reduction and treats blank states as lowest priority', () => {
+    test('ignores invalid preview ids during memory-map reduction', () => {
         const memoryMap = buildLLMSignalMemoryMap([
             {
                 preview_id: 0,
@@ -152,27 +152,5 @@ describe('llm signal memory helpers', () => {
 
         expect(memoryMap.has(0)).toBe(false);
         expect(memoryMap.get(21)?.reviewStatus).toBe('pending');
-        expect(shouldReplaceLLMSignalMemoryState(
-            {
-                reviewStatus: 'pending',
-                suppressed: false,
-                suggestedMainCategory: '',
-                suggestedSubCategory: '',
-                suggestedSourceAccount: '',
-                suggestedDestinationAccount: '',
-                confidence: 0,
-                reason: ''
-            },
-            {
-                reviewStatus: '',
-                suppressed: false,
-                suggestedMainCategory: '',
-                suggestedSubCategory: '',
-                suggestedSourceAccount: '',
-                suggestedDestinationAccount: '',
-                confidence: 0,
-                reason: ''
-            }
-        )).toBe(false);
     });
 });

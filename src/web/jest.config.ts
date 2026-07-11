@@ -12,34 +12,60 @@ const config: Config = {
         '<rootDir>/../../tests/web/views/desktop/budgets/forecastDisplay.test.ts',
         '<rootDir>/../../tests/web/views/desktop/budgets/forecastRequest.test.ts',
         '<rootDir>/../../tests/web/views/desktop/transactions/import/checkDataMatching.test.ts',
+        '<rootDir>/../../tests/web/models/imported_transaction.test.ts',
+        '<rootDir>/../../tests/web/views/desktop/transactions/import/importLifecycleSfc.test.ts',
+        '<rootDir>/../../tests/web/views/desktop/transactions/import/importPreviewUpdates.test.ts',
+        '<rootDir>/../../tests/web/views/desktop/transactions/import/importTransactionCheckDataActions.test.ts',
+        '<rootDir>/../../tests/web/views/desktop/transactions/import/importTransactionCheckDataServerDraftRehydrate.test.ts',
+        '<rootDir>/../../tests/web/views/desktop/transactions/import/importTransactionCheckDataSignalAdapter.test.ts',
+        '<rootDir>/../../tests/web/views/desktop/transactions/import/importTransactionCheckDataSignalHistoryMatrix.test.ts',
+        '<rootDir>/../../tests/web/views/desktop/transactions/import/importTransactionCheckDataSelectionAndPaging.test.ts',
+        '<rootDir>/../../tests/web/views/desktop/transactions/import/importTransactionCheckDataTemplateAndDisplayMatrix.test.ts',
         '<rootDir>/../../tests/web/views/desktop/transactions/import/importPreview.test.ts',
+        '<rootDir>/../../tests/web/views/desktop/transactions/import/importPreviewIndex.test.ts',
+        '<rootDir>/../../tests/web/views/desktop/transactions/import/importPreviewTransaction.test.ts',
+        '<rootDir>/../../tests/web/views/desktop/transactions/import/importSignalSystem.red.test.ts',
         '<rootDir>/../../tests/web/views/desktop/transactions/import/llmSignalMemory.test.ts',
-        '<rootDir>/../../tests/web/views/desktop/transactions/import/services.llmMemory.test.ts'
+        '<rootDir>/../../tests/web/views/desktop/transactions/import/services.llmMemory.test.ts',
+        '<rootDir>/../../tests/web/views/desktop/transactions/import/services.matchingCandidate.test.ts'
     ] : ['**/*.test.ts', '**/*.spec.ts'],
     moduleDirectories: ['node_modules', '<rootDir>/node_modules'],
     moduleNameMapper: {
         '^@/(.*)$': '<rootDir>/src/$1'
     },
     transform: {
+        '^.+\\.vue$': '<rootDir>/scripts/jest-vue-sfc-transformer.cjs',
         '^.+\\.ts$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.jest.json' }]
     },
-    moduleFileExtensions: ['ts', 'js', 'json'],
+    moduleFileExtensions: ['vue', 'ts', 'js', 'json'],
+    coverageReporters: ['lcov', 'json', 'text'],
+    forceCoverageMatch: coverageGateEnabled ? [
+        '**/src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue',
+        '**/src/views/mobile/transactions/ImportPreviewPage.vue'
+    ] : ['**/tests/web/fixtures/VueCoverageHarness.vue'],
     collectCoverageFrom: coverageGateEnabled ? [
         'src/views/desktop/budgets/forecastDisplay.ts',
         'src/views/desktop/budgets/forecastRequest.ts',
+        'src/models/import_matching.ts',
+        'src/models/imported_transaction.ts',
+        'src/models/imported_transaction/matching.ts',
+        'src/views/desktop/transactions/import/check-data-matching/signalViewModel.ts',
+        'src/views/desktop/transactions/import/check-data-matching/types.ts',
+        'src/views/desktop/transactions/import/import-preview-index/mapping.ts',
+        'src/views/desktop/transactions/import/import-preview-index/types.ts',
         'src/views/desktop/transactions/import/checkDataMatching.ts',
         'src/views/desktop/transactions/import/importPreview.ts',
+        'src/views/desktop/transactions/import/importPreviewUpdates.ts',
+        'src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue',
+        'src/views/mobile/transactions/ImportPreviewPage.vue',
         'src/views/desktop/transactions/import/llmSignalMemory.ts'
-    ] : [
-        'src/**/*.ts',
-        '!src/**/*.d.ts'
-    ],
+    ] : undefined,
     coverageThreshold: coverageGateEnabled ? {
         global: {
-            branches: 90,
-            functions: 90,
-            lines: 90,
-            statements: 90
+            branches: 91,
+            functions: 91,
+            lines: 91,
+            statements: 91
         }
     } : undefined
 };

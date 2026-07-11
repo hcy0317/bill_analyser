@@ -11,3 +11,4 @@ include!("types/preview_patch.rs");
 include!("types/preview_decision_learning.rs");
 include!("types/recurring_annotation_memory.rs");
 include!("types/confirm_history.rs");
+include!("types/confirm_command.rs");

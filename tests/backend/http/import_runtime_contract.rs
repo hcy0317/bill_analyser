@@ -151,6 +151,21 @@ fn stage2_materialization_dispatches_decision_groups_after_preview() {
 }
 
 #[test]
+fn matching_candidate_action_is_not_an_unconditional_conflict() {
+    let payloads = source("src/backend/http/matching_routes/payloads.rs");
+    let response = section_between(
+        &payloads,
+        "fn matching_candidate_action_response",
+        "fn preview_action_request_from_payload",
+    );
+
+    assert!(
+        !response.contains("PostgreSQL matching candidate actions require a materialized candidate"),
+        "matching candidate action must not be an unconditional PostgreSQL materialization conflict"
+    );
+}
+
+#[test]
 fn ocr_llm_vision_runtime_validates_url_and_caps_payload_before_network_post() {
     let multipart_source = source("src/backend/http/import_routes/multipart_and_ocr.rs");
     let input_parser = section_between(

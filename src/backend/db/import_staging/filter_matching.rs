@@ -198,7 +198,7 @@ fn annotation_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bo
 }
 
 fn normalize_visible_signal_filter(filter: &str) -> String {
-    let normalized = filter.trim().to_ascii_lowercase();
+    let normalized = trim_import_preview_signal_text(filter).to_ascii_lowercase();
     if normalized.contains(':') {
         return normalized;
     }
@@ -218,32 +218,41 @@ fn strip_numeric_visible_signal_suffix(filter: &str) -> &str {
 
 fn signal_filter_family_status(filter: &str) -> Option<(&str, &str)> {
     let (family, status) = filter.split_once(':')?;
-    let family = family.trim();
-    let status = status.trim();
-    if family.is_empty() || status.is_empty() {
+    let family = trim_import_preview_signal_text(family);
+    let status = trim_import_preview_signal_text(status);
+    if ImportPreviewSignalFamily::parse(family).is_none() || status.is_empty() {
         return None;
     }
     Some((family, status))
 }
 
 fn preview_signal_family_matches(family: &str, row: &ImportPreviewRow) -> bool {
-    match family {
-        "parser" => preview_parser_signal_matches(row) && !preview_has_specific_visible_signal(row),
-        "platform_duplicate" => preview_platform_duplicate_signal_matches(row),
-        "transfer" => preview_transfer_signal_matches(row),
-        "history" => preview_history_signal_matches(row),
-        "learning" => preview_recommendation_signal_matches(row),
-        "llm" => preview_feedback_key_exists(&row.preview_matching_feedback, "llm"),
+    match ImportPreviewSignalFamily::parse(family) {
+        Some(ImportPreviewSignalFamily::Parser) => {
+            preview_parser_signal_matches(row) && !preview_has_specific_visible_signal(row)
+        }
+        Some(ImportPreviewSignalFamily::PlatformDuplicate) => {
+            preview_platform_duplicate_signal_matches(row)
+        }
+        Some(ImportPreviewSignalFamily::Transfer) => preview_transfer_signal_matches(row),
+        Some(ImportPreviewSignalFamily::History) => preview_history_signal_matches(row),
+        Some(ImportPreviewSignalFamily::Learning) => preview_recommendation_signal_matches(row),
+        Some(ImportPreviewSignalFamily::Llm) => {
+            import_preview_recommendation_feedback_family_is_meaningful(
+                &row.preview_matching_feedback,
+                "llm",
+            )
+        }
         _ => false,
     }
 }
 
 fn preview_parser_signal_matches(row: &ImportPreviewRow) -> bool {
-    !row.preview_parser_id.trim().is_empty()
+    !trim_import_preview_signal_text(&row.preview_parser_id).is_empty()
         || row
             .preview_parser_tags
             .iter()
-            .any(|tag| !tag.trim().is_empty())
+            .any(|tag| !trim_import_preview_signal_text(tag).is_empty())
         || preview_feedback_key_exists(&row.preview_matching_feedback, "parser")
 }
 
@@ -252,7 +261,10 @@ fn preview_has_specific_visible_signal(row: &ImportPreviewRow) -> bool {
         || preview_transfer_signal_matches(row)
         || preview_history_signal_matches(row)
         || preview_recommendation_signal_matches(row)
-        || preview_feedback_key_exists(&row.preview_matching_feedback, "llm")
+        || import_preview_recommendation_feedback_family_is_meaningful(
+            &row.preview_matching_feedback,
+            "llm",
+        )
 }
 
 fn preview_platform_duplicate_signal_matches(row: &ImportPreviewRow) -> bool {
@@ -267,32 +279,38 @@ fn preview_transfer_signal_matches(row: &ImportPreviewRow) -> bool {
     else {
         return false;
     };
-    let review_status = transfer
-        .get("review_status")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase();
-    if matches!(review_status.as_str(), "accepted" | "rejected" | "skipped") {
-        return true;
-    }
+    // Suppressed check first
     let suppressed = transfer
         .get("suppressed")
-        .map(json_value_is_truthy)
+        .map(import_preview_signal_value_is_truthy)
         .unwrap_or(false);
-    if review_status == "pending" && !suppressed {
+    if suppressed {
+        return false;
+    }
+    let resolved_status = resolve_first_nonempty_status(transfer);
+    if matches!(resolved_status.as_str(), "none" | "suppressed") {
+        return false;
+    }
+    if resolved_status == "pending" {
         return true;
+    }
+    if !resolved_status.is_empty() {
+        return false;
     }
     let has_candidate = transfer
         .get("candidate_type")
         .and_then(Value::as_str)
-        .is_some_and(|value| !value.trim().is_empty())
+        .is_some_and(|value| !trim_import_preview_signal_text(value).is_empty())
         || transfer
             .get("reason")
             .and_then(Value::as_str)
-            .is_some_and(|value| !value.trim().is_empty());
+            .is_some_and(|value| !trim_import_preview_signal_text(value).is_empty())
+        || transfer.get("score").is_some_and(|value| match value {
+            Value::Number(number) => number.as_f64().is_some_and(|value| value > 0.0),
+            Value::String(text) => strict_decimal_is_positive(text),
+            _ => false,
+        });
     has_candidate
-        && !suppressed
         && !matches!(
             row.preview_type.trim().to_ascii_lowercase().as_str(),
             "转账" | "transfer" | "4"
@@ -300,7 +318,10 @@ fn preview_transfer_signal_matches(row: &ImportPreviewRow) -> bool {
 }
 
 fn preview_recommendation_signal_matches(row: &ImportPreviewRow) -> bool {
-    preview_feedback_key_exists(&row.preview_matching_feedback, "learning")
+    import_preview_recommendation_feedback_family_is_meaningful(
+        &row.preview_matching_feedback,
+        "learning",
+    )
 }
 
 fn preview_history_signal_matches(row: &ImportPreviewRow) -> bool {
@@ -309,19 +330,16 @@ fn preview_history_signal_matches(row: &ImportPreviewRow) -> bool {
         .and_then(|value| value.get("planned_operation"))
         .and_then(Value::as_str)
         .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase();
-    matches!(
-        planned_operation.as_str(),
-        "update_history" | "merge_transfer_history"
-    ) || reconciliation
-        .and_then(|value| value.get("destructive_ack_required"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
+        .to_string();
+    normalize_history_operation(&planned_operation).is_some()
+        || reconciliation
+            .and_then(|value| value.get("destructive_ack_required"))
+            .map(import_preview_signal_value_is_truthy)
+            .unwrap_or(false)
 }
 
 fn preview_dedup_type(row: &ImportPreviewRow) -> String {
-    let direct = row.dedup_type.trim();
+    let direct = trim_import_preview_signal_text(&row.dedup_type);
     if !direct.is_empty() {
         return direct.to_ascii_lowercase();
     }
@@ -329,7 +347,7 @@ fn preview_dedup_type(row: &ImportPreviewRow) -> String {
         .pointer("/dedup/type")
         .and_then(Value::as_str)
         .unwrap_or_default()
-        .trim()
+        .trim_matches(|ch| IMPORT_PREVIEW_SIGNAL_TRIM_CHARS.contains(ch))
         .to_ascii_lowercase()
 }
 
@@ -340,14 +358,14 @@ fn preview_feedback_key_exists(feedback: &Value, key: &str) -> bool {
 }
 
 fn preview_feedback_family_contains_status(feedback: &Value, family: &str, status: &str) -> bool {
-    preview_feedback_key_for_signal_family(family)
-        .is_some_and(|key| preview_feedback_key_contains_status(feedback, key, status))
-}
-
-fn preview_feedback_key_contains_status(feedback: &Value, key: &str, status: &str) -> bool {
-    feedback
-        .get(key)
-        .is_some_and(|value| json_value_contains_text(value, status))
+    preview_feedback_key_for_signal_family(family).is_some_and(|key| {
+        feedback.get(key).is_some_and(|value| {
+            value
+                .as_object()
+                .map(resolve_first_nonempty_status)
+                .is_some_and(|resolved| resolved == status)
+        })
+    })
 }
 
 fn preview_feedback_key_for_signal_family(family: &str) -> Option<&'static str> {
@@ -363,10 +381,7 @@ fn preview_feedback_key_for_signal_family(family: &str) -> Option<&'static str> 
 }
 
 fn is_visible_signal_family(family: &str) -> bool {
-    matches!(
-        family,
-        "parser" | "platform_duplicate" | "transfer" | "history" | "learning" | "llm"
-    )
+    is_import_preview_visible_signal_family(family)
 }
 
 fn json_value_contains_text(value: &Value, needle: &str) -> bool {
@@ -384,21 +399,6 @@ fn json_value_contains_text(value: &Value, needle: &str) -> bool {
     }
 }
 
-fn json_value_is_truthy(value: &Value) -> bool {
-    match value {
-        Value::Bool(value) => *value,
-        Value::Number(number) => {
-            number.as_i64().is_some_and(|value| value != 0)
-                || number.as_f64().is_some_and(|value| value != 0.0)
-        }
-        Value::String(text) => matches!(
-            text.trim().to_ascii_lowercase().as_str(),
-            "true" | "1" | "yes" | "y"
-        ),
-        _ => false,
-    }
-}
-
 fn sort_preview_rows(rows: &mut [ImportPreviewRow], sort_by: &str, sort_direction: &str) {
     let descending = sort_direction.eq_ignore_ascii_case("desc");
     rows.sort_by(|left, right| {
@@ -406,16 +406,30 @@ fn sort_preview_rows(rows: &mut [ImportPreviewRow], sort_by: &str, sort_directio
             "amount_cents"
             | "preview_amount_cents"
             | "previewAmountCents"
-            | "sourceAmountCents" => left.preview_amount_cents.cmp(&right.preview_amount_cents),
-            "counterparty" => left.preview_counterparty.cmp(&right.preview_counterparty),
+            | "sourceAmountCents" => left
+                .preview_amount_cents
+                .cmp(&right.preview_amount_cents)
+                .then(left.id.cmp(&right.id)),
+            "counterparty" => left
+                .preview_counterparty
+                .cmp(&right.preview_counterparty)
+                .then(left.id.cmp(&right.id)),
             "type" => preview_type_sort_rank(&left.preview_type)
                 .cmp(&preview_type_sort_rank(&right.preview_type))
-                .then(left.preview_type.cmp(&right.preview_type)),
+                .then(left.preview_type.cmp(&right.preview_type))
+                .then(left.id.cmp(&right.id)),
             "paymentMethod" => left
                 .preview_payment_method
-                .cmp(&right.preview_payment_method),
-            "comment" => left.preview_description.cmp(&right.preview_description),
-            "time" => left.preview_date.cmp(&right.preview_date),
+                .cmp(&right.preview_payment_method)
+                .then(left.id.cmp(&right.id)),
+            "comment" => left
+                .preview_description
+                .cmp(&right.preview_description)
+                .then(left.id.cmp(&right.id)),
+            "time" => left
+                .preview_date
+                .cmp(&right.preview_date)
+                .then(left.id.cmp(&right.id)),
             _ => left
                 .preview_date
                 .cmp(&right.preview_date)

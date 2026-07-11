@@ -14,6 +14,9 @@ pub fn preview_draft_from_history_duplicate(
     let payment_method =
         merge_preview_text(&history.payment_method, &input.imported_bill.payment_method);
     let description = merge_preview_text(&history.description, &input.imported_bill.description);
+    let planned_operation = normalize_history_operation("update_current_bill")
+        .expect("known history operation")
+        .as_str();
     let source_chain = serde_json::json!([
         {
             "role": "current_bill_base",
@@ -73,7 +76,7 @@ pub fn preview_draft_from_history_duplicate(
                 "source_count": input.imported_bill.dedup_source_ids().len(),
                 "history_bill_id": input.history_bill.history_bill_id,
                 "history_bill_version": input.history_bill.history_bill_version,
-                "planned_operation": "update_current_bill",
+                "planned_operation": planned_operation,
                 "source_chain": source_chain,
             },
             "reconciliation": {
@@ -83,7 +86,7 @@ pub fn preview_draft_from_history_duplicate(
                 "history_bill_id": input.history_bill.history_bill_id,
                 "history_bill_version": input.history_bill.history_bill_version,
                 "row_origin": "postgres_bill",
-                "planned_operation": "update_current_bill",
+                "planned_operation": planned_operation,
                 "review_status": "pending",
                 "time_diff_seconds": input.time_diff_seconds,
                 "score": f64::from(input.score_percent) / 100.0,

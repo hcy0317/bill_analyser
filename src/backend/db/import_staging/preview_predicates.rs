@@ -99,18 +99,45 @@ fn push_preview_signal_family_condition(
     family: &str,
 ) {
     match family {
-        "parser" => {
+        family
+            if ImportPreviewSignalFamily::parse(family)
+                == Some(ImportPreviewSignalFamily::Parser) =>
+        {
             query.push("(");
             push_preview_parser_signal_condition(query, alias);
             query.push(" AND NOT (");
             push_preview_specific_visible_signal_condition(query, alias);
             query.push("))");
         }
-        "platform_duplicate" => push_preview_platform_duplicate_signal_condition(query, alias),
-        "transfer" => push_preview_transfer_signal_condition(query, alias),
-        "history" => push_preview_history_signal_condition(query, alias),
-        "learning" => push_preview_recommendation_signal_condition(query, alias),
-        "llm" => push_preview_feedback_key_condition(query, alias, "llm"),
+        family
+            if ImportPreviewSignalFamily::parse(family)
+                == Some(ImportPreviewSignalFamily::PlatformDuplicate) =>
+        {
+            push_preview_platform_duplicate_signal_condition(query, alias)
+        }
+        family
+            if ImportPreviewSignalFamily::parse(family)
+                == Some(ImportPreviewSignalFamily::Transfer) =>
+        {
+            push_preview_transfer_signal_condition(query, alias)
+        }
+        family
+            if ImportPreviewSignalFamily::parse(family)
+                == Some(ImportPreviewSignalFamily::History) =>
+        {
+            push_preview_history_signal_condition(query, alias)
+        }
+        family
+            if ImportPreviewSignalFamily::parse(family)
+                == Some(ImportPreviewSignalFamily::Learning) =>
+        {
+            push_preview_recommendation_signal_condition(query, alias)
+        }
+        family
+            if ImportPreviewSignalFamily::parse(family) == Some(ImportPreviewSignalFamily::Llm) =>
+        {
+            push_preview_llm_signal_condition(query, alias)
+        }
         _ => {
             query.push("FALSE");
         }
@@ -118,13 +145,17 @@ fn push_preview_signal_family_condition(
 }
 
 fn push_preview_parser_signal_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
-    query.push("(COALESCE(NULLIF(");
+    query.push("(COALESCE(NULLIF(btrim(");
     query.push(alias);
-    query.push(".preview_payload->>'preview_parser_id', ''), '') <> '' OR COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(");
+    query.push(".preview_payload->>'preview_parser_id', ");
+    query.push_bind(IMPORT_PREVIEW_SIGNAL_TRIM_CHARS);
+    query.push("), ''), '') <> '' OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(");
     query.push(alias);
     query.push(".preview_payload->'preview_parser_tags') = 'array' THEN ");
     query.push(alias);
-    query.push(".preview_payload->'preview_parser_tags' ELSE '[]'::jsonb END), 0) > 0 OR ");
+    query.push(".preview_payload->'preview_parser_tags' ELSE '[]'::jsonb END) AS parser_tag(value) WHERE btrim(parser_tag.value, ");
+    query.push_bind(IMPORT_PREVIEW_SIGNAL_TRIM_CHARS);
+    query.push(") <> '') OR ");
     push_preview_feedback_key_condition(query, alias, "parser");
     query.push(")");
 }
@@ -141,7 +172,7 @@ fn push_preview_specific_visible_signal_condition(
     query.push(" OR ");
     push_preview_recommendation_signal_condition(query, alias);
     query.push(" OR ");
-    push_preview_feedback_key_condition(query, alias, "llm");
+    push_preview_llm_signal_condition(query, alias);
 }
 
 fn push_preview_platform_duplicate_signal_condition(
@@ -152,53 +183,253 @@ fn push_preview_platform_duplicate_signal_condition(
 }
 
 fn push_preview_transfer_signal_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
-    query.push("(");
     push_preview_feedback_key_condition(query, alias, "transfer");
-    query.push(" AND (");
-    query.push("LOWER(COALESCE(");
+    query.push(" AND NOT ");
+    push_preview_feedback_truthy_field_condition(query, alias, "transfer", "suppressed");
+    query.push(" AND ");
+    push_preview_feedback_resolved_status_expr(query, alias, "transfer");
+    query.push(" NOT IN (");
+    push_sql_string_list(query, IMPORT_PREVIEW_SIGNAL_SUPPRESSED_STATUSES);
+    query.push(") AND (");
+    push_preview_feedback_resolved_status_expr(query, alias, "transfer");
+    query.push(" = 'pending' OR (");
+    push_preview_feedback_resolved_status_expr(query, alias, "transfer");
+    query.push(" = '' AND LOWER(btrim(COALESCE(");
     query.push(alias);
-    query.push(".preview_payload#>>'{preview_matching_feedback,transfer,review_status}', '')) IN ('accepted', 'rejected', 'skipped') OR (LOWER(COALESCE(");
-    query.push(alias);
-    query.push(".preview_payload#>>'{preview_matching_feedback,transfer,review_status}', '')) = 'pending' AND LOWER(COALESCE(");
-    query.push(alias);
-    query.push(".preview_payload#>>'{preview_matching_feedback,transfer,suppressed}', 'false')) <> 'true') OR (LOWER(COALESCE(");
-    query.push(alias);
-    query.push(".preview_payload#>>'{preview_matching_feedback,transfer,suppressed}', 'false')) <> 'true' AND LOWER(COALESCE(");
-    query.push(alias);
-    query.push(".preview_payload->>'preview_type', '')) NOT IN ('转账', 'transfer', '4') AND (COALESCE(NULLIF(");
-    query.push(alias);
-    query.push(".preview_payload#>>'{preview_matching_feedback,transfer,candidate_type}', ''), '') <> '' OR COALESCE(NULLIF(");
-    query.push(alias);
-    query.push(
-        ".preview_payload#>>'{preview_matching_feedback,transfer,reason}', ''), '') <> ''))))",
-    );
+    query.push(".preview_payload->>'preview_type', ''), ");
+    query.push_bind(IMPORT_PREVIEW_SIGNAL_TRIM_CHARS);
+    query.push(")) NOT IN ('转账', 'transfer', '4') AND (");
+    push_preview_feedback_string_type_check(query, alias, "transfer", "candidate_type");
+    query.push(" AND ");
+    push_preview_feedback_text_expr(query, alias, "transfer", "candidate_type");
+    query.push(" <> '' OR ");
+    push_preview_feedback_string_type_check(query, alias, "transfer", "reason");
+    query.push(" AND ");
+    push_preview_feedback_text_expr(query, alias, "transfer", "reason");
+    query.push(" <> '' OR ");
+    push_preview_feedback_positive_number_condition(query, alias, "transfer", "score");
+    query.push(")))");
 }
 
 fn push_preview_recommendation_signal_condition(
     query: &mut QueryBuilder<'_, Postgres>,
     alias: &str,
 ) {
-    push_preview_feedback_key_condition(query, alias, "learning");
+    push_preview_meaningful_feedback_condition(
+        query,
+        alias,
+        "learning",
+        IMPORT_PREVIEW_LEARNING_NUMERIC_EVIDENCE_FIELDS,
+        IMPORT_PREVIEW_LEARNING_TEXT_EVIDENCE_FIELDS,
+    );
+}
+
+fn push_preview_llm_signal_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
+    push_preview_meaningful_feedback_condition(
+        query,
+        alias,
+        "llm",
+        IMPORT_PREVIEW_LLM_NUMERIC_EVIDENCE_FIELDS,
+        IMPORT_PREVIEW_LLM_TEXT_EVIDENCE_FIELDS,
+    );
 }
 
 fn push_preview_history_signal_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
-    query.push("(LOWER(COALESCE(");
-    query.push(alias);
-    query.push(".preview_payload#>>'{preview_matching_feedback,reconciliation,planned_operation}', '')) IN ('update_history', 'merge_transfer_history') OR LOWER(COALESCE(");
-    query.push(alias);
-    query.push(".preview_payload#>>'{preview_matching_feedback,reconciliation,destructive_ack_required}', '')) = 'true')");
+    query.push("(");
+    push_preview_feedback_text_expr(query, alias, "reconciliation", "planned_operation");
+    query.push(" IN (");
+    push_sql_string_list(query, IMPORT_PREVIEW_HISTORY_OPERATION_NAMES);
+    query.push(") OR ");
+    push_preview_feedback_truthy_field_condition(
+        query,
+        alias,
+        "reconciliation",
+        "destructive_ack_required",
+    );
+    query.push(")");
 }
 
-fn push_preview_dedup_type_in_condition(
+fn push_preview_feedback_resolved_status_expr(
     query: &mut QueryBuilder<'_, Postgres>,
     alias: &str,
+    key: &str,
+) {
+    let mut first = true;
+    query.push("COALESCE(");
+    for status_field in IMPORT_PREVIEW_SIGNAL_STATUS_FIELDS {
+        if !first {
+            query.push(", ");
+        }
+        query.push("NULLIF(LOWER(");
+        push_preview_feedback_text_expr(query, alias, key, status_field);
+        query.push("), '')");
+        first = false;
+    }
+    query.push(", '')");
+}
+
+fn push_preview_meaningful_feedback_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+    key: &str,
+    numeric_fields: &[&str],
+    text_fields: &[&str],
+) {
+    let canonical_statuses = if key == "learning" {
+        IMPORT_PREVIEW_LEARNING_CANONICAL_STATUSES
+    } else {
+        IMPORT_PREVIEW_SIGNAL_CANONICAL_STATUSES
+    };
+    query.push("(");
+    push_preview_feedback_key_condition(query, alias, key);
+    query.push(" AND NOT ");
+    push_preview_feedback_truthy_field_condition(query, alias, key, "suppressed");
+    query.push(" AND ");
+    push_preview_feedback_resolved_status_expr(query, alias, key);
+    query.push(" NOT IN (");
+    push_sql_string_list(query, IMPORT_PREVIEW_SIGNAL_SUPPRESSED_STATUSES);
+    query.push(") AND (");
+    push_preview_feedback_resolved_status_expr(query, alias, key);
+    query.push(" = '' OR ");
+    push_preview_feedback_resolved_status_expr(query, alias, key);
+    query.push(" IN (");
+    push_sql_string_list(query, canonical_statuses);
+    query.push(")) AND (");
+    push_preview_feedback_resolved_status_expr(query, alias, key);
+    query.push(" IN (");
+    push_sql_string_list(query, IMPORT_PREVIEW_SIGNAL_TERMINAL_STATUSES);
+    query.push(") OR (");
+    push_preview_feedback_resolved_status_expr(query, alias, key);
+    query.push(" <> '' AND ");
+    push_preview_feedback_resolved_status_expr(query, alias, key);
+    query.push(" NOT IN (");
+    push_sql_string_list(query, IMPORT_PREVIEW_SIGNAL_NON_PENDING_EXCLUDED_STATUSES);
+    query.push("))");
+    for field in numeric_fields {
+        query.push(" OR ");
+        push_preview_feedback_positive_number_condition(query, alias, key, field);
+    }
+    for field in text_fields {
+        query.push(" OR ");
+        push_preview_feedback_meaningful_text_condition(query, alias, key, field);
+    }
+    query.push("))");
+}
+
+fn push_preview_feedback_text_expr(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+    key: &str,
+    field: &str,
+) {
+    query.push("btrim(COALESCE(");
+    query.push(alias);
+    query.push(".preview_payload#>>'{preview_matching_feedback,");
+    query.push(key);
+    query.push(",");
+    query.push(field);
+    query.push("}', ''), ");
+    query.push_bind(IMPORT_PREVIEW_SIGNAL_TRIM_CHARS);
+    query.push(")");
+}
+
+fn push_preview_feedback_text_in_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+    key: &str,
+    field: &str,
     values: &[&str],
 ) {
-    query.push("LOWER(COALESCE(");
+    query.push("LOWER(");
+    push_preview_feedback_text_expr(query, alias, key, field);
+    query.push(") IN (");
+    push_sql_string_list(query, values);
+    query.push(")");
+}
+
+/// 中文说明：信号真值 SQL 谓词。与 Rust 侧 `import_preview_signal_value_is_truthy` 保持一致：
+/// 文本 true/yes/y 直接命中，或十进制数字文本解析为有限非零 double precision 亦为真。
+fn push_preview_feedback_truthy_field_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+    key: &str,
+    field: &str,
+) {
+    query.push("(");
+    push_preview_feedback_text_in_condition(
+        query,
+        alias,
+        key,
+        field,
+        IMPORT_PREVIEW_SIGNAL_TRUTHY_TEXT_VALUES,
+    );
+    query.push(" OR (");
+    push_preview_feedback_text_expr(query, alias, key, field);
+    query.push(" ~ ");
+    query.push_bind(IMPORT_PREVIEW_DECIMAL_NUMERIC_STRING_GRAMMAR);
+    query.push(" AND ");
+    push_preview_feedback_text_expr(query, alias, key, field);
+    query.push(" ~ ");
+    query.push_bind(IMPORT_PREVIEW_DECIMAL_HAS_NON_ZERO);
+    query.push("))");
+}
+
+fn push_preview_feedback_positive_number_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+    key: &str,
+    field: &str,
+) {
+    query.push("(");
+    push_preview_feedback_text_expr(query, alias, key, field);
+    query.push(" ~ ");
+    query.push_bind(IMPORT_PREVIEW_DECIMAL_NUMERIC_STRING_GRAMMAR);
+    query.push(" AND ");
+    push_preview_feedback_text_expr(query, alias, key, field);
+    query.push(" !~ '^-' AND ");
+    push_preview_feedback_text_expr(query, alias, key, field);
+    query.push(" ~ ");
+    query.push_bind(IMPORT_PREVIEW_DECIMAL_HAS_NON_ZERO);
+    query.push(")");
+}
+
+fn push_preview_feedback_string_type_check(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+    key: &str,
+    field: &str,
+) {
+    query.push("jsonb_typeof(");
     query.push(alias);
-    query.push(".preview_payload->>'dedup_type', ");
-    query.push(alias);
-    query.push(".preview_payload#>>'{preview_matching_feedback,dedup,type}', '')) IN (");
+    query.push(".preview_payload#>'{preview_matching_feedback,");
+    query.push(key);
+    query.push(",");
+    query.push(field);
+    query.push("}') = 'string'");
+}
+
+fn push_preview_feedback_meaningful_text_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+    key: &str,
+    field: &str,
+) {
+    query.push("(");
+    push_preview_feedback_string_type_check(query, alias, key, field);
+    query.push(" AND ");
+    push_preview_feedback_text_expr(query, alias, key, field);
+    query.push(" <> '' AND LOWER(");
+    push_preview_feedback_text_expr(query, alias, key, field);
+    query.push(") NOT IN ('none', 'suppressed', 'null') AND (NOT (");
+    push_preview_feedback_text_expr(query, alias, key, field);
+    query.push(" ~ ");
+    query.push_bind(IMPORT_PREVIEW_DECIMAL_NUMERIC_STRING_GRAMMAR);
+    query.push(") OR ");
+    push_preview_feedback_positive_number_condition(query, alias, key, field);
+    query.push("))");
+}
+
+fn push_sql_string_list(query: &mut QueryBuilder<'_, Postgres>, values: &[&str]) {
     for (index, value) in values.iter().enumerate() {
         if index > 0 {
             query.push(", ");
@@ -207,6 +438,23 @@ fn push_preview_dedup_type_in_condition(
         query.push(*value);
         query.push("'");
     }
+}
+
+fn push_preview_dedup_type_in_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+    values: &[&str],
+) {
+    query.push("LOWER(COALESCE(NULLIF(btrim(");
+    query.push(alias);
+    query.push(".preview_payload->>'dedup_type', ");
+    query.push_bind(IMPORT_PREVIEW_SIGNAL_TRIM_CHARS);
+    query.push("), ''), btrim(");
+    query.push(alias);
+    query.push(".preview_payload#>>'{preview_matching_feedback,dedup,type}', ");
+    query.push_bind(IMPORT_PREVIEW_SIGNAL_TRIM_CHARS);
+    query.push("), '')) IN (");
+    push_sql_string_list(query, values);
     query.push(")");
 }
 
@@ -234,23 +482,12 @@ fn push_preview_feedback_family_text_search(
         query.push("FALSE");
         return;
     };
-    push_preview_feedback_text_search_condition(query, alias, key, status);
-}
-
-fn push_preview_feedback_text_search_condition(
-    query: &mut QueryBuilder<'_, Postgres>,
-    alias: &str,
-    key: &str,
-    status: &str,
-) {
     query.push("(");
     push_preview_feedback_key_condition(query, alias, key);
-    query.push(" AND (");
-    query.push(alias);
-    query.push(".preview_payload#>'{preview_matching_feedback,");
-    query.push(key);
-    query.push("}')::text ILIKE ");
-    query.push_bind(like_pattern(status));
+    query.push(" AND ");
+    push_preview_feedback_resolved_status_expr(query, alias, key);
+    query.push(" = ");
+    query.push_bind(status.to_ascii_lowercase());
     query.push(")");
 }
 
@@ -306,11 +543,11 @@ fn push_preview_current_review_condition(query: &mut QueryBuilder<'_, Postgres>,
 }
 
 fn push_preview_identity_feedback_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
-    query.push("(jsonb_typeof(");
+    query.push("COALESCE((jsonb_typeof(");
     query.push(alias);
     query.push(".preview_payload#>'{preview_matching_feedback,identity_validation,issues}') = 'array' AND jsonb_array_length(");
     query.push(alias);
-    query.push(".preview_payload#>'{preview_matching_feedback,identity_validation,issues}') > 0)");
+    query.push(".preview_payload#>'{preview_matching_feedback,identity_validation,issues}') > 0), false)");
 }
 
 fn push_preview_missing_category_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
@@ -490,9 +727,11 @@ fn push_preview_account_filter_invalid_condition(
 }
 
 fn push_preview_empty_parser_tags_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
-    query.push("(COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(");
+    query.push("(NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(");
     query.push(alias);
     query.push(".preview_payload->'preview_parser_tags') = 'array' THEN ");
     query.push(alias);
-    query.push(".preview_payload->'preview_parser_tags' ELSE '[]'::jsonb END), 0) = 0)");
+    query.push(".preview_payload->'preview_parser_tags' ELSE '[]'::jsonb END) AS parser_tag(value) WHERE btrim(parser_tag.value, ");
+    query.push_bind(IMPORT_PREVIEW_SIGNAL_TRIM_CHARS);
+    query.push(") <> ''))");
 }

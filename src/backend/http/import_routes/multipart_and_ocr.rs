@@ -261,13 +261,7 @@ fn llm_config_update_from_map(object: &Map<String, Value>) -> LlmConfigUpdate {
     let api_key = object
         .get("api_key")
         .and_then(value_to_text)
-        .and_then(|value| {
-            if value == "********" {
-                None
-            } else {
-                Some(value)
-            }
-        });
+        .filter(|value| value != "********");
     LlmConfigUpdate {
         name: object.get("name").and_then(value_to_text),
         provider: object.get("provider").and_then(value_to_text),

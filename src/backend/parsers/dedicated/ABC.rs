@@ -113,10 +113,9 @@ fn raw_abc(row: &RowMap) -> Option<RawBill> {
             (value, "收入")
         } else if let Some(value) = parse_amount(&expense).filter(|value| *value > 0.0) {
             (value, "支出")
-        } else if let Some(value) = parse_amount(&single) {
-            (value, if value > 0.0 { "收入" } else { "支出" })
         } else {
-            return None;
+            let value = parse_amount(&single)?;
+            (value, if value > 0.0 { "收入" } else { "支出" })
         };
     if amount == 0.0 {
         return None;

@@ -31,6 +31,7 @@ pub fn build_import_preview_matching_payload(preview_item: &Map<String, Value>) 
             "parser",
             "annotation",
             "reconciliation",
+            "identity_validation",
             "stage2_baseline",
         ] {
             if let Some(feedback_section) = object_field_from_map(feedback, section) {
@@ -254,4 +255,15 @@ fn matching_section_string_field(
     preview_matching_payload(preview_item)
         .and_then(|matching| object_field(matching.get(section)))
         .map(|section| string_field_from_map(section, key))
+}
+
+fn matching_section_float_field(
+    preview_item: &Map<String, Value>,
+    section: &str,
+    key: &str,
+) -> f64 {
+    preview_matching_payload(preview_item)
+        .and_then(|matching| object_field(matching.get(section)))
+        .map(|section| float_field_from_map(section, key))
+        .unwrap_or_default()
 }

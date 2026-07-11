@@ -7,6 +7,7 @@ import {
     getFirstNonEmptyString,
     getSuggestedTypeFromMatchingCandidate,
     hasDedupSourceIds,
+    isCanonicalTruthy,
     normalizeDedupSourceIds,
     normalizeImportMatchingPayload,
     type SparseImportMatchingPayload
@@ -140,7 +141,7 @@ export class ImportTransaction implements ImportTransactionResponse {
             ? normalizeDedupSourceIds(dedup?.source_ids)
             : normalizeDedupSourceIds(response.dedupSourceIds);
         this.matching = matching;
-        this.isManuallyAnnotated = !!annotation?.is_manually_annotated || !!response.isManuallyAnnotated;
+        this.isManuallyAnnotated = isCanonicalTruthy(annotation?.is_manually_annotated) || isCanonicalTruthy(response.isManuallyAnnotated);
 
         this.actualCategoryName = response.originalCategoryName;
         this.actualSourceAccountName = response.originalSourceAccountName;
@@ -159,7 +160,7 @@ export class ImportTransaction implements ImportTransactionResponse {
 
     public hasTransferSuggestion(): boolean {
         if (this.getTransferSuggestionReviewStatus() === 'pending') {
-            return !this.matching?.transfer?.suppressed;
+            return !isCanonicalTruthy(this.matching?.transfer?.suppressed);
         }
 
         return !!this.suggestedType
@@ -175,7 +176,7 @@ export class ImportTransaction implements ImportTransactionResponse {
     }
 
     public isTransferSuggestionSuppressed(): boolean {
-        return !!this.matching?.transfer?.suppressed || this.isTransferSuggestionRejected();
+        return isCanonicalTruthy(this.matching?.transfer?.suppressed) || this.isTransferSuggestionRejected();
     }
 
     public isTransferSuggestionAccepted(): boolean {
@@ -220,7 +221,7 @@ export class ImportTransaction implements ImportTransactionResponse {
     }
 
     public isInvestmentSignalSuppressed(): boolean {
-        return !!this.matching?.investment?.suppressed || this.isInvestmentSignalRejected();
+        return isCanonicalTruthy(this.matching?.investment?.suppressed) || this.isInvestmentSignalRejected();
     }
 
     public isInvestmentSignalAccepted(): boolean {
@@ -254,11 +255,24 @@ export class ImportTransaction implements ImportTransactionResponse {
     }
 
     public getLearningRecommendationReviewStatus(): string {
-        return (this.matching?.learning?.review_status || '').trim().toLowerCase();
+        const learning = this.matching?.learning;
+        const candidates = [
+            learning?.review_status,
+            learning?.status,
+            learning?.lifecycle_status,
+            learning?.signal_state,
+        ];
+        for (const candidate of candidates) {
+            const text = (candidate || '').trim().toLowerCase();
+            if (text) {
+                return text;
+            }
+        }
+        return '';
     }
 
     public isLearningRecommendationSuppressed(): boolean {
-        return !!this.matching?.learning?.suppressed || this.isLearningRecommendationRejected();
+        return isCanonicalTruthy(this.matching?.learning?.suppressed) || this.isLearningRecommendationRejected();
     }
 
     public isLearningRecommendationAccepted(): boolean {

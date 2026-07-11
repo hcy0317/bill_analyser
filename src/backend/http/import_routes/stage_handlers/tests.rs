@@ -504,6 +504,132 @@ mod tests {
     }
 
     #[test]
+    fn reclassify_invalidates_semantic_recommendations_and_history_plan_only() {
+        let mut draft = ImportPreviewDraft {
+            preview_matching_feedback: json!({
+                "parser": {"parser_id": "alipay"},
+                "transfer": {"candidate_type": "transfer", "review_status": "pending"},
+                "recurring": {"candidate_id": 7},
+                "learning": {"review_status": "accepted", "score": 0.98},
+                "llm": {"review_status": "rejected", "confidence": 0.92},
+                "history": {"candidate_id": "history:8"},
+                "reconciliation": {
+                    "planned_operation": "update_current_bill",
+                    "history_bill_id": 8,
+                    "destructive_ack_required": true
+                }
+            }),
+            ..ImportPreviewDraft::default()
+        };
+
+        invalidate_reclassification_dependent_signals(&mut draft);
+
+        let feedback = draft
+            .preview_matching_feedback
+            .as_object()
+            .expect("matching feedback object");
+        assert!(feedback.get("learning").is_none());
+        assert!(feedback.get("llm").is_none());
+        assert!(feedback.get("history").is_none());
+        assert!(feedback.get("reconciliation").is_none());
+        assert!(feedback.get("parser").is_some());
+        assert!(feedback.get("transfer").is_some());
+        assert!(feedback.get("recurring").is_none());
+        assert_eq!(draft.preview_recurring_id, None);
+        assert!(draft.preview_recurring_name.is_empty());
+        assert_eq!(draft.preview_recurring_candidate_count, 0);
+        assert_eq!(draft.preview_recurring_match_score, 0.0);
+        assert!(draft.preview_recurring_match_reasons.is_empty());
+        assert!(draft.preview_recurring_matched_date.is_empty());
+    }
+
+    #[test]
+    fn reclassify_preserves_non_history_reconciliation_evidence() {
+        let mut draft = ImportPreviewDraft {
+            preview_matching_feedback: json!({
+                "reconciliation": {
+                    "candidate_type": "transfer",
+                    "review_status": "pending"
+                }
+            }),
+            ..ImportPreviewDraft::default()
+        };
+
+        invalidate_reclassification_dependent_signals(&mut draft);
+
+        assert!(draft
+            .preview_matching_feedback
+            .get("reconciliation")
+            .is_some());
+    }
+
+    #[test]
+    fn reclassify_removes_recurring_projection_when_candidate_disappears() {
+        let mut draft = ImportPreviewDraft {
+            preview_recurring_id: Some(7),
+            preview_recurring_name: "Old monthly candidate".to_string(),
+            preview_recurring_candidate_count: 1,
+            preview_recurring_match_score: 0.95,
+            preview_recurring_match_reasons: "amount|schedule".to_string(),
+            preview_recurring_matched_date: "2026-07-01".to_string(),
+            preview_matching_feedback: json!({
+                "parser": {"parser_id": "fixture"},
+                "transfer": {"candidate_type": "transfer", "review_status": "pending"},
+                "recurring": {"id": 7, "review_status": "pending"}
+            }),
+            ..ImportPreviewDraft::default()
+        };
+
+        invalidate_reclassification_dependent_signals(&mut draft);
+
+        assert!(best_recurring_candidate_for_draft(&draft, &[]).is_none());
+        assert_eq!(draft.preview_recurring_id, None);
+        assert_eq!(draft.preview_recurring_candidate_count, 0);
+        assert!(draft.preview_matching_feedback.get("recurring").is_none());
+        assert!(draft.preview_matching_feedback.get("parser").is_some());
+        assert!(draft.preview_matching_feedback.get("transfer").is_some());
+    }
+
+    #[test]
+    fn reclassify_recreates_only_newly_valid_recurring_candidate() {
+        let mut draft = ImportPreviewDraft {
+            preview_date: "2026-07-10 09:00:00".to_string(),
+            preview_type: "支出".to_string(),
+            preview_amount_cents: 8_800,
+            preview_recurring_id: Some(7),
+            preview_recurring_name: "Old candidate".to_string(),
+            preview_matching_feedback: json!({
+                "parser": {"parser_id": "fixture"},
+                "recurring": {"id": 7, "review_status": "pending"}
+            }),
+            ..ImportPreviewDraft::default()
+        };
+        let templates = vec![ImportIntelligenceRecurringTemplate {
+            id: 19,
+            name: "New candidate".to_string(),
+            bill_type: "支出".to_string(),
+            amount_cents: 8_800,
+            account: String::new(),
+            counterparty: String::new(),
+            next_date: "2026-07-10".to_string(),
+            start_date: "2026-06-10".to_string(),
+        }];
+
+        invalidate_reclassification_dependent_signals(&mut draft);
+        let candidate = best_recurring_candidate_for_draft(&draft, &templates)
+            .expect("new candidate remains valid");
+        apply_recurring_candidate(&mut draft, candidate);
+
+        assert_eq!(draft.preview_recurring_id, Some(19));
+        assert_eq!(draft.preview_recurring_name, "New candidate");
+        assert_eq!(
+            draft.preview_matching_feedback.pointer("/recurring/id"),
+            Some(&json!(19))
+        );
+        assert!(draft.preview_matching_feedback.get("parser").is_some());
+    }
+
+    #[test]
     fn preview_snapshots_and_row_draft_preserve_canonical_category_id() {
         let draft = ImportPreviewDraft {
             preview_type: "收入".to_string(),

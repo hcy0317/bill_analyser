@@ -37,6 +37,8 @@ pub struct ImportPreviewMatchingPayload {
     pub parser: ParserMatchingPayload,
     pub annotation: AnnotationMatchingPayload,
     pub reconciliation: ReconciliationMatchingPayload,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity_validation: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -116,6 +118,8 @@ pub struct AnnotationMatchingPayload {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct LlmRecommendationPayload {
+    pub suggested_type: String,
+    pub suggested_category_id: Option<i64>,
     pub suggested_main_category: String,
     pub suggested_sub_category: String,
     pub suggested_source_account: String,

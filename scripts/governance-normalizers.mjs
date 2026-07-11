@@ -141,15 +141,25 @@ function findLcovRecord(lcovFiles, diffPath) {
     return null;
 }
 
-function summarizeChangedLineCoverage({ lcovText, diffText, threshold = 90 }) {
+function summarizeChangedLineCoverage({
+    lcovText,
+    diffText,
+    threshold = 90,
+    requireMatchedFiles = false,
+    requireExecutableLines = false,
+}) {
     const lcovFiles = parseLcov(lcovText);
     const changedLinesByFile = parseUnifiedDiffChangedLines(diffText);
     const files = [];
+    let matchedFileCount = 0;
     let executableChangedLines = 0;
     let coveredChangedLines = 0;
 
     for (const [filePath, changedLines] of changedLinesByFile.entries()) {
         const record = findLcovRecord(lcovFiles, filePath);
+        if (record) {
+            matchedFileCount += 1;
+        }
         const executable = [];
         const covered = [];
         const uncovered = [];
@@ -171,6 +181,8 @@ function summarizeChangedLineCoverage({ lcovText, diffText, threshold = 90 }) {
         coveredChangedLines += covered.length;
         files.push({
             path: filePath,
+            matched_lcov_record: record !== null,
+            lcov_path: record?.path ?? null,
             changed_lines: [...changedLines].sort((left, right) => left - right),
             executable_changed_lines: executable,
             covered_changed_lines: covered,
@@ -184,13 +196,33 @@ function summarizeChangedLineCoverage({ lcovText, diffText, threshold = 90 }) {
     const coveragePercent = executableChangedLines === 0
         ? null
         : Number(((coveredChangedLines / executableChangedLines) * 100).toFixed(2));
+    const changedVueFiles = files.filter(file => file.path.toLowerCase().endsWith('.vue'));
+    const vueSfcPassed = changedVueFiles.every(file => (
+        file.matched_lcov_record
+        && file.executable_changed_lines.length > 0
+        && file.coverage_percent > threshold
+    ));
+    const coveragePassed = coveragePercent !== null && coveragePercent > threshold;
+    const matchedFilesPassed = !requireMatchedFiles || matchedFileCount > 0;
+    const executableLinesPassed = !requireExecutableLines || executableChangedLines > 0;
     return {
         threshold,
+        changed_file_count: changedLinesByFile.size,
+        matched_file_count: matchedFileCount,
+        changed_vue_file_count: changedVueFiles.length,
         executable_changed_lines: executableChangedLines,
         covered_changed_lines: coveredChangedLines,
         uncovered_changed_lines: executableChangedLines - coveredChangedLines,
         coverage_percent: coveragePercent,
-        status: executableChangedLines === 0 || coveragePercent >= threshold ? 'passed' : 'failed',
+        requirements: {
+            coverage_strictly_greater_than_threshold: coveragePassed,
+            matched_files: matchedFilesPassed,
+            executable_lines: executableLinesPassed,
+            changed_vue_sfc_files: vueSfcPassed,
+        },
+        status: coveragePassed && matchedFilesPassed && executableLinesPassed && vueSfcPassed
+            ? 'passed'
+            : 'failed',
         files,
     };
 }
@@ -338,7 +370,17 @@ function main(argv = process.argv.slice(2)) {
         const lcovText = readFileArgument(args, '--lcov');
         const diffText = readFileArgument(args, '--diff');
         const threshold = numberArgument(args, '--threshold', 90);
-        console.log(JSON.stringify(summarizeChangedLineCoverage({ lcovText, diffText, threshold }), null, 2));
+        const summary = summarizeChangedLineCoverage({
+            lcovText,
+            diffText,
+            threshold,
+            requireMatchedFiles: args.includes('--require-matched-files'),
+            requireExecutableLines: args.includes('--require-executable-lines'),
+        });
+        console.log(JSON.stringify(summary, null, 2));
+        if (summary.status !== 'passed') {
+            process.exitCode = 1;
+        }
         return;
     }
     if (command === 'forge-evidence') {
@@ -358,7 +400,7 @@ function main(argv = process.argv.slice(2)) {
     }
     console.error([
         'Usage:',
-        '  node scripts/governance-normalizers.mjs changed-coverage --lcov <file> --diff <file> [--threshold 90]',
+        '  node scripts/governance-normalizers.mjs changed-coverage --lcov <file> --diff <file> [--threshold 90] [--require-matched-files] [--require-executable-lines]',
         '  node scripts/governance-normalizers.mjs forge-evidence --input <json>',
         '  node scripts/governance-normalizers.mjs structure-queue [--rust-output <log>] [--frontend-output <log>]',
     ].join('\n'));

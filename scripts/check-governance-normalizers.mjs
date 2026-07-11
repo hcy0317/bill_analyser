@@ -71,6 +71,149 @@ function testChangedCoverageSummary() {
     assert.deepEqual(summary.files[0].uncovered_changed_lines, [11]);
 }
 
+function testChangedCoverageThresholdIsStrict() {
+    const summary = summarizeChangedLineCoverage({
+        lcovText: [
+            'SF:src/backend/example.rs',
+            'DA:9,1',
+            'DA:10,1',
+            'DA:11,1',
+            'DA:12,1',
+            'DA:13,1',
+            'DA:14,1',
+            'DA:15,1',
+            'DA:16,1',
+            'DA:17,1',
+            'DA:18,0',
+            'end_of_record',
+        ].join('\n'),
+        diffText: [
+            'diff --git a/src/backend/example.rs b/src/backend/example.rs',
+            '--- a/src/backend/example.rs',
+            '+++ b/src/backend/example.rs',
+            '@@ -8,0 +9,10 @@',
+            ...Array.from({ length: 10 }, (_, index) => `+line ${index + 1}`),
+        ].join('\n'),
+        threshold: 90,
+        requireMatchedFiles: true,
+        requireExecutableLines: true,
+    });
+
+    assert.equal(summary.coverage_percent, 90);
+    assert.equal(summary.status, 'failed');
+    assert.equal(summary.requirements.coverage_strictly_greater_than_threshold, false);
+}
+
+function testChangedCoverageRejectsEmptyDiff() {
+    const summary = summarizeChangedLineCoverage({
+        lcovText: 'SF:src/backend/example.rs\nDA:1,1\nend_of_record',
+        diffText: '',
+        threshold: 90,
+        requireMatchedFiles: true,
+        requireExecutableLines: true,
+    });
+
+    assert.equal(summary.changed_file_count, 0);
+    assert.equal(summary.matched_file_count, 0);
+    assert.equal(summary.executable_changed_lines, 0);
+    assert.equal(summary.status, 'failed');
+}
+
+function testChangedCoverageRejectsZeroMatchedFiles() {
+    const summary = summarizeChangedLineCoverage({
+        lcovText: 'SF:src/backend/other.rs\nDA:9,1\nend_of_record',
+        diffText: [
+            'diff --git a/src/backend/example.rs b/src/backend/example.rs',
+            '--- a/src/backend/example.rs',
+            '+++ b/src/backend/example.rs',
+            '@@ -8,0 +9 @@',
+            '+changed line',
+        ].join('\n'),
+        threshold: 90,
+        requireMatchedFiles: true,
+        requireExecutableLines: true,
+    });
+
+    assert.equal(summary.matched_file_count, 0);
+    assert.equal(summary.status, 'failed');
+    assert.equal(summary.requirements.matched_files, false);
+}
+
+function testChangedCoverageRejectsZeroExecutableChangedLines() {
+    const summary = summarizeChangedLineCoverage({
+        lcovText: 'SF:src/backend/example.rs\nDA:20,1\nend_of_record',
+        diffText: [
+            'diff --git a/src/backend/example.rs b/src/backend/example.rs',
+            '--- a/src/backend/example.rs',
+            '+++ b/src/backend/example.rs',
+            '@@ -8,0 +9 @@',
+            '+non executable changed line',
+        ].join('\n'),
+        threshold: 90,
+        requireMatchedFiles: true,
+        requireExecutableLines: true,
+    });
+
+    assert.equal(summary.matched_file_count, 1);
+    assert.equal(summary.executable_changed_lines, 0);
+    assert.equal(summary.status, 'failed');
+    assert.equal(summary.requirements.executable_lines, false);
+}
+
+function testChangedCoverageMatchesRustAndVuePaths() {
+    const summary = summarizeChangedLineCoverage({
+        lcovText: [
+            'SF:src/backend/example.rs',
+            'DA:9,1',
+            'end_of_record',
+            'SF:src/views/ExampleView.vue',
+            'DA:4,1',
+            'end_of_record',
+        ].join('\n'),
+        diffText: [
+            'diff --git a/src/backend/example.rs b/src/backend/example.rs',
+            '--- a/src/backend/example.rs',
+            '+++ b/src/backend/example.rs',
+            '@@ -8,0 +9 @@',
+            '+covered Rust line',
+            'diff --git a/src/web/src/views/ExampleView.vue b/src/web/src/views/ExampleView.vue',
+            '--- a/src/web/src/views/ExampleView.vue',
+            '+++ b/src/web/src/views/ExampleView.vue',
+            '@@ -3,0 +4 @@',
+            '+covered Vue line',
+        ].join('\n'),
+        threshold: 90,
+        requireMatchedFiles: true,
+        requireExecutableLines: true,
+    });
+
+    assert.equal(summary.matched_file_count, 2);
+    assert.equal(summary.executable_changed_lines, 2);
+    assert.equal(summary.coverage_percent, 100);
+    assert.equal(summary.status, 'passed');
+    assert.deepEqual(summary.files.map(file => file.matched_lcov_record), [true, true]);
+}
+
+function testChangedCoverageRejectsMissingVueSfcRecord() {
+    const summary = summarizeChangedLineCoverage({
+        lcovText: 'SF:src/views/OtherView.vue\nDA:4,1\nend_of_record',
+        diffText: [
+            'diff --git a/src/web/src/views/ExampleView.vue b/src/web/src/views/ExampleView.vue',
+            '--- a/src/web/src/views/ExampleView.vue',
+            '+++ b/src/web/src/views/ExampleView.vue',
+            '@@ -3,0 +4 @@',
+            '+changed Vue line',
+        ].join('\n'),
+        threshold: 90,
+        requireMatchedFiles: true,
+        requireExecutableLines: true,
+    });
+
+    assert.equal(summary.changed_vue_file_count, 1);
+    assert.equal(summary.requirements.changed_vue_sfc_files, false);
+    assert.equal(summary.status, 'failed');
+}
+
 function testForgeEvidenceNormalizer() {
     const evidence = normalizeForgeEvidence({
         target_forge: 'gitea',
@@ -131,6 +274,12 @@ function testStructureQueueNormalizer() {
 testLcovParser();
 testUnifiedDiffParser();
 testChangedCoverageSummary();
+testChangedCoverageThresholdIsStrict();
+testChangedCoverageRejectsEmptyDiff();
+testChangedCoverageRejectsZeroMatchedFiles();
+testChangedCoverageRejectsZeroExecutableChangedLines();
+testChangedCoverageMatchesRustAndVuePaths();
+testChangedCoverageRejectsMissingVueSfcRecord();
 testForgeEvidenceNormalizer();
 testStructureQueueNormalizer();
 

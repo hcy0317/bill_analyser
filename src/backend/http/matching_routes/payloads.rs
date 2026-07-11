@@ -51,11 +51,11 @@ async fn matching_bill_candidates_response(
 fn matching_candidate_action_response(
     state: &HttpAppState,
     headers: &HeaderMap,
-    _candidate_id: String,
-    _action: &str,
+    candidate_id: String,
+    action: &str,
     payload: Option<Json<Value>>,
 ) -> Response {
-    let _user_id = match user_id_from_headers(headers, &state.config) {
+    let user_id = match user_id_from_headers(headers, &state.config) {
         Ok(value) => value,
         Err(response) => return *response,
     };
@@ -65,22 +65,190 @@ fn matching_candidate_action_response(
     let Some(object) = payload.as_object() else {
         return error_response(StatusCode::BAD_REQUEST, "Invalid request");
     };
-    let _request = match preview_action_request_from_payload(object) {
+    let request = match preview_action_request_from_payload(object) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let context = match preview_matching_action_context(&candidate_id, action, &request) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_postgres_runtime(state, "matching") {
         Ok(value) => value,
         Err(response) => return *response,
     };
 
-    error_response(
-        StatusCode::CONFLICT,
-        "PostgreSQL matching candidate actions require a materialized candidate",
-    )
+    let result = match context.kind.as_str() {
+        "learning" => bill_analyser_db::apply_preview_learning_decision(
+            runtime.pool(),
+            &context.session_id,
+            context.preview_id,
+            user_id,
+            context.decision,
+            request.learning_apply.as_ref(),
+            request.expected_state.as_ref(),
+        ),
+        "llm" => bill_analyser_db::import_staging::review_preview_llm_matching_action(
+            runtime.pool(),
+            &bill_analyser_db::ImportPreviewLlmReviewRequest {
+                session_id: &context.session_id,
+                preview_id: context.preview_id,
+                user_id,
+                decision: context.decision,
+                suggestion: None,
+                user_correction_category: None,
+                user_correction_account: None,
+                expected_state: request.expected_state.as_ref(),
+            },
+        ),
+        _ => unreachable!("preview action context restricts candidate kinds"),
+    };
+
+    match result {
+        Ok(result) if result.state_conflict => {
+            error_response(StatusCode::CONFLICT, "Preview state is stale")
+        }
+        Ok(result) if result.invalid_recurring_id => {
+            error_response(StatusCode::BAD_REQUEST, "Invalid recurring candidate")
+        }
+        Ok(result) => {
+            let Some(preview) = result.preview else {
+                return error_response(StatusCode::NOT_FOUND, "Preview candidate not found");
+            };
+            if preview.session_id != context.session_id {
+                return error_response(StatusCode::CONFLICT, "Preview state is stale");
+            }
+            let review_status = preview_action_review_status(
+                &preview.preview_matching_feedback,
+                &context.kind,
+                action,
+            );
+            let preview_item = matching_preview_item_value(preview);
+            let mut action_result = Map::from_iter([
+                ("candidate_id".to_string(), json!(candidate_id)),
+                ("action".to_string(), json!(action)),
+                ("session_id".to_string(), json!(context.session_id)),
+                ("preview_id".to_string(), json!(context.preview_id)),
+                ("review_status".to_string(), json!(review_status)),
+            ]);
+            if request.response_mode_preview_item {
+                action_result.insert("preview_item".to_string(), preview_item);
+            } else {
+                action_result.insert("preview".to_string(), json!([preview_item]));
+            }
+            success_data(
+                StatusCode::OK,
+                bill_analyser_core::matching::build_matching_candidate_action_payload(
+                    &candidate_id,
+                    &action_result,
+                ),
+            )
+        }
+        Err(error) => matching_error_response(error.into()),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct PreviewMatchingActionContext {
+    kind: String,
+    session_id: String,
+    preview_id: i64,
+    decision: bill_analyser_db::ImportPreviewDecision,
+}
+
+fn preview_matching_action_context(
+    candidate_id: &str,
+    action: &str,
+    request: &PreviewMatchingActionRequest,
+) -> RouteResult<PreviewMatchingActionContext> {
+    let Some(descriptor) = bill_analyser_core::matching::parse_matching_candidate_id(candidate_id)
+    else {
+        return Err(Box::new(error_response(
+            StatusCode::BAD_REQUEST,
+            "Invalid matching candidate",
+        )));
+    };
+    if descriptor.scope != "preview" || !matches!(descriptor.kind.as_str(), "learning" | "llm") {
+        return Err(Box::new(error_response(
+            StatusCode::CONFLICT,
+            "Matching candidate action is not available for this candidate",
+        )));
+    }
+    let Some(preview_id) = descriptor.preview_id else {
+        return Err(Box::new(error_response(
+            StatusCode::BAD_REQUEST,
+            "Invalid matching candidate",
+        )));
+    };
+    let session_id = request
+        .expected_state
+        .as_ref()
+        .and_then(|expected| expected.session_id.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            Box::new(error_response(
+                StatusCode::BAD_REQUEST,
+                "sessionId is required",
+            ))
+        })?;
+    let decision = match action.trim().to_ascii_lowercase().as_str() {
+        "accept" => bill_analyser_db::ImportPreviewDecision::Accept,
+        "reject" => bill_analyser_db::ImportPreviewDecision::Reject,
+        "clear" => bill_analyser_db::ImportPreviewDecision::Clear,
+        _ => {
+            return Err(Box::new(error_response(
+                StatusCode::BAD_REQUEST,
+                "Invalid matching candidate action",
+            )));
+        }
+    };
+    Ok(PreviewMatchingActionContext {
+        kind: descriptor.kind,
+        session_id,
+        preview_id,
+        decision,
+    })
+}
+
+fn preview_action_review_status(feedback: &Value, kind: &str, action: &str) -> String {
+    feedback
+        .get(kind)
+        .and_then(Value::as_object)
+        .and_then(|value| first_value(value, &["review_status", "status"]))
+        .and_then(value_to_text)
+        .unwrap_or_else(|| {
+            if action.eq_ignore_ascii_case("clear") {
+                "cleared".to_string()
+            } else {
+                action.trim().to_ascii_lowercase()
+            }
+        })
+}
+
+fn matching_preview_item_value(preview: bill_analyser_db::ImportPreviewRow) -> Value {
+    let mut value = serde_json::to_value(preview).unwrap_or_else(|_| json!({}));
+    if let Some(object) = value.as_object_mut() {
+        bill_analyser_core::attach_import_preview_matching_payload(object);
+    }
+    value
 }
 
 fn preview_action_request_from_payload(
     object: &Map<String, Value>,
 ) -> RouteResult<PreviewMatchingActionRequest> {
+    let expected_state = expected_state_from_payload(object)?.or_else(|| {
+        first_value(object, &["sessionId", "session_id"])
+            .and_then(value_to_text)
+            .filter(|value| !value.trim().is_empty())
+            .map(|session_id| ImportPreviewExpectedState {
+                session_id: Some(session_id),
+                ..ImportPreviewExpectedState::default()
+            })
+    });
     Ok(PreviewMatchingActionRequest {
-        expected_state: expected_state_from_payload(object)?,
+        expected_state,
         response_mode_preview_item: response_mode_is_preview_item(object),
         reviewed_type: first_value(object, &["reviewedType", "reviewed_type", "type"])
             .and_then(value_to_text),
@@ -109,9 +277,24 @@ fn expected_state_from_payload(
     Ok(Some(ImportPreviewExpectedState {
         session_id: first_value(expected_state, &["sessionId", "session_id"])
             .and_then(value_to_text),
+        review_status: first_value(
+            expected_state,
+            &["reviewStatus", "review_status", "status"],
+        )
+        .and_then(value_to_text)
+        .map(|value| value.trim().to_ascii_lowercase()),
         preview_type: first_value(expected_state, &["type", "previewType", "preview_type"])
             .and_then(value_to_text)
             .map(|value| normalize_preview_type_text(&value)),
+        preview_category_id: optional_id_field_from_object(
+            expected_state,
+            &[
+                "categoryId",
+                "category_id",
+                "previewCategoryId",
+                "preview_category_id",
+            ],
+        ),
         preview_main_category: first_value(
             expected_state,
             &[

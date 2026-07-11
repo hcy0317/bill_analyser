@@ -33,6 +33,7 @@ pub struct ImportPreviewRow {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ImportPreviewFilterIndexRow {
     pub id: i64,
+    pub session_id: String,
     pub preview_date: String,
     pub preview_type: String,
     pub preview_amount_cents: i64,
@@ -54,6 +55,36 @@ pub struct ImportPreviewFilterIndexRow {
     pub dedup_type: String,
     pub dedup_source_ids: Vec<i64>,
     pub preview_matching_feedback: Value,
+}
+
+impl From<ImportPreviewRow> for ImportPreviewFilterIndexRow {
+    fn from(row: ImportPreviewRow) -> Self {
+        Self {
+            id: row.id,
+            session_id: row.session_id,
+            preview_date: row.preview_date,
+            preview_type: row.preview_type,
+            preview_amount_cents: row.preview_amount_cents,
+            category_id: row.category_id,
+            preview_main_category: row.preview_main_category,
+            preview_sub_category: row.preview_sub_category,
+            preview_source_account_id: row.preview_source_account_id,
+            preview_destination_account_id: row.preview_destination_account_id,
+            preview_counterparty: row.preview_counterparty,
+            preview_payment_method: row.preview_payment_method,
+            preview_description: row.preview_description,
+            preview_parser_id: row.preview_parser_id,
+            preview_parser_tags: row.preview_parser_tags,
+            preview_recurring_id: row.preview_recurring_id,
+            preview_recurring_candidate_count: row.preview_recurring_candidate_count,
+            preview_recurring_match_reasons: row.preview_recurring_match_reasons,
+            preview_recurring_matched_date: row.preview_recurring_matched_date,
+            preview_selected: row.preview_selected,
+            dedup_type: row.dedup_type,
+            dedup_source_ids: row.dedup_source_ids,
+            preview_matching_feedback: row.preview_matching_feedback,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

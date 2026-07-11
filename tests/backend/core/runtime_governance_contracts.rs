@@ -45,24 +45,35 @@ fn gitea_ci_path_filters_cover_backend_contract_tests() {
 }
 
 #[test]
-fn gitea_ci_does_not_require_privileged_runtime_services() {
+fn gitea_ci_provisions_isolated_postgres_without_manual_docker_commands() {
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
     let workflow = fs::read_to_string(repo_root.join(".gitea/workflows/ci.yml"))
         .expect("Gitea CI workflow is readable");
 
-    for forbidden in [
+    for required in [
         "services:",
         "postgres:",
-        "image: postgres",
+        "image: postgres:16",
+        "BILL_ANALYSER_TEST_POSTGRES_URL:",
+        "@postgres:5432/bill_analyser_test",
+        "--health-cmd",
+    ] {
+        assert!(
+            workflow.contains(required),
+            "Gitea backend CI must provision its isolated PostgreSQL test dependency: {required}"
+        );
+    }
+
+    for forbidden in [
         "ports:",
         "/dev/tcp",
         "docker ",
         "docker-compose",
-        "BILL_ANALYSER_TEST_POSTGRES_URL",
+        "privileged:",
     ] {
         assert!(
             !workflow.contains(forbidden),
-            "Gitea CI must not require privileged runtime services or port-bound infrastructure: {forbidden}"
+            "Gitea CI must use the managed service network instead of privileged or port-bound infrastructure: {forbidden}"
         );
     }
 }

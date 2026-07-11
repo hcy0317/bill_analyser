@@ -127,10 +127,6 @@ fn value_to_trimmed_string(value: Option<&Value>) -> String {
     }
 }
 
-fn value_to_trimmed_lowercase(value: &Value) -> String {
-    value_to_trimmed_string(Some(value)).to_lowercase()
-}
-
 fn value_to_i64(value: &Value) -> i64 {
     match value {
         Value::Number(number) => number

@@ -39,6 +39,8 @@ export interface ImportCheckMatchingDedupTitleOptions {
 }
 
 export type ImportPreviewSignalStatus = 'pending' | 'accepted' | 'rejected' | 'skipped';
+export type ImportPreviewRawSignalStatus = ImportPreviewSignalStatus | string | null | undefined;
+export type ImportPreviewRawFlag = boolean | number | string | null | undefined;
 export type ImportPreviewLearningMode = 'green' | 'blue' | '';
 
 export interface ImportPreviewSignalDecision {
@@ -96,13 +98,16 @@ export interface ImportPreviewSignalViewModel {
     hasAnySignal: boolean;
 }
 
-export type ImportPreviewVisibleSignalFilterValue =
-    | 'parser'
-    | 'platform_duplicate'
-    | 'transfer'
-    | 'history'
-    | 'learning'
-    | 'llm';
+export const IMPORT_PREVIEW_VISIBLE_SIGNAL_FILTERS = [
+    'parser',
+    'platform_duplicate',
+    'transfer',
+    'history',
+    'learning',
+    'llm'
+] as const;
+
+export type ImportPreviewVisibleSignalFilterValue = typeof IMPORT_PREVIEW_VISIBLE_SIGNAL_FILTERS[number];
 
 export interface ImportPreviewHistoryRewriteAcknowledgementOperation {
     preview_id: number;
@@ -121,26 +126,42 @@ export interface ImportPreviewHistoryRewriteAcknowledgement {
 }
 
 export interface ImportPreviewSignalState extends ImportCheckMatchingContextState {
-    transferStatus?: ImportPreviewSignalStatus | null;
+    transferStatus?: ImportPreviewRawSignalStatus;
     transferTitle?: string;
     transferPairOrder?: string;
     transferSourceChain?: ImportMatchingSourcePayload[];
     investmentStatus?: ImportPreviewSignalStatus | null;
     investmentTitle?: string;
     investmentProfileText?: string;
-    learningStatus?: ImportPreviewSignalStatus | null;
+    learningStatus?: ImportPreviewRawSignalStatus;
     learningTitle?: string;
     learningSummary?: string;
     learningMode?: ImportPreviewLearningMode | string;
+    learningLifecycleStatus?: string;
     learningSignalState?: string;
-    learningAutoApplied?: boolean;
-    llmStatus?: ImportPreviewSignalStatus | null;
+    learningAutoApplied?: ImportPreviewRawFlag;
+    learningSuppressed?: ImportPreviewRawFlag;
+    learningStatusAuthoritative?: boolean;
+    learningRuleId?: number | string | null;
+    learningScore?: number | string;
+    learningConfidence?: number | string;
+    learningMargin?: number | string;
+    learningAcceptedCount?: number | string;
+    learningRejectedCount?: number | string;
+    learningAutoAppliedCount?: number | string;
+    llmStatus?: ImportPreviewRawSignalStatus;
     llmTitle?: string;
     llmSummary?: string;
-    llmConfidence?: number;
+    llmConfidence?: number | string;
+    llmSuggestedCategoryId?: number | string;
     llmCategoryPath?: string;
     llmSourceAccount?: string;
     llmDestinationAccount?: string;
+    llmLifecycleStatus?: string;
+    llmSignalState?: string;
+    llmSuppressed?: ImportPreviewRawFlag;
+    llmStatusAuthoritative?: boolean;
+    historyStatus?: ImportPreviewSignalStatus | null;
     dedupSourceCount?: number;
     dedupSourceLabels?: string[];
     dedupSources?: ImportMatchingSourcePayload[];

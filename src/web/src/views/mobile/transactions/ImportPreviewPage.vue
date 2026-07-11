@@ -442,6 +442,9 @@ async function reviewLearning(row: MobileImportPreviewRow, decision: ImportPrevi
             await services.clearMatchingCandidate({ candidateId, payload: { sessionId, responseMode: 'preview-item' } });
         }
         await reload();
+    } catch (error) {
+        showToast(error instanceof Error && error.message ? error.message : 'Learning decision failed');
+        await reload();
     } finally {
         row.busy = false;
     }
@@ -460,6 +463,9 @@ async function reviewLlm(row: MobileImportPreviewRow, decision: ImportPreviewSig
         } else {
             await services.llmPreviewRecommendReject({ sessionId, previewId: row.id, suggestion });
         }
+        await reload();
+    } catch (error) {
+        showToast(error instanceof Error && error.message ? error.message : 'LLM recommendation decision failed');
         await reload();
     } finally {
         row.busy = false;

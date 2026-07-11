@@ -3,6 +3,7 @@ import type { ImportPreviewSignalStatus } from './checkDataMatching.ts';
 export interface LLMMemoryEventItem {
     id?: number | null;
     preview_id?: number | null;
+    event_type?: string | null;
     decision?: string | null;
     llm_response_raw?: string | null;
     suggested_type?: string | null;
@@ -17,6 +18,7 @@ export interface LLMMemoryEventItem {
 export interface LLMSignalMemoryState {
     reviewStatus: ImportPreviewSignalStatus | '';
     suppressed: boolean;
+    tombstone?: boolean;
     suggestedType?: string;
     suggestedCategoryId?: number;
     suggestedMainCategory: string;
@@ -25,18 +27,6 @@ export interface LLMSignalMemoryState {
     suggestedDestinationAccount: string;
     confidence: number;
     reason: string;
-}
-
-function resolveLLMSignalMemoryPriority(signal: LLMSignalMemoryState): number {
-    if (signal.reviewStatus === 'accepted' || signal.reviewStatus === 'rejected') {
-        return 2;
-    }
-
-    if (signal.reviewStatus === 'pending') {
-        return 1;
-    }
-
-    return 0;
 }
 
 /**
@@ -56,6 +46,19 @@ export function parseLLMMemoryEventSignal(event: LLMMemoryEventItem): LLMSignalM
     }
 
     const reviewStatus = String(event.decision || '').trim().toLowerCase();
+    if (reviewStatus === 'clear') {
+        return {
+            reviewStatus: '',
+            suppressed: false,
+            tombstone: true,
+            suggestedMainCategory: '',
+            suggestedSubCategory: '',
+            suggestedSourceAccount: '',
+            suggestedDestinationAccount: '',
+            confidence: 0,
+            reason: ''
+        };
+    }
     const normalizedReviewStatus: ImportPreviewSignalStatus | '' = reviewStatus === 'accept'
         ? 'accepted'
         : reviewStatus === 'reject'
@@ -84,17 +87,8 @@ export function parseLLMMemoryEventSignal(event: LLMMemoryEventItem): LLMSignalM
 }
 
 /**
- * 判断新的 LLM 信号是否应覆盖当前状态，用户已审核状态优先于 pending 状态。
- */
-export function shouldReplaceLLMSignalMemoryState(
-    current: LLMSignalMemoryState,
-    next: LLMSignalMemoryState,
-): boolean {
-    return resolveLLMSignalMemoryPriority(next) > resolveLLMSignalMemoryPriority(current);
-}
-
-/**
- * 按 preview_id 构建 LLM 信号记忆表，保留每行最高优先级的审核信号。
+ * 按 preview_id 构建 LLM 信号记忆表。API 固定按 created_at DESC, id DESC
+ * 返回，因此每行首条事件是唯一权威最新状态，clear 也不得被更旧终态复活。
  */
 export function buildLLMSignalMemoryMap(events: LLMMemoryEventItem[]): Map<number, LLMSignalMemoryState> {
     const nextMemoryMap = new Map<number, LLMSignalMemoryState>();
@@ -105,11 +99,11 @@ export function buildLLMSignalMemoryMap(events: LLMMemoryEventItem[]): Map<numbe
             continue;
         }
 
-        const signalState = parseLLMMemoryEventSignal(event)!;
-        const existing = nextMemoryMap.get(previewId);
-        if (!existing || shouldReplaceLLMSignalMemoryState(existing, signalState)) {
-            nextMemoryMap.set(previewId, signalState);
+        if (nextMemoryMap.has(previewId)) {
+            continue;
         }
+
+        nextMemoryMap.set(previewId, parseLLMMemoryEventSignal(event)!);
     }
 
     return nextMemoryMap;

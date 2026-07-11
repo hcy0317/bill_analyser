@@ -202,7 +202,7 @@ fn build_same_batch_transfer_decision_group(
         signal_payload: json!({
             "signal": "transfer",
             "dedup_type": "transfer",
-            "planned_operation": "merge_transfer",
+            "planned_operation": "merge_transfer_history",
             "source_ids": source_ids,
             "source_chain": source_chain,
             "source_label": source_label,
@@ -269,4 +269,56 @@ fn build_history_transfer_decision_groups(
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod transfer_materialization_tests {
+    use super::*;
+
+    fn parser_template(id: i64, amount: f64) -> bill_analyser_db::ImportParserTemplateRow {
+        bill_analyser_db::ImportParserTemplateRow {
+            id,
+            session_id: "session".to_string(),
+            user_id: 1,
+            parser_date: "2026-07-10 10:00:00".to_string(),
+            parser_amount: amount,
+            parser_type: "转账".to_string(),
+            parser_description: "账户间转账".to_string(),
+            parser_id: "fixture".to_string(),
+            parser_tags: vec![],
+            parser_counterparty: "本人".to_string(),
+            parser_payment_method: "银行卡".to_string(),
+            parser_original_type: "转账".to_string(),
+            parser_original_category: String::new(),
+            parser_account_id: String::new(),
+            parser_is_processed: false,
+            created_at: "2026-07-10 10:00:00".to_string(),
+        }
+    }
+
+    #[test]
+    fn same_batch_transfer_writer_uses_canonical_history_operation() {
+        let outgoing = parser_template(11, -100.0);
+        let incoming = parser_template(12, 100.0);
+        let templates = vec![&outgoing, &incoming];
+        let standard_rows = HashMap::from([(11, 21), (12, 22)]);
+        let preview_rows = HashMap::from([(11, 31)]);
+        let group = build_same_batch_transfer_decision_group(
+            "session",
+            &TransferPair {
+                outgoing_index: 0,
+                incoming_index: 1,
+                cross_batch_db_id: None,
+            },
+            &templates,
+            &standard_rows,
+            &preview_rows,
+        )
+        .expect("same-batch transfer decision group");
+
+        assert_eq!(
+            group.signal_payload["planned_operation"],
+            "merge_transfer_history"
+        );
+    }
 }

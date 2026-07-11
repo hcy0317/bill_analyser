@@ -603,6 +603,19 @@ describe('ImportTransaction model', () => {
                 }
             }
         }, 13);
+        const genericStatus = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            matching: {
+                ...BASE_RESPONSE.matching!,
+                learning: {
+                    ...BASE_RESPONSE.matching!.learning,
+                    review_status: '   ',
+                    status: ' Rejected ',
+                    lifecycle_status: 'accepted',
+                    signal_state: 'pending'
+                }
+            }
+        }, 14);
 
         expect(pending.hasLearningRecommendation()).toBe(true);
         expect(pending.hasPendingLearningRecommendation()).toBe(true);
@@ -633,6 +646,9 @@ describe('ImportTransaction model', () => {
         expect(autoAppliedRecommendation.getLearningRecommendationReviewStatus()).toBe('auto-applied');
         expect(autoAppliedRecommendation.isLearningRecommendationAccepted()).toBe(true);
         expect(autoAppliedRecommendation.canClearLearningRecommendationDecision()).toBe(true);
+
+        expect(genericStatus.getLearningRecommendationReviewStatus()).toBe('rejected');
+        expect(genericStatus.isLearningRecommendationRejected()).toBe(true);
     });
 
     test('investment review helpers expose pending, accepted, and rejected states', () => {

@@ -113,9 +113,15 @@ export function buildImportPreviewUpdateFromTransaction(
     }
 
     if (options.includeSuggestionDecisionClears) {
-        update['clear_learning_decision'] = clearLearningDecision;
-        update['clear_llm_decision'] = clearLlmDecision;
-        update['clear_actionable_suggestions'] = clearActionableSuggestions;
+        if (clearLearningDecision) {
+            update['clear_learning_decision'] = true;
+        }
+        if (clearLlmDecision) {
+            update['clear_llm_decision'] = true;
+        }
+        if (clearActionableSuggestions.length > 0) {
+            update['clear_actionable_suggestions'] = clearActionableSuggestions;
+        }
     }
 
     return update;

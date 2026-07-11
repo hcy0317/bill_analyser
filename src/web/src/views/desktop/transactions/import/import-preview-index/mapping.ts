@@ -15,6 +15,9 @@ import type { ImportCheckDataFilterLike } from '../checkDataFilters.ts';
 
 export function mapImportPreviewIndexResponseItem(item: ImportPreviewIndexResponseItem): ImportPreviewIndexItem {
     const time = new Date(item.preview_date || '').getTime() / 1000;
+    const learningStatusPresent = Object.prototype.hasOwnProperty.call(item, 'learning_status');
+    const llmStatusPresent = Object.prototype.hasOwnProperty.call(item, 'llm_status');
+    const historyStatusPresent = Object.prototype.hasOwnProperty.call(item, 'history_status');
     return {
         id: Number(item.id || 0),
         time: Number.isFinite(time) ? time : Date.now() / 1000,
@@ -39,10 +42,41 @@ export function mapImportPreviewIndexResponseItem(item: ImportPreviewIndexRespon
         dedupSourceIds: item.dedup_source_ids || [],
         transferStatus: item.transfer_status ?? null,
         transferTitle: item.transfer_title || '',
-        learningStatus: item.learning_status ?? null,
+        learningStatus: learningStatusPresent ? (item.learning_status ?? null) : undefined,
+        learningStatusAbsent: !learningStatusPresent,
+        learningLifecycleStatus: item.learning_lifecycle_status || '',
+        learningSignalState: item.learning_signal_state || '',
         learningTitle: item.learning_title || '',
         learningSummary: item.learning_summary || '',
         learningMode: item.learning_mode || '',
+        learningAutoApplied: item.learning_auto_applied,
+        learningSuppressed: item.learning_suppressed,
+        learningRuleId: item.learning_rule_id ?? null,
+        learningScore: item.learning_score ?? 0,
+        learningConfidence: item.learning_confidence ?? 0,
+        learningMargin: item.learning_margin ?? 0,
+        learningAcceptedCount: item.learning_accepted_count ?? 0,
+        learningRejectedCount: item.learning_rejected_count ?? 0,
+        learningAutoAppliedCount: item.learning_auto_applied_count ?? 0,
+        llmStatus: llmStatusPresent ? (item.llm_status ?? null) : undefined,
+        llmStatusAbsent: !llmStatusPresent,
+        llmLifecycleStatus: item.llm_lifecycle_status || '',
+        llmSignalState: item.llm_signal_state || '',
+        llmTitle: item.llm_title || '',
+        llmConfidence: item.llm_confidence ?? 0,
+        llmSuggestedCategoryId: item.llm_suggested_category_id ?? 0,
+        llmCategoryPath: item.llm_category_path || '',
+        llmSourceAccount: item.llm_source_account || '',
+        llmDestinationAccount: item.llm_destination_account || '',
+        llmSuppressed: item.llm_suppressed,
+        historyStatus: historyStatusPresent ? (item.history_status ?? null) : undefined,
+        historyTitle: item.history_title || '',
+        historyPlannedOperation: item.history_planned_operation || '',
+        historyBillId: item.history_bill_id ?? null,
+        historyBillVersion: item.history_bill_version ?? null,
+        historyOperationId: item.history_operation_id || '',
+        historyAcknowledgementToken: item.history_acknowledgement_token || '',
+        historyDestructiveAckRequired: !!item.history_destructive_ack_required,
         recurringTemplateId: item.recurring_template_id || '',
         recurringCandidateCount: Number(item.recurring_candidate_count || 0),
         recurringMatchReasons: item.recurring_match_reasons || '',
@@ -100,10 +134,40 @@ export function buildImportPreviewIndexSignalViewModel(item: ImportPreviewIndexI
         isManuallyAnnotated: item.isManuallyAnnotated,
         transferStatus: item.transferStatus ?? null,
         transferTitle: item.transferTitle || '',
-        learningStatus: item.learningStatus ?? null,
+        learningStatus: item.learningStatus,
         learningTitle: item.learningTitle || '',
         learningSummary: item.learningSummary || '',
         learningMode: item.learningMode || '',
+        learningLifecycleStatus: item.learningLifecycleStatus || '',
+        learningSignalState: item.learningSignalState || '',
+        learningAutoApplied: item.learningAutoApplied,
+        learningSuppressed: item.learningSuppressed,
+        learningStatusAuthoritative: !item.learningStatusAbsent && typeof item.learningStatus !== 'undefined',
+        learningRuleId: item.learningRuleId ?? null,
+        learningScore: item.learningScore ?? 0,
+        learningConfidence: item.learningConfidence ?? 0,
+        learningMargin: item.learningMargin ?? 0,
+        learningAcceptedCount: item.learningAcceptedCount ?? 0,
+        learningRejectedCount: item.learningRejectedCount ?? 0,
+        learningAutoAppliedCount: item.learningAutoAppliedCount ?? 0,
+        llmStatus: item.llmStatus,
+        llmTitle: item.llmTitle || '',
+        llmConfidence: item.llmConfidence ?? 0,
+        llmSuggestedCategoryId: item.llmSuggestedCategoryId ?? 0,
+        llmCategoryPath: item.llmCategoryPath || '',
+        llmSourceAccount: item.llmSourceAccount || '',
+        llmDestinationAccount: item.llmDestinationAccount || '',
+        llmLifecycleStatus: item.llmLifecycleStatus || '',
+        llmSignalState: item.llmSignalState || '',
+        llmSuppressed: item.llmSuppressed,
+        llmStatusAuthoritative: !item.llmStatusAbsent && typeof item.llmStatus !== 'undefined',
+        reconciliationTitle: item.historyTitle || '',
+        reconciliationPlannedOperation: item.historyPlannedOperation || '',
+        reconciliationHistoryBillId: item.historyBillId ?? null,
+        reconciliationHistoryBillVersion: item.historyBillVersion ?? null,
+        reconciliationOperationId: item.historyOperationId || '',
+        reconciliationAcknowledgementToken: item.historyAcknowledgementToken || '',
+        reconciliationDestructiveAckRequired: !!item.historyDestructiveAckRequired,
         hasRecurringMatch: !!item.recurringTemplateId,
         recurringTitle: item.recurringMatchReasons || '',
         recurringCandidateCount: Number(item.recurringCandidateCount || 0),
@@ -125,7 +189,7 @@ export function matchesImportPreviewIndexItemFilters(
     });
 }
 
-// 本地索引排序必须稳定保留原始顺序作为 tie-breaker，避免前端 fallback 分页在相同字段值下抖动。
+// 本地索引排序按 preview id 做同方向 tie-breaker，与 Rust/SQL 的稳定分页顺序保持一致。
 export function sortImportPreviewIndexItems(
     items: ImportPreviewIndexItem[],
     sortBy: string | null | undefined,
@@ -175,6 +239,11 @@ export function sortImportPreviewIndexItems(
 
         if (compareResult !== 0) {
             return compareResult * directionMultiplier;
+        }
+
+        const idCompareResult = compareNumber(Number(left.item.id), Number(right.item.id));
+        if (idCompareResult !== 0) {
+            return idCompareResult * directionMultiplier;
         }
 
         return left.index - right.index;

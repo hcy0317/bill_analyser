@@ -32,6 +32,18 @@ pub fn update_import_session_status(
 ) -> DbResult<bool> {
     block_on_db(async move {
         let user_id = user_id_i64(update.user_id)?;
+        let mut tx = pool.begin().await?;
+        let (session_db_id, status) =
+            lock_import_session_on_tx(&mut tx, &update.session_id, user_id).await?;
+        if status == "confirmed" {
+            tx.rollback().await?;
+            return Ok(false);
+        }
+        if update.status == "confirmed" {
+            return Err(DbError::InvalidOperation(
+                "confirmed status requires the canonical confirm command".to_string(),
+            ));
+        }
         let changed = sqlx::query(
             r#"
             UPDATE import_sessions
@@ -42,18 +54,19 @@ pub fn update_import_session_status(
                 total_confirmed = COALESCE($4, total_confirmed),
                 row_count = COALESCE($2, row_count),
                 version = version + 1
-            WHERE session_key = $5 AND user_id = $6
+            WHERE id = $5 AND user_id = $6
             "#,
         )
         .bind(&update.status)
         .bind(update.total_parsed)
         .bind(update.total_preview)
         .bind(update.total_confirmed)
-        .bind(&update.session_id)
+        .bind(session_db_id)
         .bind(user_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?
         .rows_affected();
+        tx.commit().await?;
         Ok(changed > 0)
     })
 }
@@ -75,42 +88,50 @@ pub fn clear_session_data(
     user_id: UserId,
 ) -> DbResult<ClearSessionDataResult> {
     block_on_db(async move {
-        let session_db_id = session_db_id(pool, session_id, user_id).await?;
         let user_id = user_id_i64(user_id)?;
-        let annotation_count = sqlx::query(
-            "DELETE FROM import_annotation_samples WHERE user_id = $1 AND session_id = $2",
+        let mut tx = pool.begin().await?;
+        let (session_db_id, status) =
+            lock_import_session_on_tx(&mut tx, session_id, user_id).await?;
+        if status == "confirmed" {
+            tx.rollback().await?;
+            return Ok(ClearSessionDataResult {
+                parser_count: 0,
+                preview_count: 0,
+                annotation_count: 0,
+                session_count: 0,
+            });
+        }
+        let annotation_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*)::BIGINT FROM import_annotation_samples WHERE user_id = $1 AND session_id = $2",
         )
         .bind(user_id)
         .bind(session_id)
-        .execute(pool)
+        .fetch_one(&mut *tx)
+        .await?;
+        let preview_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*)::BIGINT FROM import_preview_rows WHERE user_id = $1 AND session_id = $2",
+        )
+        .bind(user_id)
+        .bind(session_db_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        let parser_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*)::BIGINT FROM import_standard_rows WHERE user_id = $1 AND session_id = $2",
+        )
+        .bind(user_id)
+        .bind(session_db_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        clear_import_session_child_data_on_tx(&mut tx, user_id, session_db_id, session_id).await?;
+        let session_count = sqlx::query(
+            "DELETE FROM import_sessions WHERE user_id = $1 AND id = $2 AND status <> 'confirmed'",
+        )
+        .bind(user_id)
+        .bind(session_db_id)
+        .execute(&mut *tx)
         .await?
         .rows_affected();
-        let preview_count =
-            sqlx::query("DELETE FROM import_preview_rows WHERE user_id = $1 AND session_id = $2")
-                .bind(user_id)
-                .bind(session_db_id)
-                .execute(pool)
-                .await?
-                .rows_affected();
-        let parser_count =
-            sqlx::query("DELETE FROM import_standard_rows WHERE user_id = $1 AND session_id = $2")
-                .bind(user_id)
-                .bind(session_db_id)
-                .execute(pool)
-                .await?
-                .rows_affected();
-        sqlx::query("DELETE FROM import_sources WHERE user_id = $1 AND session_id = $2")
-            .bind(user_id)
-            .bind(session_db_id)
-            .execute(pool)
-            .await?;
-        let session_count =
-            sqlx::query("DELETE FROM import_sessions WHERE user_id = $1 AND id = $2")
-                .bind(user_id)
-                .bind(session_db_id)
-                .execute(pool)
-                .await?
-                .rows_affected();
+        tx.commit().await?;
         Ok(ClearSessionDataResult {
             parser_count: usize::try_from(parser_count).unwrap_or(usize::MAX),
             preview_count: usize::try_from(preview_count).unwrap_or(usize::MAX),
@@ -139,40 +160,157 @@ async fn create_import_session_async(
     pool: &PostgresPool,
     draft: &ImportSessionDraft,
 ) -> DbResult<i64> {
-    let user_id = user_id_i64(draft.user_id)?;
-    let row = sqlx::query(
-        r#"
-        INSERT INTO import_sessions (
-            user_id, session_key, status, import_mode, source_count, row_count,
-            file_count, total_parsed, total_preview, total_confirmed, metadata,
-            created_at, updated_at
-        ) VALUES ($1,$2,'parsing','preview',$3,0,$3,0,0,0,'{}'::jsonb,now(),now())
-        ON CONFLICT (user_id, session_key) DO UPDATE SET
-            status = 'parsing',
-            source_count = excluded.source_count,
-            row_count = 0,
-            file_count = excluded.file_count,
-            total_parsed = 0,
-            total_preview = 0,
-            total_confirmed = 0,
-            metadata = '{}'::jsonb,
-            updated_at = now(),
-            version = import_sessions.version + 1
-        RETURNING id
-        "#,
-    )
-    .bind(user_id)
-    .bind(&draft.session_id)
-    .bind(draft.file_count)
-    .fetch_one(pool)
-    .await?;
-    let session_db_id = row.try_get("id").map_err(DbError::from)?;
-    clear_import_session_child_data_async(pool, user_id, session_db_id, &draft.session_id).await?;
+    let mut tx = pool.begin().await?;
+    let session_db_id = prepare_import_session_for_staging_on_tx(&mut tx, draft, false)
+        .await?
+        .ok_or_else(|| DbError::InvalidOperation("import session not found".to_string()))?;
+    tx.commit().await?;
     Ok(session_db_id)
 }
 
-async fn clear_import_session_child_data_async(
-    pool: &PostgresPool,
+async fn prepare_import_session_for_staging_on_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    draft: &ImportSessionDraft,
+    require_existing_session: bool,
+) -> DbResult<Option<i64>> {
+    let user_id = user_id_i64(draft.user_id)?;
+    let existing = sqlx::query(
+        "SELECT id, status FROM import_sessions WHERE session_key = $1 AND user_id = $2 FOR UPDATE",
+    )
+    .bind(&draft.session_id)
+    .bind(user_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let session_db_id = if let Some(row) = existing {
+        if row.try_get::<String, _>("status")? == "confirmed" {
+            return Err(DbError::InvalidOperation(
+                "confirmed import session cannot be restaged".to_string(),
+            ));
+        }
+        let session_db_id = row.try_get::<i64, _>("id")?;
+        if !require_existing_session {
+            clear_import_session_child_data_on_tx(
+                tx,
+                user_id,
+                session_db_id,
+                &draft.session_id,
+            )
+            .await?;
+            sqlx::query(
+                r#"
+                UPDATE import_sessions
+                SET status = 'parsing',
+                    source_count = $3,
+                    row_count = 0,
+                    file_count = $3,
+                    total_parsed = 0,
+                    total_preview = 0,
+                    total_confirmed = 0,
+                    metadata = '{}'::jsonb,
+                    updated_at = now(),
+                    version = version + 1
+                WHERE id = $1 AND user_id = $2
+                "#,
+            )
+            .bind(session_db_id)
+            .bind(user_id)
+            .bind(draft.file_count)
+            .execute(&mut **tx)
+            .await?;
+        }
+        session_db_id
+    } else if require_existing_session {
+        return Ok(None);
+    } else {
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            INSERT INTO import_sessions (
+                user_id, session_key, status, import_mode, source_count, row_count,
+                file_count, total_parsed, total_preview, total_confirmed, metadata,
+                created_at, updated_at
+            ) VALUES ($1,$2,'parsing','preview',$3,0,$3,0,0,0,'{}'::jsonb,now(),now())
+            RETURNING id
+            "#,
+        )
+        .bind(user_id)
+        .bind(&draft.session_id)
+        .bind(draft.file_count)
+        .fetch_one(&mut **tx)
+        .await?
+    };
+    Ok(Some(session_db_id))
+}
+
+async fn lock_active_import_session_on_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    session_id: &str,
+    user_id: i64,
+) -> DbResult<i64> {
+    let (session_db_id, status) = lock_import_session_on_tx(tx, session_id, user_id).await?;
+    if status == "confirmed" {
+        return Err(DbError::InvalidOperation(
+            "confirmed import session is terminal".to_string(),
+        ));
+    }
+    Ok(session_db_id)
+}
+
+async fn lock_import_session_on_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    session_id: &str,
+    user_id: i64,
+) -> DbResult<(i64, String)> {
+    let row = sqlx::query(
+        "SELECT id, status FROM import_sessions WHERE session_key = $1 AND user_id = $2 FOR UPDATE",
+    )
+    .bind(session_id)
+    .bind(user_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| DbError::InvalidOperation("import session not found".to_string()))?;
+    Ok((row.try_get("id")?, row.try_get("status")?))
+}
+
+async fn refresh_import_session_counters_on_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    session_db_id: i64,
+    user_id: i64,
+) -> DbResult<()> {
+    let changed = sqlx::query(
+        r#"
+        UPDATE import_sessions
+        SET row_count = (
+                SELECT COUNT(*)::BIGINT FROM import_standard_rows
+                WHERE session_id = $1 AND user_id = $2
+            ),
+            total_parsed = (
+                SELECT COUNT(*)::BIGINT FROM import_standard_rows
+                WHERE session_id = $1 AND user_id = $2
+            ),
+            total_preview = (
+                SELECT COUNT(*)::BIGINT FROM import_preview_rows
+                WHERE session_id = $1 AND user_id = $2
+            ),
+            updated_at = now(),
+            version = version + 1
+        WHERE id = $1 AND user_id = $2 AND status <> 'confirmed'
+        "#,
+    )
+    .bind(session_db_id)
+    .bind(user_id)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    if changed != 1 {
+        return Err(DbError::InvalidOperation(
+            "confirmed import session is terminal".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+async fn clear_import_session_child_data_on_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
     user_id: i64,
     session_db_id: i64,
     session_key: &str,
@@ -181,7 +319,7 @@ async fn clear_import_session_child_data_async(
         sqlx::query("DELETE FROM import_annotation_samples WHERE user_id = $1 AND session_id = $2")
             .bind(user_id)
             .bind(session_key)
-            .execute(pool)
+            .execute(&mut **tx)
             .await?
             .rows_affected();
     let feedback_event_count = sqlx::query(
@@ -198,7 +336,7 @@ async fn clear_import_session_child_data_async(
     )
     .bind(user_id)
     .bind(session_db_id)
-    .execute(pool)
+    .execute(&mut **tx)
     .await?
     .rows_affected();
     let learning_suggestion_count = sqlx::query(
@@ -206,7 +344,7 @@ async fn clear_import_session_child_data_async(
     )
     .bind(user_id)
     .bind(session_db_id)
-    .execute(pool)
+    .execute(&mut **tx)
     .await?
     .rows_affected();
     let learning_sample_count = sqlx::query(
@@ -225,21 +363,21 @@ async fn clear_import_session_child_data_async(
     )
     .bind(user_id)
     .bind(session_db_id)
-    .execute(pool)
+    .execute(&mut **tx)
     .await?
     .rows_affected();
     let matching_feedback_count =
         sqlx::query("DELETE FROM preview_matching_feedback WHERE user_id = $1 AND session_id = $2")
             .bind(user_id)
             .bind(session_db_id)
-            .execute(pool)
+            .execute(&mut **tx)
             .await?
             .rows_affected();
     let confirm_count =
         sqlx::query("DELETE FROM import_confirm_operations WHERE user_id = $1 AND session_id = $2")
             .bind(user_id)
             .bind(session_db_id)
-            .execute(pool)
+            .execute(&mut **tx)
             .await?
             .rows_affected();
     let group_member_count = sqlx::query(
@@ -253,14 +391,14 @@ async fn clear_import_session_child_data_async(
     )
     .bind(user_id)
     .bind(session_db_id)
-    .execute(pool)
+    .execute(&mut **tx)
     .await?
     .rows_affected();
     let group_count =
         sqlx::query("DELETE FROM import_decision_groups WHERE user_id = $1 AND session_id = $2")
             .bind(user_id)
             .bind(session_db_id)
-            .execute(pool)
+            .execute(&mut **tx)
             .await?
             .rows_affected();
     let history_count = sqlx::query(
@@ -268,28 +406,28 @@ async fn clear_import_session_child_data_async(
     )
     .bind(user_id)
     .bind(session_db_id)
-    .execute(pool)
+    .execute(&mut **tx)
     .await?
     .rows_affected();
     let preview_count =
         sqlx::query("DELETE FROM import_preview_rows WHERE user_id = $1 AND session_id = $2")
             .bind(user_id)
             .bind(session_db_id)
-            .execute(pool)
+            .execute(&mut **tx)
             .await?
             .rows_affected();
     let parser_count =
         sqlx::query("DELETE FROM import_standard_rows WHERE user_id = $1 AND session_id = $2")
             .bind(user_id)
             .bind(session_db_id)
-            .execute(pool)
+            .execute(&mut **tx)
             .await?
             .rows_affected();
     let source_count =
         sqlx::query("DELETE FROM import_sources WHERE user_id = $1 AND session_id = $2")
             .bind(user_id)
             .bind(session_db_id)
-            .execute(pool)
+            .execute(&mut **tx)
             .await?
             .rows_affected();
 
@@ -314,19 +452,21 @@ async fn clear_user_import_staging_data_async(
     pool: &PostgresPool,
     user_id: i64,
 ) -> DbResult<usize> {
+    let mut tx = pool.begin().await?;
     let session_ids = sqlx::query_scalar::<_, i64>(
-        "SELECT id FROM import_sessions WHERE user_id = $1 ORDER BY id ASC",
+        "SELECT id FROM import_sessions WHERE user_id = $1 ORDER BY id ASC FOR UPDATE",
     )
     .bind(user_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await?;
     let annotation_count = sqlx::query("DELETE FROM import_annotation_samples WHERE user_id = $1")
         .bind(user_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?
         .rows_affected();
 
     if session_ids.is_empty() {
+        tx.commit().await?;
         return Ok(usize::try_from(annotation_count).unwrap_or(usize::MAX));
     }
 
@@ -344,7 +484,7 @@ async fn clear_user_import_staging_data_async(
     )
     .bind(user_id)
     .bind(&session_ids)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?
     .rows_affected();
     let learning_suggestion_count = sqlx::query(
@@ -352,7 +492,7 @@ async fn clear_user_import_staging_data_async(
     )
     .bind(user_id)
     .bind(&session_ids)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?
     .rows_affected();
     let learning_sample_count = sqlx::query(
@@ -371,7 +511,7 @@ async fn clear_user_import_staging_data_async(
     )
     .bind(user_id)
     .bind(&session_ids)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?
     .rows_affected();
     let matching_feedback_count = sqlx::query(
@@ -379,7 +519,7 @@ async fn clear_user_import_staging_data_async(
     )
     .bind(user_id)
     .bind(&session_ids)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?
     .rows_affected();
     let confirm_count = sqlx::query(
@@ -387,7 +527,7 @@ async fn clear_user_import_staging_data_async(
     )
     .bind(user_id)
     .bind(&session_ids)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?
     .rows_affected();
     let group_member_count = sqlx::query(
@@ -401,7 +541,7 @@ async fn clear_user_import_staging_data_async(
     )
     .bind(user_id)
     .bind(&session_ids)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?
     .rows_affected();
     let group_count = sqlx::query(
@@ -409,7 +549,7 @@ async fn clear_user_import_staging_data_async(
     )
     .bind(user_id)
     .bind(&session_ids)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?
     .rows_affected();
     let history_count = sqlx::query(
@@ -417,39 +557,39 @@ async fn clear_user_import_staging_data_async(
     )
     .bind(user_id)
     .bind(&session_ids)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?
     .rows_affected();
     let preview_count =
         sqlx::query("DELETE FROM import_preview_rows WHERE user_id = $1 AND session_id = ANY($2)")
             .bind(user_id)
             .bind(&session_ids)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?
             .rows_affected();
     let parser_count =
         sqlx::query("DELETE FROM import_standard_rows WHERE user_id = $1 AND session_id = ANY($2)")
             .bind(user_id)
             .bind(&session_ids)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?
             .rows_affected();
     let source_count =
         sqlx::query("DELETE FROM import_sources WHERE user_id = $1 AND session_id = ANY($2)")
             .bind(user_id)
             .bind(&session_ids)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?
             .rows_affected();
     let session_count =
         sqlx::query("DELETE FROM import_sessions WHERE user_id = $1 AND id = ANY($2)")
             .bind(user_id)
             .bind(&session_ids)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?
             .rows_affected();
 
-    Ok(usize::try_from(
+    let cleared = usize::try_from(
         annotation_count
             + feedback_event_count
             + learning_suggestion_count
@@ -464,7 +604,9 @@ async fn clear_user_import_staging_data_async(
             + source_count
             + session_count,
     )
-    .unwrap_or(usize::MAX))
+    .unwrap_or(usize::MAX);
+    tx.commit().await?;
+    Ok(cleared)
 }
 
 async fn get_import_session_async(
@@ -495,6 +637,27 @@ async fn session_db_id(pool: &PostgresPool, session_id: &str, user_id: UserId) -
     .fetch_one(pool)
     .await?
     .ok_or_else(|| DbError::InvalidOperation("import session not found".to_string()))
+}
+
+async fn active_session_db_id(
+    pool: &PostgresPool,
+    session_id: &str,
+    user_id: i64,
+) -> DbResult<i64> {
+    let row = sqlx::query(
+        "SELECT id, status FROM import_sessions WHERE session_key = $1 AND user_id = $2",
+    )
+    .bind(session_id)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| DbError::InvalidOperation("import session not found".to_string()))?;
+    if row.try_get::<String, _>("status")? == "confirmed" {
+        return Err(DbError::InvalidOperation(
+            "confirmed import session is terminal".to_string(),
+        ));
+    }
+    row.try_get("id").map_err(DbError::from)
 }
 
 fn user_id_i64(user_id: UserId) -> DbResult<i64> {

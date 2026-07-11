@@ -1,0 +1,32 @@
+------------------------------------------------------------------------------------
+alipay e2e signal fixture
+bill info:
+account:[bill-analyser-e2e@example.test]
+start time:[2026-07-01 00:00:00] end time:[2026-07-31 23:59:59]
+export type:[all]
+export time:[2026-07-10 12:00:00]
+total records:12
+income:0 amount:0.00
+expense:12 amount:186.00
+neutral:0 amount:0.00
+
+note:
+deterministic synthetic fixture for the import signal system Playwright suite
+alipay detection keyword preserved
+
+------------------------支付宝（中国）网络技术有限公司 电子客户回单------------------------
+,
+,
+交易时间,交易分类,交易对方,对方账号,商品说明,收/支,金额,收/付款方式,交易状态,交易订单号,商家订单号,备注
+2026-07-01 09:00:00,商户消费,E2E-SIG-PARSER,e2e@example.test,E2E parser auxiliary row,支出,10.00,余额,交易成功,E2E-SIG-0001,,parser auxiliary
+2026-07-01 09:01:00,商户消费,E2E-SIG-PLATFORM,e2e@example.test,E2E sparse platform row,支出,11.00,余额,交易成功,E2E-SIG-0002,,platform sparse
+2026-07-01 09:02:00,商户消费,E2E-SIG-TRANSFER-PENDING,e2e@example.test,E2E pending transfer row,支出,12.00,余额,交易成功,E2E-SIG-0003,,transfer pending
+2026-07-01 09:03:00,商户消费,E2E-SIG-TRANSFER-TERMINAL,e2e@example.test,E2E terminal transfer row,支出,13.00,余额,交易成功,E2E-SIG-0004,,transfer terminal
+2026-07-01 09:04:00,商户消费,E2E-SIG-HISTORY,e2e@example.test,E2E history row,支出,14.00,余额,交易成功,E2E-SIG-0005,,history
+2026-07-01 09:05:00,商户消费,E2E-SIG-LEARNING,e2e@example.test,E2E learning row,支出,15.00,余额,交易成功,E2E-SIG-0006,,learning
+2026-07-01 09:06:00,商户消费,E2E-SIG-LLM-ACTION,e2e@example.test,E2E llm action row,支出,16.00,余额,交易成功,E2E-SIG-0007,,llm action
+2026-07-01 09:07:00,商户消费,E2E-SIG-LLM-EDIT,e2e@example.test,E2E llm edit row,支出,17.00,余额,交易成功,E2E-SIG-0008,,llm edit
+2026-07-01 09:08:00,商户消费,E2E-SIG-PAGINATION-A,e2e@example.test,E2E pagination row A,支出,18.00,余额,交易成功,E2E-SIG-0009,,pagination A
+2026-07-01 09:09:00,商户消费,E2E-SIG-PAGINATION-B,e2e@example.test,E2E pagination row B,支出,19.00,余额,交易成功,E2E-SIG-0010,,pagination B
+2026-07-01 09:10:00,商户消费,E2E-SIG-PAGINATION-C,e2e@example.test,E2E pagination row C,支出,20.00,余额,交易成功,E2E-SIG-0011,,pagination C
+2026-07-01 09:11:00,商户消费,E2E-SIG-PAGINATION-D,e2e@example.test,E2E pagination row D,支出,21.00,余额,交易成功,E2E-SIG-0012,,pagination D

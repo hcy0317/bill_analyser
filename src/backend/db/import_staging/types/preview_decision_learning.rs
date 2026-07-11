@@ -68,6 +68,7 @@ pub struct ImportPreviewLlmDecisionResult {
     pub preview: Option<ImportPreviewRow>,
     pub event_id: Option<i64>,
     pub applied_fields: Vec<String>,
+    pub state_conflict: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -90,4 +91,5 @@ pub struct ImportPreviewLlmReviewRequest<'a> {
     pub suggestion: Option<&'a ImportPreviewLlmSuggestion>,
     pub user_correction_category: Option<&'a str>,
     pub user_correction_account: Option<&'a str>,
+    pub expected_state: Option<&'a ImportPreviewExpectedState>,
 }

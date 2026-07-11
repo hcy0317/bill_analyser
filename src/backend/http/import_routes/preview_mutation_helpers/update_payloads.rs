@@ -72,8 +72,23 @@ fn expected_state_from_payload(
     Ok(ImportPreviewExpectedState {
         session_id: first_value(expected_state, &["sessionId", "session_id"])
             .and_then(value_to_text),
+        review_status: first_value(
+            expected_state,
+            &["reviewStatus", "review_status", "status"],
+        )
+        .and_then(value_to_text)
+        .map(|value| value.trim().to_ascii_lowercase()),
         preview_type: first_value(expected_state, &["type", "previewType", "preview_type"])
             .and_then(value_to_text),
+        preview_category_id: optional_id_field_from_object(
+            expected_state,
+            &[
+                "categoryId",
+                "category_id",
+                "previewCategoryId",
+                "preview_category_id",
+            ],
+        ),
         preview_main_category: first_value(
             expected_state,
             &[

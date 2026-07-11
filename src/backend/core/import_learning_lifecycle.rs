@@ -178,6 +178,17 @@ pub struct ImportLearningLifecycleTransition {
     pub suppressed: bool,
 }
 
+/// 把外部 learning feedback 归一成生命周期允许的动作；未知动作由调用方显式拒绝。
+pub fn normalize_import_learning_lifecycle_feedback(feedback: &str) -> Option<&'static str> {
+    match feedback.trim().to_ascii_lowercase().as_str() {
+        "accept" | "accepted" => Some("accept"),
+        "reject" | "rejected" => Some("reject"),
+        "auto_apply" | "auto-applied" | "auto_applied" => Some("auto_apply"),
+        "suppress" | "suppressed" => Some("suppress"),
+        _ => None,
+    }
+}
+
 /// 根据用户反馈推进导入学习生命周期，维护 yellow/green/auto_applied/suppressed 状态。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn transition_import_learning_lifecycle(
@@ -189,11 +200,11 @@ pub fn transition_import_learning_lifecycle(
     let mut accepted_count = current.accepted_count.max(0);
     let mut rejected_count = current.rejected_count.max(0);
     let mut auto_applied_count = current.auto_applied_count.max(0);
-    let feedback = feedback.trim().to_ascii_lowercase();
-    let mut event_type = feedback.clone();
+    let feedback = normalize_import_learning_lifecycle_feedback(feedback);
+    let mut event_type = feedback.unwrap_or("invalid").to_string();
 
-    match feedback.as_str() {
-        "accept" | "accepted" => {
+    match feedback {
+        Some("accept") => {
             if previous_status != LEARNING_LIFECYCLE_STATUS_SUPPRESSED {
                 accepted_count += 1;
                 rejected_count = 0;
@@ -210,7 +221,7 @@ pub fn transition_import_learning_lifecycle(
             }
             event_type = "accept".to_string();
         }
-        "reject" | "rejected" => {
+        Some("reject") => {
             rejected_count += 1;
             if matches!(
                 previous_status.as_str(),
@@ -234,7 +245,7 @@ pub fn transition_import_learning_lifecycle(
                 next_status = previous_status.clone();
             }
         }
-        "auto_apply" | "auto-applied" | "auto_applied" => {
+        Some("auto_apply") => {
             if matches!(
                 previous_status.as_str(),
                 LEARNING_LIFECYCLE_STATUS_GREEN | LEARNING_LIFECYCLE_STATUS_AUTO_APPLIED
@@ -244,13 +255,11 @@ pub fn transition_import_learning_lifecycle(
             }
             event_type = "auto_apply".to_string();
         }
-        "suppress" | "suppressed" => {
+        Some("suppress") => {
             next_status = LEARNING_LIFECYCLE_STATUS_SUPPRESSED.to_string();
             event_type = "suppress".to_string();
         }
-        _ => {
-            event_type = "feedback".to_string();
-        }
+        _ => {}
     }
 
     let signal_state = learning_lifecycle_signal_state(&next_status).to_string();

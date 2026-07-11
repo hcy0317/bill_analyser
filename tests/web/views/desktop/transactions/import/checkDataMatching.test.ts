@@ -15,6 +15,10 @@ import {
     resolveImportCheckMatchingTransferParserIds,
     shouldShowImportCheckMatchingDedupSourceCount
 } from '@/views/desktop/transactions/import/checkDataMatching.ts';
+import {
+    buildImportPreviewIndexSignalViewModel,
+    mapImportPreviewIndexResponseItem
+} from '@/views/desktop/transactions/import/import-preview-index/mapping.ts';
 
 describe('checkDataMatching helpers', () => {
     test('builds matching context summaries for parser, dedup, and manual annotation display', () => {
@@ -205,7 +209,8 @@ describe('checkDataMatching helpers', () => {
     test('keeps transfer and learning review actions without rendering investment signal chips', () => {
         const viewModel = buildImportPreviewSignalViewModel({
             transferStatus: 'pending',
-            learningStatus: 'pending'
+            learningStatus: 'pending',
+            learningSummary: '支出 | 餐饮'
         });
 
         expect(viewModel.transferSuggestion?.actions.map(action => action.labelKey)).toStrictEqual([
@@ -489,6 +494,72 @@ describe('checkDataMatching helpers', () => {
         expect(matchesImportPreviewSignalFilter(transferMatch, 'learning')).toBe(false);
         expect(matchesImportPreviewSignalFilter(learning, 'learning')).toBe(true);
         expect(matchesImportPreviewSignalFilter(llm, 'llm')).toBe(true);
+    });
+
+    test('keeps full and lightweight index signal outcomes equal for history and numeric-only recommendations', () => {
+        const historyIndexItem = mapImportPreviewIndexResponseItem({
+            id: 1,
+            parser_source: 'alipay',
+            parser_tags: ['parser:alipay'],
+            history_status: 'pending',
+            history_title: '将改写/合并历史账单',
+            history_planned_operation: 'update_history',
+            history_bill_id: 9001,
+            history_bill_version: 3,
+            history_operation_id: 'history:canonical',
+            history_acknowledgement_token: 'ack-token',
+            history_destructive_ack_required: true
+        });
+        const historyFull = buildImportPreviewSignalViewModel({
+            parserId: 'alipay',
+            parserTags: ['parser:alipay'],
+            reconciliationTitle: '将改写/合并历史账单',
+            reconciliationPlannedOperation: 'update_history',
+            reconciliationHistoryBillId: 9001,
+            reconciliationHistoryBillVersion: 3,
+            reconciliationOperationId: 'history:canonical',
+            reconciliationAcknowledgementToken: 'ack-token',
+            reconciliationDestructiveAckRequired: true
+        });
+        const historyIndex = buildImportPreviewIndexSignalViewModel(historyIndexItem);
+
+        expect(matchesImportPreviewSignalFilter(historyFull, 'history')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(historyIndex, 'history')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(historyIndex, 'parser')).toBe(false);
+
+        const learningIndex = buildImportPreviewIndexSignalViewModel(mapImportPreviewIndexResponseItem({
+            id: 2,
+            parser_source: 'wechat',
+            parser_tags: ['parser:wechat'],
+            learning_status: null,
+            learning_title: '',
+            learning_summary: '',
+            learning_mode: '',
+        }));
+        const numericLearningIndex = buildImportPreviewIndexSignalViewModel(mapImportPreviewIndexResponseItem({
+            id: 3,
+            parser_source: 'wechat',
+            parser_tags: ['parser:wechat'],
+            learning_status: 'pending',
+            learning_title: '',
+            learning_summary: '',
+            learning_mode: '',
+            learning_score: 0.82,
+        }));
+        const numericLlmIndex = buildImportPreviewIndexSignalViewModel(mapImportPreviewIndexResponseItem({
+            id: 4,
+            parser_source: 'wechat',
+            parser_tags: ['parser:wechat'],
+            llm_status: 'pending',
+            llm_title: '',
+            llm_confidence: 0.71,
+        }));
+
+        expect(matchesImportPreviewSignalFilter(learningIndex, 'parser')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(numericLearningIndex, 'learning')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(numericLearningIndex, 'parser')).toBe(false);
+        expect(matchesImportPreviewSignalFilter(numericLlmIndex, 'llm')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(numericLlmIndex, 'parser')).toBe(false);
     });
 
     test('formats platform duplicate label and localized duplicate-source detail from structured metadata', () => {
@@ -924,7 +995,7 @@ describe('checkDataMatching helpers', () => {
             candidateCount: 2,
             primaryReason: '金额相同'
         });
-        expect(matchesImportPreviewSignalFilter(viewModel, 'transfer')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(viewModel, 'transfer')).toBe(false);
     });
 
     test('shows dedup fallback lines when source counts or source arrays make the signal visible', () => {

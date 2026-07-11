@@ -140,6 +140,9 @@ pub async fn import_reclassify_runtime_handler(
         .iter()
         .map(import_preview_draft_from_row)
         .collect::<Vec<_>>();
+    for draft in &mut intelligent_drafts {
+        invalidate_reclassification_dependent_signals(draft);
+    }
     if let Err(error) = apply_import_intelligence_chain(
         runtime.connection_mut(),
         user_id,
@@ -180,4 +183,45 @@ pub async fn import_reclassify_runtime_handler(
         "updated": updated,
         "preview": preview,
     })))
+}
+
+/// Reclassification changes the semantic inputs consumed by recommendation and history matching.
+/// Drop those projections before rebuilding the intelligence chain so the response cannot expose
+/// an accepted/rejected recommendation or destructive history plan for the previous row state.
+fn invalidate_reclassification_dependent_signals(draft: &mut ImportPreviewDraft) {
+    draft.preview_recurring_id = None;
+    draft.preview_recurring_name.clear();
+    draft.preview_recurring_candidate_count = 0;
+    draft.preview_recurring_match_score = 0.0;
+    draft.preview_recurring_match_reasons.clear();
+    draft.preview_recurring_matched_date.clear();
+
+    let Some(feedback) = draft.preview_matching_feedback.as_object_mut() else {
+        draft.preview_matching_feedback = json!({});
+        return;
+    };
+
+    feedback.remove("learning");
+    feedback.remove("llm");
+    feedback.remove("history");
+    feedback.remove("recurring");
+
+    let reconciliation_depends_on_history = feedback
+        .get("reconciliation")
+        .and_then(Value::as_object)
+        .is_some_and(|reconciliation| {
+            [
+                "planned_operation",
+                "history_bill_id",
+                "history_bill_version",
+                "operation_id",
+                "acknowledgement_token",
+                "destructive_ack_required",
+            ]
+            .iter()
+            .any(|key| reconciliation.contains_key(*key))
+        });
+    if reconciliation_depends_on_history {
+        feedback.remove("reconciliation");
+    }
 }

@@ -444,10 +444,18 @@ describe('import preview server-paged reset guards', () => {
         expect(tabSource).toContain('includeSuggestionDecisionClears: true');
         expect(updateSource).toContain("clearLearningDecision ? 'learning' : ''");
         expect(updateSource).toContain("clearLlmDecision ? 'llm' : ''");
-        expect(updateSource).toContain("update['clear_learning_decision'] = clearLearningDecision;");
-        expect(updateSource).toContain("update['clear_llm_decision'] = clearLlmDecision;");
-        expect(updateSource).toContain("update['clear_actionable_suggestions'] = clearActionableSuggestions;");
-        expect(tabSource.match(/syncTransferDecisionDraftState\(/g)).toHaveLength(3);
+        expect(updateSource).toContain('if (clearLearningDecision) {');
+        expect(updateSource).toContain("update['clear_learning_decision'] = true;");
+        expect(updateSource).toContain('if (clearLlmDecision) {');
+        expect(updateSource).toContain("update['clear_llm_decision'] = true;");
+        expect(updateSource).toContain('if (clearActionableSuggestions.length > 0) {');
+        expect(tabSource.match(/syncTransferDecisionDraftState\(/g)).toHaveLength(2);
+
+        const rehydrateStart = tabSource.indexOf('function rehydrateCurrentPageDrafts');
+        const rehydrateEnd = tabSource.indexOf('function getTrackedTransactionsForSelection', rehydrateStart);
+        const rehydrateSource = tabSource.slice(rehydrateStart, rehydrateEnd);
+        expect(rehydrateSource).not.toContain('syncTransferDecisionDraftState(transaction);');
+        expect(rehydrateSource).toContain('transaction.matching = authoritativeMatching;');
     });
 
     test('check-data keeps investment recognition out of actionable signal UI', () => {

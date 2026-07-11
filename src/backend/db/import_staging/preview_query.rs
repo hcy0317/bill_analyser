@@ -153,6 +153,9 @@ fn build_preview_page_result_from_rows(
     rows: Vec<ImportPreviewRow>,
     request: &ImportPreviewPageRequest,
 ) -> ImportPreviewPageResult {
+    let mut signal_count_filters = request.filters.clone();
+    signal_count_filters.signal = None;
+    let signal_count_rows = apply_preview_filters(rows.clone(), &signal_count_filters);
     let mut rows = apply_preview_filters(rows, &request.filters);
     sort_preview_rows(&mut rows, &request.sort_by, &request.sort_direction);
     let total = rows.len();
@@ -169,7 +172,7 @@ fn build_preview_page_result_from_rows(
         total,
         page,
         page_size,
-        metadata: build_preview_metadata(total),
+        metadata: build_preview_metadata_from_rows(total, &signal_count_rows),
     }
 }
 
@@ -311,6 +314,7 @@ fn like_pattern(value: &str) -> String {
 
 fn build_preview_metadata(total: usize) -> ImportPreviewMetadata {
     let counts = ImportPreviewCounts {
+        signals: empty_visible_signal_counts(),
         total,
         ..ImportPreviewCounts::default()
     };
@@ -318,6 +322,31 @@ fn build_preview_metadata(total: usize) -> ImportPreviewMetadata {
         counts,
         facets: ImportPreviewFacets::default(),
     }
+}
+
+fn build_preview_metadata_from_rows(
+    total: usize,
+    signal_count_rows: &[ImportPreviewRow],
+) -> ImportPreviewMetadata {
+    let mut metadata = build_preview_metadata(total);
+    for family in IMPORT_PREVIEW_VISIBLE_SIGNAL_FAMILIES {
+        let count = signal_count_rows
+            .iter()
+            .filter(|row| preview_signal_family_matches(family, row))
+            .count();
+        metadata
+            .counts
+            .signals
+            .insert((*family).to_string(), count);
+    }
+    metadata
+}
+
+fn empty_visible_signal_counts() -> BTreeMap<String, usize> {
+    IMPORT_PREVIEW_VISIBLE_SIGNAL_FAMILIES
+        .iter()
+        .map(|family| ((*family).to_string(), 0usize))
+        .collect()
 }
 
 async fn build_preview_metadata_for_query(
@@ -338,12 +367,32 @@ async fn build_preview_metadata_for_query(
     .map(|value| usize::try_from(value).unwrap_or(usize::MAX))?;
     metadata.counts.selected_invalid =
         count_selected_invalid_preview_rows(pool, session_db_id, user_id, filters).await?;
+    metadata.counts.signals =
+        query_preview_signal_counts(pool, session_db_id, user_id, filters).await?;
     metadata.facets.categories =
         query_preview_category_facets(pool, session_db_id, user_id, filters).await?;
     metadata.facets.accounts =
         query_preview_account_facets(pool, session_db_id, user_id, filters).await?;
     metadata.facets.tags = query_preview_tag_facets(pool, session_db_id, user_id, filters).await?;
     Ok(metadata)
+}
+
+async fn query_preview_signal_counts(
+    pool: &PostgresPool,
+    session_db_id: i64,
+    user_id: i64,
+    filters: &ImportPreviewQueryFilters,
+) -> DbResult<BTreeMap<String, usize>> {
+    let mut counts = empty_visible_signal_counts();
+    for family in IMPORT_PREVIEW_VISIBLE_SIGNAL_FAMILIES {
+        let mut signal_filters = filters.clone();
+        signal_filters.signal = Some((*family).to_string());
+        let count = count_preview_rows_by_query(pool, session_db_id, user_id, &signal_filters)
+            .await
+            .map(|value| usize::try_from(value).unwrap_or(usize::MAX))?;
+        counts.insert((*family).to_string(), count);
+    }
+    Ok(counts)
 }
 
 fn selected_count_filters(filters: &ImportPreviewQueryFilters) -> ImportPreviewQueryFilters {
@@ -421,7 +470,9 @@ async fn query_preview_tag_facets(
     query.push_bind(session_db_id);
     query.push(" AND p.user_id = ");
     query.push_bind(user_id);
-    query.push(" AND trim(tag_values.tag) <> ''");
+    query.push(" AND btrim(tag_values.tag, ");
+    query.push_bind(IMPORT_PREVIEW_SIGNAL_TRIM_CHARS);
+    query.push(") <> ''");
     push_preview_query_predicates(&mut query, &facet_filters, "p");
     query.push(" GROUP BY tag_values.tag ORDER BY count DESC, label ASC LIMIT ");
     query.push_bind(IMPORT_PREVIEW_FACET_LIMIT);

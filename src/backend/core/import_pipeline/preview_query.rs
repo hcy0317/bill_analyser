@@ -116,30 +116,25 @@ pub fn sort_import_preview_page_items(
     };
 
     let mut sorted = items.to_vec();
-    sorted.sort_by_key(|item| integer_field(item, "id"));
     let descending = normalize_import_preview_page_sort_direction(sort_direction)
         == ImportPreviewSortDirection::Desc;
-    if sort_field == "preview_amount_cents" {
-        sorted.sort_by(|left, right| {
+    sorted.sort_by(|left, right| {
+        let order = if sort_field == "preview_amount_cents" {
             let left_key = integer_field(left, sort_field);
             let right_key = integer_field(right, sort_field);
-            if descending {
-                right_key.cmp(&left_key)
-            } else {
-                left_key.cmp(&right_key)
-            }
-        });
-    } else {
-        sorted.sort_by(|left, right| {
+            left_key.cmp(&right_key)
+        } else {
             let left_key = string_field(left, sort_field).to_lowercase();
             let right_key = string_field(right, sort_field).to_lowercase();
-            if descending {
-                right_key.cmp(&left_key)
-            } else {
-                left_key.cmp(&right_key)
-            }
+            left_key.cmp(&right_key)
+        };
+        let order = order.then_with(|| {
+            let left_id = left.get("id").and_then(Value::as_i64).unwrap_or(0);
+            let right_id = right.get("id").and_then(Value::as_i64).unwrap_or(0);
+            left_id.cmp(&right_id)
         });
-    }
+        if descending { order.reverse() } else { order }
+    });
     sorted
 }
 

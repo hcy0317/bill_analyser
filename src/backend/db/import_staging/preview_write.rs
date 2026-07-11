@@ -7,10 +7,17 @@ pub fn insert_preview_bill(
     draft: &ImportPreviewDraft,
 ) -> DbResult<i64> {
     block_on_db(async move {
-        let session_db_id = session_db_id(pool, session_id, user_id).await?;
         let user_id = user_id_i64(user_id)?;
-        let identity_maps = load_import_identity_maps(pool, user_id).await?;
-        insert_preview_row_async(pool, session_db_id, user_id, draft, &identity_maps).await
+        let mut tx = pool.begin().await?;
+        let session_db_id =
+            lock_active_import_session_on_tx(&mut tx, session_id, user_id).await?;
+        let identity_maps = load_import_identity_maps_for_confirm(&mut tx, user_id).await?;
+        let id =
+            insert_preview_row_async(&mut tx, session_db_id, user_id, draft, &identity_maps)
+                .await?;
+        update_session_preview_count(&mut tx, session_db_id, user_id).await?;
+        tx.commit().await?;
+        Ok(id)
     })
 }
 
@@ -23,19 +30,23 @@ pub fn insert_preview_bills_batch(
     drafts: &[ImportPreviewDraft],
 ) -> DbResult<usize> {
     block_on_db(async move {
+        let user_id = user_id_i64(user_id)?;
+        let mut tx = pool.begin().await?;
+        let session_db_id =
+            lock_active_import_session_on_tx(&mut tx, session_id, user_id).await?;
         if drafts.is_empty() {
+            tx.commit().await?;
             return Ok(0);
         }
-        let session_db_id = session_db_id(pool, session_id, user_id).await?;
-        let user_id = user_id_i64(user_id)?;
-        insert_preview_rows_batch_async(pool, session_db_id, user_id, drafts).await?;
-        update_session_preview_count(pool, session_db_id, user_id).await?;
+        insert_preview_rows_batch_async(&mut tx, session_db_id, user_id, drafts).await?;
+        update_session_preview_count(&mut tx, session_db_id, user_id).await?;
+        tx.commit().await?;
         Ok(drafts.len())
     })
 }
 
 async fn insert_preview_row_async(
-    pool: &PostgresPool,
+    tx: &mut sqlx::Transaction<'_, Postgres>,
     session_db_id: i64,
     user_id: i64,
     draft: &ImportPreviewDraft,
@@ -58,7 +69,11 @@ async fn insert_preview_row_async(
         amount_cents,
         direction,
     );
-    let id = query.build().fetch_one(pool).await?.try_get("id")?;
+    let id = query
+        .build()
+        .fetch_one(&mut **tx)
+        .await?
+        .try_get("id")?;
     Ok(id)
 }
 
@@ -169,12 +184,12 @@ struct ImportIdentityMaps {
 }
 
 async fn insert_preview_rows_batch_async(
-    pool: &PostgresPool,
+    tx: &mut sqlx::Transaction<'_, Postgres>,
     session_db_id: i64,
     user_id: i64,
     drafts: &[ImportPreviewDraft],
 ) -> DbResult<usize> {
-    let identity_maps = load_import_identity_maps(pool, user_id).await?;
+    let identity_maps = load_import_identity_maps_for_confirm(tx, user_id).await?;
     let mut drafts = drafts.to_vec();
     for draft in &mut drafts {
         apply_identity_validation_to_draft(draft, &identity_maps);
@@ -185,7 +200,7 @@ async fn insert_preview_rows_batch_async(
         .collect::<Vec<_>>();
     for chunk in rows.chunks(IMPORT_STAGING_BULK_INSERT_CHUNK_SIZE) {
         let mut query = build_preview_rows_insert_query(session_db_id, user_id, chunk);
-        query.build().execute(pool).await?;
+        query.build().execute(&mut **tx).await?;
     }
     Ok(rows.len())
 }
@@ -254,27 +269,11 @@ async fn load_preview_rows(
 }
 
 async fn update_session_preview_count(
-    pool: &PostgresPool,
+    tx: &mut sqlx::Transaction<'_, Postgres>,
     session_db_id: i64,
     user_id: i64,
 ) -> DbResult<()> {
-    sqlx::query(
-        r#"
-        UPDATE import_sessions
-        SET total_preview = (
-                SELECT COUNT(*)::BIGINT FROM import_preview_rows
-                WHERE session_id = $1 AND user_id = $2
-            ),
-            updated_at = now(),
-            version = version + 1
-        WHERE id = $1 AND user_id = $2
-        "#,
-    )
-    .bind(session_db_id)
-    .bind(user_id)
-    .execute(pool)
-    .await?;
-    Ok(())
+    refresh_import_session_counters_on_tx(tx, session_db_id, user_id).await
 }
 
 fn preview_payload_from_draft(draft: &ImportPreviewDraft) -> Value {

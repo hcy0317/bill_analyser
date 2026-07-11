@@ -59,6 +59,20 @@ jobs:
   backend-ci:
     name: backend-ci
     runs-on: ubuntu-latest
+    env:
+      BILL_ANALYSER_TEST_POSTGRES_URL: postgresql://bill_analyser:bill_analyser@postgres:5432/bill_analyser_test
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bill_analyser
+          POSTGRES_PASSWORD: bill_analyser
+          POSTGRES_DB: bill_analyser_test
+        options: >-
+          --health-cmd "pg_isready -U bill_analyser -d bill_analyser_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - name: Checkout
         uses: https://github.com/actions/checkout@v4

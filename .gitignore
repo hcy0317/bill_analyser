@@ -187,6 +187,12 @@ lib-cov
 coverage
 *.lcov
 
+# Keep the generic Vue/Jest coverage prerequisite test tracked without
+# admitting generated coverage artifacts elsewhere.
+!tests/web/coverage/
+tests/web/coverage/*
+!tests/web/coverage/vueSfcHarness.test.ts
+
 # nyc test coverage
 .nyc_output
 

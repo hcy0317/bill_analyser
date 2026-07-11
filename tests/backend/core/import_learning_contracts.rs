@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use bill_analyser_core::import_learning_lifecycle::normalize_import_learning_lifecycle_feedback;
 use bill_analyser_core::{
     amount_cents_bucket, build_composite_match_features, build_composite_match_hash,
     build_dataset_snapshot_payload, build_feature_payload,
@@ -210,6 +211,29 @@ fn learning_lifecycle_thresholds_have_no_off_by_one_and_transfer_signal_states()
         learning_lifecycle_signal_state(LEARNING_LIFECYCLE_STATUS_DOWNGRADED),
         "yellow"
     );
+}
+
+#[test]
+fn learning_lifecycle_feedback_vocabulary_rejects_illegal_actions_explicitly() {
+    for (raw, expected) in [
+        ("accept", Some("accept")),
+        (" Accepted ", Some("accept")),
+        ("rejected", Some("reject")),
+        ("auto-applied", Some("auto_apply")),
+        ("suppressed", Some("suppress")),
+        ("clear", None),
+        ("unknown", None),
+    ] {
+        assert_eq!(normalize_import_learning_lifecycle_feedback(raw), expected);
+    }
+
+    let current = ImportLearningLifecycleState::default();
+    let illegal = transition_import_learning_lifecycle(&current, "unknown");
+    assert_eq!(illegal.previous_status, LEARNING_LIFECYCLE_STATUS_YELLOW);
+    assert_eq!(illegal.next_status, LEARNING_LIFECYCLE_STATUS_YELLOW);
+    assert_eq!(illegal.accepted_count, 0);
+    assert_eq!(illegal.rejected_count, 0);
+    assert_eq!(illegal.event_type, "invalid");
 }
 
 #[test]

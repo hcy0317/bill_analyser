@@ -35,6 +35,9 @@ pub fn preview_draft_from_history_transfer(
         build_transfer_source_snapshot(incoming, "incoming"),
     ];
     let source_label = transfer_source_label(&transfer_sources);
+    let planned_operation = normalize_history_operation("merge_current_bill_transfer")
+        .expect("known history operation")
+        .as_str();
     let source_chain = serde_json::json!([
         {
             "role": outgoing_role,
@@ -104,7 +107,7 @@ pub fn preview_draft_from_history_transfer(
                 "source_count": input.imported_bill.dedup_source_ids().len(),
                 "history_bill_id": input.history_bill.history_bill_id,
                 "history_bill_version": input.history_bill.history_bill_version,
-                "planned_operation": "merge_current_bill_transfer",
+                "planned_operation": planned_operation,
                 "source_chain": source_chain,
                 "source_label": source_label,
             },
@@ -125,7 +128,7 @@ pub fn preview_draft_from_history_transfer(
                 "history_bill_id": input.history_bill.history_bill_id,
                 "history_bill_version": input.history_bill.history_bill_version,
                 "row_origin": "postgres_bill",
-                "planned_operation": "merge_current_bill_transfer",
+                "planned_operation": planned_operation,
                 "history_role": if import_is_outgoing { "incoming" } else { "outgoing" },
                 "import_role": if import_is_outgoing { "outgoing" } else { "incoming" },
                 "review_status": "pending",

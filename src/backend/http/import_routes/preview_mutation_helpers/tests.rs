@@ -273,4 +273,22 @@ mod preview_mutation_helper_tests {
         assert_eq!(suggestion.suggested_sub_category, "基金买入");
         assert_eq!(suggestion.confidence, 0.82);
     }
+
+    #[test]
+    fn llm_review_expected_state_parser_keeps_desktop_status_and_category_aliases() {
+        let payload = json!({
+            "expected_state": {
+                "session_id": "session-llm",
+                "review_status": "Pending",
+                "category_id": "42"
+            }
+        });
+
+        let expected = expected_state_from_payload(payload.as_object().expect("payload object"))
+            .expect("expected state");
+
+        assert_eq!(expected.session_id.as_deref(), Some("session-llm"));
+        assert_eq!(expected.review_status.as_deref(), Some("pending"));
+        assert_eq!(expected.preview_category_id, Some(Some(42)));
+    }
 }

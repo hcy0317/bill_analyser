@@ -140,6 +140,23 @@ describe('import preview index helpers', () => {
         expect(page.previewIds).toStrictEqual([3]);
     });
 
+    test('uses preview id as the fallback sort tie-breaker in the requested direction', () => {
+        const tied = [
+            { ...baseItem(), id: 30, time: 100, comment: 'same' },
+            { ...baseItem(), id: 10, time: 100, comment: 'same' },
+            { ...baseItem(), id: 20, time: 100, comment: 'same' },
+        ];
+
+        expect(sortImportPreviewIndexItems(tied, 'time', 'asc').map(item => item.id))
+            .toStrictEqual([10, 20, 30]);
+        expect(sortImportPreviewIndexItems(tied, 'time', 'desc').map(item => item.id))
+            .toStrictEqual([30, 20, 10]);
+        expect(sortImportPreviewIndexItems(tied, 'comment', 'asc').map(item => item.id))
+            .toStrictEqual([10, 20, 30]);
+        expect(sortImportPreviewIndexItems(tied, 'comment', 'desc').map(item => item.id))
+            .toStrictEqual([30, 20, 10]);
+    });
+
     test('maps server-paged index responses into the table filter model', () => {
         const item = mapImportPreviewIndexResponseItem({
             id: 42,

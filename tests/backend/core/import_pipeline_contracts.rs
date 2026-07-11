@@ -1,24 +1,142 @@
 use std::collections::BTreeMap;
 
 use bill_analyser_core::{
-    build_import_history_rewrite_ack_token, build_import_history_rewrite_operation_id,
-    build_import_preview_filter_index_item, build_import_preview_matching_payload,
-    coerce_preview_selected_value, expected_preview_state_is_valid, import_preview_index_success,
-    import_preview_page_success, import_session_cancel_missing_response,
+    attach_import_preview_matching_payload, build_import_history_rewrite_ack_token,
+    build_import_history_rewrite_operation_id, build_import_preview_filter_index_item,
+    build_import_preview_matching_payload, coerce_preview_selected_value,
+    expected_preview_state_is_valid, import_preview_index_success, import_preview_page_success,
+    import_preview_signal_value_is_truthy, import_session_cancel_missing_response,
     import_session_cancel_success_response, import_session_not_found_response,
     import_session_success, import_stage_confirm_success, import_stage_dedup_success,
     import_stage_parse_success, import_v2_invalid_request_response,
     import_v2_missing_session_id_response, map_import_preview_type_to_frontend_value,
-    normalize_import_preview_page_query, normalize_import_preview_page_sort_direction,
-    normalize_import_preview_page_sort_key, normalize_page, normalize_page_size,
-    normalize_preview_ids, preview_state_conflict_response, preview_update_is_selected,
-    sort_import_preview_page_items, AccountLookup, CategoryLookup, ExpectedPreviewState,
-    ImportPreviewIndexData, ImportPreviewMatchingPayload, ImportPreviewPageData,
-    ImportPreviewSortDirection, ImportSessionSummary, ImportStageConfirmData, ImportStageDedupData,
-    ImportStageParseData, BILLS_PREVIEW_CONTRACT_FIELDS, HISTORY_REWRITE_NOTICE,
+    normalize_history_operation, normalize_import_preview_page_query,
+    normalize_import_preview_page_sort_direction, normalize_import_preview_page_sort_key,
+    normalize_page, normalize_page_size, normalize_preview_ids,
+    parse_import_preview_decimal_number, preview_state_conflict_response,
+    preview_update_is_selected, resolve_first_nonempty_status,
+    resolve_import_preview_learning_signal_status, resolve_import_preview_llm_signal_status,
+    resolve_import_preview_transfer_signal_status, sort_import_preview_page_items,
+    strict_decimal_has_non_zero, strict_decimal_is_positive, AccountLookup, CategoryLookup,
+    ExpectedPreviewState, ImportHistoryRewriteOperation, ImportPreviewIndexData,
+    ImportPreviewMatchingPayload, ImportPreviewPageData, ImportPreviewSortDirection,
+    ImportSessionSummary, ImportStageConfirmData, ImportStageDedupData, ImportStageParseData,
+    BILLS_PREVIEW_CONTRACT_FIELDS, HISTORY_REWRITE_NOTICE, IMPORT_PREVIEW_VISIBLE_SIGNAL_FAMILIES,
     IMPORT_STAGING_TABLES, IMPORT_V2_PIPELINE_STEPS,
 };
-use serde_json::{json, Map};
+use serde_json::{json, Map, Value};
+
+include!("transfer_signal_parity_corpus.rs");
+
+#[test]
+fn strict_decimal_and_text_evidence_follow_sql_grammar() {
+    for (name, value, has_non_zero, decimal_positive, evidence_visible) in [
+        ("trailing_dot", "1.", false, false, true),
+        ("zero", "0", false, false, false),
+        ("negative", "-1", true, false, false),
+        ("negative_zero", "-0", false, false, false),
+        ("malformed_text", "abc1", false, false, true),
+        ("positive_integer", "1", true, true, true),
+        ("positive_fraction", ".5", true, true, true),
+    ] {
+        assert_eq!(
+            strict_decimal_is_positive(value),
+            decimal_positive,
+            "{name}"
+        );
+        assert_eq!(strict_decimal_has_non_zero(value), has_non_zero, "{name}");
+        let preview = json!({
+            "preview_type": "支出",
+            "preview_matching_feedback": {"learning": {"summary": value}}
+        });
+        let index = build_import_preview_filter_index_item(
+            preview.as_object().unwrap(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        );
+        assert_eq!(index.learning_status.is_some(), evidence_visible, "{name}");
+    }
+}
+
+#[test]
+fn transfer_index_projection_uses_shared_parity_corpus() {
+    for case in TRANSFER_SIGNAL_PARITY_CORPUS {
+        let transfer: Value = serde_json::from_str(case.transfer_json).unwrap();
+        let preview = json!({
+            "preview_type": case.preview_type,
+            "preview_matching_feedback": {"transfer": transfer}
+        });
+        assert_eq!(
+            resolve_import_preview_transfer_signal_status(preview.as_object().unwrap()).as_deref(),
+            case.expected_index_status,
+            "{}",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn signal_index_projection_fails_closed_for_unknown_nonempty_statuses() {
+    for (family, resolver) in [
+        (
+            "learning",
+            resolve_import_preview_learning_signal_status
+                as fn(&Map<String, Value>) -> Option<String>,
+        ),
+        ("llm", resolve_import_preview_llm_signal_status),
+        ("transfer", resolve_import_preview_transfer_signal_status),
+    ] {
+        let preview = json!({
+            "preview_type": "支出",
+            "preview_matching_feedback": {
+                (family): {
+                    "review_status": "__invalid_status__",
+                    "score": 0.91,
+                    "confidence": 0.91,
+                    "candidate_type": "transfer",
+                    "summary": "actionable"
+                }
+            }
+        });
+        assert_eq!(resolver(preview.as_object().unwrap()), None, "{family}");
+    }
+}
+
+#[test]
+fn needs_review_is_learning_specific_and_does_not_leak_to_other_signal_families() {
+    for (family, resolver, expected) in [
+        (
+            "learning",
+            resolve_import_preview_learning_signal_status
+                as fn(&Map<String, Value>) -> Option<String>,
+            Some("pending"),
+        ),
+        ("llm", resolve_import_preview_llm_signal_status, None),
+        (
+            "transfer",
+            resolve_import_preview_transfer_signal_status,
+            None,
+        ),
+    ] {
+        let preview = json!({
+            "preview_type": "支出",
+            "preview_matching_feedback": {
+                (family): {
+                    "review_status": "needs_review",
+                    "score": 0.91,
+                    "confidence": 0.91,
+                    "candidate_type": "transfer",
+                    "summary": "actionable"
+                }
+            }
+        });
+        assert_eq!(
+            resolver(preview.as_object().unwrap()).as_deref(),
+            expected,
+            "{family}"
+        );
+    }
+}
 
 #[test]
 fn preview_page_query_normalization_matches_current_v2_contract() {
@@ -74,7 +192,8 @@ fn preview_sort_is_stabilized_by_id_and_uses_current_field_mapping() {
             .iter()
             .map(|item| item["id"].as_i64().unwrap())
             .collect::<Vec<_>>(),
-        vec![3, 1, 2]
+        vec![3, 2, 1],
+        "desc counterparty: beta > alpha, id tie-break desc: 2 before 1"
     );
 }
 
@@ -210,12 +329,16 @@ fn preview_matching_payload_preserves_stage2_baseline_snapshot() {
 
 #[test]
 fn history_rewrite_matching_payload_exposes_operation_ack_evidence() {
-    let operation_id =
-        build_import_history_rewrite_operation_id("update_history", 9001, 3, "hist:9001");
+    let operation_id = build_import_history_rewrite_operation_id(
+        ImportHistoryRewriteOperation::UpdateHistory,
+        9001,
+        3,
+        "hist:9001",
+    );
     let expected_token = build_import_history_rewrite_ack_token(
         "session-history",
         &operation_id,
-        "update_history",
+        ImportHistoryRewriteOperation::UpdateHistory,
         9001,
         3,
     );
@@ -248,6 +371,66 @@ fn history_rewrite_matching_payload_exposes_operation_ack_evidence() {
         matching["annotation"]["history_rewrite_notice"],
         HISTORY_REWRITE_NOTICE
     );
+}
+
+#[test]
+fn visible_signal_family_order_is_rust_enum_authoritative() {
+    assert_eq!(
+        IMPORT_PREVIEW_VISIBLE_SIGNAL_FAMILIES,
+        &[
+            "parser",
+            "platform_duplicate",
+            "transfer",
+            "history",
+            "learning",
+            "llm",
+        ]
+    );
+
+    assert_eq!(
+        normalize_history_operation("update_current_bill"),
+        Some(ImportHistoryRewriteOperation::UpdateHistory)
+    );
+    assert_eq!(
+        normalize_history_operation("merge_current_bill_transfer"),
+        Some(ImportHistoryRewriteOperation::MergeTransferHistory)
+    );
+    assert_eq!(
+        normalize_history_operation("merge_transfer"),
+        Some(ImportHistoryRewriteOperation::MergeTransferHistory)
+    );
+    assert_eq!(normalize_history_operation("recurring"), None);
+    assert_eq!(normalize_history_operation("UPDATE_HISTORY"), None);
+}
+
+#[test]
+fn unknown_history_operation_fails_before_ack_projection() {
+    let preview = json!({
+        "id": 77,
+        "session_id": "session-history",
+        "preview_matching_feedback": {
+            "reconciliation": {
+                "planned_operation": "delete_history",
+                "history_bill_id": 9001,
+                "history_bill_version": 3,
+                "group_key": "hist:9001"
+            }
+        }
+    });
+    let matching =
+        build_import_preview_matching_payload(preview.as_object().expect("preview object"));
+
+    assert_eq!(
+        matching["reconciliation"]["planned_operation"],
+        "delete_history"
+    );
+    assert!(matching["reconciliation"].get("operation_id").is_none());
+    assert!(matching["reconciliation"]
+        .get("acknowledgement_token")
+        .is_none());
+    assert!(matching["reconciliation"]
+        .get("destructive_ack_required")
+        .is_none());
 }
 
 #[test]
@@ -371,6 +554,157 @@ fn preview_filter_index_item_reads_signals_from_matching_feedback_payload() {
     assert_eq!(item.learning_title, "composite exact");
     assert_eq!(item.learning_summary, "餐饮/咖啡 | 支付宝");
     assert_eq!(item.learning_mode, "exact");
+}
+
+#[test]
+fn full_preview_preserves_matching_llm_and_index_exposes_flattened_llm_signal_fields() {
+    let preview = json!({
+        "id": 88,
+        "preview_type": "支出",
+        "preview_amount_cents": -1999,
+        "preview_parser_id": "alipay",
+        "preview_parser_tags": ["parser:alipay"],
+        "preview_matching_feedback": {
+            "llm": {
+                "review_status": "pending",
+                "confidence": 0.83,
+                "suggested_type": "expense",
+                "suggested_category_id": 42,
+                "suggested_main_category": "Meals",
+                "suggested_sub_category": "Coffee",
+                "suggested_source_account": "Checking",
+                "suggested_destination_account": "Wallet",
+                "reason": "merchant evidence"
+            }
+        }
+    });
+    let mut full_preview = preview.as_object().expect("preview object").clone();
+    attach_import_preview_matching_payload(&mut full_preview);
+    let expected_llm = full_preview["matching"]["llm"].clone();
+    assert_eq!(expected_llm["review_status"], "pending");
+    assert_eq!(expected_llm["confidence"], 0.83);
+    assert_eq!(expected_llm["suggested_category_id"], 42);
+
+    let index = build_import_preview_filter_index_item(
+        preview.as_object().expect("preview object"),
+        &BTreeMap::<i64, CategoryLookup>::new(),
+        &BTreeMap::<i64, AccountLookup>::new(),
+    );
+    let index = serde_json::to_value(index).expect("serialize filter index");
+    assert_eq!(index["llm_status"], "pending");
+    assert_eq!(index["llm_title"], "merchant evidence");
+    assert_eq!(index["llm_confidence"], 0.83);
+    assert_eq!(index["llm_category_path"], "Meals/Coffee");
+    assert_eq!(index["llm_source_account"], "Checking");
+    assert_eq!(index["llm_destination_account"], "Wallet");
+}
+
+#[test]
+fn lightweight_index_exposes_history_rewrite_fields_from_canonical_projection() {
+    let preview = json!({
+        "id": 89,
+        "session_id": "session-history",
+        "preview_type": "支出",
+        "preview_amount_cents": -1888,
+        "preview_parser_id": "alipay",
+        "preview_parser_tags": ["parser:alipay"],
+        "preview_matching_feedback": {
+            "reconciliation": {
+                "planned_operation": "update_current_bill",
+                "history_bill_id": 9001,
+                "history_bill_version": 3,
+                "group_key": "hist:9001",
+                "operation_id": "history:legacy-raw-operation-id",
+                "notice": HISTORY_REWRITE_NOTICE
+            }
+        }
+    });
+    let mut full_preview = preview.as_object().expect("preview object").clone();
+    attach_import_preview_matching_payload(&mut full_preview);
+    let canonical_operation =
+        normalize_history_operation("update_current_bill").expect("known operation");
+    let expected_operation_id =
+        build_import_history_rewrite_operation_id(canonical_operation, 9001, 3, "hist:9001");
+    let expected_token = build_import_history_rewrite_ack_token(
+        "session-history",
+        &expected_operation_id,
+        canonical_operation,
+        9001,
+        3,
+    );
+    assert_eq!(
+        full_preview["matching"]["reconciliation"]["planned_operation"],
+        "update_history"
+    );
+    assert_eq!(
+        full_preview["matching"]["reconciliation"]["operation_id"],
+        expected_operation_id
+    );
+
+    let index = build_import_preview_filter_index_item(
+        preview.as_object().expect("preview object"),
+        &BTreeMap::<i64, CategoryLookup>::new(),
+        &BTreeMap::<i64, AccountLookup>::new(),
+    );
+    let index = serde_json::to_value(index).expect("serialize filter index");
+    assert_eq!(index["history_status"], "pending");
+    assert_eq!(index["history_title"], HISTORY_REWRITE_NOTICE);
+    assert_eq!(index["history_planned_operation"], "update_history");
+    assert_eq!(index["history_bill_id"], 9001);
+    assert_eq!(index["history_bill_version"], 3);
+    assert_eq!(index["history_operation_id"], expected_operation_id);
+    assert_eq!(index["history_acknowledgement_token"], expected_token);
+    assert_eq!(index["history_destructive_ack_required"], true);
+}
+
+#[test]
+fn planned_history_operation_aliases_are_canonical_before_ack_projection() {
+    for (raw, canonical) in [
+        ("update_history", "update_history"),
+        ("merge_transfer_history", "merge_transfer_history"),
+        ("update_current_bill", "update_history"),
+        ("merge_current_bill_transfer", "merge_transfer_history"),
+        ("merge_transfer", "merge_transfer_history"),
+    ] {
+        let preview = json!({
+            "id": 77,
+            "session_id": "session-history",
+            "preview_matching_feedback": {
+                "reconciliation": {
+                    "planned_operation": raw,
+                    "history_bill_id": 9001,
+                    "history_bill_version": 3,
+                    "group_key": "hist:9001",
+                    "operation_id": "history:legacy-raw-operation-id"
+                }
+            }
+        });
+        let matching =
+            build_import_preview_matching_payload(preview.as_object().expect("preview object"));
+        let canonical_operation =
+            normalize_history_operation(canonical).expect("canonical operation");
+        let expected_operation_id =
+            build_import_history_rewrite_operation_id(canonical_operation, 9001, 3, "hist:9001");
+        let expected_token = build_import_history_rewrite_ack_token(
+            "session-history",
+            &expected_operation_id,
+            canonical_operation,
+            9001,
+            3,
+        );
+        assert_eq!(
+            matching["reconciliation"]["planned_operation"], canonical,
+            "raw operation {raw} must normalize at the read boundary"
+        );
+        assert_eq!(
+            matching["reconciliation"]["operation_id"], expected_operation_id,
+            "raw operation {raw} must receive the canonical operation id"
+        );
+        assert_eq!(
+            matching["reconciliation"]["acknowledgement_token"], expected_token,
+            "raw operation {raw} must receive the canonical acknowledgement token"
+        );
+    }
 }
 
 #[test]
@@ -663,4 +997,564 @@ fn success_envelopes_keep_session_and_preview_page_data_keys() {
     });
     assert_eq!(index.body["data"]["items"][0]["id"], 1);
     assert_eq!(index.body["data"]["total"], 1);
+}
+
+/// AC-002 回归语料：紧凑表驱动，锁定真值对齐、状态别名投影、Unicode 空白裁剪和组合多信号行。
+#[test]
+fn ac002_truthy_corpus_parity_and_signal_projection() {
+    // --- Truthy parity: numeric values ---
+    // JSON number 2 → truthy (finite, non-zero)
+    assert!(import_preview_signal_value_is_truthy(&json!(2)));
+    assert!(import_preview_signal_value_is_truthy(&json!(0.5)));
+    assert!(import_preview_signal_value_is_truthy(&json!(-3)));
+    assert!(import_preview_signal_value_is_truthy(&json!(1)));
+    // zero and negative zero → falsey
+    assert!(!import_preview_signal_value_is_truthy(&json!(0)));
+    assert!(!import_preview_signal_value_is_truthy(&json!(-0.0)));
+    // NaN and Infinity → falsey
+    assert!(!import_preview_signal_value_is_truthy(&json!(f64::NAN)));
+    assert!(!import_preview_signal_value_is_truthy(&json!(
+        f64::INFINITY
+    )));
+
+    // --- Truthy parity: string values ---
+    assert!(import_preview_signal_value_is_truthy(&json!("true")));
+    assert!(import_preview_signal_value_is_truthy(&json!("yes")));
+    assert!(import_preview_signal_value_is_truthy(&json!("y")));
+    assert!(import_preview_signal_value_is_truthy(&json!("1")));
+    assert!(import_preview_signal_value_is_truthy(&json!("2")));
+    assert!(import_preview_signal_value_is_truthy(&json!("3.5")));
+    assert!(!import_preview_signal_value_is_truthy(&json!("0")));
+    assert!(!import_preview_signal_value_is_truthy(&json!("false")));
+    assert!(!import_preview_signal_value_is_truthy(&json!("no")));
+    assert!(!import_preview_signal_value_is_truthy(&json!("none")));
+    assert!(!import_preview_signal_value_is_truthy(&json!("suppressed")));
+    assert!(!import_preview_signal_value_is_truthy(&json!("null")));
+    assert!(!import_preview_signal_value_is_truthy(&json!("")));
+    assert!(!import_preview_signal_value_is_truthy(&json!("  ")));
+    // negative zero string → falsey
+    assert!(!import_preview_signal_value_is_truthy(&json!("-0")));
+    assert!(!import_preview_signal_value_is_truthy(&json!("-0.0")));
+    // malformed numeric text → falsey
+    assert!(!import_preview_signal_value_is_truthy(&json!("1.2.3")));
+    assert!(!import_preview_signal_value_is_truthy(&json!("abc")));
+
+    // --- parse_import_preview_decimal_number parity ---
+    assert_eq!(parse_import_preview_decimal_number("2"), Some(2.0));
+    assert_eq!(parse_import_preview_decimal_number("3.5"), Some(3.5));
+    assert_eq!(parse_import_preview_decimal_number("-0.0"), Some(-0.0));
+    assert_eq!(parse_import_preview_decimal_number("1.2.3"), None);
+    assert_eq!(parse_import_preview_decimal_number("abc"), None);
+    // Unicode whitespace NBSP trim
+    assert_eq!(
+        parse_import_preview_decimal_number("\u{00A0}42\u{00A0}"),
+        Some(42.0)
+    );
+
+    // --- Unicode whitespace trim (NBSP, ideographic space, etc.) ---
+    let nbsp_value = json!(format!("\u{00A0}true\u{00A0}"));
+    assert!(import_preview_signal_value_is_truthy(&nbsp_value));
+    let ideographic = json!(format!("\u{3000}yes\u{3000}"));
+    assert!(import_preview_signal_value_is_truthy(&ideographic));
+
+    // --- Status alias projection: first-nonempty priority ---
+    // LLM with status field (not review_status) should project correctly
+    let llm_status_alias_preview = json!({
+        "id": 201,
+        "preview_type": "支出",
+        "preview_amount_cents": -500,
+        "preview_matching_feedback": {
+            "llm": {
+                "status": "rejected",
+                "confidence": 0.9,
+                "reason": "test"
+            }
+        }
+    });
+    let index = build_import_preview_filter_index_item(
+        llm_status_alias_preview.as_object().unwrap(),
+        &BTreeMap::<i64, CategoryLookup>::new(),
+        &BTreeMap::<i64, AccountLookup>::new(),
+    );
+    assert_eq!(
+        index.llm_status.as_deref(),
+        Some("rejected"),
+        "LLM must resolve status from 'status' field when 'review_status' is absent"
+    );
+
+    // LLM with lifecycle_status
+    let llm_lifecycle_preview = json!({
+        "id": 202,
+        "preview_type": "支出",
+        "preview_amount_cents": -600,
+        "preview_matching_feedback": {
+            "llm": {
+                "lifecycle_status": "skipped",
+                "confidence": 0.7,
+                "reason": "test"
+            }
+        }
+    });
+    let index = build_import_preview_filter_index_item(
+        llm_lifecycle_preview.as_object().unwrap(),
+        &BTreeMap::<i64, CategoryLookup>::new(),
+        &BTreeMap::<i64, AccountLookup>::new(),
+    );
+    assert_eq!(
+        index.llm_status.as_deref(),
+        Some("skipped"),
+        "LLM must resolve status from 'lifecycle_status' when prior fields absent"
+    );
+
+    // LLM with signal_state
+    let llm_signal_state_preview = json!({
+        "id": 203,
+        "preview_type": "支出",
+        "preview_amount_cents": -700,
+        "preview_matching_feedback": {
+            "llm": {
+                "signal_state": "accepted",
+                "confidence": 0.8,
+                "reason": "test"
+            }
+        }
+    });
+    let index = build_import_preview_filter_index_item(
+        llm_signal_state_preview.as_object().unwrap(),
+        &BTreeMap::<i64, CategoryLookup>::new(),
+        &BTreeMap::<i64, AccountLookup>::new(),
+    );
+    assert_eq!(
+        index.llm_status.as_deref(),
+        Some("accepted"),
+        "LLM must resolve status from 'signal_state' when all prior fields absent"
+    );
+
+    // Learning with status field alias
+    let learning_status_alias_preview = json!({
+        "id": 204,
+        "preview_type": "支出",
+        "preview_amount_cents": -800,
+        "preview_matching_feedback": {
+            "learning": {
+                "status": "accepted",
+                "score": 0.9,
+                "reason": "test"
+            }
+        }
+    });
+    let index = build_import_preview_filter_index_item(
+        learning_status_alias_preview.as_object().unwrap(),
+        &BTreeMap::<i64, CategoryLookup>::new(),
+        &BTreeMap::<i64, AccountLookup>::new(),
+    );
+    assert_eq!(
+        index.learning_status.as_deref(),
+        Some("accepted"),
+        "Learning must resolve status from 'status' field when 'review_status' absent"
+    );
+
+    // --- Terminal states: auto_applied → accepted ---
+    for auto_status in ["auto_applied", "auto-applied"] {
+        let llm_auto = json!({
+            "id": 210,
+            "preview_type": "支出",
+            "preview_amount_cents": -900,
+            "preview_matching_feedback": {
+                "llm": {
+                    "review_status": auto_status,
+                    "confidence": 0.85,
+                    "reason": "auto test"
+                }
+            }
+        });
+        let index = build_import_preview_filter_index_item(
+            llm_auto.as_object().unwrap(),
+            &BTreeMap::<i64, CategoryLookup>::new(),
+            &BTreeMap::<i64, AccountLookup>::new(),
+        );
+        assert_eq!(
+            index.llm_status.as_deref(),
+            Some("accepted"),
+            "LLM auto_applied must canonicalize to accepted, input={auto_status}"
+        );
+    }
+
+    // --- Trimmed transfer/history identifiers (NBSP around operation name) ---
+    let nbsp_operation = json!({
+        "id": 220,
+        "session_id": "nbsp-test",
+        "preview_type": "支出",
+        "preview_amount_cents": -1000,
+        "preview_matching_feedback": {
+            "reconciliation": {
+                "planned_operation": format!("\u{00A0}update_history\u{00A0}"),
+                "history_bill_id": 5001,
+                "history_bill_version": 2,
+                "group_key": "hist:5001"
+            }
+        }
+    });
+    let index = build_import_preview_filter_index_item(
+        nbsp_operation.as_object().unwrap(),
+        &BTreeMap::<i64, CategoryLookup>::new(),
+        &BTreeMap::<i64, AccountLookup>::new(),
+    );
+    assert_eq!(
+        index.history_status.as_deref(),
+        Some("pending"),
+        "NBSP-padded planned_operation must still resolve to pending"
+    );
+    assert_eq!(
+        index.history_planned_operation, "update_history",
+        "NBSP must be trimmed from planned_operation"
+    );
+
+    // --- Suppressed/none status → invisible ---
+    for suppressed_status in ["none", "suppressed"] {
+        let suppressed_preview = json!({
+            "id": 230,
+            "preview_type": "支出",
+            "preview_amount_cents": -1100,
+            "preview_matching_feedback": {
+                "learning": {
+                    "review_status": suppressed_status,
+                    "score": 0.95,
+                    "reason": "suppressed test"
+                }
+            }
+        });
+        let index = build_import_preview_filter_index_item(
+            suppressed_preview.as_object().unwrap(),
+            &BTreeMap::<i64, CategoryLookup>::new(),
+            &BTreeMap::<i64, AccountLookup>::new(),
+        );
+        assert!(
+            index.learning_status.is_none(),
+            "suppressed/none status must be invisible, input={suppressed_status}"
+        );
+    }
+
+    // --- Conflict status precedence: review_status=pending (first field) wins over status=accepted ---
+    // With score=0.9 as evidence, resolved pending is visible and projects "pending"
+    let conflict_review_pending_status_accepted = json!({
+        "id": 250,
+        "preview_type": "支出",
+        "preview_amount_cents": -1200,
+        "preview_matching_feedback": {
+            "learning": {
+                "review_status": "pending",
+                "status": "accepted",
+                "score": 0.9,
+                "reason": "test"
+            }
+        }
+    });
+    let index = build_import_preview_filter_index_item(
+        conflict_review_pending_status_accepted.as_object().unwrap(),
+        &BTreeMap::<i64, CategoryLookup>::new(),
+        &BTreeMap::<i64, AccountLookup>::new(),
+    );
+    assert_eq!(
+        index.learning_status.as_deref(),
+        Some("pending"),
+        "review_status=pending,status=accepted → first-nonempty resolves to pending, with evidence visible"
+    );
+
+    // --- Conflict with no evidence: review_status=pending alone, no evidence → None ---
+    let conflict_pending_no_evidence = json!({
+        "id": 255,
+        "preview_type": "支出",
+        "preview_amount_cents": -1250,
+        "preview_matching_feedback": {
+            "learning": {
+                "review_status": "pending",
+                "status": "accepted",
+                "score": 0.0,
+                "reason": ""
+            }
+        }
+    });
+    let index = build_import_preview_filter_index_item(
+        conflict_pending_no_evidence.as_object().unwrap(),
+        &BTreeMap::<i64, CategoryLookup>::new(),
+        &BTreeMap::<i64, AccountLookup>::new(),
+    );
+    assert_eq!(
+        index.learning_status.as_deref(),
+        None,
+        "review_status=pending,no evidence → invisible"
+    );
+
+    // --- Conflict: review_status=accepted, status=none → first-nonempty wins (accepted) ---
+    let conflict_accepted_status_none = json!({
+        "id": 251,
+        "preview_type": "支出",
+        "preview_amount_cents": -1300,
+        "preview_matching_feedback": {
+            "learning": {
+                "review_status": "accepted",
+                "status": "none",
+                "score": 0.8,
+                "reason": "test"
+            }
+        }
+    });
+    let index = build_import_preview_filter_index_item(
+        conflict_accepted_status_none.as_object().unwrap(),
+        &BTreeMap::<i64, CategoryLookup>::new(),
+        &BTreeMap::<i64, AccountLookup>::new(),
+    );
+    assert_eq!(
+        index.learning_status.as_deref(),
+        Some("accepted"),
+        "review_status=accepted,status=none → first-nonempty accepted wins"
+    );
+
+    // --- Conflict: empty review_status, lifecycle_status=skipped → resolved to skipped ---
+    let lifecycle_skipped = json!({
+        "id": 252,
+        "preview_type": "支出",
+        "preview_amount_cents": -1400,
+        "preview_matching_feedback": {
+            "learning": {
+                "review_status": "",
+                "lifecycle_status": "skipped",
+                "score": 0.7,
+                "reason": "test"
+            }
+        }
+    });
+    let index = build_import_preview_filter_index_item(
+        lifecycle_skipped.as_object().unwrap(),
+        &BTreeMap::<i64, CategoryLookup>::new(),
+        &BTreeMap::<i64, AccountLookup>::new(),
+    );
+    assert_eq!(
+        index.learning_status.as_deref(),
+        Some("skipped"),
+        "empty review_status + lifecycle_status=skipped → resolved to skipped"
+    );
+
+    // --- Transfer: first-nonempty for accepted/rejected ---
+    let transfer_status_accepted = json!({
+        "id": 253,
+        "preview_type": "支出",
+        "preview_amount_cents": -1500,
+        "preview_matching_feedback": {
+            "transfer": {
+                "status": "accepted"
+            }
+        }
+    });
+    let index = build_import_preview_filter_index_item(
+        transfer_status_accepted.as_object().unwrap(),
+        &BTreeMap::<i64, CategoryLookup>::new(),
+        &BTreeMap::<i64, AccountLookup>::new(),
+    );
+    assert_eq!(
+        index.transfer_status.as_deref(),
+        Some("accepted"),
+        "transfer must resolve accepted from 'status' field via first-nonempty"
+    );
+
+    // --- 400-digit safe decimal never overflows truthy ---
+    let big = "1".repeat(400);
+    assert!(
+        strict_decimal_has_non_zero(&big),
+        "400-digit all-1 string must be lexically truthy"
+    );
+    assert!(
+        strict_decimal_is_positive(&big),
+        "400-digit all-1 string must be lexically positive"
+    );
+    assert!(
+        !strict_decimal_has_non_zero("0"),
+        "single zero must not be lexically truthy"
+    );
+    assert!(
+        !strict_decimal_has_non_zero("-0.0"),
+        "negative zero must not be lexically truthy"
+    );
+    assert!(
+        !strict_decimal_has_non_zero("abc"),
+        "non-decimal must not be lexically truthy"
+    );
+    assert!(
+        !strict_decimal_is_positive("-2"),
+        "negative must not be lexically positive"
+    );
+
+    // --- JSON scalar type parity: summary:1 (number) must not create text phantom signal ---
+    let summary_number = json!({
+        "id": 254,
+        "preview_type": "支出",
+        "preview_amount_cents": -1600,
+        "preview_matching_feedback": {
+            "learning": {
+                "summary": 1
+            }
+        }
+    });
+    let index = build_import_preview_filter_index_item(
+        summary_number.as_object().unwrap(),
+        &BTreeMap::<i64, CategoryLookup>::new(),
+        &BTreeMap::<i64, AccountLookup>::new(),
+    );
+    assert!(
+        index.learning_status.is_none(),
+        "JSON number summary=1 must not create phantom text evidence"
+    );
+
+    // --- Lexical grammar validation: reject malformed with non-zero digits ---
+    assert!(
+        !strict_decimal_has_non_zero("abc1"),
+        "abc1 has alpha chars, must be rejected by grammar"
+    );
+    assert!(
+        !strict_decimal_has_non_zero("1e2"),
+        "1e2 has exponent, must be rejected by grammar"
+    );
+    assert!(
+        !strict_decimal_has_non_zero("1.2.3"),
+        "1.2.3 has two dots, must be rejected by grammar"
+    );
+    assert!(
+        !strict_decimal_is_positive("abc1"),
+        "abc1 must not be lexically positive"
+    );
+    assert!(
+        strict_decimal_has_non_zero(".5"),
+        ".5 (dot-five) must be lexically truthy"
+    );
+    assert!(
+        strict_decimal_is_positive(".5"),
+        ".5 (dot-five) must be lexically positive"
+    );
+    assert!(
+        !strict_decimal_is_positive("-0.001"),
+        "-0.001 is negative, must not be lexically positive"
+    );
+
+    // --- Status-scoped filter: resolved status, not any-field OR ---
+    // review_status=pending,status=accepted must NOT match "learning:accepted" filter
+    // because resolved first-nonempty is "pending", not "accepted"
+    let pending_accepted_learning = json!({
+        "id": 260,
+        "preview_type": "支出",
+        "preview_amount_cents": -1700,
+        "preview_matching_feedback": {
+            "learning": {
+                "review_status": "pending",
+                "status": "accepted",
+                "score": 0.9,
+                "reason": "test"
+            }
+        }
+    });
+    let matching =
+        build_import_preview_matching_payload(pending_accepted_learning.as_object().unwrap());
+    let feedback = &matching;
+    let resolved =
+        resolve_first_nonempty_status(feedback.get("learning").and_then(Value::as_object).unwrap());
+    assert_eq!(
+        resolved, "pending",
+        "review_status=pending,status=accepted → first-nonempty resolves to 'pending'"
+    );
+    // memory filter: preview_feedback_family_contains_status checks resolved status
+    // This is tested via import_staging tests. At core level, just assert resolved is correct.
+
+    // --- Stable tie sort: same date, different ids ---
+    let items = vec![
+        json!({"id": 3, "preview_date": "2026-06-01", "preview_amount_cents": 100, "preview_counterparty": "A"}),
+        json!({"id": 1, "preview_date": "2026-06-01", "preview_amount_cents": 100, "preview_counterparty": "A"}),
+        json!({"id": 2, "preview_date": "2026-06-01", "preview_amount_cents": 100, "preview_counterparty": "A"}),
+    ];
+    let sorted = sort_import_preview_page_items(&items, Some("time"), Some("asc"));
+    assert_eq!(
+        sorted
+            .iter()
+            .map(|i| i["id"].as_i64().unwrap())
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3],
+        "stable tie: asc time must order by id ascending"
+    );
+    let sorted_desc = sort_import_preview_page_items(&items, Some("time"), Some("desc"));
+    assert_eq!(
+        sorted_desc
+            .iter()
+            .map(|i| i["id"].as_i64().unwrap())
+            .collect::<Vec<_>>(),
+        vec![3, 2, 1],
+        "stable tie: desc time must order by id descending"
+    );
+
+    // --- Combined multi-family row: all signals present ---
+    let combined_preview = json!({
+        "id": 300,
+        "preview_type": "支出",
+        "preview_amount_cents": -2000,
+        "preview_parser_id": "alipay",
+        "preview_parser_tags": ["parser:alipay"],
+        "dedup_type": "platform_bank",
+        "preview_matching_feedback": {
+            "transfer": {
+                "candidate_type": "cash_transfer",
+                "score": 0.88,
+                "reason": "same amount",
+                "review_status": "pending"
+            },
+            "learning": {
+                "rule_id": 5,
+                "score": 0.92,
+                "summary": "餐饮",
+                "review_status": "accepted"
+            },
+            "llm": {
+                "confidence": 0.76,
+                "reason": "merchant",
+                "review_status": "pending"
+            },
+            "reconciliation": {
+                "planned_operation": "merge_transfer_history",
+                "history_bill_id": 7001,
+                "history_bill_version": 1,
+                "group_key": "hist:7001",
+                "destructive_ack_required": true
+            }
+        }
+    });
+    let index = build_import_preview_filter_index_item(
+        combined_preview.as_object().unwrap(),
+        &BTreeMap::<i64, CategoryLookup>::new(),
+        &BTreeMap::<i64, AccountLookup>::new(),
+    );
+    assert_eq!(
+        index.transfer_status.as_deref(),
+        Some("pending"),
+        "combined row: transfer pending"
+    );
+    assert_eq!(
+        index.learning_status.as_deref(),
+        Some("accepted"),
+        "combined row: learning accepted"
+    );
+    assert_eq!(
+        index.llm_status.as_deref(),
+        Some("pending"),
+        "combined row: llm pending"
+    );
+    assert_eq!(
+        index.history_status.as_deref(),
+        Some("pending"),
+        "combined row: history pending from destructive_ack_required"
+    );
+    assert_eq!(
+        index.history_planned_operation, "merge_transfer_history",
+        "combined row: operation canonicalized"
+    );
+    assert!(
+        index.history_destructive_ack_required,
+        "combined row: destructive ack required"
+    );
 }

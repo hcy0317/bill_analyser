@@ -23,7 +23,9 @@ mod tests {
             },
             "expectedState": {
                 "sessionId": "session-http",
+                "reviewStatus": "Pending",
                 "previewType": "expense",
+                "categoryId": "42",
                 "mainCategory": "Food",
                 "subCategory": "Coffee",
                 "recurringId": null,
@@ -48,7 +50,9 @@ mod tests {
 
         let expected = request.expected_state.expect("expected state");
         assert_eq!(expected.session_id.as_deref(), Some("session-http"));
+        assert_eq!(expected.review_status.as_deref(), Some("pending"));
         assert_eq!(expected.preview_type.as_deref(), Some("支出"));
+        assert_eq!(expected.preview_category_id, Some(Some(42)));
         assert_eq!(expected.preview_main_category.as_deref(), Some("Food"));
         assert_eq!(expected.preview_sub_category.as_deref(), Some("Coffee"));
         assert_eq!(expected.preview_recurring_id, Some(None));
@@ -90,6 +94,176 @@ mod tests {
         assert_eq!(request.recurring_id, Some(12));
         assert_eq!(request.recurring_candidate_count, 1);
         assert_eq!(request.recurring_candidate.expect("candidate").id, 12);
+
+        let top_level_session = json!({"session_id": "session-top-level"});
+        let request = preview_action_request_from_payload(
+            top_level_session
+                .as_object()
+                .expect("top-level session object"),
+        )
+        .expect("top-level session alias parses");
+        assert_eq!(
+            request
+                .expected_state
+                .as_ref()
+                .and_then(|state| state.session_id.as_deref()),
+            Some("session-top-level")
+        );
+        let minimal_mobile = request.expected_state.expect("mobile expected state");
+        assert!(minimal_mobile.review_status.is_none());
+        assert!(minimal_mobile.preview_category_id.is_none());
+
+        let snake_case_expected = json!({
+            "expected_state": {
+                "session_id": "session-snake",
+                "review_status": "rejected",
+                "category_id": null
+            }
+        });
+        let expected = preview_action_request_from_payload(
+            snake_case_expected.as_object().expect("snake expected state"),
+        )
+        .expect("snake aliases parse")
+        .expected_state
+        .expect("expected state");
+        assert_eq!(expected.review_status.as_deref(), Some("rejected"));
+        assert_eq!(expected.preview_category_id, Some(None));
+    }
+
+    #[test]
+    fn preview_matching_action_context_accepts_existing_learning_and_llm_route_contract() {
+        let learning_request = preview_action_request_from_payload(
+            json!({"sessionId": "session-learning"})
+                .as_object()
+                .expect("learning payload"),
+        )
+        .expect("learning request");
+        let learning =
+            preview_matching_action_context("preview:44:learning", "accept", &learning_request)
+                .expect("learning action context");
+        assert_eq!(learning.kind, "learning");
+        assert_eq!(learning.session_id, "session-learning");
+        assert_eq!(learning.preview_id, 44);
+        assert_eq!(
+            learning.decision,
+            bill_analyser_db::ImportPreviewDecision::Accept
+        );
+
+        let llm_request = preview_action_request_from_payload(
+            json!({"expectedState": {"sessionId": "session-llm"}})
+                .as_object()
+                .expect("LLM payload"),
+        )
+        .expect("LLM request");
+        let llm = preview_matching_action_context("preview:45:llm", "reject", &llm_request)
+            .expect("LLM action context");
+        assert_eq!(llm.kind, "llm");
+        assert_eq!(llm.session_id, "session-llm");
+        assert_eq!(llm.preview_id, 45);
+        assert_eq!(
+            llm.decision,
+            bill_analyser_db::ImportPreviewDecision::Reject
+        );
+    }
+
+    #[test]
+    fn preview_matching_action_context_rejects_missing_session_and_unsupported_candidates() {
+        let empty_request =
+            preview_action_request_from_payload(json!({}).as_object().expect("empty payload"))
+                .expect("empty request");
+        assert_eq!(
+            preview_matching_action_context("preview:44:learning", "accept", &empty_request)
+                .expect_err("session required")
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+
+        let request = preview_action_request_from_payload(
+            json!({"sessionId": "session-1"})
+                .as_object()
+                .expect("session payload"),
+        )
+        .expect("session request");
+        assert_eq!(
+            preview_matching_action_context("preview:44:transfer", "accept", &request)
+                .expect_err("unsupported preview family")
+                .status(),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            preview_matching_action_context("preview:44:learning", "unknown", &request)
+                .expect_err("invalid action")
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[test]
+    fn preview_action_context_and_review_status_cover_clear_invalid_and_fallback_contracts() {
+        let clear_request = preview_action_request_from_payload(
+            json!({"expectedState": {"sessionId": "  session-clear  "}})
+                .as_object()
+                .expect("clear payload"),
+        )
+        .expect("clear request");
+        let clear = preview_matching_action_context(
+            "preview:46:llm",
+            "  ClEaR  ",
+            &clear_request,
+        )
+        .expect("clear context");
+        assert_eq!(clear.kind, "llm");
+        assert_eq!(clear.session_id, "session-clear");
+        assert_eq!(clear.preview_id, 46);
+        assert_eq!(clear.decision, bill_analyser_db::ImportPreviewDecision::Clear);
+
+        assert_eq!(
+            preview_matching_action_context("not-a-candidate", "accept", &clear_request)
+                .expect_err("invalid candidate id")
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        let whitespace_session = preview_action_request_from_payload(
+            json!({"sessionId": " \t "})
+                .as_object()
+                .expect("whitespace payload"),
+        )
+        .expect("whitespace request");
+        assert_eq!(
+            preview_matching_action_context(
+                "preview:47:learning",
+                "accept",
+                &whitespace_session,
+            )
+            .expect_err("whitespace session rejected")
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+
+        assert_eq!(
+            preview_action_review_status(
+                &json!({"learning": {"review_status": "Accepted"}}),
+                "learning",
+                "reject",
+            ),
+            "Accepted"
+        );
+        assert_eq!(
+            preview_action_review_status(
+                &json!({"llm": {"status": "rejected"}}),
+                "llm",
+                "accept",
+            ),
+            "rejected"
+        );
+        assert_eq!(
+            preview_action_review_status(&json!({}), "llm", "clear"),
+            "cleared"
+        );
+        assert_eq!(
+            preview_action_review_status(&json!({}), "learning", "  ACCEPT  "),
+            "accept"
+        );
     }
 
     #[test]

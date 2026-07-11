@@ -1,17 +1,17 @@
-async fn apply_preview_patch_async(
-    pool: &PostgresPool,
+async fn apply_preview_patch_on_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
     session_db_id: i64,
     user_id: i64,
     patch: &ImportPreviewPatch,
     identity_maps: &ImportIdentityMaps,
 ) -> DbResult<bool> {
     let Some(row) = sqlx::query(
-        "SELECT p.*, s.session_key FROM import_preview_rows p JOIN import_sessions s ON s.id = p.session_id WHERE p.id = $1 AND p.session_id = $2 AND p.user_id = $3",
+        "SELECT p.*, s.session_key FROM import_preview_rows p JOIN import_sessions s ON s.id = p.session_id WHERE p.id = $1 AND p.session_id = $2 AND p.user_id = $3 FOR UPDATE OF p",
     )
     .bind(patch.preview_id)
     .bind(session_db_id)
     .bind(user_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut **tx)
     .await?
     else {
         return Ok(false);
@@ -53,7 +53,7 @@ async fn apply_preview_patch_async(
         session_db_id,
         user_id,
     );
-    let changed = query.build().execute(pool).await?.rows_affected();
+    let changed = query.build().execute(&mut **tx).await?.rows_affected();
     Ok(changed > 0)
 }
 

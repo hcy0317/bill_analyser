@@ -1,17 +1,20 @@
-import type { ImportMatchingPayload } from '@/models/import_matching.ts';
+import type { ImportMatchingPayload, ImportMatchingRawFlag } from '@/models/import_matching.ts';
 import { CategoryType } from '@/core/category.ts';
 
 export interface ImportPreviewLLMMatchingPayload {
     suggested_type?: string;
-    suggested_category_id?: number;
+    suggested_category_id?: number | string;
     suggested_main_category?: string;
     suggested_sub_category?: string;
     suggested_source_account?: string;
     suggested_destination_account?: string;
-    confidence?: number;
+    confidence?: number | string;
     reason?: string;
     review_status?: string;
-    suppressed?: boolean;
+    status?: string;
+    lifecycle_status?: string;
+    signal_state?: string;
+    suppressed?: ImportMatchingRawFlag;
 }
 
 export type ImportPreviewMatchingPayload = ImportMatchingPayload & {

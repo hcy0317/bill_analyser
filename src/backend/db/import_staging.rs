@@ -6,10 +6,21 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 
 use bill_analyser_core::{
-    build_transfer_source_snapshot, learning_lifecycle_is_auto_eligible,
-    learning_lifecycle_signal_state, normalize_bill_date_text,
-    transition_import_learning_lifecycle, DedupBill, DeduplicationType,
-    ImportLearningLifecycleState, Money, TransferSourceSnapshot, UserId,
+    build_transfer_source_snapshot, import_preview_recommendation_feedback_family_is_meaningful,
+    import_preview_signal_value_is_truthy, is_import_preview_visible_signal_family,
+    learning_lifecycle_is_auto_eligible, learning_lifecycle_signal_state, normalize_bill_date_text,
+    normalize_history_operation, resolve_first_nonempty_status, strict_decimal_is_positive,
+    transition_import_learning_lifecycle, trim_import_preview_signal_text, DedupBill,
+    DeduplicationType, ImportLearningLifecycleState, ImportPreviewSignalFamily, Money,
+    TransferSourceSnapshot, UserId, IMPORT_PREVIEW_DECIMAL_HAS_NON_ZERO,
+    IMPORT_PREVIEW_DECIMAL_NUMERIC_STRING_GRAMMAR, IMPORT_PREVIEW_HISTORY_OPERATION_NAMES,
+    IMPORT_PREVIEW_LEARNING_CANONICAL_STATUSES, IMPORT_PREVIEW_LEARNING_NUMERIC_EVIDENCE_FIELDS,
+    IMPORT_PREVIEW_LEARNING_TEXT_EVIDENCE_FIELDS, IMPORT_PREVIEW_LLM_NUMERIC_EVIDENCE_FIELDS,
+    IMPORT_PREVIEW_LLM_TEXT_EVIDENCE_FIELDS, IMPORT_PREVIEW_SIGNAL_CANONICAL_STATUSES,
+    IMPORT_PREVIEW_SIGNAL_NON_PENDING_EXCLUDED_STATUSES, IMPORT_PREVIEW_SIGNAL_STATUS_FIELDS,
+    IMPORT_PREVIEW_SIGNAL_SUPPRESSED_STATUSES, IMPORT_PREVIEW_SIGNAL_TERMINAL_STATUSES,
+    IMPORT_PREVIEW_SIGNAL_TRIM_CHARS, IMPORT_PREVIEW_SIGNAL_TRUTHY_TEXT_VALUES,
+    IMPORT_PREVIEW_VISIBLE_SIGNAL_FAMILIES,
 };
 use bill_analyser_parsers::{parser_source_label, serialize_parser_tags, StandardBill};
 use chrono::{DateTime, Utc};
@@ -48,6 +59,8 @@ include!("import_staging/patch_payload_helpers.rs");
 include!("import_staging/filter_matching.rs");
 #[cfg(test)]
 include!("import_staging/test_support.rs");
+#[cfg(test)]
+include!("../../../tests/backend/core/transfer_signal_parity_corpus.rs");
 #[cfg(test)]
 include!("import_staging/tests_filters.rs");
 #[cfg(test)]

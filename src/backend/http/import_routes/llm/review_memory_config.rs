@@ -81,6 +81,14 @@ async fn llm_preview_recommend_review_response(
         }
     };
     let suggestion_value = first_value(object, &["suggestion"]).cloned();
+    let expected_state = if first_value(object, &["expectedState", "expected_state"]).is_some() {
+        match expected_state_from_payload(object) {
+            Ok(expected_state) => Some(expected_state),
+            Err(response) => return route_response(response),
+        }
+    } else {
+        None
+    };
     let user_correction =
         first_value(object, &["user_correction", "userCorrection"]).and_then(Value::as_object);
     let user_correction_category = user_correction.and_then(|object| {
@@ -137,8 +145,12 @@ async fn llm_preview_recommend_review_response(
             suggestion: suggestion.as_ref(),
             user_correction_category: user_correction_category.as_deref(),
             user_correction_account: user_correction_account.as_deref(),
+            expected_state: expected_state.as_ref(),
         },
     ) {
+        Ok(result) if result.state_conflict => {
+            route_response(import_v2_error_response(409, "Preview state is stale"))
+        }
         Ok(result) => route_response(llm_decision_result_response(
             result,
             &session_id,
