@@ -1,34 +1,25 @@
 /// 解析批量 preview_updates 并落库，confirm/reclassify 依赖它保持前端草稿与 DB 状态一致。
 #[tracing::instrument(level = "debug", skip_all)]
-fn apply_preview_updates_from_payload(
+fn apply_preview_updates_preserving_selection_from_payload(
     runtime: &mut ImportRuntime,
     session_id: &str,
     user_id: UserId,
     payload: &Value,
 ) -> Result<usize, ImportV2RouteResponse> {
     let update_items = preview_update_items_from_payload(payload)?;
-    if update_items.is_empty() {
-        return Ok(0);
-    }
-
     let mut patches = Vec::with_capacity(update_items.len());
     for item in update_items {
         let preview_id = preview_id_from_payload(item)?;
         match get_preview_bill_by_id(runtime.connection(), preview_id, user_id) {
             Ok(Some(preview)) if preview.session_id == session_id => {}
-            Ok(Some(_)) | Ok(None) => {
-                return Err(import_v2_error_response(404, "Preview bill not found"));
-            }
+            Ok(_) => return Err(import_v2_error_response(404, "Preview bill not found")),
             Err(error) => return Err(db_error_response(error)),
         }
         patches.push(build_preview_patch_from_payload_with_category_lookup(
-            runtime.connection(),
-            user_id,
-            preview_id,
-            item,
+            runtime.connection(), user_id, preview_id, item,
         )?);
     }
-    update_preview_bills_batch(runtime.connection_mut(), session_id, user_id, &patches)
+    apply_preview_patches_preserving_selection(runtime.connection_mut(), session_id, user_id, &patches)
         .map_err(db_error_response)
 }
 

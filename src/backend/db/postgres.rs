@@ -190,6 +190,13 @@ const IMPORT_STAGING_CLEANUP_INDEXES: &[&str] = &[
     "idx_import_learning_feedback_events_suggestion_id",
 ];
 
+const IMPORT_DECISION_OPERATION_TABLES: &[&str] = &["import_confirm_operations"];
+
+const IMPORT_DECISION_OPERATION_INDEXES: &[&str] = &[
+    "idx_import_confirm_operations_group_decision_idempotency",
+    "idx_import_confirm_operations_history_rewrite_idempotency",
+];
+
 const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
     PostgresMigrationDescriptor {
         version: 1,
@@ -310,6 +317,13 @@ const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
         required_tables: IMPORT_STAGING_CLEANUP_INDEX_TABLES,
         required_indexes: IMPORT_STAGING_CLEANUP_INDEXES,
     },
+    PostgresMigrationDescriptor {
+        version: 18,
+        file_name: "0018_import_decision_group_operations.sql",
+        description: "persist idempotency keys for decision-group and history-rewrite confirm operations",
+        required_tables: IMPORT_DECISION_OPERATION_TABLES,
+        required_indexes: IMPORT_DECISION_OPERATION_INDEXES,
+    },
 ];
 
 pub fn postgres_migrations_dir() -> PathBuf {
@@ -341,7 +355,7 @@ mod tests {
     #[test]
     fn postgres_manifest_points_to_existing_initial_schema() {
         let manifest = postgres_migration_manifest();
-        assert_eq!(manifest.len(), 17);
+        assert_eq!(manifest.len(), 18);
         assert_eq!(manifest[0].version, 1);
         assert_eq!(manifest[0].file_name, POSTGRES_INITIAL_SCHEMA_FILE);
         for (index, descriptor) in manifest.iter().enumerate() {
@@ -536,6 +550,21 @@ mod tests {
         for index in IMPORT_PREVIEW_FILTER_INDEXES {
             assert!(migration.contains(index), "missing index {index}");
         }
+    }
+
+    #[test]
+    fn import_decision_operation_migration_contains_idempotency_column_and_indexes() {
+        let migration = fs::read_to_string(
+            postgres_migrations_dir().join("0018_import_decision_group_operations.sql"),
+        )
+        .unwrap();
+
+        assert!(migration.contains("ADD COLUMN IF NOT EXISTS operation_id TEXT"));
+        for index in IMPORT_DECISION_OPERATION_INDEXES {
+            assert!(migration.contains(index), "missing index {index}");
+        }
+        assert!(migration.contains("operation_kind = 'decision_group'"));
+        assert!(migration.contains("operation_kind = 'history_rewrite'"));
     }
 
     #[tokio::test]

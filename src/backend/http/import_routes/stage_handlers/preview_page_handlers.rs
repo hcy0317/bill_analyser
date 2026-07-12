@@ -6,6 +6,7 @@ pub async fn import_preview_page_runtime_handler(
     Query(query): Query<PreviewPageQuery>,
     headers: HeaderMap,
 ) -> Response {
+    let request_started = std::time::Instant::now();
     #[cfg(not(coverage))]
     tracing::debug!(domain = "import_parser", operation = "import_preview_page_runtime_handler", "business operation entered");
     let user_id = match user_id_from_headers(&headers, &state.config) {
@@ -78,16 +79,43 @@ pub async fn import_preview_page_runtime_handler(
                 .collect::<Vec<_>>();
             let query = serde_json::to_value(&request).ok();
             let metadata = serde_json::to_value(result.metadata).ok();
-            route_response(import_preview_page_success(ImportPreviewPageData {
+            let mut response = route_response(import_preview_page_success(ImportPreviewPageData {
                 preview,
                 total: result.total,
                 page: result.page,
                 page_size: result.page_size,
                 query,
                 metadata,
-            }))
+            }));
+            attach_preview_server_timing(&mut response, request_started.elapsed());
+            response
         }
         Err(error) => route_response(db_error_response(error)),
+    }
+}
+
+fn attach_preview_server_timing(response: &mut Response, elapsed: std::time::Duration) {
+    let timing = format!("preview;dur={:.3}", elapsed.as_secs_f64() * 1000.0);
+    if let Ok(value) = axum::http::HeaderValue::from_str(&timing) {
+        response.headers_mut().insert(
+            axum::http::HeaderName::from_static("server-timing"),
+            value,
+        );
+    }
+}
+
+#[cfg(test)]
+mod preview_server_timing_tests {
+    use super::*;
+
+    #[test]
+    fn preview_response_exposes_standard_server_timing_metric() {
+        let mut response = route_response(import_v2_data_response(serde_json::json!({})));
+        attach_preview_server_timing(&mut response, std::time::Duration::from_micros(12_345));
+        assert_eq!(
+            response.headers().get("server-timing").and_then(|value| value.to_str().ok()),
+            Some("preview;dur=12.345")
+        );
     }
 }
 

@@ -449,19 +449,29 @@ export function buildImportPreviewSignalViewModel(
             detailLines: dedupDetailLines
         }
         : reconciliationDedup;
+    const transferLearningLevel = (state.transferLearningLevel || '').trim().toLowerCase();
+    const transferPendingActions = transferLearningLevel === 'yellow'
+        ? []
+        : [
+            { decision: 'accept', labelKey: 'Accept', color: 'warning' } as ImportPreviewSignalDecision,
+            { decision: 'reject', labelKey: 'Reject', color: 'error' } as ImportPreviewSignalDecision
+        ];
+    const transferReviewedActions = transferLearningLevel === 'blue'
+        ? [
+            { decision: 'clear', labelKey: 'Clear', color: 'warning' } as ImportPreviewSignalDecision,
+            { decision: 'reject', labelKey: 'Reject', color: 'error' } as ImportPreviewSignalDecision
+        ]
+        : [{ decision: 'clear', labelKey: 'Clear', color: 'warning' } as ImportPreviewSignalDecision];
     const transferSuggestion = buildReviewView(
         transferStatus,
         state.transferTitle,
         'Likely Transfer',
         'Transfer Suggestion Accepted',
         'Transfer Suggestion Rejected',
-        [
-            { decision: 'accept', labelKey: 'Accept', color: 'warning' },
-            { decision: 'reject', labelKey: 'Reject', color: 'error' }
-        ],
+        transferPendingActions,
         undefined,
         undefined,
-        [{ decision: 'clear', labelKey: 'Clear', color: 'warning' }],
+        transferReviewedActions,
         transferDetailLines
     );
     const learningDetailLines = buildLearningDetailLines(state, options);

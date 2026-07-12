@@ -59,9 +59,27 @@ fn preview_sql_query_builder_covers_none_category_and_account_id_filters() {
     assert!(sql.contains("p.account_id = "));
     assert!(sql.contains("p.transfer_target_account_id = "));
     assert!(sql.contains("preview_matching_feedback' ? 'learning'"));
-    assert!(!sql.contains("preview_matching_feedback' ? 'transfer'"));
+    assert!(sql.contains("preview_matching_feedback' ? 'transfer'"));
     assert!(!sql.contains("preview_matching_feedback')::text ILIKE"));
     assert!(sql.contains("CASE lower(p.transaction_type)"));
+}
+
+#[test]
+fn preview_sql_learning_filter_includes_transfer_learning_level() {
+    let filters = ImportPreviewQueryFilters {
+        signal: Some("learning".to_string()),
+        ..ImportPreviewQueryFilters::default()
+    };
+    let mut query = QueryBuilder::<Postgres>::new(
+        "SELECT p.* FROM import_preview_rows p WHERE p.session_id = ",
+    );
+    query.push_bind(1_i64);
+    push_preview_query_predicates(&mut query, &filters, "p");
+
+    let sql = query.build().sql().to_string();
+    assert!(sql.contains("preview_matching_feedback' ? 'learning'"));
+    assert!(sql.contains("preview_matching_feedback' ? 'transfer'"));
+    assert!(sql.contains("learning_level"));
 }
 
 #[test]

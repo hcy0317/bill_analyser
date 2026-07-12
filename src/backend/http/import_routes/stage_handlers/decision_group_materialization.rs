@@ -17,6 +17,12 @@ fn spawn_import_decision_group_materialization(input: ImportDecisionGroupMateria
             match get_preview_by_session(&input.pool, &input.session_id, input.user_id, false) {
                 Ok(rows) => rows,
                 Err(error) => {
+                    let _ = set_import_decision_materialization_failed(
+                        &input.pool,
+                        &input.session_id,
+                        input.user_id,
+                        &error.to_string(),
+                    );
                     tracing::error!(
                         domain = "import_parser",
                         operation = "import_decision_group_materialization",
@@ -45,6 +51,15 @@ fn spawn_import_decision_group_materialization(input: ImportDecisionGroupMateria
             &decision_groups,
         ) {
             Ok(inserted) => {
+                if let Err(error) = set_import_decision_materialization_status(
+                    &input.pool,
+                    &input.session_id,
+                    input.user_id,
+                    "completed",
+                ) {
+                    tracing::error!(operation = "import_decision_group_materialization", error = %error, "failed to mark decision group materialization completed");
+                    return;
+                }
                 tracing::debug!(
                     domain = "import_parser",
                     operation = "import_decision_group_materialization",
@@ -56,6 +71,12 @@ fn spawn_import_decision_group_materialization(input: ImportDecisionGroupMateria
                 );
             }
             Err(error) => {
+                let _ = set_import_decision_materialization_failed(
+                    &input.pool,
+                    &input.session_id,
+                    input.user_id,
+                    &error.to_string(),
+                );
                 tracing::error!(
                     domain = "import_parser",
                     operation = "import_decision_group_materialization",

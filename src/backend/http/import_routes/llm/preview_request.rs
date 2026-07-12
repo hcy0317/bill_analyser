@@ -52,6 +52,29 @@ pub async fn llm_preview_recommend_runtime_handler(
         if let Err(response) = validate_llm_preview_selection_limits(&payload, limit) {
             return route_response(response);
         }
+        let action_scope = match import_preview_action_scope_from_payload(&payload) {
+            Ok(scope) => scope,
+            Err(response) => return route_response(response),
+        };
+        let rows = match selected_preview_rows_for_llm(
+            runtime.connection(),
+            &action_scope,
+            &session_id,
+            user_id,
+            limit,
+        ) {
+            Ok(rows) => rows,
+            Err(response) => return route_response(response),
+        };
+        if rows.is_empty() {
+            return route_response(ImportV2RouteResponse {
+                status_code: 200,
+                body: bill_analyser_core::build_llm_preview_recommend_response(
+                    &session_id,
+                    Vec::new(),
+                ),
+            });
+        }
         let patches = match preview_patches_from_payload(
             runtime.connection(),
             user_id,
@@ -63,27 +86,10 @@ pub async fn llm_preview_recommend_runtime_handler(
         };
         if !patches.is_empty() {
             if let Err(error) =
-                update_preview_bills_batch(runtime.connection_mut(), &session_id, user_id, &patches)
+                apply_preview_patches_preserving_selection(runtime.connection_mut(), &session_id, user_id, &patches)
             {
                 return route_response(db_error_response(error));
             }
-        }
-        let rows = match selected_preview_rows_for_llm(
-            runtime.connection(),
-            &payload,
-            &session_id,
-            user_id,
-            limit,
-        ) {
-            Ok(rows) => rows,
-            Err(response) => return route_response(response),
-        };
-        if rows.is_empty() {
-            return route_response(llm_contract_error_response(
-                "No preview rows selected",
-                "PREVIEW_SELECTION_EMPTY",
-                400,
-            ));
         }
         let config = match effective_llm_runtime_config(&state, user_id_value).await {
             Ok(config) => config,

@@ -248,6 +248,15 @@ pub async fn import_dedup_runtime_handler(
     }
     let _preview_insert_elapsed_ms = import_stage_elapsed_ms(_preview_insert_started_at);
     let database_candidate_count = history_duplicate_plan.len() + history_transfer_plan.len();
+    if let Err(error) = set_import_decision_materialization_status(
+        runtime.connection(),
+        &session_id,
+        user_id,
+        "pending",
+    ) {
+        tracing::error!(operation = "import_decision_group_materialization", error = %error, "failed to mark decision materialization pending");
+        return route_response(import_v2_error_response(500, "Failed to mark decision materialization pending"));
+    }
     spawn_import_decision_group_materialization(ImportDecisionGroupMaterializationInput {
         pool: runtime.pool().clone(),
         session_id: session_id.clone(),

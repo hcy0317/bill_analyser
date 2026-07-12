@@ -225,7 +225,8 @@ function init(): void {
 
         if (categoryType !== CategoryType.Income &&
             categoryType !== CategoryType.Expense &&
-            categoryType !== CategoryType.Transfer) {
+            categoryType !== CategoryType.Transfer &&
+            categoryType !== CategoryType.Investment) {
             showToast('Parameter Invalid');
             loadingError.value = 'Parameter Invalid';
             return;

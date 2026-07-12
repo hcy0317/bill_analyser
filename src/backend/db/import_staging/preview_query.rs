@@ -135,6 +135,18 @@ pub fn query_preview_page_by_session(
     })
 }
 
+pub fn preview_id_snapshot_hash(ids: &[i64]) -> String {
+    let text = ids
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let hash = text.bytes().fold(2_166_136_261_u32, |hash, byte| {
+        (hash ^ u32::from(byte)).wrapping_mul(16_777_619)
+    });
+    format!("fnv1a32:{hash:08x}")
+}
+
 async fn count_preview_rows_by_query(
     pool: &PostgresPool,
     session_db_id: i64,
@@ -321,6 +333,7 @@ fn build_preview_metadata(total: usize) -> ImportPreviewMetadata {
     ImportPreviewMetadata {
         counts,
         facets: ImportPreviewFacets::default(),
+        selection_hash: String::new(),
     }
 }
 

@@ -38,6 +38,7 @@
                                 v-for="chip in signalChips(row)"
                                 :key="`${row.id}-${chip.label}`"
                                 :class="['signal-chip', `signal-chip--${chip.tone}`]"
+                                @click.stop="chip.historyBillId && openHistoryBillDetail(chip.historyBillId)"
                             >
                                 {{ tt(chip.label) }}
                             </span>
@@ -178,7 +179,7 @@ interface MobileImportPreviewRow {
     busy: boolean;
 }
 
-const { tt } = useI18n();
+const { tt, formatAmountToLocalizedNumeralsWithCurrency } = useI18n();
 const { showAlert, showConfirm, showToast, routeBackOnError } = useI18nUIComponents();
 
 const sessionId = String(props.f7route.query['sessionId'] || props.f7route.query['session_id'] || '').trim();
@@ -225,6 +226,7 @@ function buildSignal(record: ImportPreviewRecord): ImportPreviewSignalViewModel 
         reconciliationPlannedOperation: matching?.reconciliation?.planned_operation,
         reconciliationHistoryBillId: matching?.reconciliation?.history_bill_id,
         reconciliationHistoryBillVersion: matching?.reconciliation?.history_bill_version,
+        reconciliationHistorySummary: matching?.reconciliation?.history_summary,
         reconciliationOperationId: matching?.reconciliation?.operation_id,
         reconciliationAcknowledgementToken: matching?.reconciliation?.acknowledgement_token,
         reconciliationDestructiveAckRequired: !!matching?.reconciliation?.destructive_ack_required,
@@ -249,6 +251,8 @@ function buildSignal(record: ImportPreviewRecord): ImportPreviewSignalViewModel 
         recurringCandidateCount: Number(record.preview_recurring_candidate_count || matching?.recurring?.candidate_count || 0),
         recurringTitle: record.preview_recurring_name || matching?.recurring?.name || '',
         recurringPrimaryReason: record.preview_recurring_match_reasons || matching?.recurring?.match_reasons || ''
+    }, {
+        formatAmountWithCurrency: formatAmountToLocalizedNumeralsWithCurrency
     });
 }
 
@@ -318,15 +322,25 @@ function formatAmount(row: MobileImportPreviewRow): string {
     return Number.isFinite(amount) ? amount.toFixed(2) : '0.00';
 }
 
-function signalChips(row: MobileImportPreviewRow): Array<{ label: string; tone: string }> {
-    const chips: Array<{ label: string; tone: string }> = [];
+function signalChips(row: MobileImportPreviewRow): Array<{ label: string; tone: string; historyBillId?: number }> {
+    const chips: Array<{ label: string; tone: string; historyBillId?: number }> = [];
     if (row.signal.parser) chips.push({ label: 'Parser', tone: 'neutral' });
     if (row.signal.dedup) chips.push({ label: row.signal.dedup.labelKey, tone: 'neutral' });
-    if (row.signal.historyRewrite) chips.push({ label: row.signal.historyRewrite.labelKey, tone: 'warning' });
+    if (row.signal.historyRewrite) chips.push({
+        label: row.signal.historyRewrite.labelKey,
+        tone: 'warning',
+        historyBillId: row.signal.historyRewrite.historyBillId
+    });
     if (row.signal.transferSuggestion) chips.push({ label: row.signal.transferSuggestion.labelKey, tone: 'info' });
     if (row.signal.learning) chips.push({ label: row.signal.learning.labelKey, tone: row.signal.learning.color === 'success' ? 'success' : 'warning' });
     if (row.signal.llm) chips.push({ label: row.signal.llm.labelKey, tone: 'warning' });
     return chips;
+}
+
+function openHistoryBillDetail(historyBillId: number): void {
+    if (historyBillId > 0) {
+        props.f7router.navigate(`/transaction/detail?id=${encodeURIComponent(String(historyBillId))}`);
+    }
 }
 
 function detailLines(row: MobileImportPreviewRow): string[] {

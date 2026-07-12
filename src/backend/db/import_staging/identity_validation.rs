@@ -180,6 +180,7 @@ fn set_identity_validation_feedback(feedback: &mut Value, issues: &[Value]) {
         *feedback = json!({});
     }
     let object = feedback.as_object_mut().expect("feedback object");
+    synchronize_identity_annotation(object, issues);
     if issues.is_empty() {
         object.remove("identity_validation");
         return;
@@ -191,6 +192,54 @@ fn set_identity_validation_feedback(feedback: &mut Value, issues: &[Value]) {
             "issues": issues,
         }),
     );
+}
+
+fn synchronize_identity_annotation(
+    feedback: &mut serde_json::Map<String, Value>,
+    issues: &[Value],
+) {
+    let Some(annotation) = feedback.get_mut("annotation") else {
+        return;
+    };
+    let Some(annotation) = annotation.as_object_mut() else {
+        return;
+    };
+    let identity_status = issues.first().and_then(|issue| {
+        match issue.get("field").and_then(Value::as_str) {
+            Some("category_id") => Some("missing_category"),
+            Some("source_account_id") => Some("missing_source_account"),
+            Some("destination_account_id") => Some("missing_destination_account"),
+            _ => None,
+        }
+    });
+    let current_status = ["status", "type", "reason", "review_status"]
+        .into_iter()
+        .find_map(|key| annotation.get(key).and_then(Value::as_str));
+    let is_identity_annotation = current_status.is_some_and(|status| {
+        matches!(
+            status.trim().to_ascii_lowercase().as_str(),
+            "missing_category"
+                | "missing-category"
+                | "missing_account"
+                | "missing_source_account"
+                | "missing-source-account"
+                | "missing_destination_account"
+                | "missing-destination-account"
+                | "requires_identity_review"
+        )
+    });
+    if !is_identity_annotation {
+        return;
+    }
+    for key in ["status", "type", "reason", "review_status"] {
+        annotation.remove(key);
+    }
+    if let Some(status) = identity_status {
+        annotation.insert("status".to_string(), json!(status));
+    }
+    if annotation.is_empty() {
+        feedback.remove("annotation");
+    }
 }
 
 fn category_type_matches_preview_type(category_type: Option<i64>, preview_type: &str) -> bool {

@@ -1,4 +1,6 @@
 /// 处理跨页 selection action，并把 all/valid/needs-review/invert 语义委托给 DB 查询更新。
+use bill_analyser_db::update_preview_selection;
+
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_preview_selection_runtime_handler(
     State(state): State<HttpAppState>,
@@ -28,6 +30,41 @@ pub async fn import_preview_selection_runtime_handler(
         Ok(object) => object,
         Err(response) => return route_response(response),
     };
+    if first_text_from_object(object, &["selectionAction", "selection_action", "action"])
+        .is_some_and(|action| action.eq_ignore_ascii_case("patch"))
+    {
+        let selected_ids = limited_id_list_field_from_object(object, &["selected_ids", "selectedIds"], 5000)
+            .and_then(|ids| ids.ok_or_else(|| import_v2_error_response(400, "selected_ids is required")));
+        let selected_ids = match selected_ids { Ok(ids) => ids, Err(response) => return route_response(response) };
+        let deselected_ids = limited_id_list_field_from_object(object, &["deselected_ids", "deselectedIds"], 5000)
+            .and_then(|ids| ids.ok_or_else(|| import_v2_error_response(400, "deselected_ids is required")));
+        let deselected_ids = match deselected_ids { Ok(ids) => ids, Err(response) => return route_response(response) };
+        for preview_id in selected_ids.iter().chain(deselected_ids.iter()) {
+            match get_preview_bill_by_id(runtime.connection(), *preview_id, user_id) {
+                Ok(Some(row)) if row.session_id == session_id => {}
+                Ok(_) => return route_response(import_v2_error_response(400, "Preview selection is outside this session")),
+                Err(error) => return route_response(db_error_response(error)),
+            }
+        }
+        if let Err(error) = update_preview_selection(runtime.connection(), &selected_ids, true, user_id) {
+            return route_response(db_error_response(error));
+        }
+        if let Err(error) = update_preview_selection(runtime.connection(), &deselected_ids, false, user_id) {
+            return route_response(db_error_response(error));
+        }
+        let metadata = match query_preview_page_by_session(
+            runtime.connection(), &session_id, user_id,
+            &ImportPreviewPageRequest { page: 1, page_size: 1, ..ImportPreviewPageRequest::default() },
+        ) {
+            Ok(result) => serde_json::to_value(result.metadata).unwrap_or_else(|_| json!({})),
+            Err(error) => return route_response(db_error_response(error)),
+        };
+        return route_response(import_v2_data_response(json!({
+            "updated": selected_ids.len() + deselected_ids.len(),
+            "selectionAction": "patch",
+            "metadata": metadata,
+        })));
+    }
     let action = match preview_selection_action_from_payload(object) {
         Ok(action) => action,
         Err(response) => return route_response(response),

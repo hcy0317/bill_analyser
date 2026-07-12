@@ -98,6 +98,7 @@ pub struct ImportDecisionGroupRow {
     pub decision_status: String,
     pub base_preview_row_id: Option<i64>,
     pub signal_payload: Value,
+    pub version: i64,
     pub members: Vec<ImportDecisionGroupMemberRow>,
     pub created_at: String,
     pub updated_at: String,
@@ -113,7 +114,44 @@ pub struct ImportDecisionGroupMemberRow {
     pub member_role: String,
     pub parser_name: String,
     pub metadata: Value,
+    pub version: i64,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportDecisionPreviewVersion {
+    pub preview_row_id: i64,
+    pub version: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportDecisionGroupCommand {
+    pub operation_id: String,
+    pub session_id: String,
+    pub group_id: i64,
+    pub decision: String,
+    pub expected_group_version: i64,
+    pub expected_preview_versions: Vec<ImportDecisionPreviewVersion>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportDecisionGroupMutation {
+    pub group_id: i64,
+    pub group_version: i64,
+    pub decision_status: String,
+    pub removed_preview_ids: Vec<i64>,
+    pub upserted_preview_ids: Vec<i64>,
+    #[serde(default)]
+    pub upserted_preview_items: Vec<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ImportDecisionGroupCommandResult {
+    Applied(ImportDecisionGroupMutation),
+    NotFound,
+    MaterializationPending,
+    MaterializationFailed,
+    Conflict,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

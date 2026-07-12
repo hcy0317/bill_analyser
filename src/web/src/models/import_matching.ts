@@ -15,6 +15,7 @@ export interface ImportMatchingTransferPayload {
     candidate_type: string;
     score: number;
     level: string;
+    learning_level?: string;
     reason: string;
     pair_order?: string;
     source_chain?: ImportMatchingSourcePayload[];
@@ -128,6 +129,23 @@ export interface ImportMatchingReconciliationPayload {
     acknowledgement_token?: string;
     destructive_ack_required?: boolean;
     notice?: string;
+    history_summary?: ImportHistoryBillSummaryPayload;
+}
+
+export interface ImportHistoryBillSummaryPayload {
+    bill_id: number;
+    date_time: string;
+    amount_cents: number;
+    currency: string;
+    category_name: string;
+    category_status?: 'known' | 'deleted' | 'unknown';
+    source_account_name: string;
+    source_account_status?: 'known' | 'deleted' | 'unknown';
+    destination_account_name?: string | null;
+    destination_account_status?: 'known' | 'deleted' | 'unknown';
+    identity_source?: 'staging_snapshot' | 'runtime_current';
+    counterparty?: string | null;
+    description?: string | null;
 }
 
 export interface ImportMatchingStage2BaselinePayload {

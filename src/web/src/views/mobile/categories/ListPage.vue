@@ -165,6 +165,9 @@ const title = computed<string>(() => {
         case CategoryType.Transfer:
             title = 'Transfer';
             break;
+        case CategoryType.Investment:
+            title = 'Investment';
+            break;
         default:
             title = 'Transaction';
             break;
@@ -206,7 +209,8 @@ function init(): void {
 
     if (categoryType.value !== CategoryType.Income &&
         categoryType.value !== CategoryType.Expense &&
-        categoryType.value !== CategoryType.Transfer) {
+        categoryType.value !== CategoryType.Transfer &&
+        categoryType.value !== CategoryType.Investment) {
         showToast('Parameter Invalid');
         loadingError.value = 'Parameter Invalid';
         return;

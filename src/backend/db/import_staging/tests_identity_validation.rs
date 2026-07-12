@@ -153,3 +153,97 @@ fn identity_validation_records_non_positive_and_missing_identity_edges() {
             && issue["reason"] == json!("not_allowed_for_type")
     }));
 }
+
+#[test]
+fn manual_identity_patch_recomputes_feedback_and_replaces_stale_annotation() {
+    let mut row = preview_row(1);
+    row.preview_type = "支出".to_string();
+    row.category_id = None;
+    row.preview_source_account_id = None;
+    row.preview_matching_feedback = json!({
+        "annotation": {"status": "missing_category", "is_manually_annotated": true}
+    });
+    let mut payload = json!({});
+    let mut maps = ImportIdentityMaps::default();
+    maps.active_categories.insert(42, Some(3));
+    maps.active_accounts.insert(11);
+
+    apply_patch_value_to_preview(
+        &mut row,
+        &mut payload,
+        ImportPreviewPatchField::CategoryId,
+        ImportPreviewPatchValue::Integer(42),
+    );
+    apply_identity_validation_to_preview(&mut row, &mut payload, &maps);
+    assert_eq!(
+        row.preview_matching_feedback.pointer("/annotation/status"),
+        Some(&json!("missing_source_account"))
+    );
+    assert_eq!(
+        row.preview_matching_feedback
+            .pointer("/identity_validation/issues/0/field"),
+        Some(&json!("source_account_id"))
+    );
+
+    apply_patch_value_to_preview(
+        &mut row,
+        &mut payload,
+        ImportPreviewPatchField::SourceAccountId,
+        ImportPreviewPatchValue::Integer(11),
+    );
+    apply_identity_validation_to_preview(&mut row, &mut payload, &maps);
+    assert!(!preview_requires_review(&row));
+    assert!(row
+        .preview_matching_feedback
+        .get("identity_validation")
+        .is_none());
+    assert!(row
+        .preview_matching_feedback
+        .pointer("/annotation/status")
+        .is_none());
+    assert_eq!(
+        row.preview_matching_feedback
+            .pointer("/annotation/is_manually_annotated"),
+        Some(&json!(true))
+    );
+}
+
+#[test]
+fn identity_annotation_sync_preserves_non_identity_and_maps_all_identity_fields() {
+    let mut non_object = serde_json::Map::from_iter([("annotation".into(), json!("legacy"))]);
+    synchronize_identity_annotation(&mut non_object, &[]);
+    assert_eq!(non_object["annotation"], json!("legacy"));
+
+    let mut business = serde_json::Map::from_iter([(
+        "annotation".into(),
+        json!({"status":"manual_review","note":"keep"}),
+    )]);
+    synchronize_identity_annotation(
+        &mut business,
+        &[json!({"field":"category_id"})],
+    );
+    assert_eq!(business["annotation"]["status"], "manual_review");
+
+    let mut destination = serde_json::Map::from_iter([(
+        "annotation".into(),
+        json!({"reason":"missing_account"}),
+    )]);
+    synchronize_identity_annotation(
+        &mut destination,
+        &[json!({"field":"destination_account_id"})],
+    );
+    assert_eq!(destination["annotation"]["status"], "missing_destination_account");
+
+    let mut cleared = serde_json::Map::from_iter([(
+        "annotation".into(),
+        json!({"review_status":"requires_identity_review"}),
+    )]);
+    synchronize_identity_annotation(&mut cleared, &[]);
+    assert!(!cleared.contains_key("annotation"));
+
+    assert!(category_type_matches_preview_type(None, "支出"));
+    assert!(category_type_matches_preview_type(Some(0), "支出"));
+    assert!(category_type_matches_preview_type(Some(3), "支出"));
+    assert!(!category_type_matches_preview_type(Some(2), "支出"));
+    assert!(category_type_matches_preview_type(Some(99), "未知"));
+}

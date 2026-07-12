@@ -136,19 +136,16 @@ fn preview_from_pg_row(row: &PgRow) -> DbResult<ImportPreviewRow> {
         preview_amount_cents,
         preview_destination_amount_cents: payload_i64(&payload, "preview_destination_amount_cents")
             .unwrap_or_default(),
-        category_id: payload_i64(&payload, "category_id")
-            .or_else(|| payload_i64(&payload, "categoryId"))
-            .or_else(|| row.try_get::<Option<i64>, _>("category_id").ok().flatten()),
+        // Staging typed columns are the canonical current identity. NULL means the
+        // current value is empty; legacy payload IDs remain evidence and must not revive it.
+        category_id: row.try_get::<Option<i64>, _>("category_id").ok().flatten(),
         preview_main_category: payload_text(&payload, "preview_main_category").unwrap_or_default(),
         preview_sub_category: payload_text(&payload, "preview_sub_category").unwrap_or_default(),
-        preview_source_account_id: payload_i64(&payload, "preview_source_account_id")
-            .or_else(|| row.try_get::<Option<i64>, _>("account_id").ok().flatten()),
-        preview_destination_account_id: payload_i64(&payload, "preview_destination_account_id")
-            .or_else(|| {
-                row.try_get::<Option<i64>, _>("transfer_target_account_id")
-                    .ok()
-                    .flatten()
-            }),
+        preview_source_account_id: row.try_get::<Option<i64>, _>("account_id").ok().flatten(),
+        preview_destination_account_id: row
+            .try_get::<Option<i64>, _>("transfer_target_account_id")
+            .ok()
+            .flatten(),
         preview_counterparty: payload_text(&payload, "preview_counterparty").unwrap_or_else(|| {
             row.try_get::<Option<String>, _>("merchant")
                 .ok()
@@ -212,6 +209,7 @@ fn import_decision_member_from_pg_row(row: &PgRow) -> DbResult<ImportDecisionGro
             .try_get::<Option<String>, _>("parser_name")?
             .unwrap_or_default(),
         metadata: row.try_get("metadata")?,
+        version: row.try_get("member_version")?,
         created_at: format_pg_time(row.try_get("created_at")?),
     })
 }

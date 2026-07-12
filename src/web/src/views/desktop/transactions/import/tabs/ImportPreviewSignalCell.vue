@@ -86,7 +86,8 @@
                             variant="tonal"
                             size="x-small"
                             :title="viewModel.historyRewrite.title"
-                            :prepend-icon="mdiAlertOutline">
+                            :prepend-icon="mdiAlertOutline"
+                            @click.stop="viewModel.historyRewrite.historyBillId && emit('openHistoryDetail', viewModel.historyRewrite.historyBillId)">
                             {{ tt(viewModel.historyRewrite.labelKey) }}
                         </v-chip>
                     </template>
@@ -108,7 +109,8 @@
                     variant="tonal"
                     size="x-small"
                     :title="viewModel.historyRewrite.title"
-                    :prepend-icon="mdiAlertOutline">
+                    :prepend-icon="mdiAlertOutline"
+                    @click.stop="viewModel.historyRewrite.historyBillId && emit('openHistoryDetail', viewModel.historyRewrite.historyBillId)">
                     {{ tt(viewModel.historyRewrite.labelKey) }}
                 </v-chip>
             </div>
@@ -370,6 +372,7 @@ const emit = defineEmits<{
     (e: 'reviewTransfer', decision: 'accept' | 'reject' | 'clear'): void;
     (e: 'reviewLearning', decision: 'accept' | 'reject' | 'clear'): void;
     (e: 'reviewLlm', decision: 'accept' | 'reject'): void;
+    (e: 'openHistoryDetail', historyBillId: number): void;
     (e: 'openRecurring'): void;
     (e: 'clearRecurring'): void;
 }>();

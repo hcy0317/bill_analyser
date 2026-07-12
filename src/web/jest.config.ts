@@ -27,7 +27,13 @@ const config: Config = {
         '<rootDir>/../../tests/web/views/desktop/transactions/import/importSignalSystem.red.test.ts',
         '<rootDir>/../../tests/web/views/desktop/transactions/import/llmSignalMemory.test.ts',
         '<rootDir>/../../tests/web/views/desktop/transactions/import/services.llmMemory.test.ts',
-        '<rootDir>/../../tests/web/views/desktop/transactions/import/services.matchingCandidate.test.ts'
+        '<rootDir>/../../tests/web/views/desktop/transactions/import/services.matchingCandidate.test.ts',
+        '<rootDir>/../../tests/web/views/desktop/transactions/import/actionScope.test.ts',
+        '<rootDir>/../../tests/web/views/desktop/transactions/import/decisionPreviewReplacement.test.ts',
+        '<rootDir>/../../tests/web/views/desktop/transactions/import/decisionPreviewReplacementBridge.test.ts',
+        '<rootDir>/../../tests/web/views/desktop/transactions/import/previewPageQuery.test.ts',
+        '<rootDir>/../../tests/web/views/desktop/transactions/import/previewPageRequestCoordinator.test.ts',
+        '<rootDir>/../../tests/web/views/desktop/transactions/import/selectionActionCoordinator.test.ts'
     ] : ['**/*.test.ts', '**/*.spec.ts'],
     moduleDirectories: ['node_modules', '<rootDir>/node_modules'],
     moduleNameMapper: {
@@ -58,8 +64,19 @@ const config: Config = {
         'src/views/desktop/transactions/import/importPreviewUpdates.ts',
         'src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue',
         'src/views/mobile/transactions/ImportPreviewPage.vue',
-        'src/views/desktop/transactions/import/llmSignalMemory.ts'
-    ] : undefined,
+        'src/views/desktop/transactions/import/llmSignalMemory.ts',
+        'src/views/desktop/transactions/import/actionScope.ts',
+        'src/views/desktop/transactions/import/decisionPreviewReplacement.ts',
+        'src/views/desktop/transactions/import/DecisionPreviewReplacementBridge.ts',
+        'src/views/desktop/transactions/import/import-dialog/previewPageQuery.ts',
+        'src/views/desktop/transactions/import/import-dialog/previewPageRequestCoordinator.ts',
+        'src/views/desktop/transactions/import/selectionActionCoordinator.ts',
+        'src/views/desktop/transactions/import/check-data-matching/historyRewrite.ts',
+        'src/views/desktop/transactions/import/check-data-matching/signalViewModel.ts'
+    ] : [
+        'src/**/*.ts',
+        '!src/**/*.d.ts'
+    ],
     coverageThreshold: coverageGateEnabled ? {
         global: {
             branches: 91,

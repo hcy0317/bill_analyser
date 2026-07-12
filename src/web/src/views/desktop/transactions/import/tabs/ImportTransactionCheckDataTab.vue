@@ -107,6 +107,7 @@
                 @review-transfer="reviewTransferSuggestion(item, $event)"
                 @review-learning="reviewLearningSuggestion(item, $event)"
                 @review-llm="reviewLLMRecommendation(item, $event)"
+                @open-history-detail="openHistoryBillDetail"
                 @open-recurring="openRecurringCandidateDialog(item)"
                 @clear-recurring="clearRecurringMatch(item)"
             />
@@ -402,17 +403,17 @@
                                @click="reclassifySelected">
                             {{ tt('Reclassify') }}
                         </v-btn>
-                        <v-btn :disabled="!!disabled || llmPreviewRecommending || selectedImportTransactionCount < 1 || !props.sessionId"
+                        <v-btn :disabled="!!disabled || llmPreviewRecommending || totalImportTransactionCount < 1 || !props.sessionId"
                                :prepend-icon="mdiStar"
                                @click="applyLLMPreviewRecommendations">
                             {{ tt('Apply LLM Suggestions') }}
                         </v-btn>
-                        <v-btn :disabled="!!disabled || llmSessionAnalyzing || selectedImportTransactionCount < 1 || !props.sessionId"
+                        <v-btn :disabled="!!disabled || llmSessionAnalyzing || totalImportTransactionCount < 1 || !props.sessionId"
                                :prepend-icon="mdiAutoFix"
                                @click="analyzeSelectedPreviewWithLLM">
                             {{ tt('Generate LLM Rule Candidates') }}
                         </v-btn>
-                        <v-btn :disabled="!!disabled || selectedImportTransactionCount < 1 || !props.sessionId"
+                        <v-btn :disabled="!!disabled || totalImportTransactionCount < 1 || !props.sessionId"
                                :prepend-icon="mdiSchoolOutline"
                                @click="promoteSelectedToLongTermLearning">
                             {{ tt('Save as Long-term Learning') }}
@@ -693,6 +694,10 @@
 
     <!-- v6.34: 账户编辑对话框 -->
     <account-edit-dialog ref="accountEditDialog" />
+    <transaction-edit-dialog
+        ref="historyBillDetailDialog"
+        :type="TransactionEditPageType.Transaction"
+        persistent />
 
     <v-dialog width="760" v-model="showRecurringCandidateDialog">
         <v-card class="pa-4">
@@ -838,6 +843,8 @@ import {
     clearResolvedImportPreviewReviewState
 } from '../importPreviewReviewState.ts';
 import { cloneImportPreviewDraftTransaction } from '../importPreviewDrafts.ts';
+import { buildImportPreviewActionScope } from '../actionScope.ts';
+import { buildSelectionPatch } from '../selectionActionCoordinator.ts';
 import {
     buildImportPreviewServerQueryFilters,
     groupImportPreviewAccountFilterLabels,
@@ -873,6 +880,9 @@ import {
 // v6.34: 导入分类和账户编辑对话框
 import CategoryEditDialog from '@/views/desktop/categories/list/dialogs/EditDialog.vue';
 import AccountEditDialog from '@/views/desktop/accounts/list/dialogs/EditDialog.vue';
+import TransactionEditDialog from '@/views/desktop/transactions/list/dialogs/EditDialog.vue';
+import { resolveDecisionPreviewReplacement } from '../decisionPreviewReplacement';
+import { TransactionEditPageType } from '@/views/base/transactions/TransactionEditPageBase.ts';
 
 import { ref, computed, useTemplateRef, watch } from 'vue';
 
@@ -985,6 +995,7 @@ type ImportLearningSuggestionDialogType = InstanceType<typeof ImportLearningSugg
 // v6.34: 分类和账户编辑对话框类型
 type CategoryEditDialogType = InstanceType<typeof CategoryEditDialog>;
 type AccountEditDialogType = InstanceType<typeof AccountEditDialog>;
+type TransactionEditDialogType = InstanceType<typeof TransactionEditDialog>;
 
 const importPreviewEditableDraftKeys = [
     'selected',
@@ -1048,7 +1059,7 @@ const props = defineProps<{
 
 // v6.55: 定义事件，用于通知父组件数据刷新
 const emit = defineEmits<{
-    (e: 'reclassified', data: ImportPreviewRecord[]): void;
+    (e: 'reclassified', data: ImportPreviewRecord[], removedPreviewIds?: number[]): void;
     (
         e: 'requestPage',
         page: number,
@@ -1083,6 +1094,7 @@ const importLearningSuggestionDialog = useTemplateRef<ImportLearningSuggestionDi
 // v6.34: 分类和账户编辑对话框引用
 const categoryEditDialog = useTemplateRef<CategoryEditDialogType>('categoryEditDialog');
 const accountEditDialog = useTemplateRef<AccountEditDialogType>('accountEditDialog');
+const historyBillDetailDialog = useTemplateRef<TransactionEditDialogType>('historyBillDetailDialog');
 
 // v6.34: 分类管理选择对话框状态
 const showCategorySelectDialog = ref<boolean>(false);
@@ -1520,6 +1532,13 @@ function closeRecurringCandidateDialog(): void {
     recurringCandidateTarget.value = null;
     recurringCandidates.value = [];
     selectedRecurringCandidateId.value = '';
+}
+
+function openHistoryBillDetail(historyBillId: number): void {
+    if (historyBillId <= 0) {
+        return;
+    }
+    void historyBillDetailDialog.value?.open({ id: String(historyBillId) });
 }
 
 async function openRecurringCandidateDialog(item: ImportTransaction): Promise<void> {
@@ -2502,6 +2521,15 @@ async function reviewTransferSuggestion(
             throw new Error(result.error || 'Unknown error');
         }
 
+        const replacement = resolveDecisionPreviewReplacement(result.data);
+        if (replacement) {
+            commitEditingTransactionDraft();
+            emit('reclassified', replacement.upsertedPreviewItems, replacement.removedPreviewIds);
+            logger.info(`[转账建议决策] 原子替换: removed=${replacement.removedPreviewIds.length}, upserted=${replacement.upsertedPreviewItems.length}`);
+            snackbar.value?.showMessage(tt(getTransferDecisionMessageKey(decision)));
+            return;
+        }
+
         if ((result.data?.sessionId || '') !== props.sessionId) {
             throw new Error('Transfer decision response is out of date');
         }
@@ -2950,6 +2978,7 @@ function buildImportPreviewSignalCacheSignature(item: ImportTransaction): string
         String(!!item.matching?.reconciliation?.destructive_ack_required),
         item.matching?.reconciliation?.notice || '',
         item.matching?.annotation?.history_rewrite_notice || '',
+        JSON.stringify(item.matching?.reconciliation?.history_summary || null),
         String(!!item.isManuallyAnnotated),
         getTransferSignalStatus(item) || '',
         getTransferSignalTitle(item),
@@ -3032,6 +3061,7 @@ function getImportPreviewSignalViewModel(item: ImportTransaction): ImportPreview
         reconciliationPlannedOperation: item.matching?.reconciliation?.planned_operation,
         reconciliationHistoryBillId: item.matching?.reconciliation?.history_bill_id,
         reconciliationHistoryBillVersion: item.matching?.reconciliation?.history_bill_version,
+        reconciliationHistorySummary: item.matching?.reconciliation?.history_summary,
         reconciliationHistoryRole: item.matching?.reconciliation?.history_role,
         reconciliationGroupKey: item.matching?.reconciliation?.group_key,
         reconciliationOperationId: item.matching?.reconciliation?.operation_id,
@@ -3041,6 +3071,7 @@ function getImportPreviewSignalViewModel(item: ImportTransaction): ImportPreview
         isManuallyAnnotated: item.isManuallyAnnotated,
         transferStatus: getTransferSignalStatus(item),
         transferTitle: getTransferSignalTitle(item),
+        transferLearningLevel: item.transferSuggestionLevel,
         transferPairOrder: item.matching?.transfer.pair_order,
         transferSourceChain: item.matching?.transfer.source_chain,
         learningStatus: learningStatusAuthority.authoritative
@@ -3079,6 +3110,7 @@ function getImportPreviewSignalViewModel(item: ImportTransaction): ImportPreview
         recurringPrimaryReason: getPrimaryRecurringReason(item)
     }, {
         ...importPreviewSignalSharedContext.value.options,
+        formatAmountWithCurrency: formatAmountToLocalizedNumeralsWithCurrency,
         currentParserId: item.parserId,
         sourceRowLookup: importPreviewSignalSourceContext.value.sourceRowLookup
     });
@@ -3423,6 +3455,48 @@ function getTrackedTransactionByPreviewId(previewId: number): ImportTransaction 
     return serverPagedDrafts.value.get(previewId) || null;
 }
 
+function buildPreviewActionScope(): Record<string, unknown> {
+    return buildImportPreviewActionScope({
+        selectedCount: selectedImportTransactionCount.value,
+        selectionHash: previewMetadata.value.selection_hash || '',
+        filters: buildServerPreviewQueryFilters()
+    });
+}
+
+async function flushPreviewSelectionAndBuildActionScope(): Promise<Record<string, unknown>> {
+    if (!serverPagedMode.value || !props.sessionId) {
+        return buildPreviewActionScope();
+    }
+    const rows = getUniqueTrackedServerPagedTransactions().flatMap(transaction => {
+        const id = getPreviewId(transaction);
+        if (id === null) return [];
+        const baseline = serverPagedSelectionBaselines.value.get(id);
+        return [{ id, baselineSelected: baseline?.selected ?? !!transaction.selected, selected: !!transaction.selected }];
+    });
+    const patch = buildSelectionPatch(rows);
+    if (patch.selectedIds.length || patch.deselectedIds.length) {
+        const token = getCurrentToken();
+        const response = await fetch(`/api/bills/import/v2/preview/${encodeURIComponent(props.sessionId)}/selection`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(token ? { Authorization: `Bearer ${token}` } : {})
+            },
+            body: JSON.stringify({
+                selectionAction: 'patch',
+                selectedIds: patch.selectedIds,
+                deselectedIds: patch.deselectedIds
+            })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.error || 'Failed to flush preview selection');
+        serverPagedSelectionMetadataOverride.value = result.data?.metadata || null;
+        serverPagedSelectionBaselines.value = new Map();
+        recordServerPagedSelectionBaselines(getUniqueTrackedServerPagedTransactions());
+    }
+    return buildPreviewActionScope();
+}
+
 async function applyLLMPreviewRecommendations(): Promise<void> {
     commitEditingTransactionDraft();
 
@@ -3438,14 +3512,10 @@ async function applyLLMPreviewRecommendations(): Promise<void> {
     llmPreviewRecommending.value = true;
     try {
         const previewUpdates = buildSelectedPreviewUpdates();
-        if (!previewUpdates.length) {
-            snackbar.value?.showMessage(tt('No preview rows available for LLM recommendation'));
-            return;
-        }
-
         const response = await services.llmPreviewRecommend({
             sessionId: props.sessionId,
-            previewUpdates
+            previewUpdates,
+            actionScope: await flushPreviewSelectionAndBuildActionScope()
         });
         const suggestions = Array.isArray(response.data?.result?.suggestions)
             ? response.data.result.suggestions as Array<{
@@ -3504,16 +3574,10 @@ async function analyzeSelectedPreviewWithLLM(): Promise<void> {
     llmSessionAnalyzing.value = true;
     try {
         const previewUpdates = buildSelectedPreviewUpdates();
-        if (!previewUpdates.length) {
-            snackbar.value?.showMessage(
-                tt('Selected preview rows are insufficient for LLM rule induction. Select more rows with category and transaction details.')
-            );
-            return;
-        }
-
         const response = await services.analyzeLLMTransactions({
             sessionId: props.sessionId,
-            previewUpdates
+            previewUpdates,
+            actionScope: await flushPreviewSelectionAndBuildActionScope()
         });
         const created = Number(response.data?.result?.candidates_created || 0);
 
@@ -3553,13 +3617,10 @@ async function promoteSelectedToLongTermLearning(): Promise<void> {
 
     try {
         const previewUpdates = buildSelectedPreviewUpdates();
-        if (!previewUpdates.length) {
-            return;
-        }
-
         const suggestionsResponse = await services.getImportLearningSuggestions({
             sessionId: props.sessionId,
-            previewUpdates
+            previewUpdates,
+            actionScope: await flushPreviewSelectionAndBuildActionScope()
         });
         const suggestions = suggestionsResponse.data?.result?.suggestions || [];
 
@@ -3582,7 +3643,7 @@ async function promoteSelectedToLongTermLearning(): Promise<void> {
 
         const promoteResponse = await services.promoteImportLearning({
             sessionId: props.sessionId,
-            previewIds
+            actionScope: { kind: 'explicit_selected', preview_ids: previewIds }
         });
 
         snackbar.value?.showMessage(

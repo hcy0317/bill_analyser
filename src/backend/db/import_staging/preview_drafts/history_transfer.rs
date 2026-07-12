@@ -130,6 +130,7 @@ pub fn preview_draft_from_history_transfer(
                 "row_origin": "postgres_bill",
                 "planned_operation": planned_operation,
                 "history_role": if import_is_outgoing { "incoming" } else { "outgoing" },
+                "history_summary": history_summary(input.history_bill),
                 "import_role": if import_is_outgoing { "outgoing" } else { "incoming" },
                 "review_status": "pending",
                 "time_diff_seconds": input.time_diff_seconds,

@@ -50,20 +50,35 @@ pub async fn llm_analyze_transactions_runtime_handler(
         if let Err(response) = init_import_runtime_schema(&runtime) {
             return route_response(response);
         }
-        let config = match effective_llm_runtime_config(&state, user_id_value).await {
-            Ok(config) => config,
-            Err(response) => return route_response(response),
-        };
-        let provider = match llm_provider_context_from_config(&config) {
-            Ok(provider) => provider,
-            Err(response) => return route_response(response),
-        };
         if let Some(session_id) = session_id.as_deref() {
             if let Err(response) = ensure_import_session_exists(&runtime, session_id, user_id) {
                 return route_response(response);
             }
             if let Err(response) = validate_llm_preview_selection_limits(&payload, limit) {
                 return route_response(response);
+            }
+            let action_scope = match import_preview_action_scope_from_payload(&payload) {
+                Ok(scope) => scope,
+                Err(response) => return route_response(response),
+            };
+            let rows = match selected_preview_rows_for_llm(
+                runtime.connection(),
+                &action_scope,
+                session_id,
+                user_id,
+                limit,
+            ) {
+                Ok(rows) => rows,
+                Err(response) => return route_response(response),
+            };
+            if rows.is_empty() {
+                return route_response(ImportV2RouteResponse {
+                    status_code: 200,
+                    body: bill_analyser_core::build_llm_analysis_response(
+                        Vec::new(),
+                        &json!({"session_id": session_id}),
+                    ),
+                });
             }
             let patches = match preview_patches_from_payload(
                 runtime.connection(),
@@ -75,7 +90,7 @@ pub async fn llm_analyze_transactions_runtime_handler(
                 Err(response) => return route_response(response),
             };
             if !patches.is_empty() {
-                if let Err(error) = update_preview_bills_batch(
+                if let Err(error) = apply_preview_patches_preserving_selection(
                     runtime.connection_mut(),
                     session_id,
                     user_id,
@@ -84,14 +99,12 @@ pub async fn llm_analyze_transactions_runtime_handler(
                     return route_response(db_error_response(error));
                 }
             }
-            let rows = match selected_preview_rows_for_llm(
-                runtime.connection(),
-                &payload,
-                session_id,
-                user_id,
-                limit,
-            ) {
-                Ok(rows) => rows,
+            let config = match effective_llm_runtime_config(&state, user_id_value).await {
+                Ok(config) => config,
+                Err(response) => return route_response(response),
+            };
+            let provider = match llm_provider_context_from_config(&config) {
+                Ok(provider) => provider,
                 Err(response) => return route_response(response),
             };
             let groups = match rule_induction_groups(rows) {
@@ -106,6 +119,14 @@ pub async fn llm_analyze_transactions_runtime_handler(
                 rule_prompt_template: template,
             }
         } else {
+            let config = match effective_llm_runtime_config(&state, user_id_value).await {
+                Ok(config) => config,
+                Err(response) => return route_response(response),
+            };
+            let provider = match llm_provider_context_from_config(&config) {
+                Ok(provider) => provider,
+                Err(response) => return route_response(response),
+            };
             let postgres_runtime = match open_postgres_runtime(&state) {
                 Ok(runtime) => runtime,
                 Err(response) => return route_response(response),

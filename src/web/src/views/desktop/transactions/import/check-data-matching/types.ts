@@ -1,4 +1,4 @@
-import type { ImportMatchingSourcePayload } from '@/models/import_matching.ts';
+import type { ImportHistoryBillSummaryPayload, ImportMatchingSourcePayload } from '@/models/import_matching.ts';
 
 export interface ImportCheckMatchingContextState {
     parserId?: string;
@@ -36,6 +36,7 @@ export interface ImportCheckMatchingDedupTitleOptions {
     dedupLabels?: Record<string, string>;
     sourceRoleLabels?: Record<string, string>;
     infoLabels?: Partial<ImportPreviewSignalInfoLabels>;
+    formatAmountWithCurrency?: (amountCents: number, currency: string) => string;
 }
 
 export type ImportPreviewSignalStatus = 'pending' | 'accepted' | 'rejected' | 'skipped';
@@ -76,6 +77,7 @@ export interface ImportPreviewSignalReviewView {
     summary?: string;
     actions: ImportPreviewSignalDecision[];
     detailLines: string[];
+    historyBillId?: number;
 }
 
 export interface ImportPreviewSignalRecurringView {
@@ -128,6 +130,7 @@ export interface ImportPreviewHistoryRewriteAcknowledgement {
 export interface ImportPreviewSignalState extends ImportCheckMatchingContextState {
     transferStatus?: ImportPreviewRawSignalStatus;
     transferTitle?: string;
+    transferLearningLevel?: string;
     transferPairOrder?: string;
     transferSourceChain?: ImportMatchingSourcePayload[];
     investmentStatus?: ImportPreviewSignalStatus | null;
@@ -179,6 +182,7 @@ export interface ImportPreviewSignalState extends ImportCheckMatchingContextStat
     reconciliationAcknowledgementToken?: string;
     reconciliationDestructiveAckRequired?: boolean;
     reconciliationNotice?: string;
+    reconciliationHistorySummary?: ImportHistoryBillSummaryPayload | null;
     hasRecurringMatch?: boolean;
     recurringTitle?: string;
     recurringCandidateCount?: number;

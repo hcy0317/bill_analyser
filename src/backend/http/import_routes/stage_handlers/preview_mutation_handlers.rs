@@ -225,3 +225,106 @@ fn invalidate_reclassification_dependent_signals(draft: &mut ImportPreviewDraft)
         feedback.remove("reconciliation");
     }
 }
+
+async fn reclassify_dematerialized_preview_items(
+    runtime: &mut ImportRuntime,
+    session_id: &str,
+    user_id: UserId,
+    group_id: i64,
+    operation_id: &str,
+    preview_ids: &[i64],
+) -> Result<Vec<Value>, bill_analyser_db::DbError> {
+    let Some(owner_token) =
+        claim_import_group_reclassification(runtime.connection(), user_id, group_id)?
+    else {
+        let (status, items) = get_import_group_reclassification_state(
+            runtime.connection(),
+            user_id,
+            group_id,
+            operation_id,
+        )?;
+        return match status.as_str() {
+            "completed" if !items.is_empty() => Ok(items),
+            "completed" => Err(bill_analyser_db::DbError::InvalidOperation(
+                "decision group reclassification completed without preview items".into(),
+            )),
+            "running" | "pending" => Err(bill_analyser_db::DbError::InvalidOperation(
+                "decision group reclassification pending".into(),
+            )),
+            "failed" => Err(bill_analyser_db::DbError::InvalidOperation(
+                "decision group reclassification retry conflict".into(),
+            )),
+            _ => Err(bill_analyser_db::DbError::InvalidOperation(
+                "decision group reclassification state missing".into(),
+            )),
+        };
+    };
+    let result =
+        reclassify_dematerialized_preview_items_claimed(runtime, session_id, user_id, preview_ids)
+            .await;
+    match &result {
+        Ok(items) => finish_import_group_reclassification(
+            runtime.connection(),
+            user_id,
+            group_id,
+            operation_id,
+            &owner_token,
+            "completed",
+            None,
+            items,
+        )?,
+        Err(error) => finish_import_group_reclassification(
+            runtime.connection(),
+            user_id,
+            group_id,
+            operation_id,
+            &owner_token,
+            "failed",
+            Some(&error.to_string()),
+            &[],
+        )?,
+    }
+    result
+}
+
+async fn reclassify_dematerialized_preview_items_claimed(
+    runtime: &mut ImportRuntime,
+    session_id: &str,
+    user_id: UserId,
+    preview_ids: &[i64],
+) -> Result<Vec<Value>, bill_analyser_db::DbError> {
+    let preview = get_preview_by_session(runtime.connection(), session_id, user_id, false)?
+        .into_iter()
+        .filter(|row| preview_ids.contains(&row.id))
+        .collect::<Vec<_>>();
+    if preview.is_empty() {
+        return Err(bill_analyser_db::DbError::InvalidOperation(
+            "decision group reclassification has no preview rows".into(),
+        ));
+    }
+    let mut drafts = preview
+        .iter()
+        .map(import_preview_draft_from_row)
+        .collect::<Vec<_>>();
+    apply_import_intelligence_chain(runtime.connection_mut(), user_id, drafts.as_mut_slice())
+        .await?;
+    enforce_import_preview_invariants(drafts.as_mut_slice());
+    let patches = preview
+        .iter()
+        .zip(drafts.iter())
+        .map(|(row, draft)| import_preview_patch_from_draft(row.id, draft))
+        .collect::<Vec<_>>();
+    update_preview_bills_batch(runtime.connection_mut(), session_id, user_id, &patches)?;
+    let refreshed = get_preview_by_session(runtime.connection(), session_id, user_id, false)?;
+    let items = refreshed
+        .into_iter()
+        .filter(|row| preview_ids.contains(&row.id))
+        .map(preview_row_to_value)
+        .collect::<Vec<_>>();
+    if items.is_empty() {
+        return Err(bill_analyser_db::DbError::InvalidOperation(
+            "decision group reclassification produced no preview items".into(),
+        ));
+    }
+    Ok(items)
+}

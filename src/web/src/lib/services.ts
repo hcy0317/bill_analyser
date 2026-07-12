@@ -243,6 +243,7 @@ interface AnalyzeLLMTransactionsRequest {
     sessionId?: string;
     previewIds?: number[];
     previewUpdates?: Array<Record<string, unknown>>;
+    actionScope?: Record<string, unknown>;
 }
 
 interface LLMAdvancedSettings {
@@ -1720,7 +1721,8 @@ export default {
         limit,
         sessionId,
         previewIds,
-        previewUpdates
+        previewUpdates,
+        actionScope
     }: AnalyzeLLMTransactionsRequest = {}): ApiResponsePromise<LLMAnalyzeTransactionsResponse> => {
         const requestConfig: AxiosRequestConfig = {
             timeout: DEFAULT_LLM_API_TIMEOUT
@@ -1730,7 +1732,8 @@ export default {
             limit: limit || 20,
             session_id: sessionId,
             preview_ids: previewIds,
-            preview_updates: previewUpdates
+            preview_updates: previewUpdates,
+            action_scope: actionScope
         }, requestConfig).then(response => {
             return buildApiResponse(response, response.data?.data);
         });
@@ -1800,17 +1803,20 @@ export default {
         sessionId,
         previewIds,
         previewUpdates,
+        actionScope,
         limit
     }: {
         sessionId: string;
         previewIds?: number[];
         previewUpdates?: Record<string, any>[];
+        actionScope?: Record<string, unknown>;
         limit?: number;
     }): ApiResponsePromise<any> => {
         return axios.post('llm/preview-recommend', {
             session_id: sessionId,
             preview_ids: previewIds,
             preview_updates: previewUpdates,
+            action_scope: actionScope,
             limit: limit || 20
         }, { timeout: DEFAULT_LLM_API_TIMEOUT } as any).then(response => {
             return buildApiResponse(response, response.data?.data);

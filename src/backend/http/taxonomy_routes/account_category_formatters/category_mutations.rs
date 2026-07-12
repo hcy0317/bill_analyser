@@ -152,19 +152,108 @@ async fn resolve_postgres_parent_category(
     user_id: i64,
 ) -> bill_analyser_db::DbResult<Option<(String, i64)>> {
     if let Some(parent_name) = virtual_category_name(parent_id) {
-        return Ok(Some((parent_name, 1)));
+        let categories = list_postgres_categories(pool, user_id).await?;
+        return Ok(resolve_virtual_parent_category(&categories, &parent_name));
     }
     let Ok(parent_id) = parent_id.parse::<i64>() else {
         return Ok(None);
     };
     Ok(get_postgres_category_by_id(pool, parent_id, user_id)
         .await?
-        .map(|parent| {
-            (
-                category_text(&parent, "main_category"),
-                parent.get("type").and_then(value_as_i64).unwrap_or(1),
-            )
-        }))
+        .and_then(|parent| resolved_real_parent_category(&parent)))
+}
+
+fn normalized_category_parent_id(parent_id: Option<&Value>) -> String {
+    let parent_id = value_string(parent_id, "0");
+    let parent_id = parent_id.trim();
+    if parent_id.is_empty() || parent_id == "0" {
+        "0".to_string()
+    } else {
+        parent_id.to_string()
+    }
+}
+
+fn requested_category_type_matches_parent(body: &Value, parent_type: i64) -> bool {
+    body.get("type")
+        .map(|value| value_as_i64(value) == Some(parent_type))
+        .unwrap_or(true)
+}
+
+fn resolved_real_parent_category(parent: &CategoryRecord) -> Option<(String, i64)> {
+    if parent.get("hidden").is_some_and(value_truthy)
+        || !category_text(parent, "sub_category").trim().is_empty()
+    {
+        return None;
+    }
+    let name = category_text(parent, "main_category");
+    let category_type = parent.get("type").and_then(value_as_i64)?;
+    (!name.trim().is_empty()).then_some((name, category_type))
+}
+
+fn resolve_virtual_parent_category(
+    categories: &[CategoryRecord],
+    parent_name: &str,
+) -> Option<(String, i64)> {
+    let mut matching = categories.iter().filter(|category| {
+        category_text(category, "main_category") == parent_name
+            && !category.get("hidden").is_some_and(value_truthy)
+    });
+    let first = matching.next()?;
+    let category_type = first.get("type").and_then(value_as_i64)?;
+    if matching.any(|category| category.get("type").and_then(value_as_i64) != Some(category_type)) {
+        return None;
+    }
+    Some((parent_name.to_string(), category_type))
+}
+
+#[cfg(test)]
+mod category_parent_contract_tests {
+    use super::*;
+
+    fn category(main: &str, sub: &str, category_type: i64, hidden: bool) -> CategoryRecord {
+        Map::from_iter([
+            ("main_category".to_string(), Value::String(main.to_string())),
+            ("sub_category".to_string(), Value::String(sub.to_string())),
+            ("type".to_string(), Value::Number(category_type.into())),
+            ("hidden".to_string(), Value::Bool(hidden)),
+        ])
+    }
+
+    #[test]
+    fn parent_id_normalizes_null_empty_and_zero_to_root() {
+        assert_eq!(normalized_category_parent_id(None), "0");
+        assert_eq!(normalized_category_parent_id(Some(&Value::Null)), "0");
+        assert_eq!(normalized_category_parent_id(Some(&Value::String("".into()))), "0");
+        assert_eq!(normalized_category_parent_id(Some(&Value::String(" 0 ".into()))), "0");
+    }
+
+    #[test]
+    fn explicit_child_type_must_match_parent_while_missing_type_inherits() {
+        assert!(requested_category_type_matches_parent(&json!({ "name": "早餐" }), 2));
+        assert!(requested_category_type_matches_parent(&json!({ "name": "早餐", "type": 2 }), 2));
+        assert!(!requested_category_type_matches_parent(&json!({ "name": "早餐", "type": 1 }), 2));
+        assert!(!requested_category_type_matches_parent(&json!({ "name": "早餐", "type": "invalid" }), 2));
+    }
+
+    #[test]
+    fn real_parent_must_be_active_primary_and_inherits_type() {
+        assert_eq!(resolved_real_parent_category(&category("餐饮", "", 2, false)), Some(("餐饮".into(), 2)));
+        assert_eq!(resolved_real_parent_category(&category("餐饮", "早餐", 2, false)), None);
+        assert_eq!(resolved_real_parent_category(&category("餐饮", "", 2, true)), None);
+    }
+
+    #[test]
+    fn virtual_parent_inherits_consistent_active_tree_type() {
+        let categories = vec![
+            category("餐饮", "早餐", 2, false),
+            category("餐饮", "午餐", 2, false),
+        ];
+        assert_eq!(resolve_virtual_parent_category(&categories, "餐饮"), Some(("餐饮".into(), 2)));
+
+        let mixed = vec![category("餐饮", "早餐", 2, false), category("餐饮", "午餐", 1, false)];
+        assert_eq!(resolve_virtual_parent_category(&mixed, "餐饮"), None);
+        assert_eq!(resolve_virtual_parent_category(&[category("餐饮", "早餐", 2, true)], "餐饮"), None);
+    }
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

@@ -100,6 +100,7 @@ export interface ImportPreviewFilterAccountCategoryLike {
 }
 
 export interface ImportPreviewMetadata {
+    selection_hash?: string;
     facets?: {
         categories?: ImportPreviewFacetEntry[];
         accounts?: ImportPreviewFacetEntry[];

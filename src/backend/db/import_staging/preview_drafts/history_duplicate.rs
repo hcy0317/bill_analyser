@@ -93,6 +93,7 @@ pub fn preview_draft_from_history_duplicate(
                 "level": input.level,
                 "reason": input.reason,
                 "notice": "将合并到当前 PostgreSQL 账单",
+                "history_summary": history_summary(input.history_bill),
             },
             "annotation": {
                 "status": "needs_review",

@@ -131,5 +131,23 @@ mod preview_draft_tests {
             draft.preview_matching_feedback["dedup"]["source_chain"][1]["amount_cents"],
             serde_json::json!(-1850)
         );
+        assert_eq!(
+            draft.preview_matching_feedback["reconciliation"]["history_summary"],
+            serde_json::json!({
+                "bill_id": 88,
+                "date_time": "2026-05-04 10:00:05",
+                "amount_cents": -1850,
+                "currency": "CNY",
+                "category_name": "一般转账 / 电子支付",
+                "category_status": "known",
+                "source_account_name": "",
+                "source_account_status": "unknown",
+                "destination_account_name": null,
+                "destination_account_status": "unknown",
+                "identity_source": "snapshot_fallback",
+                "counterparty": "icbc counterparty",
+                "description": "icbc description"
+            })
+        );
     }
 }

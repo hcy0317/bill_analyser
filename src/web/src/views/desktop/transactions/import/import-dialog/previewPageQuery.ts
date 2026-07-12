@@ -38,3 +38,24 @@ export function appendPreviewPageFilters(
         searchParams.set(PREVIEW_PAGE_FILTER_PARAM_NAMES[key as keyof ImportPreviewServerQueryFilters], value);
     }
 }
+
+export function buildCanonicalPreviewPageRequestKey(
+    page: number,
+    pageSize: number,
+    sortBy: string | null | undefined,
+    sortDirection: string | null | undefined,
+    filters: ImportPreviewServerQueryFilters | undefined
+): string {
+    const searchParams = new URLSearchParams({
+        page: String(Math.max(page || 1, 1)),
+        page_size: String(Math.max(pageSize || 10, 1))
+    });
+    const normalizedSortBy = normalizePreviewPageSortBy(sortBy);
+    if (normalizedSortBy) {
+        searchParams.set('sort_by', normalizedSortBy);
+        searchParams.set('sort_direction', normalizePreviewPageSortDirection(sortDirection));
+    }
+    appendPreviewPageFilters(searchParams, filters);
+    searchParams.sort();
+    return searchParams.toString();
+}

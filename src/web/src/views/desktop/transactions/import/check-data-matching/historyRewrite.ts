@@ -1,6 +1,6 @@
 import type { ImportCheckMatchingDedupTitleOptions, ImportPreviewHistoryRewriteAcknowledgement, ImportPreviewHistoryRewriteAcknowledgementOperation, ImportPreviewSignalReviewView, ImportPreviewSignalState } from './types.ts';
 
-import { buildSignalTitle, dedupeTextItems, formatInfoLine, getSignalInfoLabels, getSourceChainDisplayLabels, HISTORY_REWRITE_NOTICE, HISTORY_REWRITE_OPERATION_LABELS, normalizePositiveInteger, normalizeTextValue } from './shared.ts';
+import { buildSignalTitle, dedupeTextItems, HISTORY_REWRITE_NOTICE, HISTORY_REWRITE_OPERATION_LABELS, normalizePositiveInteger, normalizeTextValue } from './shared.ts';
 
 
 
@@ -20,32 +20,36 @@ export function buildHistoryRewriteDetailLines(
     state: ImportPreviewSignalState,
     options: ImportCheckMatchingDedupTitleOptions
 ): string[] {
-    const lines: string[] = [];
-    const notice = normalizeTextValue(state.reconciliationNotice) || HISTORY_REWRITE_NOTICE;
-    const title = normalizeTextValue(state.reconciliationTitle);
-    const plannedOperation = normalizeTextValue(state.reconciliationPlannedOperation);
-    const historyBillId = normalizePositiveInteger(state.reconciliationHistoryBillId);
-    const historyBillVersion = normalizePositiveInteger(state.reconciliationHistoryBillVersion);
-    const sourceLabels = getSourceChainDisplayLabels(state.reconciliationSourceChain, options);
-
-    lines.push(title || notice);
-    if (plannedOperation) {
-        lines.push(formatInfoLine('Operation', plannedOperation));
+    const summary = state.reconciliationHistorySummary;
+    if (!summary) {
+        return [normalizeTextValue(state.reconciliationTitle) || HISTORY_REWRITE_NOTICE];
     }
-    if (historyBillId > 0) {
-        lines.push(formatInfoLine(
-            'History Bill',
-            historyBillVersion > 0 ? `#${historyBillId} v${historyBillVersion}` : `#${historyBillId}`
-        ));
-    }
-    if (sourceLabels.length > 0) {
-        lines.push(formatInfoLine(getSignalInfoLabels(options).sourceLabel, sourceLabels.join('|')));
-    }
-    if (state.reconciliationDestructiveAckRequired) {
-        lines.push(notice);
-    }
-
-    return dedupeTextItems(lines);
+    const currency = normalizeTextValue(summary.currency).toUpperCase() || 'CNY';
+    const amount = options.formatAmountWithCurrency
+        ? options.formatAmountWithCurrency(summary.amount_cents, currency)
+        : String(summary.amount_cents);
+    const identityLabel = (name: string | null | undefined, status: 'known' | 'deleted' | 'unknown' | undefined, kind: '分类' | '账户'): string => {
+        if (status === 'deleted') {
+            return `已删除${kind}`;
+        }
+        return normalizeTextValue(name) || `未知${kind}`;
+    };
+    const route = [
+        identityLabel(summary.source_account_name, summary.source_account_status, '账户'),
+        summary.destination_account_status || normalizeTextValue(summary.destination_account_name)
+            ? identityLabel(summary.destination_account_name, summary.destination_account_status, '账户')
+            : ''
+    ]
+        .filter(Boolean)
+        .join(' → ');
+    return dedupeTextItems([
+        `历史账单：${normalizeTextValue(summary.date_time)}`,
+        `金额：${amount}`,
+        `分类：${identityLabel(summary.category_name, summary.category_status, '分类')}`,
+        `账户：${route}`,
+        normalizeTextValue(summary.counterparty) ? `对方：${normalizeTextValue(summary.counterparty)}` : '',
+        normalizeTextValue(summary.description) ? `备注：${normalizeTextValue(summary.description)}` : ''
+    ]);
 }
 
 export function buildHistoryRewriteSignalView(
@@ -67,7 +71,8 @@ export function buildHistoryRewriteSignalView(
         title: buildSignalTitle(detailLines, state.reconciliationTitle || HISTORY_REWRITE_NOTICE),
         color: 'warning',
         actions: [],
-        detailLines
+        detailLines,
+        historyBillId: normalizePositiveInteger(state.reconciliationHistoryBillId)
     };
 }
 

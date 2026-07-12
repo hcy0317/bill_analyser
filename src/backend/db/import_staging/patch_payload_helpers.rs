@@ -20,9 +20,7 @@ async fn apply_preview_patch_on_tx(
     let mut payload = row
         .try_get::<Value, _>("preview_payload")
         .unwrap_or_else(|_| json!({}));
-    for (field, value) in &patch.changes {
-        apply_patch_value_to_preview(&mut preview, &mut payload, *field, value.clone());
-    }
+    apply_patch_changes_to_preview(&mut preview, &mut payload, &patch.changes);
     if patch.clear_transfer_decision {
         clear_feedback_key(&mut preview.preview_matching_feedback, "transfer");
     }
@@ -250,6 +248,93 @@ fn mark_preview_manual_annotation(preview: &mut ImportPreviewRow, payload: &mut 
     }
     if let Some(annotation) = annotation.as_object_mut() {
         annotation.insert("is_manually_annotated".to_string(), json!(true));
+    }
+    payload_set(
+        payload,
+        "preview_matching_feedback",
+        preview.preview_matching_feedback.clone(),
+    );
+}
+
+fn apply_patch_changes_to_preview(
+    preview: &mut ImportPreviewRow,
+    payload: &mut Value,
+    changes: &[(ImportPreviewPatchField, ImportPreviewPatchValue)],
+) {
+    for (field, value) in changes {
+        apply_patch_value_to_preview(preview, payload, *field, value.clone());
+    }
+    let is_manual = changes.iter().any(|(field, value)| {
+        *field == ImportPreviewPatchField::ManualAnnotation
+            && *value == ImportPreviewPatchValue::Bool(true)
+    });
+    if !is_manual {
+        return;
+    }
+    let edited_fields = changes.iter().filter_map(|(field, _)| match field {
+        ImportPreviewPatchField::CategoryId => Some("category_id"),
+        ImportPreviewPatchField::SourceAccountId => Some("source_account_id"),
+        ImportPreviewPatchField::DestinationAccountId => Some("destination_account_id"),
+        _ => None,
+    });
+    mark_manual_identity_ownership(preview, payload, edited_fields);
+}
+
+fn mark_manual_identity_ownership<'a>(
+    preview: &mut ImportPreviewRow,
+    payload: &mut Value,
+    edited_fields: impl Iterator<Item = &'a str>,
+) {
+    let edited_fields = edited_fields.collect::<Vec<_>>();
+    let feedback = preview
+        .preview_matching_feedback
+        .as_object_mut()
+        .expect("manual annotation creates feedback object");
+    let annotation = feedback
+        .entry("annotation".to_string())
+        .or_insert_with(|| json!({}));
+    let manual_fields = annotation
+        .as_object_mut()
+        .expect("manual annotation object")
+        .entry("manual_fields".to_string())
+        .or_insert_with(|| json!({}));
+    if !manual_fields.is_object() {
+        *manual_fields = json!({});
+    }
+    for field in ["category_id", "source_account_id", "destination_account_id"] {
+        manual_fields
+            .as_object_mut()
+            .expect("manual fields object")
+            .entry(field.to_string())
+            .or_insert_with(|| json!(false));
+    }
+    for field in &edited_fields {
+        manual_fields
+            .as_object_mut()
+            .expect("manual fields object")
+            .insert((*field).to_string(), json!(true));
+    }
+    if let Some(transfer) = feedback.get_mut("transfer").and_then(Value::as_object_mut) {
+        let owned_fields = transfer
+            .entry("owned_fields".to_string())
+            .or_insert_with(|| json!({}));
+        if !owned_fields.is_object() {
+            let prior = owned_fields
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|value| value.as_str().map(str::to_string))
+                .map(|field| (field, json!(true)))
+                .collect();
+            *owned_fields = Value::Object(prior);
+        }
+        for field in edited_fields {
+            owned_fields
+                .as_object_mut()
+                .expect("owned fields object")
+                .insert(field.to_string(), json!(false));
+        }
     }
     payload_set(
         payload,

@@ -105,7 +105,7 @@ export class ImportTransaction implements ImportTransactionResponse {
         this.transferSuggestionScore = (transfer?.score ?? 0) > 0
             ? (transfer?.score ?? 0)
             : (response.transferSuggestionScore || 0);
-        this.transferSuggestionLevel = getFirstNonEmptyString(transfer?.level, response.transferSuggestionLevel);
+        this.transferSuggestionLevel = getFirstNonEmptyString(transfer?.learning_level, transfer?.level, response.transferSuggestionLevel);
         this.transferSuggestionReason = getFirstNonEmptyString(transfer?.reason, response.transferSuggestionReason);
         this.investmentSignalScore = (investment?.score ?? 0) > 0
             ? (investment?.score ?? 0)

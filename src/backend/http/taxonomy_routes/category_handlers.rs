@@ -113,7 +113,7 @@ async fn create_category_handler(
     let Some(name) = category_name_from_body(&body).filter(|value| !value.is_empty()) else {
         return bad_request("Category name is required");
     };
-    let parent_id = value_string(body.get("parentId"), "0");
+    let parent_id = normalized_category_parent_id(body.get("parentId"));
 
         let runtime = match open_postgres_runtime(&state, "taxonomy categories") {
             Ok(value) => value,
@@ -161,6 +161,9 @@ async fn create_category_handler(
                 Ok(None) => return not_found("Parent category not found"),
                 Err(_) => return category_db_error_response(),
             };
+        if !requested_category_type_matches_parent(&body, parent_type) {
+            return bad_request("Category type must match parent category type");
+        }
         if let Ok(Some(existing)) =
             get_postgres_category_by_name(runtime.pool(), &main_category, &name, user_id).await
         {

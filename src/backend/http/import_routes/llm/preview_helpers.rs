@@ -22,38 +22,139 @@ fn preview_patches_from_payload(
         .collect()
 }
 
+#[derive(Clone, Debug)]
+enum ImportPreviewActionScope {
+    Selected { selection_hash: String },
+    ExplicitSelected { preview_ids: Vec<i64> },
+    AllMatching {
+        filters: Box<ImportPreviewQueryFilters>,
+        filter_hash: String,
+    },
+}
+
+fn import_preview_action_scope_from_payload(
+    payload: &Value,
+) -> Result<ImportPreviewActionScope, ImportV2RouteResponse> {
+    let object = payload_object(payload)?;
+    let scope = object
+        .get("action_scope")
+        .or_else(|| object.get("actionScope"))
+        .and_then(Value::as_object)
+        .ok_or_else(|| llm_contract_error_response("action_scope is required", "INVALID_ACTION_SCOPE", 400))?;
+    if object.contains_key("preview_ids") || object.contains_key("previewIds") {
+        return Err(llm_contract_error_response(
+            "preview_ids must be carried only by action_scope",
+            "INVALID_ACTION_SCOPE",
+            400,
+        ));
+    }
+    match scope.get("kind").and_then(Value::as_str) {
+        Some("selected") => {
+            if scope.len() != 2
+                || scope.keys().any(|key| !matches!(key.as_str(), "kind" | "selection_hash"))
+            {
+                return Err(llm_contract_error_response("action_scope contains unknown or mixed fields", "INVALID_ACTION_SCOPE", 400));
+            }
+            let selection_hash = scope
+                .get("selection_hash")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| llm_contract_error_response("selection_hash is required", "INVALID_ACTION_SCOPE", 400))?;
+            Ok(ImportPreviewActionScope::Selected {
+                selection_hash: selection_hash.to_string(),
+            })
+        }
+        Some("all_matching") => {
+            if scope.len() != 3
+                || scope.keys().any(|key| !matches!(key.as_str(), "kind" | "filters" | "filter_hash"))
+            {
+                return Err(llm_contract_error_response("action_scope contains unknown or mixed fields", "INVALID_ACTION_SCOPE", 400));
+            }
+            let filters = serde_json::from_value(
+                scope.get("filters").cloned().ok_or_else(|| llm_contract_error_response("filters is required", "INVALID_ACTION_SCOPE", 400))?,
+            )
+            .map_err(|_| llm_contract_error_response("filters is invalid", "INVALID_ACTION_SCOPE", 400))?;
+            let filter_hash = scope
+                .get("filter_hash")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| llm_contract_error_response("filter_hash is required", "INVALID_ACTION_SCOPE", 400))?;
+            Ok(ImportPreviewActionScope::AllMatching {
+                filters: Box::new(filters),
+                filter_hash: filter_hash.to_string(),
+            })
+        }
+        Some("explicit_selected") => {
+            if scope.len() != 2
+                || scope.keys().any(|key| !matches!(key.as_str(), "kind" | "preview_ids"))
+            {
+                return Err(llm_contract_error_response("action_scope contains unknown or mixed fields", "INVALID_ACTION_SCOPE", 400));
+            }
+            let preview_ids = scope.get("preview_ids").and_then(Value::as_array)
+                .ok_or_else(|| llm_contract_error_response("preview_ids is required", "INVALID_ACTION_SCOPE", 400))?
+                .iter().map(value_to_i64).collect::<Option<Vec<_>>>()
+                .filter(|ids| !ids.is_empty() && ids.iter().all(|id| *id > 0))
+                .ok_or_else(|| llm_contract_error_response("preview_ids is invalid", "INVALID_ACTION_SCOPE", 400))?;
+            let mut unique_ids = preview_ids;
+            unique_ids.sort_unstable();
+            unique_ids.dedup();
+            Ok(ImportPreviewActionScope::ExplicitSelected { preview_ids: unique_ids })
+        }
+        _ => Err(llm_contract_error_response("action_scope contains unknown or mixed fields", "INVALID_ACTION_SCOPE", 400)),
+    }
+}
+
 fn selected_preview_rows_for_llm(
     connection: &Connection,
-    payload: &Value,
+    scope: &ImportPreviewActionScope,
     session_id: &str,
     user_id: UserId,
-    limit: usize,
+    _limit: usize,
 ) -> Result<Vec<ImportPreviewRow>, ImportV2RouteResponse> {
-    let object = payload_object(payload)?;
-    let preview_ids =
-        limited_id_list_field_from_object(object, &["preview_ids", "previewIds"], limit)?;
-    let mut seen_update_ids = BTreeSet::new();
-    let update_ids = limited_preview_update_items_from_payload(payload, limit)?
-        .into_iter()
-        .filter_map(|item| preview_id_from_payload(item).ok())
-        .filter(|id| *id > 0 && seen_update_ids.insert(*id))
-        .collect::<Vec<_>>();
-    let mut rows = if let Some(preview_ids) = preview_ids {
-        if preview_ids.is_empty() {
-            return Err(llm_contract_error_response(
-                "No preview rows selected",
-                "PREVIEW_SELECTION_EMPTY",
-                400,
-            ));
+    match scope {
+        ImportPreviewActionScope::Selected { selection_hash } => {
+            let rows = get_preview_by_session(connection, session_id, user_id, true).map_err(db_error_response)?;
+            let mut ids = rows.iter().map(|row| row.id).collect::<Vec<_>>();
+            ids.sort_unstable();
+            if selection_hash != &preview_id_snapshot_hash(&ids) {
+                return Err(llm_contract_error_response("selection_hash is stale", "ACTION_SCOPE_STALE", 409));
+            }
+            Ok(rows)
         }
-        load_preview_rows_by_ids(connection, session_id, user_id, &preview_ids)?
-    } else if !update_ids.is_empty() {
-        load_preview_rows_by_ids(connection, session_id, user_id, &update_ids)?
-    } else {
-        get_preview_by_session(connection, session_id, user_id, true).map_err(db_error_response)?
-    };
-    rows.truncate(limit);
-    Ok(rows)
+        ImportPreviewActionScope::AllMatching { filters, filter_hash } => {
+            let expected_filter_hash = action_scope_filter_hash(filters).map_err(|_| {
+                llm_contract_error_response(
+                    "failed to serialize action scope filters",
+                    "ACTION_SCOPE_INVALID",
+                    400,
+                )
+            })?;
+            if filter_hash != &expected_filter_hash {
+                return Err(llm_contract_error_response("filter_hash is stale", "ACTION_SCOPE_STALE", 409));
+            }
+            let first = query_preview_page_by_session(connection, session_id, user_id, &ImportPreviewPageRequest { page: 1, page_size: 1, filters: filters.as_ref().clone(), ..ImportPreviewPageRequest::default() }).map_err(db_error_response)?;
+            if first.total == 0 { return Ok(Vec::new()); }
+            Ok(query_preview_page_by_session(connection, session_id, user_id, &ImportPreviewPageRequest { page: 1, page_size: first.total, filters: filters.as_ref().clone(), ..ImportPreviewPageRequest::default() }).map_err(db_error_response)?.rows)
+        }
+        ImportPreviewActionScope::ExplicitSelected { preview_ids } => {
+            let mut rows = Vec::with_capacity(preview_ids.len());
+            for preview_id in preview_ids {
+                match get_preview_bill_by_id(connection, *preview_id, user_id).map_err(db_error_response)? {
+                    Some(row) if row.session_id == session_id => rows.push(row),
+                    _ => return Err(llm_contract_error_response("preview_ids is outside this session", "INVALID_ACTION_SCOPE", 400)),
+                }
+            }
+            Ok(rows)
+        }
+    }
+}
+
+fn action_scope_filter_hash(
+    filters: &ImportPreviewQueryFilters,
+) -> Result<String, serde_json::Error> {
+    let text = serde_json::to_string(filters)?;
+    let hash = text.bytes().fold(2_166_136_261_u32, |hash, byte| (hash ^ u32::from(byte)).wrapping_mul(16_777_619));
+    Ok(format!("fnv1a32:{hash:08x}"))
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -61,30 +162,9 @@ fn validate_llm_preview_selection_limits(
     payload: &Value,
     limit: usize,
 ) -> Result<(), ImportV2RouteResponse> {
-    let object = payload_object(payload)?;
-    let _ = limited_id_list_field_from_object(object, &["preview_ids", "previewIds"], limit)?;
+    let _ = import_preview_action_scope_from_payload(payload)?;
     let _ = limited_preview_update_items_from_payload(payload, limit)?;
     Ok(())
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn load_preview_rows_by_ids(
-    connection: &Connection,
-    session_id: &str,
-    user_id: UserId,
-    preview_ids: &[i64],
-) -> Result<Vec<ImportPreviewRow>, ImportV2RouteResponse> {
-    let mut rows = Vec::new();
-    for preview_id in preview_ids.iter().copied().filter(|value| *value > 0) {
-        if let Some(row) =
-            get_preview_bill_by_id(connection, preview_id, user_id).map_err(db_error_response)?
-        {
-            if row.session_id == session_id {
-                rows.push(row);
-            }
-        }
-    }
-    Ok(rows)
 }
 
 fn preview_row_prompt_value(row: &ImportPreviewRow) -> Value {
@@ -314,4 +394,66 @@ fn llm_preview_recommendation_item(
         "event_id": result.event_id,
         "applied_fields": result.applied_fields,
     }))
+}
+
+#[cfg(test)]
+mod action_scope_tests {
+    use super::*;
+
+    fn assert_invalid(payload: Value) {
+        let error = import_preview_action_scope_from_payload(&payload).unwrap_err();
+        assert_eq!(error.status_code, 400);
+        assert!(error.body.to_string().contains("INVALID_ACTION_SCOPE"));
+    }
+
+    #[test]
+    fn action_scope_rejects_missing_mixed_and_unknown_contracts() {
+        assert_invalid(json!({}));
+        assert_invalid(json!({
+            "action_scope": {"kind": "selected", "selection_hash": "snapshot", "filters": {}}
+        }));
+        assert_invalid(json!({
+            "action_scope": {"kind": "future", "selection_hash": "snapshot"}
+        }));
+        assert_invalid(json!({
+            "action_scope": {"kind": "selected", "selection_hash": "snapshot"},
+            "preview_ids": [1]
+        }));
+        assert_invalid(json!({
+            "action_scope": {"kind": "explicit_selected", "preview_ids": []}
+        }));
+    }
+
+    #[test]
+    fn action_scope_requires_non_empty_snapshot_hashes() {
+        assert_invalid(json!({"action_scope": {"kind": "selected", "selection_hash": ""}}));
+        assert_invalid(json!({
+            "action_scope": {"kind": "all_matching", "filters": {}, "filter_hash": ""}
+        }));
+    }
+
+    #[test]
+    fn explicit_selected_scope_deduplicates_strict_positive_ids() {
+        let scope = import_preview_action_scope_from_payload(&json!({
+            "action_scope": {"kind": "explicit_selected", "preview_ids": [9, 3, 9]}
+        })).unwrap();
+        assert!(matches!(scope, ImportPreviewActionScope::ExplicitSelected { preview_ids } if preview_ids == vec![3, 9]));
+    }
+
+    #[test]
+    fn action_scope_hashes_are_stable_for_selection_and_filter_snapshots() {
+        assert_eq!(preview_id_snapshot_hash(&[3, 7]), preview_id_snapshot_hash(&[3, 7]));
+        let filters = ImportPreviewQueryFilters {
+            signal: Some("learning".to_string()),
+            ..ImportPreviewQueryFilters::default()
+        };
+        assert_eq!(
+            action_scope_filter_hash(&filters).unwrap(),
+            action_scope_filter_hash(&filters).unwrap()
+        );
+        assert_ne!(
+            action_scope_filter_hash(&filters).unwrap(),
+            action_scope_filter_hash(&ImportPreviewQueryFilters::default()).unwrap()
+        );
+    }
 }

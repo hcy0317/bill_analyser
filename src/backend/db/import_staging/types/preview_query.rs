@@ -158,6 +158,7 @@ pub struct ImportPreviewPageResult {
 pub struct ImportPreviewMetadata {
     pub facets: ImportPreviewFacets,
     pub counts: ImportPreviewCounts,
+    pub selection_hash: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

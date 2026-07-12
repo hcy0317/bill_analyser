@@ -172,17 +172,19 @@
                     />
                 </v-window-item>
                 <v-window-item value="checkData">
-                    <import-transaction-check-data-tab
-                        ref="importTransactionCheckDataTab"
-                        :import-transactions="importTransactions"
-                        :server-paged="serverPagedPreviewMode"
-                        :total-import-transaction-count="previewTotalCount"
-                        :preview-metadata="previewMetadata"
-                        :disabled="loading || submitting"
-                        :session-id="serverSessionId"
-                        @reclassified="onReclassified"
-                        @request-page="onCheckDataPageRequested"
-                    />
+                    <decision-preview-replacement-bridge :on-reclassified="onReclassified" v-slot="{ handleReclassified }">
+                        <import-transaction-check-data-tab
+                            ref="importTransactionCheckDataTab"
+                            :import-transactions="importTransactions"
+                            :server-paged="serverPagedPreviewMode"
+                            :total-import-transaction-count="previewTotalCount"
+                            :preview-metadata="previewMetadata"
+                            :disabled="loading || submitting"
+                            :session-id="serverSessionId"
+                            @reclassified="handleReclassified"
+                            @request-page="onCheckDataPageRequested"
+                        />
+                    </decision-preview-replacement-bridge>
                 </v-window-item>
                 <v-window-item value="finalResult">
                     <h4 class="text-h4 mb-1">{{ tt('Data Import Completed') }}</h4>
@@ -365,7 +367,9 @@ import SnackBar from '@/components/desktop/SnackBar.vue';
 import ImportTransactionDefineColumnTab from './tabs/ImportTransactionDefineColumnTab.vue';
 import ImportTransactionExecuteCustomScriptTab from './tabs/ImportTransactionExecuteCustomScriptTab.vue';
 import ImportTransactionCheckDataTab from './tabs/ImportTransactionCheckDataTab.vue';
+import DecisionPreviewReplacementBridge from './DecisionPreviewReplacementBridge';
 import ImportFlowProgress from './import-dialog/ImportFlowProgress.vue';
+import { applyNonServerPagedReplacement, applyServerPagedReclassification } from './decisionPreviewReplacement';
 import ImportCheckDataFilterButton from './import-dialog/ImportCheckDataFilterButton.vue';
 import {
     resolveImportPreviewCategoryPath,
@@ -403,9 +407,11 @@ import {
 } from './import-dialog/importConfigHelpers.ts';
 import {
     appendPreviewPageFilters,
+    buildCanonicalPreviewPageRequestKey,
     normalizePreviewPageSortBy,
     normalizePreviewPageSortDirection
 } from './import-dialog/previewPageQuery.ts';
+import { PreviewPageRequestCoordinator } from './import-dialog/previewPageRequestCoordinator.ts';
 import {
     ImportDSVProcessMethod,
     type ImportConfigMatchResult,
@@ -506,8 +512,7 @@ const pendingInitialCheckDataPageRequest = ref<{
     sortBy: string;
     sortDirection: 'asc' | 'desc';
 } | null>(null);
-let previewPageRequestSequence = 0;
-let previewPageAbortController: AbortController | null = null;
+const previewPageRequests = new PreviewPageRequestCoordinator();
 const importDialogOpenedAt = ref<number | null>(null);
 const importSubmitStartedAt = ref<number | null>(null);
 const firstOperablePreviewLogged = ref<boolean>(false);
@@ -1055,9 +1060,7 @@ async function prepareColumnMappingForUnmatchedFile(fileInfo: UnmatchedFileInfo)
 /**
  */
 function abortPendingPreviewPageRequest(): void {
-    previewPageRequestSequence += 1;
-    previewPageAbortController?.abort();
-    previewPageAbortController = null;
+    previewPageRequests.abort();
 }
 
 async function fetchPreviewPage(
@@ -1095,11 +1098,18 @@ async function fetchPreviewPage(
     appendPreviewPageFilters(searchParams, sortOptions.filters);
 
     const sessionId = serverSessionId.value;
-    const requestSequence = previewPageRequestSequence + 1;
-    previewPageRequestSequence = requestSequence;
-    previewPageAbortController?.abort();
-    const controller = new AbortController();
-    previewPageAbortController = controller;
+    const requestKey = `${sessionId}?${buildCanonicalPreviewPageRequestKey(
+        normalizedPage,
+        normalizedPageSize,
+        normalizedSortBy,
+        normalizedSortDirection,
+        sortOptions.filters
+    )}`;
+    const requestHandle = previewPageRequests.begin(requestKey);
+    if (!requestHandle) {
+        return;
+    }
+    const controller = requestHandle.controller;
 
     try {
         const response = await fetchImportStage(
@@ -1112,8 +1122,7 @@ async function fetchPreviewPage(
             '预览分页加载'
         );
 
-        if (requestSequence !== previewPageRequestSequence
-            || controller.signal.aborted
+        if (!previewPageRequests.isCurrent(requestHandle)
             || sessionId !== serverSessionId.value) {
             return;
         }
@@ -1124,8 +1133,7 @@ async function fetchPreviewPage(
         }
 
         const result = await response.json();
-        if (requestSequence !== previewPageRequestSequence
-            || controller.signal.aborted
+        if (!previewPageRequests.isCurrent(requestHandle)
             || sessionId !== serverSessionId.value) {
             return;
         }
@@ -1159,9 +1167,7 @@ async function fetchPreviewPage(
         }
         throw error;
     } finally {
-        if (requestSequence === previewPageRequestSequence) {
-            previewPageAbortController = null;
-        }
+        previewPageRequests.finish(requestHandle);
     }
 }
 
@@ -1379,14 +1385,13 @@ function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: num
 /**
  * @param previewData 后端返回的原始预览数据数组（使用 preview_* 字段）
  */
-function onReclassified(previewData: ImportPreviewRecord[]): void {
-    if (serverPagedPreviewMode.value) {
+function onReclassified(previewData: ImportPreviewRecord[], removedPreviewIds: number[] = []): void {
+    if (applyServerPagedReclassification(serverPagedPreviewMode.value, () => {
         const page = importTransactionCheckDataTab.value?.getCurrentPreviewPage?.() || 1;
         const pageSize = importTransactionCheckDataTab.value?.getCurrentPreviewPageSize?.() || 10;
         const requestOptions = importTransactionCheckDataTab.value?.getCurrentServerPagedRequestOptions?.() || {};
         void fetchPreviewPage(page, pageSize, requestOptions);
-        return;
-    }
+    })) return;
 
     if (!previewData || previewData.length === 0) {
         return;
@@ -1401,8 +1406,17 @@ function onReclassified(previewData: ImportPreviewRecord[]): void {
 
     logger.info(`[三阶段导入] 转换完成: ${convertedTransactions.length} 条交易`);
 
-    // 替换整个数组
-    importTransactions.value = convertedTransactions;
+    if (removedPreviewIds.length > 0) {
+        importTransactions.value = applyNonServerPagedReplacement(
+            importTransactions.value || [],
+            removedPreviewIds,
+            convertedTransactions,
+            getPreviewIdFromTransaction,
+        );
+    } else {
+        // 普通重新分类响应仍代表完整预览集合。
+        importTransactions.value = convertedTransactions;
+    }
 }
 
 /**
@@ -1442,6 +1456,7 @@ function getHistoryRewriteOperationFromTransaction(
         reconciliationPlannedOperation: transaction.matching?.reconciliation?.planned_operation,
         reconciliationHistoryBillId: transaction.matching?.reconciliation?.history_bill_id,
         reconciliationHistoryBillVersion: transaction.matching?.reconciliation?.history_bill_version,
+        reconciliationHistorySummary: transaction.matching?.reconciliation?.history_summary,
         reconciliationOperationId: transaction.matching?.reconciliation?.operation_id,
         reconciliationAcknowledgementToken: transaction.matching?.reconciliation?.acknowledgement_token,
         reconciliationDestructiveAckRequired: !!transaction.matching?.reconciliation?.destructive_ack_required

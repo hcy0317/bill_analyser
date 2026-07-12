@@ -117,6 +117,189 @@ fn preview_filter_helpers_cover_none_account_and_nested_feedback_edges() {
     assert!(!signal_filter_matches(Some("missing"), &row));
 }
 
+#[test]
+fn learning_filter_includes_transfer_recommendations_with_learning_level() {
+    let cases = [
+        ("yellow", "pending", true),
+        ("green", "pending", true),
+        ("blue", "accepted", true),
+        ("", "pending", false),
+        ("green", "", false),
+    ];
+    for (level, review_status, expected_learning) in cases {
+        let mut row = preview_row(1);
+        row.preview_matching_feedback = json!({
+            "transfer": {
+                "review_status": review_status,
+                "candidate_type": "cross_account",
+                "learning_level": level
+            }
+        });
+        assert!(signal_filter_matches(Some("transfer"), &row));
+        assert_eq!(
+            signal_filter_matches(Some("learning"), &row),
+            expected_learning,
+            "level={level}, review_status={review_status}"
+        );
+    }
+
+    let mut plain_transfer = preview_row(2);
+    plain_transfer.preview_type = "转账".to_string();
+    plain_transfer.preview_matching_feedback = json!({});
+    assert!(!signal_filter_matches(Some("transfer"), &plain_transfer));
+    assert!(!signal_filter_matches(Some("learning"), &plain_transfer));
+}
+
+#[test]
+fn transfer_decision_state_keeps_pair_evidence_and_exposes_capabilities() {
+    let original = json!({
+        "transfer": {
+            "candidate_type": "transfer",
+            "pair_order": "outgoing",
+            "source_chain": [{"role": "outgoing"}],
+            "owned_fields": {"category_id": false}
+        }
+    });
+
+    let rejected = set_transfer_decision_state(original.clone(), "rejected", true);
+    assert_eq!(rejected.pointer("/transfer/state"), Some(&json!("rejected")));
+    assert_eq!(rejected.pointer("/transfer/suppressed"), Some(&json!(true)));
+    assert_eq!(
+        rejected.pointer("/transfer/candidate_type"),
+        original.pointer("/transfer/candidate_type")
+    );
+    assert_eq!(
+        rejected.pointer("/transfer/owned_fields/category_id"),
+        Some(&json!(false))
+    );
+
+    let accepted = set_transfer_decision_state(original, "accepted", false);
+    assert_eq!(accepted.pointer("/transfer/state"), Some(&json!("accepted")));
+    assert_eq!(accepted.pointer("/transfer/capabilities/reject"), Some(&json!(true)));
+    assert_eq!(accepted.pointer("/transfer/capabilities/undo"), Some(&json!(true)));
+}
+
+#[test]
+fn manual_markers_distinguish_category_and_account_ownership() {
+    let cases = [
+        (ImportPreviewPatchField::CategoryId, "category_id"),
+        (
+            ImportPreviewPatchField::SourceAccountId,
+            "source_account_id",
+        ),
+        (
+            ImportPreviewPatchField::DestinationAccountId,
+            "destination_account_id",
+        ),
+    ];
+    let ownership_fields = ["category_id", "source_account_id", "destination_account_id"];
+
+    for (edited_field, expected_owned_field) in cases {
+        let mut row = preview_row(1);
+        row.preview_matching_feedback = json!({
+            "transfer": {"owned_fields": ["category_id", "source_account_id", "destination_account_id"]}
+        });
+        let mut payload = json!({});
+        // Mirrors the HTTP category resolver: the base builder emits the manual marker,
+        // then canonical category resolution appends the identity change.
+        let changes = vec![
+            (
+                ImportPreviewPatchField::ManualAnnotation,
+                ImportPreviewPatchValue::Bool(true),
+            ),
+            (edited_field, ImportPreviewPatchValue::Integer(42)),
+        ];
+        apply_patch_changes_to_preview(&mut row, &mut payload, &changes);
+
+        for ownership_field in ownership_fields {
+            let expected = ownership_field == expected_owned_field;
+            assert_eq!(
+                payload.pointer(&format!(
+                    "/preview_matching_feedback/annotation/manual_fields/{ownership_field}"
+                )),
+                Some(&json!(expected)),
+                "editing {expected_owned_field} must not mark {ownership_field}"
+            );
+        }
+        assert_eq!(
+            payload.pointer(&format!(
+                "/preview_matching_feedback/transfer/owned_fields/{expected_owned_field}"
+            )),
+            Some(&json!(false)),
+            "manual ownership must replace transfer ownership for the edited field"
+        );
+        assert_eq!(
+            payload.pointer("/preview_matching_feedback/annotation/manual_fields/amount_cents"),
+            None,
+            "unrelated fields must not be marked"
+        );
+    }
+}
+
+#[test]
+fn consecutive_manual_identity_patches_accumulate_field_ownership() {
+    let mut row = preview_row(1);
+    row.preview_matching_feedback = json!({
+        "transfer": {
+            "owned_fields": {
+                "category_id": true,
+                "source_account_id": true,
+                "destination_account_id": true,
+                "amount_cents": true
+            }
+        },
+        "annotation": {
+            "manual_fields": {"amount_cents": true}
+        }
+    });
+    let mut payload = json!({});
+
+    for field in [
+        ImportPreviewPatchField::CategoryId,
+        ImportPreviewPatchField::SourceAccountId,
+        ImportPreviewPatchField::DestinationAccountId,
+    ] {
+        // Mirrors separate real HTTP updates: base manual marker precedes a resolved
+        // canonical identity change, and ownership must accumulate across requests.
+        apply_patch_changes_to_preview(
+            &mut row,
+            &mut payload,
+            &[
+                (
+                    ImportPreviewPatchField::ManualAnnotation,
+                    ImportPreviewPatchValue::Bool(true),
+                ),
+                (field, ImportPreviewPatchValue::Integer(42)),
+            ],
+        );
+    }
+
+    for field in ["category_id", "source_account_id", "destination_account_id"] {
+        assert_eq!(
+            row.preview_matching_feedback.pointer(&format!(
+                "/annotation/manual_fields/{field}"
+            )),
+            Some(&json!(true))
+        );
+        assert_eq!(
+            row.preview_matching_feedback.pointer(&format!(
+                "/transfer/owned_fields/{field}"
+            )),
+            Some(&json!(false))
+        );
+    }
+    assert_eq!(
+        row.preview_matching_feedback
+            .pointer("/annotation/manual_fields/amount_cents"),
+        Some(&json!(true))
+    );
+    assert_eq!(
+        row.preview_matching_feedback
+            .pointer("/transfer/owned_fields/amount_cents"),
+        Some(&json!(true))
+    );
+}
+
 #[tokio::test]
 async fn preview_pg_row_projection_reads_explicit_cents_payload_when_database_available(
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -165,5 +348,71 @@ async fn preview_pg_row_projection_reads_explicit_cents_payload_when_database_av
     assert_eq!(projected.preview_destination_amount_cents, 54321);
     assert_eq!(projected.preview_main_category, "餐饮");
     assert_eq!(projected.dedup_source_ids, vec![1, 2]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn preview_pg_row_projection_treats_typed_identity_columns_as_authoritative(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Ok(postgres_url) = std::env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+        return Ok(());
+    };
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&postgres_url)
+        .await?;
+    let row = sqlx::query(
+        r#"
+        SELECT 7::BIGINT AS id, 'session-1'::TEXT AS session_key, 2::BIGINT AS user_id,
+            now() AS occurred_at, 'expense'::TEXT AS transaction_type, 111::BIGINT AS amount_cents,
+            42::BIGINT AS category_id, 11::BIGINT AS account_id,
+            12::BIGINT AS transfer_target_account_id, '商户'::TEXT AS merchant,
+            '招商卡'::TEXT AS payment_method, '午餐'::TEXT AS description, true AS selected,
+            ARRAY[]::BIGINT[] AS merged_source_ids,
+            '{"category_id": 9, "categoryId": 9, "preview_source_account_id": 99,
+              "preview_destination_account_id": 98}'::jsonb AS preview_payload,
+            now() AS created_at
+        "#,
+    )
+    .fetch_one(&pool)
+    .await?;
+
+    let projected = preview_from_pg_row(&row)?;
+    assert_eq!(projected.category_id, Some(42));
+    assert_eq!(projected.preview_source_account_id, Some(11));
+    assert_eq!(projected.preview_destination_account_id, Some(12));
+    Ok(())
+}
+
+#[tokio::test]
+async fn preview_pg_row_projection_does_not_revive_payload_identity_when_typed_columns_are_null(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Ok(postgres_url) = std::env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
+        return Ok(());
+    };
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&postgres_url)
+        .await?;
+    let row = sqlx::query(
+        r#"
+        SELECT 8::BIGINT AS id, 'session-1'::TEXT AS session_key, 2::BIGINT AS user_id,
+            now() AS occurred_at, 'expense'::TEXT AS transaction_type, 111::BIGINT AS amount_cents,
+            NULL::BIGINT AS category_id, NULL::BIGINT AS account_id,
+            NULL::BIGINT AS transfer_target_account_id, NULL::TEXT AS merchant,
+            NULL::TEXT AS payment_method, NULL::TEXT AS description, false AS selected,
+            ARRAY[]::BIGINT[] AS merged_source_ids,
+            '{"category_id": 9, "categoryId": 9, "preview_source_account_id": 99,
+              "preview_destination_account_id": 98}'::jsonb AS preview_payload,
+            now() AS created_at
+        "#,
+    )
+    .fetch_one(&pool)
+    .await?;
+
+    let projected = preview_from_pg_row(&row)?;
+    assert_eq!(projected.category_id, None);
+    assert_eq!(projected.preview_source_account_id, None);
+    assert_eq!(projected.preview_destination_account_id, None);
     Ok(())
 }

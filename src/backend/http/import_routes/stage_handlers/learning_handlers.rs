@@ -47,24 +47,44 @@ async fn import_learning_suggestions_response(
         Ok(None) => return route_response(import_session_not_found_response()),
         Err(error) => return route_response(db_error_response(error)),
     }
+    let scoped_preview = match payload.as_ref() {
+        Some(payload) => {
+            let scope = match import_preview_action_scope_from_payload(payload) {
+                Ok(scope) => scope,
+                Err(response) => return route_response(response),
+            };
+            match selected_preview_rows_for_llm(runtime.connection(), &scope, &session_id, user_id, 500) {
+                Ok(rows) => rows,
+                Err(response) => return route_response(response),
+            }
+        }
+        _ => match get_preview_by_session(runtime.connection(), &session_id, user_id, false) {
+            Ok(rows) => rows,
+            Err(error) => return route_response(db_error_response(error)),
+        },
+    };
+    if payload.is_some() && scoped_preview.is_empty() {
+        return route_response(import_v2_data_response(json!({
+            "session_id": session_id,
+            "suggestions": [],
+            "count": 0,
+            "preview_ids": [],
+            "applied_preview_updates": 0,
+            "provider_bypassed": true,
+            "runtime": "rust-import-db-runtime",
+        })));
+    }
     let applied_preview_updates = match payload.as_ref() {
         Some(payload) => {
-            match apply_preview_updates_from_payload(&mut runtime, &session_id, user_id, payload) {
+            match apply_preview_updates_preserving_selection_from_payload(&mut runtime, &session_id, user_id, payload) {
                 Ok(updated) => updated,
                 Err(response) => return route_response(response),
             }
         }
         None => 0,
     };
-    let preview_ids = payload
-        .as_ref()
-        .map(preview_ids_from_payload)
-        .unwrap_or_default();
-    let suggestions = match get_preview_by_session(runtime.connection(), &session_id, user_id, false)
-    {
-        Ok(preview) => build_import_learning_suggestions_from_preview(&preview, &preview_ids),
-        Err(error) => return route_response(db_error_response(error)),
-    };
+    let preview_ids = payload.as_ref().map(preview_ids_from_payload).unwrap_or_default();
+    let suggestions = build_import_learning_suggestions_from_preview(&scoped_preview, &preview_ids);
     let suggestion_count = suggestions.len();
     route_response(import_v2_data_response(json!({
         "session_id": session_id,
@@ -169,8 +189,30 @@ pub async fn import_learning_promote_runtime_handler(
         Ok(None) => return route_response(import_session_not_found_response()),
         Err(error) => return route_response(db_error_response(error)),
     }
+    let action_scope = match import_preview_action_scope_from_payload(&payload) {
+        Ok(scope) => scope,
+        Err(response) => return route_response(response),
+    };
+    let mut preview_ids: Vec<i64> = match selected_preview_rows_for_llm(runtime.connection(), &action_scope, &session_id, user_id, 500) {
+        Ok(rows) => rows.into_iter().map(|row| row.id).collect(),
+        Err(response) => return route_response(response),
+    };
+    if preview_ids.is_empty() {
+        return route_response(import_v2_data_response(json!({
+            "success": true,
+            "session_id": session_id,
+            "selected_samples": 0,
+            "saved_samples": 0,
+            "rules_total": 0,
+            "created": 0,
+            "updated": 0,
+            "applied_preview_updates": 0,
+            "provider_bypassed": true,
+            "runtime": "rust-import-db-runtime-partial",
+        })));
+    }
     let applied_preview_updates =
-        match apply_preview_updates_from_payload(&mut runtime, &session_id, user_id, &payload) {
+        match apply_preview_updates_preserving_selection_from_payload(&mut runtime, &session_id, user_id, &payload) {
             Ok(updated) => updated,
             Err(response) => return route_response(response),
         };
@@ -188,7 +230,6 @@ pub async fn import_learning_promote_runtime_handler(
             Err(error) => return route_response(db_error_response(error)),
         }
     };
-    let mut preview_ids = preview_ids_from_payload(&payload);
     preview_ids.extend(annotation_samples.iter().map(|sample| sample.preview_id));
     preview_ids.sort_unstable();
     preview_ids.dedup();

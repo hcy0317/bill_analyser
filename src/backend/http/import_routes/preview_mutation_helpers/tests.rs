@@ -2,6 +2,28 @@
 mod preview_mutation_helper_tests {
     use super::*;
 
+    fn legacy_group(id: i64, preview_id: i64) -> bill_analyser_db::ImportDecisionGroupRow {
+        bill_analyser_db::ImportDecisionGroupRow {
+            id, session_id: "session".into(), user_id: 1, group_type: "same_batch_transfer".into(),
+            group_key: format!("group-{id}"), decision_status: "pending".into(),
+            base_preview_row_id: Some(preview_id), signal_payload: json!({}), version: 1,
+            members: vec![bill_analyser_db::ImportDecisionGroupMemberRow {
+                id, group_id: id, preview_row_id: Some(preview_id), standard_row_id: None,
+                history_bill_id: None, member_role: "outgoing".into(), parser_name: String::new(),
+                metadata: json!({}), version: 1, created_at: String::new(),
+            }], created_at: String::new(), updated_at: String::new(),
+        }
+    }
+
+    #[test]
+    fn legacy_transfer_group_resolution_requires_exactly_one_group() {
+        assert_eq!(unique_legacy_transfer_group(&[], 7).unwrap_err(), "Decision group materialization is pending");
+        let one = vec![legacy_group(1, 7)];
+        assert_eq!(unique_legacy_transfer_group(&one, 7).unwrap().id, 1);
+        let many = vec![legacy_group(1, 7), legacy_group(2, 7)];
+        assert_eq!(unique_legacy_transfer_group(&many, 7).unwrap_err(), "Preview belongs to multiple decision groups");
+    }
+
     fn change_value(
         patch: &ImportPreviewPatch,
         target: ImportPreviewPatchField,
@@ -207,6 +229,36 @@ mod preview_mutation_helper_tests {
             change_value(&patch, ImportPreviewPatchField::MatchingFeedback),
             None
         );
+    }
+
+    #[test]
+    fn resolved_category_is_appended_after_base_manual_marker() {
+        let object = Map::from_iter([
+            ("is_manually_annotated".to_string(), json!(true)),
+            ("mainCategory".to_string(), json!("餐饮")),
+        ]);
+        let mut patch = build_preview_patch_from_payload(7, &object);
+        apply_loaded_category_to_preview_patch(
+            &mut patch,
+            42,
+            PreviewPayloadCategory {
+                type_code: Some(3),
+                main_category: "餐饮".to_string(),
+                sub_category: "午餐".to_string(),
+            },
+        );
+
+        let manual_index = patch
+            .changes
+            .iter()
+            .position(|(field, _)| *field == ImportPreviewPatchField::ManualAnnotation)
+            .expect("manual marker");
+        let category_index = patch
+            .changes
+            .iter()
+            .position(|(field, _)| *field == ImportPreviewPatchField::CategoryId)
+            .expect("resolved category");
+        assert!(manual_index < category_index);
     }
 
     #[test]
