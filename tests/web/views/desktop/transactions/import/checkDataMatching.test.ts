@@ -5,6 +5,9 @@ import {
     buildImportPreviewHistoryRewriteOperationAcknowledgement,
     buildImportPreviewSignalViewModel,
     buildImportPreviewTypeColumnViewModel,
+    buildHistoryRewriteDetailLines,
+    buildTransferDetailLines,
+    getImportPreviewHistoryRewriteLabelKey,
     getImportCheckMatchingContextSummary,
     getImportCheckMatchingDedupLabel,
     getImportCheckMatchingDedupTitle,
@@ -340,6 +343,16 @@ describe('checkDataMatching helpers', () => {
         ]);
     });
 
+    test('uses default source-role labels when a transfer source has no role metadata', () => {
+        expect(buildTransferDetailLines({
+            transferSourceChain: [{
+                position: 0,
+                parser_id: 'wechat',
+                parser_label: '微信'
+            }]
+        }, {})).toStrictEqual(['微信']);
+    });
+
     test('sorts known transfer source roles ahead of unknown roles', () => {
         const viewModel = buildImportPreviewSignalViewModel({
             transferStatus: 'pending',
@@ -508,7 +521,22 @@ describe('checkDataMatching helpers', () => {
             history_bill_version: 3,
             history_operation_id: 'history:canonical',
             history_acknowledgement_token: 'ack-token',
-            history_destructive_ack_required: true
+            history_destructive_ack_required: true,
+            history_summary: {
+                bill_id: 9001,
+                date_time: '2026-07-01 09:30:00',
+                amount_cents: -1880,
+                currency: 'CNY',
+                category_name: '餐饮 / 早餐',
+                category_status: 'known',
+                source_account_name: '工资卡',
+                source_account_status: 'known',
+                destination_account_name: null,
+                destination_account_status: 'unknown',
+                identity_source: 'runtime_current',
+                counterparty: '早餐店',
+                description: '工作日早餐'
+            }
         });
         const historyFull = buildImportPreviewSignalViewModel({
             parserId: 'alipay',
@@ -519,13 +547,31 @@ describe('checkDataMatching helpers', () => {
             reconciliationHistoryBillVersion: 3,
             reconciliationOperationId: 'history:canonical',
             reconciliationAcknowledgementToken: 'ack-token',
-            reconciliationDestructiveAckRequired: true
+            reconciliationDestructiveAckRequired: true,
+            reconciliationHistorySummary: {
+                bill_id: 9001,
+                date_time: '2026-07-01 09:30:00',
+                amount_cents: -1880,
+                currency: 'CNY',
+                category_name: '餐饮 / 早餐',
+                category_status: 'known',
+                source_account_name: '工资卡',
+                source_account_status: 'known',
+                destination_account_name: null,
+                destination_account_status: 'unknown',
+                identity_source: 'runtime_current',
+                counterparty: '早餐店',
+                description: '工作日早餐'
+            }
         });
         const historyIndex = buildImportPreviewIndexSignalViewModel(historyIndexItem);
 
         expect(matchesImportPreviewSignalFilter(historyFull, 'history')).toBe(true);
         expect(matchesImportPreviewSignalFilter(historyIndex, 'history')).toBe(true);
         expect(matchesImportPreviewSignalFilter(historyIndex, 'parser')).toBe(false);
+        expect(historyIndex.historyRewrite?.detailLines).toStrictEqual(historyFull.historyRewrite?.detailLines);
+        expect(historyIndex.historyRewrite?.detailLines).toContain('分类：餐饮 / 早餐');
+        expect(historyIndex.historyRewrite?.detailLines).toContain('账户：工资卡');
 
         const learningIndex = buildImportPreviewIndexSignalViewModel(mapImportPreviewIndexResponseItem({
             id: 2,
@@ -881,9 +927,9 @@ describe('checkDataMatching helpers', () => {
         expect(matchesImportPreviewSignalFilter(learningViewModel, 'unexpected' as never)).toBe(false);
     });
 
-    test('builds explicit history rewrite signal and acknowledgement payloads', () => {
+    test('keeps history rewrite fallback human-readable and opens the canonical bill detail', () => {
         const state = {
-            reconciliationTitle: '将改写/合并历史账单',
+            reconciliationTitle: 'Operation: merge_transfer_history | History Bill: #901 v4',
             reconciliationPlannedOperation: 'merge_transfer_history',
             reconciliationHistoryBillId: 901,
             reconciliationHistoryBillVersion: 4,
@@ -901,8 +947,14 @@ describe('checkDataMatching helpers', () => {
         expect(viewModel.historyRewrite?.labelKey).toBe('Merge History Transfer');
         expect(viewModel.historyRewrite?.color).toBe('warning');
         expect(viewModel.historyRewrite?.actions).toStrictEqual([]);
-        expect(viewModel.historyRewrite?.detailLines).toContain('Operation: merge_transfer_history');
-        expect(viewModel.historyRewrite?.detailLines).toContain('History Bill: #901 v4');
+        expect(viewModel.historyRewrite?.historyBillId).toBe(901);
+        const detailText = viewModel.historyRewrite?.detailLines.join(' | ') ?? '';
+        expect(detailText).toContain('历史账单详情');
+        expect(detailText).not.toContain('Operation:');
+        expect(detailText).not.toContain('History Bill:');
+        expect(detailText).not.toContain('merge_transfer_history');
+        expect(detailText).not.toContain('#901');
+        expect(detailText).not.toContain('v4');
 
         const operation = buildImportPreviewHistoryRewriteOperationAcknowledgement(77, state);
         expect(operation).toStrictEqual({
@@ -931,6 +983,49 @@ describe('checkDataMatching helpers', () => {
                 history_rewrite_count: 1
             }
         });
+    });
+
+    test('renders deleted and unknown history identities with safe defaults', () => {
+        const detailLines = buildHistoryRewriteDetailLines({
+            reconciliationHistorySummary: {
+                bill_id: 9,
+                date_time: '2026-07-13 08:00:00',
+                amount_cents: 1234,
+                currency: '',
+                category_name: '',
+                category_status: 'deleted',
+                source_account_name: '',
+                source_account_status: 'unknown',
+                destination_account_name: null,
+                destination_account_status: 'deleted',
+                counterparty: '',
+                description: ''
+            }
+        }, {
+            formatAmountWithCurrency: (amount, currency) => `${currency} ${amount}`
+        });
+
+        expect(detailLines).toContain('金额：CNY 1234');
+        expect(detailLines).toContain('分类：已删除分类');
+        expect(detailLines).toContain('账户：未知账户 → 已删除账户');
+        expect(detailLines.some(line => line.startsWith('对方：'))).toBe(false);
+        expect(detailLines.some(line => line.startsWith('备注：'))).toBe(false);
+        expect(getImportPreviewHistoryRewriteLabelKey('unsupported_operation')).toBe('History Rewrite');
+    });
+
+    test('ignores history acknowledgement operations without a positive preview id', () => {
+        expect(buildImportPreviewHistoryRewriteAcknowledgement({
+            selectedPreviewIds: [7],
+            operations: [{
+                preview_id: 0,
+                operation_id: 'invalid',
+                planned_operation: 'update_history',
+                history_bill_id: 9,
+                history_bill_version: 1,
+                acknowledgement_token: 'token'
+            }],
+            selectionScope: {}
+        })).toBeNull();
     });
 
     test('keeps parser and investment signals out of the type column model', () => {

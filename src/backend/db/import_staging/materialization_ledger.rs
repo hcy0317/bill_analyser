@@ -360,6 +360,13 @@ pub fn insert_import_decision_groups_batch(
         }
         let mut inserted = 0usize;
         for draft in drafts {
+            validate_import_decision_group_draft_scope(
+                &mut tx,
+                session_db_id,
+                user_id,
+                draft,
+            )
+            .await?;
             let group_id: i64 = sqlx::query(
                 r#"
                 INSERT INTO import_decision_groups (
@@ -445,9 +452,19 @@ pub fn get_import_decision_groups_by_session(
         for row in rows {
             let group_id: i64 = row.try_get("id")?;
             let member_rows = sqlx::query(
-                "SELECT * FROM import_decision_group_members WHERE group_id = $1 ORDER BY id ASC",
+                r#"SELECT member.*,
+                          COALESCE(preview.version, 0::bigint) AS member_version
+                   FROM import_decision_group_members member
+                   LEFT JOIN import_preview_rows preview
+                     ON preview.id = member.preview_row_id
+                    AND preview.session_id = $2
+                    AND preview.user_id = $3
+                   WHERE member.group_id = $1
+                   ORDER BY member.id ASC"#,
             )
             .bind(group_id)
+            .bind(session_db_id)
+            .bind(user_id)
             .fetch_all(pool)
             .await?;
             groups.push(ImportDecisionGroupRow {
@@ -469,6 +486,90 @@ pub fn get_import_decision_groups_by_session(
             });
         }
         Ok(groups)
+    })
+}
+
+async fn validate_import_decision_group_draft_scope(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    session_db_id: i64,
+    user_id: i64,
+    draft: &ImportDecisionGroupDraft,
+) -> DbResult<()> {
+    let mut preview_ids = draft
+        .members
+        .iter()
+        .filter_map(|member| member.preview_row_id)
+        .collect::<Vec<_>>();
+    preview_ids.extend(draft.base_preview_row_id);
+    preview_ids.sort_unstable();
+    preview_ids.dedup();
+    let mut standard_row_ids = draft
+        .members
+        .iter()
+        .filter_map(|member| member.standard_row_id)
+        .collect::<Vec<_>>();
+    standard_row_ids.sort_unstable();
+    standard_row_ids.dedup();
+    let mut history_bill_ids = draft
+        .members
+        .iter()
+        .filter_map(|member| member.history_bill_id)
+        .collect::<Vec<_>>();
+    history_bill_ids.sort_unstable();
+    history_bill_ids.dedup();
+
+    if !preview_ids.is_empty() {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM import_preview_rows WHERE id=ANY($1) AND session_id=$2 AND user_id=$3",
+        )
+        .bind(&preview_ids)
+        .bind(session_db_id)
+        .bind(user_id)
+        .fetch_one(&mut **tx)
+        .await?;
+        if decision_group_database_count(count, "preview member")? != preview_ids.len() {
+            return Err(DbError::InvalidOperation(
+                "decision group preview member scope mismatch".into(),
+            ));
+        }
+    }
+    if !standard_row_ids.is_empty() {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM import_standard_rows WHERE id=ANY($1) AND session_id=$2 AND user_id=$3",
+        )
+        .bind(&standard_row_ids)
+        .bind(session_db_id)
+        .bind(user_id)
+        .fetch_one(&mut **tx)
+        .await?;
+        if decision_group_database_count(count, "standard-row member")? != standard_row_ids.len() {
+            return Err(DbError::InvalidOperation(
+                "decision group standard-row member scope mismatch".into(),
+            ));
+        }
+    }
+    if !history_bill_ids.is_empty() {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM bills WHERE id=ANY($1) AND user_id=$2 AND is_deleted=false",
+        )
+        .bind(&history_bill_ids)
+        .bind(user_id)
+        .fetch_one(&mut **tx)
+        .await?;
+        if decision_group_database_count(count, "history member")? != history_bill_ids.len() {
+            return Err(DbError::InvalidOperation(
+                "decision group history member scope mismatch".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn decision_group_database_count(count: i64, subject: &str) -> DbResult<usize> {
+    usize::try_from(count).map_err(|_| {
+        DbError::InvalidOperation(format!(
+            "invalid decision group {subject} count returned by PostgreSQL: {count}"
+        ))
     })
 }
 
@@ -544,23 +645,56 @@ pub fn apply_import_decision_group_command(
         let rows = sqlx::query(
             r#"SELECT p.id, p.version
                FROM import_preview_rows p
-               WHERE EXISTS (
+               WHERE p.session_id=$2 AND p.user_id=$3
+                 AND
+               EXISTS (
                    SELECT 1 FROM import_decision_group_members m
                    WHERE m.group_id=$1 AND m.preview_row_id=p.id
                )
                ORDER BY p.id FOR UPDATE OF p"#,
         )
         .bind(command.group_id)
+        .bind(session_db_id)
+        .bind(user_id)
         .fetch_all(&mut *tx)
         .await?;
-        sqlx::query(
+        let standard_rows = sqlx::query(
             r#"SELECT sr.id FROM import_decision_group_members m
                JOIN import_standard_rows sr ON sr.id = m.standard_row_id
-               WHERE m.group_id = $1 FOR UPDATE OF sr"#,
+               WHERE m.group_id = $1 AND sr.session_id=$2 AND sr.user_id=$3
+               FOR UPDATE OF sr"#,
         )
         .bind(command.group_id)
+        .bind(session_db_id)
+        .bind(user_id)
         .fetch_all(&mut *tx)
         .await?;
+        let member_reference_counts = sqlx::query(
+            r#"SELECT count(DISTINCT preview_row_id) FILTER (WHERE preview_row_id IS NOT NULL)
+                         AS preview_count,
+                      count(DISTINCT standard_row_id) FILTER (WHERE standard_row_id IS NOT NULL)
+                         AS standard_count
+               FROM import_decision_group_members
+               WHERE group_id=$1"#,
+        )
+        .bind(command.group_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        let referenced_preview_count: i64 = member_reference_counts.try_get("preview_count")?;
+        let referenced_standard_count: i64 = member_reference_counts.try_get("standard_count")?;
+        let locked_standard_count = standard_rows
+            .iter()
+            .map(|row| row.try_get::<i64, _>("id"))
+            .collect::<Result<std::collections::HashSet<_>, sqlx::Error>>()?
+            .len();
+        if decision_group_database_count(referenced_preview_count, "referenced preview")?
+            != rows.len()
+            || decision_group_database_count(referenced_standard_count, "referenced standard-row")?
+                != locked_standard_count
+        {
+            tx.rollback().await?;
+            return Ok(ImportDecisionGroupCommandResult::Conflict);
+        }
         let current = rows
             .iter()
             .map(|row| ImportDecisionPreviewVersion {
@@ -595,11 +729,14 @@ pub fn apply_import_decision_group_command(
         let next_version: i64 = sqlx::query_scalar(
             r#"UPDATE import_decision_groups SET decision_status = $1,
                version = version + 1, updated_at = now()
-               WHERE id = $2 AND version = $3 RETURNING version"#,
+               WHERE id = $2 AND version = $3 AND user_id=$4 AND session_id=$5
+               RETURNING version"#,
         )
         .bind(target_status)
         .bind(command.group_id)
         .bind(group_version)
+        .bind(user_id)
+        .bind(session_db_id)
         .fetch_one(&mut *tx)
         .await?;
         if group_type == "same_batch_transfer" && target_status == "rejected" {
@@ -651,11 +788,13 @@ pub fn apply_import_decision_group_command(
                      '{preview_matching_feedback,transfer,state}', to_jsonb($1::text), true),
                      '{preview_matching_feedback,transfer,review_status}', to_jsonb($1::text), true),
                    version = version + 1, updated_at = now()
-                   WHERE id = $2 AND version = $3"#,
+                   WHERE id = $2 AND version = $3 AND session_id=$4 AND user_id=$5"#,
             )
             .bind(target_status)
             .bind(row.preview_row_id)
             .bind(row.version)
+            .bind(session_db_id)
+            .bind(user_id)
             .execute(&mut *tx)
             .await?;
         }
@@ -707,9 +846,12 @@ async fn reject_historical_group_and_dematerialize(
            FROM import_decision_group_members m
            JOIN import_standard_rows sr ON sr.id=m.standard_row_id
            WHERE m.group_id=$1 AND m.history_bill_id IS NULL
+             AND sr.session_id=$2 AND sr.user_id=$3
            FOR UPDATE OF sr, m"#,
     )
     .bind(group_id)
+    .bind(session_db_id)
+    .bind(user_id)
     .fetch_one(&mut **tx)
     .await?;
     let standard_row_id: i64 = member.try_get("standard_row_id")?;
@@ -761,8 +903,8 @@ async fn reject_historical_group_and_dematerialize(
         .bind(new_id).bind(group_id).execute(&mut **tx).await?;
     sqlx::query("DELETE FROM import_preview_rows WHERE id=$1 AND session_id=$2 AND user_id=$3")
         .bind(old_id).bind(session_db_id).bind(user_id).execute(&mut **tx).await?;
-    sqlx::query("UPDATE import_decision_groups SET decision_status='suppressed',base_preview_row_id=$1,signal_payload=jsonb_build_object('suppressed',true,'reclassification',jsonb_build_object('status','pending','attempts',0,'preview_ids',jsonb_build_array($1))) WHERE id=$2")
-        .bind(new_id).bind(group_id).execute(&mut **tx).await?;
+    sqlx::query("UPDATE import_decision_groups SET decision_status='suppressed',base_preview_row_id=$1,signal_payload=jsonb_build_object('suppressed',true,'reclassification',jsonb_build_object('status','pending','attempts',0,'preview_ids',jsonb_build_array($1))) WHERE id=$2 AND session_id=$3 AND user_id=$4")
+        .bind(new_id).bind(group_id).bind(session_db_id).bind(user_id).execute(&mut **tx).await?;
     sqlx::query("DELETE FROM import_history_materializations WHERE session_id=$1 AND user_id=$2 AND history_bill_id IN (SELECT history_bill_id FROM import_decision_group_members WHERE group_id=$3 AND history_bill_id IS NOT NULL)")
         .bind(session_db_id).bind(user_id).bind(group_id).execute(&mut **tx).await?;
     let mut item = payload;
@@ -795,7 +937,10 @@ async fn reject_same_batch_transfer_and_dematerialize(
     }
     let old_preview_id = current[0].preview_row_id;
     let old = sqlx::query(
-        "SELECT selected, preview_payload FROM import_preview_rows WHERE id=$1 AND session_id=$2 AND user_id=$3",
+        r#"SELECT selected, preview_payload, category_id, account_id,
+                  transfer_target_account_id
+           FROM import_preview_rows
+           WHERE id=$1 AND session_id=$2 AND user_id=$3"#,
     )
     .bind(old_preview_id)
     .bind(session_db_id)
@@ -815,10 +960,13 @@ async fn reject_same_batch_transfer_and_dematerialize(
            FROM import_decision_group_members m
            JOIN import_standard_rows sr ON sr.id=m.standard_row_id
            WHERE m.group_id=$1 AND m.member_role IN ('outgoing','incoming')
+             AND sr.session_id=$2 AND sr.user_id=$3
            ORDER BY CASE m.member_role WHEN 'outgoing' THEN 0 ELSE 1 END, m.id
            FOR UPDATE OF sr, m"#,
     )
     .bind(group_id)
+    .bind(session_db_id)
+    .bind(user_id)
     .fetch_all(&mut **tx)
     .await?;
     if members.len() != 2 {
@@ -835,28 +983,54 @@ async fn reject_same_batch_transfer_and_dematerialize(
         let amount_cents: i64 = member.try_get("amount_cents")?;
         let direction: String = member.try_get("direction")?;
         let transaction_type: String = member.try_get("transaction_type")?;
-        let merchant: String = member.try_get("merchant")?;
-        let payment_method: String = member.try_get("payment_method")?;
-        let description: String = member.try_get("description")?;
+        let merchant = member
+            .try_get::<Option<String>, _>("merchant")?
+            .unwrap_or_default();
+        let payment_method = member
+            .try_get::<Option<String>, _>("payment_method")?
+            .unwrap_or_default();
+        let description = member
+            .try_get::<Option<String>, _>("description")?
+            .unwrap_or_default();
         let parser_payload: Value = member.try_get("parser_payload")?;
         let outgoing = role == "outgoing";
         let keep_category =
             outgoing && manual_fields.get("category_id").and_then(Value::as_bool) == Some(true);
-        let keep_account = outgoing
+        let keep_source_account = outgoing
             && manual_fields
                 .get("source_account_id")
                 .and_then(Value::as_bool)
                 == Some(true);
-        let category_id = keep_category
-            .then(|| old_payload.get("category_id").and_then(Value::as_i64))
-            .flatten();
-        let account_id = keep_account
-            .then(|| {
-                old_payload
-                    .get("preview_source_account_id")
-                    .and_then(Value::as_i64)
+        let keep_destination_as_incoming_source = !outgoing
+            && manual_fields
+                .get("destination_account_id")
+                .and_then(Value::as_bool)
+                == Some(true);
+        let category_id = if keep_category {
+            old.try_get::<Option<i64>, _>("category_id")?
+        } else {
+            None
+        };
+        let account_id = if keep_source_account {
+            old.try_get::<Option<i64>, _>("account_id")?
+        } else if keep_destination_as_incoming_source {
+            old.try_get::<Option<i64>, _>("transfer_target_account_id")?
+        } else {
+            None
+        };
+        let replacement_manual_fields = if outgoing {
+            json!({
+                "category_id": keep_category,
+                "source_account_id": keep_source_account,
+                "destination_account_id": false
             })
-            .flatten();
+        } else {
+            json!({
+                "category_id": false,
+                "source_account_id": keep_destination_as_incoming_source,
+                "destination_account_id": false
+            })
+        };
         let preview_type = if direction == "income" {
             "收入"
         } else {
@@ -882,7 +1056,12 @@ async fn reject_same_batch_transfer_and_dematerialize(
             "dedup_type": null,
             "dedup_source_ids": [standard_row_id],
             "preview_matching_feedback": {
-                "annotation": {"manual_fields": if outgoing { manual_fields.clone() } else { json!({}) }},
+                "annotation": {
+                    "is_manually_annotated": keep_category
+                        || keep_source_account
+                        || keep_destination_as_incoming_source,
+                    "manual_fields": replacement_manual_fields
+                },
                 "transfer": {"state": "rejected", "review_status": "rejected", "suppressed_group_id": group_id}
             }
         });
@@ -932,8 +1111,8 @@ async fn reject_same_batch_transfer_and_dematerialize(
         .bind(user_id)
         .execute(&mut **tx)
         .await?;
-    sqlx::query("UPDATE import_decision_groups SET base_preview_row_id=$1, signal_payload=jsonb_set(jsonb_set(signal_payload, '{suppressed}', 'true'::jsonb, true), '{reclassification}', jsonb_build_object('status','pending','attempts',0,'preview_ids',to_jsonb($2::bigint[])), true) WHERE id=$3")
-        .bind(new_ids.first().copied()).bind(&new_ids).bind(group_id).execute(&mut **tx).await?;
+    sqlx::query("UPDATE import_decision_groups SET base_preview_row_id=$1, signal_payload=jsonb_set(jsonb_set(signal_payload, '{suppressed}', 'true'::jsonb, true), '{reclassification}', jsonb_build_object('status','pending','attempts',0,'preview_ids',to_jsonb($2::bigint[])), true) WHERE id=$3 AND session_id=$4 AND user_id=$5")
+        .bind(new_ids.first().copied()).bind(&new_ids).bind(group_id).bind(session_db_id).bind(user_id).execute(&mut **tx).await?;
     sqlx::query("UPDATE import_sessions SET total_preview=(SELECT count(*) FROM import_preview_rows WHERE session_id=$1 AND user_id=$2), version=version+1, updated_at=now() WHERE id=$1 AND user_id=$2")
         .bind(session_db_id).bind(user_id).execute(&mut **tx).await?;
     Ok(ImportDecisionGroupMutation {

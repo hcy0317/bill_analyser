@@ -55,6 +55,10 @@ name = "import_staging"
 path = "../../../tests/backend/db/import_staging.rs"
 
 [[test]]
+name = "preview_metadata_postgres"
+path = "../../../tests/backend/db/preview_metadata_postgres.rs"
+
+[[test]]
 name = "statistics_postgres"
 path = "../../../tests/backend/db/statistics_postgres.rs"
 

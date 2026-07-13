@@ -2,12 +2,17 @@ fn apply_identity_validation_to_draft(
     draft: &mut ImportPreviewDraft,
     identity_maps: &ImportIdentityMaps,
 ) {
+    let manual_fields = draft
+        .preview_matching_feedback
+        .pointer("/annotation/manual_fields")
+        .cloned();
     let issues = normalize_identity_values(
         &draft.preview_type,
         &mut draft.category_id,
         &mut draft.preview_source_account_id,
         &mut draft.preview_destination_account_id,
         identity_maps,
+        manual_fields.as_ref(),
     );
     set_identity_validation_feedback(&mut draft.preview_matching_feedback, &issues);
     if !issues.is_empty() {
@@ -20,12 +25,17 @@ fn apply_identity_validation_to_preview(
     payload: &mut Value,
     identity_maps: &ImportIdentityMaps,
 ) {
+    let manual_fields = preview
+        .preview_matching_feedback
+        .pointer("/annotation/manual_fields")
+        .cloned();
     let issues = normalize_identity_values(
         &preview.preview_type,
         &mut preview.category_id,
         &mut preview.preview_source_account_id,
         &mut preview.preview_destination_account_id,
         identity_maps,
+        manual_fields.as_ref(),
     );
     payload_set(
         payload,
@@ -64,6 +74,7 @@ fn normalize_identity_values(
     source_account_id: &mut Option<i64>,
     destination_account_id: &mut Option<i64>,
     identity_maps: &ImportIdentityMaps,
+    manual_fields: Option<&Value>,
 ) -> Vec<Value> {
     let mut issues = Vec::new();
     if preview_category_required(preview_type) {
@@ -71,6 +82,7 @@ fn normalize_identity_values(
             Some(id) if id > 0 => match identity_maps.active_categories.get(&id) {
                 Some(category_type)
                     if category_type_matches_preview_type(*category_type, preview_type) => {}
+                Some(_) if manual_identity_field_owned(manual_fields, "category_id") => {}
                 Some(_) => {
                     issues.push(identity_issue("category_id", "type_mismatch", Some(id)));
                     *category_id = None;
@@ -167,6 +179,13 @@ fn normalize_identity_values(
     issues
 }
 
+fn manual_identity_field_owned(manual_fields: Option<&Value>, field: &str) -> bool {
+    manual_fields
+        .and_then(|fields| fields.get(field))
+        .and_then(Value::as_bool)
+        == Some(true)
+}
+
 fn identity_issue(field: &str, reason: &str, value: Option<i64>) -> Value {
     json!({
         "field": field,
@@ -204,14 +223,15 @@ fn synchronize_identity_annotation(
     let Some(annotation) = annotation.as_object_mut() else {
         return;
     };
-    let identity_status = issues.first().and_then(|issue| {
-        match issue.get("field").and_then(Value::as_str) {
-            Some("category_id") => Some("missing_category"),
-            Some("source_account_id") => Some("missing_source_account"),
-            Some("destination_account_id") => Some("missing_destination_account"),
-            _ => None,
-        }
-    });
+    let identity_status =
+        issues
+            .first()
+            .and_then(|issue| match issue.get("field").and_then(Value::as_str) {
+                Some("category_id") => Some("missing_category"),
+                Some("source_account_id") => Some("missing_source_account"),
+                Some("destination_account_id") => Some("missing_destination_account"),
+                _ => None,
+            });
     let current_status = ["status", "type", "reason", "review_status"]
         .into_iter()
         .find_map(|key| annotation.get(key).and_then(Value::as_str));
@@ -260,12 +280,16 @@ fn preview_identity_error_messages(
     let mut category_id = preview.category_id;
     let mut source_account_id = preview.preview_source_account_id;
     let mut destination_account_id = preview.preview_destination_account_id;
+    let manual_fields = preview
+        .preview_matching_feedback
+        .pointer("/annotation/manual_fields");
     normalize_identity_values(
         &preview.preview_type,
         &mut category_id,
         &mut source_account_id,
         &mut destination_account_id,
         identity_maps,
+        manual_fields,
     )
     .into_iter()
     .map(|issue| {

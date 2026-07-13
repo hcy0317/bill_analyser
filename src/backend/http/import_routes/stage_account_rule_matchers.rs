@@ -26,7 +26,9 @@ fn apply_transfer_account_rule_match(
     .cloned();
 
     let mut changed = false;
-    if draft.preview_source_account_id.is_none() {
+    if draft.preview_source_account_id.is_none()
+        && !preview_manual_identity_field_owned(draft, "source_account_id")
+    {
         let context = transfer_account_rule_context(draft, outgoing.as_ref(), true);
         if let Some(rule_match) = valid_account_rule_match(
             rules,
@@ -41,7 +43,9 @@ fn apply_transfer_account_rule_match(
         }
     }
 
-    if draft.preview_destination_account_id.is_none() {
+    if draft.preview_destination_account_id.is_none()
+        && !preview_manual_identity_field_owned(draft, "destination_account_id")
+    {
         let context = transfer_account_rule_context(draft, incoming.as_ref(), false);
         if let Some(rule_match) = valid_account_rule_match(
             rules,
@@ -74,7 +78,9 @@ fn apply_investment_account_rule_match(
     }
 
     let mut changed = false;
-    if draft.preview_source_account_id.is_none() {
+    if draft.preview_source_account_id.is_none()
+        && !preview_manual_identity_field_owned(draft, "source_account_id")
+    {
         let context = investment_source_account_rule_context(draft);
         if let Some(rule_match) = valid_account_rule_match(
             rules,
@@ -89,7 +95,9 @@ fn apply_investment_account_rule_match(
         }
     }
 
-    if draft.preview_destination_account_id.is_none() {
+    if draft.preview_destination_account_id.is_none()
+        && !preview_manual_identity_field_owned(draft, "destination_account_id")
+    {
         let counterparty_context = investment_counterparty_account_rule_context(draft);
         let matched = valid_account_rule_match(
             rules,
@@ -126,7 +134,10 @@ fn apply_standard_account_rule_match(
     rules: &[CompiledAccountRuleCandidate],
     accounts: &[ImportIntelligenceAccount],
 ) -> bool {
-    if rules.is_empty() || draft.preview_source_account_id.is_some() {
+    if rules.is_empty()
+        || draft.preview_source_account_id.is_some()
+        || preview_manual_identity_field_owned(draft, "source_account_id")
+    {
         return false;
     }
 
@@ -432,9 +443,7 @@ mod account_rule_matcher_tests {
         }
     }
 
-    fn compiled_rules(
-        rules: &[AccountRuleCandidate],
-    ) -> Vec<CompiledAccountRuleCandidate> {
+    fn compiled_rules(rules: &[AccountRuleCandidate]) -> Vec<CompiledAccountRuleCandidate> {
         compile_account_rule_candidates(rules)
     }
 
@@ -517,5 +526,129 @@ mod account_rule_matcher_tests {
             &[],
             &[]
         ));
+    }
+
+    #[test]
+    fn transfer_rules_resolve_distinct_source_and_destination_accounts() {
+        let mut draft = ImportPreviewDraft {
+            preview_type: "转账".to_string(),
+            preview_matching_feedback: json!({
+                "transfer": {
+                    "source_chain": [
+                        {
+                            "role": "outgoing",
+                            "counterparty": "转出账户标记",
+                            "description": "转出账户标记"
+                        },
+                        {
+                            "role": "incoming",
+                            "counterparty": "转入账户标记",
+                            "description": "转入账户标记"
+                        }
+                    ]
+                }
+            }),
+            ..ImportPreviewDraft::default()
+        };
+        let rules = compiled_rules(&[
+            candidate(11, "OR={转出账户标记}"),
+            candidate(22, "OR={转入账户标记}"),
+        ]);
+        let accounts = vec![account(11, "转出账户"), account(22, "转入账户")];
+
+        assert!(apply_transfer_account_rule_match(
+            &mut draft, &rules, &accounts
+        ));
+
+        assert_eq!(draft.preview_source_account_id, Some(11));
+        assert_eq!(draft.preview_destination_account_id, Some(22));
+        assert_eq!(
+            draft
+                .preview_matching_feedback
+                .pointer("/account_rule/source/account_id"),
+            Some(&json!(11))
+        );
+        assert_eq!(
+            draft
+                .preview_matching_feedback
+                .pointer("/account_rule/destination/account_id"),
+            Some(&json!(22))
+        );
+        assert_eq!(
+            draft
+                .preview_matching_feedback
+                .pointer("/transfer/account_resolution"),
+            Some(&json!("account_rules"))
+        );
+    }
+
+    #[test]
+    fn investment_rules_resolve_payment_source_and_counterparty_investment_account() {
+        let mut draft = ImportPreviewDraft {
+            preview_type: "投资".to_string(),
+            preview_counterparty: "基金平台标记".to_string(),
+            preview_payment_method: "扣款账户标记".to_string(),
+            preview_description: "定投计划".to_string(),
+            ..ImportPreviewDraft::default()
+        };
+        let rules = compiled_rules(&[
+            candidate(31, "OR={扣款账户标记}"),
+            candidate(32, "OR={基金平台标记}"),
+        ]);
+        let accounts = vec![account(31, "扣款账户"), account(32, "基金账户")];
+
+        assert!(apply_investment_account_rule_match(
+            &mut draft, &rules, &accounts
+        ));
+
+        assert_eq!(draft.preview_source_account_id, Some(31));
+        assert_eq!(draft.preview_destination_account_id, Some(32));
+        assert_eq!(
+            draft
+                .preview_matching_feedback
+                .pointer("/account_rule/source/account_id"),
+            Some(&json!(31))
+        );
+        assert_eq!(
+            draft
+                .preview_matching_feedback
+                .pointer("/account_rule/investment/account_id"),
+            Some(&json!(32))
+        );
+    }
+
+    #[test]
+    fn manual_or_out_of_scope_accounts_are_never_overwritten() {
+        let rules = compiled_rules(&[candidate(42, "OR={受保护渠道}")]);
+        let accounts = vec![account(7, "当前用户账户")];
+        let mut manual = ImportPreviewDraft {
+            preview_type: "支出".to_string(),
+            preview_payment_method: "受保护渠道".to_string(),
+            preview_matching_feedback: json!({
+                "annotation": {
+                    "manual_fields": {"source_account_id": true}
+                }
+            }),
+            ..ImportPreviewDraft::default()
+        };
+
+        assert!(!apply_standard_account_rule_match(
+            &mut manual,
+            &rules,
+            &accounts
+        ));
+        assert_eq!(manual.preview_source_account_id, None);
+
+        let mut out_of_scope = ImportPreviewDraft {
+            preview_type: "支出".to_string(),
+            preview_payment_method: "受保护渠道".to_string(),
+            ..ImportPreviewDraft::default()
+        };
+        assert!(!apply_standard_account_rule_match(
+            &mut out_of_scope,
+            &rules,
+            &accounts
+        ));
+        assert_eq!(out_of_scope.preview_source_account_id, None);
     }
 }

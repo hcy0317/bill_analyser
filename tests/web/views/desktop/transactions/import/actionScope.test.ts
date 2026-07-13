@@ -2,7 +2,8 @@ import { describe, expect, test } from '@jest/globals';
 
 import {
     buildImportPreviewActionScope,
-    hashImportPreviewActionFilters
+    hashImportPreviewActionFilters,
+    hashImportPreviewSelectionIds
 } from '@/views/desktop/transactions/import/actionScope.ts';
 
 describe('import preview action scope', () => {
@@ -14,11 +15,21 @@ describe('import preview action scope', () => {
         })).toEqual({ kind: 'selected', selection_hash: 'fnv1a32:selection' });
     });
 
+    test('uses the Rust-compatible ordered preview ID snapshot hash', () => {
+        expect(hashImportPreviewSelectionIds([102, 101, 102, 0, -1])).toBe('fnv1a32:8d9efffe');
+        expect(hashImportPreviewSelectionIds([])).toBe('fnv1a32:811c9dc5');
+    });
+
     test('builds a canonical all-matching scope from the actual filter object', () => {
         const scope = buildImportPreviewActionScope({
             selectedCount: 0,
             selectionHash: 'ignored',
-            filters: { minDatetime: '2026-07-01 00:00:00', signal: 'learning', description: 'coffee' }
+            filters: {
+                minDatetime: ' 2026-07-01 00:00:00 ',
+                account: '   ',
+                signal: ' learning ',
+                description: ' coffee '
+            }
         });
 
         expect(scope.kind).toBe('all_matching');

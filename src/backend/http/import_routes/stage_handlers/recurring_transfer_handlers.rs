@@ -227,24 +227,42 @@ pub async fn import_decision_group_runtime_handler(
     }
     match apply_import_decision_group_command(runtime.connection(), user_id, &command) {
         Ok(ImportDecisionGroupCommandResult::Applied(mut result)) => {
-            if !result.upserted_preview_items.is_empty() {
-                match reclassify_dematerialized_preview_items(
-                    &mut runtime, &command.session_id, user_id, command.group_id,
-                    &command.operation_id, &result.upserted_preview_ids,
-                ).await {
-                    Ok(items) => result.upserted_preview_items = items,
-                    Err(bill_analyser_db::DbError::InvalidOperation(message)) if message.contains("reclassification pending") =>
-                        return route_response(import_v2_error_response(409, "Decision group reclassification is pending")),
-                    Err(error) => return route_response(db_error_response(error)),
+            let canonical_only = result.upserted_preview_items.is_empty();
+            match decision_group_response_items(
+                &mut runtime,
+                &command.session_id,
+                user_id,
+                command.group_id,
+                &command.operation_id,
+                &result.upserted_preview_ids,
+                canonical_only,
+            )
+            .await
+            {
+                Ok(items) => result.upserted_preview_items = items,
+                Err(bill_analyser_db::DbError::InvalidOperation(message))
+                    if message.contains("reclassification pending") =>
+                {
+                    return route_response(import_v2_error_response(
+                        409,
+                        "Decision group reclassification is pending",
+                    ));
                 }
+                Err(error) => return route_response(db_error_response(error)),
             }
+            let replacement_removed_ids = if canonical_only {
+                result.upserted_preview_ids.clone()
+            } else {
+                result.removed_preview_ids.clone()
+            };
             route_response(import_v2_data_response(json!({
+                "sessionId": command.session_id,
                 "groupId": result.group_id,
                 "groupVersion": result.group_version,
                 "decisionStatus": result.decision_status,
                 "removed": result.removed_preview_ids,
                 "upserted": result.upserted_preview_ids,
-                "removedPreviewIds": result.removed_preview_ids,
+                "removedPreviewIds": replacement_removed_ids,
                 "upsertedPreviewItems": result.upserted_preview_items,
             })))
         }
@@ -365,35 +383,46 @@ pub async fn preview_transfer_decision_runtime_handler(
         group_id: group.id,
         decision: decision_name(decision).to_string(),
         expected_group_version: group.version,
-        expected_preview_versions: group
-            .members
-            .iter()
-            .filter_map(|member| Some(ImportDecisionPreviewVersion {
-                preview_row_id: member.preview_row_id?,
-                version: member.version,
-            }))
-            .collect(),
+        expected_preview_versions: decision_group_preview_versions(group),
     };
     match apply_import_decision_group_command(runtime.connection(), user_id, &command) {
         Ok(ImportDecisionGroupCommandResult::Applied(mut result)) => {
-            if !result.upserted_preview_items.is_empty() {
-                match reclassify_dematerialized_preview_items(
-                    &mut runtime, &preview.session_id, user_id, command.group_id,
-                    &command.operation_id, &result.upserted_preview_ids,
-                ).await {
-                    Ok(items) => result.upserted_preview_items = items,
-                    Err(bill_analyser_db::DbError::InvalidOperation(message)) if message.contains("reclassification pending") =>
-                        return route_response(import_v2_error_response(409, "Decision group reclassification is pending")),
-                    Err(error) => return route_response(db_error_response(error)),
+            let canonical_only = result.upserted_preview_items.is_empty();
+            match decision_group_response_items(
+                &mut runtime,
+                &preview.session_id,
+                user_id,
+                command.group_id,
+                &command.operation_id,
+                &result.upserted_preview_ids,
+                canonical_only,
+            )
+            .await
+            {
+                Ok(items) => result.upserted_preview_items = items,
+                Err(bill_analyser_db::DbError::InvalidOperation(message))
+                    if message.contains("reclassification pending") =>
+                {
+                    return route_response(import_v2_error_response(
+                        409,
+                        "Decision group reclassification is pending",
+                    ));
                 }
+                Err(error) => return route_response(db_error_response(error)),
             }
+            let replacement_removed_ids = if canonical_only {
+                result.upserted_preview_ids.clone()
+            } else {
+                result.removed_preview_ids.clone()
+            };
             route_response(import_v2_data_response(json!({
                 "decision": decision_name(decision),
+                "sessionId": preview.session_id,
                 "groupId": result.group_id,
                 "groupVersion": result.group_version,
                 "removed": result.removed_preview_ids,
                 "upserted": result.upserted_preview_ids,
-                "removedPreviewIds": result.removed_preview_ids,
+                "removedPreviewIds": replacement_removed_ids,
                 "upsertedPreviewItems": result.upserted_preview_items,
             })))
         },
@@ -405,6 +434,59 @@ pub async fn preview_transfer_decision_runtime_handler(
             route_response(import_v2_error_response(404, "Import session not found")),
         Err(error) => route_response(db_error_response(error)),
     }
+}
+
+fn decision_group_preview_versions(
+    group: &bill_analyser_db::ImportDecisionGroupRow,
+) -> Vec<ImportDecisionPreviewVersion> {
+    group
+        .members
+        .iter()
+        .filter_map(|member| Some((member.preview_row_id?, member.version)))
+        .collect::<std::collections::BTreeMap<_, _>>()
+        .into_iter()
+        .map(|(preview_row_id, version)| ImportDecisionPreviewVersion {
+            preview_row_id,
+            version,
+        })
+        .collect()
+}
+
+async fn decision_group_response_items(
+    runtime: &mut ImportRuntime,
+    session_id: &str,
+    user_id: UserId,
+    group_id: i64,
+    operation_id: &str,
+    preview_ids: &[i64],
+    load_canonical_only: bool,
+) -> Result<Vec<Value>, bill_analyser_db::DbError> {
+    if !load_canonical_only {
+        return reclassify_dematerialized_preview_items(
+            runtime,
+            session_id,
+            user_id,
+            group_id,
+            operation_id,
+            preview_ids,
+        )
+        .await;
+    }
+    let expected_ids = preview_ids
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+    let items = get_preview_by_session(runtime.connection(), session_id, user_id, false)?
+        .into_iter()
+        .filter(|row| expected_ids.contains(&row.id))
+        .map(preview_row_to_value)
+        .collect::<Vec<_>>();
+    if items.len() != expected_ids.len() {
+        return Err(bill_analyser_db::DbError::InvalidOperation(
+            "decision group canonical preview state is incomplete".into(),
+        ));
+    }
+    Ok(items)
 }
 
 fn unique_legacy_transfer_group(

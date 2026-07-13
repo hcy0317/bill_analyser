@@ -25,7 +25,9 @@ fn preview_sql_query_builder_covers_server_filter_and_sort_contract() {
     assert!(sql.contains("p.account_id IS NULL"));
     assert!(sql.contains("COALESCE(NULLIF(LOWER("));
     assert!(sql.contains("preview_matching_feedback,learning,review_status"));
-    assert!(!sql.contains("preview_matching_feedback,transfer"));
+    assert!(sql.contains("preview_matching_feedback' ? 'learning'"));
+    assert!(sql.contains("preview_matching_feedback' ? 'transfer'"));
+    assert!(sql.contains("learning_level"));
     assert!(!sql.contains("preview_matching_feedback')::text ILIKE"));
     assert!(sql.contains("ORDER BY p.amount_cents DESC"));
     assert!(sql.contains("LIMIT"));
@@ -59,7 +61,9 @@ fn preview_sql_query_builder_covers_none_category_and_account_id_filters() {
     assert!(sql.contains("p.account_id = "));
     assert!(sql.contains("p.transfer_target_account_id = "));
     assert!(sql.contains("preview_matching_feedback' ? 'learning'"));
-    assert!(sql.contains("preview_matching_feedback' ? 'transfer'"));
+    assert!(sql.contains("learning_level"));
+    assert!(sql.contains("candidate_type"));
+    assert!(sql.contains("suppressed"));
     assert!(!sql.contains("preview_matching_feedback')::text ILIKE"));
     assert!(sql.contains("CASE lower(p.transaction_type)"));
 }
@@ -78,8 +82,12 @@ fn preview_sql_learning_filter_includes_transfer_learning_level() {
 
     let sql = query.build().sql().to_string();
     assert!(sql.contains("preview_matching_feedback' ? 'learning'"));
-    assert!(sql.contains("preview_matching_feedback' ? 'transfer'"));
     assert!(sql.contains("learning_level"));
+    assert!(sql.contains("candidate_type"));
+    assert!(sql.contains("suppressed"));
+    assert!(sql.contains("yellow"));
+    assert!(sql.contains("green"));
+    assert!(sql.contains("blue"));
 }
 
 #[test]
@@ -123,7 +131,8 @@ fn preview_sql_query_builder_filters_transfer_by_feedback_signal_only() {
     assert!(sql.contains("preview_matching_feedback' ? 'transfer'"));
     assert!(sql.contains("review_status"));
     assert!(sql.contains("candidate_type"));
-    assert!(sql.contains("= 'pending' OR ("));
+    assert!(sql.contains("IN ('pending', 'accepted', 'auto_applied', 'auto-applied') OR ("));
+    assert!(!sql.contains("IN ('pending', 'accepted', 'rejected'"));
     assert!(sql.contains("= '' AND LOWER"));
     assert!(sql.contains("jsonb_typeof"));
     assert!(sql.contains("candidate_type}') = 'string'"));
@@ -449,4 +458,14 @@ fn preview_sort_accepts_frontend_server_paged_keys() {
         rows.iter().map(|row| row.id).collect::<Vec<_>>(),
         vec![1, 2]
     );
+}
+#[test]
+fn database_counts_reject_negative_values_instead_of_returning_sentinels() {
+    assert_eq!(preview_metadata_database_count(3, "total_count").unwrap(), 3);
+    assert!(preview_metadata_database_count(-1, "total_count").is_err());
+    assert_eq!(
+        decision_group_database_count(2, "preview member").unwrap(),
+        2
+    );
+    assert!(decision_group_database_count(-1, "preview member").is_err());
 }

@@ -36,6 +36,9 @@ use crate::{
 const LLM_MEMORY_PROMPT_TEXT_MAX_BYTES: usize = 16_384;
 const IMPORT_STAGING_BULK_INSERT_CHUNK_SIZE: usize = 500;
 const IMPORT_PREVIEW_FACET_LIMIT: i64 = 100;
+const IMPORT_PREVIEW_TRANSFER_LEARNING_LEVELS: &[&str] = &["yellow", "green", "blue"];
+const IMPORT_PREVIEW_TRANSFER_VISIBLE_STATUSES: &[&str] =
+    &["pending", "accepted", "auto_applied", "auto-applied"];
 
 include!("import_staging/types.rs");
 include!("import_staging/ledger_types.rs");
@@ -73,6 +76,8 @@ include!("import_staging/tests_identity_validation.rs");
 include!("import_staging/tests_llm.rs");
 #[cfg(test)]
 include!("import_staging/tests_preview_page_confirm.rs");
+#[cfg(test)]
+include!("import_staging/tests_preview_performance_selection.rs");
 #[cfg(test)]
 include!("import_staging/tests_standard_rows.rs");
 #[cfg(test)]

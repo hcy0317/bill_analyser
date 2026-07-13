@@ -291,7 +291,7 @@ fn preview_transfer_signal_matches(row: &ImportPreviewRow) -> bool {
     if matches!(resolved_status.as_str(), "none" | "suppressed") {
         return false;
     }
-    if resolved_status == "pending" {
+    if IMPORT_PREVIEW_TRANSFER_VISIBLE_STATUSES.contains(&resolved_status.as_str()) {
         return true;
     }
     if !resolved_status.is_empty() {
@@ -321,7 +321,41 @@ fn preview_recommendation_signal_matches(row: &ImportPreviewRow) -> bool {
     import_preview_recommendation_feedback_family_is_meaningful(
         &row.preview_matching_feedback,
         "learning",
-    )
+    ) || preview_transfer_learning_signal_matches(row)
+}
+
+fn preview_transfer_learning_signal_matches(row: &ImportPreviewRow) -> bool {
+    let Some(transfer) = row
+        .preview_matching_feedback
+        .get("transfer")
+        .and_then(Value::as_object)
+    else {
+        return false;
+    };
+    if transfer
+        .get("suppressed")
+        .map(import_preview_signal_value_is_truthy)
+        .unwrap_or(false)
+    {
+        return false;
+    }
+    let learning_level = transfer
+        .get("learning_level")
+        .and_then(Value::as_str)
+        .map(trim_import_preview_signal_text)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !IMPORT_PREVIEW_TRANSFER_LEARNING_LEVELS.contains(&learning_level.as_str()) {
+        return false;
+    }
+    let has_candidate = transfer
+        .get("candidate_type")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !trim_import_preview_signal_text(value).is_empty());
+    let status = resolve_first_nonempty_status(transfer);
+    has_candidate
+        && !status.is_empty()
+        && !IMPORT_PREVIEW_SIGNAL_SUPPRESSED_STATUSES.contains(&status.as_str())
 }
 
 fn preview_history_signal_matches(row: &ImportPreviewRow) -> bool {

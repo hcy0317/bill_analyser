@@ -6,21 +6,19 @@ function readSource(relativePath: string): string {
 }
 
 describe('desktop transaction category add button contract', () => {
-    test('header add action dispatches by current category level without menu items or icon', () => {
+    test('header exposes separate primary and secondary category actions', () => {
         const facade = readSource('src/views/desktop/categories/ListPage.vue');
         const template = readSource('src/views/desktop/categories/list/ListPage.template.html');
         const logic = readSource('src/views/desktop/categories/list/useCategoryListPage.ts');
         const source = `${facade}\n${template}\n${logic}`;
-        const toolbarAddButton = template.match(/<v-btn class="ms-3"[\s\S]*?\{\{ tt\('Add'\) \}\}[\s\S]*?<\/v-btn>/)?.[0] ?? '';
+        const primaryAction = template.match(/<v-btn[^>]*data-testid="desktop\.categories\.action\.add-primary"[\s\S]*?<\/v-btn>/)?.[0] ?? '';
+        const secondaryAction = template.match(/<v-btn[^>]*data-testid="desktop\.categories\.action\.add-secondary"[\s\S]*?<\/v-btn>/)?.[0] ?? '';
 
-        expect(toolbarAddButton).toContain('@click="addCategoryByCurrentSelection"');
-        expect(toolbarAddButton).not.toContain(':prepend-icon');
-        expect(toolbarAddButton).not.toContain('<v-menu');
-        expect(source).not.toContain("tt('Add Primary Category')");
-        expect(source).not.toContain("tt('Add Secondary Category')");
-        expect(source).toContain('function addCategoryByCurrentSelection(): void');
-        expect(source).toContain('if (canAddSecondaryCategory.value)');
-        expect(source).toContain('addSecondaryCategory();');
-        expect(source).toContain('addPrimaryCategory();');
+        expect(primaryAction).toContain('@click="addPrimaryCategory"');
+        expect(primaryAction).toContain("tt('Add Primary Category')");
+        expect(secondaryAction).toContain('@click="addSecondaryCategory"');
+        expect(secondaryAction).toContain("tt('Add Secondary Category')");
+        expect(secondaryAction).toContain('!canAddSecondaryCategory');
+        expect(source).not.toContain('addCategoryByCurrentSelection');
     });
 });

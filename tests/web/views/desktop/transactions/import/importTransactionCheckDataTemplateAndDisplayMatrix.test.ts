@@ -148,7 +148,8 @@ for (const componentPath of [
     '@/views/desktop/transactions/import/dialogs/BatchCreateDialog.vue',
     '@/views/desktop/transactions/import/dialogs/ImportLearningSuggestionDialog.vue',
     '@/views/desktop/categories/list/dialogs/EditDialog.vue',
-    '@/views/desktop/accounts/list/dialogs/EditDialog.vue'
+    '@/views/desktop/accounts/list/dialogs/EditDialog.vue',
+    '@/views/desktop/transactions/list/dialogs/EditDialog.vue'
 ]) {
     jest.mock(componentPath, () => {
         const { defineComponent, h } = jest.requireActual('vue') as any;

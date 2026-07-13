@@ -27,16 +27,32 @@ export function appendPreviewPageFilters(
     searchParams: URLSearchParams,
     filters: ImportPreviewServerQueryFilters | undefined
 ): void {
+    for (const [key, normalizedValue] of Object.entries(normalizePreviewPageFilters(filters))) {
+        searchParams.set(
+            PREVIEW_PAGE_FILTER_PARAM_NAMES[key as keyof ImportPreviewServerQueryFilters],
+            normalizedValue
+        );
+    }
+}
+
+export function normalizePreviewPageFilters(
+    filters: ImportPreviewServerQueryFilters | undefined
+): ImportPreviewServerQueryFilters {
+    const normalizedFilters: ImportPreviewServerQueryFilters = {};
     if (!filters) {
-        return;
+        return normalizedFilters;
     }
 
     for (const [key, value] of Object.entries(filters)) {
         if (typeof value !== 'string') {
             continue;
         }
-        searchParams.set(PREVIEW_PAGE_FILTER_PARAM_NAMES[key as keyof ImportPreviewServerQueryFilters], value);
+        const normalizedValue = value.trim();
+        if (normalizedValue) {
+            normalizedFilters[key as keyof ImportPreviewServerQueryFilters] = normalizedValue;
+        }
     }
+    return normalizedFilters;
 }
 
 export function buildCanonicalPreviewPageRequestKey(

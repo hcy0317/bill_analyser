@@ -173,6 +173,8 @@ pub struct ImportPreviewCounts {
     pub annotations: std::collections::BTreeMap<String, usize>,
     pub signals: std::collections::BTreeMap<String, usize>,
     pub selected: usize,
+    #[serde(default)]
+    pub selected_total: usize,
     pub selected_invalid: usize,
     pub total: usize,
 }

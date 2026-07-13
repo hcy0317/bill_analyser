@@ -22,7 +22,7 @@ export function buildHistoryRewriteDetailLines(
 ): string[] {
     const summary = state.reconciliationHistorySummary;
     if (!summary) {
-        return [normalizeTextValue(state.reconciliationTitle) || HISTORY_REWRITE_NOTICE];
+        return ['历史账单详情暂不可用，可点击查看原账单'];
     }
     const currency = normalizeTextValue(summary.currency).toUpperCase() || 'CNY';
     const amount = options.formatAmountWithCurrency
@@ -36,7 +36,7 @@ export function buildHistoryRewriteDetailLines(
     };
     const route = [
         identityLabel(summary.source_account_name, summary.source_account_status, '账户'),
-        summary.destination_account_status || normalizeTextValue(summary.destination_account_name)
+        summary.destination_account_status === 'deleted' || normalizeTextValue(summary.destination_account_name)
             ? identityLabel(summary.destination_account_name, summary.destination_account_status, '账户')
             : ''
     ]

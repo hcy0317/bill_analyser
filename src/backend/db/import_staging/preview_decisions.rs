@@ -92,39 +92,6 @@ pub fn apply_preview_transfer_decision(
     })
 }
 
-fn set_transfer_decision_state(
-    mut feedback: Value,
-    state: &str,
-    suppressed: bool,
-) -> Value {
-    if !feedback.is_object() {
-        feedback = json!({});
-    }
-    let object = feedback.as_object_mut().expect("feedback object");
-    let mut transfer = object.get("transfer").cloned().unwrap_or_else(|| json!({}));
-    if !transfer.is_object() {
-        transfer = json!({});
-    }
-    let transfer = transfer.as_object_mut().expect("transfer object");
-    transfer.insert("state".to_string(), json!(state));
-    transfer.insert(
-        "review_status".to_string(),
-        json!(if state == "candidate" { "pending" } else { state }),
-    );
-    transfer.insert("suppressed".to_string(), json!(suppressed));
-    transfer.insert(
-        "capabilities".to_string(),
-        match state {
-            "candidate" => json!({"accept": true, "reject": true, "undo": false}),
-            "accepted" => json!({"accept": false, "reject": true, "undo": true}),
-            "auto_applied" => json!({"accept": false, "reject": true, "undo": true}),
-            _ => json!({"accept": false, "reject": false, "undo": true}),
-        },
-    );
-    object.insert("transfer".to_string(), Value::Object(transfer.clone()));
-    feedback
-}
-
 /// 落库周期模板匹配接受/拒绝结果，并同步更新 recurring 相关预览字段。
 pub fn update_preview_recurring_match_decision(
     pool: &PostgresPool,

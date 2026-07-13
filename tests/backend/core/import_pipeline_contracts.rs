@@ -615,7 +615,22 @@ fn lightweight_index_exposes_history_rewrite_fields_from_canonical_projection() 
                 "history_bill_version": 3,
                 "group_key": "hist:9001",
                 "operation_id": "history:legacy-raw-operation-id",
-                "notice": HISTORY_REWRITE_NOTICE
+                "notice": HISTORY_REWRITE_NOTICE,
+                "history_summary": {
+                    "bill_id": 9001,
+                    "date_time": "2026-07-01 09:30:00",
+                    "amount_cents": -1880,
+                    "currency": "CNY",
+                    "category_name": "餐饮 / 早餐",
+                    "category_status": "known",
+                    "source_account_name": "工资卡",
+                    "source_account_status": "known",
+                    "destination_account_name": null,
+                    "destination_account_status": "unknown",
+                    "identity_source": "runtime_current",
+                    "counterparty": "早餐店",
+                    "description": "工作日早餐"
+                }
             }
         }
     });
@@ -655,6 +670,9 @@ fn lightweight_index_exposes_history_rewrite_fields_from_canonical_projection() 
     assert_eq!(index["history_operation_id"], expected_operation_id);
     assert_eq!(index["history_acknowledgement_token"], expected_token);
     assert_eq!(index["history_destructive_ack_required"], true);
+    assert_eq!(index["history_summary"]["category_name"], "餐饮 / 早餐");
+    assert_eq!(index["history_summary"]["source_account_name"], "工资卡");
+    assert_eq!(index["history_summary"]["amount_cents"], -1880);
 }
 
 #[test]

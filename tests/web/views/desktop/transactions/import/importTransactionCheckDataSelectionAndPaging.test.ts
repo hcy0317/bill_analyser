@@ -137,7 +137,8 @@ for (const componentPath of [
     '@/views/desktop/transactions/import/dialogs/BatchCreateDialog.vue',
     '@/views/desktop/transactions/import/dialogs/ImportLearningSuggestionDialog.vue',
     '@/views/desktop/categories/list/dialogs/EditDialog.vue',
-    '@/views/desktop/accounts/list/dialogs/EditDialog.vue'
+    '@/views/desktop/accounts/list/dialogs/EditDialog.vue',
+    '@/views/desktop/transactions/list/dialogs/EditDialog.vue'
 ]) {
     jest.mock(componentPath, () => ({
         __esModule: true,
@@ -282,6 +283,14 @@ describe('desktop import selection, paging, and edit contracts', () => {
             emit.mockClear();
             bindings.emitServerPagedRequest(2, 10);
             expect(emit).not.toHaveBeenCalled();
+
+            bindings.filters.value.signal = ' learning ';
+            bindings.emitServerPagedRequest(2, 10);
+            expect(emit).not.toHaveBeenCalled();
+
+            bindings.emitServerPagedRequest(2, 10, { force: true });
+            expect(emit).toHaveBeenCalledTimes(1);
+            bindings.filters.value.signal = 'learning';
 
             bindings.updatePreviewTableSort([
                 { key: 'parserId', order: 'asc' },
@@ -563,7 +572,8 @@ describe('desktop import selection, paging, and edit contracts', () => {
             expect(emit).toHaveBeenCalledWith('requestPage', 1, 10, {
                 sortBy: null,
                 sortDirection: null,
-                filters: { category: '8' }
+                filters: { category: '8' },
+                replaceActive: true
             });
 
             mockFetch.mockResolvedValueOnce({ ok: false, text: async () => 'selection conflict' });

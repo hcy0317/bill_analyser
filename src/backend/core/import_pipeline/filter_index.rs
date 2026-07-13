@@ -199,6 +199,7 @@ pub struct ImportPreviewFilterIndexItem {
     pub history_operation_id: String,
     pub history_acknowledgement_token: String,
     pub history_destructive_ack_required: bool,
+    pub history_summary: Value,
     pub recurring_template_id: String,
     pub recurring_candidate_count: i64,
     pub recurring_match_reasons: String,
@@ -356,6 +357,11 @@ pub fn build_import_preview_filter_index_item(
             .map(|section| string_field_from_map(section, "acknowledgement_token"))
             .unwrap_or_default(),
         history_destructive_ack_required,
+        history_summary: reconciliation
+            .and_then(|section| section.get("history_summary"))
+            .filter(|summary| summary.is_object())
+            .cloned()
+            .unwrap_or(Value::Null),
         recurring_template_id: normalize_id_text(preview_item.get("preview_recurring_id")),
         recurring_candidate_count: integer_field_from_map(
             preview_item,

@@ -403,8 +403,8 @@ fn preview_learning_first_nonempty_status_authority() {
         ("learning:all_empty", &j4, false),
         // transfer: review_status=pending → visible (existing domain rule)
         ("transfer:review_pending", &j5, true),
-        // terminal transfer states remain projected but are not pending filter signals
-        ("transfer:status_accepted", &j6, false),
+        // accepted transfer evidence remains discoverable even though it is no longer actionable
+        ("transfer:status_accepted", &j6, true),
         ("transfer:signal_state_rejected", &j7, false),
     ];
 

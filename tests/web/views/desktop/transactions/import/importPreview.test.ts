@@ -317,6 +317,30 @@ describe('import preview category resolution', () => {
             'missing'
         )).toBe('');
     });
+
+    test('inherits a parent category type and skips fallback children without stable ids', () => {
+        expect(resolveImportPreviewCategoryPath('childWithoutType', {
+            parent: {
+                id: 'parent',
+                name: '父分类',
+                parentId: '0',
+                type: CategoryType.Transfer
+            },
+            childWithoutType: {
+                id: 'childWithoutType',
+                name: '子分类',
+                parentId: 'parent'
+            }
+        })?.type).toBe(CategoryType.Transfer);
+
+        expect(resolveImportPreviewDefaultTransferCategoryId({}, [{
+            name: '账户互转',
+            subCategories: [{ name: '无身份子类' }]
+        }], null)).toBe('');
+        expect(resolveImportPreviewDefaultTransferCategoryId({}, [{
+            name: '无子类账户互转'
+        }], null)).toBe('');
+    });
 });
 
 describe('import preview identity-safe update/query payloads', () => {
@@ -513,7 +537,7 @@ describe('import preview server-paged reset guards', () => {
         expect(parentSource).toContain(':preview-metadata="previewMetadata"');
         expect(parentSource).toContain('preserve_unpatched_selection: serverPagedPreviewMode.value');
         expect(tabSource).toContain('buildServerPreviewQueryFilters()');
-        expect(tabSource).toContain("emit('requestPage', normalizedPage, normalizedPageSize, getCurrentServerPagedRequestOptions());");
+        expect(tabSource).toContain("emit('requestPage', normalizedPage, normalizedPageSize, requestOptions);");
         expect(tabSource).toContain('return serverPagedMode.value ? buildTrackedPreviewUpdates() : buildSelectedPreviewUpdates();');
         expect(tabSource).toContain('previewMetadata.value.counts?.selected_invalid');
         expect(tabSource).not.toContain('/index');

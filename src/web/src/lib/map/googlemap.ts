@@ -9,7 +9,7 @@ import services from '@/lib/services.ts';
 export class GoogleMapProvider implements MapProvider {
     public static GoogleMap: unknown = null;
     public static ControlPosition = {
-        LEFT_TOP: (window.google && window.google.maps && window.google.maps.ControlPosition) ? window.google.maps.ControlPosition.LEFT_TOP : 5
+        LEFT_TOP: resolveGoogleMapsLeftTopControlPosition()
     };
 
     public getWebsite(): string {
@@ -29,7 +29,7 @@ export class GoogleMapProvider implements MapProvider {
             window.onGoogleMapCallback = () => {
                 if (window.google) {
                     GoogleMapProvider.GoogleMap = window.google.maps;
-                    GoogleMapProvider.ControlPosition.LEFT_TOP = (window.google && window.google.maps && window.google.maps.ControlPosition) ? window.google.maps.ControlPosition.LEFT_TOP : 5;
+                    GoogleMapProvider.ControlPosition.LEFT_TOP = resolveGoogleMapsLeftTopControlPosition();
                 }
             };
         }
@@ -40,6 +40,13 @@ export class GoogleMapProvider implements MapProvider {
     public createMapInstance(): MapInstance | null {
         return new GoogleMapInstance();
     }
+}
+
+function resolveGoogleMapsLeftTopControlPosition(): number {
+    if (typeof window === 'undefined') {
+        return 5;
+    }
+    return window.google?.maps?.ControlPosition?.LEFT_TOP ?? 5;
 }
 
 export class GoogleMapInstance implements MapInstance {

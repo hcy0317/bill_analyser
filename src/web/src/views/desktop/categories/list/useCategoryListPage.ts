@@ -202,15 +202,6 @@ export function useDesktopCategoryListPage() {
         });
     }
 
-    function addCategoryByCurrentSelection(): void {
-        if (canAddSecondaryCategory.value) {
-            addSecondaryCategory();
-            return;
-        }
-
-        addPrimaryCategory();
-    }
-
     function edit(category: TransactionCategory): void {
         editDialog.value?.open({
             id: category.id,
@@ -376,7 +367,8 @@ export function useDesktopCategoryListPage() {
         switchAllPrimaryCategories,
         switchPrimaryCategory,
         reload,
-        addCategoryByCurrentSelection,
+        addPrimaryCategory,
+        addSecondaryCategory,
         edit,
         hide,
         remove,

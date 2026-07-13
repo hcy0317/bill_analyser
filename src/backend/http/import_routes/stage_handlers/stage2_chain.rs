@@ -18,8 +18,7 @@ async fn apply_import_intelligence_chain(
         .map(import_intelligence_category_value)
         .collect::<Vec<_>>();
     let category_rules = ImportIntelligenceRuleSet::from_rules(
-        load_import_intelligence_category_rules(connection, user_id_i64, &categories_by_id)
-            .await?,
+        load_import_intelligence_category_rules(connection, user_id_i64, &categories_by_id).await?,
     );
     let accounts = load_import_intelligence_accounts(connection, user_id_i64).await?;
     let account_values = accounts
@@ -44,6 +43,8 @@ async fn apply_import_intelligence_chain(
     };
     for draft in &mut *drafts {
         ensure_base_matching_feedback(draft);
+        canonicalize_manual_category_identity(draft, &categories_by_id);
+        let manual_category = manual_category_identity(draft);
         let before_category = (
             draft.preview_type.clone(),
             draft.preview_main_category.clone(),
@@ -52,12 +53,21 @@ async fn apply_import_intelligence_chain(
         let category_started_at = Instant::now();
         let preview_rule_text = import_preview_rule_text(draft);
         demote_unauthorized_transfer_preview(draft, &categories);
-        if is_transfer_protected_preview(draft) {
-            if !apply_transfer_category_rule_match(draft, category_rules.for_type(4), &preview_rule_text) {
+        if manual_category.is_some() {
+            restore_manual_category_identity(draft, manual_category.as_ref());
+        } else if is_transfer_protected_preview(draft) {
+            if !apply_transfer_category_rule_match(
+                draft,
+                category_rules.for_type(4),
+                &preview_rule_text,
+            ) {
                 apply_transfer_default_category(draft, &categories, transfer_category.as_ref());
             }
-        } else if !apply_non_transfer_category_rule_match(draft, &category_rules, &preview_rule_text)
-        {
+        } else if !apply_non_transfer_category_rule_match(
+            draft,
+            &category_rules,
+            &preview_rule_text,
+        ) {
             apply_builtin_category_rule_fallback(draft, &categories, &preview_rule_text);
         }
         stats.elapsed_category_rule_ns += category_started_at.elapsed().as_nanos();
@@ -77,7 +87,7 @@ async fn apply_import_intelligence_chain(
             &categories_by_id,
             &category_values,
             &account_values,
-        ) {
+        )? {
             if result.auto_applied {
                 stats.learning_applied += 1;
             }
@@ -134,6 +144,61 @@ fn apply_account_rule_match_after_semantic_projection(
         Some(2 | 3) => apply_standard_account_rule_match(draft, account_rules, accounts),
         _ => false,
     }
+}
+
+#[derive(Debug, Clone)]
+struct ManualCategoryIdentity {
+    preview_type: String,
+    category_id: Option<i64>,
+    main_category: String,
+    sub_category: String,
+}
+
+fn preview_manual_identity_field_owned(draft: &ImportPreviewDraft, field: &str) -> bool {
+    draft
+        .preview_matching_feedback
+        .pointer(&format!("/annotation/manual_fields/{field}"))
+        .and_then(Value::as_bool)
+        == Some(true)
+}
+
+fn canonicalize_manual_category_identity(
+    draft: &mut ImportPreviewDraft,
+    categories_by_id: &BTreeMap<i64, ImportIntelligenceCategory>,
+) {
+    if !preview_manual_identity_field_owned(draft, "category_id") {
+        return;
+    }
+    let Some(category) = draft
+        .category_id
+        .and_then(|category_id| categories_by_id.get(&category_id))
+    else {
+        return;
+    };
+    draft.preview_main_category = category.main_category.clone();
+    draft.preview_sub_category = category.sub_category.clone();
+}
+
+fn manual_category_identity(draft: &ImportPreviewDraft) -> Option<ManualCategoryIdentity> {
+    preview_manual_identity_field_owned(draft, "category_id").then(|| ManualCategoryIdentity {
+        preview_type: draft.preview_type.clone(),
+        category_id: draft.category_id,
+        main_category: draft.preview_main_category.clone(),
+        sub_category: draft.preview_sub_category.clone(),
+    })
+}
+
+fn restore_manual_category_identity(
+    draft: &mut ImportPreviewDraft,
+    identity: Option<&ManualCategoryIdentity>,
+) {
+    let Some(identity) = identity else {
+        return;
+    };
+    draft.preview_type = identity.preview_type.clone();
+    draft.category_id = identity.category_id;
+    draft.preview_main_category = identity.main_category.clone();
+    draft.preview_sub_category = identity.sub_category.clone();
 }
 
 fn user_id_i64_for_sql(user_id: UserId) -> Result<i64, bill_analyser_db::DbError> {
@@ -377,7 +442,9 @@ async fn load_import_intelligence_recurring_templates(
             Ok(ImportIntelligenceRecurringTemplate {
                 id: row.try_get("id")?,
                 name: row.try_get("name")?,
-                bill_type: row.try_get::<Option<String>, _>("transaction_type")?.unwrap_or_default(),
+                bill_type: row
+                    .try_get::<Option<String>, _>("transaction_type")?
+                    .unwrap_or_default(),
                 amount_cents: amount_minor,
                 account: source_account_id
                     .map(|value| value.to_string())

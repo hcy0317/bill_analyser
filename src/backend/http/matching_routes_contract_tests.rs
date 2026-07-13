@@ -112,16 +112,47 @@ fn stale_preview_actions_keep_conflict_contract_without_resurrecting_removed_sig
         include_str!("../db/import_staging/preview_learning_lifecycle.rs");
     let llm_db_source = include_str!("../db/import_staging/preview_llm.rs");
 
-    assert!(matching_source.contains(
-        "Ok(result) if result.state_conflict => {\n            error_response(StatusCode::CONFLICT, \"Preview state is stale\")"
-    ));
-    assert!(direct_llm_source.contains(
-        "Ok(result) if result.state_conflict => {\n            route_response(import_v2_error_response(409, \"Preview state is stale\"))"
-    ));
-    assert!(direct_llm_source.contains(
-        "if first_value(object, &[\"expectedState\", \"expected_state\"]).is_some()"
-    ));
-    assert!(direct_llm_source.contains("} else {\n        None\n    };"));
+    let matching_conflict_guard = matching_source
+        .find("Ok(result) if result.state_conflict")
+        .expect("matching action state-conflict guard");
+    let matching_conflict_response = matching_source
+        .find("error_response(StatusCode::CONFLICT, \"Preview state is stale\")")
+        .expect("matching action stale-state 409 response");
+    let matching_feedback_projection = matching_source
+        .find("let review_status = preview_action_review_status(")
+        .expect("matching action feedback projection");
+    assert!(
+        matching_conflict_guard < matching_conflict_response
+            && matching_conflict_response < matching_feedback_projection,
+        "state conflicts must return 409 before projecting a replacement signal"
+    );
+
+    let direct_llm_conflict_guard = direct_llm_source
+        .find("Ok(result) if result.state_conflict")
+        .expect("direct LLM state-conflict guard");
+    let direct_llm_conflict_response = direct_llm_source
+        .find("route_response(import_v2_error_response(409, \"Preview state is stale\"))")
+        .expect("direct LLM stale-state 409 response");
+    let direct_llm_success_response = direct_llm_source
+        .find("Ok(result) => route_response(llm_decision_result_response(")
+        .expect("direct LLM success response");
+    assert!(
+        direct_llm_conflict_guard < direct_llm_conflict_response
+            && direct_llm_conflict_response < direct_llm_success_response,
+        "state conflicts must return 409 before the direct LLM success response"
+    );
+    let expected_state_start = direct_llm_source
+        .find("let expected_state = if first_value(object, &[\"expectedState\", \"expected_state\"])")
+        .expect("direct LLM optional expected-state guard");
+    let expected_state_end = direct_llm_source[expected_state_start..]
+        .find("let user_correction =")
+        .map(|offset| expected_state_start + offset)
+        .expect("direct LLM expected-state block end");
+    let compact_expected_state = direct_llm_source[expected_state_start..expected_state_end]
+        .split_whitespace()
+        .collect::<String>();
+    assert!(compact_expected_state.contains("Some(expected_state)"));
+    assert!(compact_expected_state.contains("}else{None};"));
 
     let learning_guard = learning_db_source
         .find("match preview_terminal_action(")

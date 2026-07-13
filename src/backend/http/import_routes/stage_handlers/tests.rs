@@ -33,20 +33,18 @@ mod tests {
 
         assert_eq!(response.status_code, 500);
         assert_eq!(response.body["success"], false);
-        assert_eq!(
-            response.body["error"],
-            "Rust import route runtime DB error"
-        );
+        assert_eq!(response.body["error"], "Rust import route runtime DB error");
     }
 
     #[test]
     fn preview_index_lookup_maps_keep_valid_canonical_identities() {
-        let categories_by_id = preview_index_category_lookup_by_id(vec![ImportIntelligenceCategory {
-            id: 42,
-            type_code: 3,
-            main_category: "食品饮料".to_string(),
-            sub_category: "外卖".to_string(),
-        }]);
+        let categories_by_id =
+            preview_index_category_lookup_by_id(vec![ImportIntelligenceCategory {
+                id: 42,
+                type_code: 3,
+                main_category: "食品饮料".to_string(),
+                sub_category: "外卖".to_string(),
+            }]);
         let accounts_by_id = preview_index_account_lookup_by_id(vec![ImportIntelligenceAccount {
             id: 77,
             name: "支付宝".to_string(),
@@ -185,6 +183,222 @@ mod tests {
         assert_eq!(
             learning_projection_type_for_transfer_authority(Some("收入".to_string()), true),
             None
+        );
+    }
+
+    fn learning_rule(
+        id: i64,
+        composite_hash: String,
+        match_features: BTreeMap<String, String>,
+    ) -> ImportIntelligenceLearningRule {
+        ImportIntelligenceLearningRule {
+            id,
+            parser_id: "learning-test".to_string(),
+            composite_hash,
+            match_features,
+            learned_type: Some("支出".to_string()),
+            learned_category_id: None,
+            learned_source_account_id: Some(81),
+            learned_destination_account_id: Some(82),
+        }
+    }
+
+    #[test]
+    fn learning_projection_respects_manual_identity_and_transfer_account_authority() {
+        let learned_category = category(90, 2, "规则收入", "规则分类");
+        let rule = ImportIntelligenceLearningRule {
+            id: 7,
+            parser_id: "learning-test".to_string(),
+            composite_hash: String::new(),
+            match_features: BTreeMap::new(),
+            learned_type: Some("收入".to_string()),
+            learned_category_id: Some(90),
+            learned_source_account_id: Some(81),
+            learned_destination_account_id: Some(82),
+        };
+        let mut manual = ImportPreviewDraft {
+            preview_type: "支出".to_string(),
+            category_id: Some(10),
+            preview_main_category: "人工支出".to_string(),
+            preview_sub_category: "人工分类".to_string(),
+            preview_source_account_id: Some(11),
+            preview_destination_account_id: Some(12),
+            preview_matching_feedback: json!({
+                "annotation": {
+                    "manual_fields": {
+                        "category_id": true,
+                        "source_account_id": true,
+                        "destination_account_id": true
+                    }
+                }
+            }),
+            ..ImportPreviewDraft::default()
+        };
+
+        apply_learning_rule_projection(
+            &mut manual,
+            Some("收入"),
+            Some(&learned_category),
+            &rule,
+            false,
+        );
+
+        assert_eq!(manual.preview_type, "支出");
+        assert_eq!(manual.category_id, Some(10));
+        assert_eq!(manual.preview_main_category, "人工支出");
+        assert_eq!(manual.preview_source_account_id, Some(11));
+        assert_eq!(manual.preview_destination_account_id, Some(12));
+
+        let transfer_category = category(91, 4, "资金往来", "内部转账");
+        let mut transfer = ImportPreviewDraft {
+            preview_type: "转账".to_string(),
+            preview_source_account_id: Some(21),
+            preview_destination_account_id: Some(22),
+            ..ImportPreviewDraft::default()
+        };
+        apply_learning_rule_projection(
+            &mut transfer,
+            Some("转账"),
+            Some(&transfer_category),
+            &rule,
+            true,
+        );
+        assert_eq!(transfer.category_id, Some(91));
+        assert_eq!(transfer.preview_source_account_id, Some(21));
+        assert_eq!(transfer.preview_destination_account_id, Some(22));
+
+        let mut automatic = ImportPreviewDraft::default();
+        apply_learning_rule_projection(
+            &mut automatic,
+            Some("收入"),
+            Some(&learned_category),
+            &rule,
+            false,
+        );
+        assert_eq!(automatic.preview_type, "收入");
+        assert_eq!(automatic.category_id, Some(90));
+        assert_eq!(automatic.preview_source_account_id, Some(81));
+        assert_eq!(automatic.preview_destination_account_id, Some(82));
+    }
+
+    #[test]
+    fn learning_similarity_requires_counterparty_or_description_anchor() {
+        assert!(learning_similarity_has_semantic_anchor(&json!({
+            "matched_fields": ["payment_method", "counterparty"]
+        })));
+        assert!(!learning_similarity_has_semantic_anchor(&json!({
+            "matched_fields": ["payment_method", 7]
+        })));
+        assert!(!learning_similarity_has_semantic_anchor(&json!({})));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn learning_match_returns_explicit_errors_and_skips_invalid_recommendations() {
+        let Some((state, user_id, _)) = import_postgres_test_state().await else {
+            return;
+        };
+        let runtime = open_runtime(&state).expect("import runtime");
+        let categories = BTreeMap::new();
+        let mut blank = ImportPreviewDraft::default();
+        assert!(apply_learning_rule_match(
+            runtime.connection(),
+            user_id,
+            &mut blank,
+            &[],
+            &categories,
+            &[],
+            &[],
+        )
+        .expect("blank features are not an error")
+        .is_none());
+
+        let mut draft = ImportPreviewDraft {
+            preview_type: "支出".to_string(),
+            preview_parser_id: "learning-test".to_string(),
+            preview_counterparty: "相似商户".to_string(),
+            preview_payment_method: "测试渠道".to_string(),
+            preview_description: "相似描述".to_string(),
+            preview_amount_cents: 1_200,
+            ..ImportPreviewDraft::default()
+        };
+        let features = build_composite_match_features(
+            &draft.preview_parser_id,
+            &draft.preview_counterparty,
+            &draft.preview_description,
+            &draft.preview_payment_method,
+        )
+        .expect("learning features");
+        let similar_rule = learning_rule(41, String::new(), features.clone());
+        assert!(apply_learning_rule_match(
+            runtime.connection(),
+            user_id,
+            &mut draft,
+            &[similar_rule],
+            &categories,
+            &[],
+            &[],
+        )
+        .expect("missing lifecycle skips recommendation")
+        .is_none());
+
+        let exact_rule = learning_rule(42, composite_hash_from_features(&features), features);
+        for invalid_user_id in [-1, 0] {
+            let error = apply_learning_rule_match(
+                runtime.connection(),
+                invalid_user_id,
+                &mut draft.clone(),
+                std::slice::from_ref(&exact_rule),
+                &categories,
+                &[],
+                &[],
+            )
+            .expect_err("invalid user id must propagate as a DB error");
+            assert!(error.to_string().contains("invalid user id"));
+        }
+
+        let mut missing_category_rule = exact_rule.clone();
+        missing_category_rule.learned_category_id = Some(999_999);
+        let mut missing_category = draft.clone();
+        assert!(apply_learning_rule_match(
+            runtime.connection(),
+            user_id,
+            &mut missing_category,
+            &[missing_category_rule],
+            &categories,
+            &[],
+            &[],
+        )
+        .expect("missing category is a skipped recommendation")
+        .is_none());
+        assert_eq!(
+            missing_category
+                .preview_matching_feedback
+                .pointer("/learning/review_status"),
+            Some(&json!("skipped"))
+        );
+
+        let incompatible_category = category(99, 4, "资金往来", "转账");
+        let mut categories = BTreeMap::new();
+        categories.insert(incompatible_category.id, incompatible_category);
+        let mut incompatible_rule = exact_rule;
+        incompatible_rule.learned_category_id = Some(99);
+        let mut incompatible = draft;
+        assert!(apply_learning_rule_match(
+            runtime.connection(),
+            user_id,
+            &mut incompatible,
+            &[incompatible_rule],
+            &categories,
+            &[],
+            &[],
+        )
+        .expect("incompatible category is a skipped recommendation")
+        .is_none());
+        assert_eq!(
+            incompatible
+                .preview_matching_feedback
+                .pointer("/learning/review_status"),
+            Some(&json!("skipped"))
         );
     }
 
@@ -358,7 +572,10 @@ mod tests {
             ..ImportPreviewDraft::default()
         };
 
-        assert!(demote_unauthorized_transfer_preview(&mut draft, &categories));
+        assert!(demote_unauthorized_transfer_preview(
+            &mut draft,
+            &categories
+        ));
 
         assert_eq!(draft.preview_type, "支出");
         assert_eq!(draft.preview_destination_amount_cents, 0);
@@ -419,7 +636,10 @@ mod tests {
             ..ImportPreviewDraft::default()
         };
 
-        assert!(demote_unauthorized_transfer_preview(&mut draft, &categories));
+        assert!(demote_unauthorized_transfer_preview(
+            &mut draft,
+            &categories
+        ));
         assert_eq!(draft.preview_type, "转账");
         assert_eq!(draft.category_id, None);
         assert!(draft.preview_main_category.is_empty());
@@ -481,7 +701,10 @@ mod tests {
         };
         let mut draft = import_preview_draft_from_row(&row);
 
-        assert!(demote_unauthorized_transfer_preview(&mut draft, &categories));
+        assert!(demote_unauthorized_transfer_preview(
+            &mut draft,
+            &categories
+        ));
         let patch = import_preview_patch_from_draft(row.id, &draft);
 
         assert!(patch.changes.iter().any(|(field, value)| {
@@ -735,7 +958,12 @@ mod tests {
         );
 
         let one = transfer_group_fixture(2, 7);
-        assert_eq!(unique_legacy_transfer_group(std::slice::from_ref(&one), 7).unwrap().id, 2);
+        assert_eq!(
+            unique_legacy_transfer_group(std::slice::from_ref(&one), 7)
+                .unwrap()
+                .id,
+            2
+        );
 
         let two = transfer_group_fixture(3, 7);
         assert_eq!(
@@ -746,9 +974,9 @@ mod tests {
 
     #[test]
     fn decision_group_command_parser_validates_complete_cas_token() {
-        let error = decision_group_command_from_object(
-            json!({}).as_object().unwrap(), "s".into(), 1,
-        ).unwrap_err();
+        let error =
+            decision_group_command_from_object(json!({}).as_object().unwrap(), "s".into(), 1)
+                .unwrap_err();
         assert_eq!(error.status_code, 400);
 
         for payload in [
@@ -759,7 +987,12 @@ mod tests {
             json!({"operationId":"op","expectedGroupVersion":1,"expectedPreviewVersions":[{"previewRowId":0,"version":1}]}),
             json!({"operationId":"op","expectedGroupVersion":1,"expectedPreviewVersions":[{"previewRowId":2,"version":1},{"previewRowId":2,"version":1}]}),
         ] {
-            assert_eq!(decision_group_command_from_object(payload.as_object().unwrap(), "s".into(), 1).unwrap_err().status_code, 400);
+            assert_eq!(
+                decision_group_command_from_object(payload.as_object().unwrap(), "s".into(), 1)
+                    .unwrap_err()
+                    .status_code,
+                400
+            );
         }
 
         let payload = json!({
@@ -771,7 +1004,9 @@ mod tests {
                 {"previewRowId":12,"version":5}
             ]
         });
-        let (command, ids) = decision_group_command_from_object(payload.as_object().unwrap(), "session".into(), 9).unwrap();
+        let (command, ids) =
+            decision_group_command_from_object(payload.as_object().unwrap(), "session".into(), 9)
+                .unwrap();
         assert_eq!(command.operation_id, "op-1");
         assert_eq!(command.session_id, "session");
         assert_eq!(command.group_id, 9);
@@ -784,7 +1019,10 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("response body");
-        (status, serde_json::from_slice(&body).expect("JSON response"))
+        (
+            status,
+            serde_json::from_slice(&body).expect("JSON response"),
+        )
     }
 
     fn import_test_headers(user_id: i64) -> HeaderMap {
@@ -831,14 +1069,13 @@ mod tests {
             IMPORT_SESSION_COUNTER.fetch_add(1, Ordering::Relaxed)
         );
         let username = format!("http-import-{nonce}");
-        let user_id: i64 = sqlx::query_scalar(
-            "INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id",
-        )
-        .bind(&username)
-        .bind(format!("{username}@example.test"))
-        .fetch_one(runtime.pool())
-        .await
-        .expect("insert test user");
+        let user_id: i64 =
+            sqlx::query_scalar("INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id")
+                .bind(&username)
+                .bind(format!("{username}@example.test"))
+                .fetch_one(runtime.pool())
+                .await
+                .expect("insert test user");
         let session_id = format!("http-import-session-{nonce}");
         bill_analyser_db::create_import_session(
             runtime.pool(),
@@ -850,6 +1087,492 @@ mod tests {
         )
         .expect("create import session");
         Some((state, user_id, session_id))
+    }
+
+    async fn insert_legacy_same_batch_transfer_fixture(
+        state: &HttpAppState,
+        user_id: i64,
+        session_id: &str,
+    ) -> i64 {
+        let runtime = state
+            .open_postgres_repository_runtime("legacy-transfer-fixture")
+            .expect("postgres runtime");
+        let pool = runtime.pool();
+        let session_db_id: i64 = sqlx::query_scalar(
+            "SELECT id FROM import_sessions WHERE session_key=$1 AND user_id=$2",
+        )
+        .bind(session_id)
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .expect("session database id");
+        let source_id: i64 = sqlx::query_scalar(
+            r#"INSERT INTO import_sources
+               (session_id,user_id,source_index,parser_id,parser_name,feature_signature)
+               VALUES($1,$2,0,'legacy-transfer-fixture','legacy-transfer-fixture','legacy-transfer-fixture')
+               RETURNING id"#,
+        )
+        .bind(session_db_id)
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .expect("insert import source");
+        let mut standard_row_ids = Vec::new();
+        for (source_row_index, direction, amount_cents) in
+            [(0, "expense", -5_000_i64), (1, "income", 5_000_i64)]
+        {
+            standard_row_ids.push(
+                sqlx::query_scalar(
+                    r#"INSERT INTO import_standard_rows
+                       (session_id,source_id,user_id,source_row_index,occurred_at,amount_cents,
+                        direction,transaction_type,merchant,payment_method,description,parser_payload)
+                       VALUES($1,$2,$3,$4,'2026-07-13 09:00:00+08',$5,$6,$6,
+                              'legacy-fixture','legacy-fixture','legacy-fixture',
+                              '{"parser_id":"legacy-transfer-fixture"}'::jsonb)
+                       RETURNING id"#,
+                )
+                .bind(session_db_id)
+                .bind(source_id)
+                .bind(user_id)
+                .bind(source_row_index)
+                .bind(amount_cents)
+                .bind(direction)
+                .fetch_one(pool)
+                .await
+                .expect("insert standard row"),
+            );
+        }
+        let canonical_user = UserId::new(user_id as u64).expect("positive user id");
+        let preview_id = bill_analyser_db::insert_preview_bill(
+            pool,
+            session_id,
+            canonical_user,
+            &ImportPreviewDraft {
+                preview_date: "2026-07-13 09:00:00".into(),
+                preview_type: "转账".into(),
+                preview_amount_cents: 5_000,
+                preview_destination_amount_cents: 5_000,
+                preview_counterparty: "legacy-fixture".into(),
+                preview_payment_method: "legacy-fixture".into(),
+                preview_description: "legacy canonical response".into(),
+                preview_parser_id: "legacy-transfer-fixture".into(),
+                preview_selected: true,
+                preview_matching_feedback: json!({
+                    "transfer": {"state": "pending", "review_status": "pending"}
+                }),
+                ..ImportPreviewDraft::default()
+            },
+        )
+        .expect("insert transfer preview");
+        bill_analyser_db::insert_import_decision_groups_batch(
+            pool,
+            session_id,
+            canonical_user,
+            &[ImportDecisionGroupDraft {
+                group_type: "same_batch_transfer".into(),
+                group_key: format!("legacy-transfer-{preview_id}"),
+                decision_status: "pending".into(),
+                base_preview_row_id: Some(preview_id),
+                signal_payload: json!({"candidate_type": "transfer"}),
+                members: vec![
+                    ImportDecisionGroupMemberDraft {
+                        preview_row_id: Some(preview_id),
+                        standard_row_id: Some(standard_row_ids[0]),
+                        history_bill_id: None,
+                        member_role: "outgoing".into(),
+                        parser_name: "legacy-transfer-fixture".into(),
+                        metadata: json!({}),
+                    },
+                    ImportDecisionGroupMemberDraft {
+                        preview_row_id: Some(preview_id),
+                        standard_row_id: Some(standard_row_ids[1]),
+                        history_bill_id: None,
+                        member_role: "incoming".into(),
+                        parser_name: "legacy-transfer-fixture".into(),
+                        metadata: json!({}),
+                    },
+                ],
+            }],
+        )
+        .expect("insert transfer decision group");
+        preview_id
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn legacy_transfer_accept_clear_returns_session_and_canonical_preview_items() {
+        let Some((state, user_id, session_id)) = import_postgres_test_state().await else {
+            return;
+        };
+        let preview_id =
+            insert_legacy_same_batch_transfer_fixture(&state, user_id, &session_id).await;
+        let headers = import_test_headers(user_id);
+
+        let (accept_status, accept_body) = import_test_response(
+            preview_transfer_decision_runtime_handler(
+                State(state.clone()),
+                Path(preview_id),
+                headers.clone(),
+                Json(json!({
+                    "decision": "accept",
+                    "expectedState": {
+                        "sessionId": session_id,
+                        "type": "转账",
+                        "mainCategory": "",
+                        "subCategory": ""
+                    }
+                })),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(accept_status, StatusCode::OK, "body: {accept_body}");
+        assert_eq!(accept_body["data"]["sessionId"], session_id);
+        assert_eq!(accept_body["data"]["removed"], json!([]));
+        assert_eq!(
+            accept_body["data"]["removedPreviewIds"],
+            json!([preview_id])
+        );
+        assert_eq!(
+            accept_body["data"]["upsertedPreviewItems"]
+                .as_array()
+                .map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(
+            accept_body["data"]["upsertedPreviewItems"][0]["id"],
+            preview_id
+        );
+        assert_eq!(
+            accept_body["data"]["upsertedPreviewItems"][0]["session_id"],
+            session_id
+        );
+        assert_eq!(
+            accept_body["data"]["upsertedPreviewItems"][0]["preview_matching_feedback"]["transfer"]
+                ["review_status"],
+            "accepted"
+        );
+
+        for attempt in 0..2 {
+            let (clear_status, clear_body) = import_test_response(
+                preview_transfer_decision_runtime_handler(
+                    State(state.clone()),
+                    Path(preview_id),
+                    headers.clone(),
+                    Json(json!({
+                        "decision": "clear",
+                        "expectedState": {
+                            "sessionId": session_id,
+                            "type": "转账",
+                            "mainCategory": "",
+                            "subCategory": ""
+                        }
+                    })),
+                )
+                .await,
+            )
+            .await;
+            assert_eq!(
+                clear_status,
+                StatusCode::OK,
+                "attempt {attempt}, body: {clear_body}"
+            );
+            assert_eq!(clear_body["data"]["sessionId"], session_id);
+            assert_eq!(clear_body["data"]["removed"], json!([]));
+            assert_eq!(clear_body["data"]["removedPreviewIds"], json!([preview_id]));
+            assert_eq!(
+                clear_body["data"]["upsertedPreviewItems"]
+                    .as_array()
+                    .map(Vec::len),
+                Some(1)
+            );
+            assert_eq!(
+                clear_body["data"]["upsertedPreviewItems"][0]["id"],
+                preview_id
+            );
+            assert_eq!(
+                clear_body["data"]["upsertedPreviewItems"][0]["preview_matching_feedback"]
+                    ["transfer"]["review_status"],
+                "pending"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn same_batch_transfer_reject_reclassification_preserves_manual_identity_fields() {
+        let Some((state, user_id, session_id)) = import_postgres_test_state().await else {
+            return;
+        };
+        let preview_id =
+            insert_legacy_same_batch_transfer_fixture(&state, user_id, &session_id).await;
+        let runtime = state
+            .open_postgres_repository_runtime("manual-reclassification-fixture")
+            .expect("postgres runtime");
+        let pool = runtime.pool();
+        let canonical_user = UserId::new(user_id as u64).expect("positive user id");
+
+        let manual_category_id: i64 = sqlx::query_scalar(
+            "INSERT INTO categories(user_id,name,category_type,path) VALUES($1,'人工分类','4','人工转账/人工分类') RETURNING id",
+        )
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .expect("manual category");
+        let rule_category_id: i64 = sqlx::query_scalar(
+            "INSERT INTO categories(user_id,name,category_type,path) VALUES($1,'规则分类','3','规则支出/规则分类') RETURNING id",
+        )
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .expect("rule category");
+        let incoming_category_id: i64 = sqlx::query_scalar(
+            "INSERT INTO categories(user_id,name,category_type,path) VALUES($1,'入账规则','2','规则收入/入账规则') RETURNING id",
+        )
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .expect("incoming rule category");
+        let learning_category_id: i64 = sqlx::query_scalar(
+            "INSERT INTO categories(user_id,name,category_type,path) VALUES($1,'学习分类','3','学习支出/学习分类') RETURNING id",
+        )
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .expect("learning category");
+        let mut account_ids = Vec::new();
+        for name in [
+            "人工转出账户",
+            "人工转入账户",
+            "学习转出账户",
+            "学习目标账户",
+        ] {
+            account_ids.push(
+                sqlx::query_scalar(
+                    "INSERT INTO accounts(user_id,name,account_type) VALUES($1,$2,'asset') RETURNING id",
+                )
+                .bind(user_id)
+                .bind(name)
+                .fetch_one(pool)
+                .await
+                .expect("fixture account"),
+            );
+        }
+        let [manual_source_id, manual_destination_id, learning_source_id, learning_destination_id] =
+            account_ids.as_slice()
+        else {
+            panic!("four fixture accounts");
+        };
+
+        let session_db_id: i64 = sqlx::query_scalar(
+            "SELECT id FROM import_sessions WHERE session_key=$1 AND user_id=$2",
+        )
+        .bind(&session_id)
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .expect("session database id");
+        for (direction, marker) in [
+            ("expense", "manual-protected-outgoing"),
+            ("income", "auto-rematch-incoming"),
+        ] {
+            sqlx::query(
+                "UPDATE import_standard_rows SET merchant=$1,payment_method=$1,description=$1 WHERE session_id=$2 AND user_id=$3 AND direction=$4",
+            )
+            .bind(marker)
+            .bind(session_db_id)
+            .bind(user_id)
+            .bind(direction)
+            .execute(pool)
+            .await
+            .expect("specialize standard row features");
+        }
+
+        let manual_patch = ImportPreviewPatch::new(preview_id).with_changes([
+            (
+                ImportPreviewPatchField::ManualAnnotation,
+                ImportPreviewPatchValue::Bool(true),
+            ),
+            (
+                ImportPreviewPatchField::CategoryId,
+                ImportPreviewPatchValue::Integer(manual_category_id),
+            ),
+            (
+                ImportPreviewPatchField::MainCategory,
+                ImportPreviewPatchValue::Text("人工转账".to_string()),
+            ),
+            (
+                ImportPreviewPatchField::SubCategory,
+                ImportPreviewPatchValue::Text("人工分类".to_string()),
+            ),
+            (
+                ImportPreviewPatchField::SourceAccountId,
+                ImportPreviewPatchValue::Integer(*manual_source_id),
+            ),
+            (
+                ImportPreviewPatchField::DestinationAccountId,
+                ImportPreviewPatchValue::Integer(*manual_destination_id),
+            ),
+        ]);
+        assert!(
+            update_preview_bill(pool, &session_id, canonical_user, &manual_patch,)
+                .expect("manual preview patch")
+        );
+        let manually_patched = get_preview_bill_by_id(pool, preview_id, canonical_user)
+            .expect("manual preview lookup")
+            .expect("manually patched preview");
+        assert_eq!(manually_patched.category_id, Some(manual_category_id));
+        assert_eq!(
+            manually_patched
+                .preview_matching_feedback
+                .pointer("/annotation/manual_fields/category_id"),
+            Some(&json!(true))
+        );
+
+        for (category_id, name, expression, priority) in [
+            (
+                rule_category_id,
+                "outgoing overwrite threat",
+                "OR={manual-protected-outgoing}",
+                1,
+            ),
+            (
+                incoming_category_id,
+                "incoming rematch",
+                "OR={auto-rematch-incoming}",
+                2,
+            ),
+        ] {
+            sqlx::query(
+                "INSERT INTO category_rules(user_id,category_id,name,rule_expression,priority,enabled) VALUES($1,$2,$3,jsonb_build_object('expression',$4::text,'regex_enabled',false),$5,true)",
+            )
+            .bind(user_id)
+            .bind(category_id)
+            .bind(name)
+            .bind(expression)
+            .bind(priority)
+            .execute(pool)
+            .await
+            .expect("category rule");
+        }
+
+        let learning_features = build_composite_match_features(
+            "legacy-transfer-fixture",
+            "manual-protected-outgoing",
+            "manual-protected-outgoing",
+            "manual-protected-outgoing",
+        )
+        .expect("learning features");
+        let recommendation_key =
+            build_import_learning_recommendation_key(&ImportLearningRecommendationKeyInput {
+                user_id,
+                recommended_type: "支出".to_string(),
+                recommended_category_id: Some(learning_category_id),
+                recommended_source_account_id: Some(*learning_source_id),
+                recommended_destination_account_id: Some(*learning_destination_id),
+                transaction_type_scope: "支出".to_string(),
+                parser_bucket: "legacy-transfer-fixture".to_string(),
+                counterparty_bucket: "manual-protected-outgoing".to_string(),
+                payment_bucket: "manual-protected-outgoing".to_string(),
+                description_bucket: "manual-protected-outgoing".to_string(),
+                amount_bucket: Some(amount_cents_bucket(Some(&json!(5_000))).to_string()),
+                ..ImportLearningRecommendationKeyInput::default()
+            });
+        sqlx::query(
+            r#"INSERT INTO import_learning_lifecycle(
+                   user_id,recommendation_key,recommendation_type,status,accepted_count,
+                   auto_apply_enabled,metadata
+               ) VALUES($1,$2,'支出','green',3,true,$3)"#,
+        )
+        .bind(user_id)
+        .bind(&recommendation_key)
+        .bind(json!({
+            "parser_id": "legacy-transfer-fixture",
+            "composite_hash": composite_hash_from_features(&learning_features),
+            "match_features": learning_features,
+            "learned_type": "支出",
+            "learned_category_id": learning_category_id,
+            "learned_source_account_id": learning_source_id,
+            "learned_destination_account_id": learning_destination_id
+        }))
+        .execute(pool)
+        .await
+        .expect("auto-apply learning rule");
+
+        let (status, body) = import_test_response(
+            preview_transfer_decision_runtime_handler(
+                State(state.clone()),
+                Path(preview_id),
+                import_test_headers(user_id),
+                Json(json!({
+                    "decision": "reject",
+                    "expectedState": {
+                        "sessionId": session_id,
+                        "type": "转账",
+                        "mainCategory": "人工转账",
+                        "subCategory": "人工分类"
+                    }
+                })),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "body: {body}");
+        let items = body["data"]["upsertedPreviewItems"]
+            .as_array()
+            .expect("canonical response items");
+        assert_eq!(items.len(), 2, "body: {body}");
+        let outgoing = items
+            .iter()
+            .find(|item| item["preview_type"] == "支出")
+            .expect("outgoing response item");
+        assert_eq!(outgoing["category_id"], manual_category_id);
+        assert_eq!(outgoing["preview_main_category"], "人工转账");
+        assert_eq!(outgoing["preview_sub_category"], "人工分类");
+        assert_eq!(outgoing["preview_source_account_id"], *manual_source_id);
+        assert_eq!(
+            outgoing["preview_destination_account_id"],
+            Value::Null,
+            "non-transfer destination remains invalid after learning projection"
+        );
+        assert_eq!(
+            outgoing.pointer("/preview_matching_feedback/annotation/manual_fields"),
+            Some(&json!({
+                "category_id": true,
+                "source_account_id": true,
+                "destination_account_id": false
+            }))
+        );
+        assert_eq!(
+            outgoing.pointer("/preview_matching_feedback/learning/review_status"),
+            Some(&json!("auto_applied"))
+        );
+
+        let incoming = items
+            .iter()
+            .find(|item| item["preview_type"] == "收入")
+            .expect("incoming response item");
+        assert_eq!(incoming["category_id"], incoming_category_id);
+        assert_eq!(incoming["preview_main_category"], "规则收入");
+        assert_eq!(incoming["preview_sub_category"], "入账规则");
+        assert_eq!(
+            incoming["preview_source_account_id"],
+            *manual_destination_id
+        );
+        assert_eq!(
+            incoming.pointer("/preview_matching_feedback/annotation/manual_fields"),
+            Some(&json!({
+                "category_id": false,
+                "source_account_id": true,
+                "destination_account_id": false
+            }))
+        );
+
+        for item in items {
+            let preview_id = item["id"].as_i64().expect("response preview id");
+            let canonical = get_preview_bill_by_id(pool, preview_id, canonical_user)
+                .expect("canonical lookup")
+                .expect("canonical preview row");
+            assert_eq!(preview_row_to_value(canonical), *item);
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -872,7 +1595,10 @@ mod tests {
             (json!([]), StatusCode::BAD_REQUEST),
             (json!({}), StatusCode::BAD_REQUEST),
             (json!({"previewId": "bad"}), StatusCode::BAD_REQUEST),
-            (json!({"previewId": 9_999_999_999_i64}), StatusCode::NOT_FOUND),
+            (
+                json!({"previewId": 9_999_999_999_i64}),
+                StatusCode::NOT_FOUND,
+            ),
         ] {
             let (status, body) = import_test_response(
                 import_preview_update_runtime_handler(
@@ -1036,7 +1762,9 @@ mod tests {
         )
         .await
         .expect_err("completed without items is invalid");
-        assert!(error.to_string().contains("completed without preview items"));
+        assert!(error
+            .to_string()
+            .contains("completed without preview items"));
 
         let running_operation = format!("reclass-running-{preview_id}");
         let running_group = insert_reclassification_group(

@@ -24,6 +24,37 @@ describe('PreviewPageRequestCoordinator', () => {
         expect(coordinator.loading).toBe(false);
     });
 
+    test('forced refresh replaces an equivalent active request and ignores its late response', async () => {
+        const coordinator = new PreviewPageRequestCoordinator();
+        const oldResponse = deferred<string>();
+        const newResponse = deferred<string>();
+        let state = '';
+        const run = async (response: Promise<string>, replaceActive = false) => {
+            const handle = coordinator.begin('session-a?page=1&signal=learning', { replaceActive })!;
+            try {
+                const value = await response;
+                if (coordinator.isCurrent(handle)) state = value;
+            } finally {
+                coordinator.finish(handle);
+            }
+            return handle;
+        };
+
+        const oldRun = run(oldResponse.promise);
+        const newRun = run(newResponse.promise, true);
+        oldResponse.resolve('old');
+        const oldHandle = await oldRun;
+        expect(oldHandle.controller.signal.aborted).toBe(true);
+        expect(state).toBe('');
+        expect(coordinator.loading).toBe(true);
+
+        newResponse.resolve('new');
+        const newHandle = await newRun;
+        expect(newHandle.generation).toBeGreaterThan(oldHandle.generation);
+        expect(state).toBe('new');
+        expect(coordinator.loading).toBe(false);
+    });
+
     test('does not merge different session, page, or filter keys', () => {
         const coordinator = new PreviewPageRequestCoordinator();
         const first = coordinator.begin('session-a?page=1&signal=learning')!;

@@ -42,7 +42,8 @@ const {
     switchAllPrimaryCategories,
     switchPrimaryCategory,
     reload,
-    addCategoryByCurrentSelection,
+    addPrimaryCategory,
+    addSecondaryCategory,
     edit,
     hide,
     remove,
@@ -60,7 +61,7 @@ const {
     mdiDotsVertical
 } = useDesktopCategoryListPage();
 
-useExternalTemplateBindings(ConfirmDialog, SnackBar, SettingsJsonImportExportButton, EditDialog, PresetDialog, useDesktopCategoryListPage, tt, loading, primaryCategoryId, currentPrimaryCategory, navbar, confirmDialog, snackbar, editDialog, activeCategoryType, activeTab, updating, categoryHiding, categoryRemoving, displayOrderModified, cardMinHeight, alwaysShowNav, showNav, showHidden, showPresetDialog, primaryCategories, secondaryCategories, hasSubCategories, categories, noAvailableCategory, noCategory, availableCategoryCount, canAddSecondaryCategory, updateCardMinHeight, isCategorySupportSwitch, switchAllPrimaryCategories, switchPrimaryCategory, reload, addCategoryByCurrentSelection, edit, hide, remove, saveSortResult, onMove, onPresetCategorySaved, CategoryType, mdiRefresh, mdiMenu, mdiPencilOutline, mdiEyeOffOutline, mdiEyeOutline, mdiDeleteOutline, mdiDrag, mdiDotsVertical);
+useExternalTemplateBindings(ConfirmDialog, SnackBar, SettingsJsonImportExportButton, EditDialog, PresetDialog, useDesktopCategoryListPage, tt, loading, primaryCategoryId, currentPrimaryCategory, navbar, confirmDialog, snackbar, editDialog, activeCategoryType, activeTab, updating, categoryHiding, categoryRemoving, displayOrderModified, cardMinHeight, alwaysShowNav, showNav, showHidden, showPresetDialog, primaryCategories, secondaryCategories, hasSubCategories, categories, noAvailableCategory, noCategory, availableCategoryCount, canAddSecondaryCategory, updateCardMinHeight, isCategorySupportSwitch, switchAllPrimaryCategories, switchPrimaryCategory, reload, addPrimaryCategory, addSecondaryCategory, edit, hide, remove, saveSortResult, onMove, onPresetCategorySaved, CategoryType, mdiRefresh, mdiMenu, mdiPencilOutline, mdiEyeOffOutline, mdiEyeOutline, mdiDeleteOutline, mdiDrag, mdiDotsVertical);
 </script>
 
 <style src="./list/ListPage.css"></style>

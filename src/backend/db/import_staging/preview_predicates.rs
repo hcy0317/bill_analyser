@@ -192,7 +192,9 @@ fn push_preview_transfer_signal_condition(query: &mut QueryBuilder<'_, Postgres>
     push_sql_string_list(query, IMPORT_PREVIEW_SIGNAL_SUPPRESSED_STATUSES);
     query.push(") AND (");
     push_preview_feedback_resolved_status_expr(query, alias, "transfer");
-    query.push(" = 'pending' OR (");
+    query.push(" IN (");
+    push_sql_string_list(query, IMPORT_PREVIEW_TRANSFER_VISIBLE_STATUSES);
+    query.push(") OR (");
     push_preview_feedback_resolved_status_expr(query, alias, "transfer");
     query.push(" = '' AND LOWER(btrim(COALESCE(");
     query.push(alias);
@@ -215,6 +217,7 @@ fn push_preview_recommendation_signal_condition(
     query: &mut QueryBuilder<'_, Postgres>,
     alias: &str,
 ) {
+    query.push("(");
     push_preview_meaningful_feedback_condition(
         query,
         alias,
@@ -222,6 +225,36 @@ fn push_preview_recommendation_signal_condition(
         IMPORT_PREVIEW_LEARNING_NUMERIC_EVIDENCE_FIELDS,
         IMPORT_PREVIEW_LEARNING_TEXT_EVIDENCE_FIELDS,
     );
+    query.push(" OR ");
+    push_preview_transfer_learning_signal_condition(query, alias);
+    query.push(")");
+}
+
+fn push_preview_transfer_learning_signal_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+) {
+    query.push("(");
+    push_preview_feedback_key_condition(query, alias, "transfer");
+    query.push(" AND NOT ");
+    push_preview_feedback_truthy_field_condition(query, alias, "transfer", "suppressed");
+    query.push(" AND ");
+    push_preview_feedback_string_type_check(query, alias, "transfer", "candidate_type");
+    query.push(" AND ");
+    push_preview_feedback_text_expr(query, alias, "transfer", "candidate_type");
+    query.push(" <> '' AND ");
+    push_preview_feedback_string_type_check(query, alias, "transfer", "learning_level");
+    query.push(" AND ");
+    push_preview_feedback_text_expr(query, alias, "transfer", "learning_level");
+    query.push(" IN (");
+    push_sql_string_list(query, IMPORT_PREVIEW_TRANSFER_LEARNING_LEVELS);
+    query.push(") AND ");
+    push_preview_feedback_resolved_status_expr(query, alias, "transfer");
+    query.push(" <> '' AND ");
+    push_preview_feedback_resolved_status_expr(query, alias, "transfer");
+    query.push(" NOT IN (");
+    push_sql_string_list(query, IMPORT_PREVIEW_SIGNAL_SUPPRESSED_STATUSES);
+    query.push("))");
 }
 
 fn push_preview_llm_signal_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
@@ -536,6 +569,29 @@ fn push_preview_current_review_condition(query: &mut QueryBuilder<'_, Postgres>,
     query.push(" OR ");
     push_preview_missing_destination_account_condition(query, alias);
     query.push(" OR ");
+    push_preview_same_transfer_accounts_condition(query, alias);
+    query.push(" OR ");
+    push_preview_identity_feedback_condition(query, alias);
+    query.push(")");
+}
+
+fn push_preview_current_review_condition_with_joins(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+) {
+    query.push("((");
+    push_preview_category_required_type_condition(query, alias);
+    query.push(" AND (");
+    query.push(alias);
+    query.push(".category_id IS NULL OR c.id IS NULL OR ");
+    push_preview_category_type_mismatch_condition(query, alias, "c");
+    query.push(")) OR (");
+    query.push(alias);
+    query.push(".account_id IS NULL OR source_account.id IS NULL) OR (");
+    push_preview_destination_account_type_condition(query, alias);
+    query.push(" AND (");
+    query.push(alias);
+    query.push(".transfer_target_account_id IS NULL OR target_account.id IS NULL)) OR ");
     push_preview_same_transfer_accounts_condition(query, alias);
     query.push(" OR ");
     push_preview_identity_feedback_condition(query, alias);

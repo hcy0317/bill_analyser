@@ -136,7 +136,8 @@ for (const componentPath of [
     '@/views/desktop/transactions/import/dialogs/BatchCreateDialog.vue',
     '@/views/desktop/transactions/import/dialogs/ImportLearningSuggestionDialog.vue',
     '@/views/desktop/categories/list/dialogs/EditDialog.vue',
-    '@/views/desktop/accounts/list/dialogs/EditDialog.vue'
+    '@/views/desktop/accounts/list/dialogs/EditDialog.vue',
+    '@/views/desktop/transactions/list/dialogs/EditDialog.vue'
 ]) {
     jest.mock(componentPath, () => ({ __esModule: true, default: { name: 'SignalHistoryMatrixStub' } }));
 }
@@ -512,6 +513,55 @@ describe('desktop import signal, history, and annotation matrix', () => {
         expect(bindings.getAnnotationText({ reason: ' reason text ' })).toBe('reason text');
         expect(bindings.getAnnotationType(' Missing-Category ')).toBe('missing-category');
     });
+
+    test('canonical category patch clears stale missing-category signal while preserving missing-account review', () => {
+        const transaction = createTransaction(57, {
+            matching: {
+                annotation: { status: 'missing_category' },
+                identity_validation: {
+                    review_status: 'requires_identity_review',
+                    issues: [
+                        { field: 'category_id', reason: 'missing' },
+                        { field: 'source_account_id', reason: 'missing' }
+                    ]
+                }
+            }
+        });
+        transaction.categoryId = '';
+        transaction.sourceAccountId = '';
+        const { bindings } = createBindings([transaction]);
+
+        expect(bindings.getAnnotationIssues(transaction)).toStrictEqual([
+            'Missing Category',
+            'Missing Source Account'
+        ]);
+
+        bindings.syncTransactionFromPreviewDecision(transaction, {
+            id: 57,
+            preview_type: 'expense',
+            category_id: 8,
+            preview_source_account_id: null,
+            preview_destination_account_id: null,
+            matching: {
+                annotation: { status: 'missing_category' },
+                identity_validation: {
+                    review_status: 'requires_identity_review',
+                    issues: [
+                        { field: 'category_id', reason: 'missing' },
+                        { field: 'source_account_id', reason: 'missing' }
+                    ]
+                }
+            }
+        });
+
+        expect(transaction.categoryId).toBe('8');
+        expect(bindings.getAnnotationIssues(transaction)).toStrictEqual(['Missing Source Account']);
+        expect(bindings.getAnnotationSummary(transaction)).toBe('Missing Source Account');
+        expect(bindings.hasCurrentAnnotationIssue(transaction)).toBe(true);
+        expect(transaction.matching?.identity_validation).toMatchObject({
+            issues: [{ field: 'source_account_id', reason: 'missing' }]
+        });
+    });
 });
 
 describe('desktop import async action branch matrix', () => {
@@ -555,7 +605,7 @@ describe('desktop import async action branch matrix', () => {
         expect(mockShowMessage).toHaveBeenCalledWith(expect.stringContaining('Reclassify failed: Error: Reclassify failed: 409'));
     });
 
-    test('LLM bulk recommendation guards session, busy, and empty selection then handles result variants', async () => {
+    test('LLM bulk recommendation guards empty state and uses all-matching when no rows are selected', async () => {
         const selected = createTransaction(71);
         const noSession = createBindings([selected], '').bindings;
         await noSession.applyLLMPreviewRecommendations();
@@ -567,9 +617,23 @@ describe('desktop import async action branch matrix', () => {
         await busy.applyLLMPreviewRecommendations();
         expect(mockLlmPreviewRecommend).not.toHaveBeenCalled();
 
+        const empty = createBindings([]).bindings;
+        await empty.applyLLMPreviewRecommendations();
+        expect(mockLlmPreviewRecommend).not.toHaveBeenCalled();
+        expect(mockShowMessage).toHaveBeenCalledWith('No preview rows available for LLM recommendation');
+
+        mockLlmPreviewRecommend.mockResolvedValueOnce({ data: { result: { suggestions: [] } } });
         const unselected = createBindings([createTransaction(72, { selected: false })]).bindings;
         await unselected.applyLLMPreviewRecommendations();
-        expect(mockShowMessage).toHaveBeenCalledWith('No preview rows available for LLM recommendation');
+        expect(mockLlmPreviewRecommend).toHaveBeenLastCalledWith(expect.objectContaining({
+            sessionId: 'signal-session',
+            previewUpdates: [],
+            actionScope: expect.objectContaining({
+                kind: 'all_matching',
+                filter_hash: expect.stringMatching(/^fnv1a32:/)
+            })
+        }));
+        expect(mockShowMessage).toHaveBeenCalledWith('LLM preview recommendation completed, but no suggestions were generated');
         expect(unselected.llmPreviewRecommending.value).toBe(false);
 
         mockLlmPreviewRecommend.mockResolvedValueOnce({
@@ -577,10 +641,14 @@ describe('desktop import async action branch matrix', () => {
         });
         const success = createBindings([selected]).bindings;
         await success.applyLLMPreviewRecommendations();
-        expect(mockLlmPreviewRecommend).toHaveBeenCalledWith({
+        expect(mockLlmPreviewRecommend).toHaveBeenCalledWith(expect.objectContaining({
             sessionId: 'signal-session',
-            previewUpdates: [expect.objectContaining({ id: 71 })]
-        });
+            previewUpdates: [expect.objectContaining({ id: 71 })],
+            actionScope: expect.objectContaining({
+                kind: 'selected',
+                selection_hash: expect.stringMatching(/^fnv1a32:/)
+            })
+        }));
         expect(selected.matching?.llm?.reason).toBe('fresh model');
         expect(mockGetLLMMemoryEvents).toHaveBeenCalledWith({ session_id: 'signal-session', limit: 500 });
         expect(mockShowMessage).toHaveBeenCalledWith(expect.stringContaining('LLM preview recommendation updated'));
@@ -597,7 +665,7 @@ describe('desktop import async action branch matrix', () => {
         expect(failure.llmPreviewRecommending.value).toBe(false);
     });
 
-    test('LLM analysis handles guards, candidate counts, and structured failures', async () => {
+    test('LLM analysis guards empty state and analyzes all matching rows when no rows are selected', async () => {
         const selected = createTransaction(81);
         const noSession = createBindings([selected], '').bindings;
         await noSession.analyzeSelectedPreviewWithLLM();
@@ -608,18 +676,30 @@ describe('desktop import async action branch matrix', () => {
         await busy.analyzeSelectedPreviewWithLLM();
         expect(mockAnalyzeLLMTransactions).not.toHaveBeenCalled();
 
-        const empty = createBindings([createTransaction(82, { selected: false })]).bindings;
+        const empty = createBindings([]).bindings;
         await empty.analyzeSelectedPreviewWithLLM();
-        expect(mockShowMessage).toHaveBeenCalledWith(expect.stringContaining('Selected preview rows are insufficient'));
+        expect(mockAnalyzeLLMTransactions).not.toHaveBeenCalled();
+        expect(mockShowMessage).toHaveBeenCalledWith('No preview rows available for LLM analysis');
         expect(empty.llmSessionAnalyzing.value).toBe(false);
+
+        mockAnalyzeLLMTransactions.mockResolvedValueOnce({ data: { result: { candidates_created: 0 } } });
+        const unselected = createBindings([createTransaction(82, { selected: false })]).bindings;
+        await unselected.analyzeSelectedPreviewWithLLM();
+        expect(mockAnalyzeLLMTransactions).toHaveBeenLastCalledWith(expect.objectContaining({
+            sessionId: 'signal-session',
+            previewUpdates: [],
+            actionScope: expect.objectContaining({ kind: 'all_matching' })
+        }));
+        expect(mockShowMessage).toHaveBeenCalledWith(expect.stringContaining('no candidate rules'));
 
         mockAnalyzeLLMTransactions.mockResolvedValueOnce({ data: { result: { candidates_created: 2 } } });
         const created = createBindings([selected]).bindings;
         await created.analyzeSelectedPreviewWithLLM();
-        expect(mockAnalyzeLLMTransactions).toHaveBeenCalledWith({
+        expect(mockAnalyzeLLMTransactions).toHaveBeenCalledWith(expect.objectContaining({
             sessionId: 'signal-session',
-            previewUpdates: [expect.objectContaining({ id: 81 })]
-        });
+            previewUpdates: [expect.objectContaining({ id: 81 })],
+            actionScope: expect.objectContaining({ kind: 'selected' })
+        }));
         expect(mockShowMessage).toHaveBeenCalledWith(expect.stringContaining('created'));
         expect(created.llmSessionAnalyzing.value).toBe(false);
 
@@ -635,13 +715,22 @@ describe('desktop import async action branch matrix', () => {
         expect(failed.llmSessionAnalyzing.value).toBe(false);
     });
 
-    test('long-term learning handles empty inputs, missing suggestions, dialog cancellation, success, and errors', async () => {
+    test('long-term learning guards empty state and uses explicit selected promotion after scoped suggestions', async () => {
         const selected = createTransaction(91);
         await createBindings([selected], '').bindings.promoteSelectedToLongTermLearning();
         expect(mockGetImportLearningSuggestions).not.toHaveBeenCalled();
 
-        await createBindings([createTransaction(92, { selected: false })]).bindings.promoteSelectedToLongTermLearning();
+        await createBindings([]).bindings.promoteSelectedToLongTermLearning();
         expect(mockGetImportLearningSuggestions).not.toHaveBeenCalled();
+        expect(mockShowMessage).toHaveBeenCalledWith('No preview rows available for learning');
+
+        mockGetImportLearningSuggestions.mockResolvedValueOnce({ data: { result: { suggestions: [] } } });
+        await createBindings([createTransaction(92, { selected: false })]).bindings.promoteSelectedToLongTermLearning();
+        expect(mockGetImportLearningSuggestions).toHaveBeenLastCalledWith(expect.objectContaining({
+            sessionId: 'signal-session',
+            previewUpdates: [],
+            actionScope: expect.objectContaining({ kind: 'all_matching' })
+        }));
 
         mockGetImportLearningSuggestions.mockResolvedValueOnce({ data: { result: { suggestions: [] } } });
         await createBindings([selected]).bindings.promoteSelectedToLongTermLearning();
@@ -658,11 +747,15 @@ describe('desktop import async action branch matrix', () => {
         const success = createBindings([selected]).bindings;
         success.importLearningSuggestionDialog.value = { open: jest.fn(async () => ({ previewIds: [91] })) };
         await success.promoteSelectedToLongTermLearning();
-        expect(mockGetImportLearningSuggestions).toHaveBeenCalledWith({
+        expect(mockGetImportLearningSuggestions).toHaveBeenCalledWith(expect.objectContaining({
             sessionId: 'signal-session',
-            previewUpdates: [expect.objectContaining({ id: 91 })]
+            previewUpdates: [expect.objectContaining({ id: 91 })],
+            actionScope: expect.objectContaining({ kind: 'selected' })
+        }));
+        expect(mockPromoteImportLearning).toHaveBeenCalledWith({
+            sessionId: 'signal-session',
+            actionScope: { kind: 'explicit_selected', preview_ids: [91] }
         });
-        expect(mockPromoteImportLearning).toHaveBeenCalledWith({ sessionId: 'signal-session', previewIds: [91] });
         expect(mockShowMessage).toHaveBeenCalledWith(expect.stringContaining('Long-term learning saved'));
 
         mockGetImportLearningSuggestions.mockRejectedValueOnce(new Error('learning unavailable'));

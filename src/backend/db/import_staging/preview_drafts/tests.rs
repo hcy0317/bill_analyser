@@ -144,10 +144,43 @@ mod preview_draft_tests {
                 "source_account_status": "unknown",
                 "destination_account_name": null,
                 "destination_account_status": "unknown",
-                "identity_source": "snapshot_fallback",
+                "identity_source": "runtime_current",
                 "counterparty": "icbc counterparty",
                 "description": "icbc description"
             })
         );
+    }
+
+    #[test]
+    fn history_transfer_summary_uses_user_scoped_runtime_bill_identities() {
+        let imported = DedupBill {
+            template_id: Some("901".to_string()),
+            session_id: Some("session-transfer-summary".to_string()),
+            ..transfer_bill("wechat", "300.00", "2002")
+        };
+        let mut stored_bill = transfer_bill("icbc", "-300.00", "1001");
+        stored_bill.main_category = "资产流转".to_string();
+        stored_bill.sub_category = "银行卡转账".to_string();
+        stored_bill.account_name = "工资卡".to_string();
+        stored_bill.destination_account_name = "微信零钱".to_string();
+        let stored = history_row(stored_bill);
+
+        let draft = preview_draft_from_history_transfer(ImportHistoryTransferPreviewInput {
+            imported_bill: &imported,
+            history_bill: &stored,
+            candidate_id: "candidate-summary",
+            group_key: "group-summary",
+            time_diff_seconds: 5,
+            score_percent: 99,
+            level: "high",
+            reason: "opposite_amount|same_day|time_close",
+        });
+
+        let summary = &draft.preview_matching_feedback["reconciliation"]["history_summary"];
+        assert_eq!(summary["category_name"], "资产流转 / 银行卡转账");
+        assert_eq!(summary["source_account_name"], "工资卡");
+        assert_eq!(summary["destination_account_name"], "微信零钱");
+        assert_eq!(summary["identity_source"], "runtime_current");
+        assert_eq!(summary["amount_cents"], -30000);
     }
 }

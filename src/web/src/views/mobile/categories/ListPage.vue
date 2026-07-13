@@ -5,10 +5,21 @@
             <f7-nav-title :title="tt(title)"></f7-nav-title>
             <f7-nav-right class="navbar-compact-icons">
                 <f7-link icon-f7="ellipsis" :class="{ 'disabled': !categories.length }" v-if="!sortable" @click="showMoreActionSheet = true"></f7-link>
-                <f7-link data-testid="mobile.categories.action.add" :href="'/category/add?type=' + categoryType + '&parentId=' + primaryCategoryId + (currentPrimaryCategory ? `&color=${currentPrimaryCategory.color}&icon=${currentPrimaryCategory.icon}` : '')" icon-f7="plus" v-if="!sortable"></f7-link>
                 <f7-link :text="tt('Done')" :class="{ 'disabled': displayOrderSaving }" @click="saveSortResult" v-else-if="sortable"></f7-link>
             </f7-nav-right>
         </f7-navbar>
+
+        <f7-list strong inset dividers class="margin-top category-actions" v-if="!loading && !sortable">
+            <f7-list-button data-testid="mobile.categories.action.add-primary"
+                            :title="tt('Add Primary Category')"
+                            :href="primaryCategoryAddHref"
+                            icon-f7="plus"></f7-list-button>
+            <f7-list-button data-testid="mobile.categories.action.add-secondary"
+                            :class="{ 'disabled': !canAddSecondaryCategory }"
+                            :title="tt('Add Secondary Category')"
+                            :href="secondaryCategoryAddHref"
+                            icon-f7="plus_circle"></f7-list-button>
+        </f7-list>
 
         <f7-list strong inset dividers class="margin-top skeleton-text" v-if="loading">
             <f7-list-item title="Category Name"
@@ -117,7 +128,7 @@ const props = defineProps<{
 
 const { tt, getCurrentLanguageTextDirection } = useI18n();
 const { showAlert, showToast, routeBackOnError } = useI18nUIComponents();
-const { loading, primaryCategoryId, currentPrimaryCategory } = useCategoryListPageBase();
+const { loading, primaryCategoryId, currentPrimaryCategory: baseCurrentPrimaryCategory } = useCategoryListPageBase();
 
 const transactionCategoriesStore = useTransactionCategoriesStore();
 
@@ -133,6 +144,34 @@ const displayOrderModified = ref<boolean>(false);
 const displayOrderSaving = ref<boolean>(false);
 
 const textDirection = computed<TextDirection>(() => getCurrentLanguageTextDirection());
+const supportedCategoryType = computed<boolean>(() => categoryType.value === CategoryType.Income
+    || categoryType.value === CategoryType.Expense
+    || categoryType.value === CategoryType.Transfer
+    || categoryType.value === CategoryType.Investment);
+const currentPrimaryCategory = computed<TransactionCategory | undefined>(() => {
+    const category = baseCurrentPrimaryCategory.value;
+    if (!category || !supportedCategoryType.value || category.type !== categoryType.value) {
+        return undefined;
+    }
+
+    if (category.parentId && category.parentId !== '0') {
+        return undefined;
+    }
+
+    return category;
+});
+const canAddSecondaryCategory = computed<boolean>(() => !!currentPrimaryCategory.value && primaryCategoryId.value !== '0');
+const primaryCategoryAddHref = computed<string | undefined>(() => supportedCategoryType.value
+    ? '/category/add?type=' + categoryType.value + '&parentId=0'
+    : undefined);
+const secondaryCategoryAddHref = computed<string | undefined>(() => {
+    const parent = currentPrimaryCategory.value;
+    if (!parent || !canAddSecondaryCategory.value) {
+        return undefined;
+    }
+
+    return '/category/add?type=' + categoryType.value + '&parentId=' + parent.id + '&color=' + parent.color + '&icon=' + parent.icon;
+});
 
 const categories = computed<TransactionCategory[]>(() => {
     if (!primaryCategoryId.value || primaryCategoryId.value === '' || primaryCategoryId.value === '0') {
@@ -141,7 +180,7 @@ const categories = computed<TransactionCategory[]>(() => {
         }
 
         return transactionCategoriesStore.allTransactionCategories[categoryType.value] ?? [];
-    } else if (primaryCategoryId.value && primaryCategoryId.value !== '' && primaryCategoryId.value !== '0') {
+    } else if (primaryCategoryId.value && primaryCategoryId.value !== '' && primaryCategoryId.value !== '0' && currentPrimaryCategory.value) {
         if (!transactionCategoriesStore.allTransactionCategoriesMap || !transactionCategoriesStore.allTransactionCategoriesMap[primaryCategoryId.value]) {
             return [];
         }

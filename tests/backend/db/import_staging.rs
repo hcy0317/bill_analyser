@@ -9,11 +9,12 @@ use bill_analyser_core::{
     ImportHistoryRewriteOperation, UserId,
 };
 use bill_analyser_db::{
-    apply_preview_learning_decision, apply_preview_patches_preserving_selection,
-    apply_preview_transfer_decision, batch_update_preview_classification,
-    clear_import_preview_materialization_state, clear_session_data, clear_user_import_staging_data,
-    confirm_import_command, confirm_preview_to_bills, confirm_preview_to_bills_with_ack,
-    create_import_session, get_import_history_candidate_bills_for_session,
+    apply_import_decision_group_command, apply_preview_learning_decision,
+    apply_preview_patches_preserving_selection, apply_preview_transfer_decision,
+    batch_update_preview_classification, clear_import_preview_materialization_state,
+    clear_session_data, clear_user_import_staging_data, confirm_import_command,
+    confirm_preview_to_bills, confirm_preview_to_bills_with_ack, create_import_session,
+    get_import_decision_groups_by_session, get_import_history_candidate_bills_for_session,
     get_import_history_materializations_by_session, get_import_learning_lifecycle_view,
     get_import_session, get_parser_templates_by_session, get_preview_bill_by_id,
     get_unprocessed_templates_for_dedup, insert_import_decision_groups_batch,
@@ -26,21 +27,24 @@ use bill_analyser_db::{
     stage_import_parser_templates, stage_import_parser_templates_with_sources,
     update_import_session_status, update_parser_template_status, update_preview_bill,
     update_preview_bills_batch, update_preview_recurring_match_decision, update_preview_selection,
-    update_session_preview_selection_by_query, ConfirmCommand, ImportDecisionGroupDraft,
-    ImportHistoryMaterializationDraft, ImportHistoryRewriteAcknowledgement,
-    ImportHistoryRewriteAcknowledgementOperation, ImportLearningLifecycleRecordInput,
-    ImportParserTemplateDraft, ImportPreviewClassificationUpdate, ImportPreviewDecision,
-    ImportPreviewDraft, ImportPreviewExpectedState, ImportPreviewLearningApply,
-    ImportPreviewLlmReviewRequest, ImportPreviewLlmSuggestion, ImportPreviewPageRequest,
-    ImportPreviewPatch, ImportPreviewPatchField, ImportPreviewPatchValue,
-    ImportPreviewQueryFilters, ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate,
-    ImportPreviewSelectionMode, ImportPreviewSelectionTarget, ImportSessionDraft,
-    ImportSessionStatusUpdate, ImportSourceDraft, ImportStandardRowDraft, PostgresPool,
+    update_session_preview_selection_by_query, ConfirmCommand, ImportDecisionGroupCommand,
+    ImportDecisionGroupCommandResult, ImportDecisionGroupDraft, ImportDecisionGroupMemberDraft,
+    ImportDecisionPreviewVersion, ImportHistoryMaterializationDraft,
+    ImportHistoryRewriteAcknowledgement, ImportHistoryRewriteAcknowledgementOperation,
+    ImportLearningLifecycleRecordInput, ImportParserTemplateDraft,
+    ImportPreviewClassificationUpdate, ImportPreviewDecision, ImportPreviewDraft,
+    ImportPreviewExpectedState, ImportPreviewLearningApply, ImportPreviewLlmReviewRequest,
+    ImportPreviewLlmSuggestion, ImportPreviewPageRequest, ImportPreviewPatch,
+    ImportPreviewPatchField, ImportPreviewPatchValue, ImportPreviewQueryFilters,
+    ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate, ImportPreviewSelectionMode,
+    ImportPreviewSelectionTarget, ImportSessionDraft, ImportSessionStatusUpdate, ImportSourceDraft,
+    ImportStandardRowDraft, PostgresPool,
 };
 use serde_json::{json, Value};
 use sqlx::Row;
 
 mod postgres_test_support;
+include!("../core/transfer_signal_parity_corpus.rs");
 
 fn initial_schema() -> String {
     fs::read_to_string(postgres_initial_schema_path()).expect("initial PostgreSQL schema")
@@ -480,6 +484,35 @@ async fn real_postgres_import_six_signal_families_e2e() -> Result<(), Box<dyn Er
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn real_postgres_transfer_signal_projection_uses_shared_parity_corpus(
+) -> Result<(), Box<dyn Error>> {
+    let test_db = strict_isolated_postgres_database("transfer_signal_projection_parity").await?;
+    let pool = &test_db.pool;
+
+    for case in TRANSFER_SIGNAL_PARITY_CORPUS {
+        let projected = sqlx::query_scalar::<_, bool>(
+            "SELECT COALESCE((import_preview_signal_flags(jsonb_build_object(\
+                'preview_type', $1::text, \
+                'preview_matching_feedback', jsonb_build_object('transfer', $2::jsonb)\
+            ))->>'transfer')::boolean, false)",
+        )
+        .bind(case.preview_type)
+        .bind(case.transfer_json)
+        .fetch_one(pool)
+        .await?;
+
+        assert_eq!(
+            projected, case.expected_filter_visible,
+            "PostgreSQL projection diverged from shared transfer parity corpus: {}",
+            case.name
+        );
+    }
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn real_postgres_signal_filters_fail_closed_for_unknown_review_statuses(
 ) -> Result<(), Box<dyn Error>> {
     let test_db = strict_isolated_postgres_database("import_invalid_signal_status").await?;
@@ -659,7 +692,10 @@ async fn real_postgres_signal_filters_fail_closed_for_unknown_review_statuses(
             "llm",
             vec!["llm blank", "llm pending", "llm accepted", "llm rejected"],
         ),
-        ("transfer", vec!["transfer blank", "transfer pending"]),
+        (
+            "transfer",
+            vec!["transfer blank", "transfer pending", "transfer accepted"],
+        ),
     ] {
         let expected_ids = expected_descriptions
             .iter()
@@ -696,7 +732,7 @@ async fn real_postgres_signal_filters_fail_closed_for_unknown_review_statuses(
     )?;
     assert_eq!(refreshed.metadata.counts.signals.get("learning"), Some(&5));
     assert_eq!(refreshed.metadata.counts.signals.get("llm"), Some(&4));
-    assert_eq!(refreshed.metadata.counts.signals.get("transfer"), Some(&2));
+    assert_eq!(refreshed.metadata.counts.signals.get("transfer"), Some(&3));
 
     test_db.cleanup().await?;
     Ok(())
@@ -3792,6 +3828,414 @@ async fn real_postgres_parser_staging_covers_missing_inline_explicit_and_mutatio
             .collect::<Vec<_>>(),
         vec!["inline parser second"]
     );
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn real_postgres_same_batch_transfer_reject_accepts_nullable_standard_row_text(
+) -> Result<(), Box<dyn Error>> {
+    let test_db = strict_isolated_postgres_database("transfer_reject_nullable_text").await?;
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "transfer-reject-nullable-text").await?;
+    let scoped_user_id = UserId::new(user_id as u64).expect("positive user id");
+    let category_id =
+        insert_category(pool, user_id, "人工转账分类", "transfer", "转账/人工分类").await?;
+    let source_account_id = insert_account(pool, user_id, "人工转出账户").await?;
+    let destination_account_id = insert_account(pool, user_id, "人工转入账户").await?;
+    let session_id = "transfer-reject-nullable-text-session";
+    create_import_session(
+        pool,
+        &ImportSessionDraft {
+            session_id: session_id.to_string(),
+            user_id: scoped_user_id,
+            file_count: 1,
+        },
+    )?;
+
+    let session_db_id: i64 =
+        sqlx::query_scalar("SELECT id FROM import_sessions WHERE session_key=$1 AND user_id=$2")
+            .bind(session_id)
+            .bind(user_id)
+            .fetch_one(pool)
+            .await?;
+    let source_id: i64 = sqlx::query_scalar(
+        r#"INSERT INTO import_sources
+           (session_id,user_id,source_index,parser_id,parser_name,feature_signature)
+           VALUES($1,$2,0,'nullable-fixture','nullable-fixture','nullable-fixture')
+           RETURNING id"#,
+    )
+    .bind(session_db_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    let mut standard_row_ids = Vec::new();
+    for (source_row_index, direction, amount_cents) in
+        [(0, "expense", -5_000_i64), (1, "income", 5_000_i64)]
+    {
+        standard_row_ids.push(
+            sqlx::query_scalar(
+                r#"INSERT INTO import_standard_rows
+                   (session_id,source_id,user_id,source_row_index,occurred_at,amount_cents,
+                    direction,transaction_type,merchant,payment_method,description,parser_payload)
+                   VALUES($1,$2,$3,$4,'2026-07-13 09:00:00+08',$5,$6,$6,
+                          NULL,NULL,NULL,'{"parser_id":"nullable-fixture"}'::jsonb)
+                   RETURNING id"#,
+            )
+            .bind(session_db_id)
+            .bind(source_id)
+            .bind(user_id)
+            .bind(source_row_index)
+            .bind(amount_cents)
+            .bind(direction)
+            .fetch_one(pool)
+            .await?,
+        );
+    }
+
+    let mut preview = preview_draft(
+        "2026-07-13 09:00:00",
+        "转账",
+        5_000,
+        Some(category_id),
+        Some(source_account_id),
+        Some(destination_account_id),
+        true,
+    );
+    preview.preview_matching_feedback = json!({
+        "annotation": {
+            "is_manually_annotated": true,
+            "manual_fields": {
+                "category_id": true,
+                "source_account_id": true,
+                "destination_account_id": true
+            }
+        },
+        "transfer": {
+            "state": "pending",
+            "review_status": "pending",
+            "owned_fields": {
+                "category_id": false,
+                "source_account_id": false,
+                "destination_account_id": false
+            }
+        }
+    });
+    let preview_id = insert_preview_bill(pool, session_id, scoped_user_id, &preview)?;
+    insert_import_decision_groups_batch(
+        pool,
+        session_id,
+        scoped_user_id,
+        &[ImportDecisionGroupDraft {
+            group_type: "same_batch_transfer".to_string(),
+            group_key: "nullable-text-pair".to_string(),
+            decision_status: "pending".to_string(),
+            base_preview_row_id: Some(preview_id),
+            signal_payload: json!({"candidate_type": "transfer"}),
+            members: vec![
+                ImportDecisionGroupMemberDraft {
+                    preview_row_id: Some(preview_id),
+                    standard_row_id: Some(standard_row_ids[0]),
+                    history_bill_id: None,
+                    member_role: "outgoing".to_string(),
+                    parser_name: "nullable-fixture".to_string(),
+                    metadata: json!({}),
+                },
+                ImportDecisionGroupMemberDraft {
+                    preview_row_id: Some(preview_id),
+                    standard_row_id: Some(standard_row_ids[1]),
+                    history_bill_id: None,
+                    member_role: "incoming".to_string(),
+                    parser_name: "nullable-fixture".to_string(),
+                    metadata: json!({}),
+                },
+            ],
+        }],
+    )?;
+    let (group_id, group_version): (i64, i64) = sqlx::query_as(
+        "SELECT id, version FROM import_decision_groups WHERE session_id=$1 AND group_key=$2",
+    )
+    .bind(session_db_id)
+    .bind("nullable-text-pair")
+    .fetch_one(pool)
+    .await?;
+
+    let initial_group = get_import_decision_groups_by_session(pool, session_id, scoped_user_id)?
+        .into_iter()
+        .find(|group| group.id == group_id)
+        .expect("user-scoped decision group");
+    assert_eq!(initial_group.members.len(), 2);
+    assert!(initial_group
+        .members
+        .iter()
+        .all(|member| member.version == 1));
+
+    let result = apply_import_decision_group_command(
+        pool,
+        scoped_user_id,
+        &ImportDecisionGroupCommand {
+            operation_id: "reject-nullable-text-pair".to_string(),
+            session_id: session_id.to_string(),
+            group_id,
+            decision: "reject".to_string(),
+            expected_group_version: group_version,
+            expected_preview_versions: vec![ImportDecisionPreviewVersion {
+                preview_row_id: preview_id,
+                version: 1,
+            }],
+        },
+    )
+    .expect("same-batch reject must accept nullable merchant/payment method/description");
+    let ImportDecisionGroupCommandResult::Applied(mutation) = result else {
+        panic!("expected applied same-batch rejection, got {result:?}");
+    };
+    assert_eq!(mutation.removed_preview_ids, vec![preview_id]);
+    assert_eq!(mutation.upserted_preview_items.len(), 2);
+    for item in &mutation.upserted_preview_items {
+        assert_eq!(item.get("preview_counterparty"), Some(&json!("")));
+        assert_eq!(item.get("preview_payment_method"), Some(&json!("")));
+        assert_eq!(item.get("preview_description"), Some(&json!("")));
+    }
+    let outgoing = mutation
+        .upserted_preview_items
+        .iter()
+        .find(|item| item["preview_type"] == "支出")
+        .expect("outgoing replacement");
+    assert_eq!(outgoing["category_id"], category_id);
+    assert_eq!(outgoing["preview_source_account_id"], source_account_id);
+    assert_eq!(outgoing["preview_destination_account_id"], Value::Null);
+    assert_eq!(
+        outgoing.pointer("/preview_matching_feedback/annotation/manual_fields"),
+        Some(&json!({
+            "category_id": true,
+            "source_account_id": true,
+            "destination_account_id": false
+        }))
+    );
+    let incoming = mutation
+        .upserted_preview_items
+        .iter()
+        .find(|item| item["preview_type"] == "收入")
+        .expect("incoming replacement");
+    assert_eq!(incoming["category_id"], Value::Null);
+    assert_eq!(
+        incoming["preview_source_account_id"], destination_account_id,
+        "manual transfer destination becomes the incoming row source account"
+    );
+    assert_eq!(incoming["preview_destination_account_id"], Value::Null);
+    assert_eq!(
+        incoming.pointer("/preview_matching_feedback/annotation/manual_fields"),
+        Some(&json!({
+            "category_id": false,
+            "source_account_id": true,
+            "destination_account_id": false
+        }))
+    );
+
+    for replacement_id in &mutation.upserted_preview_ids {
+        let row = get_preview_bill_by_id(pool, *replacement_id, scoped_user_id)?
+            .expect("replacement remains user scoped");
+        assert_eq!(row.session_id, session_id);
+    }
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn real_postgres_decision_group_rejects_cross_user_preview_and_standard_members(
+) -> Result<(), Box<dyn Error>> {
+    let test_db = strict_isolated_postgres_database("decision_group_cross_scope").await?;
+    let pool = &test_db.pool;
+    let user_a = insert_user(pool, "decision-group-scope-a").await?;
+    let user_b = insert_user(pool, "decision-group-scope-b").await?;
+    let scoped_a = UserId::new(user_a as u64).expect("positive user id");
+    let scoped_b = UserId::new(user_b as u64).expect("positive user id");
+    let session_a = "decision-group-scope-a-session";
+    let session_b = "decision-group-scope-b-session";
+    for (session_id, user_id) in [(session_a, scoped_a), (session_b, scoped_b)] {
+        create_import_session(
+            pool,
+            &ImportSessionDraft {
+                session_id: session_id.to_string(),
+                user_id,
+                file_count: 1,
+            },
+        )?;
+    }
+    let session_a_db_id: i64 =
+        sqlx::query_scalar("SELECT id FROM import_sessions WHERE session_key=$1 AND user_id=$2")
+            .bind(session_a)
+            .bind(user_a)
+            .fetch_one(pool)
+            .await?;
+    let session_b_db_id: i64 =
+        sqlx::query_scalar("SELECT id FROM import_sessions WHERE session_key=$1 AND user_id=$2")
+            .bind(session_b)
+            .bind(user_b)
+            .fetch_one(pool)
+            .await?;
+    let source_b: i64 = sqlx::query_scalar(
+        r#"INSERT INTO import_sources
+           (session_id,user_id,source_index,parser_id,parser_name,feature_signature)
+           VALUES($1,$2,0,'cross-scope','cross-scope','cross-scope') RETURNING id"#,
+    )
+    .bind(session_b_db_id)
+    .bind(user_b)
+    .fetch_one(pool)
+    .await?;
+    let standard_b: i64 = sqlx::query_scalar(
+        r#"INSERT INTO import_standard_rows
+           (session_id,source_id,user_id,source_row_index,occurred_at,amount_cents,
+            direction,transaction_type,merchant,payment_method,description,parser_payload)
+           VALUES($1,$2,$3,0,'2026-07-13 09:00:00+08',5000,'expense','expense',
+                  'scope-b','scope-b','scope-b','{"parser_id":"cross-scope"}'::jsonb)
+           RETURNING id"#,
+    )
+    .bind(session_b_db_id)
+    .bind(source_b)
+    .bind(user_b)
+    .fetch_one(pool)
+    .await?;
+    let mut preview_b = preview_draft("2026-07-13 09:00:00", "转账", 5_000, None, None, None, true);
+    preview_b.preview_matching_feedback = json!({
+        "transfer": {"state": "pending", "review_status": "pending"}
+    });
+    let preview_b_id = insert_preview_bill(pool, session_b, scoped_b, &preview_b)?;
+
+    let cross_scope_draft = ImportDecisionGroupDraft {
+        group_type: "same_batch_transfer".to_string(),
+        group_key: "cross-scope-api-boundary".to_string(),
+        decision_status: "pending".to_string(),
+        base_preview_row_id: Some(preview_b_id),
+        signal_payload: json!({"candidate_type": "transfer"}),
+        members: vec![ImportDecisionGroupMemberDraft {
+            preview_row_id: Some(preview_b_id),
+            standard_row_id: Some(standard_b),
+            history_bill_id: None,
+            member_role: "outgoing".to_string(),
+            parser_name: "cross-scope".to_string(),
+            metadata: json!({}),
+        }],
+    };
+    assert!(
+        insert_import_decision_groups_batch(pool, session_a, scoped_a, &[cross_scope_draft])
+            .is_err()
+    );
+    let boundary_group_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM import_decision_groups WHERE session_id=$1 AND group_key=$2",
+    )
+    .bind(session_a_db_id)
+    .bind("cross-scope-api-boundary")
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(boundary_group_count, 0, "invalid group insert rolls back");
+
+    let corrupted_group_id: i64 = sqlx::query_scalar(
+        r#"INSERT INTO import_decision_groups
+           (session_id,user_id,group_type,group_key,decision_status,base_preview_row_id,signal_payload)
+           VALUES($1,$2,'same_batch_transfer','cross-scope-corruption','pending',$3,'{}'::jsonb)
+           RETURNING id"#,
+    )
+    .bind(session_a_db_id)
+    .bind(user_a)
+    .bind(preview_b_id)
+    .fetch_one(pool)
+    .await?;
+    sqlx::query(
+        r#"INSERT INTO import_decision_group_members
+           (group_id,preview_row_id,standard_row_id,member_role,parser_name,metadata)
+           VALUES($1,$2,$3,'outgoing','cross-scope','{}'::jsonb)"#,
+    )
+    .bind(corrupted_group_id)
+    .bind(preview_b_id)
+    .bind(standard_b)
+    .execute(pool)
+    .await?;
+    let preview_b_before: (i64, Value) = sqlx::query_as(
+        "SELECT version, preview_payload FROM import_preview_rows WHERE id=$1 AND user_id=$2",
+    )
+    .bind(preview_b_id)
+    .bind(user_b)
+    .fetch_one(pool)
+    .await?;
+    let standard_b_before: Value = sqlx::query_scalar(
+        "SELECT standard_payload FROM import_standard_rows WHERE id=$1 AND user_id=$2",
+    )
+    .bind(standard_b)
+    .bind(user_b)
+    .fetch_one(pool)
+    .await?;
+
+    let result = apply_import_decision_group_command(
+        pool,
+        scoped_a,
+        &ImportDecisionGroupCommand {
+            operation_id: "cross-scope-command".to_string(),
+            session_id: session_a.to_string(),
+            group_id: corrupted_group_id,
+            decision: "accept".to_string(),
+            expected_group_version: 1,
+            expected_preview_versions: vec![ImportDecisionPreviewVersion {
+                preview_row_id: preview_b_id,
+                version: preview_b_before.0,
+            }],
+        },
+    )?;
+    assert_eq!(result, ImportDecisionGroupCommandResult::Conflict);
+    let empty_expected_result = apply_import_decision_group_command(
+        pool,
+        scoped_a,
+        &ImportDecisionGroupCommand {
+            operation_id: "cross-scope-command-empty-expected".to_string(),
+            session_id: session_a.to_string(),
+            group_id: corrupted_group_id,
+            decision: "accept".to_string(),
+            expected_group_version: 1,
+            expected_preview_versions: vec![],
+        },
+    )?;
+    assert_eq!(
+        empty_expected_result,
+        ImportDecisionGroupCommandResult::Conflict,
+        "cross-scope member references must fail closed even when expected previews are empty"
+    );
+    let preview_b_after: (i64, Value) = sqlx::query_as(
+        "SELECT version, preview_payload FROM import_preview_rows WHERE id=$1 AND user_id=$2",
+    )
+    .bind(preview_b_id)
+    .bind(user_b)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(preview_b_after, preview_b_before);
+    let standard_b_after: Value = sqlx::query_scalar(
+        "SELECT standard_payload FROM import_standard_rows WHERE id=$1 AND user_id=$2",
+    )
+    .bind(standard_b)
+    .bind(user_b)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(standard_b_after, standard_b_before);
+    let group_after: (String, i64) = sqlx::query_as(
+        "SELECT decision_status, version FROM import_decision_groups WHERE id=$1 AND user_id=$2",
+    )
+    .bind(corrupted_group_id)
+    .bind(user_a)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(group_after, ("pending".to_string(), 1));
+    let operation_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM import_confirm_operations WHERE user_id=$1 AND operation_id=ANY($2)",
+    )
+    .bind(user_a)
+    .bind(vec![
+        "cross-scope-command".to_string(),
+        "cross-scope-command-empty-expected".to_string(),
+    ])
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(operation_count, 0);
 
     test_db.cleanup().await?;
     Ok(())

@@ -24,11 +24,11 @@ const TRANSFER_SIGNAL_PARITY_CORPUS: &[TransferSignalParityCase] = &[
         expected_filter_visible: false,
     },
     TransferSignalParityCase {
-        name: "accepted_preserved_not_pending",
+        name: "accepted_preserved_and_filter_visible",
         preview_type: "支出",
         transfer_json: r#"{"review_status":"accepted"}"#,
         expected_index_status: Some("accepted"),
-        expected_filter_visible: false,
+        expected_filter_visible: true,
     },
     TransferSignalParityCase {
         name: "rejected_preserved_not_pending",
@@ -49,14 +49,14 @@ const TRANSFER_SIGNAL_PARITY_CORPUS: &[TransferSignalParityCase] = &[
         preview_type: "支出",
         transfer_json: r#"{"review_status":"auto_applied"}"#,
         expected_index_status: Some("accepted"),
-        expected_filter_visible: false,
+        expected_filter_visible: true,
     },
     TransferSignalParityCase {
         name: "auto_applied_hyphen_canonicalized",
         preview_type: "支出",
         transfer_json: r#"{"review_status":"auto-applied"}"#,
         expected_index_status: Some("accepted"),
-        expected_filter_visible: false,
+        expected_filter_visible: true,
     },
     TransferSignalParityCase {
         name: "explicit_pending_visible",

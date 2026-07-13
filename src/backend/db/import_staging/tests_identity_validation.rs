@@ -58,6 +58,46 @@ fn identity_validation_clears_invalid_draft_ids_and_records_issues() {
 }
 
 #[test]
+fn identity_validation_preserves_only_active_manually_owned_category_mismatches() {
+    let mut maps = ImportIdentityMaps::default();
+    maps.active_categories.insert(42, Some(4));
+    maps.active_accounts.insert(11);
+    let mut manually_owned = ImportPreviewDraft {
+        preview_type: "支出".to_string(),
+        category_id: Some(42),
+        preview_source_account_id: Some(11),
+        preview_selected: true,
+        preview_matching_feedback: json!({
+            "annotation": {
+                "is_manually_annotated": true,
+                "manual_fields": {"category_id": true}
+            }
+        }),
+        ..ImportPreviewDraft::default()
+    };
+
+    apply_identity_validation_to_draft(&mut manually_owned, &maps);
+
+    assert_eq!(manually_owned.category_id, Some(42));
+    assert!(manually_owned
+        .preview_matching_feedback
+        .get("identity_validation")
+        .is_none());
+    assert!(manually_owned.preview_selected);
+
+    manually_owned.category_id = Some(99);
+    apply_identity_validation_to_draft(&mut manually_owned, &maps);
+    assert_eq!(manually_owned.category_id, None);
+    assert_eq!(
+        manually_owned
+            .preview_matching_feedback
+            .pointer("/identity_validation/issues/0/reason"),
+        Some(&json!("not_active_or_not_found"))
+    );
+    assert!(!manually_owned.preview_selected);
+}
+
+#[test]
 fn identity_validation_records_non_positive_and_missing_identity_edges() {
     let maps = ImportIdentityMaps::default();
 
@@ -218,21 +258,19 @@ fn identity_annotation_sync_preserves_non_identity_and_maps_all_identity_fields(
         "annotation".into(),
         json!({"status":"manual_review","note":"keep"}),
     )]);
-    synchronize_identity_annotation(
-        &mut business,
-        &[json!({"field":"category_id"})],
-    );
+    synchronize_identity_annotation(&mut business, &[json!({"field":"category_id"})]);
     assert_eq!(business["annotation"]["status"], "manual_review");
 
-    let mut destination = serde_json::Map::from_iter([(
-        "annotation".into(),
-        json!({"reason":"missing_account"}),
-    )]);
+    let mut destination =
+        serde_json::Map::from_iter([("annotation".into(), json!({"reason":"missing_account"}))]);
     synchronize_identity_annotation(
         &mut destination,
         &[json!({"field":"destination_account_id"})],
     );
-    assert_eq!(destination["annotation"]["status"], "missing_destination_account");
+    assert_eq!(
+        destination["annotation"]["status"],
+        "missing_destination_account"
+    );
 
     let mut cleared = serde_json::Map::from_iter([(
         "annotation".into(),

@@ -9,10 +9,22 @@ import logger from '@/lib/logger.ts';
 
 export class BaiduMapProvider implements MapProvider {
     public static BMap: unknown = null;
-    public static BMAP_NAVIGATION_CONTROL_ZOOM: unknown = window.BMAP_NAVIGATION_CONTROL_ZOOM || 3;
-    public static BMAP_ANCHOR_TOP_LEFT: unknown = window.BMAP_ANCHOR_TOP_LEFT || 0;
-    public static COORDINATES_WGS84: unknown = window.COORDINATES_WGS84 || 1;
-    public static COORDINATES_BD09: unknown = window.COORDINATES_BD09 || 5;
+    public static BMAP_NAVIGATION_CONTROL_ZOOM: unknown = resolveBaiduMapRuntimeValue(
+        () => window.BMAP_NAVIGATION_CONTROL_ZOOM,
+        3
+    );
+    public static BMAP_ANCHOR_TOP_LEFT: unknown = resolveBaiduMapRuntimeValue(
+        () => window.BMAP_ANCHOR_TOP_LEFT,
+        0
+    );
+    public static COORDINATES_WGS84: unknown = resolveBaiduMapRuntimeValue(
+        () => window.COORDINATES_WGS84,
+        1
+    );
+    public static COORDINATES_BD09: unknown = resolveBaiduMapRuntimeValue(
+        () => window.COORDINATES_BD09,
+        5
+    );
 
     public getWebsite(): string {
         return 'https://map.baidu.com';
@@ -44,6 +56,13 @@ export class BaiduMapProvider implements MapProvider {
     public createMapInstance(): MapInstance | null {
         return new BaiduMapInstance();
     }
+}
+
+function resolveBaiduMapRuntimeValue(resolve: () => unknown, fallback: number): unknown {
+    if (typeof window === 'undefined') {
+        return fallback;
+    }
+    return resolve() || fallback;
 }
 
 export class BaiduMapInstance implements MapInstance {

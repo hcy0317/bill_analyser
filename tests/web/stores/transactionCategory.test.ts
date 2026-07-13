@@ -2,15 +2,17 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 import { createPinia, setActivePinia } from 'pinia';
 
 import { CategoryType } from '@/core/category.ts';
-import type { TransactionCategoryInfoResponse } from '@/models/transaction_category.ts';
+import { TransactionCategory, type TransactionCategoryInfoResponse } from '@/models/transaction_category.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 
 const mockGetAllTransactionCategories = jest.fn<() => Promise<CategoriesApiResponse>>();
+const mockAddTransactionCategory = jest.fn<(payload: unknown) => Promise<CategoryApiResponse>>();
 
 jest.mock('@/lib/services.ts', () => ({
     __esModule: true,
     default: {
-        getAllTransactionCategories: () => mockGetAllTransactionCategories()
+        getAllTransactionCategories: () => mockGetAllTransactionCategories(),
+        addTransactionCategory: (payload: unknown) => mockAddTransactionCategory(payload)
     }
 }));
 
@@ -29,6 +31,12 @@ type CategoriesApiResponse = {
     data: {
         success: boolean;
         result: CategoryResponseMap;
+    };
+};
+type CategoryApiResponse = {
+    data: {
+        success: boolean;
+        result: TransactionCategoryInfoResponse;
     };
 };
 
@@ -74,6 +82,7 @@ describe('transactionCategory store loadAllCategories', () => {
     beforeEach(() => {
         setActivePinia(createPinia());
         mockGetAllTransactionCategories.mockReset();
+        mockAddTransactionCategory.mockReset();
     });
 
     test('deduplicates concurrent loadAllCategories calls when force is false', async () => {
@@ -162,5 +171,85 @@ describe('transactionCategory store loadAllCategories', () => {
         expect(store.allTransactionCategories).toStrictEqual({});
         expect(store.allTransactionCategoriesMap).toStrictEqual({});
         expect(store.transactionCategoryListStateInvalid).toBe(true);
+    });
+
+    test('saveCategory sends explicit hierarchy and updates the visible tree immediately', async () => {
+        const store = useTransactionCategoriesStore();
+        mockGetAllTransactionCategories.mockResolvedValue({
+            data: {
+                success: true,
+                result: buildCategoryResponse()
+            }
+        });
+        await store.loadAllCategories({ force: false });
+
+        mockAddTransactionCategory
+            .mockResolvedValueOnce({
+                data: {
+                    success: true,
+                    result: {
+                        id: 'expense-2',
+                        name: '交通',
+                        parentId: '0',
+                        type: CategoryType.Expense,
+                        icon: 'las la-car',
+                        color: '#2196f3',
+                        comment: '',
+                        displayOrder: 2,
+                        hidden: false,
+                        visible: true,
+                        subCategories: []
+                    } as TransactionCategoryInfoResponse
+                }
+            })
+            .mockResolvedValueOnce({
+                data: {
+                    success: true,
+                    result: {
+                        id: 'expense-2-sub-1',
+                        name: '公交',
+                        parentId: 'expense-2',
+                        type: CategoryType.Expense,
+                        icon: 'las la-bus',
+                        color: '#2196f3',
+                        comment: '',
+                        displayOrder: 1,
+                        hidden: false,
+                        visible: true
+                    } as TransactionCategoryInfoResponse
+                }
+            });
+
+        const primaryDraft = TransactionCategory.createNewCategory(CategoryType.Expense, '0');
+        primaryDraft.name = '交通';
+        const savedPrimary = await store.saveCategory({
+            category: primaryDraft,
+            isEdit: false,
+            clientSessionId: 'primary-session'
+        });
+
+        expect(mockAddTransactionCategory).toHaveBeenNthCalledWith(1, expect.objectContaining({
+            type: CategoryType.Expense,
+            parentId: '0',
+            clientSessionId: 'primary-session'
+        }));
+        expect(store.allTransactionCategories[CategoryType.Expense]).toContainEqual(savedPrimary);
+        expect(store.allTransactionCategoriesMap['expense-2']).toMatchObject({ id: savedPrimary.id, parentId: '0' });
+
+        const secondaryDraft = TransactionCategory.createNewCategory(CategoryType.Expense, savedPrimary.id);
+        secondaryDraft.name = '公交';
+        const savedSecondary = await store.saveCategory({
+            category: secondaryDraft,
+            isEdit: false,
+            clientSessionId: 'secondary-session'
+        });
+
+        expect(mockAddTransactionCategory).toHaveBeenNthCalledWith(2, expect.objectContaining({
+            type: CategoryType.Expense,
+            parentId: 'expense-2',
+            clientSessionId: 'secondary-session'
+        }));
+        expect(store.allTransactionCategoriesMap['expense-2-sub-1']).toMatchObject({ id: savedSecondary.id, parentId: 'expense-2' });
+        expect(store.allTransactionCategoriesMap['expense-2']?.subCategories).toContainEqual(savedSecondary);
     });
 });

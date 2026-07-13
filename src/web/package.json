@@ -17,7 +17,7 @@
     "lint": "vue-tsc --noEmit && eslint . --fix",
     "lint:ci": "vue-tsc --noEmit && tsc --noEmit --project tsconfig.e2e.json && eslint .",
     "test": "cross-env CI=1 TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --maxWorkers=50%",
-    "test:coverage": "npm run test && cross-env CI=1 COVERAGE_GATE=1 TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --maxWorkers=50% --coverage",
+    "test:coverage": "npm run test && cross-env CI=1 COVERAGE_GATE=1 TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --maxWorkers=50% --coverage && cross-env CI=1 CHANGED_SFC_COVERAGE=1 TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --runInBand --coverage && node scripts/merge-jest-coverage.cjs",
     "test:watch": "cross-env TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --watch",
     "e2e": "playwright test",
     "e2e:check": "tsc --noEmit --project tsconfig.e2e.json",

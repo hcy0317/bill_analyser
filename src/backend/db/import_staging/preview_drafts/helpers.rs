@@ -103,7 +103,12 @@ fn history_summary(row: &ImportHistoryBillRow) -> Value {
         source_account_name
     };
     let destination_account_name = if destination_account_name.is_empty() {
-        Value::Null
+        let fallback = row.bill.destination_account_name.trim();
+        if fallback.is_empty() {
+            Value::Null
+        } else {
+            json!(fallback)
+        }
     } else {
         json!(destination_account_name)
     };
@@ -129,10 +134,9 @@ fn history_summary(row: &ImportHistoryBillRow) -> Value {
         "known"
     };
     let identity_source = snapshot_text(&["identitySource", "identity_source"]);
-    let identity_source = if identity_source.is_empty() {
-        "snapshot_fallback".to_string()
-    } else {
-        identity_source
+    let identity_source = match identity_source.as_str() {
+        "staging_snapshot" | "runtime_current" => identity_source,
+        _ => "runtime_current".to_string(),
     };
     json!({
         "bill_id": row.history_bill_id,

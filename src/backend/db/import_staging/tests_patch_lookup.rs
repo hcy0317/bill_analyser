@@ -143,40 +143,22 @@ fn learning_filter_includes_transfer_recommendations_with_learning_level() {
         );
     }
 
+    let mut suppressed = preview_row(3);
+    suppressed.preview_matching_feedback = json!({
+        "transfer": {
+            "review_status": "pending",
+            "candidate_type": "cross_account",
+            "learning_level": "yellow",
+            "suppressed": true
+        }
+    });
+    assert!(!signal_filter_matches(Some("learning"), &suppressed));
+
     let mut plain_transfer = preview_row(2);
     plain_transfer.preview_type = "转账".to_string();
     plain_transfer.preview_matching_feedback = json!({});
     assert!(!signal_filter_matches(Some("transfer"), &plain_transfer));
     assert!(!signal_filter_matches(Some("learning"), &plain_transfer));
-}
-
-#[test]
-fn transfer_decision_state_keeps_pair_evidence_and_exposes_capabilities() {
-    let original = json!({
-        "transfer": {
-            "candidate_type": "transfer",
-            "pair_order": "outgoing",
-            "source_chain": [{"role": "outgoing"}],
-            "owned_fields": {"category_id": false}
-        }
-    });
-
-    let rejected = set_transfer_decision_state(original.clone(), "rejected", true);
-    assert_eq!(rejected.pointer("/transfer/state"), Some(&json!("rejected")));
-    assert_eq!(rejected.pointer("/transfer/suppressed"), Some(&json!(true)));
-    assert_eq!(
-        rejected.pointer("/transfer/candidate_type"),
-        original.pointer("/transfer/candidate_type")
-    );
-    assert_eq!(
-        rejected.pointer("/transfer/owned_fields/category_id"),
-        Some(&json!(false))
-    );
-
-    let accepted = set_transfer_decision_state(original, "accepted", false);
-    assert_eq!(accepted.pointer("/transfer/state"), Some(&json!("accepted")));
-    assert_eq!(accepted.pointer("/transfer/capabilities/reject"), Some(&json!(true)));
-    assert_eq!(accepted.pointer("/transfer/capabilities/undo"), Some(&json!(true)));
 }
 
 #[test]

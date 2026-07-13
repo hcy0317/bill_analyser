@@ -1,6 +1,7 @@
 import type { Config } from 'jest';
 
 const coverageGateEnabled = process.env['COVERAGE_GATE'] === '1';
+const changedSfcCoverageEnabled = process.env['CHANGED_SFC_COVERAGE'] === '1';
 
 const config: Config = {
     preset: 'ts-jest',
@@ -8,7 +9,10 @@ const config: Config = {
     testTimeout: 300000,
     maxWorkers: 1,
     roots: ['<rootDir>/src', '<rootDir>/../../tests/web'],
-    testMatch: coverageGateEnabled ? [
+    testMatch: changedSfcCoverageEnabled ? [
+        '<rootDir>/../../tests/web/views/desktop/transactions/import/changedVueSfcCoverage.test.ts',
+        '<rootDir>/../../tests/web/views/mobile/categoryListPageInteraction.test.ts'
+    ] : coverageGateEnabled ? [
         '<rootDir>/../../tests/web/views/desktop/budgets/forecastDisplay.test.ts',
         '<rootDir>/../../tests/web/views/desktop/budgets/forecastRequest.test.ts',
         '<rootDir>/../../tests/web/views/desktop/transactions/import/checkDataMatching.test.ts',
@@ -45,11 +49,19 @@ const config: Config = {
     },
     moduleFileExtensions: ['vue', 'ts', 'js', 'json'],
     coverageReporters: ['lcov', 'json', 'text'],
-    forceCoverageMatch: coverageGateEnabled ? [
+    forceCoverageMatch: changedSfcCoverageEnabled ? [
+        '**/src/views/desktop/transactions/import/ImportDialog.vue',
+        '**/src/views/desktop/categories/ListPage.vue',
+        '**/src/views/mobile/categories/ListPage.vue'
+    ] : coverageGateEnabled ? [
         '**/src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue',
         '**/src/views/mobile/transactions/ImportPreviewPage.vue'
     ] : ['**/tests/web/fixtures/VueCoverageHarness.vue'],
-    collectCoverageFrom: coverageGateEnabled ? [
+    collectCoverageFrom: changedSfcCoverageEnabled ? [
+        'src/views/desktop/transactions/import/ImportDialog.vue',
+        'src/views/desktop/categories/ListPage.vue',
+        'src/views/mobile/categories/ListPage.vue'
+    ] : coverageGateEnabled ? [
         'src/views/desktop/budgets/forecastDisplay.ts',
         'src/views/desktop/budgets/forecastRequest.ts',
         'src/models/import_matching.ts',
@@ -77,7 +89,8 @@ const config: Config = {
         'src/**/*.ts',
         '!src/**/*.d.ts'
     ],
-    coverageThreshold: coverageGateEnabled ? {
+    coverageDirectory: changedSfcCoverageEnabled ? '<rootDir>/coverage/changed-sfc' : undefined,
+    coverageThreshold: coverageGateEnabled && !changedSfcCoverageEnabled ? {
         global: {
             branches: 91,
             functions: 91,

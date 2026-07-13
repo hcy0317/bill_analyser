@@ -6,6 +6,10 @@ const mockShowMessage = jest.fn();
 const mockLoggerError = jest.fn();
 const mockLoadAllCategories = jest.fn();
 const mockLoadAllAccounts = jest.fn();
+const mockLlmPreviewRecommend = jest.fn<(...args: Array<any>) => Promise<any>>();
+const mockAnalyzeLLMTransactions = jest.fn<(...args: Array<any>) => Promise<any>>();
+const mockGetImportLearningSuggestions = jest.fn<(...args: Array<any>) => Promise<any>>();
+const mockPromoteImportLearning = jest.fn<(...args: Array<any>) => Promise<any>>();
 
 const mockExpenseChild = {
     id: '8',
@@ -118,7 +122,13 @@ jest.mock('@/stores/transactionTag.ts', () => ({
 }));
 jest.mock('@/lib/services.ts', () => ({
     __esModule: true,
-    default: { getLLMMemoryEvents: mockGetLLMMemoryEvents }
+    default: {
+        getLLMMemoryEvents: mockGetLLMMemoryEvents,
+        llmPreviewRecommend: mockLlmPreviewRecommend,
+        analyzeLLMTransactions: mockAnalyzeLLMTransactions,
+        getImportLearningSuggestions: mockGetImportLearningSuggestions,
+        promoteImportLearning: mockPromoteImportLearning
+    }
 }));
 jest.mock('@/lib/server_settings.ts', () => ({ isTransactionFromAIImageRecognitionEnabled: () => false }));
 jest.mock('@/lib/userstate.ts', () => ({ getCurrentToken: () => 'action-token' }));
@@ -160,7 +170,8 @@ for (const componentPath of [
     '@/views/desktop/transactions/import/dialogs/BatchCreateDialog.vue',
     '@/views/desktop/transactions/import/dialogs/ImportLearningSuggestionDialog.vue',
     '@/views/desktop/categories/list/dialogs/EditDialog.vue',
-    '@/views/desktop/accounts/list/dialogs/EditDialog.vue'
+    '@/views/desktop/accounts/list/dialogs/EditDialog.vue',
+    '@/views/desktop/transactions/list/dialogs/EditDialog.vue'
 ]) {
     jest.mock(componentPath, () => ({ __esModule: true, default: { name: 'ActionMatrixStub' } }));
 }
@@ -224,6 +235,21 @@ function createBindings(transactions: ImportTransaction[], sessionId = 'action-s
     return bindings;
 }
 
+function createServerPagedBindings(
+    transactions: ImportTransaction[],
+    metadata: Record<string, unknown>
+): any {
+    const bindings = (ImportTransactionCheckDataTab as any).setup({
+        importTransactions: transactions,
+        sessionId: 'action-session',
+        serverPaged: true,
+        totalImportTransactionCount: 3,
+        previewMetadata: metadata
+    }, { emit: jest.fn(), expose: jest.fn() });
+    bindings.snackbar.value = { showMessage: mockShowMessage };
+    return bindings;
+}
+
 async function flushPromises(): Promise<void> {
     await Promise.resolve();
     await Promise.resolve();
@@ -251,6 +277,10 @@ function recurringPreview(id: number, recurringId: number | null): Record<string
 beforeEach(() => {
     jest.clearAllMocks();
     mockGetLLMMemoryEvents.mockResolvedValue({ data: { result: { events: [] } } });
+    mockLlmPreviewRecommend.mockResolvedValue({ data: { result: { suggestions: [] } } });
+    mockAnalyzeLLMTransactions.mockResolvedValue({ data: { result: { candidates_created: 0 } } });
+    mockGetImportLearningSuggestions.mockResolvedValue({ data: { result: { suggestions: [] } } });
+    mockPromoteImportLearning.mockResolvedValue({ data: { result: { rules_total: 0 } } });
     Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: mockFetch });
 });
 
@@ -318,6 +348,159 @@ describe('desktop import category, account, and decision baselines', () => {
                 score: 0
             });
             expect(bindings.shouldBlockLearningDecisionOnSync(transaction)).toBe(false);
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
+    test('shows the transfer decision server error once without nested fallback prefixes', async () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        try {
+            const transaction = createTransaction(150);
+            const bindings = createBindings([transaction]);
+            bindings.syncTransferDecisionBaseline(transaction);
+            mockFetch.mockResolvedValueOnce({
+                ok: false,
+                status: 500,
+                text: async () => JSON.stringify({
+                    error: 'Rust import route runtime DB error',
+                    success: false
+                })
+            });
+
+            await bindings.reviewTransferSuggestion(transaction, 'accept');
+
+            expect(mockShowMessage).toHaveBeenLastCalledWith('Rust import route runtime DB error');
+            const visibleMessage = String(mockShowMessage.mock.calls.at(-1)?.[0] ?? '');
+            expect(visibleMessage.match(/Transfer decision failed/g) ?? []).toHaveLength(0);
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
+    test('normalizes empty, plain-text, JSON, Error, and string decision failures', () => {
+        const bindings = createBindings([createTransaction(154)]);
+
+        expect(bindings.parseImportDecisionErrorMessage('', 'fallback')).toBe('fallback');
+        expect(bindings.parseImportDecisionErrorMessage('plain domain failure', 'fallback'))
+            .toBe('plain domain failure');
+        expect(bindings.parseImportDecisionErrorMessage('{"message":" structured failure "}', 'fallback'))
+            .toBe('structured failure');
+        expect(bindings.getImportDecisionErrorMessage(new Error(' runtime failure '), 'fallback'))
+            .toBe('runtime failure');
+        expect(bindings.getImportDecisionErrorMessage(' string failure ', 'fallback'))
+            .toBe('string failure');
+        expect(bindings.getImportDecisionErrorMessage({ failure: true }, 'fallback')).toBe('fallback');
+    });
+
+    test('flushes partial selection once and sends the same server selection hash to all three actions', async () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        try {
+            const selected = createTransaction(151, { selected: false });
+            const bindings = createServerPagedBindings([selected], {
+                counts: { total: 3, selected: 0, selected_total: 0, selected_invalid: 0 },
+                facets: {},
+                selection_hash: 'fnv1a32:811c9dc5'
+            });
+            selected.selected = true;
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    success: true,
+                    data: {
+                        metadata: {
+                            counts: { total: 3, selected: 1, selected_total: 1, selected_invalid: 0 },
+                            facets: {},
+                            selection_hash: 'fnv1a32:resolved-selection'
+                        }
+                    }
+                })
+            });
+
+            await bindings.applyLLMPreviewRecommendations();
+            await bindings.analyzeSelectedPreviewWithLLM();
+            await bindings.promoteSelectedToLongTermLearning();
+
+            expect(mockFetch).toHaveBeenCalledTimes(1);
+            expect(mockFetch).toHaveBeenCalledWith(
+                '/api/bills/import/v2/preview/action-session/selection',
+                expect.objectContaining({
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        selectionAction: 'patch',
+                        selectedIds: [151],
+                        deselectedIds: []
+                    })
+                })
+            );
+            const expectedScope = {
+                kind: 'selected',
+                selection_hash: 'fnv1a32:resolved-selection'
+            };
+            for (const service of [
+                mockLlmPreviewRecommend,
+                mockAnalyzeLLMTransactions,
+                mockGetImportLearningSuggestions
+            ]) {
+                expect(service).toHaveBeenCalledTimes(1);
+                expect(service).toHaveBeenCalledWith(expect.objectContaining({
+                    sessionId: 'action-session',
+                    actionScope: expectedScope,
+                    previewUpdates: [expect.objectContaining({ id: 151 })]
+                }));
+            }
+            expect(mockFetch.mock.invocationCallOrder[0]).toBeLessThan(
+                mockLlmPreviewRecommend.mock.invocationCallOrder[0]!
+            );
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
+    test('keeps selected scope when the active filter hides every selected row', async () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        try {
+            const visibleUnselected = createTransaction(152, { selected: false });
+            const bindings = createServerPagedBindings([visibleUnselected], {
+                counts: { total: 1, selected: 0, selected_total: 1, selected_invalid: 0 },
+                facets: {},
+                selection_hash: 'fnv1a32:hidden-selected-row'
+            });
+
+            await bindings.applyLLMPreviewRecommendations();
+
+            expect(mockFetch).not.toHaveBeenCalled();
+            expect(mockLlmPreviewRecommend).toHaveBeenCalledWith({
+                sessionId: 'action-session',
+                previewUpdates: [],
+                actionScope: {
+                    kind: 'selected',
+                    selection_hash: 'fnv1a32:hidden-selected-row'
+                }
+            });
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
+    test('does not guess a selected scope from a nonempty hash when selected_total is absent', async () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        try {
+            const visibleUnselected = createTransaction(153, { selected: false });
+            const bindings = createServerPagedBindings([visibleUnselected], {
+                counts: { total: 1, selected: 0, selected_invalid: 0 } as never,
+                facets: {},
+                selection_hash: 'fnv1a32:untrusted-without-count'
+            });
+
+            await bindings.applyLLMPreviewRecommendations();
+
+            expect(mockFetch).not.toHaveBeenCalled();
+            expect(mockLlmPreviewRecommend).toHaveBeenCalledWith(expect.objectContaining({
+                sessionId: 'action-session',
+                previewUpdates: [],
+                actionScope: expect.objectContaining({ kind: 'all_matching' })
+            }));
         } finally {
             warnSpy.mockRestore();
         }

@@ -197,6 +197,13 @@ const IMPORT_DECISION_OPERATION_INDEXES: &[&str] = &[
     "idx_import_confirm_operations_history_rewrite_idempotency",
 ];
 
+const IMPORT_PREVIEW_TIME_PAGE_TABLES: &[&str] = &["import_preview_rows"];
+
+const IMPORT_PREVIEW_TIME_PAGE_INDEXES: &[&str] = &["idx_import_preview_rows_session_occurred_at"];
+
+const IMPORT_PREVIEW_SIGNAL_FLAG_TABLES: &[&str] = &["import_preview_rows"];
+const IMPORT_PREVIEW_SIGNAL_FLAG_INDEXES: &[&str] = &[];
+
 const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
     PostgresMigrationDescriptor {
         version: 1,
@@ -324,6 +331,20 @@ const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
         required_tables: IMPORT_DECISION_OPERATION_TABLES,
         required_indexes: IMPORT_DECISION_OPERATION_INDEXES,
     },
+    PostgresMigrationDescriptor {
+        version: 19,
+        file_name: "0019_import_preview_time_page_index.sql",
+        description: "add import preview session time-order index for bounded server pages",
+        required_tables: IMPORT_PREVIEW_TIME_PAGE_TABLES,
+        required_indexes: IMPORT_PREVIEW_TIME_PAGE_INDEXES,
+    },
+    PostgresMigrationDescriptor {
+        version: 20,
+        file_name: "0020_import_preview_signal_flags.sql",
+        description: "centralize immutable import preview signal flag projection for bounded metadata queries",
+        required_tables: IMPORT_PREVIEW_SIGNAL_FLAG_TABLES,
+        required_indexes: IMPORT_PREVIEW_SIGNAL_FLAG_INDEXES,
+    },
 ];
 
 pub fn postgres_migrations_dir() -> PathBuf {
@@ -355,11 +376,18 @@ mod tests {
     #[test]
     fn postgres_manifest_points_to_existing_initial_schema() {
         let manifest = postgres_migration_manifest();
-        assert_eq!(manifest.len(), 18);
+        assert_eq!(manifest.len(), 20);
         assert_eq!(manifest[0].version, 1);
         assert_eq!(manifest[0].file_name, POSTGRES_INITIAL_SCHEMA_FILE);
         for (index, descriptor) in manifest.iter().enumerate() {
             assert_eq!(descriptor.version, i64::try_from(index + 1).unwrap());
+            assert!(
+                descriptor
+                    .file_name
+                    .starts_with(&format!("{:04}_", descriptor.version)),
+                "migration file name must preserve manifest order: {}",
+                descriptor.file_name
+            );
         }
         assert!(postgres_initial_schema_path().exists());
         for descriptor in manifest.iter().skip(1) {
@@ -367,6 +395,31 @@ mod tests {
                 .join(descriptor.file_name)
                 .exists());
         }
+        assert_eq!(manifest[18].version, 19);
+        assert_eq!(
+            manifest[18].file_name,
+            "0019_import_preview_time_page_index.sql"
+        );
+        assert_eq!(manifest[19].version, 20);
+        assert_eq!(
+            manifest[19].file_name,
+            "0020_import_preview_signal_flags.sql"
+        );
+
+        let mut migration_files = fs::read_dir(postgres_migrations_dir())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|file_name| file_name.ends_with(".sql"))
+            .collect::<Vec<_>>();
+        migration_files.sort();
+        assert_eq!(
+            migration_files,
+            manifest
+                .iter()
+                .map(|descriptor| descriptor.file_name.to_string())
+                .collect::<Vec<_>>(),
+            "migration directory and manifest must contain the same ordered SQL files"
+        );
     }
 
     #[test]
@@ -565,6 +618,32 @@ mod tests {
         }
         assert!(migration.contains("operation_kind = 'decision_group'"));
         assert!(migration.contains("operation_kind = 'history_rewrite'"));
+    }
+
+    #[test]
+    fn import_preview_time_page_migration_contains_required_index() {
+        let migration = fs::read_to_string(
+            postgres_migrations_dir().join("0019_import_preview_time_page_index.sql"),
+        )
+        .unwrap();
+
+        for index in IMPORT_PREVIEW_TIME_PAGE_INDEXES {
+            assert!(migration.contains(index), "missing index {index}");
+        }
+        assert!(migration.contains("session_id, user_id, occurred_at, id"));
+    }
+
+    #[test]
+    fn import_preview_signal_flag_migration_contains_projection_functions() {
+        let migration = fs::read_to_string(
+            postgres_migrations_dir().join("0020_import_preview_signal_flags.sql"),
+        )
+        .unwrap();
+
+        assert!(migration.contains("FUNCTION import_preview_signal_flags"));
+        assert!(migration.contains("FUNCTION import_preview_meaningful_feedback"));
+        assert!(migration.contains("IMMUTABLE"));
+        assert!(migration.contains("PARALLEL SAFE"));
     }
 
     #[tokio::test]

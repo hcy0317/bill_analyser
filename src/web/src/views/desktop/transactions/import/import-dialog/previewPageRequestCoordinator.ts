@@ -4,6 +4,10 @@ export interface PreviewPageRequestHandle {
     readonly controller: AbortController;
 }
 
+export interface PreviewPageRequestStartOptions {
+    replaceActive?: boolean;
+}
+
 export class PreviewPageRequestCoordinator {
     private generation = 0;
     private active: PreviewPageRequestHandle | null = null;
@@ -12,8 +16,8 @@ export class PreviewPageRequestCoordinator {
         return this.active !== null;
     }
 
-    begin(key: string): PreviewPageRequestHandle | null {
-        if (this.active?.key === key) {
+    begin(key: string, options: PreviewPageRequestStartOptions = {}): PreviewPageRequestHandle | null {
+        if (this.active?.key === key && !options.replaceActive) {
             return null;
         }
         this.active?.controller.abort();

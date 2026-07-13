@@ -1105,7 +1105,9 @@ async function fetchPreviewPage(
         normalizedSortDirection,
         sortOptions.filters
     )}`;
-    const requestHandle = previewPageRequests.begin(requestKey);
+    const requestHandle = previewPageRequests.begin(requestKey, {
+        replaceActive: sortOptions.replaceActive
+    });
     if (!requestHandle) {
         return;
     }
@@ -1197,6 +1199,7 @@ async function onCheckDataPageRequested(
             sortBy: normalizedSortBy,
             sortDirection: normalizedSortDirection,
             filters: sortOptions?.filters,
+            replaceActive: sortOptions?.replaceActive,
         });
     } catch (error) {
         if (isAbortError(error)) {

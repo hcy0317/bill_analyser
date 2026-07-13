@@ -3,6 +3,7 @@ import type {
     ImportCheckVisibleTransactionLike,
 } from '../checkDataFilters.ts';
 import type { ImportPreviewRawFlag, ImportPreviewRawSignalStatus, ImportPreviewSignalStatus } from '../checkDataMatching.ts';
+import type { ImportHistoryBillSummaryPayload } from '@/models/import_matching.ts';
 
 export interface ImportPreviewIndexItem extends ImportCheckVisibleTransactionLike {
     id: number;
@@ -51,6 +52,7 @@ export interface ImportPreviewIndexItem extends ImportCheckVisibleTransactionLik
     historyOperationId?: string;
     historyAcknowledgementToken?: string;
     historyDestructiveAckRequired?: boolean;
+    historySummary?: ImportHistoryBillSummaryPayload | null;
     recurringTemplateId?: string;
     recurringCandidateCount?: number;
     recurringMatchReasons?: string;
@@ -110,6 +112,7 @@ export interface ImportPreviewMetadata {
         annotations?: Record<string, number>;
         signals?: Record<string, number>;
         selected?: number;
+        selected_total?: number;
         selected_invalid?: number;
         total?: number;
     };
@@ -131,6 +134,7 @@ export interface PreviewPageRequestOptions {
     sortBy?: string | null;
     sortDirection?: PreviewTableSortDirection | null;
     filters?: ImportPreviewServerQueryFilters;
+    replaceActive?: boolean;
 }
 
 export interface PreviewTableSortInputItem {
@@ -199,6 +203,7 @@ export interface ImportPreviewIndexResponseItem {
     history_operation_id?: string;
     history_acknowledgement_token?: string;
     history_destructive_ack_required?: boolean;
+    history_summary?: ImportHistoryBillSummaryPayload | null;
     recurring_template_id?: string;
     recurring_candidate_count?: number;
     recurring_match_reasons?: string;

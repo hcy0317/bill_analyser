@@ -1,6 +1,7 @@
 import { describe, expect, jest, test } from '@jest/globals';
 
 import {
+    applyNonServerPagedReplacement,
     applyServerPagedReclassification,
     resolveDecisionPreviewReplacement,
 } from '@/views/desktop/transactions/import/decisionPreviewReplacement';
@@ -29,5 +30,25 @@ describe('decision preview replacement', () => {
         expect(refresh).toHaveBeenCalledTimes(1);
         expect(applyServerPagedReclassification(false, refresh)).toBe(false);
         expect(refresh).toHaveBeenCalledTimes(1);
+    });
+
+    test('non-server-paged replacement keeps rows without a preview id and appends server upserts', () => {
+        const currentRows = [
+            { id: 1, previewId: 41 },
+            { id: 2, previewId: null },
+            { id: 3, previewId: 42 },
+        ] as never[];
+        const upsertedRows = [{ id: 4, previewId: 51 }] as never[];
+
+        expect(applyNonServerPagedReplacement(
+            currentRows,
+            [41],
+            upsertedRows,
+            row => (row as unknown as { previewId: number | null }).previewId,
+        )).toEqual([
+            { id: 2, previewId: null },
+            { id: 3, previewId: 42 },
+            { id: 4, previewId: 51 },
+        ]);
     });
 });

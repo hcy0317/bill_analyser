@@ -180,6 +180,34 @@ describe('forecastDisplay helpers', () => {
         expect(result.map(item => item.categoryName)).toStrictEqual(['高置信', '低置信']);
     });
 
+    test('filterAndSortForecasts reaches category tie-breakers for equal confidence and totals', () => {
+        const tiedForecasts: BudgetForecastItem[] = [
+            {
+                ...SAMPLE_FORECASTS[0]!,
+                categoryId: '9',
+                categoryName: '游戏',
+                projectedTotalCents: 100,
+                backtestMape: null,
+                confidence: 'medium'
+            },
+            {
+                ...SAMPLE_FORECASTS[0]!,
+                categoryId: '10',
+                categoryName: '电影',
+                projectedTotalCents: 100,
+                backtestMape: null,
+                confidence: 'medium'
+            }
+        ];
+
+        expect(filterAndSortForecasts(tiedForecasts, { sortBy: 'confidence' })
+            .map(item => item.categoryName)).toStrictEqual(['电影', '游戏']);
+        expect(filterAndSortForecasts(tiedForecasts, { sortBy: 'projected_total' })
+            .map(item => item.categoryName)).toStrictEqual(['电影', '游戏']);
+        expect(filterAndSortForecasts(tiedForecasts, { sortBy: 'backtest' })
+            .map(item => item.categoryName)).toStrictEqual(['电影', '游戏']);
+    });
+
     test('summarizeForecastRisks returns total, risk counts and filtered count', () => {
         const filtered = filterAndSortForecasts(SAMPLE_FORECASTS, {
             sortBy: 'category',

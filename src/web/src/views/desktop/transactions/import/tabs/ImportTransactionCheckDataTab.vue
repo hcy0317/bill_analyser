@@ -843,8 +843,9 @@ import {
     clearResolvedImportPreviewReviewState
 } from '../importPreviewReviewState.ts';
 import { cloneImportPreviewDraftTransaction } from '../importPreviewDrafts.ts';
-import { buildImportPreviewActionScope } from '../actionScope.ts';
+import { buildImportPreviewActionScope, hashImportPreviewSelectionIds } from '../actionScope.ts';
 import { buildSelectionPatch } from '../selectionActionCoordinator.ts';
+import { buildCanonicalPreviewPageRequestKey } from '../import-dialog/previewPageQuery.ts';
 import {
     buildImportPreviewServerQueryFilters,
     groupImportPreviewAccountFilterLabels,
@@ -1068,6 +1069,7 @@ const emit = defineEmits<{
             sortBy?: string | null;
             sortDirection?: PreviewTableSortDirection | null;
             filters?: ImportPreviewServerQueryFilters;
+            replaceActive?: boolean;
         }
     ): void;
 }>();
@@ -2365,6 +2367,37 @@ function resolvePreviewDecisionItem(
     return previewData.find(preview => Number(preview.id) === previewId) || null;
 }
 
+function parseImportDecisionErrorMessage(errorText: string, fallbackMessage: string): string {
+    const normalizedErrorText = errorText.trim();
+    if (!normalizedErrorText) {
+        return fallbackMessage;
+    }
+
+    try {
+        const payload = JSON.parse(normalizedErrorText) as Record<string, unknown>;
+        for (const key of ['error', 'message']) {
+            const message = payload[key];
+            if (typeof message === 'string' && message.trim()) {
+                return message.trim();
+            }
+        }
+    } catch {
+        // The server may return a plain-text domain error.
+    }
+
+    return normalizedErrorText;
+}
+
+function getImportDecisionErrorMessage(error: unknown, fallbackMessage: string): string {
+    if (error instanceof Error && error.message.trim()) {
+        return error.message.trim();
+    }
+    if (typeof error === 'string' && error.trim()) {
+        return error.trim();
+    }
+    return fallbackMessage;
+}
+
 function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData: ImportPreviewRecord): void {
     const previousType = item.type;
     const nextType = getImportPreviewTransactionTypeNumber(previewData.preview_type);
@@ -2428,6 +2461,7 @@ function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData
     item.recurringMatchedDate = previewData.preview_recurring_matched_date || '';
 
     updateTransactionData(item);
+    importTransactionSelectionRevision.value += 1;
     syncTransferDecisionBaseline(item);
     syncLearningDecisionBaseline(item);
     getPreviewState(item)._shouldClearLlmDecision = false;
@@ -2513,7 +2547,10 @@ async function reviewTransferSuggestion(
 
         if (!response.ok) {
             const errorText = await response.text();
-            throw new Error(`Transfer decision failed: ${response.status} ${errorText}`);
+            throw new Error(parseImportDecisionErrorMessage(
+                errorText,
+                `Transfer decision failed (${response.status})`
+            ));
         }
 
         const result = await response.json();
@@ -2547,7 +2584,7 @@ async function reviewTransferSuggestion(
         snackbar.value?.showMessage(tt(getTransferDecisionMessageKey(decision)));
     } catch (error) {
         logger.error(`[转账建议决策] 失败: ${error}`);
-        snackbar.value?.showMessage(`Transfer decision failed: ${error}`);
+        snackbar.value?.showMessage(getImportDecisionErrorMessage(error, 'Transfer decision failed'));
     } finally {
         removeDecisionLoadingId(transferDecisionLoadingIds, previewId);
     }
@@ -3190,9 +3227,11 @@ function collectAnnotationIssues(item: ImportTransaction): string[] {
     return reasons;
 }
 
-const importTransactionSelectionSummary = computed<ImportTransactionSelectionSummary>(() => (
-    collectImportTransactionSelectionSummary(getTrackedTransactionsForSelection(), collectAnnotationIssues)
-));
+const importTransactionSelectionRevision = ref(0);
+const importTransactionSelectionSummary = computed<ImportTransactionSelectionSummary>(() => {
+    void importTransactionSelectionRevision.value;
+    return collectImportTransactionSelectionSummary(getTrackedTransactionsForSelection(), collectAnnotationIssues);
+});
 
 function getAnnotationIssues(item: ImportTransaction): string[] {
     return importTransactionSelectionSummary.value.annotationIssuesByIndex[item.index] || collectAnnotationIssues(item);
@@ -3456,9 +3495,19 @@ function getTrackedTransactionByPreviewId(previewId: number): ImportTransaction 
 }
 
 function buildPreviewActionScope(): Record<string, unknown> {
+    const selectedPreviewIds = getTrackedTransactionsForSelection()
+        .filter(transaction => transaction.selected)
+        .map(transaction => getPreviewId(transaction))
+        .filter((previewId): previewId is number => previewId !== null);
+    const serverSelectionHash = String(previewMetadata.value.selection_hash || '').trim();
+    const selectedTotal = Number(previewMetadata.value.counts?.selected_total);
+    const selectedCountForScope = serverPagedMode.value
+        ? (Number.isSafeInteger(selectedTotal) && selectedTotal >= 0 ? selectedTotal : 0)
+        : selectedPreviewIds.length;
     return buildImportPreviewActionScope({
-        selectedCount: selectedImportTransactionCount.value,
-        selectionHash: previewMetadata.value.selection_hash || '',
+        selectedCount: selectedCountForScope,
+        selectionHash: serverSelectionHash
+            || hashImportPreviewSelectionIds(selectedPreviewIds),
         filters: buildServerPreviewQueryFilters()
     });
 }
@@ -3502,6 +3551,11 @@ async function applyLLMPreviewRecommendations(): Promise<void> {
 
     if (!props.sessionId) {
         snackbar.value?.showMessage('No session ID available');
+        return;
+    }
+
+    if (totalImportTransactionCount.value < 1) {
+        snackbar.value?.showMessage('No preview rows available for LLM recommendation');
         return;
     }
 
@@ -3567,6 +3621,11 @@ async function analyzeSelectedPreviewWithLLM(): Promise<void> {
         return;
     }
 
+    if (totalImportTransactionCount.value < 1) {
+        snackbar.value?.showMessage('No preview rows available for LLM analysis');
+        return;
+    }
+
     if (llmSessionAnalyzing.value) {
         return;
     }
@@ -3612,6 +3671,11 @@ async function promoteSelectedToLongTermLearning(): Promise<void> {
 
     if (!props.sessionId) {
         snackbar.value?.showMessage('No session ID available');
+        return;
+    }
+
+    if (totalImportTransactionCount.value < 1) {
+        snackbar.value?.showMessage('No preview rows available for learning');
         return;
     }
 
@@ -4345,12 +4409,15 @@ function getCurrentServerPagedRequestOptions(): PreviewPageRequestOptions {
     };
 }
 
+const lastServerPagedRequestKey = ref('');
+
 function emitServerPagedRequest(
     page: number,
     pageSize: number,
     options: {
         cacheDrafts?: boolean;
         force?: boolean;
+        replaceActive?: boolean;
         sortKey?: string | null;
         sortDirection?: PreviewTableSortDirection | null;
     } = {}
@@ -4361,12 +4428,21 @@ function emitServerPagedRequest(
     const normalizedSortDirection = normalizePreviewTableSortDirection(
         options.sortDirection ?? currentSortDirection.value
     );
-    const pageChanged = currentPage.value !== normalizedPage;
-    const pageSizeChanged = countPerPage.value !== normalizedPageSize;
-    const sortChanged = currentSortKey.value !== normalizedSortKey
-        || currentSortDirection.value !== normalizedSortDirection;
+    const requestOptions: PreviewPageRequestOptions = {
+        sortBy: normalizedSortKey || null,
+        sortDirection: normalizedSortKey ? normalizedSortDirection : null,
+        filters: buildServerPreviewQueryFilters(),
+        replaceActive: options.replaceActive
+    };
+    const requestKey = buildCanonicalPreviewPageRequestKey(
+        normalizedPage,
+        normalizedPageSize,
+        requestOptions.sortBy,
+        requestOptions.sortDirection,
+        requestOptions.filters
+    );
 
-    if (!pageChanged && !pageSizeChanged && !sortChanged && !options.force) {
+    if (!options.force && requestKey === lastServerPagedRequestKey.value) {
         return;
     }
 
@@ -4378,7 +4454,8 @@ function emitServerPagedRequest(
     countPerPage.value = normalizedPageSize;
     currentSortKey.value = normalizedSortKey;
     currentSortDirection.value = normalizedSortDirection;
-    emit('requestPage', normalizedPage, normalizedPageSize, getCurrentServerPagedRequestOptions());
+    lastServerPagedRequestKey.value = requestKey;
+    emit('requestPage', normalizedPage, normalizedPageSize, requestOptions);
 }
 
 function updatePreviewTablePage(page: number): void {
@@ -4500,6 +4577,7 @@ watch(
             serverPagedSelectionBaselines.value = new Map();
             currentSortKey.value = '';
             currentSortDirection.value = 'asc';
+            lastServerPagedRequestKey.value = '';
             return;
         }
 
@@ -4523,7 +4601,7 @@ watch(
         }
 
         emitServerPagedRequest(1, countPerPage.value > 0 ? countPerPage.value : 10, {
-            force: true,
+            cacheDrafts: false,
         });
     }
 );
@@ -5130,7 +5208,8 @@ async function applyServerPagedSelection(action: ServerPagedSelectionAction): Pr
         recordServerPagedSelectionBaselines(importTransactions.value);
         emitServerPagedRequest(currentPage.value, countPerPage.value, {
             cacheDrafts: false,
-            force: true
+            force: true,
+            replaceActive: true
         });
     } catch (error) {
         for (const { transaction, selected } of selectionSnapshot) {
@@ -5418,6 +5497,7 @@ function reset(): void {
     tableSortBy.value = [];
     currentSortKey.value = '';
     currentSortDirection.value = 'asc';
+    lastServerPagedRequestKey.value = '';
 }
 
 function setCountPerPage(count: number): void {

@@ -7,14 +7,16 @@ fn apply_learning_rule_match(
     categories_by_id: &BTreeMap<i64, ImportIntelligenceCategory>,
     category_values: &[Value],
     account_values: &[Value],
-) -> Option<ImportLearningRuleMatchResult> {
+) -> Result<Option<ImportLearningRuleMatchResult>, bill_analyser_db::DbError> {
     let transfer_protected = is_transfer_protected_preview(draft);
-    let features = build_composite_match_features(
+    let Some(features) = build_composite_match_features(
         &draft.preview_parser_id,
         &draft.preview_counterparty,
         &draft.preview_description,
         &draft.preview_payment_method,
-    )?;
+    ) else {
+        return Ok(None);
+    };
     let composite_hash = composite_hash_from_features(&features);
     let mut best: Option<(&ImportIntelligenceLearningRule, f64, String, String)> = None;
     for rule in rules {
@@ -29,21 +31,27 @@ fn apply_learning_rule_match(
         let candidate = if !rule.composite_hash.trim().is_empty()
             && rule.composite_hash.trim() == composite_hash
         {
-            Some((1.0, "exact".to_string(), "composite exact match".to_string()))
+            Some((
+                1.0,
+                "exact".to_string(),
+                "composite exact match".to_string(),
+            ))
         } else {
             score_learning_rule_similarity(&features, &rule.match_features).and_then(|score| {
                 let score_value = score
                     .get("score")
                     .and_then(Value::as_f64)
                     .unwrap_or_default();
-                (score_value >= 0.72 && learning_similarity_has_semantic_anchor(&score)).then(|| {
-                    let reason = score
-                        .get("reason_parts")
-                        .cloned()
-                        .unwrap_or_else(|| json!([]))
-                        .to_string();
-                    (score_value, "similar".to_string(), reason)
-                })
+                (score_value >= 0.72 && learning_similarity_has_semantic_anchor(&score)).then(
+                    || {
+                        let reason = score
+                            .get("reason_parts")
+                            .cloned()
+                            .unwrap_or_else(|| json!([]))
+                            .to_string();
+                        (score_value, "similar".to_string(), reason)
+                    },
+                )
             })
         };
         let Some((score, mode, reason)) = candidate else {
@@ -56,7 +64,9 @@ fn apply_learning_rule_match(
             best = Some((rule, score, mode, reason));
         }
     }
-    let (rule, score, mode, reason) = best?;
+    let Some((rule, score, mode, reason)) = best else {
+        return Ok(None);
+    };
     let raw_learned_type = rule
         .learned_type
         .as_deref()
@@ -79,11 +89,14 @@ fn apply_learning_rule_match(
                     "learned category is missing from current category table",
                 );
             }
-            return None;
+            return Ok(None);
         };
         if transfer_protected && category.type_code != 4 {
             None
-        } else if !category_type_matches_learning_projection(category.type_code, candidate_preview_type) {
+        } else if !category_type_matches_learning_projection(
+            category.type_code,
+            candidate_preview_type,
+        ) {
             if !transfer_protected {
                 annotate_learning_rule_skip(
                     draft,
@@ -91,7 +104,7 @@ fn apply_learning_rule_match(
                     "learned category type is incompatible with preview type",
                 );
             }
-            return None;
+            return Ok(None);
         } else {
             Some(category)
         }
@@ -104,7 +117,7 @@ fn apply_learning_rule_match(
         && rule.learned_source_account_id.is_none()
         && rule.learned_destination_account_id.is_none()
     {
-        return None;
+        return Ok(None);
     }
     let mut recommended_draft = draft.clone();
     apply_learning_rule_projection(
@@ -116,12 +129,13 @@ fn apply_learning_rule_match(
     );
     if learned_type.is_none()
         && recommended_category_id.is_none()
-        && import_preview_stage2_snapshot(&recommended_draft) == import_preview_stage2_snapshot(draft)
+        && import_preview_stage2_snapshot(&recommended_draft)
+            == import_preview_stage2_snapshot(draft)
     {
-        return None;
+        return Ok(None);
     }
-    let recommendation_key = build_import_learning_recommendation_key(
-        &ImportLearningRecommendationKeyInput {
+    let recommendation_key =
+        build_import_learning_recommendation_key(&ImportLearningRecommendationKeyInput {
             user_id,
             recommended_type: learned_type
                 .clone()
@@ -139,18 +153,27 @@ fn apply_learning_rule_match(
             ),
             transfer_protected,
             ..ImportLearningRecommendationKeyInput::default()
-        },
-    );
-    let lifecycle_user_id = u64::try_from(user_id).ok().and_then(|value| UserId::new(value).ok())?;
-    let lifecycle = get_import_learning_lifecycle_view(
-        connection,
-        lifecycle_user_id,
-        &recommendation_key,
-    )
-    .ok()
-    .flatten()?;
+        });
+    let lifecycle_user_id = u64::try_from(user_id)
+        .map_err(|_| {
+            bill_analyser_db::DbError::InvalidOperation(
+                "learning lifecycle received an invalid user id".to_string(),
+            )
+        })
+        .and_then(|value| {
+            UserId::new(value).map_err(|_| {
+                bill_analyser_db::DbError::InvalidOperation(
+                    "learning lifecycle received an invalid user id".to_string(),
+                )
+            })
+        })?;
+    let Some(lifecycle) =
+        get_import_learning_lifecycle_view(connection, lifecycle_user_id, &recommendation_key)?
+    else {
+        return Ok(None);
+    };
     if lifecycle.suppressed {
-        return None;
+        return Ok(None);
     }
     let mut rule_payload = Map::new();
     rule_payload.insert("learned_type".to_string(), json!(learned_type));
@@ -206,10 +229,10 @@ fn apply_learning_rule_match(
             "applied_preview": applied_preview,
         }),
     );
-    Some(ImportLearningRuleMatchResult {
+    Ok(Some(ImportLearningRuleMatchResult {
         rule_id: Some(rule.id),
         auto_applied,
-    })
+    }))
 }
 
 /// 把 learning 命中投影到 preview draft，并写入可审核 feedback 与 expected-state 证据。
@@ -220,22 +243,27 @@ fn apply_learning_rule_projection(
     rule: &ImportIntelligenceLearningRule,
     transfer_protected: bool,
 ) {
-    if let Some(learned_type) = learned_type {
+    let manual_category = preview_manual_identity_field_owned(draft, "category_id");
+    if let Some(learned_type) = learned_type.filter(|_| !manual_category) {
         draft.preview_type = learned_type.to_string();
     }
-    if let Some(category) = learned_category {
+    if let Some(category) = learned_category.filter(|_| !manual_category) {
         draft.preview_main_category = category.main_category.clone();
         draft.preview_sub_category = category.sub_category.clone();
         draft.category_id = Some(category.id);
         normalize_preview_type_for_category(draft, category.type_code);
     }
     if let Some(account_id) = rule.learned_source_account_id {
-        if !transfer_protected || draft.preview_source_account_id.is_none() {
+        if !preview_manual_identity_field_owned(draft, "source_account_id")
+            && (!transfer_protected || draft.preview_source_account_id.is_none())
+        {
             draft.preview_source_account_id = Some(account_id);
         }
     }
     if let Some(account_id) = rule.learned_destination_account_id {
-        if !transfer_protected || draft.preview_destination_account_id.is_none() {
+        if !preview_manual_identity_field_owned(draft, "destination_account_id")
+            && (!transfer_protected || draft.preview_destination_account_id.is_none())
+        {
             draft.preview_destination_account_id = Some(account_id);
         }
     }
@@ -246,9 +274,10 @@ fn learning_similarity_has_semantic_anchor(score: &Value) -> bool {
         .get("matched_fields")
         .and_then(Value::as_array)
         .is_some_and(|fields| {
-            fields.iter().filter_map(Value::as_str).any(|field| {
-                matches!(field, "counterparty" | "description")
-            })
+            fields
+                .iter()
+                .filter_map(Value::as_str)
+                .any(|field| matches!(field, "counterparty" | "description"))
         })
 }
 
@@ -270,8 +299,7 @@ fn apply_transfer_default_category(
     categories: &[ImportIntelligenceCategory],
     default_category: Option<&ImportIntelligenceCategory>,
 ) -> bool {
-    if !is_transfer_protected_preview(draft)
-        || preview_category_matches_type(draft, categories, 4)
+    if !is_transfer_protected_preview(draft) || preview_category_matches_type(draft, categories, 4)
     {
         return false;
     }

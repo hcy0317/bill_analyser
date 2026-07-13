@@ -41,10 +41,16 @@
                                             </v-btn>
                                              <span>{{ tt('Transaction Categories') }}</span>
                                              <v-btn class="ms-3" color="default" variant="outlined"
-                                                    data-testid="desktop.categories.action.add"
+                                                    data-testid="desktop.categories.action.add-primary"
                                                     :disabled="loading || updating"
-                                                    @click="addCategoryByCurrentSelection">
-                                                 {{ tt('Add') }}
+                                                    @click="addPrimaryCategory">
+                                                 {{ tt('Add Primary Category') }}
+                                             </v-btn>
+                                             <v-btn class="ms-3" color="default" variant="outlined"
+                                                    data-testid="desktop.categories.action.add-secondary"
+                                                    :disabled="loading || updating || !canAddSecondaryCategory"
+                                                    @click="addSecondaryCategory">
+                                                 {{ tt('Add Secondary Category') }}
                                              </v-btn>
                                             <settings-json-import-export-button
                                                 section-key="transactionCategories"
