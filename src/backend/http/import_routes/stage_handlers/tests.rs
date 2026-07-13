@@ -1052,13 +1052,9 @@ mod tests {
         let runtime = state
             .open_postgres_repository_runtime("import-test")
             .expect("postgres runtime");
-        bill_analyser_db::init_import_staging_schema(runtime.pool()).expect("import schema");
-        sqlx::query(
-            "ALTER TABLE import_confirm_operations ADD COLUMN IF NOT EXISTS operation_id TEXT",
-        )
-        .execute(runtime.pool())
-        .await
-        .expect("decision operation migration");
+        bill_analyser_db::run_postgres_migrations(runtime.pool())
+            .await
+            .expect("postgres migrations");
         let nonce = format!(
             "{}-{}-{}",
             std::process::id(),
@@ -1087,6 +1083,27 @@ mod tests {
         )
         .expect("create import session");
         Some((state, user_id, session_id))
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn import_postgres_test_state_applies_the_canonical_migration_set() {
+        let Some((state, _, _)) = import_postgres_test_state().await else {
+            return;
+        };
+        let runtime = state
+            .open_postgres_repository_runtime("import-schema-contract")
+            .expect("postgres runtime");
+        let latest_applied_version: i64 =
+            sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations WHERE success")
+                .fetch_one(runtime.pool())
+                .await
+                .expect("canonical migration metadata");
+        let latest_manifest_version = bill_analyser_db::postgres_migration_manifest()
+            .last()
+            .expect("postgres migration manifest")
+            .version;
+
+        assert_eq!(latest_applied_version, latest_manifest_version);
     }
 
     async fn insert_legacy_same_batch_transfer_fixture(
