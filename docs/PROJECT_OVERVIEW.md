@@ -4,7 +4,11 @@ Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预
 
 ## 运行态入口
 
-- 后端主入口：`src/backend/http/bin/bill_http_server.rs`
+- HTTP 服务入口：`bill_http_server`（`src/backend/http/bin/bill_http_server.rs`）；它是唯一 HTTP 运行时入口。
+- Weaviate 运维 CLI：`bill_weaviate_derived_index`（`src/backend/http/bin/bill_weaviate_derived_index.rs`），提供 health、schema bootstrap、outbox 处理和 rebuild。
+- 认证合同桥接 CLI：`bill_auth_bridge`（`src/backend/core/bin/bill_auth_bridge.rs`）。
+- 分类规则桥接 CLI：`bill_category_rule_bridge`（`src/backend/core/bin/bill_category_rule_bridge.rs`）。
+- 运行态治理清单 CLI：`bill_runtime_manifest`（`src/backend/core/bin/bill_runtime_manifest.rs`）。
 - 后端导航图：`docs/backend-map.md`
 - 静态阅读入口：`docs/backend-map.html`
 - 前端工程：`src/web`
@@ -33,6 +37,8 @@ Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预
 
 导入预览桌面前端当前以页面 facade + 功能子文件组织：`ImportDialog.vue` 保留导入流程编排和模板入口，`import-dialog/**` 承载导入源选择、进度条、配置匹配、preview page 查询参数和样式；`ImportTransactionCheckDataTab.vue` 保留预览表格入口和事件合同，`check-data-tab/**` 承载筛选菜单和批量动作；`checkDataMatching.ts` 与 `importPreviewIndex.ts` 作为兼容 facade 聚合 `check-data-matching/**` 和 `import-preview-index/**` 的信号视图模型、历史改写、筛选分组、查询过滤与 mapping helper。该拆分不改变 prop/emit、REST 调用、金额/身份合同或导入预览视觉布局。
 
+前端运行链由 router/guard 装配并进入 desktop/mobile views；views 调用 Pinia stores 和/或 services，stores 也通过 services 访问后端。Axios 请求共享 `src/web/src/lib/services.ts` 的 API base URL、Bearer、response envelope、401 refresh 与请求阻塞 interceptor；若干 view-local 原生 `fetch` 调用绕过该 Axios interceptor 边界。
+
 运行时共享前端当前以 facade + 功能子文件组织：`src/web/src/lib/services.ts` 保留 axios/auth interceptor、通用 endpoint facade 和 `ApiResponsePromise` 兼容导出，HTTP 类型/response envelope helper 下沉到 `lib/services/http.ts`，导入预览、导入学习、matching candidate 和导入配置 endpoint 下沉到 `lib/services/importPreview.ts`；`src/web/src/stores/index.ts` 保留 `useRootStore` facade，跨 store reset 编排和 OAuth URL helper 下沉到 `stores/root/**`；`src/web/src/core/theme.ts` 保留 theme 兼容导出，theme 类型、基础 Vuetify/F7 色板、主题变体表和 preference/paired helper 分别下沉到 `core/theme/**`；`src/web/src/models/imported_transaction.ts` 保留 `ImportTransaction` 模型和响应接口，matching payload 归一化、dedup source id 与信号 helper 下沉到 `models/imported_transaction/matching.ts`；桌面和移动 router shell 继续由 `src/web/src/router/desktop.ts` 与 `src/web/src/router/mobile.ts` 承载，路由 guard、query prop 映射和主导航合同由 shared shell 行为锁测试覆盖。该拆分不改变 import path、default services API、Pinia root store action 名、ThemeType/preference/paired theme 合同、导入预览金额/目标账户 payload、路由 path/guard/query prop 或现有 UI 视觉。
 
 ## 数据库与健康检查
@@ -44,9 +50,9 @@ Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预
 - `BILL_ANALYSER_WEAVIATE_ENABLED=true`
 - `BILL_ANALYSER_WEAVIATE_ENDPOINT=http://127.0.0.1:8088`
 
-`/api/health` 的 details 暴露 PostgreSQL 配置状态、脱敏 URL、route repository backend、Weaviate ready 状态、脱敏 endpoint、API key 是否配置与 collection prefix。PostgreSQL 不可连接或 Weaviate ready probe 未通过时，整体 health 返回 `unhealthy`。
+`/api/health` 的 details 暴露 PostgreSQL 配置状态、脱敏 URL、route repository backend、Weaviate ready 状态、脱敏 endpoint、API key 是否配置与 collection prefix。health handler 会实时请求 Weaviate `/v1/.well-known/ready`；PostgreSQL 一侧当前只检查 URL 是否已配置，不执行 pool acquire 或 `SELECT 1` 连通性探测。整体状态由“PostgreSQL 配置存在”和“Weaviate probe 为 healthy”共同决定。
 
-Rust HTTP 主入口在开始监听前会对配置的 PostgreSQL 运行 `src/backend/db/postgres/migrations` 当前迁移目录，确保后续运行态路由看到最新 schema；该目录属于 Rust DB crate 的运行态输入，部署/打包时必须随服务保留；未配置 PostgreSQL URL 时，仓储路由保持配置缺失状态并由 health/route error 暴露。
+Rust HTTP 主入口在开始监听前会运行 PostgreSQL migrations。迁移目录由 DB crate 的编译期 `CARGO_MANIFEST_DIR` 与 `postgres/migrations` 拼接得到，`sqlx::migrate::Migrator::new` 在运行时从该路径读取 SQL 文件。`HttpShellConfig::from_env` 在环境变量缺失或为空时使用本地开发 PostgreSQL URL，因此正常环境加载会得到已配置的 PostgreSQL 主链。
 
 ## API 与业务域
 
@@ -100,7 +106,7 @@ LLM memory 查询按 `created_at DESC, id DESC` 返回，前端仅采用每个 p
 
 ## 认证与备份
 
-认证运行态校验 Bearer access token 签名、过期时间和 PostgreSQL token session。登录、注册、邮箱验证、密码重置、refresh、logout、2FA、profile、cloud settings、external auth、user-data statistics/export/clear 直接读写 PostgreSQL 表。敏感动作通过当前密码、操作密码或签名 step-up token 校验，并写入认证或业务审计。
+通用业务 Bearer 认证当前校验 access JWT 的算法、HMAC 签名、token 类型、过期时间与 `user_id`，不查询 PostgreSQL token session。PostgreSQL `token_sessions` 用于 refresh token 有效 session 查询与轮换、logout 按 token hash 失效、session 列表和指定 session 撤销；因此 logout/revoke 不构成通用业务路由对已签发 access JWT 的即时撤销检查。登录、注册、邮箱验证、密码重置、refresh、logout、2FA、profile、cloud settings、external auth、user-data statistics/export/clear 直接读写 PostgreSQL 表。敏感动作通过当前密码、操作密码或签名 step-up token 校验，并写入认证或业务审计。
 
 注册请求支持可选 `defaultPackage`。缺失、`null` 或 `none` 保持旧注册行为；`standard_daily_v1` 会在注册事务内一次性写入面向中国大陆个人/家庭账单的默认账户、交易分类、分类规则和账户识别规则，并在注册响应中返回 `defaultSeed` 写入摘要。桌面端和移动端注册页都提供独立 opt-in 开关；未勾选的新用户和所有现有用户不会自动写入这套默认包。该默认包写入的数据仍走当前 taxonomy/settings 主链，可随设置包导出并导入到其他账号。
 

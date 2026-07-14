@@ -291,6 +291,48 @@ function Test-DockerContainerRunningWithHostPort {
     return $hostPorts -contains $HostPort
 }
 
+function Repair-ComposeServiceHostPorts {
+    param(
+        [string]$DockerPath,
+        [string]$ComposeFile,
+        [string]$ServiceName,
+        [string]$ContainerName,
+        [hashtable]$ExpectedPorts
+    )
+
+    $missingPorts = @(
+        foreach ($entry in $ExpectedPorts.GetEnumerator()) {
+            $containerPort = [int]$entry.Key
+            $hostPort = [int]$entry.Value
+            if (-not (Test-DockerContainerRunningWithHostPort -DockerPath $DockerPath -ContainerName $ContainerName -ContainerPort $containerPort -HostPort $hostPort)) {
+                "$hostPort`:$containerPort"
+            }
+        }
+    )
+
+    if ($missingPorts.Count -eq 0) {
+        return
+    }
+
+    Write-Warn "  检测到 $ServiceName 容器缺少运行态端口映射 ($($missingPorts -join ', '))，正在安全重建容器..."
+    & $DockerPath compose -f $ComposeFile up -d --force-recreate $ServiceName
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "  ✗ $ServiceName 容器重建失败"
+        exit 1
+    }
+
+    foreach ($entry in $ExpectedPorts.GetEnumerator()) {
+        $containerPort = [int]$entry.Key
+        $hostPort = [int]$entry.Value
+        if (-not (Test-DockerContainerRunningWithHostPort -DockerPath $DockerPath -ContainerName $ContainerName -ContainerPort $containerPort -HostPort $hostPort)) {
+            Write-Err "  ✗ $ServiceName 容器重建后仍缺少端口映射 $hostPort`:$containerPort"
+            exit 1
+        }
+    }
+
+    Write-Success "  ✓ $ServiceName 容器端口映射已恢复"
+}
+
 function Find-ComposeHostPort {
     param(
         [string]$ServiceName,
@@ -491,6 +533,14 @@ function Start-RequiredRuntimeServices {
         Write-Err "  ✗ 运行态 compose 服务启动失败"
         exit 1
     }
+
+    if ($composeServices -contains "postgres") {
+        Repair-ComposeServiceHostPorts -DockerPath $dockerCmd.Source -ComposeFile $composeFile -ServiceName "postgres" -ContainerName "bill-analyser-postgres" -ExpectedPorts @{ 5432 = $postgresPort }
+    }
+    if ($composeServices -contains "weaviate") {
+        Repair-ComposeServiceHostPorts -DockerPath $dockerCmd.Source -ComposeFile $composeFile -ServiceName "weaviate" -ContainerName "bill-analyser-weaviate" -ExpectedPorts @{ 8080 = $weaviatePort; 50051 = $weaviateGrpcPort }
+    }
+
     Write-Success "  ✓ 运行态服务已启动或已在运行"
 }
 

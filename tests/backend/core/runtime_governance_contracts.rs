@@ -1147,6 +1147,29 @@ fn rust_http_server_runs_postgres_migrations_before_listening() {
 }
 
 #[test]
+fn one_click_launcher_repairs_missing_compose_host_port_bindings() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let launcher_source =
+        fs::read_to_string(repo_root.join("一键启动.ps1")).expect("one-click launcher source");
+
+    let compose_up = launcher_source
+        .find("compose -f $composeFile up -d @composeServices")
+        .expect("normal compose startup");
+    let repair_function = launcher_source
+        .find("function Repair-ComposeServiceHostPorts")
+        .expect("missing-port repair helper");
+    let repair_calls = launcher_source
+        .rfind("Repair-ComposeServiceHostPorts")
+        .expect("missing-port repair calls");
+
+    assert!(launcher_source.contains("up -d --force-recreate $ServiceName"));
+    assert!(launcher_source.contains("ExpectedPorts @{ 5432 = $postgresPort }"));
+    assert!(launcher_source
+        .contains("ExpectedPorts @{ 8080 = $weaviatePort; 50051 = $weaviateGrpcPort }"));
+    assert!(repair_function < compose_up && compose_up < repair_calls);
+}
+
+#[test]
 fn domain_db_invariant_ids_match_public_writer_policy_helpers() {
     for (domain, policy) in [
         ("database-schema", database_schema_db_writer_policy()),

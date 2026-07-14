@@ -211,8 +211,8 @@ Rust `bill_http_server` 是唯一 HTTP 运行时入口。当前运行态以 `RES
 
 ### 金额单位
 
-- 后端核心通常以元存储
-- 前端和部分 API 交互常用分
+- 业务 core、PostgreSQL、HTTP DTO 与前端 API 模型使用整数分或名称显式的 minor units 字段
+- 元单位只用于用户输入/展示，以及 parser、OCR、LLM、原始导入源等外部边界
 - 修改接口时必须显式确认元/分转换，不要靠隐式约定
 
 ## 前端构建产物说明
