@@ -45,6 +45,7 @@ describe('LearningCenterPanel OCR config placement', () => {
         expect(source).toContain('const resp = await services.updateOCRConfig');
         expect(source).toContain('section-key="ocrConfig"');
         expect(source).toContain('password-required-for-export');
+        expect(source).toContain('<Teleport defer :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">');
     });
 });
 

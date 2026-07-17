@@ -140,7 +140,9 @@ const displayPreviewResult = computed<string>(() => {
     } else if (executionError.value) {
         return executionError.value;
     } else if (previewResult.value) {
-        const rows = previewResult.value.slice(0, previewCount.value);
+        const rows = previewCount.value > 0
+            ? previewResult.value.slice(0, previewCount.value)
+            : previewResult.value;
         return JSON.stringify(rows, null, 2);
     } else {
         return tt('No Preview Result');
@@ -309,28 +311,35 @@ function onMessage(event: MessageEvent<SandboxResponse>): void {
         previewResult.value = undefined;
         executionError.value = data.error;
     } else if (data.result) {
-        const originalResult = JSON.parse(data.result) as Record<string, unknown>[];
-        const finalResult: ImportTransactionRequestItem[] = [];
+        try {
+            const originalResult = JSON.parse(data.result) as Record<string, unknown>[];
+            const finalResult: ImportTransactionRequestItem[] = [];
 
-        for (const item of originalResult) {
-            const finalItem: ImportTransactionRequestItem = {
-                time: (isDefined(item['time'])) ? String(item['time']) : '',
-                utcOffset: (isDefined(item['utcOffset'])) ? String(item['utcOffset']) : '',
-                type: (isDefined(item['type'])) ? String(item['type']) : '',
-                categoryName: (isDefined(item['categoryName']) && item['categoryName'] !== '') ? String(item['categoryName']) : undefined,
-                sourceAccountName: (isDefined(item['sourceAccountName']) && item['sourceAccountName'] !== '') ? String(item['sourceAccountName']) : undefined,
-                destinationAccountName: (isDefined(item['destinationAccountName']) && item['destinationAccountName'] !== '') ? String(item['destinationAccountName']) : undefined,
-                sourceAmountCents: (isDefined(item['sourceAmountCents'])) ? String(item['sourceAmountCents']) : '',
-                destinationAmountCents: (isDefined(item['destinationAmountCents']) && item['destinationAmountCents'] !== '') ? String(item['destinationAmountCents']) : undefined,
-                geoLocation: (isDefined(item['geoLocation']) && item['geoLocation']) ? String(item['geoLocation']) : undefined,
-                tagNames: (isDefined(item['tagNames']) && item['tagNames']) ? String(item['tagNames']) : undefined,
-                comment: (isDefined(item['description']) && item['description']) ? String(item['description']) : undefined
-            };
-            finalResult.push(finalItem);
+            for (const item of originalResult) {
+                const finalItem: ImportTransactionRequestItem = {
+                    time: (isDefined(item['time'])) ? String(item['time']) : '',
+                    utcOffset: (isDefined(item['utcOffset'])) ? String(item['utcOffset']) : '',
+                    type: (isDefined(item['type'])) ? String(item['type']) : '',
+                    categoryName: (isDefined(item['categoryName']) && item['categoryName'] !== '') ? String(item['categoryName']) : undefined,
+                    sourceAccountName: (isDefined(item['sourceAccountName']) && item['sourceAccountName'] !== '') ? String(item['sourceAccountName']) : undefined,
+                    destinationAccountName: (isDefined(item['destinationAccountName']) && item['destinationAccountName'] !== '') ? String(item['destinationAccountName']) : undefined,
+                    sourceAmountCents: (isDefined(item['sourceAmountCents'])) ? String(item['sourceAmountCents']) : '',
+                    destinationAmountCents: (isDefined(item['destinationAmountCents']) && item['destinationAmountCents'] !== '') ? String(item['destinationAmountCents']) : undefined,
+                    geoLocation: (isDefined(item['geoLocation']) && item['geoLocation']) ? String(item['geoLocation']) : undefined,
+                    tagNames: (isDefined(item['tagNames']) && item['tagNames']) ? String(item['tagNames']) : undefined,
+                    comment: (isDefined(item['description']) && item['description']) ? String(item['description']) : undefined
+                };
+                finalResult.push(finalItem);
+            }
+
+            previewResult.value = finalResult;
+            executionError.value = '';
+        } catch (error) {
+            logger.error('Failed to parse custom script result', error);
+            snackbar.value?.showError('Failed to execute custom script');
+            previewResult.value = undefined;
+            executionError.value = error instanceof Error ? error.message : String(error);
         }
-
-        previewResult.value = finalResult;
-        executionError.value = '';
     }
 
     reloadSandbox();

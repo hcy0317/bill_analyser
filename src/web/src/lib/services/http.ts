@@ -5,6 +5,7 @@ import type { ApiResponse } from '@/core/api.ts';
 export interface ApiRequestConfig extends AxiosRequestConfig {
     headers: AxiosRequestHeaders;
     readonly noAuth?: boolean;
+    readonly preserveExplicitAuthorization?: boolean;
     readonly ignoreBlocked?: boolean;
     readonly ignoreError?: boolean;
     readonly timeout?: number;

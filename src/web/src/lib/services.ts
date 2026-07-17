@@ -1,5 +1,4 @@
 import axios, { type AxiosRequestConfig, type AxiosRequestHeaders, type AxiosResponse } from 'axios';
-
 import type { ApiResponse } from '@/core/api.ts';
 
 import type {
@@ -109,6 +108,15 @@ import {
 } from './services/http.ts';
 export type { ApiResponsePromise } from './services/http.ts';
 import type {
+    AccountRuleCreateRequest, AnalyzeLLMTransactionsRequest, AnomalyListRequest,
+    BudgetForecastQueryRequest, BudgetHistoryQueryRequest, CalendarEventsRequest,
+    CreateLLMConfigRequest, LearningRuleListRequest, LLMAnalyzeTransactionsResponse,
+    LLMMemoryEventsResponse, LLMPreviewRecommendAcceptRequest, LLMPreviewRecommendRejectRequest,
+    LLMPreviewRecommendRequest, LLMRuleSynthesisRequest, LLMRuleSynthesisResponse,
+    OCRConfigResponse, OCRConfigUpdateRequest, PagedStatusRequest
+} from './services/contracts.ts';
+export type { OCRConfigResponse } from './services/contracts.ts';
+import type {
     TransactionCategoryCreateRequest,
     TransactionCategoryCreateBatchRequest,
     TransactionCategoryModifyRequest,
@@ -179,6 +187,8 @@ import type {
 import {
     getCurrentToken,
     getCurrentRefreshToken,
+    updateCurrentToken,
+    updateCurrentRefreshToken,
     clearCurrentTokenAndUserInfo
 } from './userstate.ts';
 
@@ -237,79 +247,190 @@ function isPublicNoAuthRequest(url: string): boolean {
     ].includes(normalizedUrl);
 }
 
-interface AnalyzeLLMTransactionsRequest {
-    billIds?: number[];
-    limit?: number;
-    sessionId?: string;
-    previewIds?: number[];
-    previewUpdates?: Array<Record<string, unknown>>;
-    actionScope?: Record<string, unknown>;
-}
-
-interface LLMAdvancedSettings {
-    reasoning_depth?: string;
-    temperature?: number;
-    max_tokens?: number;
-    system_prompt?: string;
-    classification_prompt_template?: string;
-    rule_prompt_template?: string;
-}
-
-interface CreateLLMConfigRequest {
-    name: string;
-    provider: string;
-    model: string;
-    api_key?: string;
-    base_url?: string;
-    credential_config?: Record<string, unknown>;
-    is_active?: boolean;
-    advanced_settings?: LLMAdvancedSettings;
-}
-
-export interface OCRConfigResponse {
-    provider: string;
-    lang: string;
-    model?: string;
-    base_url?: string;
-    parameters?: Record<string, unknown>;
-    credential_config?: Record<string, unknown>;
-    available_providers: string[];
-    configured: boolean;
-}
-
-interface LLMAnalyzeTransactionCandidate {
-    id: number;
-    session_id?: string;
-    source_preview_ids?: number[];
-    rule_name?: string;
-    rule_expression?: string;
-    confidence?: number;
-    category_name?: string;
-    explanation?: string;
-}
-
-interface LLMAnalyzeTransactionsResponse {
-    candidates_created: number;
-    candidates: LLMAnalyzeTransactionCandidate[];
-    session_id?: string;
-    mode?: 'import_session' | 'persisted_selection' | 'persisted_uncategorized';
-}
-
-interface LLMRuleSynthesisResponse {
-    candidates_created: number;
-    candidates: LLMAnalyzeTransactionCandidate[];
-    mode?: 'rule_synthesis';
-    knowledge_summary_pack?: Record<string, unknown>;
-}
-
-interface LLMMemoryEventsResponse {
-    events: Array<Record<string, unknown>>;
-    total: number;
-}
-
 let needBlockRequest = false;
-const blockedRequests: (() => void)[] = [];  // 改为无参数函数
+interface BlockedRequest {
+    readonly resume: () => void;
+    readonly reject: (reason?: unknown) => void;
+}
+
+const blockedRequests: BlockedRequest[] = [];
+let activeRefreshPromise: ApiResponsePromise<TokenRefreshResponse> | null = null;
 const cancelableRequests: Record<string, boolean> = {};
+const refreshFailureLogCodes = new Set([
+    'ERR_BAD_RESPONSE',
+    'ERR_CANCELED',
+    'ERR_NETWORK',
+    'ECONNABORTED',
+    'ETIMEDOUT'
+]);
+
+type TokenFailureOperation = 'refresh' | 'revoke';
+
+interface TokenFailureLog {
+    message: 'Token refresh failed' | 'Token revoke failed';
+    route: 'tokens/refresh' | 'tokens/:id';
+    code?: string;
+    status?: number;
+}
+
+function getTokenFailureLog(reason: unknown, operation: TokenFailureOperation): TokenFailureLog {
+    const failureLog: TokenFailureLog = operation === 'refresh'
+        ? { message: 'Token refresh failed', route: 'tokens/refresh' }
+        : { message: 'Token revoke failed', route: 'tokens/:id' };
+
+    if (typeof reason !== 'object' || reason === null) {
+        return failureLog;
+    }
+
+    try {
+        const errorRecord = reason as Record<string, unknown>;
+        const code = errorRecord['code'];
+
+        if (typeof code === 'string' && refreshFailureLogCodes.has(code)) {
+            failureLog.code = code;
+        }
+
+        const response = errorRecord['response'];
+        if (typeof response === 'object' && response !== null) {
+            const status = (response as Record<string, unknown>)['status'];
+            if (typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599) {
+                failureLog.status = status;
+            }
+        }
+    } catch {
+        return failureLog;
+    }
+
+    return failureLog;
+}
+
+function getRefreshFailureLog(reason: unknown): TokenFailureLog {
+    return getTokenFailureLog(reason, 'refresh');
+}
+
+function getTokenResponseFailureOperation(reason: unknown): TokenFailureOperation | null {
+    if (typeof reason !== 'object' || reason === null) {
+        return null;
+    }
+
+    try {
+        const response = (reason as Record<string, unknown>)['response'];
+        if (typeof response !== 'object' || response === null) {
+            return null;
+        }
+
+        const config = (response as Record<string, unknown>)['config'];
+        if (typeof config !== 'object' || config === null) {
+            return null;
+        }
+
+        const configRecord = config as Record<string, unknown>;
+        const url = configRecord['url'];
+        if (typeof url !== 'string') {
+            return null;
+        }
+
+        const normalizedUrl = (url.split(/[?#]/, 1)[0] || '')
+            .replace(/^[a-z][a-z\d+.-]*:\/\/[^/]+/i, '')
+            .replace(/^.*\/api\//, '')
+            .replace(/^\/+/, '')
+            .replace(/^api\/+/, '')
+            .replace(/\/+$/, '');
+
+        if (normalizedUrl === 'tokens/refresh') {
+            return 'refresh';
+        }
+
+        const method = configRecord['method'];
+        if (typeof method === 'string' && method.toLowerCase() === 'delete'
+            && /^tokens\/[^/]+$/.test(normalizedUrl)) {
+            return 'revoke';
+        }
+    } catch {
+        return null;
+    }
+
+    return null;
+}
+
+function resolveBlockedRequests(): void {
+    const pendingRequests = blockedRequests.splice(0, blockedRequests.length);
+
+    for (const request of pendingRequests) {
+        request.resume();
+    }
+}
+
+function rejectBlockedRequests(reason: unknown): void {
+    const pendingRequests = blockedRequests.splice(0, blockedRequests.length);
+
+    for (const request of pendingRequests) {
+        request.reject(reason);
+    }
+}
+
+function refreshAuthenticationToken(): ApiResponsePromise<TokenRefreshResponse> {
+    if (activeRefreshPromise) {
+        return activeRefreshPromise;
+    }
+
+    const refreshToken = getCurrentRefreshToken();
+
+    logger.debug(`[refreshToken] Called, current needBlockRequest=${needBlockRequest}, blockedRequests=${blockedRequests.length}`);
+
+    if (!refreshToken) {
+        const error = Object.assign(new Error('No refresh token available'), {
+            noRefreshToken: true
+        });
+        needBlockRequest = false;
+        rejectBlockedRequests(error);
+        return Promise.reject(error);
+    }
+
+    needBlockRequest = true;
+    const refreshRequest = axios.post<ApiResponse<TokenRefreshResponse>>('tokens/refresh', { refreshToken }, {
+        ignoreBlocked: true,
+        noAuth: true
+    } as ApiRequestConfig);
+
+    activeRefreshPromise = refreshRequest.then(response => {
+        const data = response.data;
+        const result = data?.result;
+
+        if (!data?.success || !result
+            || typeof result.newToken !== 'string' || !result.newToken
+            || typeof result.refreshToken !== 'string' || !result.refreshToken) {
+            throw new Error('Invalid token refresh response');
+        }
+
+        updateCurrentRefreshToken(result.refreshToken);
+
+        if (getCurrentRefreshToken() !== result.refreshToken) {
+            throw new Error('Unable to persist refreshed credential');
+        }
+
+        updateCurrentToken(result.newToken);
+
+        if (getCurrentToken() !== result.newToken) {
+            throw new Error('Unable to persist refreshed access token');
+        }
+
+        needBlockRequest = false;
+        resolveBlockedRequests();
+        return response;
+    }).catch(error => {
+        const failure = Object.freeze(getRefreshFailureLog(error));
+        logger.error('[auth-refresh] Token refresh failed', failure);
+        needBlockRequest = false;
+        rejectBlockedRequests(failure);
+        throw failure;
+    }).finally(() => {
+        needBlockRequest = false;
+        activeRefreshPromise = null;
+    });
+
+    return activeRefreshPromise;
+}
 
 axios.defaults.baseURL = getBasePath() + BASE_API_URL_PATH;
 axios.defaults.timeout = DEFAULT_API_TIMEOUT;
@@ -380,12 +501,29 @@ function setAuthorizationHeader(headers: any, token: string): void {
     }
 }
 
+function clearAuthorizationHeader(headers: AxiosRequestHeaders): void {
+    const deletableHeaders = headers as AxiosRequestHeaders & {
+        delete?: (header: string | string[]) => unknown;
+    };
+
+    try {
+        deletableHeaders.delete?.(['Authorization', 'authorization']);
+    } catch {
+        logger.warn('[clearAuthorizationHeader] headers.delete() failed');
+    }
+
+    delete headers['Authorization'];
+    delete headers['authorization'];
+    delete headers.Authorization;
+}
+
 // ==== 拦截器注册标记 ====
 logger.debug('[services.ts] Registering request interceptor');
 
 axios.interceptors.request.use((config: ApiRequestConfig) => {
     const url = (config as any).url || 'unknown';
     const effectiveNoAuth = !!config.noAuth || isPublicNoAuthRequest(url);
+    const preserveExplicitAuthorization = !!config.preserveExplicitAuthorization;
 
     // 强制日志：验证拦截器是否被调用
     logger.debug(`[Interceptor START] ${url}`);
@@ -395,30 +533,41 @@ axios.interceptors.request.use((config: ApiRequestConfig) => {
         logger.debug(`[Interceptor] Blocking request ${url}, total blocked: ${blockedRequests.length + 1}`);
 
         // 关键修复：被阻塞的请求等待Token refresh完成后，自动获取最新Token
-        return new Promise(resolve => {
-            blockedRequests.push(() => {
-                // 解除阻塞时，重新从localStorage获取最新Token
-                const latestToken = getCurrentToken();
-                logger.debug(`[Interceptor] Unblocking ${url}, fetching latest token from storage`);
+        return new Promise((resolve, reject) => {
+            blockedRequests.push({
+                reject,
+                resume: () => {
+                    // 解除阻塞时，重新从localStorage获取最新Token
+                    const latestToken = getCurrentToken();
+                    logger.debug(`[Interceptor] Unblocking ${url}, fetching latest token from storage`);
 
-                if (latestToken && !effectiveNoAuth) {
-                    // 双重保险：同时更新axios.defaults和config.headers
-                    axios.defaults.headers.common['Authorization'] = `Bearer ${latestToken}`;
-
-                    // 确保headers对象存在
                     if (!config.headers) {
                         config.headers = {} as AxiosRequestHeaders;
                     }
 
-                    setAuthorizationHeader(config.headers, latestToken);
-                    logger.debug(`[Interceptor] Unblocked ${url} with latest token (defaults+config), length=${latestToken.length}`);
-                } else if (!latestToken && !effectiveNoAuth) {
-                    logger.error(`[Interceptor] ✗ Unblocked ${url} but no token in localStorage!`);
-                } else {
-                    logger.debug(`[Interceptor] Unblocked ${url} (noAuth request)`);
-                }
+                    if ((effectiveNoAuth || !latestToken) && !preserveExplicitAuthorization) {
+                        clearAuthorizationHeader(config.headers);
+                    }
 
-                resolve(config);
+                    if (latestToken && !effectiveNoAuth) {
+                        // 双重保险：同时更新axios.defaults和config.headers
+                        axios.defaults.headers.common['Authorization'] = `Bearer ${latestToken}`;
+
+                        // 确保headers对象存在
+                        if (!config.headers) {
+                            config.headers = {} as AxiosRequestHeaders;
+                        }
+
+                        setAuthorizationHeader(config.headers, latestToken);
+                        logger.debug(`[Interceptor] Unblocked ${url} with latest token (defaults+config), length=${latestToken.length}`);
+                    } else if (!latestToken && !effectiveNoAuth) {
+                        logger.error(`[Interceptor] ✗ Unblocked ${url} but no token in localStorage!`);
+                    } else {
+                        logger.debug(`[Interceptor] Unblocked ${url} (noAuth request)`);
+                    }
+
+                    resolve(config);
+                }
             });
         });
     }
@@ -445,6 +594,15 @@ axios.interceptors.request.use((config: ApiRequestConfig) => {
     if (!config.headers) {
         logger.warn(`[Interceptor] config.headers is undefined for ${url}, creating new object`);
         config.headers = {} as AxiosRequestHeaders;
+    }
+
+    if ((effectiveNoAuth || !token) && !preserveExplicitAuthorization) {
+        clearAuthorizationHeader(config.headers);
+
+        if (!token) {
+            delete axios.defaults.headers.common['Authorization'];
+            delete axios.defaults.headers.common['authorization'];
+        }
     }
 
     if (token && !effectiveNoAuth) {
@@ -533,15 +691,24 @@ axios.interceptors.response.use((response: any) => {
 }, (error: any) => {
     // 记录错误响应的请求config
     if (error.response) {
-        const url = error.response.config?.url || 'unknown';
-        const authInConfig = error.response.config?.headers?.Authorization
-                          || error.response.config?.headers?.['Authorization']
-                          || (typeof error.response.config?.headers?.get === 'function' ? error.response.config.headers.get('Authorization') : null);
+        const tokenOperation = getTokenResponseFailureOperation(error);
 
-        logger.error(`[Response Error] ${error.response.status} ${url} - Config had Authorization: ${authInConfig ? 'YES' : 'NO'}`, {
-            allConfigHeaders: error.response.config?.headers ? Object.keys(error.response.config.headers).join(', ') : 'N/A',
-            responseMessage: getApiErrorMessage(error) || 'N/A'
-        });
+        if (tokenOperation) {
+            logger.error(
+                '[auth-token] Token operation failed',
+                Object.freeze(getTokenFailureLog(error, tokenOperation))
+            );
+        } else {
+            const url = error.response.config?.url || 'unknown';
+            const authInConfig = error.response.config?.headers?.Authorization
+                              || error.response.config?.headers?.['Authorization']
+                              || (typeof error.response.config?.headers?.get === 'function' ? error.response.config.headers.get('Authorization') : null);
+
+            logger.error(`[Response Error] ${error.response.status} ${url} - Config had Authorization: ${authInConfig ? 'YES' : 'NO'}`, {
+                allConfigHeaders: error.response.config?.headers ? Object.keys(error.response.config.headers).join(', ') : 'N/A',
+                responseMessage: getApiErrorMessage(error) || 'N/A'
+            });
+        }
     }
 
     if (error.response?.config && 'cancelableUuid' in error.response.config
@@ -598,6 +765,7 @@ export default {
             passcode: passcode
         }, {
             noAuth: true,
+            preserveExplicitAuthorization: true,
             headers: {
                 Authorization: `Bearer ${token}`
             }
@@ -608,6 +776,7 @@ export default {
             recoveryCode: recoveryCode
         }, {
             noAuth: true,
+            preserveExplicitAuthorization: true,
             headers: {
                 Authorization: `Bearer ${token}`
             }
@@ -622,6 +791,7 @@ export default {
 
         return axios.post<ApiResponse<AuthResponse>>('auth/oauth2/authorize', req, {
             noAuth: true,
+            preserveExplicitAuthorization: true,
             headers: {
                 Authorization: `Bearer ${callbackToken}`
             }
@@ -665,67 +835,7 @@ export default {
     logout: (): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('auth/logout');
     },
-    refreshToken: (): ApiResponsePromise<TokenRefreshResponse> => {
-        return new Promise((resolve, reject) => {
-            const refreshToken = getCurrentRefreshToken();
-
-            logger.debug(`[refreshToken] Called, current needBlockRequest=${needBlockRequest}, blockedRequests=${blockedRequests.length}`);
-
-            // 如果没有refreshToken，直接返回错误
-            if (!refreshToken) {
-                logger.warn('[refreshToken] No refresh token available, clearing block state');
-                needBlockRequest = false;
-                blockedRequests.length = 0;
-                reject({
-                    message: 'No refresh token available',
-                    noRefreshToken: true
-                });
-                return;
-            }
-
-            logger.debug(`[refreshToken] Starting token refresh, currently ${blockedRequests.length} blocked requests`);
-
-            const requestBody = { refreshToken };
-
-            // 关键修复：先发起请求，然后再设置 needBlockRequest
-            // 这样 Token refresh 请求本身不会被阻塞标志影响
-            const refreshPromise = axios.post<ApiResponse<TokenRefreshResponse>>('tokens/refresh', requestBody, {
-                ignoreBlocked: true,
-                noAuth: true  // 使用 refreshToken，不附加 access token
-            } as ApiRequestConfig);
-
-            // 在请求发出后再设置阻塞标志，防止后续请求干扰
-            logger.debug('[refreshToken] Setting needBlockRequest=true AFTER request sent');
-            needBlockRequest = true;
-
-            refreshPromise.then((response: any) => {
-                const data = response.data;
-                const newToken = data.result?.newToken;
-
-                if (newToken) {
-                    logger.debug(`[refreshToken] Token refreshed successfully, unblocking ${blockedRequests.length} requests`);
-
-                    // 关键修复：不传递newToken，让被阻塞的请求自己从localStorage读取
-                    blockedRequests.forEach(func => func());
-                    blockedRequests.length = 0;
-                } else {
-                    logger.error('[refreshToken] No newToken in response');
-                }
-
-                // 解除阻塞状态
-                logger.debug('[refreshToken] Clearing needBlockRequest=false after success');
-                needBlockRequest = false;
-
-                resolve(response);
-            }).catch((error: any) => {
-                logger.error('[refreshToken] Failed to refresh token', error);
-                logger.debug('[refreshToken] Clearing needBlockRequest=false after error');
-                needBlockRequest = false;
-                blockedRequests.length = 0;
-                reject(error);
-            });
-        });
-    },
+    refreshToken: refreshAuthenticationToken,
     getExternalAuths: (): ApiResponsePromise<UserExternalAuthInfoResponse[]> => {
         return axios.get<ApiResponse<UserExternalAuthInfoResponse[]>>('profile/external-auths');
     },
@@ -1159,14 +1269,7 @@ export default {
     getOCRConfig: (): ApiResponsePromise<OCRConfigResponse> => {
         return axios.get<ApiResponse<OCRConfigResponse>>('ml/receipt-recognition/config');
     },
-    updateOCRConfig: (config: {
-        provider: string;
-        lang: string;
-        model?: string;
-        base_url?: string;
-        parameters?: Record<string, unknown>;
-        credential_config?: Record<string, unknown>;
-    }): ApiResponsePromise<OCRConfigResponse> => {
+    updateOCRConfig: (config: OCRConfigUpdateRequest): ApiResponsePromise<OCRConfigResponse> => {
         return axios.put<ApiResponse<OCRConfigResponse>>('ml/receipt-recognition/config', config);
     },
     getLatestExchangeRates: (param: { ignoreError?: boolean, provider?: string }): ApiResponsePromise<LatestExchangeRateResponse> => {
@@ -1343,19 +1446,7 @@ export default {
      * 创建预算历史快照
      * @param req 查询条件
      */
-    createBudgetHistorySnapshot: (req?: {
-        type?: number,
-        periodType?: string,
-        year?: number,
-        month?: number,
-        quarter?: number,
-        startDate?: string,
-        endDate?: string,
-        budgetId?: string,
-        categoryId?: string,
-        accountIds?: string[],
-        tagIds?: string[]
-    }): ApiResponsePromise<any> => {
+    createBudgetHistorySnapshot: (req?: BudgetHistoryQueryRequest): ApiResponsePromise<any> => {
         return axios.post<ApiResponse<any>>('budgets/history/snapshot', {
             budget_type: req?.type,
             period_type: req?.periodType,
@@ -1375,19 +1466,7 @@ export default {
      * 获取预算历史快照
      * @param req 查询条件
      */
-    getBudgetHistory: (req?: {
-        type?: number,
-        periodType?: string,
-        year?: number,
-        month?: number,
-        quarter?: number,
-        startDate?: string,
-        endDate?: string,
-        budgetId?: string,
-        categoryId?: string,
-        accountIds?: string[],
-        tagIds?: string[]
-    }): ApiResponsePromise<any> => {
+    getBudgetHistory: (req?: BudgetHistoryQueryRequest): ApiResponsePromise<any> => {
         const queryString = buildBudgetHistoryQuery(req);
         return axios.get<ApiResponse<any>>('budgets/history' + queryString).then(response => {
             return buildApiResponse(response, mapRestHistoryToFrontend(response.data?.result));
@@ -1398,17 +1477,7 @@ export default {
      * 获取周期预计（基于历史数据预测）
      * @param req 查询条件
      */
-    getBudgetForecast: (req?: {
-        type?: number,
-        periodType?: string,
-        year?: number,
-        month?: number,
-        quarter?: number,
-        monthsHistory?: number,
-        forecastStrategy?: string,
-        startDate?: string,
-        endDate?: string,
-    }): ApiResponsePromise<any> => {
+    getBudgetForecast: (req?: BudgetForecastQueryRequest): ApiResponsePromise<any> => {
         const queryString = buildBudgetForecastQuery(req);
         return axios.get<ApiResponse<any>>('budgets/forecast' + queryString).then(response => {
             return buildApiResponse(response, mapRestForecastToFrontend(response.data?.result));
@@ -1477,15 +1546,7 @@ export default {
 
     // ── Learning Center ──────────────────────────
 
-    getLearningSuggestions: ({
-        status,
-        limit,
-        offset
-    }: {
-        status?: string,
-        limit?: number,
-        offset?: number
-    } = {}): ApiResponsePromise<LearningSuggestionsResponse> => {
+    getLearningSuggestions: ({ status, limit, offset }: PagedStatusRequest = {}): ApiResponsePromise<LearningSuggestionsResponse> => {
         return axios.get<ApiDataResponse<LearningSuggestionsResponse>>('learning/suggestions', {
             params: { status, limit, offset }
         }).then(response => {
@@ -1522,15 +1583,7 @@ export default {
         });
     },
 
-    getLearningRules: ({
-        enabledOnly,
-        limit,
-        offset
-    }: {
-        enabledOnly?: boolean,
-        limit?: number,
-        offset?: number
-    } = {}): ApiResponsePromise<LearningRulesResponse> => {
+    getLearningRules: ({ enabledOnly, limit, offset }: LearningRuleListRequest = {}): ApiResponsePromise<LearningRulesResponse> => {
         return axios.get<ApiDataResponse<LearningRulesResponse>>('learning/rules', {
             params: { enabled_only: enabledOnly, limit, offset }
         }).then(response => {
@@ -1546,7 +1599,7 @@ export default {
     },
 
     updateLearningRule: ({ ruleId, ...fields }: { ruleId: number, matchValue?: string, learnedType?: string, learnedCategoryId?: number, enabled?: boolean }): ApiResponsePromise<any> => {
-        return axios.put(`bills/import/learning-rules/${ruleId}`, fields).then(response => {
+        return axios.put(`learning/rules/${ruleId}`, fields).then(response => {
             return buildApiResponse(response, response.data?.data ?? response.data?.result);
         });
     },
@@ -1559,15 +1612,7 @@ export default {
 
     // ── Recurring Detection (周期自动发现) ──────────
 
-    getRecurringSuggestions: ({
-        status,
-        limit,
-        offset
-    }: {
-        status?: string,
-        limit?: number,
-        offset?: number
-    } = {}): ApiResponsePromise<RecurringSuggestionsResponse> => {
+    getRecurringSuggestions: ({ status, limit, offset }: PagedStatusRequest = {}): ApiResponsePromise<RecurringSuggestionsResponse> => {
         return axios.get<ApiDataResponse<RecurringSuggestionsResponse>>('recurring/suggestions', {
             params: { status, limit, offset }
         }).then(response => {
@@ -1597,13 +1642,7 @@ export default {
 
     // ── Calendar Events (日历/现金流) ──────────
 
-    getCalendarEvents: ({
-        startDate,
-        endDate
-    }: {
-        startDate: string,
-        endDate: string
-    }): ApiResponsePromise<any> => {
+    getCalendarEvents: ({ startDate, endDate }: CalendarEventsRequest): ApiResponsePromise<any> => {
         return axios.get('calendar/events', {
             params: { start_date: startDate, end_date: endDate }
         }).then(response => {
@@ -1671,14 +1710,7 @@ export default {
             return buildApiResponse(response, response.data?.data);
         });
     },
-    createAccountRule: (data: {
-        account_id: number;
-        name: string;
-        priority: number;
-        rule_expression: string;
-        regex_enabled?: boolean;
-        enabled?: boolean;
-    }): ApiResponsePromise<any> => {
+    createAccountRule: (data: AccountRuleCreateRequest): ApiResponsePromise<any> => {
         return axios.post('account-rules/', data).then(response => {
             return buildApiResponse(response, response.data?.data);
         });
@@ -1738,11 +1770,7 @@ export default {
             return buildApiResponse(response, response.data?.data);
         });
     },
-    generateLLMRuleSynthesis: ({
-        limit
-    }: {
-        limit?: number
-    } = {}): ApiResponsePromise<LLMRuleSynthesisResponse> => {
+    generateLLMRuleSynthesis: ({ limit }: LLMRuleSynthesisRequest = {}): ApiResponsePromise<LLMRuleSynthesisResponse> => {
         return axios.post('llm/rule-synthesis', {
             limit: limit || 8
         }, { timeout: DEFAULT_LLM_API_TIMEOUT } as any).then(response => {
@@ -1799,19 +1827,7 @@ export default {
 
     // ── LLM Preview Recommend (A5 黄色推荐) ──────────
 
-    llmPreviewRecommend: ({
-        sessionId,
-        previewIds,
-        previewUpdates,
-        actionScope,
-        limit
-    }: {
-        sessionId: string;
-        previewIds?: number[];
-        previewUpdates?: Record<string, any>[];
-        actionScope?: Record<string, unknown>;
-        limit?: number;
-    }): ApiResponsePromise<any> => {
+    llmPreviewRecommend: ({ sessionId, previewIds, previewUpdates, actionScope, limit }: LLMPreviewRecommendRequest): ApiResponsePromise<any> => {
         return axios.post('llm/preview-recommend', {
             session_id: sessionId,
             preview_ids: previewIds,
@@ -1823,15 +1839,7 @@ export default {
         });
     },
 
-    llmPreviewRecommendAccept: ({
-        sessionId,
-        previewId,
-        suggestion
-    }: {
-        sessionId: string;
-        previewId: number;
-        suggestion: Record<string, any>;
-    }): ApiResponsePromise<any> => {
+    llmPreviewRecommendAccept: ({ sessionId, previewId, suggestion }: LLMPreviewRecommendAcceptRequest): ApiResponsePromise<any> => {
         return axios.post('llm/preview-recommend/accept', {
             session_id: sessionId,
             preview_id: previewId,
@@ -1841,17 +1849,7 @@ export default {
         });
     },
 
-    llmPreviewRecommendReject: ({
-        sessionId,
-        previewId,
-        suggestion,
-        userCorrection
-    }: {
-        sessionId: string;
-        previewId: number;
-        suggestion: Record<string, any>;
-        userCorrection?: Record<string, any>;
-    }): ApiResponsePromise<any> => {
+    llmPreviewRecommendReject: ({ sessionId, previewId, suggestion, userCorrection }: LLMPreviewRecommendRejectRequest): ApiResponsePromise<any> => {
         return axios.post('llm/preview-recommend/reject', {
             session_id: sessionId,
             preview_id: previewId,
@@ -1875,11 +1873,7 @@ export default {
 
     // ── Anomaly Insights (异常洞察) ──────────
 
-    getAnomalies: ({
-        months
-    }: {
-        months?: number
-    } = {}): ApiResponsePromise<any> => {
+    getAnomalies: ({ months }: AnomalyListRequest = {}): ApiResponsePromise<any> => {
         return axios.get('insights/anomalies', {
             params: { months }
         }).then(response => {

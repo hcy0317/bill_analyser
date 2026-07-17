@@ -156,7 +156,8 @@ for (const componentPath of [
     '@/views/desktop/transactions/import/dialogs/BatchCreateDialog.vue',
     '@/views/desktop/transactions/import/dialogs/ImportLearningSuggestionDialog.vue',
     '@/views/desktop/categories/list/dialogs/EditDialog.vue',
-    '@/views/desktop/accounts/list/dialogs/EditDialog.vue'
+    '@/views/desktop/accounts/list/dialogs/EditDialog.vue',
+    '@/views/desktop/transactions/list/dialogs/EditDialog.vue'
 ]) {
     jest.mock(componentPath, () => {
         const { defineComponent, h } = jest.requireActual('vue') as any;
@@ -807,7 +808,7 @@ describe('P3 import lifecycle production SFC coverage', () => {
             expect(bindings.getLLMSignalAccountRoute(llm)).toBe('Wallet');
             expect(bindings.getLLMSignalStatus(transaction)).toBe('pending');
             expect(bindings.buildLLMSignalSummary(llm)).toContain('Food/Cafe');
-            expect(bindings.getLearningSignalStatus(transaction)).toBe('pending');
+            expect(bindings.getImportPreviewSignalViewModel(transaction).learning?.status).toBe('pending');
             for (const [status, expected] of [
                 ['accepted', 'accepted'],
                 ['rejected', 'rejected'],
@@ -815,15 +816,25 @@ describe('P3 import lifecycle production SFC coverage', () => {
                 ['none', null]
             ] as const) {
                 const statusTransaction = createRenderableDesktopTransaction(3, 60);
+                statusTransaction.matching.learning = { reason: 'legacy helper status' };
                 statusTransaction.hasPendingLearningRecommendation = () => false;
                 statusTransaction.isLearningRecommendationAccepted = () => status === 'accepted';
                 statusTransaction.isLearningRecommendationRejected = () => status === 'rejected';
                 statusTransaction.isLearningRecommendationSkipped = () => status === 'skipped';
-                expect(bindings.getLearningSignalStatus(statusTransaction)).toBe(expected);
+                if (status === 'none') {
+                    statusTransaction.matching.learning = {};
+                    statusTransaction.learningRecommendationReason = '';
+                    statusTransaction.learningRecommendationSummary = '';
+                }
+                const learningSignal = bindings.getImportPreviewSignalViewModel(statusTransaction).learning;
+                expect(learningSignal?.status ?? null).toBe(expected);
             }
             const absentLearningTransaction = createRenderableDesktopTransaction(3, 61);
+            absentLearningTransaction.matching.learning = {};
+            absentLearningTransaction.learningRecommendationReason = '';
+            absentLearningTransaction.learningRecommendationSummary = '';
             absentLearningTransaction.hasLearningRecommendation = () => false;
-            expect(bindings.getLearningSignalStatus(absentLearningTransaction)).toBeNull();
+            expect(bindings.getImportPreviewSignalViewModel(absentLearningTransaction).learning).toBeNull();
 
             expect(bindings.shouldClearTransferDecisionOnSync(transaction)).toBe(false);
             expect(bindings.shouldClearLearningDecisionOnSync(transaction)).toBe(false);
@@ -855,15 +866,17 @@ describe('P3 import lifecycle production SFC coverage', () => {
             expect(bindings.getLearningDecisionMessageKey('reject')).toBe('Learning Suggestion Rejected');
             expect(bindings.getLearningDecisionMessageKey('clear')).toBe('Clear Learning Decision');
 
-            expect(bindings.serializeImportPreviewSignalSourceChain([{ role: 'parser', label: 'learning' }])).toContain('parser');
-            expect(bindings.buildImportPreviewSignalCacheSignature(transaction)).toContain('pending');
-            expect(bindings.getImportPreviewSignalViewModel(transaction).hasAnySignal).toBe(true);
+            const firstSignalViewModel = bindings.getImportPreviewSignalViewModel(transaction);
+            expect(firstSignalViewModel.hasAnySignal).toBe(true);
+            expect(bindings.getImportPreviewSignalViewModel(transaction)).toBe(firstSignalViewModel);
+            transaction.matching.learning.score = 0.88;
+            expect(bindings.getImportPreviewSignalViewModel(transaction)).not.toBe(firstSignalViewModel);
             expect(bindings.getImportPreviewHistoryRewriteOperation(transaction)).toMatchObject({
                 preview_id: 77,
                 planned_operation: 'update_history'
             });
             expect(bindings.getImportTransactionRowKey(transaction)).toContain('77');
-            expect(bindings.getAnnotationIssues(transaction)).toEqual(bindings.collectAnnotationIssues(transaction));
+            expect(bindings.getAnnotationSummary(transaction)).toEqual(expect.any(String));
             expect(bindings.needsAnnotation(transaction)).toBe(true);
 
             expect(bindings.metadataFacetLabels([{ label: 'Food', count: 2 }])).toEqual(['Food']);
@@ -993,15 +1006,6 @@ describe('P3 import lifecycle production SFC coverage', () => {
                 text: 'Missing category',
                 history_rewrite_notice: 'history rewrite'
             };
-            expect(bindings.getMatchingAnnotationPayload(transaction)).toMatchObject({ type: 'missing_category' });
-            expect(bindings.getAnnotationText(transaction.matching.annotation)).toBe('missing_category');
-            expect(bindings.getAnnotationType(transaction.matching.annotation)).toBe('missing_category');
-            expect(bindings.isCategoryAnnotationType('missing_category')).toBe(true);
-            expect(bindings.isSourceAccountAnnotationType('missing_source_account')).toBe(true);
-            expect(bindings.isDestinationAccountAnnotationType('missing_destination_account')).toBe(true);
-            expect(bindings.isTransferAccountAnnotationType('review_transfer_accounts')).toBe(true);
-            expect(bindings.hasRawPersistedMatchingAnnotationIssue(transaction)).toBe(true);
-            expect(bindings.hasCurrentPersistedMatchingAnnotationIssue(transaction)).toEqual(expect.any(Boolean));
             expect(bindings.hasBaselineAnnotationIssue(transaction)).toEqual(expect.any(Boolean));
             expect(bindings.hasCurrentAnnotationIssue(transaction)).toEqual(expect.any(Boolean));
             expect(bindings.getAnnotationSummary(transaction)).toBeTruthy();

@@ -55,6 +55,10 @@ name = "import_learning_contracts"
 path = "../../../tests/backend/core/import_learning_contracts.rs"
 
 [[test]]
+name = "import_config_contracts"
+path = "../../../tests/backend/core/import_config_contracts.rs"
+
+[[test]]
 name = "import_pipeline_contracts"
 path = "../../../tests/backend/core/import_pipeline_contracts.rs"
 

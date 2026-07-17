@@ -49,6 +49,13 @@ fn gitea_ci_provisions_isolated_postgres_without_manual_docker_commands() {
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
     let workflow = fs::read_to_string(repo_root.join(".gitea/workflows/ci.yml"))
         .expect("Gitea CI workflow is readable");
+    let backend_start = workflow
+        .find("  backend-ci:")
+        .expect("Gitea CI keeps the backend-ci job");
+    let frontend_start = workflow
+        .find("  frontend-ci:")
+        .expect("Gitea CI keeps the frontend-ci job after backend-ci");
+    let backend_workflow = &workflow[backend_start..frontend_start];
 
     for required in [
         "services:",
@@ -59,7 +66,7 @@ fn gitea_ci_provisions_isolated_postgres_without_manual_docker_commands() {
         "--health-cmd",
     ] {
         assert!(
-            workflow.contains(required),
+            backend_workflow.contains(required),
             "Gitea backend CI must provision its isolated PostgreSQL test dependency: {required}"
         );
     }
@@ -72,7 +79,7 @@ fn gitea_ci_provisions_isolated_postgres_without_manual_docker_commands() {
         "privileged:",
     ] {
         assert!(
-            !workflow.contains(forbidden),
+            !backend_workflow.contains(forbidden),
             "Gitea CI must use the managed service network instead of privileged or port-bound infrastructure: {forbidden}"
         );
     }
@@ -118,6 +125,8 @@ fn rust_owned_verified_runtime_routes_include_current_rest_runtime() {
     for (method, pattern) in [
         ("GET", "/api/health"),
         ("GET", "/api/runtime"),
+        ("GET", "/api/health/live"),
+        ("GET", "/api/health/ready"),
         ("GET", "/api/bills"),
         ("POST", "/api/bills/batch"),
         ("POST", "/api/bills/import/v2/parse"),
@@ -127,14 +136,16 @@ fn rust_owned_verified_runtime_routes_include_current_rest_runtime() {
         ("GET", "/api/statistics/exchange-rates"),
         ("POST", "/api/auth/login"),
         ("POST", "/api/data/clear/all"),
+        ("GET", "/api/accounts"),
         ("GET", "/api/accounts/"),
         ("POST", "/api/accounts/sync-balances"),
-        ("GET", "/api/categories/rules"),
         ("GET", "/api/category-rules/"),
         ("POST", "/api/category-rules/reorder"),
         ("GET", "/api/account-rules/"),
         ("GET", "/api/settings/bundle/export"),
+        ("GET", "/api/tags"),
         ("GET", "/api/tags/"),
+        ("GET", "/api/templates"),
         ("GET", "/api/templates/"),
         ("GET", "/api/matching/candidates"),
         ("GET", "/api/recurring/suggestions"),
@@ -226,8 +237,6 @@ fn bills_import_and_provider_routes_are_rust_owned() {
         ("GET", "/api/bills/{bill_id}"),
         ("PUT", "/api/bills/{bill_id}"),
         ("DELETE", "/api/bills/{bill_id}"),
-        ("POST", "/api/bills/modify"),
-        ("POST", "/api/bills/delete"),
         ("POST", "/api/bills/batch"),
         ("PUT", "/api/bills/batch/update"),
         ("DELETE", "/api/bills/batch/delete"),
@@ -353,6 +362,8 @@ fn backup_ops_routes_are_rust_owned_in_current_file_runtime() {
 fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_remainder() {
     let manifest = expanded_route_manifest();
     for endpoint in [
+        "GET /api/accounts",
+        "POST /api/accounts",
         "GET /api/accounts/",
         "POST /api/accounts/",
         "GET /api/accounts/{account_id}",
@@ -375,6 +386,8 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_remainder() {
     }
 
     for endpoint in [
+        "GET /api/tags",
+        "POST /api/tags",
         "GET /api/tags/",
         "POST /api/tags/",
         "GET /api/tags/{tag_id}",
@@ -410,8 +423,6 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_remainder() {
         "POST /api/categories/move",
         "GET /api/categories/export",
         "POST /api/categories/import",
-        "GET /api/categories/rules",
-        "PUT /api/categories/rules",
         "GET /api/categories/statistics",
         "POST /api/categories/update-all",
     ] {
@@ -427,6 +438,8 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_remainder() {
     }
 
     for endpoint in [
+        "GET /api/templates",
+        "POST /api/templates",
         "GET /api/templates/",
         "POST /api/templates/",
         "GET /api/templates/{template_id}",
@@ -810,8 +823,6 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         "GET /api/bills/{bill_id}",
         "PUT /api/bills/{bill_id}",
         "DELETE /api/bills/{bill_id}",
-        "POST /api/bills/modify",
-        "POST /api/bills/delete",
         "POST /api/bills/batch",
         "GET /api/bills/export",
         "POST /api/bills/pictures",

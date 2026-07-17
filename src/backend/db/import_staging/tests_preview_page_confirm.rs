@@ -184,7 +184,12 @@ fn confirm_command_fingerprint_canonicalizes_unordered_ack_collections_and_json_
 
 #[test]
 fn import_confirm_and_lifecycle_observability_is_complete_and_secret_safe() {
-    let confirm_source = include_str!("confirm.rs");
+    let confirm_source = concat!(
+        include_str!("confirm/orchestration.rs"),
+        include_str!("confirm/patches.rs"),
+        include_str!("confirm/history.rs"),
+        include_str!("confirm/persistence.rs"),
+    );
     for required in [
         "operation = \"confirm\"",
         "operation = \"session_locked\"",
@@ -207,8 +212,15 @@ fn import_confirm_and_lifecycle_observability_is_complete_and_secret_safe() {
         );
     }
 
-    let learning_source = include_str!("preview_learning_lifecycle.rs");
-    let llm_source = include_str!("preview_llm.rs");
+    let learning_source = concat!(
+        include_str!("preview_learning_lifecycle/decisions.rs"),
+        include_str!("preview_learning_lifecycle/persistence.rs"),
+        include_str!("preview_learning_lifecycle/feedback.rs"),
+    );
+    let llm_source = concat!(
+        include_str!("preview_llm/application.rs"),
+        include_str!("preview_llm/review.rs"),
+    );
     for (family, source) in [("learning", learning_source), ("llm", llm_source)] {
         for required in [
             "operation = \"lifecycle_transition\"",

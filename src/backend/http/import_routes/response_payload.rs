@@ -210,7 +210,7 @@ async fn import_parse_multipart_runtime_response(
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "auto".to_string());
-    let file_parts = form.file_parts();
+    let file_parts = form.into_file_parts();
     if file_parts.is_empty() {
         return route_response(import_v2_error_response(400, "Missing import files"));
     }
@@ -223,7 +223,7 @@ async fn import_parse_multipart_runtime_response(
     let mut first_detected_parser_id: Option<String> = None;
 
     let parse_results =
-        match parse_multipart_import_files_parallel(file_parts, &requested_parser).await {
+        match parse_multipart_import_files_bounded(file_parts, &requested_parser).await {
             Ok(parse_results) => parse_results,
             Err(response) => return route_response(response),
         };
@@ -302,16 +302,12 @@ async fn import_parse_multipart_runtime_response(
                 elapsed_ms = import_stage_elapsed_ms(_unmatched_started_at),
                 "stage1 unmatched file persisted"
             );
-            unmatched_files.push(json!({
-                "original_name": original_name.clone(),
-                "originalName": original_name.clone(),
-                "filename": original_name.clone(),
-                "temp_path": temp_path.clone(),
-                "tempPath": temp_path.clone(),
-                "parser_id": unmatched_parser_id,
-                "reason": result.decision.reason.clone(),
-                "parser_decision": parser_decision.clone(),
-            }));
+            unmatched_files.push(unmatched_import_file_payload(
+                &original_name,
+                &temp_path,
+                unmatched_parser_id,
+                &result.decision,
+            ));
             source_drafts.push(import_source_draft(ImportSourceDraftInput {
                 session_id: &session_id,
                 source_index: i64::try_from(_file_index).unwrap_or(i64::MAX),
@@ -353,71 +349,6 @@ async fn import_parse_multipart_runtime_response(
         },
         request_started_at,
     )
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-async fn parse_multipart_import_files_parallel(
-    file_parts: Vec<&MultipartPart>,
-    requested_parser: &str,
-) -> Result<Vec<ImportMultipartFileParseResult>, ImportV2RouteResponse> {
-    let mut handles = Vec::with_capacity(file_parts.len());
-    for (index, part) in file_parts.into_iter().enumerate() {
-        let input = ImportMultipartFileParseInput {
-            index,
-            original_name: part
-                .filename
-                .clone()
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| "import-file.csv".to_string()),
-            body: part.body.clone(),
-            requested_parser: requested_parser.to_string(),
-        };
-        handles.push(tokio::task::spawn_blocking(move || {
-            parse_multipart_import_file(input)
-        }));
-    }
-
-    let mut results = Vec::with_capacity(handles.len());
-    for handle in handles {
-        let result = handle.await.map_err(|error| {
-            import_v2_error_response(500, &format!("Import parser worker failed: {error}"))
-        })?;
-        results.push(result);
-    }
-    results.sort_by_key(|result| result.index);
-    Ok(results)
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn parse_multipart_import_file(
-    input: ImportMultipartFileParseInput,
-) -> ImportMultipartFileParseResult {
-    let started_at = Instant::now();
-    let selected = parse_dedicated_import_bytes_with_decision(
-        &input.original_name,
-        &input.body,
-        &input.requested_parser,
-    );
-    let decision = selected.decision;
-    let parsed = selected
-        .parsed
-        .filter(|parsed| !parsed.bills.is_empty())
-        .map(|parsed| ImportMultipartParsedFile {
-            source_index: input.index,
-            parser_id: parsed.parser_id,
-            parsed_count: parsed.bills.len(),
-            delimiter: parsed.delimiter,
-            bills: parsed.bills,
-            decision: parsed.decision,
-        });
-    ImportMultipartFileParseResult {
-        index: input.index,
-        original_name: input.original_name,
-        body: input.body,
-        parsed,
-        decision,
-        _elapsed_ms: import_stage_elapsed_ms(started_at),
-    }
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

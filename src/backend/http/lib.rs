@@ -17,9 +17,11 @@ pub mod config;
 pub mod config_database;
 pub mod config_weaviate;
 pub mod database_runtime;
+pub mod import_config_handlers;
 pub mod import_routes;
 pub mod logging;
 pub mod matching_routes;
+pub mod route_ownership;
 pub mod router;
 pub mod runtime;
 pub mod server;
@@ -30,8 +32,8 @@ pub mod weaviate;
 pub mod weaviate_recall;
 
 pub use auth::{
-    resolve_authenticated_user_from_headers, resolve_user_id_from_headers, AuthenticatedUser,
-    RustRouteAuthError,
+    resolve_authenticated_user_from_headers, resolve_authoritative_authenticated_user_from_headers,
+    resolve_user_id_from_headers, AuthenticatedUser, RustRouteAuthError,
 };
 pub use auth_routes::{auth_token_runtime_router, AUTH_TOKEN_ROUTE_PATTERNS};
 pub use backup_routes::{backup_ops_runtime_router, BACKUP_OPS_ROUTE_PATTERNS};
@@ -51,6 +53,10 @@ pub use config_weaviate::{
 pub use database_runtime::{
     DatabaseRuntimeBoundary, RouteRepositoryBackend, RouteRepositoryRuntimeError,
 };
+pub use import_config_handlers::{
+    delete_import_config_handler, list_import_configs_handler, match_import_config_handler,
+    save_import_config_handler, suggest_import_config_handler, IMPORT_CONFIG_ROUTE_PATTERNS,
+};
 pub use import_routes::IMPORT_SKELETON_ROUTE_PATTERNS;
 pub use logging::init_runtime_tracing;
 pub use logging::runtime_log_filter_from_directives;
@@ -58,9 +64,16 @@ pub use matching_routes::{
     matching_recurring_calendar_networth_runtime_router,
     MATCHING_RECURRING_CALENDAR_NETWORTH_ROUTE_PATTERNS,
 };
-pub use router::{build_router, health_handler, metadata_handler};
+pub use route_ownership::{
+    validate_live_route_ownership, LiveRouteRecord, RouteOwnershipMismatch,
+    FORBIDDEN_LEGACY_VERIFIED_ROUTES,
+};
+pub use router::{
+    build_router, health_handler, liveness_handler, metadata_handler, readiness_handler,
+};
 pub use runtime::{
-    http_shell_health, http_shell_health_with_weaviate_status, HttpShellHealth, HttpShellIdentity,
+    http_shell_health, http_shell_health_with_weaviate_status, http_shell_liveness,
+    http_shell_readiness_with_dependency_statuses, HttpShellHealth, HttpShellIdentity,
 };
 pub use server::{bind_addr_from_env, bind_addr_from_env_with, run_http_server, DEFAULT_HTTP_BIND};
 pub use state::HttpAppState;

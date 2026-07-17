@@ -81,7 +81,10 @@ async fn refresh_bill_categories_handler(
 ) -> Response {
     #[cfg(not(coverage))]
     tracing::info!(domain = "bills", operation = "refresh_bill_categories_handler", "business operation entered");
-    let payload = optional_json_object_from_body(&body);
+    let payload = match optional_json_object_from_body(&body) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
     let bill_ids = extract_bill_ids(&payload).filter(|ids| !ids.is_empty());
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,

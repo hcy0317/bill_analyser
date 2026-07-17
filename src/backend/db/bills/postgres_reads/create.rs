@@ -4,8 +4,9 @@ pub async fn create_postgres_bill(
     user_id: i64,
     draft: &BillCreateDraft,
 ) -> DbResult<i64> {
-    let mutation = prepare_postgres_bill_mutation(pool, user_id, &draft.fields).await?;
     let mut tx = pool.begin().await?;
+    let mutation = prepare_postgres_bill_mutation(&draft.fields)?;
+    lock_and_validate_postgres_bill_mutations_on_tx(&mut tx, user_id, &[&mutation]).await?;
     let bill_id: i64 = sqlx::query(
         r#"
         INSERT INTO bills (
@@ -54,7 +55,7 @@ pub async fn batch_create_postgres_bills(
 }
 
 pub(crate) async fn batch_create_postgres_bills_in_transaction(
-    pool: &PostgresPool,
+    _pool: &PostgresPool,
     tx: &mut sqlx::Transaction<'_, Postgres>,
     user_id: i64,
     drafts: &[BillCreateDraft],
@@ -65,10 +66,15 @@ pub(crate) async fn batch_create_postgres_bills_in_transaction(
     let mut prepared = Vec::with_capacity(drafts.len());
     for draft in drafts {
         prepared.push(PreparedPostgresBillMutation {
-            mutation: prepare_postgres_bill_mutation(pool, user_id, &draft.fields).await?,
+            mutation: prepare_postgres_bill_mutation(&draft.fields)?,
             tag_ids: draft.tag_ids.clone(),
         });
     }
+    let mutations = prepared
+        .iter()
+        .map(|prepared| &prepared.mutation)
+        .collect::<Vec<_>>();
+    lock_and_validate_postgres_bill_mutations_on_tx(tx, user_id, &mutations).await?;
 
     let mut bill_ids = Vec::with_capacity(prepared.len());
     let mut balance_deltas = Vec::new();

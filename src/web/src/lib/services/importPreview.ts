@@ -401,10 +401,12 @@ const importPreviewServices = {
         });
     },
     getImportConfigs: ({ fileFormat }: { fileFormat?: string } = {}): ApiResponsePromise<any[]> => {
-        return axios.get<ApiResponse<any[]>>('bills/import/configs', {
+        return axios.get<ApiDataResponse<any[]>>('bills/import/configs', {
             params: {
                 file_format: fileFormat
             }
+        }).then(response => {
+            return buildApiResponse(response, response.data?.data || []);
         });
     },
     previewImportFile: ({ importFile, fileEncoding, delimiter }: { importFile: File, fileEncoding?: string, delimiter?: string }): ApiResponsePromise<any> => {
@@ -416,8 +418,9 @@ const importPreviewServices = {
             timeout: DEFAULT_UPLOAD_API_TIMEOUT
         } as ApiRequestConfig);
     },
-    previewImportFileFromTemp: ({ tempPath, fileEncoding, delimiter }: { tempPath: string, fileEncoding?: string, delimiter?: string }): ApiResponsePromise<any> => {
+    previewImportFileFromTemp: ({ sessionId, tempPath, fileEncoding, delimiter }: { sessionId: string, tempPath: string, fileEncoding?: string, delimiter?: string }): ApiResponsePromise<any> => {
         return axios.postForm<ApiResponse<any>>('bills/import/preview', {
+            session_id: sessionId,
             temp_path: tempPath,
             fileEncoding: fileEncoding,
             delimiter: delimiter
@@ -426,7 +429,7 @@ const importPreviewServices = {
         } as ApiRequestConfig);
     },
     // 中文说明：把临时预览文件按用户列映射解析进既有导入 session，保持 v2 parse_generic payload 字段名。
-    parseGenericIntoSession: ({ sessionId, tempPath, columnMapping, transactionTypeMapping, hasHeaderLine, timeFormat, timezoneFormat, amountDecimalSeparator, amountDigitGroupingSymbol, delimiter }: {
+    parseGenericIntoSession: ({ sessionId, tempPath, columnMapping, transactionTypeMapping, hasHeaderLine, timeFormat, timezoneFormat, amountDecimalSeparator, amountDigitGroupingSymbol, fileEncoding, delimiter }: {
         sessionId: string;
         tempPath: string;
         columnMapping: Record<string, number>;
@@ -436,6 +439,7 @@ const importPreviewServices = {
         timezoneFormat?: string;
         amountDecimalSeparator?: string;
         amountDigitGroupingSymbol?: string;
+        fileEncoding?: string;
         delimiter?: string;
     }): ApiResponsePromise<any> => {
         return axios.post<ApiResponse<any>>('bills/import/v2/parse_generic', {
@@ -448,29 +452,38 @@ const importPreviewServices = {
             timezone_format: timezoneFormat,
             amount_decimal_separator: amountDecimalSeparator,
             amount_digit_grouping_symbol: amountDigitGroupingSymbol,
+            file_encoding: fileEncoding,
             delimiter: delimiter
         }, {
             timeout: DEFAULT_UPLOAD_API_TIMEOUT
         } as ApiRequestConfig);
     },
     matchImportConfig: ({ fileFormat, headers }: { fileFormat: string, headers: string[] }): ApiResponsePromise<any | null> => {
-        return axios.post<ApiResponse<any | null>>('bills/import/configs/match', {
+        return axios.post<ApiDataResponse<any | null>>('bills/import/configs/match', {
             fileFormat,
             headers
+        }).then(response => {
+            return buildApiResponse(response, response.data?.data ?? null);
         });
     },
     suggestImportConfig: ({ fileFormat, headers, sampleRows }: { fileFormat: string, headers: string[], sampleRows?: string[][] }): ApiResponsePromise<any> => {
-        return axios.post<ApiResponse<any>>('bills/import/configs/suggest', {
+        return axios.post<ApiDataResponse<any>>('bills/import/configs/suggest', {
             fileFormat,
             headers,
             sampleRows
+        }).then(response => {
+            return buildApiResponse(response, response.data?.data);
         });
     },
     saveImportConfig: (req: any): ApiResponsePromise<{ id: number }> => {
-        return axios.post<ApiResponse<{ id: number }>>('bills/import/configs', req);
+        return axios.post<ApiDataResponse<{ id: number }>>('bills/import/configs', req).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
     },
-    deleteImportConfig: ({ id }: { id: number | string }): ApiResponsePromise<boolean> => {
-        return axios.delete<ApiResponse<boolean>>(`bills/import/configs/${id}`);
+    deleteImportConfig: ({ id }: { id: number | string }): ApiResponsePromise<{ id: number, deleted: boolean }> => {
+        return axios.delete<ApiDataResponse<{ id: number, deleted: boolean }>>(`bills/import/configs/${id}`).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
     },
     
 };

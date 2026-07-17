@@ -12,7 +12,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use base64::{engine::general_purpose, Engine as _};
@@ -99,11 +99,11 @@ use bill_analyser_db::{
 };
 use bill_analyser_parsers::{
     parse_dedicated_import_bytes_with_decision, parser_source_label, post_process_raw_bills,
-    DedicatedParserDecision, RawBill, StandardBill,
+    DedicatedParserDecision, RawBill, StandardBill, MAX_SPREADSHEET_TOTAL_CELL_BYTES,
 };
 use bytes::{Bytes, BytesMut};
 use chrono::{NaiveDate, Utc};
-use encoding_rs::GBK;
+use encoding_rs::{GB18030, GBK};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
@@ -111,7 +111,7 @@ use sqlx::{Postgres, QueryBuilder, Row};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
     env, fs, io,
-    io::Write,
+    io::{Read, Write},
     path::{Component, Path as FsPath, PathBuf},
     process::{Command, Stdio},
     sync::{
@@ -128,6 +128,10 @@ type Connection = PostgresPool;
 use crate::{
     auth::resolve_user_id_from_headers,
     config::HttpShellConfig,
+    import_config_handlers::{
+        delete_import_config_handler, list_import_configs_handler, match_import_config_handler,
+        save_import_config_handler, suggest_import_config_handler,
+    },
     state::HttpAppState,
     weaviate::{
         recall_import_learning_candidates, WeaviateImportLearningRecallHit,
@@ -146,6 +150,7 @@ const LLM_RULE_INDUCTION_MAX_CANDIDATES_PER_GROUP: usize = 5;
 const LLM_RULE_SYNTHESIS_MAX_GROUPS: usize = 8;
 const LLM_RULE_SYNTHESIS_MAX_EVIDENCE_PER_GROUP: usize = 4;
 pub const IMPORT_SKELETON_ROUTE_PATTERNS: &[(&str, &str)] = &[
+    ("POST", "/api/bills/import/preview"),
     ("POST", "/api/bills/import/v2/parse"),
     ("POST", "/api/bills/import/v2/parse_generic"),
     ("POST", "/api/bills/import/v2/dedup"),
@@ -182,6 +187,11 @@ pub const IMPORT_SKELETON_ROUTE_PATTERNS: &[(&str, &str)] = &[
         "/api/bills/import/v2/learning/{session_id}/suggestions",
     ),
     ("POST", "/api/bills/import/v2/learning/{session_id}/promote"),
+    ("GET", "/api/bills/import/configs"),
+    ("POST", "/api/bills/import/configs"),
+    ("POST", "/api/bills/import/configs/match"),
+    ("POST", "/api/bills/import/configs/suggest"),
+    ("DELETE", "/api/bills/import/configs/{config_id}"),
     ("POST", "/api/llm/preview-recommend/accept"),
     ("POST", "/api/llm/preview-recommend/reject"),
     ("GET", "/api/llm/memory"),
@@ -203,6 +213,10 @@ pub const IMPORT_SKELETON_ROUTE_PATTERNS: &[(&str, &str)] = &[
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn import_runtime_router() -> Router<HttpAppState> {
     Router::new()
+        .route(
+            "/api/bills/import/preview",
+            post(file_preview_handler::import_file_preview_runtime_handler),
+        )
         .route(
             "/api/bills/import/v2/parse",
             post(import_parse_runtime_handler),
@@ -264,6 +278,22 @@ pub fn import_runtime_router() -> Router<HttpAppState> {
         .route(
             "/api/bills/import/v2/learning/:session_id/promote",
             post(import_learning_promote_runtime_handler),
+        )
+        .route(
+            "/api/bills/import/configs",
+            get(list_import_configs_handler).post(save_import_config_handler),
+        )
+        .route(
+            "/api/bills/import/configs/match",
+            post(match_import_config_handler),
+        )
+        .route(
+            "/api/bills/import/configs/suggest",
+            post(suggest_import_config_handler),
+        )
+        .route(
+            "/api/bills/import/configs/:config_id",
+            delete(delete_import_config_handler),
         )
         .route(
             "/api/llm/preview-recommend",
@@ -371,7 +401,9 @@ include!("transfer_materialization.rs");
 include!("parse_handlers.rs");
 include!("llm_handlers.rs");
 include!("ocr_learning_handlers.rs");
+include!("response_payload_parse_budget.rs");
 include!("response_payload.rs");
+include!("response_payload_tests.rs");
 include!("response_payload_ledger.rs");
 include!("multipart_and_ocr.rs");
 include!("parser_mapping.rs");
@@ -379,3 +411,8 @@ include!("learning_runtime.rs");
 include!("import_file_helpers.rs");
 include!("preview_mutation_helpers.rs");
 include!("runtime_helpers.rs");
+mod file_preview_handler;
+use file_preview_handler::{
+    decode_preview_text, normalize_preview_encoding, read_bounded_preview_file,
+    IMPORT_FILE_PREVIEW_HARD_MAX_BYTES,
+};

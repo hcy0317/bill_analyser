@@ -28,9 +28,11 @@ describe('import dialog progress UI contract', () => {
         expect(progressSource).toContain("'result'");
     });
 
-    test('keeps the v2 parse endpoint on the Rust REST import chain', () => {
+    test('keeps the parser-first v2 stages on the Rust REST import chain', () => {
         const source = readImportDialogSource();
 
         expect(source).toContain("fetchImportStage('/api/bills/import/v2/parse'");
+        expect(source).toContain("fetchImportStage('/api/bills/import/v2/dedup'");
+        expect(source).toContain("fetchImportStage('/api/bills/import/v2/confirm'");
     });
 });

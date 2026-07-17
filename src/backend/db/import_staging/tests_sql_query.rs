@@ -69,7 +69,7 @@ fn preview_sql_query_builder_covers_none_category_and_account_id_filters() {
 }
 
 #[test]
-fn preview_sql_learning_filter_includes_transfer_learning_level() {
+fn preview_sql_learning_filter_includes_transfer_learning_evidence() {
     let filters = ImportPreviewQueryFilters {
         signal: Some("learning".to_string()),
         ..ImportPreviewQueryFilters::default()

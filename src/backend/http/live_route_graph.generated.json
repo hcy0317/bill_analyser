@@ -1,0 +1,963 @@
+{
+  "generatedFrom": [
+    "src/backend/http/router.rs",
+    "src/backend/http/import_routes/mod.rs",
+    "src/backend/http/bill_routes/mod.rs",
+    "src/backend/http/auth_routes/mod.rs",
+    "src/backend/http/backup_routes/mod.rs",
+    "src/backend/http/budget_routes/routes.rs",
+    "src/backend/http/matching_routes.rs",
+    "src/backend/http/statistics_routes/mod.rs",
+    "src/backend/http/taxonomy_routes/mod.rs"
+  ],
+  "routes": [
+    {
+      "method": "DELETE",
+      "pattern": "/api/account-rules/{rule_id}"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/accounts/{account_id}"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/backup/delete/{filename}"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/bills/batch/delete"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/bills/import/configs/{config_id}"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/bills/import/v2/preview-item/{preview_id}/recurring-match"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/bills/import/v2/session/{session_id}"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/bills/{bill_id}"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/bills/{bill_id}/recurring-match"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/budgets/{budget_id}"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/categories/{category_id}"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/category-rules/{rule_id}"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/learning/rules/{rule_id}"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/llm/configs/{config_id}"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/matching/pairs/{pair_id}"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/profile/avatar"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/profile/cloud-settings"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/statistics/exchange-rates/custom/{currency}"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/tags/{tag_id}"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/templates/{template_id}"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/tokens"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/tokens/{token_id}"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/2fa/status"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/account-rules/"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/accounts"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/accounts/"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/accounts/{account_id}"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/backup/"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/backup/download/{filename}"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/backup/jobs"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/bills"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/bills/"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/bills/by-month"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/bills/export"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/bills/get"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/bills/import/configs"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/bills/import/v2/learning/{session_id}/suggestions"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/bills/import/v2/preview-item/{preview_id}/recurring-candidates"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/bills/import/v2/preview/{session_id}"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/bills/import/v2/preview/{session_id}/index"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/bills/import/v2/session/{session_id}"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/bills/reconciliation_statements"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/bills/{bill_id}"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/bills/{bill_id}/recurring-candidates"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/budgets"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/budgets/"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/budgets/execution"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/budgets/export"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/budgets/forecast"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/budgets/history"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/budgets/{budget_id}"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/calendar/events"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/categories"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/categories/"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/categories/all"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/categories/export"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/categories/flat"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/categories/statistics"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/categories/tree"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/categories/{category_id}"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/category-rules/"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/data/export.{file_type}"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/data/statistics"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/health"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/health/live"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/health/ready"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/insights/anomalies"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/learning/rules"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/learning/suggestions"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/llm/candidates"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/llm/candidates/{candidate_id}"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/llm/config"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/llm/configs"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/llm/memory"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/matching/bills/{bill_id}/candidates"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/matching/bills/{bill_id}/feedback"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/matching/candidates"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/matching/investment-settings"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/matching/pairs"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/matching/reconciliation-candidates"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/matching/sessions/{session_id}/candidates"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/ml/receipt-recognition/config"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/networth/snapshot"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/profile"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/profile/cloud-settings"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/profile/external-auths"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/recurring/suggestions"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/rules/overview"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/runtime"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/settings/bundle/export"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/settings/bundle/sections/{section_key}/export"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/statistics/amounts"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/statistics/asset-trends"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/statistics/category"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/statistics/category-pie"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/statistics/category-statistics"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/statistics/category-statistics/trends"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/statistics/comparison"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/statistics/exchange-rates"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/statistics/overview"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/statistics/top-merchants"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/statistics/trend"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/statistics/trends"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/system/version"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/tags"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/tags/"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/tags/{tag_id}"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/templates"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/templates/"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/templates/{template_id}"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/tokens"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/2fa/disable"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/2fa/enable/confirm"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/2fa/enable/request"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/2fa/recovery/regenerate"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/2fa/recovery/verify"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/2fa/verify"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/account-rules/"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/account-rules/reorder"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/account-rules/{rule_id}/test"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/accounts"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/accounts/"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/accounts/sync-balances"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/accounts/{account_id}/transactions/clear"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/accounts/{account_id}/transactions/move"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/auth/email/resend-verification"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/auth/email/verify"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/auth/login"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/auth/logout"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/auth/oauth2/authorize"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/auth/password/forgot"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/auth/password/reset"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/auth/register"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/backup/cleanup"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/backup/create"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/backup/jobs"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/backup/sync"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/bills"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/bills/"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/bills/batch"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/bills/category/quick-add-rule"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/bills/category/refresh"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/bills/import/configs"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/bills/import/configs/match"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/bills/import/configs/suggest"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/bills/import/preview"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/bills/import/v2/confirm"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/bills/import/v2/dedup"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/bills/import/v2/learning/{session_id}/promote"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/bills/import/v2/learning/{session_id}/suggestions"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/bills/import/v2/parse"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/bills/import/v2/parse_generic"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/bills/import/v2/preview-item/{preview_id}/transfer-decision"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/bills/import/v2/reclassify/{session_id}"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/bills/pictures"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/bills/pictures/unused"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/budgets"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/budgets/"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/budgets/history/snapshot"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/budgets/import"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/categories"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/categories/"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/categories/batch"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/categories/import"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/categories/move"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/categories/update-all"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/category-rules/"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/category-rules/defaults"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/category-rules/reorder"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/category-rules/{rule_id}/test"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/data/clear/all"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/data/clear/transactions"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/learning/suggestions/batch-accept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/learning/suggestions/generate"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/learning/suggestions/{suggestion_id}/accept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/learning/suggestions/{suggestion_id}/reject"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/llm/analyze-transactions"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/llm/candidates/{candidate_id}/accept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/llm/candidates/{candidate_id}/reject"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/llm/config"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/llm/configs"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/llm/configs/{config_id}/activate"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/llm/preview-recommend"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/llm/preview-recommend/accept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/llm/preview-recommend/reject"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/llm/rule-synthesis"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/matching/candidates/{candidate_id}/accept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/matching/candidates/{candidate_id}/clear"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/matching/candidates/{candidate_id}/reject"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/matching/manual-pair"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/matching/reconcile-history"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/ml/receipt-recognition"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/profile/avatar"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/profile/email/resend-verification"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/profile/external-auths/unlink"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/recurring/suggestions/detect"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/recurring/suggestions/{suggestion_id}/accept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/recurring/suggestions/{suggestion_id}/reject"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/security/step-up/verify"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/settings/bundle/import"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/settings/bundle/import/preview"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/settings/bundle/sections/{section_key}/export"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/settings/bundle/sections/{section_key}/import"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/settings/bundle/sections/{section_key}/import/preview"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/tags"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/tags/"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/tags/batch"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/templates"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/templates/"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/tokens/api"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/tokens/mcp"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/tokens/refresh"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/account-rules/{rule_id}"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/accounts/display-orders"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/accounts/{account_id}"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/bills/batch/update"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/bills/import/v2/preview-item/{preview_id}/recurring-match"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/bills/import/v2/preview/{session_id}/selection"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/bills/import/v2/preview/{session_id}/update"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/bills/{bill_id}"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/bills/{bill_id}/recurring-match"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/budgets/{budget_id}"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/categories/all"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/categories/{category_id}"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/category-rules/{rule_id}"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/learning/rules/{rule_id}"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/learning/rules/{rule_id}/toggle"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/llm/configs/{config_id}"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/matching/investment-settings"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/ml/receipt-recognition/config"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/profile"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/profile/cloud-settings"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/statistics/exchange-rates/custom"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/tags/display-orders"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/tags/{tag_id}"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/templates/display-orders"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/templates/{template_id}"
+    }
+  ]
+}

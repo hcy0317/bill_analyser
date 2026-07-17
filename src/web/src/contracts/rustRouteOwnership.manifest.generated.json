@@ -9,6 +9,18 @@
     },
     {
       "method": "GET",
+      "pattern": "/api/health/live",
+      "domain": "api-runtime-shell",
+      "state": "rust_owned_verified"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/health/ready",
+      "domain": "api-runtime-shell",
+      "state": "rust_owned_verified"
+    },
+    {
+      "method": "GET",
       "pattern": "/api/runtime",
       "domain": "api-runtime-shell",
       "state": "rust_owned_verified"
@@ -64,18 +76,6 @@
     {
       "method": "DELETE",
       "pattern": "/api/bills/{bill_id}",
-      "domain": "bills-crud",
-      "state": "rust_owned_verified"
-    },
-    {
-      "method": "POST",
-      "pattern": "/api/bills/modify",
-      "domain": "bills-crud",
-      "state": "rust_owned_verified"
-    },
-    {
-      "method": "POST",
-      "pattern": "/api/bills/delete",
       "domain": "bills-crud",
       "state": "rust_owned_verified"
     },
@@ -315,6 +315,12 @@
     },
     {
       "method": "POST",
+      "pattern": "/api/bills/import/preview",
+      "domain": "bills-import",
+      "state": "rust_owned_verified"
+    },
+    {
+      "method": "POST",
       "pattern": "/api/bills/import/v2/parse",
       "domain": "bills-import",
       "state": "rust_owned_verified"
@@ -422,48 +428,6 @@
       "state": "rust_owned_verified"
     },
     {
-      "method": "POST",
-      "pattern": "/api/bills/import/preview",
-      "domain": "bills-import",
-      "state": "rust_owned_verified"
-    },
-    {
-      "method": "POST",
-      "pattern": "/api/bills/import/confirm",
-      "domain": "bills-import",
-      "state": "rust_owned_verified"
-    },
-    {
-      "method": "POST",
-      "pattern": "/api/bills/import/batch",
-      "domain": "bills-import",
-      "state": "rust_owned_verified"
-    },
-    {
-      "method": "POST",
-      "pattern": "/api/bills/parse_import",
-      "domain": "bills-import",
-      "state": "rust_owned_verified"
-    },
-    {
-      "method": "POST",
-      "pattern": "/api/bills/import/upload",
-      "domain": "bills-import",
-      "state": "rust_owned_verified"
-    },
-    {
-      "method": "GET",
-      "pattern": "/api/bills/import/parsers",
-      "domain": "bills-import",
-      "state": "rust_owned_verified"
-    },
-    {
-      "method": "POST",
-      "pattern": "/api/bills/import/reclassify",
-      "domain": "bills-import",
-      "state": "rust_owned_verified"
-    },
-    {
       "method": "GET",
       "pattern": "/api/bills/import/configs",
       "domain": "bills-import",
@@ -490,24 +454,6 @@
     {
       "method": "DELETE",
       "pattern": "/api/bills/import/configs/{config_id}",
-      "domain": "bills-import",
-      "state": "rust_owned_verified"
-    },
-    {
-      "method": "GET",
-      "pattern": "/api/bills/import/learning-rules",
-      "domain": "bills-import",
-      "state": "rust_owned_verified"
-    },
-    {
-      "method": "PUT",
-      "pattern": "/api/bills/import/learning-rules/{rule_id}",
-      "domain": "bills-import",
-      "state": "rust_owned_verified"
-    },
-    {
-      "method": "DELETE",
-      "pattern": "/api/bills/import/learning-rules/{rule_id}",
       "domain": "bills-import",
       "state": "rust_owned_verified"
     },
@@ -753,6 +699,18 @@
     },
     {
       "method": "GET",
+      "pattern": "/api/accounts",
+      "domain": "taxonomy-rules-settings",
+      "state": "rust_owned_verified"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/accounts",
+      "domain": "taxonomy-rules-settings",
+      "state": "rust_owned_verified"
+    },
+    {
+      "method": "GET",
       "pattern": "/api/accounts/",
       "domain": "taxonomy-rules-settings",
       "state": "rust_owned_verified"
@@ -945,18 +903,6 @@
     },
     {
       "method": "GET",
-      "pattern": "/api/categories/rules",
-      "domain": "taxonomy-rules-settings",
-      "state": "rust_owned_verified"
-    },
-    {
-      "method": "PUT",
-      "pattern": "/api/categories/rules",
-      "domain": "taxonomy-rules-settings",
-      "state": "rust_owned_verified"
-    },
-    {
-      "method": "GET",
       "pattern": "/api/categories/statistics",
       "domain": "taxonomy-rules-settings",
       "state": "rust_owned_verified"
@@ -1083,19 +1029,19 @@
     },
     {
       "method": "POST",
-      "pattern": "/api/matching/candidates/{*candidate_id}/accept",
+      "pattern": "/api/matching/candidates/{candidate_id}/accept",
       "domain": "matching-recurring-calendar-networth",
       "state": "rust_owned_verified"
     },
     {
       "method": "POST",
-      "pattern": "/api/matching/candidates/{*candidate_id}/clear",
+      "pattern": "/api/matching/candidates/{candidate_id}/clear",
       "domain": "matching-recurring-calendar-networth",
       "state": "rust_owned_verified"
     },
     {
       "method": "POST",
-      "pattern": "/api/matching/candidates/{*candidate_id}/reject",
+      "pattern": "/api/matching/candidates/{candidate_id}/reject",
       "domain": "matching-recurring-calendar-networth",
       "state": "rust_owned_verified"
     },
@@ -1221,6 +1167,18 @@
     },
     {
       "method": "GET",
+      "pattern": "/api/tags",
+      "domain": "taxonomy-rules-settings",
+      "state": "rust_owned_verified"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/tags",
+      "domain": "taxonomy-rules-settings",
+      "state": "rust_owned_verified"
+    },
+    {
+      "method": "GET",
       "pattern": "/api/tags/",
       "domain": "taxonomy-rules-settings",
       "state": "rust_owned_verified"
@@ -1258,6 +1216,18 @@
     {
       "method": "PUT",
       "pattern": "/api/tags/display-orders",
+      "domain": "taxonomy-rules-settings",
+      "state": "rust_owned_verified"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/templates",
+      "domain": "taxonomy-rules-settings",
+      "state": "rust_owned_verified"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/templates",
       "domain": "taxonomy-rules-settings",
       "state": "rust_owned_verified"
     },

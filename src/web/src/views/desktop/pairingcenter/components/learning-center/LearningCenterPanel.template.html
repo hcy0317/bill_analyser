@@ -13,7 +13,7 @@
                                 <div class="learning-section-header"
                                      :class="{ 'learning-section-header--empty': hideSectionTitle && hasHeaderActionsTarget }">
                                     <h3 v-if="!hideSectionTitle" class="learning-section-title">{{ tt('Auto Suggestions') }}</h3>
-                                    <Teleport :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
+                                    <Teleport defer :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
                                      <div class="learning-section-actions"
                                           :class="{
                                               'learning-section-actions--external': hasHeaderActionsTarget,
@@ -136,7 +136,7 @@
                                 <div class="learning-section-header"
                                      :class="{ 'learning-section-header--empty': hideSectionTitle && hasHeaderActionsTarget }">
                                     <h3 v-if="!hideSectionTitle" class="learning-section-title">{{ tt('Learning Rules') }}</h3>
-                                    <Teleport :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
+                                    <Teleport defer :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
                                     <div class="learning-section-actions"
                                          :class="{ 'learning-section-actions--external': hasHeaderActionsTarget }">
                                         <v-chip size="small" variant="tonal" color="info">
@@ -373,7 +373,7 @@
                                 <div class="learning-section-header"
                                      :class="{ 'learning-section-header--empty': hideSectionTitle && hasHeaderActionsTarget }">
                                     <h3 v-if="!hideSectionTitle" class="learning-section-title">{{ tt('LLM Config') }}</h3>
-                                    <Teleport :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
+                                    <Teleport defer :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
                                     <div class="learning-section-actions"
                                          :class="{ 'learning-section-actions--external': hasHeaderActionsTarget }">
                                         <v-btn class="learning-panel-action"
@@ -448,7 +448,7 @@
                                 <div class="learning-section-header"
                                      :class="{ 'learning-section-header--empty': hideSectionTitle && hasHeaderActionsTarget }">
                                     <h3 v-if="!hideSectionTitle" class="learning-section-title">{{ tt('Suggested Rules') }}</h3>
-                                     <Teleport :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
+                                     <Teleport defer :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
                                      <div class="learning-section-actions"
                                           :class="{
                                               'learning-section-actions--external': hasHeaderActionsTarget,

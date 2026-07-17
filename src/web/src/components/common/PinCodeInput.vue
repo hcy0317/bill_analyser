@@ -109,7 +109,7 @@ function autoFillText(index: number, text: string): void {
 
     setFocus(lastIndex);
 
-    if (finalPinCode.value.length === length) {
+    if (finalPinCode.value.length === props.length) {
         emit('pincode:confirm', finalPinCode.value);
     }
 }

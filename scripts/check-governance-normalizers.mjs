@@ -6,6 +6,9 @@ import {
     normalizeStructureGateQueue,
     parseLcov,
     parseUnifiedDiffChangedLines,
+    isBusinessSourcePath,
+    isConservativelyDeclarationOnlyRustSource,
+    isTypeOnlyTypescriptSource,
     summarizeChangedLineCoverage,
 } from './governance-normalizers.mjs';
 
@@ -154,9 +157,11 @@ function testChangedCoverageRejectsZeroExecutableChangedLines() {
         requireExecutableLines: true,
     });
 
-    assert.equal(summary.matched_file_count, 1);
+    assert.equal(summary.matched_file_count, 0);
     assert.equal(summary.executable_changed_lines, 0);
+    assert.equal(summary.files[0].exclusion_reason, 'non_executable_change');
     assert.equal(summary.status, 'failed');
+    assert.equal(summary.coverage_disposition, 'failed_no_executable_lines');
     assert.equal(summary.requirements.executable_lines, false);
 }
 
@@ -212,6 +217,216 @@ function testChangedCoverageRejectsMissingVueSfcRecord() {
     assert.equal(summary.changed_vue_file_count, 1);
     assert.equal(summary.requirements.changed_vue_sfc_files, false);
     assert.equal(summary.status, 'failed');
+}
+
+function testChangedCoverageRejectsAnyMissingBusinessFile() {
+    const summary = summarizeChangedLineCoverage({
+        lcovText: [
+            'SF:src/web/src/covered.ts',
+            'DA:1,1',
+            'end_of_record',
+        ].join('\n'),
+        diffText: [
+            'diff --git a/src/web/src/covered.ts b/src/web/src/covered.ts',
+            '--- a/src/web/src/covered.ts',
+            '+++ b/src/web/src/covered.ts',
+            '@@ -0,0 +1 @@',
+            '+covered',
+            'diff --git a/src/web/src/missing.ts b/src/web/src/missing.ts',
+            '--- a/src/web/src/missing.ts',
+            '+++ b/src/web/src/missing.ts',
+            '@@ -0,0 +1 @@',
+            '+silently omitted before this regression test',
+        ].join('\n'),
+        threshold: 90,
+        requireMatchedFiles: true,
+        requireExecutableLines: true,
+    });
+
+    assert.equal(summary.business_file_count, 2);
+    assert.equal(summary.matched_file_count, 1);
+    assert.deepEqual(summary.missing_lcov_files, ['src/web/src/missing.ts']);
+    assert.equal(summary.requirements.all_business_files_matched, false);
+    assert.equal(summary.status, 'failed');
+}
+
+function testChangedCoverageReportsIncludedAndExcludedLines() {
+    const summary = summarizeChangedLineCoverage({
+        lcovText: [
+            'SF:src/backend/example.rs',
+            'DA:1,1',
+            'end_of_record',
+        ].join('\n'),
+        diffText: [
+            'diff --git a/src/backend/example.rs b/src/backend/example.rs',
+            '--- a/src/backend/example.rs',
+            '+++ b/src/backend/example.rs',
+            '@@ -0,0 +1,2 @@',
+            '+covered executable',
+            '+comment-only line',
+            'diff --git a/tests/backend/example.rs b/tests/backend/example.rs',
+            '--- a/tests/backend/example.rs',
+            '+++ b/tests/backend/example.rs',
+            '@@ -0,0 +1 @@',
+            '+test line',
+        ].join('\n'),
+        threshold: 90,
+        requireMatchedFiles: true,
+        requireExecutableLines: true,
+    });
+
+    assert.equal(summary.business_changed_lines, 2);
+    assert.equal(summary.included_executable_lines, 1);
+    assert.equal(summary.excluded_non_executable_lines, 1);
+    assert.equal(summary.files.find(file => file.path.startsWith('tests/')).scope_included, false);
+    assert.equal(summary.status, 'passed');
+}
+
+function testBusinessSourceClassification() {
+    assert.equal(isBusinessSourcePath('src/backend/http/lib.rs'), true);
+    assert.equal(isBusinessSourcePath('src/web/src/stores/user.ts'), true);
+    assert.equal(isBusinessSourcePath('src/web/src/App.vue'), true);
+    assert.equal(isBusinessSourcePath('src/web/src/contracts/rustRouteOwnership.generated.ts'), false);
+    assert.equal(isBusinessSourcePath('src/web/src/types/generated.d.ts'), false);
+    assert.equal(isBusinessSourcePath('tests/web/store.test.ts'), false);
+    assert.equal(isBusinessSourcePath('src/web/package.json'), false);
+    assert.equal(isBusinessSourcePath('src/backend/db/build.rs'), false);
+    assert.equal(isBusinessSourcePath('src/backend/http/routes/tests.rs'), false);
+    assert.equal(isBusinessSourcePath('src/backend/db/import_staging/tests_filters/core.rs'), false);
+    assert.equal(isBusinessSourcePath('src/backend/http/matching_routes_contract_tests.rs'), false);
+    assert.equal(isBusinessSourcePath('src/backend/http/router_test.rs'), false);
+    assert.equal(isBusinessSourcePath('src/backend/http/latest.rs'), true);
+}
+
+function testChangedCoverageExcludesPureTypeSourceWithReason() {
+    const filePath = 'src/web/src/lib/services/contracts.ts';
+    const sourceText = [
+        "import type { AxiosRequestConfig } from 'axios';",
+        'export interface RequestContract {',
+        '  config: AxiosRequestConfig;',
+        '}',
+        'export type RequestId = string;',
+    ].join('\n');
+    const summary = summarizeChangedLineCoverage({
+        lcovText: `SF:${filePath}\nend_of_record`,
+        diffText: [
+            `diff --git a/${filePath} b/${filePath}`,
+            '--- /dev/null',
+            `+++ b/${filePath}`,
+            '@@ -0,0 +1,5 @@',
+            ...sourceText.split('\n').map(line => `+${line}`),
+        ].join('\n'),
+        threshold: 90,
+        requireMatchedFiles: true,
+        requireExecutableLines: true,
+        sourceTextByPath: { [filePath]: sourceText },
+    });
+
+    assert.equal(isTypeOnlyTypescriptSource(filePath, sourceText), true);
+    assert.equal(summary.files[0].exclusion_reason, 'type_only_source');
+    assert.equal(summary.coverage_eligible_file_count, 0);
+    assert.equal(summary.coverage_disposition, 'failed_no_executable_lines');
+    assert.equal(summary.status, 'failed');
+}
+
+function testChangedCoverageExcludesCommentOnlyChangeWithReason() {
+    const filePath = 'src/backend/http/example.rs';
+    const summary = summarizeChangedLineCoverage({
+        lcovText: '',
+        diffText: [
+            `diff --git a/${filePath} b/${filePath}`,
+            `--- a/${filePath}`,
+            `+++ b/${filePath}`,
+            '@@ -4,0 +5,2 @@',
+            '+// Explain the invariant.',
+            '+/// Explain the public contract.',
+        ].join('\n'),
+        threshold: 90,
+        requireMatchedFiles: true,
+        requireExecutableLines: true,
+    });
+
+    assert.equal(summary.files[0].exclusion_reason, 'comment_only_change');
+    assert.equal(summary.status, 'failed');
+
+    const inlineBlockWithCode = summarizeChangedLineCoverage({
+        lcovText: '',
+        diffText: [
+            `diff --git a/${filePath} b/${filePath}`,
+            `--- a/${filePath}`,
+            `+++ b/${filePath}`,
+            '@@ -4,0 +5 @@',
+            '+/* misleading */ execute_runtime();',
+        ].join('\n'),
+        threshold: 90,
+        requireMatchedFiles: true,
+        requireExecutableLines: true,
+    });
+    assert.equal(inlineBlockWithCode.files[0].exclusion_reason, null);
+    assert.deepEqual(inlineBlockWithCode.missing_lcov_files, [filePath]);
+}
+
+function testChangedCoverageReportsDeclarationOnlyRustFacade() {
+    const filePath = 'src/backend/db/postgres.rs';
+    const sourceText = [
+        '#![allow(clippy::all)]',
+        'pub(crate) mod migration_manifest;',
+        'pub use migration_manifest::{embedded_migrations, migration_count};',
+        'include!("postgres/runtime.rs");',
+    ].join('\n');
+    const summary = summarizeChangedLineCoverage({
+        lcovText: '',
+        diffText: [
+            `diff --git a/${filePath} b/${filePath}`,
+            `--- a/${filePath}`,
+            `+++ b/${filePath}`,
+            '@@ -0,0 +1,4 @@',
+            ...sourceText.split('\n').map(line => `+${line}`),
+        ].join('\n'),
+        threshold: 90,
+        requireMatchedFiles: true,
+        requireExecutableLines: true,
+        sourceTextByPath: { [filePath]: sourceText },
+    });
+
+    assert.equal(isConservativelyDeclarationOnlyRustSource(filePath, sourceText), true);
+    assert.equal(summary.files[0].exclusion_reason, 'declaration_only_source');
+    assert.equal(summary.missing_lcov_file_count, 0);
+    assert.equal(summary.status, 'failed');
+}
+
+function testChangedCoverageExcludesRustConstDataInventories() {
+    const filePath = 'src/backend/core/runtime_governance/ownership/routes.rs';
+    const sourceText = [
+        'use super::EndpointOwnership;',
+        'macro_rules! route {',
+        '    ($method:literal) => { EndpointOwnership { method: $method, pattern: "/api/health" } };',
+        '}',
+        'pub(super) const ROUTES: &[EndpointOwnership] = &[',
+        '    route!("GET"),',
+        '];',
+    ].join('\n');
+    const summary = summarizeChangedLineCoverage({
+        lcovText: '',
+        diffText: [
+            `diff --git a/${filePath} b/${filePath}`,
+            '--- /dev/null',
+            `+++ b/${filePath}`,
+            `@@ -0,0 +1,${sourceText.split('\n').length} @@`,
+            ...sourceText.split('\n').map(line => `+${line}`),
+        ].join('\n'),
+        threshold: 90,
+        requireMatchedFiles: true,
+        requireExecutableLines: true,
+        sourceTextByPath: { [filePath]: sourceText },
+    });
+
+    assert.equal(isConservativelyDeclarationOnlyRustSource(filePath, sourceText), true);
+    assert.equal(summary.files[0].exclusion_reason, 'declaration_only_source');
+    assert.equal(summary.missing_lcov_file_count, 0);
+
+    const runtimeSource = `${sourceText}\npub fn routes() -> &'static [EndpointOwnership] { ROUTES }`;
+    assert.equal(isConservativelyDeclarationOnlyRustSource(filePath, runtimeSource), false);
 }
 
 function testForgeEvidenceNormalizer() {
@@ -280,6 +495,13 @@ testChangedCoverageRejectsZeroMatchedFiles();
 testChangedCoverageRejectsZeroExecutableChangedLines();
 testChangedCoverageMatchesRustAndVuePaths();
 testChangedCoverageRejectsMissingVueSfcRecord();
+testChangedCoverageRejectsAnyMissingBusinessFile();
+testChangedCoverageReportsIncludedAndExcludedLines();
+testBusinessSourceClassification();
+testChangedCoverageExcludesPureTypeSourceWithReason();
+testChangedCoverageExcludesCommentOnlyChangeWithReason();
+testChangedCoverageReportsDeclarationOnlyRustFacade();
+testChangedCoverageExcludesRustConstDataInventories();
 testForgeEvidenceNormalizer();
 testStructureQueueNormalizer();
 

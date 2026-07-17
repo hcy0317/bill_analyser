@@ -520,14 +520,14 @@ describe('import preview server-paged reset guards', () => {
     });
 
     test('check-data signal column uses the transfer signal adapter', () => {
-        const tabSource = readSource('src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue');
-        const signalModelIndex = tabSource.indexOf('const viewModel = buildImportPreviewSignalViewModel({');
-        const signalModelSource = tabSource.slice(signalModelIndex, tabSource.indexOf('}, {', signalModelIndex));
+        const signalSource = readSource('src/views/desktop/transactions/import/check-data-tab/useImportCheckDataSignals.ts');
+        const signalModelIndex = signalSource.indexOf('const viewModel = buildImportPreviewSignalViewModel({');
+        const signalModelSource = signalSource.slice(signalModelIndex, signalSource.indexOf('}, {', signalModelIndex));
 
-        expect(tabSource).toContain('getImportPreviewTransferSignalStatus as getTransferSignalStatus');
-        expect(tabSource).toContain('getImportPreviewTransferSignalTitle as getTransferSignalTitle');
-        expect(signalModelSource).toContain('transferStatus: getTransferSignalStatus(item),');
-        expect(signalModelSource).toContain('transferTitle: getTransferSignalTitle(item),');
+        expect(signalSource).toContain('getImportPreviewTransferSignalStatus,');
+        expect(signalSource).toContain('getImportPreviewTransferSignalTitle');
+        expect(signalModelSource).toContain('transferStatus: getImportPreviewTransferSignalStatus(item),');
+        expect(signalModelSource).toContain('transferTitle: getImportPreviewTransferSignalTitle(item),');
     });
 
     test('check-data server paging no longer fetches a full preview index before filtering', () => {
@@ -545,10 +545,10 @@ describe('import preview server-paged reset guards', () => {
     });
 
     test('check-data server paging baselines use dynamic annotation issue state', () => {
-        const tabSource = readSource('src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue');
-        const functionIndex = tabSource.indexOf('function hasBaselineAnnotationIssue');
-        const nextFunctionIndex = tabSource.indexOf('function getAnnotationSummary', functionIndex);
-        const functionSource = tabSource.slice(functionIndex, nextFunctionIndex);
+        const annotationSource = readSource('src/views/desktop/transactions/import/check-data-tab/useImportCheckDataAnnotations.ts');
+        const functionIndex = annotationSource.indexOf('function hasBaselineAnnotationIssue');
+        const nextFunctionIndex = annotationSource.indexOf('function getAnnotationSummary', functionIndex);
+        const functionSource = annotationSource.slice(functionIndex, nextFunctionIndex);
 
         expect(functionIndex).toBeGreaterThanOrEqual(0);
         expect(nextFunctionIndex).toBeGreaterThan(functionIndex);
@@ -557,10 +557,10 @@ describe('import preview server-paged reset guards', () => {
     });
 
     test('check-data annotation resolution reads status-only missing category payloads', () => {
-        const tabSource = readSource('src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue');
-        const functionIndex = tabSource.indexOf('function getAnnotationType');
-        const nextFunctionIndex = tabSource.indexOf('function isCategoryAnnotationType', functionIndex);
-        const functionSource = tabSource.slice(functionIndex, nextFunctionIndex);
+        const annotationSource = readSource('src/views/desktop/transactions/import/check-data-tab/useImportCheckDataAnnotations.ts');
+        const functionIndex = annotationSource.indexOf('function getAnnotationType');
+        const nextFunctionIndex = annotationSource.indexOf('function hasCurrentPersistedMatchingAnnotationIssue', functionIndex);
+        const functionSource = annotationSource.slice(functionIndex, nextFunctionIndex);
 
         expect(functionIndex).toBeGreaterThanOrEqual(0);
         expect(nextFunctionIndex).toBeGreaterThan(functionIndex);

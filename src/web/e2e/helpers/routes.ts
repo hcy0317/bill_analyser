@@ -1,5 +1,8 @@
 import type { E2EEnvironment } from './env';
 
+export const ROUTE_SMOKE_PAGE_ANCHOR_TIMEOUT_MS = process.env['CI'] ? 45_000 : 15_000;
+export const ROUTE_SMOKE_TEST_TIMEOUT_MS = process.env['CI'] ? 90_000 : 30_000;
+
 export interface RouteSmokeTarget {
     readonly name: string;
     readonly path: string;

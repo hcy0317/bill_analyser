@@ -106,11 +106,14 @@ async fn non_preview_matching_candidate_actions_keep_explicit_conflict_envelope(
 
 #[test]
 fn stale_preview_actions_keep_conflict_contract_without_resurrecting_removed_signals() {
-    let matching_source = include_str!("matching_routes/payloads.rs");
-    let direct_llm_source = include_str!("import_routes/llm/review_memory_config.rs");
+    let matching_source = include_str!("matching_routes/payloads.rs").replace("\r\n", "\n");
+    let direct_llm_source =
+        include_str!("import_routes/llm/review_memory_config.rs").replace("\r\n", "\n");
     let learning_db_source =
-        include_str!("../db/import_staging/preview_learning_lifecycle.rs");
-    let llm_db_source = include_str!("../db/import_staging/preview_llm.rs");
+        include_str!("../db/import_staging/preview_learning_lifecycle/decisions.rs")
+            .replace("\r\n", "\n");
+    let llm_db_source = include_str!("../db/import_staging/preview_llm/review.rs")
+        .replace("\r\n", "\n");
 
     let matching_conflict_guard = matching_source
         .find("Ok(result) if result.state_conflict")

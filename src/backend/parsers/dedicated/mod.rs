@@ -30,3 +30,8 @@ pub use types::{
     DedicatedParseResult, DedicatedParseSelectionResult, DedicatedParserCandidate,
     DedicatedParserDecision,
 };
+
+/// 读取 HTML spreadsheet，并在返回前执行预览资源预算。
+pub fn parse_html_spreadsheet_preview_rows(bytes: &[u8]) -> Option<(Vec<Vec<String>>, usize)> {
+    common::html_spreadsheet_preview_rows(bytes)
+}

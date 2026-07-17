@@ -105,6 +105,12 @@ pub(super) fn sheet_or_html_rows(bytes: &[u8]) -> Vec<Vec<String>> {
     }
 }
 
+/// 为通用预览读取 HTML 表格，并在构造结果时同步执行预算。
+pub(super) fn html_spreadsheet_preview_rows(bytes: &[u8]) -> Option<(Vec<Vec<String>>, usize)> {
+    let preview = crate::spreadsheet::parse_html_preview_rows(bytes).ok()?;
+    Some((preview.rows, preview.total_rows))
+}
+
 /// 只在 payload 确认为 HTML 表格时执行关键词探测，避免把二进制 Excel 当文本扫描。
 pub(super) fn html_payload_contains_any(bytes: &[u8], needles: &[&str]) -> Option<bool> {
     if !looks_like_html_table_payload(bytes) {

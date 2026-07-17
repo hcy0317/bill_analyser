@@ -114,6 +114,40 @@ fn payload_object(payload: &Value) -> RouteResult<&Map<String, Value>> {
         .ok_or_else(|| Box::new(bad_request("No data provided")))
 }
 
+fn validate_bill_money_payload(payload: &Value) -> RouteResult<()> {
+    match payload {
+        Value::Array(items) => {
+            for item in items {
+                validate_bill_money_payload(item)?;
+            }
+        }
+        Value::Object(object) => {
+            for (key, value) in object {
+                if is_bill_money_field(key) && value_to_i64(value) == Some(i64::MIN) {
+                    return Err(Box::new(bad_request(
+                        "Money amount is outside the supported range",
+                    )));
+                }
+                validate_bill_money_payload(value)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn is_bill_money_field(key: &str) -> bool {
+    matches!(
+        key,
+        "amountCents"
+            | "amount_cents"
+            | "sourceAmountCents"
+            | "source_amount_cents"
+            | "destinationAmountCents"
+            | "destination_amount_cents"
+    )
+}
+
 fn required_json_object_from_body(
     body: &Bytes,
     empty_message: &str,
@@ -121,12 +155,8 @@ fn required_json_object_from_body(
     if body.is_empty() {
         return Err(Box::new(bad_request(empty_message)));
     }
-    let payload = serde_json::from_slice::<Value>(body).map_err(|error| {
-        Box::new(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("JSON parse error: {error}"),
-        ))
-    })?;
+    let payload = serde_json::from_slice::<Value>(body)
+        .map_err(|_| Box::new(bad_request("Invalid JSON body")))?;
     if payload
         .as_object()
         .filter(|object| !object.is_empty())
@@ -137,11 +167,12 @@ fn required_json_object_from_body(
     Ok(payload)
 }
 
-fn optional_json_object_from_body(body: &Bytes) -> Value {
+fn optional_json_object_from_body(body: &Bytes) -> Result<Value, Box<Response>> {
     if body.is_empty() {
-        return Value::Object(Map::new());
+        return Ok(Value::Object(Map::new()));
     }
-    serde_json::from_slice::<Value>(body).unwrap_or_else(|_| Value::Object(Map::new()))
+    serde_json::from_slice::<Value>(body)
+        .map_err(|_| Box::new(bad_request("Invalid JSON body")))
 }
 
 fn is_frontend_mutation(payload: &Value) -> bool {
@@ -285,6 +316,21 @@ mod payload_helper_tests {
         assert_eq!(fields.get("category_id"), Some(&json!(42)));
         assert_eq!(fields.get("main_category"), Some(&json!("餐饮")));
         assert_eq!(fields.get("sub_category"), Some(&json!("咖啡")));
+    }
+
+    #[test]
+    fn bill_money_payload_rejects_i64_min_across_public_aliases() {
+        for (key, value) in [
+            ("amount_cents", json!(i64::MIN)),
+            ("sourceAmountCents", json!(i64::MIN.to_string())),
+            ("destination_amount_cents", json!(i64::MIN)),
+        ] {
+            let error = validate_bill_money_payload(&json!({
+                "items": [{ key: value }]
+            }))
+            .expect_err("i64::MIN must be rejected before repository access");
+            assert_eq!(error.status(), StatusCode::BAD_REQUEST, "{key}");
+        }
     }
 }
 

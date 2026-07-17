@@ -3,7 +3,8 @@
 fn build_preview_patch_from_payload(
     preview_id: i64,
     object: &Map<String, Value>,
-) -> ImportPreviewPatch {
+) -> Result<ImportPreviewPatch, ImportV2RouteResponse> {
+    validate_preview_money_fields(object)?;
     let mut changes = Vec::new();
     push_text_change(
         &mut changes,
@@ -206,7 +207,35 @@ fn build_preview_patch_from_payload(
     if clear_llm {
         patch = patch.with_llm_decision_cleared();
     }
-    patch
+    Ok(patch)
+}
+
+fn validate_preview_money_fields(
+    object: &Map<String, Value>,
+) -> Result<(), ImportV2RouteResponse> {
+    for keys in [
+        &[
+            "amountCents",
+            "amount_cents",
+            "previewAmountCents",
+            "preview_amount_cents",
+            "sourceAmountCents",
+        ][..],
+        &[
+            "destinationAmountCents",
+            "destination_amount_cents",
+            "previewDestinationAmountCents",
+            "preview_destination_amount_cents",
+        ][..],
+    ] {
+        if first_value(object, keys).and_then(value_to_minor_units) == Some(i64::MIN) {
+            return Err(import_v2_error_response(
+                400,
+                "Money amount is outside the supported range",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn payload_contains_manual_edit_field(object: &Map<String, Value>) -> bool {
@@ -288,7 +317,7 @@ fn build_preview_patch_from_payload_with_category_lookup(
     preview_id: i64,
     object: &Map<String, Value>,
 ) -> Result<ImportPreviewPatch, ImportV2RouteResponse> {
-    let mut patch = build_preview_patch_from_payload(preview_id, object);
+    let mut patch = build_preview_patch_from_payload(preview_id, object)?;
     apply_category_id_to_preview_patch(connection, user_id, object, &mut patch)?;
     Ok(patch)
 }

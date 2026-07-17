@@ -55,6 +55,18 @@ name = "import_staging"
 path = "../../../tests/backend/db/import_staging.rs"
 
 [[test]]
+name = "import_staging_llm_application"
+path = "../../../tests/backend/db/import_staging_llm_application.rs"
+
+[[test]]
+name = "learning_rules_postgres"
+path = "../../../tests/backend/db/learning_rules_postgres.rs"
+
+[[test]]
+name = "import_config_postgres"
+path = "../../../tests/backend/db/import_config_postgres.rs"
+
+[[test]]
 name = "preview_metadata_postgres"
 path = "../../../tests/backend/db/preview_metadata_postgres.rs"
 
@@ -69,6 +81,10 @@ path = "../../../tests/backend/db/matching_postgres.rs"
 [[test]]
 name = "bills_postgres"
 path = "../../../tests/backend/db/bills_postgres.rs"
+
+[[test]]
+name = "postgres_embedded_migrations"
+path = "../../../tests/backend/db/postgres_embedded_migrations.rs"
 
 [lints]
 workspace = true

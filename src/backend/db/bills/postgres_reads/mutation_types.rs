@@ -21,8 +21,16 @@ struct PreparedPostgresBillMutation {
 }
 
 #[derive(Debug, Clone)]
+struct LockedPostgresBill {
+    bill_id: i64,
+    record: BillRecord,
+    version: i64,
+}
+
+#[derive(Debug, Clone)]
 struct PreparedPostgresBillUpdate {
     bill_id: i64,
+    expected_version: i64,
     old_mutation: PostgresBillMutation,
     new_mutation: PostgresBillMutation,
 }

@@ -302,11 +302,15 @@ impl HttpShellConfig {
             parse_import_route_mode(lookup("BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE").as_deref())?;
         let database_backend =
             parse_database_backend(lookup("BILL_ANALYSER_DATABASE_BACKEND").as_deref())?;
-        let postgres_url = normalize_postgres_url(
-            lookup("BILL_ANALYSER_POSTGRES_URL")
-                .filter(|value| !value.trim().is_empty())
-                .or_else(|| Some(DEFAULT_LOCAL_POSTGRES_URL.to_string())),
-        )?;
+        let runtime_profile = lookup("BILL_ANALYSER_RUNTIME_PROFILE");
+        let postgres_url = lookup("BILL_ANALYSER_POSTGRES_URL")
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                explicit_development_profile(runtime_profile.as_deref())
+                    .then(|| DEFAULT_LOCAL_POSTGRES_URL.to_string())
+            })
+            .ok_or(HttpShellConfigError::MissingPostgresUrl)
+            .and_then(|value| normalize_postgres_url(Some(value)))?;
         let uploads_dir = lookup("BILL_ANALYSER_UPLOADS_DIR")
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
@@ -491,6 +495,8 @@ pub enum HttpShellConfigError {
     InvalidDatabaseBackend,
     #[error("invalid PostgreSQL URL")]
     InvalidPostgresUrl,
+    #[error("BILL_ANALYSER_POSTGRES_URL is required outside an explicit development profile")]
+    MissingPostgresUrl,
     #[error("invalid Weaviate endpoint")]
     InvalidWeaviateEndpoint,
     #[error("invalid Weaviate collection prefix")]
@@ -641,3 +647,14 @@ fn parse_database_backend(value: Option<&str>) -> Result<DatabaseBackend, HttpSh
         _ => Err(HttpShellConfigError::InvalidDatabaseBackend),
     }
 }
+
+fn explicit_development_profile(value: Option<&str>) -> bool {
+    matches!(
+        value.unwrap_or("").trim().to_ascii_lowercase().as_str(),
+        "dev" | "development" | "local"
+    )
+}
+
+#[cfg(test)]
+#[path = "config/wave4_config_tests.rs"]
+mod wave4_config_tests;

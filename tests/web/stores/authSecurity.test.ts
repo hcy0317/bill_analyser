@@ -19,13 +19,17 @@ const mockSetApplicationSettingsFromCloudSettings = jest.fn();
 const mockStoreUserBasicInfo = jest.fn();
 const mockUpdateCurrentToken = jest.fn();
 const mockUpdateCurrentRefreshToken = jest.fn();
+const mockLoggerError = jest.fn();
+const mockLoggerWarn = jest.fn();
 
 const mockGetTokens = jest.fn<() => Promise<ApiResponse<unknown>>>();
 const mockRefreshToken = jest.fn<() => Promise<ApiResponse<unknown>>>();
 const mockRevokeToken = jest.fn<(req: unknown) => Promise<ApiResponse<boolean>>>();
 const mockGenerateAPIToken = jest.fn<(req: unknown) => Promise<ApiResponse<unknown>>>();
 const mockGet2FAStatus = jest.fn<() => Promise<ApiResponse<unknown>>>();
+const mockEnable2FA = jest.fn<() => Promise<ApiResponse<unknown>>>();
 const mockConfirmEnable2FA = jest.fn<(req: unknown) => Promise<ApiResponse<unknown>>>();
+const mockDisable2FA = jest.fn<(req: unknown) => Promise<ApiResponse<unknown>>>();
 const mockRegenerate2FARecoveryCode = jest.fn<(req: unknown) => Promise<ApiResponse<unknown>>>();
 const mockGetExternalAuths = jest.fn<() => Promise<ApiResponse<unknown>>>();
 const mockUnlinkExternalAuth = jest.fn<(req: unknown) => Promise<ApiResponse<boolean>>>();
@@ -58,7 +62,9 @@ jest.mock('@/lib/services.ts', () => ({
         revokeToken: (req: unknown) => mockRevokeToken(req),
         generateAPIToken: (req: unknown) => mockGenerateAPIToken(req),
         get2FAStatus: () => mockGet2FAStatus(),
+        enable2FA: () => mockEnable2FA(),
         confirmEnable2FA: (req: unknown) => mockConfirmEnable2FA(req),
+        disable2FA: (req: unknown) => mockDisable2FA(req),
         regenerate2FARecoveryCode: (req: unknown) => mockRegenerate2FARecoveryCode(req),
         getExternalAuths: () => mockGetExternalAuths(),
         unlinkExternalAuth: (req: unknown) => mockUnlinkExternalAuth(req)
@@ -70,8 +76,8 @@ jest.mock('@/lib/logger.ts', () => ({
     default: {
         debug: jest.fn(),
         info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn()
+        warn: (...args: Array<unknown>) => mockLoggerWarn(...args),
+        error: (...args: Array<unknown>) => mockLoggerError(...args)
     }
 }));
 
@@ -101,18 +107,22 @@ describe('auth security stores', () => {
         mockStoreUserBasicInfo.mockClear();
         mockUpdateCurrentToken.mockClear();
         mockUpdateCurrentRefreshToken.mockClear();
+        mockLoggerError.mockClear();
+        mockLoggerWarn.mockClear();
         mockGetTokens.mockReset();
         mockRefreshToken.mockReset();
         mockRevokeToken.mockReset();
         mockGenerateAPIToken.mockReset();
         mockGet2FAStatus.mockReset();
+        mockEnable2FA.mockReset();
         mockConfirmEnable2FA.mockReset();
+        mockDisable2FA.mockReset();
         mockRegenerate2FARecoveryCode.mockReset();
         mockGetExternalAuths.mockReset();
         mockUnlinkExternalAuth.mockReset();
     });
 
-    test('refreshTokenAndRevokeOldToken writes rotated tokens, cloud settings and user profile', async () => {
+    test('refreshTokenAndRevokeOldToken consumes coordinator-persisted tokens and updates profile state', async () => {
         mockRefreshToken.mockResolvedValue(apiResponse({
             newToken: 'new-access-token',
             refreshToken: 'new-refresh-token',
@@ -130,8 +140,8 @@ describe('auth security stores', () => {
         });
         await Promise.resolve();
 
-        expect(mockUpdateCurrentToken).toHaveBeenCalledWith('new-access-token');
-        expect(mockUpdateCurrentRefreshToken).toHaveBeenCalledWith('new-refresh-token');
+        expect(mockUpdateCurrentToken).not.toHaveBeenCalled();
+        expect(mockUpdateCurrentRefreshToken).not.toHaveBeenCalled();
         expect(mockSetApplicationSettingsFromCloudSettings).toHaveBeenCalledWith([
             { settingKey: 'theme', settingValue: 'dark' }
         ]);
@@ -142,6 +152,131 @@ describe('auth security stores', () => {
             tokenId: 'old-session',
             ignoreError: true
         });
+    });
+
+    test('refreshTokenAndRevokeOldToken rejects malformed envelopes with a safe failure', async () => {
+        mockRefreshToken.mockResolvedValue({
+            data: {
+                success: false,
+                result: null
+            }
+        });
+        const store = useTokensStore();
+
+        const consumerFailure = await store.refreshTokenAndRevokeOldToken().then(
+            () => { throw new Error('refresh unexpectedly resolved'); },
+            reason => reason
+        );
+
+        expect(consumerFailure).toStrictEqual({
+            message: 'Token refresh failed',
+            route: 'tokens/refresh'
+        });
+        expect(Object.isFrozen(consumerFailure)).toBe(true);
+        expect(mockLoggerError).toHaveBeenCalledWith('[TokenStore] Token refresh failed', consumerFailure);
+    });
+
+    test('refreshTokenAndRevokeOldToken never logs raw refresh rejection details', async () => {
+        const sentinel = 'TOKEN-STORE-REFRESH-SENTINEL';
+        const hostileFailure = {
+            message: `refresh failed: ${sentinel}`,
+            code: 'ERR_NETWORK',
+            status: 503,
+            noRefreshToken: true,
+            config: {
+                data: JSON.stringify({ refreshToken: sentinel })
+            },
+            request: { body: sentinel },
+            response: { data: { refreshToken: sentinel } }
+        };
+        mockRefreshToken.mockRejectedValue(hostileFailure);
+        const store = useTokensStore();
+
+        const consumerFailure = await store.refreshTokenAndRevokeOldToken().then(
+            () => { throw new Error('refresh unexpectedly resolved'); },
+            reason => reason
+        );
+
+        expect(consumerFailure).not.toBe(hostileFailure);
+        expect(consumerFailure).toStrictEqual({
+            message: 'Token refresh failed',
+            route: 'tokens/refresh',
+            code: 'ERR_NETWORK',
+            status: 503,
+            noRefreshToken: true
+        });
+        expect(Object.keys(consumerFailure as Record<string, unknown>).sort()).toStrictEqual([
+            'code',
+            'message',
+            'noRefreshToken',
+            'route',
+            'status'
+        ]);
+        expect(Object.isFrozen(consumerFailure)).toBe(true);
+        expect(mockLoggerError).toHaveBeenCalledWith('[TokenStore] Token refresh failed', consumerFailure);
+        const serializedLoggerCalls = JSON.stringify(mockLoggerError.mock.calls);
+        const serializedConsumerFailure = JSON.stringify(consumerFailure);
+        expect(serializedLoggerCalls).not.toContain(sentinel);
+        expect(serializedConsumerFailure).not.toContain(sentinel);
+        expect(serializedLoggerCalls).not.toContain('refreshToken');
+        expect(serializedConsumerFailure).not.toContain('refreshToken');
+        expect(serializedLoggerCalls).not.toContain('config');
+        expect(serializedConsumerFailure).not.toContain('config');
+        expect(serializedLoggerCalls).not.toContain('request');
+        expect(serializedConsumerFailure).not.toContain('request');
+        expect(serializedLoggerCalls).not.toContain('response');
+        expect(serializedConsumerFailure).not.toContain('response');
+        expect(serializedConsumerFailure).not.toContain('data');
+    });
+
+    test('refreshTokenAndRevokeOldToken sanitizes old-session revoke failures before logging', async () => {
+        const sentinel = 'TOKEN-STORE-REVOKE-SENTINEL';
+        const hostileRevokeFailure = {
+            message: `revoke failed: ${sentinel}`,
+            code: 'ERR_BAD_RESPONSE',
+            config: {
+                headers: { Authorization: `Bearer ${sentinel}` }
+            },
+            request: { body: sentinel },
+            response: {
+                status: 502,
+                data: {
+                    refreshToken: sentinel
+                }
+            }
+        };
+        mockRefreshToken.mockResolvedValue(apiResponse({
+            newToken: 'new-access-token',
+            refreshToken: 'new-refresh-token',
+            oldTokenId: 'old-session'
+        }));
+        mockRevokeToken.mockRejectedValue(hostileRevokeFailure);
+        const store = useTokensStore();
+
+        await expect(store.refreshTokenAndRevokeOldToken()).resolves.toMatchObject({
+            oldTokenId: 'old-session'
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const expectedFailure = {
+            message: 'Token revoke failed',
+            route: 'tokens/:id',
+            code: 'ERR_BAD_RESPONSE',
+            status: 502
+        };
+        expect(mockLoggerError).toHaveBeenCalledWith('[TokenStore] Token revoke failed', expectedFailure);
+        expect(mockLoggerWarn).toHaveBeenCalledWith('[TokenStore] Failed to revoke old token', expectedFailure);
+        const serializedLogs = JSON.stringify([
+            ...mockLoggerError.mock.calls,
+            ...mockLoggerWarn.mock.calls
+        ]);
+        expect(serializedLogs).not.toContain(sentinel);
+        expect(serializedLogs).not.toContain('refreshToken');
+        expect(serializedLogs).not.toContain('Authorization');
+        expect(serializedLogs).not.toContain('config');
+        expect(serializedLogs).not.toContain('request');
+        expect(serializedLogs).not.toContain('response');
     });
 
     test('token list and api token generation preserve response envelopes', async () => {
@@ -199,6 +334,128 @@ describe('auth security stores', () => {
             secret: 'otp-secret',
             passcode: '123456'
         });
+    });
+
+    test('2FA enable, disable and recovery actions preserve valid response contracts', async () => {
+        mockEnable2FA.mockResolvedValue(apiResponse({
+            qrcode: 'data:image/png;base64,qr',
+            secret: 'otp-secret'
+        }));
+        mockConfirmEnable2FA.mockResolvedValue(apiResponse({
+            token: 'access-without-refresh',
+            refreshToken: 42,
+            recoveryCodes: ['AAAA-BBBB']
+        }));
+        mockDisable2FA.mockResolvedValue(apiResponse(true));
+        mockRegenerate2FARecoveryCode.mockResolvedValue(apiResponse({
+            recoveryCodes: ['CCCC-DDDD']
+        }));
+        const store = useTwoFactorAuthStore();
+
+        await expect(store.enable2FA()).resolves.toStrictEqual({
+            qrcode: 'data:image/png;base64,qr',
+            secret: 'otp-secret'
+        });
+        await expect(store.confirmEnable2FA({
+            secret: 'otp-secret',
+            passcode: '654321'
+        })).resolves.toMatchObject({ token: 'access-without-refresh' });
+        await expect(store.disable2FA({ password: 'current-password' })).resolves.toBe(true);
+        await expect(store.regenerate2FARecoveryCode({
+            password: 'current-password'
+        })).resolves.toStrictEqual({
+            recoveryCodes: ['CCCC-DDDD']
+        });
+
+        expect(mockUpdateCurrentToken).toHaveBeenCalledWith('access-without-refresh');
+        expect(mockUpdateCurrentRefreshToken).not.toHaveBeenCalled();
+        expect(mockDisable2FA).toHaveBeenCalledWith({ password: 'current-password' });
+    });
+
+    test('2FA actions reject malformed success envelopes', async () => {
+        const malformed = {
+            data: {
+                success: false,
+                result: null
+            }
+        } as ApiResponse<unknown>;
+        const store = useTwoFactorAuthStore();
+
+        mockGet2FAStatus.mockResolvedValueOnce(apiResponse({ enable: 'yes' }));
+        await expect(store.get2FAStatus()).rejects.toStrictEqual({
+            message: 'Unable to retrieve current two-factor authentication status'
+        });
+
+        mockEnable2FA.mockResolvedValueOnce(apiResponse({ qrcode: '', secret: '' }));
+        await expect(store.enable2FA()).rejects.toStrictEqual({
+            message: 'Unable to enable two-factor authentication'
+        });
+
+        mockConfirmEnable2FA.mockResolvedValueOnce(malformed);
+        await expect(store.confirmEnable2FA({
+            secret: 'otp-secret',
+            passcode: '123456'
+        })).rejects.toStrictEqual({
+            message: 'Unable to enable two-factor authentication'
+        });
+
+        mockDisable2FA.mockResolvedValueOnce(apiResponse(false));
+        await expect(store.disable2FA({ password: 'current-password' })).rejects.toStrictEqual({
+            message: 'Unable to disable two-factor authentication'
+        });
+
+        mockRegenerate2FARecoveryCode.mockResolvedValueOnce(malformed);
+        await expect(store.regenerate2FARecoveryCode({
+            password: 'current-password'
+        })).rejects.toStrictEqual({
+            message: 'Unable to regenerate two-factor authentication backup codes'
+        });
+    });
+
+    test('2FA actions route backend, unprocessed and processed failures distinctly', async () => {
+        const store = useTwoFactorAuthStore();
+        const actions = [
+            {
+                reject: (error: unknown) => mockGet2FAStatus.mockRejectedValueOnce(error),
+                invoke: () => store.get2FAStatus(),
+                fallbackMessage: 'Unable to retrieve current two-factor authentication status'
+            },
+            {
+                reject: (error: unknown) => mockEnable2FA.mockRejectedValueOnce(error),
+                invoke: () => store.enable2FA(),
+                fallbackMessage: 'Unable to enable two-factor authentication'
+            },
+            {
+                reject: (error: unknown) => mockConfirmEnable2FA.mockRejectedValueOnce(error),
+                invoke: () => store.confirmEnable2FA({ secret: 'secret', passcode: '123456' }),
+                fallbackMessage: 'Unable to enable two-factor authentication'
+            },
+            {
+                reject: (error: unknown) => mockDisable2FA.mockRejectedValueOnce(error),
+                invoke: () => store.disable2FA({ password: 'current-password' }),
+                fallbackMessage: 'Unable to disable two-factor authentication'
+            },
+            {
+                reject: (error: unknown) => mockRegenerate2FARecoveryCode.mockRejectedValueOnce(error),
+                invoke: () => store.regenerate2FARecoveryCode({ password: 'current-password' }),
+                fallbackMessage: 'Unable to regenerate two-factor authentication backup codes'
+            }
+        ];
+
+        for (const [index, action] of actions.entries()) {
+            const backendData = { message: `backend-${index}` };
+            action.reject({ response: { data: backendData } });
+            await expect(action.invoke()).rejects.toStrictEqual({ error: backendData });
+
+            action.reject({ processed: false });
+            await expect(action.invoke()).rejects.toStrictEqual({
+                message: action.fallbackMessage
+            });
+
+            const processedError = { processed: true, marker: `processed-${index}` };
+            action.reject(processedError);
+            await expect(action.invoke()).rejects.toBe(processedError);
+        }
     });
 
     test('2FA recovery regeneration rejects empty backup code lists', async () => {

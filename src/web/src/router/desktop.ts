@@ -277,6 +277,10 @@ const router = createRouter({
             path: '/unlock',
             component: UnlockPage,
             beforeEnter: checkLocked
+        },
+        {
+            path: '/:pathMatch(.*)*',
+            redirect: '/'
         }
     ],
 })

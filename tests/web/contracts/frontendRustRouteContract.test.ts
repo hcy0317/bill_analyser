@@ -19,6 +19,10 @@ const AXIOS_VERBS = new Map([
     ['put', 'PUT'],
     ['delete', 'DELETE'],
 ]);
+const RETIRED_IMPORT_RUNTIME_ROUTES = new Set([
+    'GET /api/bills/import/parsers',
+    'POST /api/bills/import/upload',
+]);
 
 interface FrontendRouteUse {
     readonly method: string;
@@ -174,5 +178,13 @@ describe('frontend Rust route contract', () => {
             });
 
         expect([...new Set(offenders)]).toEqual([]);
+    });
+
+    test('frontend code does not revive retired one-shot import endpoints', () => {
+        const offenders = collectFrontendRouteUses()
+            .filter(use => RETIRED_IMPORT_RUNTIME_ROUTES.has(`${use.method} ${use.path}`))
+            .map(use => `${use.method} ${use.path} from ${use.source}`);
+
+        expect(offenders).toEqual([]);
     });
 });

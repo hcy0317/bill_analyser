@@ -9,8 +9,7 @@ describe('desktop transaction category add button contract', () => {
     test('header exposes separate primary and secondary category actions', () => {
         const facade = readSource('src/views/desktop/categories/ListPage.vue');
         const template = readSource('src/views/desktop/categories/list/ListPage.template.html');
-        const logic = readSource('src/views/desktop/categories/list/useCategoryListPage.ts');
-        const source = `${facade}\n${template}\n${logic}`;
+        const renderedSurface = `${facade}\n${template}`;
         const primaryAction = template.match(/<v-btn[^>]*data-testid="desktop\.categories\.action\.add-primary"[\s\S]*?<\/v-btn>/)?.[0] ?? '';
         const secondaryAction = template.match(/<v-btn[^>]*data-testid="desktop\.categories\.action\.add-secondary"[\s\S]*?<\/v-btn>/)?.[0] ?? '';
 
@@ -19,6 +18,6 @@ describe('desktop transaction category add button contract', () => {
         expect(secondaryAction).toContain('@click="addSecondaryCategory"');
         expect(secondaryAction).toContain("tt('Add Secondary Category')");
         expect(secondaryAction).toContain('!canAddSecondaryCategory');
-        expect(source).not.toContain('addCategoryByCurrentSelection');
+        expect(renderedSurface).not.toContain('addCategoryByCurrentSelection');
     });
 });

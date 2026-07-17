@@ -7,17 +7,24 @@ mod money_serde;
 mod normalization;
 mod post_process;
 mod registry;
+mod spreadsheet;
 mod tags;
 mod types;
 
 pub use dedicated::{
     detect_dedicated_import_bytes, parse_dedicated_import_bytes,
-    parse_dedicated_import_bytes_with_decision, DedicatedParseResult,
-    DedicatedParseSelectionResult, DedicatedParserCandidate, DedicatedParserDecision,
+    parse_dedicated_import_bytes_with_decision, parse_html_spreadsheet_preview_rows,
+    DedicatedParseResult, DedicatedParseSelectionResult, DedicatedParserCandidate,
+    DedicatedParserDecision,
 };
 pub use normalization::{normalize_amount_text, normalize_transaction_type};
 pub use post_process::{aggregate_description, post_process_raw_bills};
 pub use registry::{parser_registry, parser_source_label};
+pub use spreadsheet::{
+    parse_spreadsheet_preview_rows, parse_spreadsheet_rows, validate_dedicated_spreadsheet_payload,
+    validate_spreadsheet_payload, SpreadsheetPreviewRows, SpreadsheetValidationError,
+    SpreadsheetValidationErrorKind, MAX_SPREADSHEET_TOTAL_CELL_BYTES,
+};
 pub use tags::{
     build_parser_tags, normalize_parser_tags, normalize_parser_tags_text,
     normalize_parser_tags_value, resolve_parser_tags, serialize_parser_tags,

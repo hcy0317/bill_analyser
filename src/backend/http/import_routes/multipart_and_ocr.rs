@@ -47,9 +47,9 @@ impl MultipartForm {
         })
     }
 
-    fn file_parts(&self) -> Vec<&MultipartPart> {
+    fn into_file_parts(self) -> Vec<MultipartPart> {
         self.parts
-            .iter()
+            .into_iter()
             .filter(|part| part.filename.is_some() || part.name == "file" || part.name == "files")
             .filter(|part| !part.body.is_empty())
             .collect()

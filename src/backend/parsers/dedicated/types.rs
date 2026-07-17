@@ -26,7 +26,16 @@ pub struct DedicatedParserDecision {
     pub selected_parser_id: Option<String>,
     pub candidates: Vec<DedicatedParserCandidate>,
     pub conflict_group: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
     pub reason: String,
+}
+
+impl DedicatedParserDecision {
+    /// 返回面向 API 消费方的稳定错误码，展示文案不得作为分支条件。
+    pub fn error_code(&self) -> Option<&str> {
+        self.error_code.as_deref()
+    }
 }
 
 /// dedicated parser 候选证据，供冲突解释和导入预览定位来源识别依据。

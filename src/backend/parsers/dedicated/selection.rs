@@ -1,4 +1,6 @@
-use crate::parser_source_label;
+use crate::{
+    parser_source_label, validate_dedicated_spreadsheet_payload, SpreadsheetValidationErrorKind,
+};
 
 use super::{
     evidence::parser_evidence,
@@ -74,6 +76,24 @@ fn select_dedicated_import_bytes(
             ),
             selected: None,
         };
+    }
+
+    let suffix = std::path::Path::new(filename)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if matches!(suffix.as_str(), "xls" | "xlsx") {
+        if let Err(error) = validate_dedicated_spreadsheet_payload(bytes) {
+            return DedicatedParserSelection {
+                decision: no_match_decision_with_code(
+                    requested,
+                    error.message(),
+                    Some(spreadsheet_error_code(error.kind())),
+                ),
+                selected: None,
+            };
+        }
     }
 
     let matches = if requested.is_empty() || requested == "auto" {
@@ -155,6 +175,7 @@ fn dedicated_selection_from_matches(
                     selected_parser_id: Some(selected.candidate.parser_id.clone()),
                     candidates: vec![selected.candidate.clone()],
                     conflict_group: Vec::new(),
+                    error_code: None,
                     reason: "Exactly one dedicated Rust parser matched the uploaded file"
                         .to_string(),
                 },
@@ -176,6 +197,7 @@ fn dedicated_selection_from_matches(
                         .map(|candidate| candidate.parser_id.clone())
                         .collect(),
                     candidates,
+                    error_code: None,
                     reason: "Multiple dedicated Rust parsers matched the uploaded file".to_string(),
                 },
                 selected: None,
@@ -186,12 +208,29 @@ fn dedicated_selection_from_matches(
 
 /// 构造未命中决策，保持 API 暴露的 no_match 字段结构一致。
 fn no_match_decision(requested_parser: String, reason: &str) -> DedicatedParserDecision {
+    no_match_decision_with_code(requested_parser, reason, None)
+}
+
+fn no_match_decision_with_code(
+    requested_parser: String,
+    reason: &str,
+    error_code: Option<&str>,
+) -> DedicatedParserDecision {
     DedicatedParserDecision {
         requested_parser,
         status: "no_match".to_string(),
         selected_parser_id: None,
         candidates: Vec::new(),
         conflict_group: Vec::new(),
+        error_code: error_code.map(str::to_string),
         reason: reason.to_string(),
+    }
+}
+
+fn spreadsheet_error_code(kind: SpreadsheetValidationErrorKind) -> &'static str {
+    match kind {
+        SpreadsheetValidationErrorKind::Unsupported => "unsupported_legacy_xls",
+        SpreadsheetValidationErrorKind::TooLarge => "spreadsheet_too_large",
+        SpreadsheetValidationErrorKind::Invalid => "invalid_spreadsheet",
     }
 }

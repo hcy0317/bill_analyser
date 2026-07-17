@@ -80,14 +80,16 @@ test.describe('desktop import signal system', () => {
             const expectedMarkers: Record<typeof IMPORT_SIGNAL_FAMILIES[number], readonly string[]> = {
                 parser: [
                     IMPORT_SIGNAL_MARKERS.parser,
-                    IMPORT_SIGNAL_MARKERS.transfer_terminal,
                     'E2E-SIG-PAGINATION-A',
                     'E2E-SIG-PAGINATION-B',
                     'E2E-SIG-PAGINATION-C',
                     'E2E-SIG-PAGINATION-D'
                 ],
                 platform_duplicate: [IMPORT_SIGNAL_MARKERS.platform_duplicate],
-                transfer: [IMPORT_SIGNAL_MARKERS.transfer],
+                transfer: [
+                    IMPORT_SIGNAL_MARKERS.transfer,
+                    IMPORT_SIGNAL_MARKERS.transfer_terminal
+                ],
                 history: [IMPORT_SIGNAL_MARKERS.history],
                 learning: [IMPORT_SIGNAL_MARKERS.learning],
                 llm: [IMPORT_SIGNAL_MARKERS.llm, IMPORT_SIGNAL_MARKERS.llm_edit]
@@ -116,7 +118,7 @@ test.describe('desktop import signal system', () => {
 
             const transferEnvelope = await refreshPreviewThroughFilter(page, 'Transfer Match');
             const transferRows = previewRowsFromEnvelope(transferEnvelope);
-            expect(transferRows.some(row => rowIncludesMarker(row, IMPORT_SIGNAL_MARKERS.transfer_terminal))).toBe(false);
+            expect(transferRows.some(row => rowIncludesMarker(row, IMPORT_SIGNAL_MARKERS.transfer_terminal))).toBe(true);
 
             const platformEnvelope = await refreshPreviewThroughFilter(page, 'Platform Duplicate');
             const platformRow = previewRowsFromEnvelope(platformEnvelope)[0];

@@ -35,8 +35,24 @@ type ApiResponse<T> = {
     };
 };
 
+function createDeferred<T>(): {
+    promise: Promise<T>;
+    resolve: (value: T) => void;
+    reject: (reason?: unknown) => void;
+} {
+    let resolve!: (value: T) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+        resolve = resolvePromise;
+        reject = rejectPromise;
+    });
+
+    return { promise, resolve, reject };
+}
+
 const mockGetAllAccounts = jest.fn<() => Promise<ApiResponse<AccountInfoResponse[]>>>();
 const mockGetTransactions = jest.fn<(req: unknown) => Promise<ApiResponse<TransactionInfoPageWrapperResponse>>>();
+const mockGetAllTransactionsByMonth = jest.fn<(req: unknown) => Promise<ApiResponse<TransactionInfoPageWrapperResponse>>>();
 const mockAddTransactions = jest.fn<(req: unknown) => Promise<ApiResponse<{
     items: TransactionInfoResponse[];
     ids: string[];
@@ -49,6 +65,7 @@ jest.mock('@/lib/services.ts', () => ({
     default: {
         getAllAccounts: () => mockGetAllAccounts(),
         getTransactions: (req: unknown) => mockGetTransactions(req),
+        getAllTransactionsByMonth: (req: unknown) => mockGetAllTransactionsByMonth(req),
         addTransactions: (req: unknown) => mockAddTransactions(req),
         moveAllTransactionsBetweenAccounts: (req: unknown) => mockMoveAllTransactionsBetweenAccounts(req)
     }
@@ -161,6 +178,7 @@ describe('transaction store service boundary', () => {
         memStore.clear();
         mockGetAllAccounts.mockReset();
         mockGetTransactions.mockReset();
+        mockGetAllTransactionsByMonth.mockReset();
         mockAddTransactions.mockReset();
         mockMoveAllTransactionsBetweenAccounts.mockReset();
         mockGetAllAccounts.mockResolvedValue({
@@ -212,6 +230,152 @@ describe('transaction store service boundary', () => {
         }));
         expect(page.totalCount).toBe(1);
         expect(transactionsStore.transactionListStateInvalid).toBe(false);
+    });
+
+    test('loadTransactions keeps the newest response when an older request resolves last', async () => {
+        const olderRequest = createDeferred<ApiResponse<TransactionInfoPageWrapperResponse>>();
+        const newerRequest = createDeferred<ApiResponse<TransactionInfoPageWrapperResponse>>();
+        mockGetTransactions
+            .mockReturnValueOnce(olderRequest.promise)
+            .mockReturnValueOnce(newerRequest.promise);
+
+        const store = useTransactionsStore();
+        store.initTransactionListFilter({ keyword: 'older-filter' });
+        const olderLoad = store.loadTransactions({
+            reload: true,
+            autoExpand: false,
+            defaultCurrency: 'CNY'
+        });
+
+        store.updateTransactionListFilter({ keyword: 'newer-filter' });
+        const newerLoad = store.loadTransactions({
+            reload: true,
+            autoExpand: false,
+            defaultCurrency: 'CNY'
+        });
+
+        newerRequest.resolve({
+            data: {
+                success: true,
+                result: {
+                    items: [transactionResponse({ id: 'newer-bill', comment: 'newer-filter' })],
+                    totalCount: 1,
+                    nextTimeSequenceId: 200
+                }
+            }
+        });
+        await newerLoad;
+
+        olderRequest.resolve({
+            data: {
+                success: true,
+                result: {
+                    items: [transactionResponse({ id: 'older-bill', comment: 'older-filter' })],
+                    totalCount: 1,
+                    nextTimeSequenceId: 100
+                }
+            }
+        });
+        const staleResult = await olderLoad;
+
+        expect(store.transactions.flatMap(month => month.items).map(transaction => transaction.id))
+            .toStrictEqual(['newer-bill']);
+        expect(store.transactionsNextTimeId).toBe(200);
+        expect(store.transactionListStateInvalid).toBe(false);
+        expect(staleResult.items.map(transaction => transaction.id)).toStrictEqual(['newer-bill']);
+    });
+
+    test('loadTransactions does not clear newer state when an older request fails last', async () => {
+        const olderRequest = createDeferred<ApiResponse<TransactionInfoPageWrapperResponse>>();
+        const newerRequest = createDeferred<ApiResponse<TransactionInfoPageWrapperResponse>>();
+        mockGetTransactions
+            .mockReturnValueOnce(olderRequest.promise)
+            .mockReturnValueOnce(newerRequest.promise);
+
+        const store = useTransactionsStore();
+        const olderLoad = store.loadTransactions({
+            reload: true,
+            autoExpand: false,
+            defaultCurrency: 'CNY'
+        });
+        const newerLoad = store.loadTransactions({
+            reload: true,
+            autoExpand: false,
+            defaultCurrency: 'CNY'
+        });
+
+        newerRequest.resolve({
+            data: {
+                success: true,
+                result: {
+                    items: [transactionResponse({ id: 'newer-bill' })],
+                    totalCount: 1,
+                    nextTimeSequenceId: 200
+                }
+            }
+        });
+        await newerLoad;
+
+        olderRequest.reject({ processed: false });
+        await expect(olderLoad).resolves.toMatchObject({
+            items: [expect.objectContaining({ id: 'newer-bill' })],
+            totalCount: 1
+        });
+
+        expect(store.transactions.flatMap(month => month.items).map(transaction => transaction.id))
+            .toStrictEqual(['newer-bill']);
+        expect(store.transactionListStateInvalid).toBe(false);
+    });
+
+    test('loadMonthlyAllTransactions keeps the newest monthly response', async () => {
+        const olderRequest = createDeferred<ApiResponse<TransactionInfoPageWrapperResponse>>();
+        const newerRequest = createDeferred<ApiResponse<TransactionInfoPageWrapperResponse>>();
+        mockGetAllTransactionsByMonth
+            .mockReturnValueOnce(olderRequest.promise)
+            .mockReturnValueOnce(newerRequest.promise);
+
+        const store = useTransactionsStore();
+        const olderLoad = store.loadMonthlyAllTransactions({
+            year: 2026,
+            month: 1,
+            autoExpand: false,
+            defaultCurrency: 'CNY'
+        });
+        const newerLoad = store.loadMonthlyAllTransactions({
+            year: 2026,
+            month: 2,
+            autoExpand: false,
+            defaultCurrency: 'CNY'
+        });
+
+        newerRequest.resolve({
+            data: {
+                success: true,
+                result: {
+                    items: [transactionResponse({ id: 'newer-month-bill' })],
+                    totalCount: 1,
+                    nextTimeSequenceId: 0
+                }
+            }
+        });
+        await newerLoad;
+
+        olderRequest.resolve({
+            data: {
+                success: true,
+                result: {
+                    items: [transactionResponse({ id: 'older-month-bill' })],
+                    totalCount: 1,
+                    nextTimeSequenceId: 0
+                }
+            }
+        });
+        const staleResult = await olderLoad;
+
+        expect(store.transactions.flatMap(month => month.items).map(transaction => transaction.id))
+            .toStrictEqual(['newer-month-bill']);
+        expect(staleResult.items.map(transaction => transaction.id)).toStrictEqual(['newer-month-bill']);
+        expect(store.transactionListStateInvalid).toBe(false);
     });
 
     test('filter URL params and export requests keep the transaction query contract', () => {

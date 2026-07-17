@@ -276,6 +276,22 @@ fn frontend_mutation_to_backend_and_create_defaults_match_current_write_adapter(
 }
 
 #[test]
+fn frontend_mutation_rejects_i64_min_money_without_panicking() {
+    let error = frontend_transaction_mutation_to_backend(
+        &json!({
+            "type": 3,
+            "sourceAmountCents": i64::MIN,
+            "destinationAmountCents": 0,
+        }),
+        UtcOffsetMinutes::new(480),
+    )
+    .expect_err("i64::MIN cannot be normalized to an absolute minor-unit amount");
+
+    assert_eq!(error.code, ErrorCode::InvalidInput);
+    assert_eq!(error.message, "money amount is outside the supported range");
+}
+
+#[test]
 fn frontend_mutation_to_backend_preserves_transfer_and_investment_destination_contracts() {
     let transfer = json!({
         "type": 4,

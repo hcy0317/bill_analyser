@@ -59,5 +59,25 @@ path = "../../../tests/backend/http/weaviate_runtime_contract.rs"
 name = "import_runtime_contract"
 path = "../../../tests/backend/http/import_runtime_contract.rs"
 
+[[test]]
+name = "import_config_handler_contract"
+path = "../../../tests/backend/http/import_config_handler_contract.rs"
+
+[[test]]
+name = "auth_session_authority"
+path = "../../../tests/backend/http/auth_session_authority.rs"
+
+[[test]]
+name = "health_readiness"
+path = "../../../tests/backend/http/health_readiness.rs"
+
+[[test]]
+name = "runtime_route_ownership_contract"
+path = "../../../tests/backend/http/runtime_route_ownership_contract.rs"
+
+[[test]]
+name = "bill_route_input_contract"
+path = "../../../tests/backend/http/bill_route_input_contract.rs"
+
 [lints]
 workspace = true

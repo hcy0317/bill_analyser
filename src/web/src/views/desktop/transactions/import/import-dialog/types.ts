@@ -75,6 +75,7 @@ export interface ImportTransactionCheckDataFilterMenuGroup {
 export interface UnmatchedFileInfo {
     originalName: string;
     tempPath: string;
+    reason?: string;
 }
 
 export const SERVER_PAGED_PREVIEW_SORTABLE_COLUMNS = new Set<string>([

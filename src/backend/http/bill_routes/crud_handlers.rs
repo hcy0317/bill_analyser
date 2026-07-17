@@ -14,7 +14,6 @@ async fn list_bills_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
-
         let runtime = match open_postgres_runtime(&state, "bills") {
             Ok(value) => value,
             Err(response) => return *response,
@@ -52,7 +51,6 @@ async fn bills_by_month_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
-
         let runtime = match open_postgres_runtime(&state, "bills") {
             Ok(value) => value,
             Err(response) => return *response,
@@ -102,6 +100,9 @@ async fn create_bill_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if let Err(response) = validate_bill_money_payload(&payload) {
+        return *response;
+    }
 
         let runtime = match open_postgres_runtime(&state, "bills") {
             Ok(value) => value,
@@ -181,6 +182,9 @@ async fn update_bill_path_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if let Err(response) = validate_bill_money_payload(&payload) {
+        return *response;
+    }
 
         let runtime = match open_postgres_runtime(&state, "bills") {
             Ok(value) => value,

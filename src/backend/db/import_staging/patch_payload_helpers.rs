@@ -20,7 +20,7 @@ async fn apply_preview_patch_on_tx(
     let mut payload = row
         .try_get::<Value, _>("preview_payload")
         .unwrap_or_else(|_| json!({}));
-    apply_patch_changes_to_preview(&mut preview, &mut payload, &patch.changes);
+    apply_patch_changes_to_preview(&mut preview, &mut payload, &patch.changes)?;
     if patch.clear_transfer_decision {
         clear_feedback_key(&mut preview.preview_matching_feedback, "transfer");
     }
@@ -36,7 +36,10 @@ async fn apply_preview_patch_on_tx(
         "preview_matching_feedback",
         preview.preview_matching_feedback.clone(),
     );
-    let amount_cents = preview.preview_amount_cents.abs();
+    let amount_cents = preview
+        .preview_amount_cents
+        .checked_abs()
+        .ok_or_else(|| DbError::InvalidOperation("invalid preview amount_cents".to_string()))?;
     let direction = if preview.preview_type == "收入" || preview.preview_type == "income" {
         "income"
     } else {
@@ -116,7 +119,7 @@ fn apply_patch_value_to_preview(
     payload: &mut Value,
     field: ImportPreviewPatchField,
     value: ImportPreviewPatchValue,
-) {
+) -> DbResult<()> {
     match (field, value) {
         (ImportPreviewPatchField::Date, ImportPreviewPatchValue::Text(value)) => {
             preview.preview_date = value.clone();
@@ -127,15 +130,23 @@ fn apply_patch_value_to_preview(
             payload_set(payload, "preview_type", json!(value));
         }
         (ImportPreviewPatchField::Amount, ImportPreviewPatchValue::Integer(value)) => {
-            preview.preview_amount_cents = value.abs();
-            payload_set(payload, "preview_amount_cents", json!(value.abs()));
+            let value = value.checked_abs().ok_or_else(|| {
+                DbError::InvalidOperation("invalid preview amount_cents".to_string())
+            })?;
+            preview.preview_amount_cents = value;
+            payload_set(payload, "preview_amount_cents", json!(value));
         }
         (ImportPreviewPatchField::DestinationAmount, ImportPreviewPatchValue::Integer(value)) => {
-            preview.preview_destination_amount_cents = value.abs();
+            let value = value.checked_abs().ok_or_else(|| {
+                DbError::InvalidOperation(
+                    "invalid preview destination_amount_cents".to_string(),
+                )
+            })?;
+            preview.preview_destination_amount_cents = value;
             payload_set(
                 payload,
                 "preview_destination_amount_cents",
-                json!(value.abs()),
+                json!(value),
             );
         }
         (ImportPreviewPatchField::MainCategory, ImportPreviewPatchValue::Text(value)) => {
@@ -231,6 +242,7 @@ fn apply_patch_value_to_preview(
         }
         _ => {}
     }
+    Ok(())
 }
 
 fn mark_preview_manual_annotation(preview: &mut ImportPreviewRow, payload: &mut Value) {
@@ -260,16 +272,16 @@ fn apply_patch_changes_to_preview(
     preview: &mut ImportPreviewRow,
     payload: &mut Value,
     changes: &[(ImportPreviewPatchField, ImportPreviewPatchValue)],
-) {
+) -> DbResult<()> {
     for (field, value) in changes {
-        apply_patch_value_to_preview(preview, payload, *field, value.clone());
+        apply_patch_value_to_preview(preview, payload, *field, value.clone())?;
     }
     let is_manual = changes.iter().any(|(field, value)| {
         *field == ImportPreviewPatchField::ManualAnnotation
             && *value == ImportPreviewPatchValue::Bool(true)
     });
     if !is_manual {
-        return;
+        return Ok(());
     }
     let edited_fields = changes.iter().filter_map(|(field, _)| match field {
         ImportPreviewPatchField::CategoryId => Some("category_id"),
@@ -278,6 +290,7 @@ fn apply_patch_changes_to_preview(
         _ => None,
     });
     mark_manual_identity_ownership(preview, payload, edited_fields);
+    Ok(())
 }
 
 fn mark_manual_identity_ownership<'a>(

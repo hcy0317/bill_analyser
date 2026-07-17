@@ -11,6 +11,7 @@ Write-Host "================================================" -ForegroundColor C
 Write-Host ""
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $ProjectRoot "scripts\http-bind.ps1")
 $CargoToml = Join-Path $ProjectRoot "Cargo.toml"
 $HttpServerName = "bill_http_server.exe"
 $HttpServerDebugPath = Join-Path $ProjectRoot "target\debug\$HttpServerName"
@@ -247,6 +248,8 @@ if (-not $env:BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE) {
 if (-not $env:BILL_ANALYSER_HTTP_BIND) {
     $env:BILL_ANALYSER_HTTP_BIND = "127.0.0.1:5000"
 }
+$HttpEndpoint = Resolve-BillAnalyserHttpEndpoint -Bind $env:BILL_ANALYSER_HTTP_BIND
+$env:BILL_ANALYSER_HTTP_BIND = $HttpEndpoint.Bind
 
 if (-not $env:BILL_ANALYSER_AUTH_JWT_SECRET) {
     if ($env:JWT_SECRET_KEY) {
@@ -330,8 +333,8 @@ Write-Host "Rust import mode: $env:BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE" -Foregr
 Write-Host "Database backend: $env:BILL_ANALYSER_DATABASE_BACKEND" -ForegroundColor Gray
 Write-Host "Postgres configured: $([bool]$env:BILL_ANALYSER_POSTGRES_URL)" -ForegroundColor Gray
 Write-Host "Weaviate endpoint: $env:BILL_ANALYSER_WEAVIATE_ENDPOINT" -ForegroundColor Gray
-Write-Host "Listening on: http://$env:BILL_ANALYSER_HTTP_BIND" -ForegroundColor Cyan
-Write-Host "Health check: http://127.0.0.1:5000/api/health" -ForegroundColor Cyan
+Write-Host "Listening on: $($HttpEndpoint.BaseUrl)" -ForegroundColor Cyan
+Write-Host "Health check: $($HttpEndpoint.HealthUrl)" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Press Ctrl+C to stop server" -ForegroundColor Yellow
 Write-Host ""

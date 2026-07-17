@@ -2,13 +2,19 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+use std::time::Duration;
+
 use axum::http::{header, HeaderMap};
 use base64::{engine::general_purpose, Engine as _};
 use bill_analyser_core::{auth::parse_bearer_authorization_header, UserId};
+use bill_analyser_db::get_postgres_authoritative_access_session_id;
 use ring::hmac;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
-use crate::config::HttpShellConfig;
+use crate::{config::HttpShellConfig, state::HttpAppState};
+
+const SESSION_AUTHORITY_DEADLINE: Duration = Duration::from_millis(850);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthenticatedUser {
@@ -65,6 +71,54 @@ pub fn resolve_authenticated_user_from_headers(
     }
 
     resolve_bearer_user(headers, config)
+}
+
+pub async fn resolve_authoritative_authenticated_user_from_headers(
+    headers: &HeaderMap,
+    state: &HttpAppState,
+    trusted_secret_header: &'static str,
+) -> Result<AuthenticatedUser, RustRouteAuthError> {
+    if headers.contains_key(trusted_secret_header)
+        || headers.contains_key("x-user-id")
+        || headers.contains_key("x-bill-analyser-user-id")
+    {
+        return resolve_trusted_header_user_id(headers, &state.config, trusted_secret_header).map(
+            |user_id| AuthenticatedUser {
+                user_id,
+                session_id: None,
+            },
+        );
+    }
+
+    let auth_header = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    let token = parse_bearer_authorization_header(auth_header)
+        .map_err(|error| RustRouteAuthError::unauthorized(error.message))?;
+    let user_id = validate_access_jwt(&token, &state.config)?;
+    let runtime = state
+        .open_postgres_repository_runtime("auth session authority")
+        .map_err(|_| {
+            RustRouteAuthError::unavailable("Authentication session authority is unavailable")
+        })?;
+    let token_hash = format!("{:x}", Sha256::digest(token.as_bytes()));
+    let lookup = tokio::time::timeout(
+        SESSION_AUTHORITY_DEADLINE,
+        get_postgres_authoritative_access_session_id(runtime.pool(), &token_hash, user_id),
+    )
+    .await
+    .map_err(|_| RustRouteAuthError::unavailable("Authentication session authority timed out"))?
+    .map_err(|_| {
+        RustRouteAuthError::unavailable("Authentication session authority is unavailable")
+    })?;
+    let session_id = lookup.ok_or_else(|| {
+        RustRouteAuthError::unauthorized("Access token session is invalid or expired")
+    })?;
+    Ok(AuthenticatedUser {
+        user_id,
+        session_id: Some(session_id),
+    })
 }
 
 fn resolve_trusted_header_user_id(

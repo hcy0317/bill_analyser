@@ -56,24 +56,55 @@ export async function saveAuthenticatedStorageState(
     auth: AuthResponse
 ): Promise<void> {
     const context = await browser.newContext({ baseURL: env.baseURL });
-    const page = await context.newPage();
+    let primaryError: unknown = null;
+    let cleanupError: unknown = null;
 
-    await page.goto(desktopRoute('/login', env), { waitUntil: 'domcontentloaded' });
-    await page.evaluate(({ authState }) => {
-        localStorage.setItem('ebk_user_token', authState.token);
-        localStorage.setItem('ebk_last_login_time', String(Date.now()));
-
-        if (authState.refreshToken) {
-            localStorage.setItem('ebk_user_refresh_token', authState.refreshToken);
+    try {
+        const page = await context.newPage();
+        const response = await page.goto(desktopRoute('/login', env), { waitUntil: 'commit' });
+        if (!response) {
+            throw new Error('E2E auth storage seed route did not return a document response.');
+        }
+        if (!response.ok()) {
+            throw new Error(`E2E auth storage seed route returned HTTP ${response.status()}.`);
         }
 
-        if (authState.user) {
-            localStorage.setItem('ebk_user_info', JSON.stringify(authState.user));
-        }
-    }, { authState: auth });
+        await page.evaluate(({ authState }) => {
+            localStorage.setItem('ebk_user_token', authState.token);
+            localStorage.setItem('ebk_last_login_time', String(Date.now()));
 
-    await context.storageState({ path: AUTH_STORAGE_STATE_PATH });
-    await context.close();
+            if (authState.refreshToken) {
+                localStorage.setItem('ebk_user_refresh_token', authState.refreshToken);
+            }
+
+            if (authState.user) {
+                localStorage.setItem('ebk_user_info', JSON.stringify(authState.user));
+            }
+        }, { authState: auth });
+
+        await context.storageState({ path: AUTH_STORAGE_STATE_PATH });
+    } catch (error) {
+        primaryError = error;
+    }
+
+    try {
+        await context.close();
+    } catch (error) {
+        cleanupError = error;
+    }
+
+    if (primaryError && cleanupError) {
+        throw new AggregateError(
+            [primaryError, cleanupError],
+            'E2E auth storage seed failed and temporary context cleanup failed.'
+        );
+    }
+    if (cleanupError) {
+        throw cleanupError;
+    }
+    if (primaryError) {
+        throw primaryError;
+    }
 }
 
 async function registerE2EAccount(

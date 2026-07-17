@@ -213,7 +213,8 @@ fn manual_identity_patch_recomputes_feedback_and_replaces_stale_annotation() {
         &mut payload,
         ImportPreviewPatchField::CategoryId,
         ImportPreviewPatchValue::Integer(42),
-    );
+    )
+    .expect("category identity patch");
     apply_identity_validation_to_preview(&mut row, &mut payload, &maps);
     assert_eq!(
         row.preview_matching_feedback.pointer("/annotation/status"),
@@ -230,7 +231,8 @@ fn manual_identity_patch_recomputes_feedback_and_replaces_stale_annotation() {
         &mut payload,
         ImportPreviewPatchField::SourceAccountId,
         ImportPreviewPatchValue::Integer(11),
-    );
+    )
+    .expect("source account identity patch");
     apply_identity_validation_to_preview(&mut row, &mut payload, &maps);
     assert!(!preview_requires_review(&row));
     assert!(row

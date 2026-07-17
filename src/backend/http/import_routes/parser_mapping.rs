@@ -1,6 +1,17 @@
 // 中文导读：当前导入解析映射 helper，只服务 /api/bills/import/v2 当前路径。
 // 维护重点：只保留 column-mapped 文本导入和当前 DTO 转换，不恢复历史读取/迁移入口。
 
+fn spreadsheet_validation_error_response(
+    error: bill_analyser_parsers::SpreadsheetValidationError,
+) -> ImportV2RouteResponse {
+    let status_code = match error.kind() {
+        bill_analyser_parsers::SpreadsheetValidationErrorKind::Invalid => 400,
+        bill_analyser_parsers::SpreadsheetValidationErrorKind::TooLarge => 413,
+        bill_analyser_parsers::SpreadsheetValidationErrorKind::Unsupported => 415,
+    };
+    import_v2_error_response(status_code, error.message())
+}
+
 #[tracing::instrument(level = "debug", skip_all)]
 fn detect_csv_table_start(text: &str, require_known_headers: bool) -> Option<(usize, char)> {
     for (index, line) in text.lines().enumerate() {
@@ -29,9 +40,9 @@ fn looks_like_import_headers<'a>(headers: impl Iterator<Item = &'a str>) -> bool
             || header == "time"
             || header.contains("trade_time")
     });
-    let has_amount = headers
-        .iter()
-        .any(|header| header.contains("金额") || header == "amount" || header.contains("source_amount"));
+    let has_amount = headers.iter().any(|header| {
+        header.contains("金额") || header == "amount" || header.contains("source_amount")
+    });
     has_date && has_amount
 }
 
@@ -50,16 +61,39 @@ fn standard_bills_from_temp_path_payload(
     session_id: &str,
 ) -> Result<Vec<StandardBill>, ImportV2RouteResponse> {
     let path = validate_import_temp_path(temp_path, user_id, Some(session_id))?;
-    let text = read_import_temp_text(&path)?;
-    standard_bills_from_column_mapped_text(object, &text)
+    let bytes = read_bounded_preview_file(&path, IMPORT_FILE_PREVIEW_HARD_MAX_BYTES)?;
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let rows = match extension.as_str() {
+        "csv" | "txt" => {
+            let encoding = first_text_from_object(object, &["file_encoding", "fileEncoding"])
+                .unwrap_or_else(|| "auto".to_string());
+            let encoding = normalize_preview_encoding(&encoding)?;
+            let (text, _) = decode_preview_text(&bytes, encoding)?;
+            let delimiter = first_text_from_object(object, &["delimiter"]);
+            csv_rows_from_text(&text, delimiter.as_deref())?
+        }
+        "xls" | "xlsx" => {
+            bill_analyser_parsers::parse_spreadsheet_rows(&bytes)
+                .map_err(spreadsheet_validation_error_response)?
+        }
+        _ => {
+            return Err(import_v2_error_response(
+                415,
+                "Generic column mapping file type is not supported",
+            ))
+        }
+    };
+    standard_bills_from_column_mapped_rows(object, rows)
 }
 
-fn standard_bills_from_column_mapped_text(
+fn standard_bills_from_column_mapped_rows(
     object: &Map<String, Value>,
-    text: &str,
+    mut rows: Vec<Vec<String>>,
 ) -> Result<Vec<StandardBill>, ImportV2RouteResponse> {
-    let delimiter = first_text_from_object(object, &["delimiter"]);
-    let mut rows = csv_rows_from_text(text, delimiter.as_deref())?;
     let column_mapping = column_mapping_from_payload(object)?;
     if !column_mapping.contains_key(&1) || !column_mapping.contains_key(&8) {
         return Err(import_v2_error_response(

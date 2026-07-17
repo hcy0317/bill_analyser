@@ -16,6 +16,7 @@ pub mod backup_postgres;
 pub mod bills;
 pub mod budgets;
 pub mod error;
+pub mod import_config;
 pub mod import_staging;
 pub mod llm;
 pub mod matching;
@@ -49,19 +50,19 @@ pub use auth_postgres::{
     enable_postgres_two_factor_with_recovery_codes_and_session,
     get_postgres_active_refresh_session, get_postgres_active_session_id_by_token_hash,
     get_postgres_auth_token_user, get_postgres_auth_user_profile,
-    get_postgres_auth_user_two_factor_enabled, get_postgres_login_user_by_id,
-    get_postgres_login_user_by_login_name, get_postgres_operation_password,
-    get_postgres_user_external_auth, increment_postgres_failed_login,
-    invalidate_other_postgres_user_sessions, invalidate_postgres_session_by_id,
-    invalidate_postgres_session_by_token_hash, list_postgres_application_cloud_settings,
-    list_postgres_user_external_auths, list_postgres_user_sessions,
-    postgres_auth_account_belongs_to_user, postgres_auth_category_belongs_to_user,
-    postgres_auth_email_exists, postgres_auth_email_exists_for_other_user,
-    postgres_auth_username_exists, replace_postgres_two_factor_recovery_codes,
-    rotate_postgres_refresh_token_session, set_postgres_user_email_verified,
-    update_postgres_application_cloud_settings, update_postgres_auth_user_profile,
-    update_postgres_auth_user_profile_with_auth_log, update_postgres_user_last_login,
-    update_postgres_user_password_hash,
+    get_postgres_auth_user_two_factor_enabled, get_postgres_authoritative_access_session_id,
+    get_postgres_login_user_by_id, get_postgres_login_user_by_login_name,
+    get_postgres_operation_password, get_postgres_user_external_auth,
+    increment_postgres_failed_login, invalidate_other_postgres_user_sessions,
+    invalidate_postgres_session_by_id, invalidate_postgres_session_by_token_hash,
+    list_postgres_application_cloud_settings, list_postgres_user_external_auths,
+    list_postgres_user_sessions, postgres_auth_account_belongs_to_user,
+    postgres_auth_category_belongs_to_user, postgres_auth_email_exists,
+    postgres_auth_email_exists_for_other_user, postgres_auth_username_exists,
+    replace_postgres_two_factor_recovery_codes, rotate_postgres_refresh_token_session,
+    set_postgres_user_email_verified, update_postgres_application_cloud_settings,
+    update_postgres_auth_user_profile, update_postgres_auth_user_profile_with_auth_log,
+    update_postgres_user_last_login, update_postgres_user_password_hash,
 };
 pub use auth_registration::{
     RegisterDefaultSeedPackage, RegisterDefaultSeedSummary, RegisterPresetCategory,
@@ -100,6 +101,10 @@ pub use budgets::{
     BudgetUpdateDraft,
 };
 pub use error::{DbError, DbResult};
+pub use import_config::{
+    delete_postgres_import_config, list_postgres_import_configs, match_postgres_import_config,
+    save_postgres_import_config, ImportConfigRepositoryError,
+};
 pub use import_staging::{
     apply_import_decision_group_command, apply_preview_learning_decision,
     apply_preview_llm_recommendation, apply_preview_patches_preserving_selection,
@@ -170,9 +175,10 @@ pub use matching::{
     MatchingRuntimeError, PreviewMatchingActionRequest, ReconciliationCandidateFilters,
 };
 pub use postgres::{
-    postgres_initial_schema_path, postgres_migration_manifest, postgres_migrations_dir,
-    run_postgres_migrations, PostgresMigrationDescriptor, PostgresPool,
-    POSTGRES_INITIAL_SCHEMA_FILE, POSTGRES_MIGRATIONS_RELATIVE_DIR,
+    embedded_postgres_migration_versions, postgres_initial_schema_path,
+    postgres_migration_manifest, postgres_migrations_dir, run_postgres_migrations,
+    PostgresMigrationDescriptor, PostgresPool, POSTGRES_INITIAL_SCHEMA_FILE,
+    POSTGRES_MIGRATIONS_RELATIVE_DIR,
 };
 pub use recurring::{
     accept_postgres_recurring_suggestion, bind_postgres_bill_to_recurring,

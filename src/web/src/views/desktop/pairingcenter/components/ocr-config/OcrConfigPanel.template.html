@@ -2,7 +2,7 @@
         <div class="learning-section-header"
              :class="{ 'learning-section-header--empty': hideSectionTitle && hasHeaderActionsTarget }">
             <h3 v-if="!hideSectionTitle" class="learning-section-title">{{ tt('OCR Config') }}</h3>
-            <Teleport :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
+            <Teleport defer :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
                 <div class="learning-section-actions"
                      :class="{ 'learning-section-actions--external': hasHeaderActionsTarget }">
                     <settings-json-import-export-button

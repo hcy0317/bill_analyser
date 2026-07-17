@@ -46,6 +46,11 @@ on:
       - '*.ps1'
       - '*.bat'
   workflow_dispatch:
+    inputs:
+      base_sha:
+        description: Optional immutable base SHA for changed-line coverage
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -76,6 +81,16 @@ jobs:
     steps:
       - name: Checkout
         uses: https://github.com/actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js 22
+        uses: https://github.com/actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Resolve immutable CI diff refs
+        run: node scripts/resolve-ci-diff-refs.mjs resolve --event-name "$GITHUB_EVENT_NAME" --event-path "$GITHUB_EVENT_PATH" --remote origin --default-base refs/heads/main --out .omx/ultragoal/evidence/ci-diff-refs.json
 
       - name: Restore Rust toolchain cache
         id: rust-toolchain-cache
@@ -131,6 +146,9 @@ jobs:
       - name: Check Cargo metadata
         run: cargo metadata --locked --format-version 1 >/tmp/bill-analyser-cargo-metadata.json
 
+      - name: Run Rust backend structure check
+        run: node scripts/check-rust-backend-structure.mjs
+
       - name: Run Rust format check
         run: cargo fmt --all -- --check
 
@@ -139,6 +157,9 @@ jobs:
 
       - name: Run Rust tests
         run: cargo test --workspace
+
+      - name: Run assembled runtime route ownership contract
+        run: cargo test -p bill-analyser-http --test runtime_route_ownership_contract -- --nocapture
 
       - name: Build Rust HTTP server
         run: cargo build -p bill-analyser-http --bin bill_http_server
@@ -152,6 +173,13 @@ jobs:
 
       - name: Run Rust coverage
         run: cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35
+
+      - name: Enforce Rust changed-line coverage
+        run: |
+          MERGE_BASE_SHA="$(node scripts/resolve-ci-diff-refs.mjs read --input .omx/ultragoal/evidence/ci-diff-refs.json --field merge_base_sha)"
+          HEAD_SHA="$(node scripts/resolve-ci-diff-refs.mjs read --input .omx/ultragoal/evidence/ci-diff-refs.json --field head_sha)"
+          git -c gc.auto=0 diff --unified=0 "$MERGE_BASE_SHA...$HEAD_SHA" -- src/backend tests/backend > .omx/ultragoal/evidence/rust-changed.diff
+          node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .omx/ultragoal/evidence/rust-changed.diff --threshold 90 --require-matched-files --require-executable-lines
 
       - name: Trim backend caches before cache save
         id: backend-cache-trim
@@ -217,11 +245,16 @@ jobs:
     steps:
       - name: Checkout
         uses: https://github.com/actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js 22
         uses: https://github.com/actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Resolve immutable CI diff refs
+        run: node scripts/resolve-ci-diff-refs.mjs resolve --event-name "$GITHUB_EVENT_NAME" --event-path "$GITHUB_EVENT_PATH" --remote origin --default-base refs/heads/main --out .omx/ultragoal/evidence/ci-diff-refs.json
 
       - name: Restore npm cache
         uses: https://github.com/actions/cache@v4
@@ -235,6 +268,9 @@ jobs:
         working-directory: src/web
         run: npm ci
 
+      - name: Run frontend structure check
+        run: npm --prefix src/web run structure:check
+
       - name: Run lint
         working-directory: src/web
         run: npm run lint:ci
@@ -242,6 +278,13 @@ jobs:
       - name: Run tests with coverage
         working-directory: src/web
         run: npm run test:coverage
+
+      - name: Enforce frontend changed-line coverage
+        run: |
+          MERGE_BASE_SHA="$(node scripts/resolve-ci-diff-refs.mjs read --input .omx/ultragoal/evidence/ci-diff-refs.json --field merge_base_sha)"
+          HEAD_SHA="$(node scripts/resolve-ci-diff-refs.mjs read --input .omx/ultragoal/evidence/ci-diff-refs.json --field head_sha)"
+          git -c gc.auto=0 diff --unified=0 "$MERGE_BASE_SHA...$HEAD_SHA" -- src/web tests/web > .omx/ultragoal/evidence/frontend-changed.diff
+          node scripts/governance-normalizers.mjs changed-coverage --lcov src/web/coverage/lcov.info --diff .omx/ultragoal/evidence/frontend-changed.diff --threshold 90 --require-matched-files --require-executable-lines
 
       - name: Build frontend
         working-directory: src/web
@@ -268,11 +311,25 @@ jobs:
     steps:
       - name: Checkout repository
         uses: https://github.com/actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js 22
         uses: https://github.com/actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Install locked workflow checker dependencies
+        run: npm ci --prefix src/web
+
+      - name: Self-test immutable CI diff resolver
+        run: node scripts/resolve-ci-diff-refs.mjs --self-test
+
+      - name: Self-test Gitea workflow checker
+        run: node scripts/check-gitea-workflow.mjs --self-test
+
+      - name: Check Gitea workflow
+        run: node scripts/check-gitea-workflow.mjs
 
       - name: Check backend documentation map
         run: node scripts/check-backend-doc-map.mjs
@@ -281,33 +338,63 @@ jobs:
         run: node scripts/check-governance-normalizers.mjs
 
       - name: Ensure tracked source tree is Rust-only
-        run: |
-          tracked_py="$(git ls-files '*.py')"
-          if [ -n "$tracked_py" ]; then
-            echo "$tracked_py"
-            echo "Tracked Python files are not allowed in the Rust-only source tree."
-            exit 1
-          fi
+        run: node scripts/check-rust-only-source-tree.mjs
 
-          py_lower='python'
-          removed_files=".${py_lower}-version py""project.toml py""test.ini uv.lock"
-          for removed in $removed_files; do
-            if git ls-files --error-unmatch "$removed" >/dev/null 2>&1; then
-              echo "$removed should not be tracked in the Rust-only source tree."
-              exit 1
-            fi
-          done
+  e2e-ci:
+    name: e2e-ci
+    runs-on: ubuntu-latest
+    env:
+      BILL_ANALYSER_DATABASE_BACKEND: postgres
+      BILL_ANALYSER_POSTGRES_URL: postgresql://bill_analyser_e2e:bill_analyser_e2e@postgres:5432/bill_analyser_e2e
+      BILL_ANALYSER_WEAVIATE_ENABLED: 'true'
+      BILL_ANALYSER_WEAVIATE_ENDPOINT: http://weaviate:8080
+      BILL_ANALYSER_WEAVIATE_COLLECTION_PREFIX: BillAnalyserE2E${{ github.run_id }}
+      BILL_ANALYSER_HTTP_BIND: 127.0.0.1:5000
+      BILL_ANALYSER_AUTH_JWT_SECRET: bill-analyser-e2e-ci-${{ github.run_id }}
+      BILL_ANALYSER_AUTH_ENABLE_USER_REGISTRATION: 'true'
+      BILL_ANALYSER_AUTH_REQUIRE_EMAIL_VERIFICATION: 'false'
+      E2E_RUN_ID: ${{ github.run_id }}
+      E2E_EXPECTED_WEAVIATE_PREFIX: BillAnalyserE2E${{ github.run_id }}
+      E2E_STRICT_CLEANUP: 'true'
+      E2E_ALLOW_CI_SERVICE_HOSTS: 'true'
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: bill_analyser_e2e
+          POSTGRES_USER: bill_analyser_e2e
+          POSTGRES_PASSWORD: bill_analyser_e2e
+        options: >-
+          --health-cmd "pg_isready -U bill_analyser_e2e -d bill_analyser_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      weaviate:
+        image: cr.weaviate.io/semitechnologies/weaviate:1.37.4
+        env:
+          AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
+          DEFAULT_VECTORIZER_MODULE: none
+          PERSISTENCE_DATA_PATH: /var/lib/weaviate
+          CLUSTER_HOSTNAME: e2e-node
+    steps:
+      - name: Checkout E2E source
+        uses: https://github.com/actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Check removed runtime/tooling references
-        run: |
-          paths="AGENTS.md CLAUDE.md .codex .gitea docs README.md scripts start_backend.ps1 一键启动.ps1 build_static.ps1 .omx/plans/rust-full-rewrite-total-plan.md"
-          py_word='Python'
-          py_lower='python'
-          agent_stack="agent_stack_health"".py"
-          rust_deps="check_rust_workspace_dependencies"".py"
-          plan_progress="omx_plan_progress"".py"
-          pattern="BILL_ANALYSER_${py_word^^}_UPSTREAM|${py_word}Proxied|setup-${py_lower}|py""project|\\.v""env|${py_lower}\\.exe|${agent_stack}|${rust_deps}|${plan_progress}"
-          if git grep -n -E "$pattern" -- $paths; then
-            echo "Removed runtime/tooling references are still present."
-            exit 1
-          fi
+      - name: Setup E2E Node.js 22
+        uses: https://github.com/actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup E2E Rust stable
+        uses: https://github.com/dtolnay/rust-toolchain@stable
+
+      - name: Install locked E2E dependencies
+        run: npm ci --prefix src/web
+
+      - name: Install Playwright Chromium
+        run: npm --prefix src/web run e2e:install -- --with-deps
+
+      - name: Run deterministic E2E supervisor
+        run: npm --prefix src/web run e2e:ci:smoke

@@ -492,14 +492,4 @@ onMounted(() => {
 });
 </script>
 
-<style scoped>
-.import-preview-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.history-summary { color: var(--f7-color-orange); font-weight: 600; }
-.import-preview-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
-.signal-chip { display: inline-flex; align-items: center; border-radius: 6px; padding: 2px 6px; font-size: 12px; line-height: 16px; border: 1px solid var(--f7-list-item-border-color); }
-.signal-chip--neutral { color: var(--f7-text-color); background: var(--f7-list-bg-color); }
-.signal-chip--info { color: var(--f7-color-blue); background: rgba(0, 122, 255, 0.12); }
-.signal-chip--warning { color: var(--f7-color-orange); background: rgba(255, 149, 0, 0.14); }
-.signal-chip--success { color: var(--f7-color-green); background: rgba(52, 199, 89, 0.14); }
-.row-action-link { margin-left: auto; }
-</style>
+<style scoped src="./import-preview/ImportPreviewPage.scss"></style>

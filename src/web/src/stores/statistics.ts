@@ -69,8 +69,6 @@ import {
     getDateRangeByDateType
 } from '@/lib/datetime.ts';
 import { sortStatisticsItems } from '@/lib/statistics.ts';
-import logger from '@/lib/logger.ts';
-import services from '@/lib/services.ts';
 import type {
     TransactionStatisticsFilter,
     TransactionStatisticsPartialFilter,
@@ -83,6 +81,7 @@ import {
     buildTransactionListPageParams,
     buildTransactionStatisticsPageParams
 } from './statistics/pageParams.ts';
+import { createStatisticsLoaders } from './statistics/loaders.ts';
 
 export type {
     TransactionStatisticsFilter,
@@ -124,6 +123,19 @@ export const useStatisticsStore = defineStore('statistics', () => {
     const transactionCategoryTrendsData = ref<TransactionStatisticTrendsResponseItem[]>([]);
     const transactionAssetTrendsData = ref<TransactionStatisticAssetTrendsResponseItem[]>([]);
     const transactionStatisticsStateInvalid = ref<boolean>(true);
+    const {
+        invalidateRequests,
+        loadCategoricalAnalysis,
+        loadTrendAnalysis,
+        loadAssetTrends
+    } = createStatisticsLoaders({
+        transactionStatisticsFilter,
+        transactionCategoryStatisticsData,
+        transactionCategoryTrendsData,
+        transactionAssetTrendsData,
+        transactionStatisticsStateInvalid,
+        useTransactionTimezone: () => settingsStore.appSettings.statistics.defaultTimezoneType === TimezoneTypeForStatistics.TransactionTimezone.type
+    });
 
     const categoricalAnalysisChartDataCategory = computed<string>(() => {
         if (transactionStatisticsFilter.value.chartDataType === ChartDataType.OutflowsByAccount.type ||
@@ -1276,6 +1288,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
     }
 
     function resetTransactionStatistics(): void {
+        invalidateRequests();
         transactionStatisticsFilter.value.chartDataType = ChartDataType.Default.type;
         transactionStatisticsFilter.value.categoricalChartType = CategoricalChartType.Default.type;
         transactionStatisticsFilter.value.categoricalChartDateType = DEFAULT_CATEGORICAL_CHART_DATA_RANGE.type;
@@ -1300,6 +1313,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
     }
 
     function initTransactionStatisticsFilter(analysisType: StatisticsAnalysisType, filter?: TransactionStatisticsPartialFilter): void {
+        invalidateRequests();
         if (filter && isInteger(filter.chartDataType)) {
             transactionStatisticsFilter.value.chartDataType = filter.chartDataType;
         } else {
@@ -1635,6 +1649,10 @@ export const useStatisticsStore = defineStore('statistics', () => {
             changed = true;
         }
 
+        if (changed) {
+            invalidateRequests();
+        }
+
         return changed;
     }
 
@@ -1655,133 +1673,6 @@ export const useStatisticsStore = defineStore('statistics', () => {
             analysisType,
             itemId,
             dateRange
-        });
-    }
-
-    function loadCategoricalAnalysis({ force }: { force: boolean }): Promise<TransactionStatisticResponse> {
-        return new Promise((resolve, reject) => {
-            services.getTransactionStatistics({
-                startTime: transactionStatisticsFilter.value.categoricalChartStartTime,
-                endTime: transactionStatisticsFilter.value.categoricalChartEndTime,
-                tagIds: transactionStatisticsFilter.value.tagIds,
-                tagFilterType: transactionStatisticsFilter.value.tagFilterType,
-                keyword: transactionStatisticsFilter.value.keyword,
-                useTransactionTimezone: settingsStore.appSettings.statistics.defaultTimezoneType === TimezoneTypeForStatistics.TransactionTimezone.type
-            }).then(response => {
-                const data = response.data;
-
-                if (!data || !data.success || !data.result) {
-                    reject({ message: 'Unable to retrieve transaction statistics' });
-                    return;
-                }
-
-                if (transactionStatisticsStateInvalid.value) {
-                    updateTransactionStatisticsInvalidState(false);
-                }
-
-                if (force && data.result && isEquals(transactionCategoryStatisticsData.value, data.result)) {
-                    reject({ message: 'Data is up to date', isUpToDate: true });
-                    return;
-                }
-
-                transactionCategoryStatisticsData.value = data.result;
-
-                resolve(data.result);
-            }).catch(error => {
-                logger.error('failed to retrieve transaction statistics', error);
-
-                if (error.response && error.response.data && error.response.data.message) {
-                    reject({ error: error.response.data });
-                } else if (!error.processed) {
-                    reject({ message: 'Unable to retrieve transaction statistics' });
-                } else {
-                    reject(error);
-                }
-            });
-        });
-    }
-
-    function loadTrendAnalysis({ force }: { force: boolean }): Promise<TransactionStatisticTrendsResponseItem[]> {
-        return new Promise((resolve, reject) => {
-            const isAllDateRange = transactionStatisticsFilter.value.trendChartDateType === DateRange.All.type;
-
-            services.getTransactionStatisticsTrends({
-                startYearMonth: isAllDateRange ? '197001' : transactionStatisticsFilter.value.trendChartStartYearMonth,
-                endYearMonth: isAllDateRange ? '197001' : transactionStatisticsFilter.value.trendChartEndYearMonth,
-                tagIds: transactionStatisticsFilter.value.tagIds,
-                tagFilterType: transactionStatisticsFilter.value.tagFilterType,
-                keyword: transactionStatisticsFilter.value.keyword,
-                useTransactionTimezone: settingsStore.appSettings.statistics.defaultTimezoneType === TimezoneTypeForStatistics.TransactionTimezone.type
-            }).then(response => {
-                const data = response.data;
-
-                if (!data || !data.success || !data.result) {
-                    reject({ message: 'Unable to retrieve transaction statistics' });
-                    return;
-                }
-
-                if (transactionStatisticsStateInvalid.value) {
-                    updateTransactionStatisticsInvalidState(false);
-                }
-
-                if (force && data.result && isEquals(transactionCategoryTrendsData.value, data.result)) {
-                    reject({ message: 'Data is up to date', isUpToDate: true });
-                    return;
-                }
-
-                transactionCategoryTrendsData.value = data.result;
-
-                resolve(data.result);
-            }).catch(error => {
-                logger.error('failed to retrieve transaction statistics', error);
-
-                if (error.response && error.response.data && error.response.data.message) {
-                    reject({ error: error.response.data });
-                } else if (!error.processed) {
-                    reject({ message: 'Unable to retrieve transaction statistics' });
-                } else {
-                    reject(error);
-                }
-            });
-        });
-    }
-
-    function loadAssetTrends({ force }: { force: boolean }): Promise<TransactionStatisticAssetTrendsResponseItem[]> {
-        return new Promise((resolve, reject) => {
-            services.getTransactionStatisticsAssetTrends({
-                startTime: transactionStatisticsFilter.value.assetTrendsChartStartTime,
-                endTime: transactionStatisticsFilter.value.assetTrendsChartEndTime
-            }).then(response => {
-                const data = response.data;
-
-                if (!data || !data.success || !data.result) {
-                    reject({ message: 'Unable to retrieve transaction statistics' });
-                    return;
-                }
-
-                if (transactionStatisticsStateInvalid.value) {
-                    updateTransactionStatisticsInvalidState(false);
-                }
-
-                if (force && data.result && isEquals(transactionAssetTrendsData.value, data.result)) {
-                    reject({ message: 'Data is up to date', isUpToDate: true });
-                    return;
-                }
-
-                transactionAssetTrendsData.value = data.result;
-
-                resolve(data.result);
-            }).catch(error => {
-                logger.error('failed to retrieve transaction statistics', error);
-
-                if (error.response && error.response.data && error.response.data.message) {
-                    reject({ error: error.response.data });
-                } else if (!error.processed) {
-                    reject({ message: 'Unable to retrieve transaction statistics' });
-                } else {
-                    reject(error);
-                }
-            });
         });
     }
 

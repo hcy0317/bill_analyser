@@ -403,7 +403,10 @@ import {
     getImportConfigDisplayDescription,
     getMatchedImportConfigMessage,
     normalizeImportConfigMatchResult,
-    resolveImportConfigFileFormat
+    resolveActiveImportSource,
+    resolveImportConfigFileFormat,
+    resolveUnmatchedImportFiles,
+    type ImportStageUnmatchedFile
 } from './import-dialog/importConfigHelpers.ts';
 import {
     appendPreviewPageFilters,
@@ -418,18 +421,15 @@ import {
     type ImportConfigSuggestionResult,
     type ImportFieldMappings,
     type ImportFilePreviewResult,
-    type ImportTransactionCheckDataFilterMenuGroup,
     type ImportTransactionDialogStep,
     type UnmatchedFileInfo
 } from './import-dialog/types.ts';
 import { createImportFlowMilestoneLogger } from './import-dialog/importFlowProfiler.ts';
 import { useImportFlowProgress } from './import-dialog/useImportFlowProgress.ts';
+import { useImportCheckDataFilterMenu } from './import-dialog/useImportCheckDataFilterMenu.ts';
 import { useImportSourceSelection } from './import-dialog/useImportSourceSelection.ts';
-
-import { ref, computed, nextTick, useTemplateRef, watch } from 'vue';
-
+import { ref, computed, nextTick, useTemplateRef } from 'vue';
 import { useI18n } from '@/locales/helpers.ts';
-
 import { useAccountsStore } from '@/stores/account.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import { useTransactionTagsStore } from '@/stores/transactionTag.ts';
@@ -517,6 +517,7 @@ const importDialogOpenedAt = ref<number | null>(null);
 const importSubmitStartedAt = ref<number | null>(null);
 const firstOperablePreviewLogged = ref<boolean>(false);
 const parsedFileDelimiter = ref<string>('');
+const parsedFileEncoding = ref<string>('auto');
 const matchedImportConfig = ref<ImportConfigMatchResult | null>(null);
 
 const unmatchedFilesQueue = ref<UnmatchedFileInfo[]>([]);
@@ -543,6 +544,10 @@ const openedCheckDataFilterGroups = ref<string[]>([]);
 const importFile = computed<File | undefined>(() => {
     return importFiles.value.length > 0 ? importFiles.value[0] : undefined;
 });
+const activeImportSource = computed(() => resolveActiveImportSource(
+    importFile.value,
+    unmatchedFilesQueue.value[currentUnmatchedIndex.value]
+));
 
 const {
     allFileSubTypes,
@@ -606,59 +611,13 @@ const {
     formatCount: getDisplayCount
 });
 
-function isActiveCheckDataFilterGroup(summary?: string): boolean {
-    return !!summary && summary !== tt('All');
-}
-
-function getVisibleCheckDataFilterGroups(): ImportTransactionCheckDataFilterMenuGroup[] {
-    return importTransactionCheckDataTab.value?.filterMenus || [];
-}
-
-function syncOpenedCheckDataFilterGroups(): void {
-    const groups = getVisibleCheckDataFilterGroups();
-    if (groups.length < 1) {
-        openedCheckDataFilterGroups.value = [];
-        return;
-    }
-
-    const validTitles = new Set(groups.map(group => group.title));
-    const retainedTitles = openedCheckDataFilterGroups.value.filter(title => validTitles.has(title));
-
-    if (retainedTitles.length > 0) {
-        openedCheckDataFilterGroups.value = retainedTitles;
-        return;
-    }
-
-    const activeTitles = groups
-        .filter(group => isActiveCheckDataFilterGroup(group.summary))
-        .map(group => group.title);
-    const firstGroup = groups[0];
-
-    openedCheckDataFilterGroups.value = activeTitles.length > 0
-        ? activeTitles
-        : (firstGroup ? [firstGroup.title] : []);
-}
-
-watch(showCheckDataFilterMenu, visible => {
-    if (visible) {
-        syncOpenedCheckDataFilterGroups();
-    }
+const { isActiveCheckDataFilterGroup } = useImportCheckDataFilterMenu({
+    currentStep,
+    openedGroups: openedCheckDataFilterGroups,
+    showMenu: showCheckDataFilterMenu,
+    getFilterMenus: () => importTransactionCheckDataTab.value?.filterMenus || [],
+    translate: tt
 });
-
-watch(currentStep, step => {
-    if (step !== 'checkData') {
-        showCheckDataFilterMenu.value = false;
-    }
-});
-
-watch(
-    () => getVisibleCheckDataFilterGroups().map(group => `${group.title}:${group.summary || ''}`).join('|'),
-    () => {
-        if (showCheckDataFilterMenu.value) {
-            syncOpenedCheckDataFilterGroups();
-        }
-    }
-);
 
 function open(): Promise<void> {
     abortPendingPreviewPageRequest();
@@ -678,6 +637,7 @@ function open(): Promise<void> {
     importData.value = '';
     parsedFileData.value = undefined;
     parsedFileDelimiter.value = '';
+    parsedFileEncoding.value = 'auto';
     matchedImportConfig.value = null;
     unmatchedFilesQueue.value = [];
     currentUnmatchedIndex.value = 0;
@@ -766,19 +726,16 @@ function setSelectedImportFiles(files: readonly File[]): void {
     processDSVMethod.value = ImportDSVProcessMethod.AutoDetect;
     matchedImportConfig.value = null;
     parsedFileData.value = undefined;
+    parsedFileEncoding.value = 'auto';
     logImportFlowMilestone('files_selected_at', {
         file_count: importFiles.value.length,
         total_size_bytes: importFiles.value.reduce((sum, file) => sum + file.size, 0)
     });
 }
 
-function getImportConfigFileFormat(): string {
-    return resolveImportConfigFileFormat(importFile.value);
-}
-
 async function loadImportConfigList(): Promise<void> {
     const response = await services.getImportConfigs({
-        fileFormat: getImportConfigFileFormat()
+        fileFormat: activeImportSource.value.fileFormat
     });
     const result = Array.isArray(response.data?.result) ? response.data.result : [];
     importConfigList.value = result
@@ -800,6 +757,7 @@ function applyImportConfig(config: ImportConfigMatchResult): void {
     importTransactionDefineColumnTab.value?.applyFieldMappings(config.fieldMappings);
     matchedImportConfig.value = config;
     parsedFileDelimiter.value = config.delimiter || parsedFileDelimiter.value;
+    parsedFileEncoding.value = config.encoding || parsedFileEncoding.value;
     showManageImportConfigDialog.value = false;
     snackbar.value?.showMessage(`已套用模板：${config.name}`);
 }
@@ -823,7 +781,7 @@ async function saveEditedImportConfig(): Promise<void> {
         const response = await services.saveImportConfig({
             id: targetConfig.id,
             name: editImportConfigName.value.trim(),
-            fileFormat: targetConfig.fileFormat || getImportConfigFileFormat(),
+            fileFormat: targetConfig.fileFormat || activeImportSource.value.fileFormat,
             description: editImportConfigDescription.value.trim(),
             fieldMappings: targetConfig.fieldMappings,
             dateFormat: targetConfig.dateFormat || '',
@@ -907,6 +865,7 @@ async function executeColumnMappingImport(): Promise<void> {
         timezoneFormat: mapping.timezoneFormat,
         amountDecimalSeparator: mapping.amountDecimalSeparator,
         amountDigitGroupingSymbol: mapping.amountDigitGroupingSymbol,
+        fileEncoding: parsedFileEncoding.value || undefined,
         delimiter: parsedFileDelimiter.value || undefined
     });
 
@@ -935,7 +894,7 @@ function openSaveImportConfigDialog(): void {
     }
 
     saveImportConfigName.value = matchedImportConfig.value?.name ||
-        `${importFile.value?.name || 'import'} 模板`;
+        `${activeImportSource.value.fileName} 模板`;
     saveImportConfigDescription.value = getImportConfigDisplayDescription(matchedImportConfig.value);
     loadImportConfigList().then(() => {
         const hasDefaultTemplate = importConfigList.value.some(config => !!config.isDefault);
@@ -965,28 +924,34 @@ async function saveCurrentImportConfig(): Promise<void> {
         const response = await services.saveImportConfig({
             id: matchedImportConfig.value?.id,
             name: saveImportConfigName.value.trim(),
-            fileFormat: getImportConfigFileFormat(),
+            fileFormat: activeImportSource.value.fileFormat,
             description: saveImportConfigDescription.value.trim(),
             fieldMappings: mapping,
+            dateFormat: mapping.timeFormat || '',
             delimiter: parsedFileDelimiter.value,
+            skipRows: 0,
             hasHeader: mapping.includeHeader,
+            customRules: {},
             sampleHeaders: parsedFileData.value[0] || [],
             isDefault: saveImportConfigIsDefault.value,
-            encoding: matchedImportConfig.value?.encoding || 'utf-8'
+            encoding: parsedFileEncoding.value || 'auto'
         });
 
         const savedId = response.data?.result?.id;
         matchedImportConfig.value = {
             id: savedId || matchedImportConfig.value?.id || 0,
             name: saveImportConfigName.value.trim(),
-            fileFormat: getImportConfigFileFormat(),
+            fileFormat: activeImportSource.value.fileFormat,
             description: saveImportConfigDescription.value.trim(),
             descriptionSummary: saveImportConfigDescription.value.trim(),
             fieldMappings: mapping,
+            dateFormat: mapping.timeFormat || '',
             sampleHeaders: parsedFileData.value[0] || [],
             delimiter: parsedFileDelimiter.value,
-            encoding: matchedImportConfig.value?.encoding || 'utf-8',
+            encoding: parsedFileEncoding.value || 'auto',
+            skipRows: 0,
             hasHeader: mapping.includeHeader,
+            customRules: {},
             isDefault: saveImportConfigIsDefault.value,
             defaultRecommendation: !saveImportConfigIsDefault.value && saveImportConfigRecommended.value
         };
@@ -1003,9 +968,19 @@ async function saveCurrentImportConfig(): Promise<void> {
  */
 async function prepareColumnMappingForUnmatchedFile(fileInfo: UnmatchedFileInfo): Promise<void> {
     logger.info(`[列映射] 准备文件: ${fileInfo.originalName} (${currentUnmatchedIndex.value + 1}/${unmatchedFilesQueue.value.length})`);
+    parsedFileData.value = undefined;
+    parsedFileDelimiter.value = '';
+    parsedFileEncoding.value = 'auto';
+    matchedImportConfig.value = null;
+    const sessionId = serverSessionId.value;
+    if (!sessionId) {
+        throw new Error('Import session is unavailable for temporary file preview');
+    }
 
     const previewResponse = await services.previewImportFileFromTemp({
+        sessionId,
         tempPath: fileInfo.tempPath,
+        fileEncoding: parsedFileEncoding.value || undefined,
         delimiter: parsedFileDelimiter.value || undefined
     });
     const preview = previewResponse.data?.result as ImportFilePreviewResult | undefined;
@@ -1017,6 +992,7 @@ async function prepareColumnMappingForUnmatchedFile(fileInfo: UnmatchedFileInfo)
     }
 
     parsedFileDelimiter.value = preview?.delimiter || parsedFileDelimiter.value;
+    parsedFileEncoding.value = preview?.encoding || parsedFileEncoding.value;
     parsedFileData.value = rows.slice(0, 300);
     currentStep.value = 'defineColumn';
 
@@ -1027,12 +1003,14 @@ async function prepareColumnMappingForUnmatchedFile(fileInfo: UnmatchedFileInfo)
     if (!headers.length) return;
 
     // 尝试自动匹配和建议列映射
+    const fileFormat = resolveImportConfigFileFormat({ name: fileInfo.originalName });
     try {
-        const response = await services.matchImportConfig({ fileFormat: 'csv', headers });
+        const response = await services.matchImportConfig({ fileFormat, headers });
         const result = response.data?.result;
         if (response.data?.success && result?.fieldMappings) {
             matchedImportConfig.value = result;
             parsedFileDelimiter.value = result.delimiter || parsedFileDelimiter.value;
+            parsedFileEncoding.value = result.encoding || parsedFileEncoding.value;
             importTransactionDefineColumnTab.value?.applyFieldMappings(result.fieldMappings);
             snackbar.value?.showMessage(getMatchedImportConfigMessage(result));
             return;
@@ -1043,7 +1021,7 @@ async function prepareColumnMappingForUnmatchedFile(fileInfo: UnmatchedFileInfo)
 
     try {
         const suggestionResponse = await services.suggestImportConfig({
-            fileFormat: 'csv',
+            fileFormat,
             headers,
             sampleRows: rows.slice(1, 21)
         });
@@ -1343,15 +1321,19 @@ async function parseData(): Promise<void> {
         serverSessionId.value = stage1Result.data.session_id;
         importProcess.value = 30;
 
-        const unmatchedFiles: Array<{ original_name: string; temp_path: string }> = stage1Result.data.unmatched_files || [];
+        const unmatchedFiles = (stage1Result.data.unmatched_files || []) as ImportStageUnmatchedFile[];
 
         if (unmatchedFiles.length > 0) {
+            const resolvedFiles = resolveUnmatchedImportFiles(unmatchedFiles);
+            if (resolvedFiles.errorMessage) {
+                snackbar.value?.showError(resolvedFiles.errorMessage);
+                await cleanupServerSession();
+                return;
+            }
+
             // 有未匹配文件，进入逐文件列映射流程
             logger.info(`[三阶段导入] ${unmatchedFiles.length} 个文件未匹配特定解析器，进入列映射流程`);
-            unmatchedFilesQueue.value = unmatchedFiles.map(f => ({
-                originalName: f.original_name,
-                tempPath: f.temp_path
-            }));
+            unmatchedFilesQueue.value = resolvedFiles.queue;
             currentUnmatchedIndex.value = 0;
 
             submitting.value = false;

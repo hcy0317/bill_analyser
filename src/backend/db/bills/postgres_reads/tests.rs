@@ -109,4 +109,20 @@ mod tests {
             100
         );
     }
+
+    #[test]
+    fn bill_mutation_rejects_i64_min_amount_without_panicking() {
+        let fields = BillRecord::from_iter([
+            ("date".to_string(), json!("2026-07-16 10:00:00")),
+            ("type".to_string(), json!("支出")),
+            ("amount_cents".to_string(), json!(i64::MIN)),
+        ]);
+
+        let error = prepare_postgres_bill_mutation(&fields)
+            .expect_err("i64::MIN cannot become a positive PostgreSQL bill amount");
+        assert!(matches!(
+            error,
+            DbError::InvalidOperation(message) if message == "invalid bill amount_cents"
+        ));
+    }
 }

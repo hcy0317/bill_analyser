@@ -482,32 +482,38 @@ pub async fn learning_rules_list_runtime_handler(
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
     };
-    let runtime = match open_runtime(&state) {
+    let user_id = match user_id_i64_value(user_id) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let runtime = match open_postgres_runtime(&state) {
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),
     };
-    if let Err(response) = init_global_learning_runtime_schema(&runtime) {
-        return route_response(response);
-    }
     let limit = query.limit.unwrap_or(200).clamp(1, 1000);
     let offset = query.offset.unwrap_or(0);
     let enabled_only = query.enabled_only();
-    let total = match count_import_learning_rules(runtime.connection(), user_id, enabled_only) {
+    let total = match bill_analyser_db::taxonomy::postgres_reads::count_postgres_learning_rules(
+        runtime.pool(),
+        user_id,
+        enabled_only,
+    )
+    .await
+    {
         Ok(total) => total,
-        Err(response) => return route_response(response),
+        Err(error) => return route_response(db_error_response(error)),
     };
-    let items = match load_import_learning_rules(
-        runtime.connection(),
+    let items = match bill_analyser_db::taxonomy::postgres_reads::list_postgres_learning_rules(
+        runtime.pool(),
         user_id,
         enabled_only,
         limit,
         offset,
-    ) {
-        Ok(items) => items
-            .into_iter()
-            .map(|item| learning_rule_camel_to_snake(&item))
-            .collect::<Vec<_>>(),
-        Err(response) => return route_response(response),
+    )
+    .await
+    {
+        Ok(items) => items,
+        Err(error) => return route_response(db_error_response(error)),
     };
     route_response(learning_data_response(json!({
         "items": items,
@@ -531,41 +537,7 @@ pub async fn learning_rule_toggle_runtime_handler(
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
     };
-    let object = match payload_object(&payload) {
-        Ok(object) => object,
-        Err(response) => return route_response(response),
-    };
-    let enabled = first_value(object, &["enabled"])
-        .and_then(value_to_bool)
-        .unwrap_or(true);
-    let mut runtime = match open_runtime(&state) {
-        Ok(runtime) => runtime,
-        Err(response) => return route_response(response),
-    };
-    if let Err(response) = init_global_learning_runtime_schema(&runtime) {
-        return route_response(response);
-    }
-    match set_import_learning_rule_enabled(runtime.connection_mut(), rule_id, user_id, enabled) {
-        Ok(true) => route_response(learning_data_response(json!({
-            "ruleId": rule_id,
-            "enabled": enabled,
-        }))),
-        Ok(false) => route_response(learning_error_response(404, "rule_not_found")),
-        Err(response) => route_response(response),
-    }
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-/// 更新当前用户导入学习规则，保持规则字段和状态投影一致。
-pub async fn learning_rule_update_runtime_handler(
-    State(state): State<HttpAppState>,
-    Path(rule_id): Path<i64>,
-    headers: HeaderMap,
-    Json(payload): Json<Value>,
-) -> Response {
-    #[cfg(not(coverage))]
-    tracing::debug!(domain = "import_parser", operation = "learning_rule_update_runtime_handler", "business operation entered");
-    let user_id = match user_id_from_headers(&headers, &state.config) {
+    let user_id = match user_id_i64_value(user_id) {
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
     };
@@ -573,36 +545,35 @@ pub async fn learning_rule_update_runtime_handler(
         Ok(object) => object,
         Err(response) => return route_response(response),
     };
-    let has_edit = first_value(object, &["matchValue", "match_value"]).is_some()
-        || first_value(object, &["learnedType", "learned_type"]).is_some()
-        || first_value(object, &["learnedCategoryId", "learned_category_id"]).is_some()
-        || first_value(object, &["enabled"]).is_some();
-    if !has_edit {
-        return route_response(learning_error_response(400, "no_fields_to_update"));
-    }
-    let runtime = match open_runtime(&state) {
+    let enabled = first_value(object, &["enabled"])
+        .and_then(value_to_bool)
+        .unwrap_or(true);
+    let runtime = match open_postgres_runtime(&state) {
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),
     };
-    if let Err(response) = init_global_learning_runtime_schema(&runtime) {
-        return route_response(response);
-    }
-    if let Err(response) =
-        update_import_learning_rule(runtime.connection(), rule_id, user_id, object)
+    let update = bill_analyser_db::taxonomy::postgres_reads::PostgresLearningRuleUpdate {
+        enabled: Some(enabled),
+        ..Default::default()
+    };
+    match bill_analyser_db::taxonomy::postgres_reads::update_postgres_learning_rule(
+        runtime.pool(),
+        user_id,
+        rule_id,
+        &update,
+    )
+    .await
     {
-        if response.status_code == 404 {
-            return route_response(learning_error_response(404, "rule_not_found"));
-        }
-        return route_response(response);
-    }
-    match get_import_learning_rule(runtime.connection(), rule_id, user_id) {
-        Ok(Some(rule)) => {
-            route_response(learning_data_response(learning_rule_camel_to_snake(&rule)))
-        }
+        Ok(Some(_)) => route_response(learning_data_response(json!({
+            "ruleId": rule_id,
+            "enabled": enabled,
+        }))),
         Ok(None) => route_response(learning_error_response(404, "rule_not_found")),
-        Err(response) => route_response(response),
+        Err(error) => route_response(db_error_response(error)),
     }
 }
+
+include!("learning_rule_update.rs");
 
 #[tracing::instrument(level = "debug", skip_all)]
 /// 删除当前用户导入学习规则，未命中时返回标准学习域错误。
@@ -617,19 +588,26 @@ pub async fn learning_rule_delete_runtime_handler(
         Ok(user_id) => user_id,
         Err(response) => return route_response(response),
     };
-    let runtime = match open_runtime(&state) {
+    let user_id = match user_id_i64_value(user_id) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let runtime = match open_postgres_runtime(&state) {
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),
     };
-    if let Err(response) = init_global_learning_runtime_schema(&runtime) {
-        return route_response(response);
-    }
-    match delete_import_learning_rule(runtime.connection(), rule_id, user_id) {
+    match bill_analyser_db::taxonomy::postgres_reads::delete_postgres_learning_rule(
+        runtime.pool(),
+        user_id,
+        rule_id,
+    )
+    .await
+    {
         Ok(true) => route_response(ImportV2RouteResponse {
             status_code: 200,
             body: json!({"success": true}),
         }),
         Ok(false) => route_response(learning_error_response(404, "rule_not_found")),
-        Err(response) => route_response(response),
+        Err(error) => route_response(db_error_response(error)),
     }
 }

@@ -159,15 +159,6 @@ fn load_import_learning_rules(
     Ok(Vec::new())
 }
 
-fn set_import_learning_rule_enabled(
-    _connection: &Connection,
-    _rule_id: i64,
-    _user_id: UserId,
-    _enabled: bool,
-) -> Result<bool, ImportV2RouteResponse> {
-    Ok(false)
-}
-
 fn update_import_learning_rule(
     _connection: &Connection,
     _rule_id: i64,
@@ -205,8 +196,4 @@ fn learning_error_response(status_code: u16, error: &str) -> ImportV2RouteRespon
         status_code,
         body: json!({"success": false, "error": error}),
     }
-}
-
-fn learning_rule_camel_to_snake(rule: &Value) -> Value {
-    rule.clone()
 }

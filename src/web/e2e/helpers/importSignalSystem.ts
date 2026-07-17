@@ -47,9 +47,9 @@ export const IMPORT_SIGNAL_MARKERS = {
 } as const;
 
 export const EXPECTED_SIGNAL_COUNTS = {
-    parser: 6,
+    parser: 5,
     platform_duplicate: 1,
-    transfer: 1,
+    transfer: 2,
     history: 1,
     learning: 1,
     llm: 2

@@ -1,6 +1,7 @@
 import type { ComputedRef, Ref } from 'vue';
 
 import { type NameValue, reversed } from '@/core/base.ts';
+import type { ImportTransactionReplaceRule } from '@/core/import_transaction.ts';
 import { TransactionType } from '@/core/transaction.ts';
 import { getSecondaryTransactionMapByName, transactionTypeToCategoryType } from '@/lib/category.ts';
 import type { Account } from '@/models/account.ts';
@@ -17,6 +18,19 @@ import type BatchReplaceAllTypesDialog from '../dialogs/BatchReplaceAllTypesDial
 type BatchReplaceDialogType = InstanceType<typeof BatchReplaceDialog>;
 type BatchReplaceAllTypesDialogType = InstanceType<typeof BatchReplaceAllTypesDialog>;
 type BatchCreateDialogType = InstanceType<typeof BatchCreateDialog>;
+
+interface BatchReplaceDialogResult {
+    sourceItem?: string;
+    targetItem?: string;
+}
+
+interface BatchReplaceAllTypesDialogResult {
+    rules?: Array<ImportTransactionReplaceRule | null>;
+}
+
+interface BatchCreateDialogResult {
+    sourceTargetMap?: Record<string, string>;
+}
 
 interface SnackbarLike {
     showMessage(message: string, payload?: Record<string, unknown>): void;
@@ -84,7 +98,7 @@ export function useImportCheckDataBatchActions(options: ImportCheckDataBatchActi
             mode: 'batchReplace',
             type: type,
             allSourceTagItems: allSourceTagItems
-        }).then(result => {
+        }).then((result: BatchReplaceDialogResult | null | undefined) => {
             if (!result) {
                 return;
             }
@@ -173,7 +187,7 @@ export function useImportCheckDataBatchActions(options: ImportCheckDataBatchActi
         batchReplaceDialog.value?.open({
             mode: 'batchAdd',
             type: type
-        }).then(result => {
+        }).then((result: BatchReplaceDialogResult | null | undefined) => {
             if (!result || !result.targetItem) {
                 return;
             }
@@ -238,7 +252,7 @@ export function useImportCheckDataBatchActions(options: ImportCheckDataBatchActi
             mode: 'replaceInvalidItems',
             type: type,
             invalidItems: invalidItems
-        }).then(result => {
+        }).then((result: BatchReplaceDialogResult | null | undefined) => {
             if (!result || (!result.sourceItem && result.sourceItem !== '')) {
                 return;
             }
@@ -339,7 +353,7 @@ export function useImportCheckDataBatchActions(options: ImportCheckDataBatchActi
             transferCategoryNames: allInvalidTransferCategoryNames.value,
             accountNames: allInvalidAccountNames.value,
             tagNames: allInvalidTransactionTagNames.value
-        }).then(result => {
+        }).then((result: BatchReplaceAllTypesDialogResult | null | undefined) => {
             if (!result || !result.rules) {
                 return;
             }
@@ -410,7 +424,7 @@ export function useImportCheckDataBatchActions(options: ImportCheckDataBatchActi
         batchCreateDialog.value?.open({
             type: type,
             invalidItems: invalidItems
-        }).then(result => {
+        }).then((result: BatchCreateDialogResult | null | undefined) => {
             if (!result || !result.sourceTargetMap) {
                 return;
             }

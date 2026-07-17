@@ -306,11 +306,9 @@
                     <template #chip="{ props, index }">
                         <v-chip :class="{ 'font-italic': !isTagValid(editingTags, index) }"
                                 :prepend-icon="isTagValid(editingTags, index) ? mdiPound : mdiAlertOutline"
-                                :color="isTagValid(editingTags, index) ? 'default' : 'error'"
-                                :text="isTagValid(editingTags, index) ? allTagsMap[editingTags[index] as string]?.name : item.originalTagNames[index]"
+                                :color="isTagValid(editingTags, index) ? 'default' : 'error'" :text="isTagValid(editingTags, index) ? allTagsMap[editingTags[index] as string]?.name : item.originalTagNames[index]"
                                 v-bind="props"/>
                     </template>
-
                     <template #item="{ props, item }">
                         <v-list-item :value="item.value" v-bind="props" v-if="!item.raw.hidden">
                             <template #title>
@@ -867,9 +865,7 @@ import {
 } from '../importPreviewIndex.ts';
 import {
     collectTrackedImportTransactionsForSelection,
-    collectImportTransactionSelectionSummary,
-    type AnnotationReasonSummary,
-    type ImportTransactionSelectionSummary
+    type AnnotationReasonSummary
 } from '../checkDataSelection.ts';
 import {
     type ImportTransactionCheckDataFilter,
@@ -889,20 +885,10 @@ import { ref, computed, useTemplateRef, watch } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
 import {
-    buildImportPreviewHistoryRewriteOperationAcknowledgement,
-    buildImportPreviewSignalViewModel,
     IMPORT_PREVIEW_VISIBLE_SIGNAL_FILTERS,
-    normalizeImportPreviewSignalStatusAlias,
-    type ImportCheckMatchingSourceContext,
     type ImportPreviewHistoryRewriteAcknowledgementOperation,
-    type ImportPreviewSignalStatus,
-    type ImportPreviewSignalViewModel,
-    type ImportPreviewSignalViewModelOptions
+    type ImportPreviewSignalStatus
 } from '../checkDataMatching.ts';
-import {
-    getImportPreviewTransferSignalStatus as getTransferSignalStatus,
-    getImportPreviewTransferSignalTitle as getTransferSignalTitle
-} from '../importPreviewSignalAdapter.ts';
 import {
     getImportCheckVisibleTransactions,
     matchesImportTransactionCheckDataFilters,
@@ -926,6 +912,11 @@ import {
 } from '../llmSignalMemory.ts';
 import { useImportCheckDataMenus } from '../check-data-tab/useImportCheckDataMenus.ts';
 import { useImportCheckDataBatchActions } from '../check-data-tab/useImportCheckDataBatchActions.ts';
+import { useImportCheckDataAnnotations } from '../check-data-tab/useImportCheckDataAnnotations.ts';
+import {
+    resolveSignalStatusAuthority,
+    useImportCheckDataSignals
+} from '../check-data-tab/useImportCheckDataSignals.ts';
 
 import { useSettingsStore } from '@/stores/setting.ts';
 import { useUserStore } from '@/stores/user.ts';
@@ -940,7 +931,6 @@ import { AccountCategory } from '@/core/account.ts';
 import { TransactionType } from '@/core/transaction.ts';
 
 import { Account, type CategorizedAccountWithDisplayBalance } from '@/models/account.ts';
-import type { ImportMatchingSourcePayload } from '@/models/import_matching.ts';
 import type { TransactionCategory } from '@/models/transaction_category.ts';
 import type { TransactionTag } from '@/models/transaction_tag.ts';
 import { ImportTransaction } from '@/models/imported_transaction.ts';
@@ -1022,32 +1012,6 @@ const importPreviewEditableDraftKeys = [
 type ImportPreviewEditableDraftKey = typeof importPreviewEditableDraftKeys[number];
 type ImportPreviewEditableDraftValue = string | number | boolean | string[];
 type ImportPreviewEditableDraftState = Record<ImportPreviewEditableDraftKey, ImportPreviewEditableDraftValue>;
-
-function resolveSignalStatusAuthority(...values: unknown[]): {
-    status: ImportPreviewSignalStatus | string | null | undefined;
-    authoritative: boolean;
-} {
-    const status = normalizeImportPreviewSignalStatusAlias(...values);
-    if (status !== null) {
-        return { status, authoritative: true };
-    }
-
-    const hasExplicitNull = values.some(value => value === null);
-    return {
-        status: hasExplicitNull ? null : undefined,
-        authoritative: hasExplicitNull
-    };
-}
-
-function serializeSignalCacheValue(value: unknown): string {
-    if (value === null) {
-        return '<null>';
-    }
-    if (typeof value === 'undefined') {
-        return '<undefined>';
-    }
-    return String(value);
-}
 
 const props = defineProps<{
     importTransactions?: ImportTransaction[]
@@ -2461,7 +2425,7 @@ function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData
     item.recurringMatchedDate = previewData.preview_recurring_matched_date || '';
 
     updateTransactionData(item);
-    importTransactionSelectionRevision.value += 1;
+    refreshImportTransactionSelectionSummary();
     syncTransferDecisionBaseline(item);
     syncLearningDecisionBaseline(item);
     getPreviewState(item)._shouldClearLlmDecision = false;
@@ -2823,145 +2787,22 @@ async function syncLearningDecisionDraftToPreview(item: ImportTransaction, candi
     }
 }
 
-const PARSER_LABELS: Record<string, string> = {
-    wechat: '微信',
-    alipay: '支付宝',
-    icbc: '工商银行',
-    cmbc: '民生银行',
-    abc: '农业银行',
-    ccb: '建设银行',
-    generic: '通用',
-};
-
-const PARSER_COLORS: Record<string, string> = {
-    wechat: 'green',
-    alipay: 'blue',
-    icbc: 'red',
-    cmbc: 'orange',
-    abc: 'teal',
-    ccb: 'indigo',
-    generic: 'grey',
-};
-
-function getLearningSignalStatus(item: ImportTransaction): ImportPreviewSignalStatus | null {
-    if (!item.hasLearningRecommendation()) {
-        return null;
-    }
-
-    if (item.hasPendingLearningRecommendation()) {
-        return 'pending';
-    }
-
-    if (item.isLearningRecommendationAccepted()) {
-        return 'accepted';
-    }
-
-    if (item.isLearningRecommendationRejected()) {
-        return 'rejected';
-    }
-
-    if (item.isLearningRecommendationSkipped()) {
-        return 'skipped';
-    }
-
-    return null;
-}
-
-const importPreviewSignalSourceContext = computed<{
-    sourceRowLookup: Map<string, ImportCheckMatchingSourceContext>;
-    version: string;
-}>(() => {
-    const sourceRowLookup = new Map<string, ImportCheckMatchingSourceContext>();
-    const versionParts: string[] = [];
-
-    for (const item of importTransactions.value) {
-        const parserId = (item.parserId || '').trim();
-        const parserTags = Array.isArray(item.parserTags) ? item.parserTags : [];
-        if (!parserId && parserTags.length < 1) {
-            continue;
-        }
-
-        const previewId = getPreviewId(item);
-        const sourceContext = {
-            parserId,
-            parserTags
-        };
-
-        sourceRowLookup.set(String(item.index), sourceContext);
-        if (previewId !== null) {
-            sourceRowLookup.set(String(previewId), sourceContext);
-        }
-
-        versionParts.push([
-            item.index,
-            previewId ?? '',
-            parserId,
-            parserTags.join('|')
-        ].join('::'));
-    }
-
-    return {
-        sourceRowLookup,
-        version: versionParts.join('\u001f')
-    };
+const {
+    getImportPreviewHistoryRewriteOperation,
+    getImportPreviewSignalViewModel,
+    getImportTransactionRowKey
+} = useImportCheckDataSignals({
+    importTransactions,
+    translate: tt,
+    getPreviewId,
+    getLLMMatchingPayload,
+    getLLMSignalStatus,
+    getLLMSignalCategoryPath,
+    buildLLMSignalSummary,
+    getRecurringMatchSummary,
+    getPrimaryRecurringReason,
+    formatAmountWithCurrency: formatAmountToLocalizedNumeralsWithCurrency
 });
-
-const importPreviewSignalSharedContext = computed<{
-    options: Omit<ImportPreviewSignalViewModelOptions, 'currentParserId' | 'sourceRowLookup'>;
-    version: string;
-}>(() => {
-    const options = {
-        matchLabel: tt('Matching'),
-        parserLabels: PARSER_LABELS,
-        parserColors: PARSER_COLORS,
-        dedupLabels: {
-            'Transfer Match': tt('Transfer Match'),
-            'Platform Duplicate': tt('Platform Duplicate'),
-            'Platform-Bank Duplicate': tt('Platform-Bank Duplicate'),
-            'Similar Duplicate': tt('Similar Duplicate'),
-            'Split-Merge Duplicate': tt('Split-Merge Duplicate'),
-            'Cross-Batch Transfer': tt('Cross-Batch Transfer')
-        },
-        sourceRoleLabels: {
-            outgoing: tt('Outgoing'),
-            incoming: tt('Incoming'),
-            debit: tt('Outgoing'),
-            credit: tt('Incoming')
-        },
-        infoLabels: {
-            sourceLabel: tt('Source'),
-            duplicateSourcesLabel: tt('Duplicate Sources'),
-            recommendedCategoryLabel: tt('Recommended Category'),
-            accountRouteLabel: tt('Account Route')
-        }
-    } satisfies Omit<ImportPreviewSignalViewModelOptions, 'currentParserId' | 'sourceRowLookup'>;
-
-    return {
-        options,
-        version: [
-            options.matchLabel,
-            options.dedupLabels['Transfer Match'],
-            options.dedupLabels['Platform Duplicate'],
-            options.dedupLabels['Platform-Bank Duplicate'],
-            options.dedupLabels['Similar Duplicate'],
-            options.dedupLabels['Split-Merge Duplicate'],
-            options.dedupLabels['Cross-Batch Transfer'],
-            options.sourceRoleLabels.outgoing,
-            options.sourceRoleLabels.incoming,
-            options.infoLabels.sourceLabel,
-            options.infoLabels.duplicateSourcesLabel,
-            options.infoLabels.recommendedCategoryLabel,
-            options.infoLabels.accountRouteLabel
-        ].join('\u001f')
-    };
-});
-
-type ImportPreviewSignalViewModelCacheEntry = {
-    signature: string;
-    viewModel: ImportPreviewSignalViewModel;
-};
-
-const importPreviewSignalViewModelCache = new WeakMap<ImportTransaction, ImportPreviewSignalViewModelCacheEntry>();
 type ServerPagedSelectionAction = 'select_all'
     | 'select_valid'
     | 'select_invalid'
@@ -2969,400 +2810,27 @@ type ServerPagedSelectionAction = 'select_all'
     | 'select_none'
     | 'invert';
 
-function serializeImportPreviewSignalSourceChain(
-    sources: ImportMatchingSourcePayload[] | undefined
-): string {
-    return (sources || []).map(source => [
-        source.role || '',
-        source.parser_id || '',
-        source.parser_label || '',
-        source.label || '',
-        source.position || ''
-    ].join('::')).join('||');
-}
-
-function buildImportPreviewSignalCacheSignature(item: ImportTransaction): string {
-    const dedupSourceIds = Array.isArray(item.dedupSourceIds) ? item.dedupSourceIds : [];
-    const dedupSourceLabels = Array.isArray(item.matching?.dedup.source_labels) ? item.matching?.dedup.source_labels : [];
-    const parserTags = Array.isArray(item.parserTags) ? item.parserTags : [];
-    const learningPayload = item.matching?.learning;
-    const llmPayload = getLLMMatchingPayload(item);
-
-    return [
-        importPreviewSignalSourceContext.value.version,
-        importPreviewSignalSharedContext.value.version,
-        item.index,
-        getPreviewId(item) ?? '',
-        (item.parserId || '').trim(),
-        parserTags.join('|'),
-        item.dedupType || '',
-        dedupSourceIds.join('|'),
-        Number(item.matching?.dedup.source_count || 0),
-        dedupSourceLabels.join('|'),
-        serializeImportPreviewSignalSourceChain(item.matching?.dedup.sources),
-        serializeImportPreviewSignalSourceChain(item.matching?.parser.source_chain),
-        item.matching?.reconciliation?.candidate_type || '',
-        item.matching?.reconciliation?.status || '',
-        item.matching?.reconciliation?.signal_label || '',
-        serializeImportPreviewSignalSourceChain(item.matching?.reconciliation?.source_chain),
-        item.matching?.reconciliation?.planned_operation || '',
-        item.matching?.reconciliation?.history_bill_id || '',
-        item.matching?.reconciliation?.history_bill_version || '',
-        item.matching?.reconciliation?.history_role || '',
-        item.matching?.reconciliation?.group_key || '',
-        item.matching?.reconciliation?.operation_id || '',
-        item.matching?.reconciliation?.acknowledgement_token || '',
-        String(!!item.matching?.reconciliation?.destructive_ack_required),
-        item.matching?.reconciliation?.notice || '',
-        item.matching?.annotation?.history_rewrite_notice || '',
-        JSON.stringify(item.matching?.reconciliation?.history_summary || null),
-        String(!!item.isManuallyAnnotated),
-        getTransferSignalStatus(item) || '',
-        getTransferSignalTitle(item),
-        item.matching?.transfer.pair_order || '',
-        serializeImportPreviewSignalSourceChain(item.matching?.transfer.source_chain),
-        serializeSignalCacheValue(learningPayload?.review_status),
-        serializeSignalCacheValue(learningPayload?.status),
-        serializeSignalCacheValue(learningPayload?.lifecycle_status),
-        serializeSignalCacheValue(learningPayload?.signal_state),
-        String(learningPayload?.reason ?? item.learningRecommendationReason ?? ''),
-        String(learningPayload?.summary ?? item.learningRecommendationSummary ?? ''),
-        String(learningPayload?.mode ?? ''),
-        String(learningPayload?.rule_id ?? ''),
-        String(learningPayload?.score ?? item.learningRecommendationScore ?? ''),
-        String(learningPayload?.confidence ?? ''),
-        String(learningPayload?.margin ?? ''),
-        String(learningPayload?.accepted_count ?? ''),
-        String(learningPayload?.rejected_count ?? ''),
-        String(learningPayload?.auto_applied_count ?? ''),
-        String(learningPayload?.suppressed ?? ''),
-        String(learningPayload?.auto_apply ?? ''),
-        String(learningPayload?.recommendation_key ?? ''),
-        getLLMSignalStatus(item) || '',
-        serializeSignalCacheValue(llmPayload.review_status),
-        serializeSignalCacheValue(llmPayload.status),
-        serializeSignalCacheValue(llmPayload.lifecycle_status),
-        serializeSignalCacheValue(llmPayload.signal_state),
-        String(llmPayload.suggested_type || ''),
-        String(llmPayload.suggested_category_id ?? ''),
-        String(llmPayload.suggested_main_category || ''),
-        String(llmPayload.suggested_sub_category || ''),
-        String(llmPayload.suggested_source_account || ''),
-        String(llmPayload.suggested_destination_account || ''),
-        String(llmPayload.reason || ''),
-        String(llmPayload.confidence ?? ''),
-        String(llmPayload.suppressed ?? ''),
-        String(!!item.hasRecurringMatch()),
-        getRecurringMatchSummary(item),
-        Number(item.recurringCandidateCount || 0),
-        getPrimaryRecurringReason(item)
-    ].join('\u001f');
-}
-
-function getImportPreviewSignalViewModel(item: ImportTransaction): ImportPreviewSignalViewModel {
-    const signature = buildImportPreviewSignalCacheSignature(item);
-    const cached = importPreviewSignalViewModelCache.get(item);
-    if (cached && cached.signature === signature) {
-        return cached.viewModel;
-    }
-
-    const learningPayload = item.matching?.learning;
-    const llmPayload = getLLMMatchingPayload(item);
-    const learningStatusAuthority = item.isTransferProtectedLearningSkip()
-        ? { status: null, authoritative: true }
-        : resolveSignalStatusAuthority(
-            learningPayload?.review_status,
-            learningPayload?.status,
-            learningPayload?.lifecycle_status,
-            learningPayload?.signal_state
-        );
-    const llmStatusAuthority = resolveSignalStatusAuthority(
-        llmPayload.review_status,
-        llmPayload.status,
-        llmPayload.lifecycle_status,
-        llmPayload.signal_state
-    );
-    const viewModel = buildImportPreviewSignalViewModel({
-        parserId: item.parserId,
-        parserTags: item.parserTags,
-        dedupType: item.dedupType,
-        dedupSourceIds: item.dedupSourceIds,
-        dedupSourceCount: item.matching?.dedup.source_count,
-        dedupSourceLabels: item.matching?.dedup.source_labels,
-        dedupSources: item.matching?.dedup.sources,
-        parserIdChain: item.matching?.parser.source_chain,
-        reconciliationType: item.matching?.reconciliation?.candidate_type,
-        reconciliationStatus: item.matching?.reconciliation?.status,
-        reconciliationTitle: item.matching?.reconciliation?.signal_label,
-        reconciliationSourceChain: item.matching?.reconciliation?.source_chain,
-        reconciliationPlannedOperation: item.matching?.reconciliation?.planned_operation,
-        reconciliationHistoryBillId: item.matching?.reconciliation?.history_bill_id,
-        reconciliationHistoryBillVersion: item.matching?.reconciliation?.history_bill_version,
-        reconciliationHistorySummary: item.matching?.reconciliation?.history_summary,
-        reconciliationHistoryRole: item.matching?.reconciliation?.history_role,
-        reconciliationGroupKey: item.matching?.reconciliation?.group_key,
-        reconciliationOperationId: item.matching?.reconciliation?.operation_id,
-        reconciliationAcknowledgementToken: item.matching?.reconciliation?.acknowledgement_token,
-        reconciliationDestructiveAckRequired: !!item.matching?.reconciliation?.destructive_ack_required,
-        reconciliationNotice: item.matching?.reconciliation?.notice || item.matching?.annotation?.history_rewrite_notice,
-        isManuallyAnnotated: item.isManuallyAnnotated,
-        transferStatus: getTransferSignalStatus(item),
-        transferTitle: getTransferSignalTitle(item),
-        transferLearningLevel: item.transferSuggestionLevel,
-        transferPairOrder: item.matching?.transfer.pair_order,
-        transferSourceChain: item.matching?.transfer.source_chain,
-        learningStatus: learningStatusAuthority.authoritative
-            ? learningStatusAuthority.status
-            : getLearningSignalStatus(item),
-        learningTitle: String(learningPayload?.reason ?? item.learningRecommendationReason ?? ''),
-        learningSummary: String(learningPayload?.summary ?? item.learningRecommendationSummary ?? ''),
-        learningMode: String(learningPayload?.mode || ''),
-        learningLifecycleStatus: String(learningPayload?.lifecycle_status || ''),
-        learningSignalState: String(learningPayload?.signal_state || ''),
-        learningAutoApplied: learningPayload?.auto_apply,
-        learningSuppressed: learningPayload?.suppressed,
-        learningStatusAuthoritative: learningStatusAuthority.authoritative,
-        learningRuleId: learningPayload?.rule_id,
-        learningScore: learningPayload?.score ?? item.learningRecommendationScore,
-        learningConfidence: learningPayload?.confidence,
-        learningMargin: learningPayload?.margin,
-        learningAcceptedCount: learningPayload?.accepted_count,
-        learningRejectedCount: learningPayload?.rejected_count,
-        learningAutoAppliedCount: learningPayload?.auto_applied_count,
-        llmStatus: llmStatusAuthority.status,
-        llmTitle: String(llmPayload.reason || ''),
-        llmSummary: buildLLMSignalSummary(llmPayload),
-        llmConfidence: llmPayload.confidence,
-        llmSuggestedCategoryId: llmPayload.suggested_category_id,
-        llmCategoryPath: getLLMSignalCategoryPath(llmPayload),
-        llmSourceAccount: String(llmPayload.suggested_source_account || ''),
-        llmDestinationAccount: String(llmPayload.suggested_destination_account || ''),
-        llmLifecycleStatus: String(llmPayload.lifecycle_status || ''),
-        llmSignalState: String(llmPayload.signal_state || ''),
-        llmSuppressed: llmPayload.suppressed,
-        llmStatusAuthoritative: llmStatusAuthority.authoritative,
-        hasRecurringMatch: item.hasRecurringMatch(),
-        recurringTitle: getRecurringMatchSummary(item),
-        recurringCandidateCount: item.recurringCandidateCount,
-        recurringPrimaryReason: getPrimaryRecurringReason(item)
-    }, {
-        ...importPreviewSignalSharedContext.value.options,
-        formatAmountWithCurrency: formatAmountToLocalizedNumeralsWithCurrency,
-        currentParserId: item.parserId,
-        sourceRowLookup: importPreviewSignalSourceContext.value.sourceRowLookup
-    });
-
-    importPreviewSignalViewModelCache.set(item, {
-        signature,
-        viewModel
-    });
-    return viewModel;
-}
-
-function getImportPreviewHistoryRewriteOperation(
-    item: ImportTransaction
-): ImportPreviewHistoryRewriteAcknowledgementOperation | null {
-    const previewId = getPreviewId(item);
-    if (previewId === null) {
-        return null;
-    }
-
-    return buildImportPreviewHistoryRewriteOperationAcknowledgement(previewId, {
-        reconciliationPlannedOperation: item.matching?.reconciliation?.planned_operation,
-        reconciliationHistoryBillId: item.matching?.reconciliation?.history_bill_id,
-        reconciliationHistoryBillVersion: item.matching?.reconciliation?.history_bill_version,
-        reconciliationOperationId: item.matching?.reconciliation?.operation_id,
-        reconciliationAcknowledgementToken: item.matching?.reconciliation?.acknowledgement_token,
-        reconciliationDestructiveAckRequired: !!item.matching?.reconciliation?.destructive_ack_required
-    });
-}
-
-function getImportTransactionRowKey(item: ImportTransaction): string {
-    const previewId = getPreviewId(item);
-    if (previewId !== null) {
-        return `preview:${previewId}`;
-    }
-
-    return `row:${item.index}`;
-}
-
-function hasMissingCategoryIssue(item: ImportTransaction): boolean {
-    return item.type !== TransactionType.ModifyBalance && !isTransactionCategoryAccepted(item);
-}
-
-function hasMissingSourceAccountIssue(item: ImportTransaction): boolean {
-    return !isKnownAccountId(item.sourceAccountId);
-}
-
-function hasMissingDestinationAccountIssue(item: ImportTransaction): boolean {
-    return requiresDestinationAccount(item) && !isKnownAccountId(item.destinationAccountId);
-}
-
-function hasTransferAccountReviewIssue(item: ImportTransaction): boolean {
-    return requiresDestinationAccount(item)
-        && isKnownAccountId(item.sourceAccountId)
-        && isKnownAccountId(item.destinationAccountId)
-        && item.sourceAccountId === item.destinationAccountId;
-}
-
-function collectAnnotationIssues(item: ImportTransaction): string[] {
-    const reasons: string[] = [];
-
-    if (hasMissingCategoryIssue(item)) {
-        reasons.push(tt('Missing Category'));
-    }
-
-    if (hasMissingSourceAccountIssue(item)) {
-        reasons.push(tt('Missing Source Account'));
-    }
-
-    if (hasMissingDestinationAccountIssue(item)) {
-        reasons.push(tt('Missing Destination Account'));
-    }
-
-    if (hasTransferAccountReviewIssue(item)) {
-        reasons.push(tt('Review Transfer Accounts'));
-    }
-
-    return reasons;
-}
-
-const importTransactionSelectionRevision = ref(0);
-const importTransactionSelectionSummary = computed<ImportTransactionSelectionSummary>(() => {
-    void importTransactionSelectionRevision.value;
-    return collectImportTransactionSelectionSummary(getTrackedTransactionsForSelection(), collectAnnotationIssues);
+const {
+    getAnnotationListTitle,
+    getAnnotationIssues,
+    getAnnotationSummary,
+    hasBaselineAnnotationIssue,
+    hasCurrentAnnotationIssue,
+    hasMissingCategoryIssue,
+    hasMissingDestinationAccountIssue,
+    hasMissingSourceAccountIssue,
+    hasTransferAccountReviewIssue,
+    importTransactionSelectionSummary,
+    needsAnnotation,
+    refreshImportTransactionSelectionSummary
+} = useImportCheckDataAnnotations({
+    translate: tt,
+    isTransactionCategoryAccepted,
+    isKnownAccountId,
+    requiresDestinationAccount,
+    getTrackedTransactionsForSelection,
+    getDisplayDateTime
 });
-
-function getAnnotationIssues(item: ImportTransaction): string[] {
-    return importTransactionSelectionSummary.value.annotationIssuesByIndex[item.index] || collectAnnotationIssues(item);
-}
-
-function needsAnnotation(item: ImportTransaction): boolean {
-    return getAnnotationIssues(item).length > 0;
-}
-
-type MatchingAnnotationPayload = Record<string, unknown> | string | null | undefined;
-
-function getMatchingAnnotationPayload(item: ImportTransaction): MatchingAnnotationPayload {
-    return item.matching?.annotation as MatchingAnnotationPayload;
-}
-
-function getAnnotationText(annotation: MatchingAnnotationPayload): string {
-    if (typeof annotation === 'string') {
-        return annotation.trim();
-    }
-
-    if (annotation && typeof annotation === 'object') {
-        for (const key of ['status', 'type', 'review_status', 'level', 'reason']) {
-            const value = annotation[key];
-            if (typeof value === 'string' && value.trim() !== '') {
-                return value.trim();
-            }
-        }
-    }
-
-    return '';
-}
-
-function getAnnotationType(annotation: MatchingAnnotationPayload): string {
-    if (typeof annotation === 'string') {
-        return annotation.trim().toLowerCase();
-    }
-
-    if (annotation && typeof annotation === 'object') {
-        return getAnnotationText(annotation).trim().toLowerCase();
-    }
-
-    return '';
-}
-
-function isCategoryAnnotationType(annotationType: string): boolean {
-    return [
-        'category',
-        'category_missing',
-        'missing_category',
-        'missing-category',
-        'missing_classification'
-    ].includes(annotationType);
-}
-
-function isSourceAccountAnnotationType(annotationType: string): boolean {
-    return [
-        'account',
-        'missing_account',
-        'source_account',
-        'source_account_missing',
-        'missing_source_account',
-        'missing-source-account'
-    ].includes(annotationType);
-}
-
-function isDestinationAccountAnnotationType(annotationType: string): boolean {
-    return [
-        'destination_account',
-        'destination_account_missing',
-        'missing_destination_account',
-        'missing-destination-account'
-    ].includes(annotationType);
-}
-
-function isTransferAccountAnnotationType(annotationType: string): boolean {
-    return [
-        'transfer_account_direction',
-        'transfer_accounts',
-        'review_transfer_accounts',
-        'same_transfer_accounts'
-    ].includes(annotationType);
-}
-
-function hasRawPersistedMatchingAnnotationIssue(item: ImportTransaction): boolean {
-    return getAnnotationText(getMatchingAnnotationPayload(item)) !== '';
-}
-
-function hasCurrentPersistedMatchingAnnotationIssue(item: ImportTransaction): boolean {
-    const annotation = getMatchingAnnotationPayload(item);
-    if (getAnnotationText(annotation) === '') {
-        return false;
-    }
-
-    const annotationType = getAnnotationType(annotation);
-    if (isCategoryAnnotationType(annotationType)) {
-        return hasMissingCategoryIssue(item);
-    }
-
-    if (isSourceAccountAnnotationType(annotationType)) {
-        return hasMissingSourceAccountIssue(item);
-    }
-
-    if (isDestinationAccountAnnotationType(annotationType)) {
-        return hasMissingDestinationAccountIssue(item);
-    }
-
-    if (isTransferAccountAnnotationType(annotationType)) {
-        return hasMissingSourceAccountIssue(item)
-            || hasMissingDestinationAccountIssue(item)
-            || hasTransferAccountReviewIssue(item);
-    }
-
-    return hasRawPersistedMatchingAnnotationIssue(item);
-}
-
-function hasBaselineAnnotationIssue(item: ImportTransaction): boolean {
-    return hasCurrentAnnotationIssue(item);
-}
-
-function hasCurrentAnnotationIssue(item: ImportTransaction): boolean {
-    return collectAnnotationIssues(item).length > 0 || hasCurrentPersistedMatchingAnnotationIssue(item);
-}
-
-function getAnnotationSummary(item: ImportTransaction): string {
-    return getAnnotationIssues(item).join(' · ');
-}
-
-function getAnnotationListTitle(item: ImportTransaction): string {
-    const description = item.comment || item.counterparty || item.paymentMethod || tt('No description');
-    return `${getDisplayDateTime(item)} · ${description}`;
-}
 
 // 批量编辑分类：根据选中的交易类型获取分类列表
 function getBatchCategoryItems(): TransactionCategory[] {
@@ -4571,13 +4039,13 @@ watch(
 watch(
     () => [serverPagedMode.value, props.sessionId] as const,
     ([isServerPaged]) => {
+        lastServerPagedRequestKey.value = '';
         if (!isServerPaged) {
             serverPagedDrafts.value = new Map();
             serverPagedDraftBaselines.value = new Map();
             serverPagedSelectionBaselines.value = new Map();
             currentSortKey.value = '';
             currentSortDirection.value = 'asc';
-            lastServerPagedRequestKey.value = '';
             return;
         }
 
@@ -5554,6 +5022,7 @@ defineExpose({
     getSelectedVisibleHistoryRewriteOperationCount,
     getCurrentPreviewPage,
     getCurrentPreviewPageSize,
+    getAnnotationIssues,
     getCurrentServerPagedRequestOptions
 });
 </script>

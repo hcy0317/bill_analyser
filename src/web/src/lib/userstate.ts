@@ -1,4 +1,3 @@
-import CryptoJS from 'crypto-js';
 import axios from 'axios';
 
 import type { ApplicationLockState, WebAuthnConfig } from '@/core/setting.ts';
@@ -9,34 +8,26 @@ import type { TransactionDraft } from '@/models/transaction.ts';
 import { isString, isObject } from './common.ts';
 import { isEnableApplicationLock } from './settings.ts';
 import logger from './logger.ts';
+import {
+    appLockStateSessionStorageKey,
+    clearAxiosAuthorizationHeader,
+    discardLegacyPlaintextRefreshCredential,
+    encryptedRefreshTokenSessionStorageKey,
+    encryptedTokenSessionStorageKey,
+    getAppLockSecret,
+    getDecryptedCredentialOrNull,
+    getDecryptedToken,
+    getEncryptedToken,
+    refreshTokenLocalStorageKey,
+    refreshTokenSessionStorageKey,
+    restoreUnlockedCredentials,
+    tokenLocalStorageKey,
+    tokenSessionStorageKey
+} from './userstate/credentials.ts';
 
-const appLockSecretBaseStringPrefix: string = 'EBK_LOCK_SECRET_';
-
-const tokenLocalStorageKey: string = 'ebk_user_token';
-const refreshTokenLocalStorageKey: string = 'ebk_user_refresh_token';
 const webauthnConfigLocalStorageKey: string = 'ebk_user_webauthn_config';
 const userInfoLocalStorageKey: string = 'ebk_user_info';
 const transactionDraftLocalStorageKey: string = 'ebk_user_draft_transaction';
-
-const tokenSessionStorageKey: string = 'ebk_user_session_token';
-const encryptedTokenSessionStorageKey: string = 'ebk_user_session_encrypted_token';
-const appLockStateSessionStorageKey: string = 'ebk_user_app_lock_state'; // { 'username': '', secret: '' }
-
-function getAppLockSecret(pinCode: string): string {
-    const hashedPinCode = CryptoJS.SHA256(appLockSecretBaseStringPrefix + pinCode).toString();
-    return hashedPinCode.substring(0, 24); // 将 secret 放入 WebAuthn 的 user id（user id 总长度必须小于 64 字节）
-}
-
-function getEncryptedToken(token: string, appLockState: ApplicationLockState): string {
-    const key = CryptoJS.SHA256(`${appLockSecretBaseStringPrefix}|${appLockState.username}|${appLockState.secret}`).toString();
-    return CryptoJS.AES.encrypt(token, key).toString();
-}
-
-function getDecryptedToken(encryptedToken: string, appLockState: ApplicationLockState): string {
-    const key = CryptoJS.SHA256(`${appLockSecretBaseStringPrefix}|${appLockState.username}|${appLockState.secret}`).toString();
-    const bytes = CryptoJS.AES.decrypt(encryptedToken, key);
-    return bytes.toString(CryptoJS.enc.Utf8);
-}
 
 /** 中文说明：判断当前会话是否存在 access token。 */
 export function isUserLogined(): boolean {
@@ -102,11 +93,7 @@ export function unlockTokenByWebAuthn(credentialId: string, userName: string, us
         username: userName,
         secret: userSecret
     };
-    const token = getDecryptedToken(encryptedToken, appLockState);
-
-    sessionStorage.setItem(appLockStateSessionStorageKey, JSON.stringify(appLockState));
-    sessionStorage.setItem(encryptedTokenSessionStorageKey, encryptedToken);
-    sessionStorage.setItem(tokenSessionStorageKey, token);
+    restoreUnlockedCredentials(encryptedToken, appLockState);
 }
 
 /** 中文说明：用 PIN 码恢复应用锁状态，并解密当前 access/refresh token。 */
@@ -121,11 +108,7 @@ export function unlockTokenByPinCode(userName: string, pinCode: string): void {
         username: userName,
         secret: getAppLockSecret(pinCode)
     };
-    const token = getDecryptedToken(encryptedToken, appLockState);
-
-    sessionStorage.setItem(appLockStateSessionStorageKey, JSON.stringify(appLockState));
-    sessionStorage.setItem(encryptedTokenSessionStorageKey, encryptedToken);
-    sessionStorage.setItem(tokenSessionStorageKey, token);
+    restoreUnlockedCredentials(encryptedToken, appLockState);
 }
 
 /** 中文说明：启用应用锁时重新加密当前 access/refresh token，并保存锁定状态。 */
@@ -141,24 +124,43 @@ export function encryptToken(userName: string, pinCode: string): void {
         secret: getAppLockSecret(pinCode)
     };
     const encryptedToken = getEncryptedToken(token, appLockState);
+    const refreshToken = localStorage.getItem(refreshTokenLocalStorageKey);
 
     sessionStorage.setItem(appLockStateSessionStorageKey, JSON.stringify(appLockState));
     sessionStorage.setItem(encryptedTokenSessionStorageKey, encryptedToken);
     sessionStorage.setItem(tokenSessionStorageKey, token);
     localStorage.setItem(tokenLocalStorageKey, encryptedToken);
+
+    if (refreshToken) {
+        const encryptedRefreshToken = getEncryptedToken(refreshToken, appLockState);
+        sessionStorage.setItem(encryptedRefreshTokenSessionStorageKey, encryptedRefreshToken);
+        sessionStorage.setItem(refreshTokenSessionStorageKey, refreshToken);
+        localStorage.setItem(refreshTokenLocalStorageKey, encryptedRefreshToken);
+    } else {
+        sessionStorage.removeItem(encryptedRefreshTokenSessionStorageKey);
+        sessionStorage.removeItem(refreshTokenSessionStorageKey);
+    }
 }
 
 /** 中文说明：根据内存中的应用锁密钥解密 token，并把明文 token 恢复到当前会话状态。 */
 export function decryptToken(): void {
     const token = sessionStorage.getItem(tokenSessionStorageKey);
+    const refreshToken = sessionStorage.getItem(refreshTokenSessionStorageKey);
 
     if (!token) {
         throw new Error('No token in session storage');
     }
 
     localStorage.setItem(tokenLocalStorageKey, token);
+    if (refreshToken) {
+        localStorage.setItem(refreshTokenLocalStorageKey, refreshToken);
+    } else {
+        localStorage.removeItem(refreshTokenLocalStorageKey);
+    }
     sessionStorage.removeItem(tokenSessionStorageKey);
     sessionStorage.removeItem(encryptedTokenSessionStorageKey);
+    sessionStorage.removeItem(refreshTokenSessionStorageKey);
+    sessionStorage.removeItem(encryptedRefreshTokenSessionStorageKey);
     sessionStorage.removeItem(appLockStateSessionStorageKey);
 }
 
@@ -179,11 +181,18 @@ export function getCurrentToken(): string | null {
     const enableAppLock = isEnableApplicationLock();
 
     if (enableAppLock) {
+        const appLockState = getUserAppLockState();
         const usedEncryptedToken = sessionStorage.getItem(encryptedTokenSessionStorageKey);
         const currentEncryptedToken = localStorage.getItem(tokenLocalStorageKey);
         const sessionToken = sessionStorage.getItem(tokenSessionStorageKey);
 
         logger.debug(`[getCurrentToken] AppLock mode: hasSessionEnc=${!!usedEncryptedToken}, hasLocalEnc=${!!currentEncryptedToken}, hasSessionPlain=${!!sessionToken}`);
+
+        if (!appLockState) {
+            discardLegacyPlaintextRefreshCredential();
+            logger.debug('[getCurrentToken] App lock is active but the current session is locked');
+            return null;
+        }
 
         if (!usedEncryptedToken || !currentEncryptedToken) {
             // 兜底：如果应用锁已启用，但当前没有 session key，
@@ -221,13 +230,6 @@ export function getCurrentToken(): string | null {
 
         // 重新解密 token
         logger.debug('[getCurrentToken] Encrypted token changed, re-decrypting...');
-
-        const appLockState = getUserAppLockState();
-
-        if (!appLockState) {
-            logger.error('[getCurrentToken] AppLockState missing during re-decrypt');
-            return null;
-        }
 
         const token = getDecryptedToken(currentEncryptedToken, appLockState);
 
@@ -287,14 +289,61 @@ export function updateCurrentToken(token: string): void {
 
 /** 中文说明：读取当前 refresh token，供 refresh 流程和会话恢复使用。 */
 export function getCurrentRefreshToken(): string | null {
-    return localStorage.getItem(refreshTokenLocalStorageKey);
+    if (!isEnableApplicationLock()) {
+        return localStorage.getItem(refreshTokenLocalStorageKey);
+    }
+
+    const appLockState = getUserAppLockState();
+    const currentEncryptedRefreshToken = localStorage.getItem(refreshTokenLocalStorageKey);
+
+    if (!appLockState || !currentEncryptedRefreshToken) {
+        return null;
+    }
+
+    const usedEncryptedRefreshToken = sessionStorage.getItem(encryptedRefreshTokenSessionStorageKey);
+    const sessionRefreshToken = sessionStorage.getItem(refreshTokenSessionStorageKey);
+
+    if (usedEncryptedRefreshToken === currentEncryptedRefreshToken && sessionRefreshToken) {
+        return sessionRefreshToken;
+    }
+
+    const refreshToken = getDecryptedCredentialOrNull(currentEncryptedRefreshToken, appLockState);
+
+    if (!refreshToken) {
+        sessionStorage.removeItem(encryptedRefreshTokenSessionStorageKey);
+        sessionStorage.removeItem(refreshTokenSessionStorageKey);
+        return null;
+    }
+
+    sessionStorage.setItem(encryptedRefreshTokenSessionStorageKey, currentEncryptedRefreshToken);
+    sessionStorage.setItem(refreshTokenSessionStorageKey, refreshToken);
+    return refreshToken;
 }
 
 /** 中文说明：更新当前 refresh token，并在应用锁启用时同步写入加密缓存。 */
 export function updateCurrentRefreshToken(refreshToken: string): void {
-    if (isString(refreshToken)) {
-        localStorage.setItem(refreshTokenLocalStorageKey, refreshToken);
+    if (!isString(refreshToken)) {
+        return;
     }
+
+    if (isEnableApplicationLock()) {
+        const appLockState = getUserAppLockState();
+
+        if (!appLockState) {
+            logger.warn('[updateCurrentRefreshToken] App lock is active without an unlocked credential state');
+            return;
+        }
+
+        const encryptedRefreshToken = getEncryptedToken(refreshToken, appLockState);
+        localStorage.setItem(refreshTokenLocalStorageKey, encryptedRefreshToken);
+        sessionStorage.setItem(encryptedRefreshTokenSessionStorageKey, encryptedRefreshToken);
+        sessionStorage.setItem(refreshTokenSessionStorageKey, refreshToken);
+        return;
+    }
+
+    localStorage.setItem(refreshTokenLocalStorageKey, refreshToken);
+    sessionStorage.removeItem(encryptedRefreshTokenSessionStorageKey);
+    sessionStorage.removeItem(refreshTokenSessionStorageKey);
 }
 
 /** 中文说明：判断当前用户是否已保存 WebAuthn 凭据配置。 */
@@ -428,7 +477,10 @@ export function clearUserTransactionDraft(): void {
 export function clearCurrentSessionToken(): void {
     sessionStorage.removeItem(tokenSessionStorageKey);
     sessionStorage.removeItem(encryptedTokenSessionStorageKey);
+    sessionStorage.removeItem(refreshTokenSessionStorageKey);
+    sessionStorage.removeItem(encryptedRefreshTokenSessionStorageKey);
     sessionStorage.removeItem(appLockStateSessionStorageKey);
+    clearAxiosAuthorizationHeader();
 }
 
 /** 中文说明：清理当前 token、refresh token 和用户信息，并按需要同步清除应用锁状态。 */
@@ -443,6 +495,8 @@ export function clearCurrentTokenAndUserInfo(clearAppLockState: boolean): void {
     logger.debug('[clearCurrentTokenAndUserInfo] 清理sessionStorage token');
     sessionStorage.removeItem(tokenSessionStorageKey);
     sessionStorage.removeItem(encryptedTokenSessionStorageKey);
+    sessionStorage.removeItem(refreshTokenSessionStorageKey);
+    sessionStorage.removeItem(encryptedRefreshTokenSessionStorageKey);
 
     logger.debug('[clearCurrentTokenAndUserInfo] 清理localStorage token');
     localStorage.removeItem(tokenLocalStorageKey);
@@ -456,7 +510,7 @@ export function clearCurrentTokenAndUserInfo(clearAppLockState: boolean): void {
 
     // 关键修复：清除axios.defaults.headers.common中的Authorization
     logger.debug('[clearCurrentTokenAndUserInfo] 清理axios Authorization头');
-    delete axios.defaults.headers.common['Authorization'];
+    clearAxiosAuthorizationHeader();
 
     // 验证清理结果
     const tokenStillExists = localStorage.getItem(tokenLocalStorageKey);

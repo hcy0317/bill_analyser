@@ -202,6 +202,16 @@ export function useDesktopCategoryListPage() {
         });
     }
 
+    // 保留 composable 的选择分派合同；工具栏可继续使用显式的一级/二级分类入口。
+    function addCategoryByCurrentSelection(): void {
+        if (canAddSecondaryCategory.value) {
+            addSecondaryCategory();
+            return;
+        }
+
+        addPrimaryCategory();
+    }
+
     function edit(category: TransactionCategory): void {
         editDialog.value?.open({
             id: category.id,
@@ -369,6 +379,7 @@ export function useDesktopCategoryListPage() {
         reload,
         addPrimaryCategory,
         addSecondaryCategory,
+        addCategoryByCurrentSelection,
         edit,
         hide,
         remove,

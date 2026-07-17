@@ -47,21 +47,21 @@ pub(super) const ROUTES: &[EndpointOwnership] = &[
     ),
     rust_owned_route!(
         "POST",
-        "/api/matching/candidates/{*candidate_id}/accept",
+        "/api/matching/candidates/{candidate_id}/accept",
         "matching-recurring-calendar-networth",
         ResponseEnvelopeFamily::CurrentSuccessData,
         "Rust matching runtime owns candidate accept actions across formal bills and import-preview matching families; the removed matching route shell is deleted."
     ),
     rust_owned_route!(
         "POST",
-        "/api/matching/candidates/{*candidate_id}/clear",
+        "/api/matching/candidates/{candidate_id}/clear",
         "matching-recurring-calendar-networth",
         ResponseEnvelopeFamily::CurrentSuccessData,
         "Rust matching runtime owns candidate clear actions for supported import-preview matching families; the removed matching route shell is deleted."
     ),
     rust_owned_route!(
         "POST",
-        "/api/matching/candidates/{*candidate_id}/reject",
+        "/api/matching/candidates/{candidate_id}/reject",
         "matching-recurring-calendar-networth",
         ResponseEnvelopeFamily::CurrentSuccessData,
         "Rust matching runtime owns candidate reject actions across formal bills and import-preview matching families; the removed matching route shell is deleted."
@@ -243,6 +243,24 @@ pub(super) const ROUTES: &[EndpointOwnership] = &[
     },
     EndpointOwnership {
         method: "GET",
+        pattern: "/api/tags",
+        domain: "taxonomy-rules-settings",
+        state: RuntimeState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::CurrentSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy runtime owns the non-trailing-slash current-user tag list route.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/tags",
+        domain: "taxonomy-rules-settings",
+        state: RuntimeState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::CurrentSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy runtime owns non-trailing-slash current-user tag creation.",
+    },
+    EndpointOwnership {
+        method: "GET",
         pattern: "/api/tags/",
         domain: "taxonomy-rules-settings",
         state: RuntimeState::RustOwnedVerified,
@@ -303,6 +321,24 @@ pub(super) const ROUTES: &[EndpointOwnership] = &[
         envelope: ResponseEnvelopeFamily::CurrentSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust taxonomy runtime owns user-scoped tag display-order updates; the removed tags.py shell has been removed.",
+    },
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/templates",
+        domain: "taxonomy-rules-settings",
+        state: RuntimeState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::CurrentSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy templates runtime owns the non-trailing-slash authenticated-user template list route.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/templates",
+        domain: "taxonomy-rules-settings",
+        state: RuntimeState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::CurrentSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy templates runtime owns non-trailing-slash authenticated-user template creation.",
     },
     EndpointOwnership {
         method: "GET",

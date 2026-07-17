@@ -30,6 +30,7 @@ use crate::{
 include!("postgres_reads/accounts.rs");
 include!("postgres_reads/categories.rs");
 include!("postgres_reads/category_rules.rs");
+include!("postgres_reads/learning_rules.rs");
 include!("postgres_reads/account_rules.rs");
 include!("postgres_reads/tags.rs");
 include!("postgres_reads/templates.rs");

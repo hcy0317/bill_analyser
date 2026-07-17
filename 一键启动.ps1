@@ -23,67 +23,6 @@ function Write-Warn { param($msg) Write-Host $msg -ForegroundColor Yellow }
 function Write-Err { param($msg) Write-Host $msg -ForegroundColor Red }
 function Write-Gray { param($msg) Write-Host $msg -ForegroundColor Gray }
 
-function Get-PortFromBind {
-    param(
-        [string]$Bind,
-        [int]$DefaultPort
-    )
-
-    if ([string]::IsNullOrWhiteSpace($Bind)) {
-        return $DefaultPort
-    }
-
-    $lastColon = $Bind.LastIndexOf(":")
-    if ($lastColon -lt 0 -or $lastColon -eq ($Bind.Length - 1)) {
-        Write-Warn "无法从 BILL_ANALYSER_HTTP_BIND='$Bind' 解析端口，使用默认端口 $DefaultPort"
-        return $DefaultPort
-    }
-
-    $portText = $Bind.Substring($lastColon + 1)
-    $port = 0
-    if ([int]::TryParse($portText, [ref]$port) -and $port -gt 0 -and $port -le 65535) {
-        return $port
-    }
-
-    Write-Warn "无法从 BILL_ANALYSER_HTTP_BIND='$Bind' 解析端口，使用默认端口 $DefaultPort"
-    return $DefaultPort
-}
-
-function Get-ProbeHostFromBind {
-    param(
-        [string]$Bind,
-        [string]$DefaultHost
-    )
-
-    if ([string]::IsNullOrWhiteSpace($Bind)) {
-        return $DefaultHost
-    }
-
-    $hostText = $DefaultHost
-    if ($Bind.StartsWith("[")) {
-        $endBracket = $Bind.IndexOf("]")
-        if ($endBracket -gt 1) {
-            $hostText = $Bind.Substring(1, $endBracket - 1)
-        }
-    } else {
-        $lastColon = $Bind.LastIndexOf(":")
-        if ($lastColon -gt 0) {
-            $hostText = $Bind.Substring(0, $lastColon)
-        }
-    }
-
-    $hostText = $hostText.Trim()
-    if ([string]::IsNullOrWhiteSpace($hostText) -or $hostText -in @("0.0.0.0", "::", "*")) {
-        return "127.0.0.1"
-    }
-
-    if ($hostText.Contains(":") -and -not $hostText.StartsWith("[")) {
-        return "[$hostText]"
-    }
-
-    return $hostText
-}
-
 function Get-PreferredShell {
     $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
     if ($pwshCmd) {
@@ -546,6 +485,7 @@ function Start-RequiredRuntimeServices {
 
 # 获取项目根目录
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $ProjectRoot "scripts\http-bind.ps1")
 Set-Location $ProjectRoot
 $ShellExe = Get-PreferredShell
 
@@ -555,11 +495,12 @@ if (-not $ShellExe) {
 }
 
 $BackendBind = if ($env:BILL_ANALYSER_HTTP_BIND) { $env:BILL_ANALYSER_HTTP_BIND } else { "127.0.0.1:5000" }
-$BackendPort = Get-PortFromBind -Bind $BackendBind -DefaultPort 5000
-$BackendProbeHost = Get-ProbeHostFromBind -Bind $BackendBind -DefaultHost "127.0.0.1"
+$BackendEndpoint = Resolve-BillAnalyserHttpEndpoint -Bind $BackendBind
+$env:BILL_ANALYSER_HTTP_BIND = $BackendEndpoint.Bind
+$BackendPort = $BackendEndpoint.Port
 $FrontendPort = 8081
-$BackendBaseUrl = "http://${BackendProbeHost}:$BackendPort"
-$BackendHealthUrl = "$BackendBaseUrl/api/health"
+$BackendBaseUrl = $BackendEndpoint.BaseUrl
+$BackendHealthUrl = $BackendEndpoint.HealthUrl
 $FrontendUrl = "http://127.0.0.1:$FrontendPort"
 $BackendStartupTimeoutSeconds = Get-PositiveIntSetting -Name "BILL_ANALYSER_BACKEND_STARTUP_TIMEOUT_SECONDS" -DefaultValue 300
 $FrontendStartupTimeoutSeconds = Get-PositiveIntSetting -Name "BILL_ANALYSER_FRONTEND_STARTUP_TIMEOUT_SECONDS" -DefaultValue 60

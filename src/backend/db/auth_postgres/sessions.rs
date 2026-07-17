@@ -104,6 +104,31 @@ pub async fn get_postgres_active_session_id_by_token_hash(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：按 access token hash、用户、active 与过期时间读取唯一授权 session。
+pub async fn get_postgres_authoritative_access_session_id(
+    pool: &PostgresPool,
+    token_hash: &str,
+    user_id: UserId,
+) -> DbResult<Option<i64>> {
+    sqlx::query_scalar(
+        r#"
+        SELECT id
+        FROM token_sessions
+        WHERE token_hash = $1
+          AND user_id = $2
+          AND is_active = TRUE
+          AND expires_at > now()
+        LIMIT 1
+        "#,
+    )
+    .bind(token_hash)
+    .bind(user_id_i64(user_id)?)
+    .fetch_optional(pool)
+    .await
+    .map_err(postgres_auth_error)
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
 /// 中文说明：读取仍有效的 refresh session，确保 refresh token 轮换只发生在当前可用会话内。
 pub async fn get_postgres_active_refresh_session(
     pool: &PostgresPool,

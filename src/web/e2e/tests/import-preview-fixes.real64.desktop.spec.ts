@@ -12,13 +12,65 @@ import { cleanupE2ESession, createCleanE2ESession } from '../helpers/session';
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 const REAL64_DIR = path.join(REPO_ROOT, 'bills');
 const EVIDENCE_DIR = path.join(REPO_ROOT, '.omx', 'context');
+const LEGACY_BINARY_XLS_FILE_NAME = '交易明细_9316_20230827_20250827.xls';
 
 test.describe('G019 real 64-file import preview', () => {
     test.describe.configure({ mode: 'serial', retries: 0, timeout: 240_000 });
 
-    test('uploads the fixed real corpus and records canonical filter evidence', async ({ page, request }) => {
+    test('rejects the unsupported legacy file without silently starting dedup', async ({ page, request }) => {
         const session = await createCleanE2ESession(request);
         const manifest = buildReal64Manifest();
+        let dedupRequestCount = 0;
+
+        page.on('request', requestValue => {
+            if (requestValue.method() === 'POST' && requestValue.url().includes('/api/bills/import/v2/dedup')) {
+                dedupRequestCount += 1;
+            }
+        });
+
+        try {
+            const env = getE2EEnvironment();
+            await page.goto(desktopRoute('/transaction/list?pageType=0&dateType=7', env), {
+                waitUntil: 'domcontentloaded'
+            });
+            await page.getByTestId('desktop.transactions.action.import').click();
+            await expect(page.getByTestId('desktop.import.dialog')).toBeVisible();
+            await page.getByTestId('desktop.import.file-input').setInputFiles(manifest.files.map(file => file.path));
+
+            const parseResponsePromise = page.waitForResponse(response => (
+                response.request().method() === 'POST'
+                && response.url().includes('/api/bills/import/v2/parse')
+            ));
+            await page.getByTestId('desktop.import.action.next').click();
+            const parseResponse = await parseResponsePromise;
+            expect(parseResponse.ok(), 'real64 parse request').toBe(true);
+            const parseData = unwrapData(await parseResponse.json() as Record<string, unknown>);
+            const unmatchedFiles = Array.isArray(parseData['unmatched_files'])
+                ? parseData['unmatched_files'] as Array<Record<string, unknown>>
+                : [];
+
+            expect(unmatchedFiles.map(file => String(file['original_name'] || '')))
+                .toContain(LEGACY_BINARY_XLS_FILE_NAME);
+            await expect(page.getByText('不支持旧版二进制 XLS', { exact: false })).toBeVisible();
+            expect(dedupRequestCount).toBe(0);
+
+            mkdirSync(EVIDENCE_DIR, { recursive: true });
+            writeFileSync(path.join(EVIDENCE_DIR, 'g019-real64-unsupported-boundary.json'), JSON.stringify({
+                generatedAt: new Date().toISOString(),
+                corpusCount: manifest.files.length,
+                parsedCount: parseData['parsed_count'],
+                unmatchedFiles
+            }, null, 2));
+        } finally {
+            await cleanupE2ESession(session);
+        }
+    });
+
+    test('imports the compatible real corpus and records canonical filter evidence', async ({ page, request }) => {
+        const session = await createCleanE2ESession(request);
+        const manifest = buildReal64Manifest();
+        const compatibleFiles = manifest.files.filter(file => file.name !== LEGACY_BINARY_XLS_FILE_NAME);
+        expect(compatibleFiles).toHaveLength(63);
         const previewRequests: Array<Record<string, unknown>> = [];
         const requestStartedAt = new Map<string, number>();
         let parseStartedAt = 0;
@@ -52,7 +104,7 @@ test.describe('G019 real 64-file import preview', () => {
             await expect(page.getByTestId('desktop.import.dialog')).toBeVisible();
 
             const fileInput = page.getByTestId('desktop.import.file-input');
-            await fileInput.setInputFiles(manifest.files.map(file => file.path));
+            await fileInput.setInputFiles(compatibleFiles.map(file => file.path));
 
             const parseResponsePromise = page.waitForResponse(response => (
                 response.request().method() === 'POST'
@@ -109,6 +161,8 @@ test.describe('G019 real 64-file import preview', () => {
                 corpus: {
                     directory: REAL64_DIR,
                     count: manifest.files.length,
+                    uploadedCompatibleCount: compatibleFiles.length,
+                    excludedUnsupportedFile: LEGACY_BINARY_XLS_FILE_NAME,
                     totalBytes: manifest.totalBytes,
                     extensions: manifest.extensions,
                     files: manifest.files.map(file => ({

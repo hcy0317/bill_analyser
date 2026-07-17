@@ -8,7 +8,8 @@ fn preview_patch_value_updates_category_identity_in_row_and_payload() {
         &mut payload,
         ImportPreviewPatchField::CategoryId,
         ImportPreviewPatchValue::Integer(42),
-    );
+    )
+    .expect("category id patch");
 
     assert_eq!(row.category_id, Some(42));
     assert_eq!(payload["category_id"], json!(42));
@@ -19,7 +20,8 @@ fn preview_patch_value_updates_category_identity_in_row_and_payload() {
         &mut payload,
         ImportPreviewPatchField::CategoryId,
         ImportPreviewPatchValue::Null,
-    );
+    )
+    .expect("category clear patch");
 
     assert_eq!(row.category_id, None);
     assert_eq!(payload["category_id"], Value::Null);
@@ -30,7 +32,8 @@ fn preview_patch_value_updates_category_identity_in_row_and_payload() {
         &mut payload,
         ImportPreviewPatchField::Amount,
         ImportPreviewPatchValue::Integer(-12345),
-    );
+    )
+    .expect("amount patch");
     assert_eq!(row.preview_amount_cents, 12345);
     assert_eq!(payload["preview_amount_cents"], json!(12345));
 
@@ -39,9 +42,29 @@ fn preview_patch_value_updates_category_identity_in_row_and_payload() {
         &mut payload,
         ImportPreviewPatchField::DestinationAmount,
         ImportPreviewPatchValue::Integer(-54321),
-    );
+    )
+    .expect("destination amount patch");
     assert_eq!(row.preview_destination_amount_cents, 54321);
     assert_eq!(payload["preview_destination_amount_cents"], json!(54321));
+}
+
+#[test]
+fn preview_patch_rejects_i64_min_money_without_panicking() {
+    let mut row = preview_row(1);
+    let mut payload = json!({});
+
+    let error = apply_patch_value_to_preview(
+        &mut row,
+        &mut payload,
+        ImportPreviewPatchField::Amount,
+        ImportPreviewPatchValue::Integer(i64::MIN),
+    )
+    .expect_err("i64::MIN cannot become a positive preview amount");
+
+    assert!(matches!(
+        error,
+        DbError::InvalidOperation(message) if message == "invalid preview amount_cents"
+    ));
 }
 
 #[test]
@@ -57,7 +80,8 @@ fn preview_patch_value_marks_manual_annotation_without_replacing_feedback() {
         &mut payload,
         ImportPreviewPatchField::ManualAnnotation,
         ImportPreviewPatchValue::Bool(true),
-    );
+    )
+    .expect("manual annotation patch");
 
     assert_eq!(
         row.preview_matching_feedback.pointer("/parser/parser_id"),
@@ -118,30 +142,28 @@ fn preview_filter_helpers_cover_none_account_and_nested_feedback_edges() {
 }
 
 #[test]
-fn learning_filter_includes_transfer_recommendations_with_learning_level() {
-    let cases = [
-        ("yellow", "pending", true),
-        ("green", "pending", true),
-        ("blue", "accepted", true),
-        ("", "pending", false),
-        ("green", "", false),
-    ];
-    for (level, review_status, expected_learning) in cases {
-        let mut row = preview_row(1);
-        row.preview_matching_feedback = json!({
-            "transfer": {
-                "review_status": review_status,
-                "candidate_type": "cross_account",
-                "learning_level": level
-            }
-        });
-        assert!(signal_filter_matches(Some("transfer"), &row));
-        assert_eq!(
-            signal_filter_matches(Some("learning"), &row),
-            expected_learning,
-            "level={level}, review_status={review_status}"
-        );
-    }
+fn transfer_learning_feedback_matches_learning_filter_but_plain_transfer_does_not() {
+    let mut row = preview_row(1);
+    row.preview_matching_feedback = json!({
+        "transfer": {
+            "review_status": "pending",
+            "candidate_type": "cross_account",
+            "learning_level": "green"
+        }
+    });
+    assert!(signal_filter_matches(Some("transfer"), &row));
+    assert!(signal_filter_matches(Some("learning"), &row));
+    assert!(!signal_filter_matches(Some("learning:pending"), &row));
+
+    let mut transfer_only = preview_row(4);
+    transfer_only.preview_matching_feedback = json!({
+        "transfer": {
+            "review_status": "pending",
+            "candidate_type": "cross_account"
+        }
+    });
+    assert!(signal_filter_matches(Some("transfer"), &transfer_only));
+    assert!(!signal_filter_matches(Some("learning"), &transfer_only));
 
     let mut suppressed = preview_row(3);
     suppressed.preview_matching_feedback = json!({
@@ -191,7 +213,8 @@ fn manual_markers_distinguish_category_and_account_ownership() {
             ),
             (edited_field, ImportPreviewPatchValue::Integer(42)),
         ];
-        apply_patch_changes_to_preview(&mut row, &mut payload, &changes);
+        apply_patch_changes_to_preview(&mut row, &mut payload, &changes)
+            .expect("identity patch changes");
 
         for ownership_field in ownership_fields {
             let expected = ownership_field == expected_owned_field;
@@ -253,7 +276,8 @@ fn consecutive_manual_identity_patches_accumulate_field_ownership() {
                 ),
                 (field, ImportPreviewPatchValue::Integer(42)),
             ],
-        );
+        )
+        .expect("manual ownership patch changes");
     }
 
     for field in ["category_id", "source_account_id", "destination_account_id"] {

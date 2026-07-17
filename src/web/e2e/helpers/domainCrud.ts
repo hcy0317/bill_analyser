@@ -21,6 +21,7 @@ export interface DomainCrudFixture {
 
 export async function createDomainCrudFixture(client: E2EApiClient, env: E2EEnvironment): Promise<DomainCrudFixture> {
     const suffix = env.runId;
+    const budgetPeriod = currentMonthDateRange();
     const account = await client.post<Entity>('accounts', {
         name: `E2E Cash ${suffix}`,
         category: 1,
@@ -54,8 +55,8 @@ export async function createDomainCrudFixture(client: E2EApiClient, env: E2EEnvi
         sub_category: '',
         period_type: 'monthly',
         amountCents: 12345,
-        start_date: '2026-06-01',
-        end_date: '2026-06-30',
+        start_date: budgetPeriod.startDate,
+        end_date: budgetPeriod.endDate,
         alert_threshold: 80,
         enabled: true
     }), budgetName);
@@ -113,6 +114,7 @@ export async function createDomainCrudFixture(client: E2EApiClient, env: E2EEnvi
 
 export async function updateDomainCrudFixture(client: E2EApiClient, fixture: DomainCrudFixture, env: E2EEnvironment): Promise<DomainCrudFixture> {
     const suffix = `${env.runId}-updated`;
+    const budgetPeriod = currentMonthDateRange();
     const account = await client.put<Entity>(`accounts/${fixture.account.id}`, {
         id: String(fixture.account.id),
         name: `E2E Cash ${suffix}`,
@@ -146,8 +148,8 @@ export async function updateDomainCrudFixture(client: E2EApiClient, fixture: Dom
         sub_category: '',
         period_type: 'monthly',
         amountCents: 23456,
-        start_date: '2026-06-01',
-        end_date: '2026-06-30',
+        start_date: budgetPeriod.startDate,
+        end_date: budgetPeriod.endDate,
         alert_threshold: 75,
         enabled: true
     });
@@ -236,6 +238,17 @@ export async function expectDomainRulesVisibleInApi(client: E2EApiClient, fixtur
         .toContain(fixture.categoryRule.name);
     expect(JSON.stringify(accountRules), `account rule ${fixture.accountRule.name} should be listed by API`)
         .toContain(fixture.accountRule.name);
+}
+
+function currentMonthDateRange(now: Date = new Date()): { startDate: string; endDate: string } {
+    const year = now.getFullYear();
+    const monthIndex = now.getMonth();
+    const month = String(monthIndex + 1).padStart(2, '0');
+    const lastDay = String(new Date(year, monthIndex + 1, 0).getDate()).padStart(2, '0');
+    return {
+        startDate: `${year}-${month}-01`,
+        endDate: `${year}-${month}-${lastDay}`
+    };
 }
 
 function buildTemplatePayload(input: {

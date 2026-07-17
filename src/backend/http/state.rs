@@ -85,4 +85,10 @@ impl HttpAppState {
         *cached_runtime = Some(runtime.clone());
         Ok(runtime)
     }
+
+    pub fn invalidate_postgres_repository_runtime(&self) {
+        if let Ok(mut cached_runtime) = self.postgres_runtime.lock() {
+            *cached_runtime = None;
+        }
+    }
 }

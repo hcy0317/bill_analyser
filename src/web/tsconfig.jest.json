@@ -20,5 +20,8 @@
     "src/**/*.ts",
     "../../tests/web/**/*.ts",
     "jest.config.ts"
+  ],
+  "exclude": [
+    "src/vue-shim.d.ts"
   ]
 }

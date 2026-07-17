@@ -14,6 +14,9 @@ async fn batch_create_bills_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if let Err(response) = validate_bill_money_payload(&payload) {
+        return *response;
+    }
 
         let runtime = match open_postgres_runtime(&state, "bills") {
             Ok(value) => value,
@@ -80,6 +83,9 @@ async fn batch_update_bills_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    if let Err(response) = validate_bill_money_payload(&payload) {
+        return *response;
+    }
     let Some(bill_ids) = extract_bill_ids(&payload).filter(|ids| !ids.is_empty()) else {
         return bad_request("No bill IDs provided");
     };

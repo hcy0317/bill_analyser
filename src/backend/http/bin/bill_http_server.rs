@@ -41,8 +41,8 @@ async fn prepare_http_state(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_runtime_tracing();
-    let config = HttpShellConfig::from_env()?;
     let bind_addr = bind_addr_from_env()?;
+    let config = HttpShellConfig::from_env()?;
     let state = prepare_http_state(config).await?;
     let listener = TcpListener::bind(bind_addr).await?;
 

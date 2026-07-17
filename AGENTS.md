@@ -44,7 +44,7 @@ Tool-specific entry files should stay thin and only add platform-specific discov
 
 Bill Analyser 是一个账单导入、去重、自动分类、预算与统计分析系统。
 
-- 后端主入口：`crates/bill-analyser-http/src/bin/bill_http_server.rs`
+- 后端主入口：`src/backend/http/bin/bill_http_server.rs`
 - 前端工程：`src/web`
 - 当前运行态主链：`REST /api/...`
 
@@ -57,7 +57,7 @@ Bill Analyser 是一个账单导入、去重、自动分类、预算与统计分
 
 ## Critical conventions
 
-- 金额单位必须显式处理：后端核心存元，很多前端/API 交互用分；改动金额字段时必须人工复核一次元/分转换。
+- 金额单位必须显式处理：业务 core、PostgreSQL、HTTP DTO 与前端 API 模型使用整数分或名称显式的 minor units；元只存在于用户输入/展示及 parser、OCR、LLM、原始导入源等外部边界。改动金额字段时必须人工复核一次元/分转换。
 - 修改导入链路时，优先检查 parser、dedup、preview、learning 与 confirm 的 Rust 调用顺序是否仍然一致。
 - 修改 API 契约时，先确认 `src/web/src/lib/services.ts` 和相关 store 是否需要同步更新。
 - 新增适配器优先使用中性模块命名，不要新增对 legacy `v1_*` 适配器文件的直接依赖。

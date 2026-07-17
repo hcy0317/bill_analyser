@@ -15,6 +15,7 @@ pub mod auth;
 pub mod budgets;
 pub mod category_rules;
 pub mod error;
+pub mod import_config;
 pub mod import_learning;
 pub mod import_learning_lifecycle;
 pub mod import_pipeline;
@@ -54,6 +55,11 @@ pub use ai_ocr_llm::{
     OCR_DISABLED_PROVIDER_NAME,
 };
 pub use error::{ErrorCode, RuntimeError};
+pub use import_config::{
+    normalize_import_config_format, normalize_import_config_headers, normalize_import_config_name,
+    suggest_import_config, ImportConfigColumnSuggestion, ImportConfigDraft, ImportConfigDto,
+    ImportConfigMatchDto, ImportConfigSuggestion, ImportConfigValidationError,
+};
 pub use import_learning::{
     amount_cents_bucket, build_composite_match_features, build_composite_match_hash,
     build_dataset_snapshot_payload, build_feature_payload, build_label_confirmation_counts,

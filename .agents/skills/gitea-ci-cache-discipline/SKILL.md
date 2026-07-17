@@ -1,55 +1,47 @@
 ---
 name: gitea-ci-cache-discipline
-description: Maintain Bill Analyser Gitea Actions cache hygiene for Python, Rust, npm, act_runner cache growth, and coverage-gated CI cleanup.
+description: Maintain Bill Analyser Gitea Actions cache hygiene for the Rust, npm, governance, coverage, and E2E pipelines.
 ---
 
 # Gitea CI Cache Discipline
 
-Use this skill when changing `.gitea/workflows/ci.yml`, `actions/cache` usage, Rust/Python/npm setup steps, coverage cleanup, or act_runner cache behavior for this repository.
-
-This is a Bill Analyser-specific workflow. It is not a generic GitHub Actions caching tutorial.
-
-## When to Use
-
-Use this skill when you need to:
-
-- adjust Gitea Actions cache paths, keys, restore/save ordering, or cache-size limits
-- reduce act_runner or actcache disk growth from CI runs
-- cache Rust stable setup, `llvm-tools-preview`, `cargo-llvm-cov`, pip, npm, or Cargo dependency metadata
-- move cleanup relative to Rust coverage, pytest coverage, frontend coverage, or job completion
-- explain whether existing cache blobs can be cleaned by workflow changes or require runner/cache storage cleanup
-- keep local developer test scripts aligned with the CI parallel pytest and cache-trim contract
-
-Do not use this skill for:
-
-- business-code coverage policy changes outside CI workflow wiring
-- ad hoc local `.venv`, `target`, or `node_modules` cleanup unrelated to CI parity
-- changing Gitea runner deployment, service units, or external cache storage without explicit operator scope
+Use this repository-specific skill when changing `.gitea/workflows/ci.yml`, `actions/cache` usage, Rust/npm setup, coverage cleanup, or act_runner cache behavior. Bill Analyser is Rust-only on the backend; do not restore retired Python-era gates or sidecars.
 
 ## Read First
 
-Before editing anything, read these files:
+Before editing, read:
 
 - `AGENTS.md`
 - `.gitea/workflows/ci.yml`
+- `scripts/check-gitea-workflow.mjs`
+- `scripts/check-rust-only-source-tree.mjs`
 - `scripts/run_ci_local.ps1`
 - `scripts/trim_ci_caches.ps1`
-- `tests/test_gitea_workflows.py`
-- `tests/test_local_ci_scripts.py`
-- `docs/AI_WORKFLOW.md` if changing entrypoint documentation
-- the current `git diff`, because CI cache changes often happen while unrelated Rust or frontend work is active
+- the current `git diff`
+- `docs/AI_WORKFLOW.md` only when changing documented entrypoints
 
-## Core Cache Contract
+## Current Runtime and Gate Contract
 
-Cleanup must happen after the artifacts that need the files have already run.
+- Rust `bill_http_server` is the only HTTP runtime; never add a Python/sidecar fallback.
+- The canonical tracked-source gate is `node scripts/check-rust-only-source-tree.mjs`.
+- The canonical workflow parser and contract gate is `node scripts/check-gitea-workflow.mjs`; it resolves the lockfile-pinned `js-yaml` through `src/web/package.json`.
+- The canonical local CI wrapper is `scripts/run_ci_local.ps1`.
+- Active hook/config validation uses PowerShell `ConvertFrom-Json` and scans only the frozen active config set for removed `scripts/hooks/**` or `scripts/agent_stack_health.py` command references.
+- Real Gitea evidence uses the existing authenticated `tea` CLI; a successful dispatch alone is not a successful run.
 
-- Backend cleanup belongs after `Run Rust coverage` and `Run pytest coverage`, before cache save or job completion.
-- Frontend cleanup belongs after `npm run test:coverage` and `npm run build`, before cache save or job completion.
-- Local cleanup belongs in `scripts/trim_ci_caches.ps1`; `scripts/run_ci_local.ps1` should call it after local CI-equivalent checks unless explicitly skipped.
-- Do not delete coverage inputs before the corresponding coverage gate has finished.
-- Keep the workflow's cleanup step names recognizable: `Trim backend caches before cache save` and `Trim frontend caches before cache save`.
+Do not use `.venv`, pytest, `tests/test_gitea_workflows.py`, `tests/test_local_ci_scripts.py`, global Python YAML parsing, or any other removed Python-era command.
 
-Never cache generated build outputs or bulky expanded source trees:
+## Cache Contract
+
+Cleanup must happen after the artifacts that consume the files:
+
+- Backend cleanup runs after Rust tests, full coverage, and changed-line coverage.
+- Frontend cleanup runs after frontend coverage and build.
+- Local cleanup stays in `scripts/trim_ci_caches.ps1` and is called by `scripts/run_ci_local.ps1` unless explicitly skipped.
+- Do not delete coverage inputs before their gate finishes.
+- Keep step names recognizable: `Trim backend caches before cache save` and `Trim frontend caches before cache save`.
+
+Never cache expanded/generated outputs:
 
 - `target`
 - `node_modules`
@@ -57,89 +49,95 @@ Never cache generated build outputs or bulky expanded source trees:
 - `coverage`
 - `workspace.lcov`
 - `coverage.json`
-- `.coverage` / `.coverage.*`
 - `~/.cargo/registry/src`
 - `~/.cargo/git/checkouts`
 
-Prefer small reusable cache inputs:
+Prefer reusable download/tool metadata:
 
-- Cargo dependency metadata and archives: `~/.cargo/registry/index`, `~/.cargo/registry/cache`, `~/.cargo/git/db`
-- Rust coverage binary: `~/.cargo/bin/cargo-llvm-cov`, plus Cargo install metadata files
-- pip download cache: `~/.cache/pip`
-- npm download cache: `~/.npm`
-- Rustup toolchain cache: `~/.rustup/toolchains`, `~/.rustup/update-hashes`, `~/.rustup/settings.toml`
-- Rustup bootstrap proxies: `~/.cargo/bin/rustup`, `~/.cargo/bin/cargo`, `~/.cargo/bin/rustc`, `~/.cargo/bin/rustdoc`, and related rustup proxy binaries
+- Cargo: `~/.cargo/registry/index`, `~/.cargo/registry/cache`, `~/.cargo/git/db`
+- Rust coverage: `~/.cargo/bin/cargo-llvm-cov` and Cargo install metadata
+- npm: `~/.npm`
+- rustup: toolchains, update hashes, settings, rustup executable, and proxy binaries
 
-## Rust Toolchain and Coverage Tool
+Current budgets:
 
-Rust toolchain caching must stay separate from Cargo dependency caching.
+- Cargo cache: 450 MB after trim
+- npm cache: 300 MB after trim
+- rustup cache: the explicit cap in `.gitea/workflows/ci.yml`; use 950 MB or lower only when a sub-1 GB cap is explicitly requested
 
-- Restore rustup paths before `Setup Rust stable`.
-- Cache the rustup executable and proxy binaries with the rustup toolchain paths; caching only `~/.rustup/**` still lets `dtolnay/rust-toolchain` download the rustup installer every run.
-- Give `dtolnay/rust-toolchain@stable` an `id`, then use its `cachekey` output when saving the rustup cache.
-- Save the rustup cache only after the backend trim step has measured the cache size.
-- Guard save with an output such as `rust_toolchain_cache_save=true`; if the measured rustup cache is over budget, delete the rustup paths and skip save.
-- `llvm-tools-preview` lives inside the rustup toolchain cache.
-- `cargo-llvm-cov` lives in Cargo's bin cache and the install step must stay idempotent with `command -v cargo-llvm-cov`.
-
-Current repo budgets:
-
-- Cargo cache target: 450 MB maximum after trim.
-- pip cache target: 300 MB maximum after trim.
-- npm cache target: 300 MB maximum after trim.
-- rustup cache target: use the explicit cap in `.gitea/workflows/ci.yml` and mirror it in `tests/test_gitea_workflows.py`. If the user asks for a sub-1 GB rustup cache, set the cap to 950 MB or lower.
-
-When cache paths or key semantics change, bump the `slim-vN` key segment so old oversized exact-key cache entries are not restored as the new baseline.
+When cache paths or key semantics change, bump the relevant `slim-vN` key segment.
 
 ## Existing actcache Cleanup
 
-Workflow edits only prevent future cache growth. They do not delete old cache blobs that were already saved by act_runner or the Gitea cache backend.
-
-For an already large actcache directory:
-
-- If the cache directory is on the current machine and the user explicitly authorizes cleanup, inspect the exact path and clean only cache-owned entries.
-- If the cache lives on a remote runner, NAS, object store, or Gitea deployment host, cleanup is an operator/deployment-side action.
-- If no manual cleanup is performed, rely on the cache backend TTL or retention policy.
-- Do not claim that changing `.gitea/workflows/ci.yml` will shrink existing 56 GB cache storage by itself.
+Workflow changes prevent future growth; they do not delete existing cache blobs. Clean an existing cache store only when the user explicitly authorizes the exact local cache-owned path. Remote runner, NAS, object-store, or Gitea-hosted cleanup is an operator action. Otherwise rely on configured retention/TTL and do not claim old storage was reclaimed.
 
 ## Implementation Checklist
 
-1. Inspect the current workflow and tests before editing; do not apply stale assumptions from an older branch.
-2. Keep Gitea compatibility rules intact:
-   - use absolute action URLs such as `https://github.com/actions/cache@v4`
-   - do not add unsupported `timeout-minutes`, `continue-on-error`, top-level `concurrency`, or job `environment`
-   - keep jobs independent unless Gitea support is verified
-3. Add or update `tests/test_gitea_workflows.py` for every cache path, key, cleanup-order, or size-guard contract.
-4. Parse the workflow YAML after editing.
-5. Run the Gitea workflow tests and validate AI adapter JSON if hook-adjacent assets changed.
+1. Inspect the current workflow, scripts, and diff; do not apply an older Python-era assumption.
+2. Preserve Gitea compatibility: absolute action URLs, no unsupported `timeout-minutes`, `continue-on-error`, top-level `concurrency`, or job `environment`.
+3. Update `scripts/check-gitea-workflow.mjs` whenever required steps, order, cache paths, keys, or cleanup semantics change.
+4. Keep immutable diff resolution, Rust/frontend changed-line coverage, route ownership, Rust-only source, and deterministic E2E steps merge-blocking.
+5. Parse and self-test the workflow through the locked Node checker.
+6. Validate active JSON files and the narrow removed-hook residual scan when `.agents/**`, `.github/**`, `.claude/**`, `.codex/**`, or hook adapters change.
 
 ## Verification
 
-Minimum verification for CI cache workflow changes:
+From the repository root:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/test_gitea_workflows.py -v
-.\.venv\Scripts\python.exe -c "import pathlib, yaml; yaml.safe_load(pathlib.Path('.gitea/workflows/ci.yml').read_text(encoding='utf-8')); print('yaml parse ok')"
+node scripts/check-rust-only-source-tree.mjs --self-test
+node scripts/check-rust-only-source-tree.mjs
+node scripts/check-gitea-workflow.mjs --self-test
+node scripts/check-gitea-workflow.mjs
+node scripts/check-governance-normalizers.mjs
+node scripts/resolve-ci-diff-refs.mjs --self-test
 ```
 
-If AI workflow docs, skills, or hook-adjacent assets changed, also parse adapter JSON and scan for deleted hook entrypoints:
+Validate active configuration existence and JSON syntax:
 
 ```powershell
-Get-Content .codex/hooks.json | ConvertFrom-Json | Out-Null
-Get-Content .claude/settings.json | ConvertFrom-Json | Out-Null
-Get-ChildItem .github/hooks -Filter *.json | ForEach-Object { Get-Content $_.FullName | ConvertFrom-Json | Out-Null }
-rg -n "scripts[/\\]hooks|scripts[/\\]agent_stack_health\.py" .codex .claude .github/hooks
+$explicit = @('.codex/hooks.json','.codex/config.toml','opencode.json','.opencode/package.json')
+$missing = @($explicit | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) })
+if ($missing.Count) { $missing; exit 1 }
+$json = @('.codex/hooks.json','opencode.json','.opencode/package.json') + @(
+    Get-ChildItem -Path '.claude/settings*.json','.github/hooks/*.json' -File | ForEach-Object FullName
+)
+foreach ($path in $json) {
+    Get-Content -LiteralPath $path -Raw | ConvertFrom-Json | Out-Null
+}
 ```
+
+Scan only active hook/config surfaces; `.opencode/package.json` is parsed above but deliberately excluded from the residual scan:
+
+```powershell
+$active = @('.codex/hooks.json','.codex/config.toml','opencode.json') + @(
+    Get-ChildItem -Path '.claude/settings*.json','.github/hooks/*.json' -File | ForEach-Object FullName
+)
+$hits = & rg -n 'scripts[/\\]hooks|scripts[/\\]agent_stack_health\.py' -- $active
+if ($LASTEXITCODE -eq 0) { $hits; exit 1 }
+if ($LASTEXITCODE -ne 1) { exit $LASTEXITCODE }
+```
+
+For real Gitea evidence, push the target branch and use explicit repository arguments:
+
+```powershell
+tea actions workflows list --repo hcy0317/bill_analyser
+tea actions workflows dispatch ci.yml --ref <remote-branch> --repo hcy0317/bill_analyser
+tea actions runs list --repo hcy0317/bill_analyser
+tea actions runs view <run-id> --jobs --repo hcy0317/bill_analyser
+tea actions runs logs <run-id> --job <job-id> --repo hcy0317/bill_analyser
+tea api /repos/hcy0317/bill_analyser/actions/runs/<run-id>/jobs
+```
+
+Accept the run only when its head SHA equals the pushed branch HEAD and every required job/step exists with `conclusion=success`.
 
 ## Anti-patterns
 
-Avoid these mistakes:
-
-- caching `target` to speed up Rust builds while silently growing actcache by many GB
-- caching `node_modules` instead of the npm download cache
-- deleting backend caches before Rust or pytest coverage completes
-- relying on setup-node's implicit npm cache when explicit Gitea cache behavior is needed
-- using a static rustup cache key that cannot track stable toolchain changes
-- caching `~/.rustup` without `~/.cargo/bin/rustup` and its proxies, which leaves `Setup Rust stable` stuck reinstalling rustup
-- saving rustup cache after deleting the paths without a conditional save guard
-- telling the user old actcache storage is cleaned when only future workflow behavior changed
+- caching `target` or `node_modules`
+- deleting coverage artifacts before coverage gates complete
+- restoring pytest, pip cache, Python YAML, or `.venv` commands to this Rust-only repository
+- scanning the whole `.github`, `.claude`, or `.opencode` documentation tree for active hook references
+- treating Gitea dispatch exit 0 as run success
+- claiming workflow edits reclaimed existing remote actcache storage
+- caching rustup toolchains without the rustup executable and proxy binaries
+- saving an over-budget rustup cache after its paths were removed

@@ -115,12 +115,20 @@ const {
     getRequestErrorMessage,
 });
 
-const loading = computed(() => (
-    store.suggestionsLoading
-    || store.rulesLoading
-    || llmLoading.value
-    || llmConfigLoading.value
-));
+const loading = computed(() => {
+    switch (activeTab.value) {
+        case 'suggestions':
+            return store.suggestionsLoading;
+        case 'rules':
+            return store.rulesLoading;
+        case 'llm':
+            return llmLoading.value;
+        case 'llm-config':
+            return llmConfigLoading.value;
+        default:
+            return false;
+    }
+});
 const error = computed(() => store.error);
 const suggestionsTotal = computed(() => store.suggestionsTotal);
 const rules = computed(() => store.rules);

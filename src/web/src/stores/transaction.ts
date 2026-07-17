@@ -20,8 +20,7 @@ import {
     type TransactionImportRequest,
     type TransactionPageWrapper,
     type TransactionReconciliationStatementResponse,
-    Transaction,
-    EMPTY_TRANSACTION_RESULT
+    Transaction
 } from '@/models/transaction.ts';
 import { TransactionCategory } from '@/models/transaction_category.ts';
 import type {
@@ -73,6 +72,11 @@ import {
     mapReceiptImageErrorCode,
     normalizeReceiptTransactionDraft
 } from './transaction/receiptDraft.ts';
+import {
+    createTransactionListRequestCoordinator,
+    type LoadMonthlyTransactionsOptions,
+    type LoadTransactionsOptions
+} from './transaction/listRequestCoordinator.ts';
 
 export type {
     TransactionListPartialFilter,
@@ -114,6 +118,14 @@ export const useTransactionsStore = defineStore('transactions', () => {
     const transactionsNextTimeId = ref<number>(0);
     const transactionListStateInvalid = ref<boolean>(true);
     const transactionReconciliationStatementStateInvalid = ref<boolean>(true);
+    const transactionListRequestCoordinator = createTransactionListRequestCoordinator({
+        getFilter: () => transactionsFilter.value,
+        getNextTimeId: () => transactionsNextTimeId.value,
+        expandAccountIds: accountIds => accountsStore.expandAccountIds(accountIds),
+        applyPage: loadTransactionList,
+        isListInvalid: () => transactionListStateInvalid.value,
+        updateListInvalidState: updateTransactionListInvalidState
+    });
 
     const allFilterCategoryIds = computed<Record<string, boolean>>(() => splitItemsToMap(transactionsFilter.value.categoryIds, ','));
     const allFilterAccountIds = computed<Record<string, boolean>>(() => splitItemsToMap(transactionsFilter.value.accountIds, ','));
@@ -563,6 +575,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
     }
 
     function resetTransactions(): void {
+        transactionListRequestCoordinator.reset();
         transactionsFilter.value.dateType = DateRange.All.type;
         transactionsFilter.value.maxTime = 0;
         transactionsFilter.value.minTime = 0;
@@ -580,12 +593,14 @@ export const useTransactionsStore = defineStore('transactions', () => {
     }
 
     function clearTransactions(): void {
+        transactionListRequestCoordinator.reset();
         transactions.value = [];
         transactionsNextTimeId.value = 0;
         transactionListStateInvalid.value = true;
     }
 
     function initTransactionListFilter(filter: TransactionListPartialFilter): void {
+        transactionListRequestCoordinator.invalidate();
         if (filter && isNumber(filter.dateType)) {
             transactionsFilter.value.dateType = filter.dateType;
         } else {
@@ -705,6 +720,10 @@ export const useTransactionsStore = defineStore('transactions', () => {
             changed = true;
         }
 
+        if (changed) {
+            transactionListRequestCoordinator.invalidate();
+        }
+
         return changed;
     }
 
@@ -765,190 +784,12 @@ export const useTransactionsStore = defineStore('transactions', () => {
         };
     }
 
-    function loadTransactions({ reload, count, page, withCount, autoExpand, defaultCurrency }: { reload?: boolean, count?: number, page?: number, withCount?: boolean, autoExpand: boolean, defaultCurrency: string }): Promise<TransactionPageWrapper> {
-        let actualMaxTime = transactionsNextTimeId.value;
-
-        if (reload && transactionsFilter.value.maxTime > 0) {
-            actualMaxTime = transactionsFilter.value.maxTime * 1000 + 999;
-        } else if (reload && transactionsFilter.value.maxTime <= 0) {
-            actualMaxTime = 0;
-        }
-
-        // 🆕 展开账户ID：将主账户展开为所有子账户
-        let expandedAccountIds = transactionsFilter.value.accountIds;
-        if (expandedAccountIds) {
-            const accountIdArray = expandedAccountIds.split(',').filter(id => id);
-            if (accountIdArray.length > 0) {
-                const expanded = accountsStore.expandAccountIds(accountIdArray);
-                expandedAccountIds = expanded.join(',');
-                logger.info(`[loadTransactions] 账户筛选展开: ${transactionsFilter.value.accountIds} → ${expandedAccountIds}`);
-            }
-        }
-
-        return new Promise((resolve, reject) => {
-            services.getTransactions({
-                maxTime: actualMaxTime,
-                minTime: transactionsFilter.value.minTime * 1000,
-                count: count || 50,
-                page: page || 1,
-                withCount: !!withCount,
-                type: transactionsFilter.value.type,
-                categoryIds: transactionsFilter.value.categoryIds,
-                accountIds: expandedAccountIds,  // 🆕 使用展开后的账户ID
-                tagIds: transactionsFilter.value.tagIds,
-                tagFilterType: transactionsFilter.value.tagFilterType,
-                amountFilterCents: transactionsFilter.value.amountFilterCents,
-                keyword: transactionsFilter.value.keyword
-            }).then(response => {
-                const data = response.data;
-
-                if (!data || !data.success || !data.result) {
-                    if (reload) {
-                        loadTransactionList({
-                            transactionPageWrapper: EMPTY_TRANSACTION_RESULT,
-                            reload: reload,
-                            autoExpand: autoExpand,
-                            defaultCurrency: defaultCurrency
-                        });
-
-                        if (!transactionListStateInvalid.value) {
-                            updateTransactionListInvalidState(true);
-                        }
-                    }
-
-                    reject({ message: 'Unable to retrieve transaction list' });
-                    return;
-                }
-
-                const transactionPageWrapper: TransactionPageWrapper = {
-                    items: Transaction.ofMulti(data.result.items),
-                    totalCount: data.result.totalCount
-                };
-
-                loadTransactionList({
-                    transactionPageWrapper: transactionPageWrapper,
-                    reload: !!reload,
-                    autoExpand: autoExpand,
-                    defaultCurrency: defaultCurrency,
-                    nextTimeSequenceId: data.result.nextTimeSequenceId
-                });
-
-                if (reload) {
-                    if (transactionListStateInvalid.value) {
-                        updateTransactionListInvalidState(false);
-                    }
-                }
-
-                resolve(transactionPageWrapper);
-            }).catch(error => {
-                logger.error('failed to load transaction list', error);
-
-                if (reload) {
-                    loadTransactionList({
-                        transactionPageWrapper: EMPTY_TRANSACTION_RESULT,
-                        reload: reload,
-                        autoExpand: autoExpand,
-                        defaultCurrency: defaultCurrency
-                    });
-
-                    if (!transactionListStateInvalid.value) {
-                        updateTransactionListInvalidState(true);
-                    }
-                }
-
-                if (error.response && error.response.data && error.response.data.message) {
-                    reject({ error: error.response.data });
-                } else if (!error.processed) {
-                    reject({ message: 'Unable to retrieve transaction list' });
-                } else {
-                    reject(error);
-                }
-            });
-        });
+    function loadTransactions(options: LoadTransactionsOptions): Promise<TransactionPageWrapper> {
+        return transactionListRequestCoordinator.loadTransactions(options);
     }
 
-    function loadMonthlyAllTransactions({ year, month, autoExpand, defaultCurrency }: { year: number, month: number, autoExpand: boolean, defaultCurrency: string }): Promise<TransactionPageWrapper> {
-        // 🆕 展开账户ID：将主账户展开为所有子账户
-        let expandedAccountIds = transactionsFilter.value.accountIds;
-        if (expandedAccountIds) {
-            const accountIdArray = expandedAccountIds.split(',').filter(id => id);
-            if (accountIdArray.length > 0) {
-                const expanded = accountsStore.expandAccountIds(accountIdArray);
-                expandedAccountIds = expanded.join(',');
-                logger.info(`[loadMonthlyAllTransactions] 账户筛选展开: ${transactionsFilter.value.accountIds} → ${expandedAccountIds}`);
-            }
-        }
-
-        return new Promise((resolve, reject) => {
-            services.getAllTransactionsByMonth({
-                year: year,
-                month: month,
-                type: transactionsFilter.value.type,
-                categoryIds: transactionsFilter.value.categoryIds,
-                accountIds: expandedAccountIds,  // 🆕 使用展开后的账户ID
-                tagIds: transactionsFilter.value.tagIds,
-                tagFilterType: transactionsFilter.value.tagFilterType,
-                amountFilterCents: transactionsFilter.value.amountFilterCents,
-                keyword: transactionsFilter.value.keyword
-            }).then(response => {
-                const data = response.data;
-
-                if (!data || !data.success || !data.result) {
-                    loadTransactionList({
-                        transactionPageWrapper: EMPTY_TRANSACTION_RESULT,
-                        reload: true,
-                        autoExpand: autoExpand,
-                        defaultCurrency: defaultCurrency
-                    });
-
-                    if (!transactionListStateInvalid.value) {
-                        updateTransactionListInvalidState(true);
-                    }
-
-                    reject({ message: 'Unable to retrieve transaction list' });
-                    return;
-                }
-
-                const transactionPageWrapper: TransactionPageWrapper = {
-                    items: Transaction.ofMulti(data.result.items),
-                    totalCount: data.result.totalCount
-                };
-
-                loadTransactionList({
-                    transactionPageWrapper: transactionPageWrapper,
-                    reload: true,
-                    autoExpand: autoExpand,
-                    defaultCurrency: defaultCurrency
-                });
-
-                if (transactionListStateInvalid.value) {
-                    updateTransactionListInvalidState(false);
-                }
-
-                resolve(transactionPageWrapper);
-            }).catch(error => {
-                logger.error('failed to load monthly all transaction list', error);
-
-                loadTransactionList({
-                    transactionPageWrapper: EMPTY_TRANSACTION_RESULT,
-                    reload: true,
-                    autoExpand: autoExpand,
-                    defaultCurrency: defaultCurrency
-                });
-
-                if (!transactionListStateInvalid.value) {
-                    updateTransactionListInvalidState(true);
-                }
-
-                if (error.response && error.response.data && error.response.data.message) {
-                    reject({ error: error.response.data });
-                } else if (!error.processed) {
-                    reject({ message: 'Unable to retrieve transaction list' });
-                } else {
-                    reject(error);
-                }
-            });
-        });
+    function loadMonthlyAllTransactions(options: LoadMonthlyTransactionsOptions): Promise<TransactionPageWrapper> {
+        return transactionListRequestCoordinator.loadMonthlyAllTransactions(options);
     }
 
     function getReconciliationStatements({ accountId, startTime, endTime }: { accountId: string, startTime: number, endTime: number }): Promise<TransactionReconciliationStatementResponse> {

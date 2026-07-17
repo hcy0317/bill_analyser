@@ -1,6 +1,5 @@
 param(
     [int]$CargoCacheLimitMb = 450,
-    [int]$PipCacheLimitMb = 300,
     [int]$NpmCacheLimitMb = 300,
     [switch]$CiExact
 )
@@ -62,15 +61,6 @@ if ($cargoCacheMb -gt $CargoCacheLimitMb) {
         (Join-Path $cargoHome "registry\src"),
         (Join-Path $cargoHome "git\checkouts")
     ) -AllowedRoot $cargoHome
-}
-
-$pipCache = Join-Path $env:LOCALAPPDATA "pip\Cache"
-if (-not (Test-Path -LiteralPath $pipCache)) {
-    $pipCache = Join-Path $HOME ".cache\pip"
-}
-$pipCacheMb = Get-PathSizeMb @($pipCache)
-if ($pipCacheMb -gt $PipCacheLimitMb) {
-    python -m pip cache purge
 }
 
 $npmCache = npm config get cache

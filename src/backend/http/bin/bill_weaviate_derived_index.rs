@@ -3,7 +3,7 @@ use std::{env, error::Error, process};
 use bill_analyser_db::{DatabaseRuntimeConfig, DatabaseRuntimeProvider, DbError, PostgresPool};
 use bill_analyser_http::{
     probe_weaviate_health, process_weaviate_outbox_once, rebuild_weaviate_from_postgres,
-    HttpShellConfig, WeaviateHttpClient,
+    HttpShellConfig, WeaviateHttpClient, WeaviateRuntimeConfig,
 };
 use serde_json::json;
 
@@ -24,25 +24,28 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let mode = option_value(&args, "--mode")
         .or_else(|| args.first().cloned())
         .unwrap_or_else(|| "health".to_string());
-    let config = HttpShellConfig::from_env()?;
 
     match mode.as_str() {
         "health" => {
+            let config = weaviate_only_config_from_env()?;
             let status = probe_weaviate_health(&config).await;
             println!("{}", serde_json::to_string_pretty(&status)?);
         }
         "bootstrap" => {
+            let config = weaviate_only_config_from_env()?;
             let report = WeaviateHttpClient::new(&config.weaviate)?
                 .bootstrap_schema()
                 .await?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         "process-outbox" => {
+            let config = HttpShellConfig::from_env()?;
             let pool = postgres_pool(&config)?;
             let report = process_weaviate_outbox_once(&pool, &config.weaviate).await?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         "rebuild" => {
+            let config = HttpShellConfig::from_env()?;
             let pool = postgres_pool(&config)?;
             let user_id = option_value(&args, "--user-id")
                 .map(|value| value.parse::<i64>())
@@ -56,6 +59,12 @@ async fn run() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+fn weaviate_only_config_from_env() -> Result<HttpShellConfig, Box<dyn Error>> {
+    let mut lookup = |name| env::var(name).ok();
+    let weaviate = WeaviateRuntimeConfig::from_env_with(&mut lookup)?;
+    Ok(HttpShellConfig::default().with_weaviate_config(weaviate))
 }
 
 fn postgres_pool(config: &HttpShellConfig) -> Result<PostgresPool, DbError> {

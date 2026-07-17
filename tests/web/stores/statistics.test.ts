@@ -87,6 +87,18 @@ function statisticsEnvelope<T>(result: T): Promise<{ data: { success: boolean; r
     });
 }
 
+function createDeferred<T>(): {
+    promise: Promise<T>;
+    resolve: (value: T) => void;
+} {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((resolvePromise) => {
+        resolve = resolvePromise;
+    });
+
+    return { promise, resolve };
+}
+
 describe('statistics store service boundary', () => {
     beforeEach(() => {
         setActivePinia(createPinia());
@@ -122,6 +134,79 @@ describe('statistics store service boundary', () => {
         });
         expect(store.transactionStatisticsStateInvalid).toBe(false);
         expect(store.transactionCategoryStatisticsData).toStrictEqual(result);
+    });
+
+    test('keeps the newest categorical response when an older request resolves last', async () => {
+        type StatisticsResponse = { data: { success: boolean; result: {
+            startTime: number;
+            endTime: number;
+            items: Array<{ categoryId: string; accountId: string; amountCents: number }>;
+        } } };
+        const olderRequest = createDeferred<StatisticsResponse>();
+        const newerRequest = createDeferred<StatisticsResponse>();
+        mockGetTransactionStatistics
+            .mockReturnValueOnce(olderRequest.promise)
+            .mockReturnValueOnce(newerRequest.promise);
+
+        const store = useStatisticsStore();
+        store.transactionStatisticsFilter.keyword = 'older-filter';
+        const olderLoad = store.loadCategoricalAnalysis({ force: false });
+
+        store.transactionStatisticsFilter.keyword = 'newer-filter';
+        const newerLoad = store.loadCategoricalAnalysis({ force: false });
+        const newerResult = {
+            startTime: 300,
+            endTime: 400,
+            items: [{ categoryId: 'newer-category', accountId: 'cash', amountCents: -200 }]
+        };
+        newerRequest.resolve({ data: { success: true, result: newerResult } });
+        await newerLoad;
+
+        const olderResult = {
+            startTime: 100,
+            endTime: 200,
+            items: [{ categoryId: 'older-category', accountId: 'cash', amountCents: -100 }]
+        };
+        olderRequest.resolve({ data: { success: true, result: olderResult } });
+        await olderLoad;
+
+        expect(store.transactionCategoryStatisticsData).toStrictEqual(newerResult);
+        expect(store.transactionStatisticsStateInvalid).toBe(false);
+    });
+
+    test('keeps the newest trend response when an older request resolves last', async () => {
+        type TrendResponse = { data: { success: boolean; result: Array<{
+            year: number;
+            month: number;
+            items: never[];
+        }> } };
+        const olderRequest = createDeferred<TrendResponse>();
+        const newerRequest = createDeferred<TrendResponse>();
+        mockGetTransactionStatisticsTrends
+            .mockReturnValueOnce(olderRequest.promise)
+            .mockReturnValueOnce(newerRequest.promise);
+
+        const store = useStatisticsStore();
+        store.transactionStatisticsFilter.trendChartDateType = DateRange.All.type;
+        store.transactionStatisticsFilter.keyword = 'older-filter';
+        const olderLoad = store.loadTrendAnalysis({ force: false });
+
+        store.transactionStatisticsFilter.keyword = 'newer-filter';
+        const newerLoad = store.loadTrendAnalysis({ force: false });
+        const newerResult = [{ year: 2026, month: 2, items: [] as never[] }];
+        newerRequest.resolve({ data: { success: true, result: newerResult } });
+        await newerLoad;
+
+        olderRequest.resolve({
+            data: {
+                success: true,
+                result: [{ year: 2026, month: 1, items: [] }]
+            }
+        });
+        await olderLoad;
+
+        expect(store.transactionCategoryTrendsData).toStrictEqual(newerResult);
+        expect(store.transactionStatisticsStateInvalid).toBe(false);
     });
 
     test('rejects force refresh when category statistics are already current', async () => {
@@ -188,5 +273,69 @@ describe('statistics store service boundary', () => {
         expect(mockGetTransactionStatisticsAssetTrends).toHaveBeenCalledTimes(2);
         expect(result[0]!.items[0]!.accountOpeningBalanceCents).toBe(10025);
         expect(result[0]!.items[0]!.accountClosingBalanceCents).toBe(10941);
+    });
+
+    test('keeps the newest asset-trends response when an older request resolves last', async () => {
+        type AssetResult = Array<{
+            year: number;
+            month: number;
+            day: number;
+            items: Array<{
+                accountId: string;
+                accountOpeningBalanceCents: number;
+                accountClosingBalanceCents: number;
+            }>;
+        }>;
+        type AssetResponse = { data: { success: boolean; result: AssetResult } };
+        const olderRequest = createDeferred<AssetResponse>();
+        const newerRequest = createDeferred<AssetResponse>();
+        mockGetTransactionStatisticsAssetTrends
+            .mockReturnValueOnce(olderRequest.promise)
+            .mockReturnValueOnce(newerRequest.promise);
+
+        const store = useStatisticsStore();
+        store.transactionStatisticsFilter.assetTrendsChartStartTime = 100;
+        store.transactionStatisticsFilter.assetTrendsChartEndTime = 200;
+        const olderLoad = store.loadAssetTrends({ force: false });
+
+        store.transactionStatisticsFilter.assetTrendsChartStartTime = 300;
+        store.transactionStatisticsFilter.assetTrendsChartEndTime = 400;
+        const newerLoad = store.loadAssetTrends({ force: false });
+        const newerResult: AssetResult = [{
+            year: 2026,
+            month: 2,
+            day: 1,
+            items: [{
+                accountId: 'cash',
+                accountOpeningBalanceCents: 200,
+                accountClosingBalanceCents: 300
+            }]
+        }];
+        newerRequest.resolve({ data: { success: true, result: newerResult } });
+        await newerLoad;
+
+        olderRequest.resolve({
+            data: {
+                success: true,
+                result: [{
+                    year: 2026,
+                    month: 1,
+                    day: 1,
+                    items: [{
+                        accountId: 'cash',
+                        accountOpeningBalanceCents: 100,
+                        accountClosingBalanceCents: 200
+                    }]
+                }]
+            }
+        });
+        await olderLoad;
+
+        mockGetTransactionStatisticsAssetTrends.mockReturnValue(statisticsEnvelope(newerResult));
+        await expect(store.loadAssetTrends({ force: true })).rejects.toMatchObject({
+            message: 'Data is up to date',
+            isUpToDate: true
+        });
+        expect(store.transactionStatisticsStateInvalid).toBe(false);
     });
 });

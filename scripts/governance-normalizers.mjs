@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -123,6 +124,47 @@ function parseUnifiedDiffChangedLines(diffText) {
     return files;
 }
 
+function parseUnifiedDiffAddedText(diffText) {
+    const files = new Map();
+    let currentPath = null;
+    let newLine = 0;
+    for (const rawLine of String(diffText ?? '').split(/\r?\n/)) {
+        if (rawLine.startsWith('diff --git ')) {
+            currentPath = null;
+            newLine = 0;
+            continue;
+        }
+        if (rawLine.startsWith('+++ ')) {
+            const nextPath = rawLine.slice(4).trim();
+            currentPath = nextPath === '/dev/null' ? null : normalizePath(nextPath);
+            if (currentPath && !files.has(currentPath)) {
+                files.set(currentPath, new Map());
+            }
+            continue;
+        }
+        if (!currentPath) {
+            continue;
+        }
+        const hunk = rawLine.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+        if (hunk) {
+            newLine = Number.parseInt(hunk[1], 10);
+            continue;
+        }
+        if (rawLine.startsWith('+') && !rawLine.startsWith('+++')) {
+            files.get(currentPath).set(newLine, rawLine.slice(1));
+            newLine += 1;
+            continue;
+        }
+        if (rawLine.startsWith('-') && !rawLine.startsWith('---')) {
+            continue;
+        }
+        if (!rawLine.startsWith('\\')) {
+            newLine += 1;
+        }
+    }
+    return files;
+}
+
 function findLcovRecord(lcovFiles, diffPath) {
     const candidates = pathCandidates(diffPath);
     for (const candidate of candidates) {
@@ -141,24 +183,256 @@ function findLcovRecord(lcovFiles, diffPath) {
     return null;
 }
 
+function intrinsicSourceExclusionReason(filePath) {
+    const normalized = normalizePath(filePath).toLowerCase();
+    if (/^src\/backend\/.+\.rs$/.test(normalized)) {
+        const basename = path.posix.basename(normalized);
+        if (basename === 'build.rs') {
+            return 'rust_build_script';
+        }
+        if (
+            /\/(?:tests?|test_[^/]*|tests_[^/]*)\//.test(normalized)
+            || /^(?:tests?(?:_[^.]+)?|.+_tests?)\.rs$/.test(basename)
+        ) {
+            return 'test_source';
+        }
+        return null;
+    }
+    if (/^src\/web\/src\/.+\.(?:[cm]?[jt]sx?|vue)$/.test(normalized)) {
+        if (/^src\/web\/src\/contracts\/.+\.generated\.ts$/.test(normalized)) {
+            return 'generated_source';
+        }
+        if (normalized.endsWith('.d.ts')) {
+            return 'type_declaration_source';
+        }
+        if (/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(normalized)) {
+            return 'test_source';
+        }
+        return null;
+    }
+    return 'not_business_source';
+}
+
+function isBusinessSourcePath(filePath) {
+    return intrinsicSourceExclusionReason(filePath) === null;
+}
+
+let typescriptModule;
+
+function loadTypescript() {
+    if (typescriptModule !== undefined) {
+        return typescriptModule;
+    }
+    try {
+        const webRequire = createRequire(path.join(repoRoot, 'src', 'web', 'package.json'));
+        typescriptModule = webRequire('typescript');
+    } catch {
+        typescriptModule = null;
+    }
+    return typescriptModule;
+}
+
+function isConservativelyTypeOnlyTypescriptSource(sourceText) {
+    if (typeof sourceText !== 'string' || sourceText.includes('/*')) {
+        return false;
+    }
+    let braceDepth = 0;
+    let sawDeclaration = false;
+    const allowedStart = /^(?:export\s+)?(?:type|interface|declare)\b|^import\s+type\b|^export\s*\{\s*type\b/;
+    for (const rawLine of sourceText.split(/\r?\n/)) {
+        const trimmed = rawLine.trim();
+        if (trimmed === '' || trimmed.startsWith('//')) {
+            continue;
+        }
+        if (braceDepth === 0 && !trimmed.startsWith('}')) {
+            if (!allowedStart.test(trimmed)) {
+                return false;
+            }
+            sawDeclaration = true;
+        }
+        const opens = (rawLine.match(/\{/g) ?? []).length;
+        const closes = (rawLine.match(/\}/g) ?? []).length;
+        braceDepth += opens - closes;
+        if (braceDepth < 0) {
+            return false;
+        }
+    }
+    return sawDeclaration && braceDepth === 0;
+}
+
+function isTypeOnlyTypescriptSource(filePath, sourceText) {
+    if (!/\.[cm]?tsx?$/i.test(filePath) || filePath.toLowerCase().endsWith('.d.ts')) {
+        return filePath.toLowerCase().endsWith('.d.ts');
+    }
+    const ts = loadTypescript();
+    if (sourceText === null || sourceText === undefined) {
+        return false;
+    }
+    if (!ts) {
+        return isConservativelyTypeOnlyTypescriptSource(sourceText);
+    }
+    const source = ts.createSourceFile(
+        filePath,
+        sourceText,
+        ts.ScriptTarget.Latest,
+        true,
+        /tsx$/i.test(filePath) ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    const hasDeclareModifier = statement => (
+        ts.canHaveModifiers(statement)
+        && (ts.getModifiers(statement) ?? []).some(modifier => modifier.kind === ts.SyntaxKind.DeclareKeyword)
+    );
+    const isTypeOnlyStatement = statement => {
+        if (
+            ts.isInterfaceDeclaration(statement)
+            || ts.isTypeAliasDeclaration(statement)
+            || ts.isImportEqualsDeclaration(statement) && statement.isTypeOnly
+        ) {
+            return true;
+        }
+        if (ts.isImportDeclaration(statement)) {
+            const clause = statement.importClause;
+            if (!clause) {
+                return false;
+            }
+            if (clause.isTypeOnly) {
+                return true;
+            }
+            return (
+                !clause.name
+                && clause.namedBindings
+                && ts.isNamedImports(clause.namedBindings)
+                && clause.namedBindings.elements.every(element => element.isTypeOnly)
+            );
+        }
+        if (ts.isExportDeclaration(statement)) {
+            if (statement.isTypeOnly) {
+                return true;
+            }
+            return (
+                statement.exportClause
+                && ts.isNamedExports(statement.exportClause)
+                && statement.exportClause.elements.every(element => element.isTypeOnly)
+            );
+        }
+        return hasDeclareModifier(statement) || ts.isEmptyStatement(statement);
+    };
+    return source.statements.length === 0 || source.statements.every(isTypeOnlyStatement);
+}
+
+function addedLinesAreCommentOnly(addedLines) {
+    if (!addedLines || addedLines.size === 0) {
+        return false;
+    }
+    return [...addedLines.values()].every(line => {
+        const trimmed = line.trim();
+        return (
+            trimmed === ''
+            || trimmed.startsWith('//')
+        );
+    });
+}
+
+function isConservativelyDeclarationOnlyRustSource(filePath, sourceText) {
+    if (!filePath.toLowerCase().endsWith('.rs') || typeof sourceText !== 'string' || sourceText.includes('/*')) {
+        return false;
+    }
+    let statement = '';
+    let sawDeclaration = false;
+    let macroBraceDepth = 0;
+    const allowed = [
+        /^(?:pub(?:\([^)]*\))?\s+)?mod\s+[A-Za-z_][A-Za-z0-9_]*\s*;$/,
+        /^(?:pub(?:\([^)]*\))?\s+)?use\s+.+;$/,
+        /^(?:pub(?:\([^)]*\))?\s+)?const\s+[A-Za-z_][A-Za-z0-9_]*\s*:\s*.+\s*=\s*.+;$/,
+        /^include!\s*\(.+\)\s*;$/,
+        /^extern\s+crate\s+.+;$/,
+    ];
+    for (const rawLine of sourceText.split(/\r?\n/)) {
+        const trimmed = rawLine.trim();
+        if (trimmed === '' || trimmed.startsWith('//') || /^#!?\[.*\]$/.test(trimmed)) {
+            continue;
+        }
+        if (macroBraceDepth > 0) {
+            macroBraceDepth += (rawLine.match(/\{/g) ?? []).length;
+            macroBraceDepth -= (rawLine.match(/\}/g) ?? []).length;
+            if (macroBraceDepth < 0) {
+                return false;
+            }
+            continue;
+        }
+        if (/^macro_rules!\s*[A-Za-z_][A-Za-z0-9_]*\s*\{/.test(trimmed)) {
+            macroBraceDepth = (rawLine.match(/\{/g) ?? []).length
+                - (rawLine.match(/\}/g) ?? []).length;
+            if (macroBraceDepth < 0) {
+                return false;
+            }
+            sawDeclaration = true;
+            continue;
+        }
+        statement = `${statement} ${trimmed}`.trim();
+        if (!trimmed.endsWith(';')) {
+            continue;
+        }
+        if (!allowed.some(pattern => pattern.test(statement))) {
+            return false;
+        }
+        sawDeclaration = true;
+        statement = '';
+    }
+    return sawDeclaration && statement === '' && macroBraceDepth === 0;
+}
+
+function sourceTextForPath(filePath, sourceTextByPath) {
+    if (sourceTextByPath instanceof Map && sourceTextByPath.has(filePath)) {
+        return sourceTextByPath.get(filePath);
+    }
+    if (sourceTextByPath && Object.hasOwn(sourceTextByPath, filePath)) {
+        return sourceTextByPath[filePath];
+    }
+    try {
+        return fs.readFileSync(path.resolve(repoRoot, filePath), 'utf8');
+    } catch {
+        return null;
+    }
+}
+
 function summarizeChangedLineCoverage({
     lcovText,
     diffText,
     threshold = 90,
     requireMatchedFiles = false,
     requireExecutableLines = false,
+    sourceTextByPath = null,
 }) {
     const lcovFiles = parseLcov(lcovText);
     const changedLinesByFile = parseUnifiedDiffChangedLines(diffText);
+    const addedTextByFile = parseUnifiedDiffAddedText(diffText);
     const files = [];
     let matchedFileCount = 0;
+    let businessFileCount = 0;
+    let coverageEligibleFileCount = 0;
+    let businessChangedLines = 0;
     let executableChangedLines = 0;
     let coveredChangedLines = 0;
 
     for (const [filePath, changedLines] of changedLinesByFile.entries()) {
-        const record = findLcovRecord(lcovFiles, filePath);
-        if (record) {
-            matchedFileCount += 1;
+        const intrinsicExclusion = intrinsicSourceExclusionReason(filePath);
+        const businessCandidate = intrinsicExclusion === null;
+        const record = businessCandidate ? findLcovRecord(lcovFiles, filePath) : null;
+        let exclusionReason = intrinsicExclusion;
+        if (businessCandidate) {
+            const sourceText = sourceTextForPath(filePath, sourceTextByPath);
+            if (isTypeOnlyTypescriptSource(filePath, sourceText)) {
+                exclusionReason = 'type_only_source';
+            } else if (isConservativelyDeclarationOnlyRustSource(filePath, sourceText)) {
+                exclusionReason = 'declaration_only_source';
+            } else if (addedLinesAreCommentOnly(addedTextByFile.get(filePath))) {
+                exclusionReason = 'comment_only_change';
+            }
+        }
+        if (businessCandidate) {
+            businessFileCount += 1;
+            businessChangedLines += changedLines.size;
         }
         const executable = [];
         const covered = [];
@@ -177,11 +451,27 @@ function summarizeChangedLineCoverage({
             }
         }
 
-        executableChangedLines += executable.length;
-        coveredChangedLines += covered.length;
+        if (businessCandidate && exclusionReason === null && record && executable.length === 0) {
+            exclusionReason = 'non_executable_change';
+        }
+        const scopeIncluded = businessCandidate && exclusionReason === null;
+        if (scopeIncluded) {
+            coverageEligibleFileCount += 1;
+        }
+        if (scopeIncluded && record) {
+            matchedFileCount += 1;
+        }
+
+        if (scopeIncluded) {
+            executableChangedLines += executable.length;
+            coveredChangedLines += covered.length;
+        }
         files.push({
             path: filePath,
-            matched_lcov_record: record !== null,
+            business_candidate: businessCandidate,
+            scope_included: scopeIncluded,
+            exclusion_reason: exclusionReason,
+            matched_lcov_record: scopeIncluded && record !== null,
             lcov_path: record?.path ?? null,
             changed_lines: [...changedLines].sort((left, right) => left - right),
             executable_changed_lines: executable,
@@ -196,26 +486,44 @@ function summarizeChangedLineCoverage({
     const coveragePercent = executableChangedLines === 0
         ? null
         : Number(((coveredChangedLines / executableChangedLines) * 100).toFixed(2));
-    const changedVueFiles = files.filter(file => file.path.toLowerCase().endsWith('.vue'));
+    const changedVueFiles = files.filter(file => (
+        file.scope_included && file.path.toLowerCase().endsWith('.vue')
+    ));
+    const missingLcovFiles = files.filter(file => (
+        file.scope_included && !file.matched_lcov_record
+    ));
     const vueSfcPassed = changedVueFiles.every(file => (
         file.matched_lcov_record
         && file.executable_changed_lines.length > 0
         && file.coverage_percent > threshold
     ));
     const coveragePassed = coveragePercent !== null && coveragePercent > threshold;
-    const matchedFilesPassed = !requireMatchedFiles || matchedFileCount > 0;
+    const matchedFilesPassed = !requireMatchedFiles || (
+        businessFileCount > 0
+        && matchedFileCount === coverageEligibleFileCount
+        && missingLcovFiles.length === 0
+    );
     const executableLinesPassed = !requireExecutableLines || executableChangedLines > 0;
     return {
         threshold,
         changed_file_count: changedLinesByFile.size,
+        business_file_count: businessFileCount,
+        coverage_eligible_file_count: coverageEligibleFileCount,
         matched_file_count: matchedFileCount,
+        missing_lcov_file_count: missingLcovFiles.length,
+        missing_lcov_files: missingLcovFiles.map(file => file.path),
         changed_vue_file_count: changedVueFiles.length,
+        business_changed_lines: businessChangedLines,
+        included_executable_lines: executableChangedLines,
+        excluded_non_executable_lines: businessChangedLines - executableChangedLines,
         executable_changed_lines: executableChangedLines,
         covered_changed_lines: coveredChangedLines,
         uncovered_changed_lines: executableChangedLines - coveredChangedLines,
         coverage_percent: coveragePercent,
+        coverage_disposition: executableChangedLines === 0 ? 'failed_no_executable_lines' : 'measured',
         requirements: {
             coverage_strictly_greater_than_threshold: coveragePassed,
+            all_business_files_matched: matchedFilesPassed,
             matched_files: matchedFilesPassed,
             executable_lines: executableLinesPassed,
             changed_vue_sfc_files: vueSfcPassed,
@@ -417,5 +725,9 @@ export {
     normalizeStructureGateQueue,
     parseLcov,
     parseUnifiedDiffChangedLines,
+    isBusinessSourcePath,
+    isConservativelyTypeOnlyTypescriptSource,
+    isConservativelyDeclarationOnlyRustSource,
+    isTypeOnlyTypescriptSource,
     summarizeChangedLineCoverage,
 };

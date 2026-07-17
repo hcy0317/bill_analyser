@@ -147,7 +147,7 @@ fn confirm_preview_patch_from_payload(
     object: &Map<String, Value>,
 ) -> Result<ImportPreviewPatch, ImportV2RouteResponse> {
     let preview_id = preview_id_from_payload(object)?;
-    let mut patch = build_preview_patch_from_payload(preview_id, object);
+    let mut patch = build_preview_patch_from_payload(preview_id, object)?;
     if let Some(value) = first_value(object, &["categoryId", "category_id"]) {
         patch
             .changes
@@ -319,6 +319,20 @@ mod confirm_handler_contract_tests {
             );
             assert!(command.declared_confirm_time_effects.is_empty());
         }
+    }
+
+    #[test]
+    fn confirm_payload_rejects_i64_min_preview_money_before_db_access() {
+        let error = confirm_command_from_payload(&json!({
+            "session_id": "session-money-boundary",
+            "preview_updates": [{
+                "id": 7,
+                "amountCents": i64::MIN
+            }]
+        }))
+        .expect_err("confirm preview patches must reject i64::MIN at the HTTP boundary");
+
+        assert_eq!(error.status_code, 400);
     }
 
     #[test]

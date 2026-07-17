@@ -5,7 +5,15 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    time::Duration,
 };
+
+use axum::{
+    body::Body,
+    http::{Method, Request, StatusCode},
+};
+use bill_analyser_http::{import_routes::import_runtime_router, HttpAppState, HttpShellConfig};
+use tower::ServiceExt;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -58,6 +66,80 @@ fn position(haystack: &str, needle: &str) -> usize {
     haystack
         .find(needle)
         .unwrap_or_else(|| panic!("missing marker {needle}"))
+}
+
+#[tokio::test]
+async fn assembled_import_router_exposes_import_preview_config_and_learning_update_routes() {
+    let state = HttpAppState::new(
+        HttpShellConfig::new("", Duration::from_secs(1), 1024 * 1024).expect("test HTTP config"),
+    )
+    .expect("test HTTP state");
+    let app = import_runtime_router().with_state(state);
+
+    for (method, path, body, expected_status) in [
+        (
+            Method::POST,
+            "/api/bills/import/preview",
+            "",
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            Method::GET,
+            "/api/bills/import/configs?file_format=csv",
+            "",
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            Method::POST,
+            "/api/bills/import/configs",
+            "{}",
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            Method::POST,
+            "/api/bills/import/configs/match",
+            "{}",
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            Method::POST,
+            "/api/bills/import/configs/suggest",
+            "{}",
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            Method::DELETE,
+            "/api/bills/import/configs/1",
+            "",
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            Method::PUT,
+            "/api/learning/rules/1",
+            "{}",
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            Method::PUT,
+            "/api/bills/import/learning-rules/1",
+            "{}",
+            StatusCode::NOT_FOUND,
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .expect("route contract request"),
+            )
+            .await
+            .expect("route contract response");
+        assert_eq!(response.status(), expected_status, "{path}");
+    }
 }
 
 #[test]

@@ -59,7 +59,7 @@ pub fn http_shell_health_with_weaviate_status(
     let mut details = BTreeMap::new();
     details.insert(
         "owned_routes".to_string(),
-        "/api/health,/api/runtime,import/preview-adjacent runtime routes,bills CRUD runtime routes,bills picture runtime routes,bills export runtime route,bills recurring runtime routes,bills reconciliation runtime route,bills category actions runtime routes,budgets CRUD/execution/forecast/history/import runtime routes,matching/recurring/calendar/networth runtime routes,statistics read/analyzer/exchange runtime routes,taxonomy account CRUD/display-order/sync-balances/transaction-action/account-rule list-create-update-delete-reorder-test runtime routes,taxonomy tag CRUD/display-order runtime routes,taxonomy category master-data/statistics/category-rule-list-test/rule-overview/settings-bundle import-export runtime routes,taxonomy templates CRUD/display-order runtime routes,global Learning Center suggestions/rules runtime routes,LLM config/candidates/provider-generation runtime routes,OCR config and receipt recognition runtime routes,auth login/register/token/OAuth2 authorize/profile/cloud/external-auth/system/user-data-statistics-export-clear/2FA status/verify/recovery-code/write/step-up runtime routes,backup ops runtime routes".to_string(),
+        "/api/health,/api/health/live,/api/health/ready,/api/runtime,import/preview-adjacent runtime routes,bills CRUD runtime routes,bills picture runtime routes,bills export runtime route,bills recurring runtime routes,bills reconciliation runtime route,bills category actions runtime routes,budgets CRUD/execution/forecast/history/import runtime routes,matching/recurring/calendar/networth runtime routes,statistics read/analyzer/exchange runtime routes,taxonomy account CRUD/display-order/sync-balances/transaction-action/account-rule list-create-update-delete-reorder-test runtime routes,taxonomy tag CRUD/display-order runtime routes,taxonomy category master-data/statistics/category-rule-list-test/rule-overview/settings-bundle import-export runtime routes,taxonomy templates CRUD/display-order runtime routes,global Learning Center suggestions/rules runtime routes,LLM config/candidates/provider-generation runtime routes,OCR config and receipt recognition runtime routes,auth login/register/token/OAuth2 authorize/profile/cloud/external-auth/system/user-data-statistics-export-clear/2FA status/verify/recovery-code/write/step-up runtime routes,backup ops runtime routes".to_string(),
     );
     details.insert(
         "import_route_mode".to_string(),
@@ -160,9 +160,47 @@ pub fn http_shell_health_with_weaviate_status(
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
+pub fn http_shell_readiness_with_dependency_statuses(
+    config: &HttpShellConfig,
+    postgres_status: &str,
+    weaviate_status: &str,
+) -> HttpShellHealth {
+    let mut health = http_shell_health_with_weaviate_status(config, weaviate_status);
+    health
+        .details
+        .insert("probe".to_string(), "readiness".to_string());
+    health.details.insert(
+        "postgres_authority_status".to_string(),
+        postgres_status.to_string(),
+    );
+    health.status = if postgres_status == "healthy" && weaviate_status == "healthy" {
+        "ok".to_string()
+    } else {
+        "unhealthy".to_string()
+    };
+    health
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+pub fn http_shell_liveness(config: &HttpShellConfig) -> HttpShellHealth {
+    let mut health = http_shell_health_with_weaviate_status(config, "not_probed:liveness");
+    health.status = "ok".to_string();
+    health
+        .details
+        .insert("probe".to_string(), "liveness".to_string());
+    health.details.insert(
+        "postgres_authority_status".to_string(),
+        "not_probed:liveness".to_string(),
+    );
+    health
+}
+
 #[cfg(test)]
 mod tests {
-    use super::http_shell_health_with_weaviate_status;
+    use super::{
+        http_shell_health_with_weaviate_status, http_shell_readiness_with_dependency_statuses,
+    };
     use crate::HttpShellConfig;
 
     #[test]
@@ -179,5 +217,26 @@ mod tests {
             health.details.get("postgres_authority_status"),
             Some(&"complete:postgres_authority".to_string())
         );
+    }
+
+    #[test]
+    fn readiness_does_not_allow_healthy_weaviate_to_mask_postgres_outage() {
+        let config = HttpShellConfig::default();
+        let health = http_shell_readiness_with_dependency_statuses(
+            &config,
+            "unhealthy:unavailable",
+            "healthy",
+        );
+
+        assert_eq!(health.status, "unhealthy");
+        assert_eq!(
+            health.details.get("postgres_authority_status"),
+            Some(&"unhealthy:unavailable".to_string())
+        );
+        assert_eq!(
+            health.details.get("weaviate_status"),
+            Some(&"healthy".to_string())
+        );
+        assert_eq!(health.details.get("probe"), Some(&"readiness".to_string()));
     }
 }

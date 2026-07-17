@@ -1,8 +1,9 @@
 use std::error::Error;
 
 use bill_analyser_db::{
-    batch_create_postgres_bills, create_postgres_bill, get_postgres_bill_by_id,
-    get_postgres_bill_tags, query_postgres_bills, BillCategoryFilter, BillCreateDraft, BillFilters,
+    batch_create_postgres_bills, batch_update_postgres_bills, create_postgres_bill,
+    delete_postgres_bill, get_postgres_bill_by_id, get_postgres_bill_tags, query_postgres_bills,
+    update_postgres_bill, BillCategoryFilter, BillCreateDraft, BillFilters, BillUpdateDraft,
     PostgresPool,
 };
 use serde_json::{json, Value};
@@ -253,6 +254,62 @@ async fn batch_create_rolls_back_all_bills_when_any_identity_is_invalid(
 }
 
 #[tokio::test]
+async fn postgres_bill_mutations_reject_i64_min_without_writing_rows() -> Result<(), Box<dyn Error>>
+{
+    let Some(test_db) =
+        postgres_test_support::isolated_postgres_database("bill_i64_min_contract").await?
+    else {
+        return Ok(());
+    };
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "bill-i64-min-contract").await?;
+
+    let invalid_amount = BillCreateDraft {
+        fields: serde_json::Map::from_iter([
+            ("date".to_string(), json!("2026-05-03 09:00:00")),
+            ("type".to_string(), json!("支出")),
+            ("amount_cents".to_string(), json!(i64::MIN)),
+        ]),
+        tag_ids: Vec::new(),
+    };
+    let error = create_postgres_bill(pool, user_id, &invalid_amount)
+        .await
+        .expect_err("i64::MIN amount must fail before PostgreSQL mutation");
+    assert!(
+        error.to_string().contains("invalid bill amount_cents"),
+        "unexpected error: {error}"
+    );
+
+    let invalid_destination_amount = BillCreateDraft {
+        fields: serde_json::Map::from_iter([
+            ("date".to_string(), json!("2026-05-03 10:00:00")),
+            ("type".to_string(), json!("转账")),
+            ("amount_cents".to_string(), json!(100)),
+            ("destination_amount_cents".to_string(), json!(i64::MIN)),
+        ]),
+        tag_ids: Vec::new(),
+    };
+    let error = batch_create_postgres_bills(pool, user_id, &[invalid_destination_amount])
+        .await
+        .expect_err("i64::MIN destination amount must fail the batch");
+    assert!(
+        error
+            .to_string()
+            .contains("invalid bill destination_amount_cents"),
+        "unexpected error: {error}"
+    );
+
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*)::BIGINT FROM bills WHERE user_id = $1")
+        .bind(user_id)
+        .fetch_one(pool)
+        .await?;
+    assert_eq!(count, 0, "extreme amounts must not write partial rows");
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn create_bill_rejects_invalid_account_and_category_identity() -> Result<(), Box<dyn Error>> {
     let Some(test_db) =
         postgres_test_support::isolated_postgres_database("bill_invalid_identity_contract").await?
@@ -405,6 +462,474 @@ async fn create_bill_drops_destination_account_for_non_transfer_types() -> Resul
     assert!(standard_payload.get("destinationAccountId").is_none());
 
     test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_bill_updates_keep_account_balance_equal_to_committed_bill(
+) -> Result<(), Box<dyn Error>> {
+    let Some(test_db) =
+        postgres_test_support::isolated_postgres_database("bill_concurrent_update_update").await?
+    else {
+        return Ok(());
+    };
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "bill-concurrent-update-update").await?;
+    let account_id = insert_account(pool, user_id, "并发钱包").await?;
+    let category_id = insert_category(pool, user_id, "并发支出", "支出/并发支出").await?;
+    let bill_id = create_postgres_bill(
+        pool,
+        user_id,
+        &expense_bill_draft(account_id, category_id, 1_000, "update-update"),
+    )
+    .await?;
+
+    let mut blocker = pool.begin().await?;
+    sqlx::query("SELECT id FROM bills WHERE id=$1 FOR UPDATE")
+        .bind(bill_id)
+        .fetch_one(&mut *blocker)
+        .await?;
+    let first = spawn_bill_update(pool.clone(), user_id, bill_id, 1_500);
+    let second = spawn_bill_update(pool.clone(), user_id, bill_id, 2_200);
+    wait_for_bill_lock_waiters(pool, 2).await?;
+    blocker.commit().await?;
+    assert!(first.await??, "first update must commit exactly once");
+    assert!(second.await??, "second update must commit exactly once");
+
+    assert_balance_matches_authoritative_bills(pool, user_id, account_id).await?;
+    let version: i64 = sqlx::query_scalar("SELECT version FROM bills WHERE id=$1")
+        .bind(bill_id)
+        .fetch_one(pool)
+        .await?;
+    assert_eq!(
+        version, 3,
+        "two serialized updates each advance one version"
+    );
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_bill_update_and_delete_leave_no_balance_residue() -> Result<(), Box<dyn Error>>
+{
+    let Some(test_db) =
+        postgres_test_support::isolated_postgres_database("bill_concurrent_update_delete").await?
+    else {
+        return Ok(());
+    };
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "bill-concurrent-update-delete").await?;
+    let account_id = insert_account(pool, user_id, "并发删除钱包").await?;
+    let category_id = insert_category(pool, user_id, "并发删除", "支出/并发删除").await?;
+    let bill_id = create_postgres_bill(
+        pool,
+        user_id,
+        &expense_bill_draft(account_id, category_id, 1_000, "update-delete"),
+    )
+    .await?;
+
+    let mut blocker = pool.begin().await?;
+    sqlx::query("SELECT id FROM bills WHERE id=$1 FOR UPDATE")
+        .bind(bill_id)
+        .fetch_one(&mut *blocker)
+        .await?;
+    let update = spawn_bill_update(pool.clone(), user_id, bill_id, 2_500);
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let delete_pool = pool.clone();
+    let delete =
+        tokio::spawn(async move { delete_postgres_bill(&delete_pool, user_id, bill_id).await });
+    wait_for_bill_lock_waiters(pool, 2).await?;
+    blocker.commit().await?;
+    let _update_committed = update.await??;
+    assert!(delete.await??, "delete must commit once");
+
+    assert!(get_postgres_bill_by_id(pool, user_id, bill_id)
+        .await?
+        .is_none());
+    assert_eq!(account_balance_cents(pool, account_id).await?, 0);
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_batch_and_single_update_preserve_authoritative_balance_sum(
+) -> Result<(), Box<dyn Error>> {
+    let Some(test_db) =
+        postgres_test_support::isolated_postgres_database("bill_concurrent_batch_single").await?
+    else {
+        return Ok(());
+    };
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "bill-concurrent-batch-single").await?;
+    let account_id = insert_account(pool, user_id, "批量并发钱包").await?;
+    let category_id = insert_category(pool, user_id, "批量并发", "支出/批量并发").await?;
+    let first_bill_id = create_postgres_bill(
+        pool,
+        user_id,
+        &expense_bill_draft(account_id, category_id, 1_000, "batch-first"),
+    )
+    .await?;
+    let second_bill_id = create_postgres_bill(
+        pool,
+        user_id,
+        &expense_bill_draft(account_id, category_id, 2_000, "batch-second"),
+    )
+    .await?;
+
+    let mut blocker = pool.begin().await?;
+    sqlx::query("SELECT id FROM bills WHERE id=$1 FOR UPDATE")
+        .bind(first_bill_id)
+        .fetch_one(&mut *blocker)
+        .await?;
+    let batch_pool = pool.clone();
+    let batch = tokio::spawn(async move {
+        batch_update_postgres_bills(
+            &batch_pool,
+            user_id,
+            &[first_bill_id, second_bill_id],
+            &serde_json::Map::from_iter([("amount_cents".to_string(), json!(3_000))]),
+        )
+        .await
+    });
+    let single = spawn_bill_update(pool.clone(), user_id, first_bill_id, 4_500);
+    wait_for_bill_lock_waiters(pool, 2).await?;
+    blocker.commit().await?;
+    let batch_result = batch.await??;
+    assert_eq!(batch_result.success_count, 2);
+    assert!(single.await??, "single update must commit once");
+
+    assert_balance_matches_authoritative_bills(pool, user_id, account_id).await?;
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_reverse_transfer_updates_use_one_account_lock_order(
+) -> Result<(), Box<dyn Error>> {
+    let Some(test_db) =
+        postgres_test_support::isolated_postgres_database("bill_reverse_transfer_accounts").await?
+    else {
+        return Ok(());
+    };
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "bill-reverse-transfer-accounts").await?;
+    let account_a = insert_account(pool, user_id, "反向账户 A").await?;
+    let account_b = insert_account(pool, user_id, "反向账户 B").await?;
+    let category_a =
+        insert_category_with_type(pool, user_id, "反向转账 A", "transfer", "转账/反向 A").await?;
+    let category_b =
+        insert_category_with_type(pool, user_id, "反向转账 B", "transfer", "转账/反向 B").await?;
+    let bill_ab = create_postgres_bill(
+        pool,
+        user_id,
+        &transfer_bill_draft(account_a, account_b, category_a, 1_000, "A-to-B"),
+    )
+    .await?;
+    let bill_ba = create_postgres_bill(
+        pool,
+        user_id,
+        &transfer_bill_draft(account_b, account_a, category_b, 2_000, "B-to-A"),
+    )
+    .await?;
+
+    let mut blocker = pool.begin().await?;
+    sqlx::query("SELECT id FROM accounts WHERE id IN ($1, $2) ORDER BY id FOR UPDATE")
+        .bind(account_a)
+        .bind(account_b)
+        .fetch_all(&mut *blocker)
+        .await?;
+    let update_ab = spawn_bill_update_fields(
+        pool.clone(),
+        user_id,
+        bill_ab,
+        serde_json::Map::from_iter([
+            ("source_account_id".to_string(), json!(account_b)),
+            ("destination_account_id".to_string(), json!(account_a)),
+        ]),
+    );
+    let update_ba = spawn_bill_update_fields(
+        pool.clone(),
+        user_id,
+        bill_ba,
+        serde_json::Map::from_iter([
+            ("source_account_id".to_string(), json!(account_a)),
+            ("destination_account_id".to_string(), json!(account_b)),
+        ]),
+    );
+    wait_for_relation_lock_waiters(pool, "accounts", 2).await?;
+    blocker.commit().await?;
+
+    let (update_ab, update_ba) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::join!(update_ab, update_ba)
+    })
+    .await
+    .map_err(|_| "reverse transfer updates exceeded the bounded lock deadline")?;
+    let update_ab = update_ab?;
+    let update_ba = update_ba?;
+    assert!(
+        matches!(update_ab, Ok(true)) && matches!(update_ba, Ok(true)),
+        "reverse transfer updates must both serialize without a deadlock: {update_ab:?}, {update_ba:?}"
+    );
+    assert_balance_matches_transfer_bills(pool, user_id, account_a).await?;
+    assert_balance_matches_transfer_bills(pool, user_id, account_b).await?;
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_reverse_category_updates_use_one_category_lock_order(
+) -> Result<(), Box<dyn Error>> {
+    let Some(test_db) =
+        postgres_test_support::isolated_postgres_database("bill_reverse_categories").await?
+    else {
+        return Ok(());
+    };
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "bill-reverse-categories").await?;
+    let account_a = insert_account(pool, user_id, "分类账户 A").await?;
+    let account_b = insert_account(pool, user_id, "分类账户 B").await?;
+    let category_x = insert_category(pool, user_id, "分类 X", "支出/分类 X").await?;
+    let category_y = insert_category(pool, user_id, "分类 Y", "支出/分类 Y").await?;
+    let bill_x = create_postgres_bill(
+        pool,
+        user_id,
+        &expense_bill_draft(account_a, category_x, 1_100, "category-X"),
+    )
+    .await?;
+    let bill_y = create_postgres_bill(
+        pool,
+        user_id,
+        &expense_bill_draft(account_b, category_y, 2_200, "category-Y"),
+    )
+    .await?;
+
+    let mut blocker = pool.begin().await?;
+    sqlx::query("SELECT id FROM categories WHERE id IN ($1, $2) ORDER BY id FOR UPDATE")
+        .bind(category_x)
+        .bind(category_y)
+        .fetch_all(&mut *blocker)
+        .await?;
+    let update_x = spawn_bill_update_fields(
+        pool.clone(),
+        user_id,
+        bill_x,
+        serde_json::Map::from_iter([("category_id".to_string(), json!(category_y))]),
+    );
+    let update_y = spawn_bill_update_fields(
+        pool.clone(),
+        user_id,
+        bill_y,
+        serde_json::Map::from_iter([("category_id".to_string(), json!(category_x))]),
+    );
+    wait_for_relation_lock_waiters(pool, "categories", 2).await?;
+    blocker.commit().await?;
+
+    let (update_x, update_y) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::join!(update_x, update_y)
+    })
+    .await
+    .map_err(|_| "reverse category updates exceeded the bounded lock deadline")?;
+    let update_x = update_x?;
+    let update_y = update_y?;
+    assert!(
+        matches!(update_x, Ok(true)) && matches!(update_y, Ok(true)),
+        "reverse category updates must both serialize without a deadlock: {update_x:?}, {update_y:?}"
+    );
+    assert_balance_matches_authoritative_bills(pool, user_id, account_a).await?;
+    assert_balance_matches_authoritative_bills(pool, user_id, account_b).await?;
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+fn spawn_bill_update(
+    pool: PostgresPool,
+    user_id: i64,
+    bill_id: i64,
+    amount_cents: i64,
+) -> tokio::task::JoinHandle<bill_analyser_db::DbResult<bool>> {
+    spawn_bill_update_fields(
+        pool,
+        user_id,
+        bill_id,
+        serde_json::Map::from_iter([("amount_cents".to_string(), json!(amount_cents))]),
+    )
+}
+
+fn spawn_bill_update_fields(
+    pool: PostgresPool,
+    user_id: i64,
+    bill_id: i64,
+    fields: serde_json::Map<String, Value>,
+) -> tokio::task::JoinHandle<bill_analyser_db::DbResult<bool>> {
+    tokio::spawn(async move {
+        update_postgres_bill(
+            &pool,
+            user_id,
+            bill_id,
+            &BillUpdateDraft {
+                fields,
+                tag_ids: None,
+            },
+        )
+        .await
+    })
+}
+
+async fn wait_for_bill_lock_waiters(
+    pool: &PostgresPool,
+    expected: i64,
+) -> Result<(), Box<dyn Error>> {
+    for _ in 0..100 {
+        let waiting: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*)::BIGINT
+            FROM pg_stat_activity
+            WHERE datname = current_database()
+              AND wait_event_type = 'Lock'
+              AND query ILIKE '%bills%'
+            "#,
+        )
+        .fetch_one(pool)
+        .await?;
+        if waiting >= expected {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    Err(format!("timed out waiting for {expected} blocked bill mutations").into())
+}
+
+async fn wait_for_relation_lock_waiters(
+    pool: &PostgresPool,
+    relation_name: &str,
+    expected: i64,
+) -> Result<(), Box<dyn Error>> {
+    let query_pattern = format!("%{relation_name}%");
+    for _ in 0..100 {
+        let waiting: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*)::BIGINT
+            FROM pg_stat_activity
+            WHERE datname = current_database()
+              AND pid <> pg_backend_pid()
+              AND wait_event_type = 'Lock'
+              AND query ILIKE $1
+            "#,
+        )
+        .bind(&query_pattern)
+        .fetch_one(pool)
+        .await?;
+        if waiting >= expected {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    Err(format!("timed out waiting for {expected} blocked {relation_name} mutations").into())
+}
+
+fn expense_bill_draft(
+    account_id: i64,
+    category_id: i64,
+    amount_cents: i64,
+    description: &str,
+) -> BillCreateDraft {
+    BillCreateDraft {
+        fields: serde_json::Map::from_iter([
+            ("date".to_string(), json!("2026-07-14 12:00:00")),
+            ("type".to_string(), json!("支出")),
+            ("amount_cents".to_string(), json!(amount_cents)),
+            ("source_account_id".to_string(), json!(account_id)),
+            ("category_id".to_string(), json!(category_id)),
+            ("counterparty".to_string(), json!("并发测试商户")),
+            ("description".to_string(), json!(description)),
+            ("payment_method".to_string(), json!("现金")),
+        ]),
+        tag_ids: Vec::new(),
+    }
+}
+
+fn transfer_bill_draft(
+    source_account_id: i64,
+    destination_account_id: i64,
+    category_id: i64,
+    amount_cents: i64,
+    description: &str,
+) -> BillCreateDraft {
+    BillCreateDraft {
+        fields: serde_json::Map::from_iter([
+            ("date".to_string(), json!("2026-07-14 12:00:00")),
+            ("type".to_string(), json!("转账")),
+            ("amount_cents".to_string(), json!(amount_cents)),
+            ("destination_amount_cents".to_string(), json!(amount_cents)),
+            ("source_account_id".to_string(), json!(source_account_id)),
+            (
+                "destination_account_id".to_string(),
+                json!(destination_account_id),
+            ),
+            ("category_id".to_string(), json!(category_id)),
+            ("counterparty".to_string(), json!("反向转账测试")),
+            ("description".to_string(), json!(description)),
+            ("payment_method".to_string(), json!("内部转账")),
+        ]),
+        tag_ids: Vec::new(),
+    }
+}
+
+async fn account_balance_cents(
+    pool: &PostgresPool,
+    account_id: i64,
+) -> Result<i64, Box<dyn Error>> {
+    Ok(
+        sqlx::query_scalar("SELECT balance_cents FROM accounts WHERE id=$1")
+            .bind(account_id)
+            .fetch_one(pool)
+            .await?,
+    )
+}
+
+async fn assert_balance_matches_authoritative_bills(
+    pool: &PostgresPool,
+    user_id: i64,
+    account_id: i64,
+) -> Result<(), Box<dyn Error>> {
+    let expected: i64 = sqlx::query_scalar(
+        "SELECT -COALESCE(SUM(amount_cents), 0)::BIGINT FROM bills WHERE user_id=$1 AND source_account_id=$2 AND is_deleted=false",
+    )
+    .bind(user_id)
+    .bind(account_id)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(account_balance_cents(pool, account_id).await?, expected);
+    Ok(())
+}
+
+async fn assert_balance_matches_transfer_bills(
+    pool: &PostgresPool,
+    user_id: i64,
+    account_id: i64,
+) -> Result<(), Box<dyn Error>> {
+    let expected: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COALESCE(SUM(
+            CASE WHEN source_account_id = $2 THEN -amount_cents ELSE 0 END
+            + CASE WHEN transfer_target_account_id = $2 THEN
+                COALESCE((standard_payload->>'destination_amount_cents')::BIGINT, amount_cents)
+              ELSE 0 END
+        ), 0)::BIGINT
+        FROM bills
+        WHERE user_id = $1 AND is_deleted = false
+        "#,
+    )
+    .bind(user_id)
+    .bind(account_id)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(account_balance_cents(pool, account_id).await?, expected);
     Ok(())
 }
 

@@ -138,7 +138,8 @@ mod preview_mutation_helper_tests {
             ("destinationAmountCents".to_string(), json!("54321")),
         ]);
 
-        let patch = build_preview_patch_from_payload(7, &object);
+        let patch = build_preview_patch_from_payload(7, &object)
+            .expect("explicit cents aliases are valid");
 
         assert_eq!(patch.preview_id, 7);
         assert_eq!(
@@ -159,7 +160,8 @@ mod preview_mutation_helper_tests {
             ("recurringCandidateCount".to_string(), json!(2)),
         ]);
 
-        let patch = build_preview_patch_from_payload(7, &object);
+        let patch = build_preview_patch_from_payload(7, &object)
+            .expect("non-integer cents values preserve the existing ignore contract");
 
         assert_eq!(change_value(&patch, ImportPreviewPatchField::Amount), None);
         assert_eq!(
@@ -187,7 +189,8 @@ mod preview_mutation_helper_tests {
             ("preview_type".to_string(), json!("转账")),
         ]);
 
-        let patch = build_preview_patch_from_payload(7, &object);
+        let patch = build_preview_patch_from_payload(7, &object)
+            .expect("matching feedback payload is otherwise valid");
 
         assert_eq!(
             change_value(&patch, ImportPreviewPatchField::Type),
@@ -215,7 +218,8 @@ mod preview_mutation_helper_tests {
             ),
         ]);
 
-        let patch = build_preview_patch_from_payload(7, &object);
+        let patch = build_preview_patch_from_payload(7, &object)
+            .expect("manual annotation payload is valid");
 
         assert_eq!(
             change_value(&patch, ImportPreviewPatchField::ManualAnnotation),
@@ -237,7 +241,8 @@ mod preview_mutation_helper_tests {
             ("is_manually_annotated".to_string(), json!(true)),
             ("mainCategory".to_string(), json!("餐饮")),
         ]);
-        let mut patch = build_preview_patch_from_payload(7, &object);
+        let mut patch = build_preview_patch_from_payload(7, &object)
+            .expect("category payload is valid");
         apply_loaded_category_to_preview_patch(
             &mut patch,
             42,
@@ -265,7 +270,8 @@ mod preview_mutation_helper_tests {
     fn preview_patch_payload_ignores_standalone_manual_annotation_marker() {
         let object = Map::from_iter([("is_manually_annotated".to_string(), json!(true))]);
 
-        let patch = build_preview_patch_from_payload(7, &object);
+        let patch = build_preview_patch_from_payload(7, &object)
+            .expect("standalone manual marker payload is valid");
 
         assert_eq!(
             change_value(&patch, ImportPreviewPatchField::ManualAnnotation),
@@ -275,6 +281,23 @@ mod preview_mutation_helper_tests {
             change_value(&patch, ImportPreviewPatchField::MatchingFeedback),
             None
         );
+    }
+
+    #[test]
+    fn preview_patch_payload_rejects_i64_min_money_aliases() {
+        for key in [
+            "amountCents",
+            "preview_amount_cents",
+            "sourceAmountCents",
+            "destinationAmountCents",
+            "preview_destination_amount_cents",
+        ] {
+            let object = Map::from_iter([(key.to_string(), json!(i64::MIN))]);
+            let error = build_preview_patch_from_payload(7, &object)
+                .expect_err("i64::MIN must be rejected at the HTTP patch boundary");
+
+            assert_eq!(error.status_code, 400, "{key}");
+        }
     }
 
     #[tokio::test]

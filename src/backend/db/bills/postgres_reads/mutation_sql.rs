@@ -67,6 +67,7 @@ async fn update_postgres_bill_on_tx(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     user_id: i64,
     bill_id: i64,
+    expected_version: i64,
     mutation: &PostgresBillMutation,
 ) -> DbResult<u64> {
     sqlx::query(
@@ -88,7 +89,7 @@ async fn update_postgres_bill_on_tx(
             standard_payload = $14,
             updated_at = now(),
             version = version + 1
-        WHERE user_id = $1 AND id = $2 AND is_deleted = false
+        WHERE user_id = $1 AND id = $2 AND version = $15 AND is_deleted = false
         "#,
     )
     .bind(user_id)
@@ -105,8 +106,80 @@ async fn update_postgres_bill_on_tx(
     .bind(&mutation.payment_method)
     .bind(&mutation.source_hash)
     .bind(&mutation.standard_payload)
+    .bind(expected_version)
     .execute(&mut **tx)
     .await
     .map(|result| result.rows_affected())
     .map_err(DbError::from)
+}
+
+async fn get_postgres_bill_for_update_on_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    user_id: i64,
+    bill_id: i64,
+) -> DbResult<Option<LockedPostgresBill>> {
+    let row = sqlx::query(&format!(
+        r#"SELECT b.id, b.user_id, b.occurred_at, b.transaction_type, b.amount_cents,
+            b.merchant, b.description, b.payment_method,
+            {MAIN_CATEGORY_EXPR} AS main_category, {SUB_CATEGORY_EXPR} AS sub_category,
+            b.standard_payload, b.source_hash, b.created_at, b.updated_at,
+            b.account_id, b.source_account_id, b.target_account_id,
+            b.transfer_target_account_id, b.category_id, b.version
+           FROM bills b
+           LEFT JOIN categories c ON c.user_id=b.user_id AND c.id=b.category_id
+           WHERE b.user_id=$1 AND b.id=$2 AND b.is_deleted=false
+           FOR UPDATE OF b"#
+    ))
+    .bind(user_id)
+    .bind(bill_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    row.map(|row| {
+        let bill_id = row.try_get("id")?;
+        let version = row.try_get("version")?;
+        Ok(LockedPostgresBill {
+            bill_id,
+            record: bill_record_from_postgres_row(row)?,
+            version,
+        })
+    })
+    .transpose()
+}
+
+async fn get_postgres_bills_for_update_on_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    user_id: i64,
+    bill_ids: &[i64],
+) -> DbResult<Vec<LockedPostgresBill>> {
+    if bill_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows = sqlx::query(&format!(
+        r#"SELECT b.id, b.user_id, b.occurred_at, b.transaction_type, b.amount_cents,
+            b.merchant, b.description, b.payment_method,
+            {MAIN_CATEGORY_EXPR} AS main_category, {SUB_CATEGORY_EXPR} AS sub_category,
+            b.standard_payload, b.source_hash, b.created_at, b.updated_at,
+            b.account_id, b.source_account_id, b.target_account_id,
+            b.transfer_target_account_id, b.category_id, b.version
+           FROM bills b
+           LEFT JOIN categories c ON c.user_id=b.user_id AND c.id=b.category_id
+           WHERE b.user_id=$1 AND b.id=ANY($2) AND b.is_deleted=false
+           ORDER BY b.id
+           FOR UPDATE OF b"#
+    ))
+    .bind(user_id)
+    .bind(bill_ids)
+    .fetch_all(&mut **tx)
+    .await?;
+    rows.into_iter()
+        .map(|row| {
+            let bill_id = row.try_get("id")?;
+            let version = row.try_get("version")?;
+            Ok(LockedPostgresBill {
+                bill_id,
+                record: bill_record_from_postgres_row(row)?,
+                version,
+            })
+        })
+        .collect()
 }

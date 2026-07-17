@@ -1,8 +1,12 @@
 import { expect, type Page } from '@playwright/test';
 
-export async function expectPageAnchor(page: Page, testId: string): Promise<void> {
+export async function expectPageAnchor(
+    page: Page,
+    testId: string,
+    timeoutMs = 15_000
+): Promise<void> {
     await expect(page.getByTestId(testId), `page anchor ${testId}`).toBeVisible({
-        timeout: 15_000
+        timeout: timeoutMs
     });
 }
 

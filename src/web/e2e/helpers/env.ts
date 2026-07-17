@@ -14,6 +14,7 @@ export interface E2EEnvironment {
     readonly runId: string;
     readonly expectedWeaviatePrefix: string;
     readonly allowSharedLocalDatabase: boolean;
+    readonly allowCIServiceHosts: boolean;
     readonly healthTimeoutMs: number;
 }
 
@@ -23,6 +24,7 @@ interface RuntimeHealth {
 }
 
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+const CONTROLLED_CI_POSTGRES_HOSTS = new Set(['postgres']);
 
 function readEnv(name: string, fallback: string): string {
     const value = process.env[name]?.trim();
@@ -71,6 +73,7 @@ export function getE2EEnvironment(): E2EEnvironment {
         runId: readEnv('E2E_RUN_ID', `e2e-${new Date().toISOString().replace(/[-:.TZ]/gu, '').slice(0, 14)}`),
         expectedWeaviatePrefix: readEnv('E2E_EXPECTED_WEAVIATE_PREFIX', 'BillAnalyserE2E'),
         allowSharedLocalDatabase: readBooleanEnv('E2E_ALLOW_SHARED_LOCAL_DATABASE', false),
+        allowCIServiceHosts: readBooleanEnv('E2E_ALLOW_CI_SERVICE_HOSTS', false),
         healthTimeoutMs: parsePositiveIntegerEnv('E2E_HEALTH_TIMEOUT_MS', 10_000)
     };
 }
@@ -85,7 +88,7 @@ export function assertLocalE2EEnvironment(env: E2EEnvironment = getE2EEnvironmen
 
     const postgresURL = process.env['BILL_ANALYSER_POSTGRES_URL']?.trim();
     if (postgresURL) {
-        assertLocalPostgresURL(postgresURL, env.allowSharedLocalDatabase);
+        assertLocalPostgresURL(postgresURL, env.allowSharedLocalDatabase, env.allowCIServiceHosts);
     }
 }
 
@@ -128,7 +131,11 @@ function assertLocalURL(value: string, label: string): void {
     }
 }
 
-function assertLocalPostgresURL(value: string, allowSharedLocalDatabase: boolean): void {
+function assertLocalPostgresURL(
+    value: string,
+    allowSharedLocalDatabase: boolean,
+    allowCIServiceHosts: boolean
+): void {
     let parsed: URL;
     try {
         parsed = new URL(value);
@@ -136,8 +143,10 @@ function assertLocalPostgresURL(value: string, allowSharedLocalDatabase: boolean
         throw new Error('BILL_ANALYSER_POSTGRES_URL must be a valid URL when provided to E2E.', { cause: error });
     }
 
-    if (!LOCAL_HOSTS.has(parsed.hostname)) {
-        throw new Error('BILL_ANALYSER_POSTGRES_URL must point to a local PostgreSQL host for E2E cleanup.');
+    if (!isAllowedPostgresHost(parsed.hostname, allowCIServiceHosts)) {
+        throw new Error(
+            'BILL_ANALYSER_POSTGRES_URL must point to a local or explicitly controlled CI PostgreSQL host for E2E cleanup.'
+        );
     }
 
     assertSafePostgresDatabaseName(
@@ -166,8 +175,10 @@ function assertHealthPostgresTarget(health: RuntimeHealth, env: E2EEnvironment):
         throw new Error(`health details.postgres_url_redacted must use postgres/postgresql, got ${value}.`);
     }
 
-    if (!LOCAL_HOSTS.has(parsed.hostname)) {
-        throw new Error(`health details.postgres_url_redacted must point to a local PostgreSQL host, got ${value}.`);
+    if (!isAllowedPostgresHost(parsed.hostname, env.allowCIServiceHosts)) {
+        throw new Error(
+            `health details.postgres_url_redacted must point to a local or explicitly controlled CI PostgreSQL host, got ${value}.`
+        );
     }
 
     assertSafePostgresDatabaseName(
@@ -179,6 +190,11 @@ function assertHealthPostgresTarget(health: RuntimeHealth, env: E2EEnvironment):
 
 function matchesPostgresScheme(protocol: string): boolean {
     return protocol === 'postgres:' || protocol === 'postgresql:';
+}
+
+function isAllowedPostgresHost(hostname: string, allowCIServiceHosts: boolean): boolean {
+    return LOCAL_HOSTS.has(hostname)
+        || (allowCIServiceHosts && CONTROLLED_CI_POSTGRES_HOSTS.has(hostname));
 }
 
 function assertSafePostgresDatabaseName(databaseName: string, allowSharedLocalDatabase: boolean, label: string): void {

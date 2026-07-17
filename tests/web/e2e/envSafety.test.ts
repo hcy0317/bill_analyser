@@ -1,6 +1,10 @@
 import { beforeEach, expect, jest, test } from '@jest/globals';
 
-import { assertBackendHealthy, type E2EEnvironment } from '../../../src/web/e2e/helpers/env';
+import {
+    assertBackendHealthy,
+    getE2EEnvironment,
+    type E2EEnvironment
+} from '../../../src/web/e2e/helpers/env';
 
 function buildEnvironment(overrides: Partial<E2EEnvironment> = {}): E2EEnvironment {
     return {
@@ -15,6 +19,7 @@ function buildEnvironment(overrides: Partial<E2EEnvironment> = {}): E2EEnvironme
         runId: 'e2e-test',
         expectedWeaviatePrefix: 'BillAnalyserE2E',
         allowSharedLocalDatabase: false,
+        allowCIServiceHosts: false,
         healthTimeoutMs: 10_000,
         ...overrides
     };
@@ -37,6 +42,7 @@ function buildHealthRequest(postgresURL: string): never {
 
 beforeEach(() => {
     delete process.env['BILL_ANALYSER_POSTGRES_URL'];
+    delete process.env['E2E_ALLOW_CI_SERVICE_HOSTS'];
 });
 
 test('E2E health guard accepts local dedicated PostgreSQL databases', async () => {
@@ -57,11 +63,55 @@ test('E2E health guard rejects the default local development PostgreSQL database
     ).rejects.toThrow('health details.postgres_url_redacted database name must include "e2e" or "test"');
 });
 
+test('E2E health guard accepts the controlled PostgreSQL service host only under the explicit CI contract', async () => {
+    process.env['E2E_ALLOW_CI_SERVICE_HOSTS'] = 'true';
+    process.env['BILL_ANALYSER_POSTGRES_URL'] =
+        'postgresql://bill_analyser_e2e:secret@postgres:5432/bill_analyser_e2e';
+
+    await expect(
+        assertBackendHealthy(
+            buildHealthRequest('postgres://bill_analyser_e2e:***@postgres:5432/bill_analyser_e2e'),
+            getE2EEnvironment()
+        )
+    ).resolves.toEqual(expect.objectContaining({ status: 'ok' }));
+});
+
+test('E2E health guard rejects the PostgreSQL service host without the explicit CI contract', async () => {
+    process.env['BILL_ANALYSER_POSTGRES_URL'] =
+        'postgresql://bill_analyser_e2e:secret@postgres:5432/bill_analyser_e2e';
+
+    await expect(
+        assertBackendHealthy(
+            buildHealthRequest('postgres://bill_analyser_e2e:***@postgres:5432/bill_analyser_e2e'),
+            buildEnvironment()
+        )
+    ).rejects.toThrow('BILL_ANALYSER_POSTGRES_URL must point to a local or explicitly controlled CI PostgreSQL host');
+});
+
 test('E2E health guard rejects remote PostgreSQL even when shared local DB mode is enabled', async () => {
+    process.env['E2E_ALLOW_CI_SERVICE_HOSTS'] = 'true';
+    process.env['BILL_ANALYSER_POSTGRES_URL'] =
+        'postgresql://bill_analyser_e2e:secret@db.example.test:5432/bill_analyser_e2e';
+
     await expect(
         assertBackendHealthy(
             buildHealthRequest('postgres://bill_analyser:***@db.example.test:5432/bill_analyser_e2e'),
-            buildEnvironment({ allowSharedLocalDatabase: true })
+            buildEnvironment({ allowSharedLocalDatabase: true, allowCIServiceHosts: true })
         )
-    ).rejects.toThrow('health details.postgres_url_redacted must point to a local PostgreSQL host');
+    ).rejects.toThrow('BILL_ANALYSER_POSTGRES_URL must point to a local or explicitly controlled CI PostgreSQL host');
+});
+
+test('E2E health guard rejects a remote health PostgreSQL target under the explicit CI contract', async () => {
+    process.env['E2E_ALLOW_CI_SERVICE_HOSTS'] = 'true';
+    process.env['BILL_ANALYSER_POSTGRES_URL'] =
+        'postgresql://bill_analyser_e2e:secret@postgres:5432/bill_analyser_e2e';
+
+    await expect(
+        assertBackendHealthy(
+            buildHealthRequest('postgres://bill_analyser_e2e:***@db.example.test:5432/bill_analyser_e2e'),
+            buildEnvironment({ allowCIServiceHosts: true })
+        )
+    ).rejects.toThrow(
+        'health details.postgres_url_redacted must point to a local or explicitly controlled CI PostgreSQL host'
+    );
 });

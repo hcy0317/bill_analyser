@@ -38,6 +38,11 @@ const mockWallet = {
     color: '#0088ff',
     hidden: false
 };
+const mockBank = {
+    ...mockWallet,
+    id: 'bank',
+    name: 'Bank'
+};
 
 jest.mock('vue', () => {
     const actual = jest.requireActual('vue') as any;
@@ -69,10 +74,10 @@ jest.mock('@/stores/user.ts', () => ({
 }));
 jest.mock('@/stores/account.ts', () => ({
     useAccountsStore: () => ({
-        allPlainAccounts: [mockWallet],
-        allVisiblePlainAccounts: [mockWallet],
-        allAccountsMap: { wallet: mockWallet },
-        allAccounts: [mockWallet],
+        allPlainAccounts: [mockWallet, mockBank],
+        allVisiblePlainAccounts: [mockWallet, mockBank],
+        allAccountsMap: { wallet: mockWallet, bank: mockBank },
+        allAccounts: [mockWallet, mockBank],
         loadAllAccounts: jest.fn()
     })
 }));
@@ -391,7 +396,7 @@ describe('desktop import signal, history, and annotation matrix', () => {
         transaction.matching!.learning!.margin = 0.18;
         const afterLearning = bindings.getImportPreviewSignalViewModel(transaction);
         expect(afterLearning).not.toBe(first);
-        expect(bindings.buildImportPreviewSignalCacheSignature(transaction)).toContain('12');
+        expect(bindings.getImportPreviewSignalViewModel(transaction)).toBe(afterLearning);
 
         transaction.matching!.llm!.suggested_sub_category = 'Dinner';
         transaction.matching!.llm!.suggested_source_account = 'Cash';
@@ -414,8 +419,7 @@ describe('desktop import signal, history, and annotation matrix', () => {
         transaction.matching!.dedup!.source_labels = ['first', 'second'];
         const afterParserDedup = bindings.getImportPreviewSignalViewModel(transaction);
         expect(afterParserDedup).not.toBe(afterHistory);
-        expect(bindings.buildImportPreviewSignalCacheSignature(transaction)).toContain('mobile');
-        expect(bindings.buildImportPreviewSignalCacheSignature(transaction)).toContain('ack-b');
+        expect(afterParserDedup.dedup?.detailLines.join(' ')).toContain('second');
     });
 
     test('requires a complete history operation before exposing selected acknowledgement data', () => {
@@ -491,27 +495,21 @@ describe('desktop import signal, history, and annotation matrix', () => {
         const { bindings } = createBindings([category, source, destination, transfer, unknown, empty]);
 
         for (const transaction of [category, source, destination, transfer, unknown]) {
-            expect(bindings.hasRawPersistedMatchingAnnotationIssue(transaction)).toBe(true);
-            expect(bindings.hasCurrentPersistedMatchingAnnotationIssue(transaction)).toBe(true);
             expect(bindings.hasCurrentAnnotationIssue(transaction)).toBe(true);
             expect(bindings.hasBaselineAnnotationIssue(transaction)).toBe(true);
             expect(bindings.getAnnotationSummary(transaction)).toEqual(expect.any(String));
         }
-        expect(bindings.hasRawPersistedMatchingAnnotationIssue(empty)).toBe(false);
-        expect(bindings.hasCurrentPersistedMatchingAnnotationIssue(empty)).toBe(false);
+        expect(bindings.hasCurrentAnnotationIssue(empty)).toBe(false);
 
         category.categoryId = '8';
         source.sourceAccountId = 'wallet';
-        destination.destinationAccountId = 'wallet';
+        destination.destinationAccountId = 'bank';
         transfer.type = 3;
-        expect(bindings.hasRawPersistedMatchingAnnotationIssue(category)).toBe(true);
-        expect(bindings.hasCurrentPersistedMatchingAnnotationIssue(category)).toBe(false);
-        expect(bindings.hasCurrentPersistedMatchingAnnotationIssue(source)).toBe(false);
-        expect(bindings.hasCurrentPersistedMatchingAnnotationIssue(destination)).toBe(false);
-        expect(bindings.hasCurrentPersistedMatchingAnnotationIssue(transfer)).toBe(false);
-        expect(bindings.hasCurrentPersistedMatchingAnnotationIssue(unknown)).toBe(true);
-        expect(bindings.getAnnotationText({ reason: ' reason text ' })).toBe('reason text');
-        expect(bindings.getAnnotationType(' Missing-Category ')).toBe('missing-category');
+        expect(bindings.hasCurrentAnnotationIssue(category)).toBe(false);
+        expect(bindings.hasCurrentAnnotationIssue(source)).toBe(false);
+        expect(bindings.hasCurrentAnnotationIssue(destination)).toBe(false);
+        expect(bindings.hasCurrentAnnotationIssue(transfer)).toBe(false);
+        expect(bindings.hasCurrentAnnotationIssue(unknown)).toBe(true);
     });
 
     test('canonical category patch clears stale missing-category signal while preserving missing-account review', () => {

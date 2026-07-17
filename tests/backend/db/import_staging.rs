@@ -16,20 +16,21 @@ use bill_analyser_db::{
     confirm_preview_to_bills, confirm_preview_to_bills_with_ack, create_import_session,
     get_import_decision_groups_by_session, get_import_history_candidate_bills_for_session,
     get_import_history_materializations_by_session, get_import_learning_lifecycle_view,
-    get_import_session, get_parser_templates_by_session, get_preview_bill_by_id,
-    get_unprocessed_templates_for_dedup, insert_import_decision_groups_batch,
-    insert_import_history_materializations_batch, insert_parser_template,
-    insert_parser_templates_batch, insert_preview_bill, insert_preview_bills_batch,
-    mark_unprocessed_parser_templates_processed_for_session, postgres_initial_schema_path,
-    postgres_migration_manifest, query_preview_page_by_session,
+    get_import_session, get_import_standard_rows_by_session, get_parser_templates_by_session,
+    get_preview_bill_by_id, get_unprocessed_templates_for_dedup,
+    insert_import_decision_groups_batch, insert_import_history_materializations_batch,
+    insert_parser_template, insert_parser_templates_batch, insert_preview_bill,
+    insert_preview_bills_batch, mark_unprocessed_parser_templates_processed_for_session,
+    postgres_initial_schema_path, postgres_migration_manifest, query_preview_page_by_session,
     record_import_learning_lifecycle_feedback, replace_preview_selection_with_patches,
     reset_session_preview_selection, review_preview_llm_recommendation,
+    set_import_decision_materialization_failed, set_import_decision_materialization_status,
     stage_import_parser_templates, stage_import_parser_templates_with_sources,
     update_import_session_status, update_parser_template_status, update_preview_bill,
     update_preview_bills_batch, update_preview_recurring_match_decision, update_preview_selection,
     update_session_preview_selection_by_query, ConfirmCommand, ImportDecisionGroupCommand,
     ImportDecisionGroupCommandResult, ImportDecisionGroupDraft, ImportDecisionGroupMemberDraft,
-    ImportDecisionPreviewVersion, ImportHistoryMaterializationDraft,
+    ImportDecisionGroupMutation, ImportDecisionPreviewVersion, ImportHistoryMaterializationDraft,
     ImportHistoryRewriteAcknowledgement, ImportHistoryRewriteAcknowledgementOperation,
     ImportLearningLifecycleRecordInput, ImportParserTemplateDraft,
     ImportPreviewClassificationUpdate, ImportPreviewDecision, ImportPreviewDraft,
@@ -4958,6 +4959,1230 @@ async fn real_postgres_learning_and_llm_lifecycle_transitions_are_transactional_
 
     test_db.cleanup().await?;
     Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn real_postgres_decision_group_repository_upserts_members_and_preserves_user_scope(
+) -> Result<(), Box<dyn Error>> {
+    let test_db = strict_isolated_postgres_database("decision_group_repository_scope").await?;
+    let pool = &test_db.pool;
+    let first_user_id = insert_user(pool, "decision-group-repository-first").await?;
+    let second_user_id = insert_user(pool, "decision-group-repository-second").await?;
+    let first_user = UserId::new(first_user_id as u64).expect("positive first user id");
+    let second_user = UserId::new(second_user_id as u64).expect("positive second user id");
+    let shared_session_id = "decision-group-shared-session-key";
+
+    for user_id in [first_user, second_user] {
+        create_import_session(
+            pool,
+            &ImportSessionDraft {
+                session_id: shared_session_id.to_string(),
+                user_id,
+                file_count: 1,
+            },
+        )?;
+    }
+
+    assert_eq!(
+        insert_import_decision_groups_batch(pool, shared_session_id, first_user, &[])?,
+        0
+    );
+    let first_preview_id = insert_preview_bill(
+        pool,
+        shared_session_id,
+        first_user,
+        &preview_draft("2026-07-11 08:00:00", "支出", -1100, None, None, None, true),
+    )?;
+    let second_preview_id = insert_preview_bill(
+        pool,
+        shared_session_id,
+        second_user,
+        &preview_draft("2026-07-11 08:01:00", "收入", 2200, None, None, None, false),
+    )?;
+    let expected_preview_version: i64 = sqlx::query_scalar(
+        r#"
+        UPDATE import_preview_rows
+        SET description = 'decision-group preview member v2',
+            updated_at = now(),
+            version = version + 1
+        WHERE id = $1 AND user_id = $2
+        RETURNING version
+        "#,
+    )
+    .bind(first_preview_id)
+    .bind(first_user_id)
+    .fetch_one(pool)
+    .await?;
+
+    let first_standard_source = ImportSourceDraft {
+        source_index: 1,
+        original_file_name: "decision-group-members.csv".to_string(),
+        parser_id: "decision-group-parser".to_string(),
+        parser_name: "decision group parser".to_string(),
+        parser_signal: "exact".to_string(),
+        parser_confidence: 1.0,
+        feature_signature: "decision-group-member-source".to_string(),
+        metadata: json!({"owner": "first"}),
+    };
+    let first_standard_row = ImportStandardRowDraft {
+        source_index: 1,
+        source_row_index: 1,
+        occurred_at: "2026-07-11 08:02:00+08".to_string(),
+        amount_cents: -3300,
+        direction: "expense".to_string(),
+        transaction_type: "支出".to_string(),
+        merchant: "decision group standard member".to_string(),
+        payment_method: "test".to_string(),
+        description: "decision-group standard member".to_string(),
+        parser_payload: json!({"parser_id": "decision-group-parser"}),
+        standard_payload: json!({"generation": 1}),
+    };
+    for generation in [1, 2] {
+        let mut versioned_standard_row = first_standard_row.clone();
+        versioned_standard_row.standard_payload = json!({"generation": generation});
+        let staged = stage_import_parser_templates_with_sources(
+            pool,
+            &ImportSessionDraft {
+                session_id: shared_session_id.to_string(),
+                user_id: first_user,
+                file_count: 1,
+            },
+            &[],
+            std::slice::from_ref(&first_standard_source),
+            &[versioned_standard_row],
+            true,
+        )?;
+        assert!(staged.session_found);
+        assert_eq!(staged.inserted_count, 1);
+    }
+    let first_standard_id =
+        get_import_standard_rows_by_session(pool, shared_session_id, first_user)?[0].id;
+    let expected_standard_version: i64 = sqlx::query_scalar(
+        "SELECT version FROM import_standard_rows WHERE id = $1 AND user_id = $2",
+    )
+    .bind(first_standard_id)
+    .bind(first_user_id)
+    .fetch_one(pool)
+    .await?;
+
+    let first_history_id =
+        insert_history_bill(pool, first_user_id, "decision-group history member").await?;
+    let expected_history_version: i64 = sqlx::query_scalar(
+        r#"
+        UPDATE bills
+        SET description = 'decision-group history member v2',
+            updated_at = now(),
+            version = version + 1
+        WHERE id = $1 AND user_id = $2
+        RETURNING version
+        "#,
+    )
+    .bind(first_history_id)
+    .bind(first_user_id)
+    .fetch_one(pool)
+    .await?;
+    for version in [
+        expected_preview_version,
+        expected_standard_version,
+        expected_history_version,
+    ] {
+        assert!(version > 1, "member source version must be advanced");
+    }
+
+    let first_draft = ImportDecisionGroupDraft {
+        group_type: "duplicate".to_string(),
+        group_key: "shared-logical-key".to_string(),
+        decision_status: "pending".to_string(),
+        base_preview_row_id: Some(first_preview_id),
+        signal_payload: json!({"owner": "first", "generation": 1}),
+        members: vec![
+            ImportDecisionGroupMemberDraft {
+                preview_row_id: Some(first_preview_id),
+                standard_row_id: None,
+                history_bill_id: None,
+                member_role: "preview_source".to_string(),
+                parser_name: "first-parser".to_string(),
+                metadata: json!({"generation": 1}),
+            },
+            ImportDecisionGroupMemberDraft {
+                preview_row_id: None,
+                standard_row_id: Some(first_standard_id),
+                history_bill_id: None,
+                member_role: "standard_source".to_string(),
+                parser_name: "decision-group-parser".to_string(),
+                metadata: json!({"generation": 2}),
+            },
+            ImportDecisionGroupMemberDraft {
+                preview_row_id: None,
+                standard_row_id: None,
+                history_bill_id: Some(first_history_id),
+                member_role: "history_source".to_string(),
+                parser_name: "history-fixture".to_string(),
+                metadata: json!({"generation": 2}),
+            },
+        ],
+    };
+    let second_draft = ImportDecisionGroupDraft {
+        group_type: "duplicate".to_string(),
+        group_key: "shared-logical-key".to_string(),
+        decision_status: "matched".to_string(),
+        base_preview_row_id: Some(second_preview_id),
+        signal_payload: json!({"owner": "second"}),
+        members: vec![ImportDecisionGroupMemberDraft {
+            preview_row_id: Some(second_preview_id),
+            standard_row_id: None,
+            history_bill_id: None,
+            member_role: "base".to_string(),
+            parser_name: "second-parser".to_string(),
+            metadata: json!({"tenant": "second"}),
+        }],
+    };
+    assert_eq!(
+        insert_import_decision_groups_batch(
+            pool,
+            shared_session_id,
+            first_user,
+            std::slice::from_ref(&first_draft),
+        )?,
+        1
+    );
+    assert_eq!(
+        insert_import_decision_groups_batch(
+            pool,
+            shared_session_id,
+            second_user,
+            std::slice::from_ref(&second_draft),
+        )?,
+        1
+    );
+
+    let first_groups = get_import_decision_groups_by_session(pool, shared_session_id, first_user)?;
+    let second_groups =
+        get_import_decision_groups_by_session(pool, shared_session_id, second_user)?;
+    assert_eq!(first_groups.len(), 1);
+    assert_eq!(second_groups.len(), 1);
+    assert_eq!(first_groups[0].user_id, first_user_id);
+    assert_eq!(second_groups[0].user_id, second_user_id);
+    assert_eq!(first_groups[0].signal_payload["owner"], json!("first"));
+    assert_eq!(second_groups[0].signal_payload["owner"], json!("second"));
+    assert_eq!(second_groups[0].members.len(), 1);
+    assert_eq!(second_groups[0].members[0].version, 1);
+    assert_eq!(first_groups[0].members.len(), 3);
+    let member_version = |member_role: &str| {
+        first_groups[0]
+            .members
+            .iter()
+            .find(|member| member.member_role == member_role)
+            .unwrap_or_else(|| panic!("missing decision-group member role {member_role}"))
+            .version
+    };
+    assert_eq!(member_version("preview_source"), expected_preview_version);
+    assert_eq!(member_version("standard_source"), expected_standard_version);
+    assert_eq!(member_version("history_source"), expected_history_version);
+
+    let replacement = ImportDecisionGroupDraft {
+        decision_status: "accepted".to_string(),
+        base_preview_row_id: None,
+        signal_payload: json!({"owner": "first", "generation": 2}),
+        members: Vec::new(),
+        ..first_draft.clone()
+    };
+    assert_eq!(
+        insert_import_decision_groups_batch(
+            pool,
+            shared_session_id,
+            first_user,
+            std::slice::from_ref(&replacement),
+        )?,
+        1
+    );
+    let replaced = get_import_decision_groups_by_session(pool, shared_session_id, first_user)?;
+    assert_eq!(replaced[0].id, first_groups[0].id);
+    assert_eq!(replaced[0].version, 2);
+    assert_eq!(replaced[0].decision_status, "accepted");
+    assert_eq!(replaced[0].base_preview_row_id, None);
+    assert!(replaced[0].members.is_empty());
+
+    let final_replacement = ImportDecisionGroupDraft {
+        decision_status: "pending".to_string(),
+        base_preview_row_id: Some(first_preview_id),
+        signal_payload: json!({"owner": "first", "generation": 3}),
+        members: vec![ImportDecisionGroupMemberDraft {
+            preview_row_id: Some(first_preview_id),
+            standard_row_id: None,
+            history_bill_id: None,
+            member_role: "replacement".to_string(),
+            parser_name: "replacement-parser".to_string(),
+            metadata: json!({"generation": 3}),
+        }],
+        ..first_draft
+    };
+    insert_import_decision_groups_batch(pool, shared_session_id, first_user, &[final_replacement])?;
+    let final_first = get_import_decision_groups_by_session(pool, shared_session_id, first_user)?;
+    assert_eq!(final_first[0].version, 3);
+    assert_eq!(final_first[0].members.len(), 1);
+    assert_eq!(final_first[0].members[0].member_role, "replacement");
+    assert_eq!(
+        get_import_decision_groups_by_session(pool, shared_session_id, second_user)?[0].version,
+        1,
+        "first tenant upserts must not mutate the second tenant group"
+    );
+    assert!(get_import_decision_groups_by_session(pool, "missing-session", first_user).is_err());
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn real_postgres_decision_group_commands_cover_scope_cas_replay_and_status_paths(
+) -> Result<(), Box<dyn Error>> {
+    let test_db = strict_isolated_postgres_database("decision_group_command_matrix").await?;
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "decision-group-command-matrix").await?;
+    let other_user_id = insert_user(pool, "decision-group-command-other").await?;
+    let user = UserId::new(user_id as u64).expect("positive user id");
+    let other_user = UserId::new(other_user_id as u64).expect("positive other user id");
+    let session_id = "decision-group-command-session";
+    for scoped_user in [user, other_user] {
+        create_import_session(
+            pool,
+            &ImportSessionDraft {
+                session_id: session_id.to_string(),
+                user_id: scoped_user,
+                file_count: 1,
+            },
+        )?;
+    }
+
+    let mut preview_drafts = Vec::new();
+    for (description, amount) in [("command first", -3100), ("command second", -3200)] {
+        let mut draft = preview_draft(
+            "2026-07-11 09:00:00",
+            "支出",
+            amount,
+            None,
+            None,
+            None,
+            true,
+        );
+        draft.preview_description = description.to_string();
+        draft.preview_matching_feedback =
+            json!({"transfer": {"state": "pending", "review_status": "pending"}});
+        preview_drafts.push(draft);
+    }
+    assert_eq!(
+        insert_preview_bills_batch(pool, session_id, user, &preview_drafts)?,
+        2
+    );
+    let page = query_preview_page_by_session(
+        pool,
+        session_id,
+        user,
+        &ImportPreviewPageRequest {
+            page_size: 10,
+            sort_by: "time".to_string(),
+            sort_direction: "asc".to_string(),
+            ..ImportPreviewPageRequest::default()
+        },
+    )?;
+    let preview_ids = page.rows.iter().map(|row| row.id).collect::<Vec<_>>();
+    assert_eq!(preview_ids.len(), 2);
+    insert_import_decision_groups_batch(
+        pool,
+        session_id,
+        user,
+        &[ImportDecisionGroupDraft {
+            group_type: "duplicate".to_string(),
+            group_key: "command-matrix-group".to_string(),
+            decision_status: "pending".to_string(),
+            base_preview_row_id: Some(preview_ids[0]),
+            signal_payload: json!({"signal": "duplicate"}),
+            members: preview_ids
+                .iter()
+                .enumerate()
+                .map(|(index, preview_id)| ImportDecisionGroupMemberDraft {
+                    preview_row_id: Some(*preview_id),
+                    standard_row_id: None,
+                    history_bill_id: None,
+                    member_role: format!("member-{index}"),
+                    parser_name: "command-fixture".to_string(),
+                    metadata: json!({"index": index}),
+                })
+                .collect(),
+        }],
+    )?;
+    let group_id =
+        import_decision_group_id(pool, user_id, session_id, "command-matrix-group").await?;
+    let versions = preview_ids
+        .iter()
+        .rev()
+        .map(|preview_row_id| ImportDecisionPreviewVersion {
+            preview_row_id: *preview_row_id,
+            version: 1,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        apply_import_decision_group_command(
+            pool,
+            user,
+            &ImportDecisionGroupCommand {
+                operation_id: "missing-session".to_string(),
+                session_id: "unknown-session".to_string(),
+                group_id,
+                decision: "accept".to_string(),
+                expected_group_version: 1,
+                expected_preview_versions: versions.clone(),
+            },
+        )?,
+        ImportDecisionGroupCommandResult::NotFound
+    );
+    assert_eq!(
+        apply_import_decision_group_command(
+            pool,
+            other_user,
+            &ImportDecisionGroupCommand {
+                operation_id: "other-user-scope".to_string(),
+                session_id: session_id.to_string(),
+                group_id,
+                decision: "accept".to_string(),
+                expected_group_version: 1,
+                expected_preview_versions: versions.clone(),
+            },
+        )?,
+        ImportDecisionGroupCommandResult::MaterializationPending
+    );
+    let missing_group_command = ImportDecisionGroupCommand {
+        operation_id: "missing-group".to_string(),
+        session_id: session_id.to_string(),
+        group_id: i64::MAX,
+        decision: "accept".to_string(),
+        expected_group_version: 1,
+        expected_preview_versions: Vec::new(),
+    };
+    assert_eq!(
+        apply_import_decision_group_command(pool, user, &missing_group_command)?,
+        ImportDecisionGroupCommandResult::MaterializationPending
+    );
+    set_import_decision_materialization_failed(pool, session_id, user, "fixture failure")?;
+    assert_eq!(
+        apply_import_decision_group_command(pool, user, &missing_group_command)?,
+        ImportDecisionGroupCommandResult::MaterializationFailed
+    );
+    set_import_decision_materialization_status(pool, session_id, user, "completed")?;
+    assert_eq!(
+        apply_import_decision_group_command(pool, user, &missing_group_command)?,
+        ImportDecisionGroupCommandResult::NotFound
+    );
+
+    let base_command = ImportDecisionGroupCommand {
+        operation_id: "command-accept".to_string(),
+        session_id: session_id.to_string(),
+        group_id,
+        decision: "accepted".to_string(),
+        expected_group_version: 1,
+        expected_preview_versions: versions.clone(),
+    };
+    assert_eq!(
+        apply_import_decision_group_command(
+            pool,
+            user,
+            &ImportDecisionGroupCommand {
+                operation_id: "invalid-decision".to_string(),
+                decision: "approve".to_string(),
+                ..base_command.clone()
+            },
+        )?,
+        ImportDecisionGroupCommandResult::Conflict
+    );
+    assert_eq!(
+        apply_import_decision_group_command(
+            pool,
+            user,
+            &ImportDecisionGroupCommand {
+                operation_id: "  ".to_string(),
+                ..base_command.clone()
+            },
+        )?,
+        ImportDecisionGroupCommandResult::Conflict
+    );
+    assert_eq!(
+        apply_import_decision_group_command(
+            pool,
+            user,
+            &ImportDecisionGroupCommand {
+                operation_id: "stale-group-version".to_string(),
+                expected_group_version: 99,
+                ..base_command.clone()
+            },
+        )?,
+        ImportDecisionGroupCommandResult::Conflict
+    );
+    assert_eq!(
+        apply_import_decision_group_command(
+            pool,
+            user,
+            &ImportDecisionGroupCommand {
+                operation_id: "stale-preview-inventory".to_string(),
+                expected_preview_versions: versions[..1].to_vec(),
+                ..base_command.clone()
+            },
+        )?,
+        ImportDecisionGroupCommandResult::Conflict
+    );
+
+    let accepted = applied_decision_group_mutation(apply_import_decision_group_command(
+        pool,
+        user,
+        &base_command,
+    )?);
+    assert_eq!(accepted.group_version, 2);
+    assert_eq!(accepted.decision_status, "accepted");
+    assert!(accepted.removed_preview_ids.is_empty());
+    assert_eq!(accepted.upserted_preview_ids, preview_ids);
+    for preview_id in &preview_ids {
+        let preview = get_preview_bill_by_id(pool, *preview_id, user)?.expect("accepted preview");
+        assert_eq!(import_preview_version(pool, user_id, *preview_id).await?, 2);
+        assert_eq!(
+            preview.preview_matching_feedback.pointer("/transfer/state"),
+            Some(&json!("accepted"))
+        );
+        assert_eq!(
+            preview
+                .preview_matching_feedback
+                .pointer("/transfer/review_status"),
+            Some(&json!("accepted"))
+        );
+    }
+    assert_eq!(
+        applied_decision_group_mutation(apply_import_decision_group_command(
+            pool,
+            user,
+            &base_command,
+        )?),
+        accepted,
+        "same operation id must replay the stored mutation before CAS checks"
+    );
+    assert_eq!(
+        apply_import_decision_group_command(
+            pool,
+            user,
+            &ImportDecisionGroupCommand {
+                decision: "reject".to_string(),
+                ..base_command.clone()
+            },
+        )?,
+        ImportDecisionGroupCommandResult::Conflict,
+        "one operation id cannot be reused for another target status"
+    );
+
+    let version_two = preview_ids
+        .iter()
+        .map(|preview_row_id| ImportDecisionPreviewVersion {
+            preview_row_id: *preview_row_id,
+            version: 2,
+        })
+        .collect::<Vec<_>>();
+    let same_status = applied_decision_group_mutation(apply_import_decision_group_command(
+        pool,
+        user,
+        &ImportDecisionGroupCommand {
+            operation_id: "command-accept-noop".to_string(),
+            expected_group_version: 2,
+            expected_preview_versions: version_two.clone(),
+            ..base_command.clone()
+        },
+    )?);
+    assert_eq!(same_status.group_version, 2);
+    assert_eq!(same_status.decision_status, "accepted");
+    assert_eq!(same_status.upserted_preview_ids, preview_ids);
+
+    let rejected = applied_decision_group_mutation(apply_import_decision_group_command(
+        pool,
+        user,
+        &ImportDecisionGroupCommand {
+            operation_id: "command-reject".to_string(),
+            decision: "rejected".to_string(),
+            expected_group_version: 2,
+            expected_preview_versions: version_two,
+            ..base_command.clone()
+        },
+    )?);
+    assert_eq!(rejected.group_version, 3);
+    assert_eq!(rejected.decision_status, "rejected");
+
+    let version_three = preview_ids
+        .iter()
+        .map(|preview_row_id| ImportDecisionPreviewVersion {
+            preview_row_id: *preview_row_id,
+            version: 3,
+        })
+        .collect::<Vec<_>>();
+    let cleared = applied_decision_group_mutation(apply_import_decision_group_command(
+        pool,
+        user,
+        &ImportDecisionGroupCommand {
+            operation_id: "command-clear".to_string(),
+            decision: "cleared".to_string(),
+            expected_group_version: 3,
+            expected_preview_versions: version_three,
+            ..base_command
+        },
+    )?);
+    assert_eq!(cleared.group_version, 4);
+    assert_eq!(cleared.decision_status, "pending");
+    let final_group = sqlx::query(
+        "SELECT version, decision_status FROM import_decision_groups WHERE id=$1 AND user_id=$2",
+    )
+    .bind(group_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(final_group.try_get::<i64, _>("version")?, 4);
+    assert_eq!(
+        final_group.try_get::<String, _>("decision_status")?,
+        "pending"
+    );
+    for preview_id in &preview_ids {
+        let preview = get_preview_bill_by_id(pool, *preview_id, user)?.expect("cleared preview");
+        assert_eq!(import_preview_version(pool, user_id, *preview_id).await?, 4);
+        assert_eq!(
+            preview
+                .preview_matching_feedback
+                .pointer("/transfer/review_status"),
+            Some(&json!("pending"))
+        );
+    }
+    let operation_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)::BIGINT FROM import_confirm_operations WHERE user_id=$1 AND operation_kind='decision_group'",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(operation_count, 4);
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn real_postgres_decision_group_rejections_dematerialize_and_roll_back_invalid_shapes(
+) -> Result<(), Box<dyn Error>> {
+    let test_db = strict_isolated_postgres_database("decision_group_rejection_matrix").await?;
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "decision-group-rejection-matrix").await?;
+    let user = UserId::new(user_id as u64).expect("positive user id");
+    let account_id = insert_account(pool, user_id, "拒绝拆回账户").await?;
+    let destination_account_id = insert_account(pool, user_id, "拒绝拆回目标账户").await?;
+    let category_id =
+        insert_category(pool, user_id, "拒绝拆回分类", "transfer", "测试/拒绝拆回").await?;
+    let history_bill_id = insert_history_bill(pool, user_id, "拒绝拆回历史账单").await?;
+    let session_id = "decision-group-rejection-session";
+    create_import_session(
+        pool,
+        &ImportSessionDraft {
+            session_id: session_id.to_string(),
+            user_id: user,
+            file_count: 1,
+        },
+    )?;
+    let staging = stage_import_parser_templates_with_sources(
+        pool,
+        &ImportSessionDraft {
+            session_id: session_id.to_string(),
+            user_id: user,
+            file_count: 1,
+        },
+        &[],
+        &[ImportSourceDraft {
+            source_index: 1,
+            original_file_name: "decision-groups.csv".to_string(),
+            parser_id: "decision-fixture".to_string(),
+            parser_name: "决策测试解析器".to_string(),
+            parser_signal: "exact".to_string(),
+            parser_confidence: 1.0,
+            feature_signature: "decision-group-rejection-source".to_string(),
+            metadata: json!({"fixture": "decision-group-rejections"}),
+        }],
+        &[
+            ImportStandardRowDraft {
+                source_index: 1,
+                source_row_index: 1,
+                occurred_at: "2026-07-11 10:00:00+08".to_string(),
+                amount_cents: 5100,
+                direction: "income".to_string(),
+                transaction_type: "收入".to_string(),
+                merchant: "历史拆回收入".to_string(),
+                payment_method: "历史渠道".to_string(),
+                description: "historical import member".to_string(),
+                parser_payload: json!({"parser_id": "history-import", "parser_tags": ["history"]}),
+                standard_payload: json!({"fixture": "historical"}),
+            },
+            ImportStandardRowDraft {
+                source_index: 1,
+                source_row_index: 2,
+                occurred_at: "2026-07-11 11:00:00+08".to_string(),
+                amount_cents: -6200,
+                direction: "expense".to_string(),
+                transaction_type: "支出".to_string(),
+                merchant: "同批转出".to_string(),
+                payment_method: "转出渠道".to_string(),
+                description: "same batch outgoing".to_string(),
+                parser_payload: json!({"parser_id": "outgoing-parser", "parser_tags": ["outgoing"]}),
+                standard_payload: json!({"fixture": "outgoing"}),
+            },
+            ImportStandardRowDraft {
+                source_index: 1,
+                source_row_index: 3,
+                occurred_at: "2026-07-11 11:00:30+08".to_string(),
+                amount_cents: 6200,
+                direction: "income".to_string(),
+                transaction_type: "收入".to_string(),
+                merchant: "同批转入".to_string(),
+                payment_method: "转入渠道".to_string(),
+                description: "same batch incoming".to_string(),
+                parser_payload: json!({"parser_id": "incoming-parser", "parser_tags": ["incoming"]}),
+                standard_payload: json!({"fixture": "incoming"}),
+            },
+        ],
+        true,
+    )?;
+    assert!(staging.session_found);
+    assert_eq!(staging.inserted_count, 3);
+    let standard_rows = get_import_standard_rows_by_session(pool, session_id, user)?;
+    let standard_id = |description: &str| {
+        standard_rows
+            .iter()
+            .find(|row| row.description == description)
+            .unwrap_or_else(|| panic!("missing standard row {description}"))
+            .id
+    };
+    let historical_standard_id = standard_id("historical import member");
+    let outgoing_standard_id = standard_id("same batch outgoing");
+    let incoming_standard_id = standard_id("same batch incoming");
+
+    let mut historical_preview = preview_draft(
+        "2026-07-11 10:00:00+08",
+        "转账",
+        5100,
+        None,
+        None,
+        None,
+        false,
+    );
+    historical_preview.preview_description = "historical materialized preview".to_string();
+    historical_preview.preview_matching_feedback = json!({
+        "reconciliation": {"planned_operation": "update_history"}
+    });
+    let historical_preview_id = insert_preview_bill(pool, session_id, user, &historical_preview)?;
+
+    let mut same_batch_preview = preview_draft(
+        "2026-07-11 11:00:00+08",
+        "转账",
+        6200,
+        Some(category_id),
+        Some(account_id),
+        Some(destination_account_id),
+        true,
+    );
+    same_batch_preview.preview_description = "same batch materialized preview".to_string();
+    same_batch_preview.preview_matching_feedback = json!({
+        "annotation": {
+            "manual_fields": {"category_id": true, "source_account_id": true}
+        },
+        "transfer": {"state": "pending", "review_status": "pending"}
+    });
+    let same_batch_preview_id = insert_preview_bill(pool, session_id, user, &same_batch_preview)?;
+
+    insert_import_history_materializations_batch(
+        pool,
+        session_id,
+        user,
+        &[ImportHistoryMaterializationDraft {
+            history_bill_id,
+            history_bill_version: 1,
+            materialized_payload: json!({"planned_operation": "update_history"}),
+            rewrite_reason: "decision group historical fixture".to_string(),
+        }],
+    )?;
+    insert_import_decision_groups_batch(
+        pool,
+        session_id,
+        user,
+        &[
+            ImportDecisionGroupDraft {
+                group_type: "historical_duplicate".to_string(),
+                group_key: "historical-success".to_string(),
+                decision_status: "pending".to_string(),
+                base_preview_row_id: Some(historical_preview_id),
+                signal_payload: json!({"signal": "historical_duplicate"}),
+                members: vec![
+                    ImportDecisionGroupMemberDraft {
+                        preview_row_id: Some(historical_preview_id),
+                        standard_row_id: None,
+                        history_bill_id: Some(history_bill_id),
+                        member_role: "history_base".to_string(),
+                        parser_name: "history_db".to_string(),
+                        metadata: json!({"planned_operation": "update_history"}),
+                    },
+                    ImportDecisionGroupMemberDraft {
+                        preview_row_id: Some(historical_preview_id),
+                        standard_row_id: Some(historical_standard_id),
+                        history_bill_id: None,
+                        member_role: "import_duplicate".to_string(),
+                        parser_name: "history-import".to_string(),
+                        metadata: json!({"fixture": "import-member"}),
+                    },
+                ],
+            },
+            ImportDecisionGroupDraft {
+                group_type: "same_batch_transfer".to_string(),
+                group_key: "same-batch-success".to_string(),
+                decision_status: "pending".to_string(),
+                base_preview_row_id: Some(same_batch_preview_id),
+                signal_payload: json!({"signal": "transfer"}),
+                members: vec![
+                    ImportDecisionGroupMemberDraft {
+                        preview_row_id: Some(same_batch_preview_id),
+                        standard_row_id: Some(outgoing_standard_id),
+                        history_bill_id: None,
+                        member_role: "outgoing".to_string(),
+                        parser_name: "outgoing-parser".to_string(),
+                        metadata: json!({"role": "outgoing"}),
+                    },
+                    ImportDecisionGroupMemberDraft {
+                        preview_row_id: None,
+                        standard_row_id: Some(incoming_standard_id),
+                        history_bill_id: None,
+                        member_role: "incoming".to_string(),
+                        parser_name: "incoming-parser".to_string(),
+                        metadata: json!({"role": "incoming"}),
+                    },
+                ],
+            },
+        ],
+    )?;
+    let historical_group_id =
+        import_decision_group_id(pool, user_id, session_id, "historical-success").await?;
+    let same_batch_group_id =
+        import_decision_group_id(pool, user_id, session_id, "same-batch-success").await?;
+    let same_batch_old_payload: Value = sqlx::query_scalar(
+        "SELECT preview_payload FROM import_preview_rows WHERE id=$1 AND user_id=$2",
+    )
+    .bind(same_batch_preview_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(
+        same_batch_old_payload.get("category_id"),
+        Some(&json!(category_id))
+    );
+    assert_eq!(
+        same_batch_old_payload.get("preview_source_account_id"),
+        Some(&json!(account_id))
+    );
+    assert_eq!(
+        same_batch_old_payload
+            .pointer("/preview_matching_feedback/annotation/manual_fields/category_id"),
+        Some(&json!(true))
+    );
+
+    let historical_command = ImportDecisionGroupCommand {
+        operation_id: "historical-reject".to_string(),
+        session_id: session_id.to_string(),
+        group_id: historical_group_id,
+        decision: "reject".to_string(),
+        expected_group_version: 1,
+        expected_preview_versions: vec![ImportDecisionPreviewVersion {
+            preview_row_id: historical_preview_id,
+            version: 1,
+        }],
+    };
+    let historical_result = applied_decision_group_mutation(apply_import_decision_group_command(
+        pool,
+        user,
+        &historical_command,
+    )?);
+    assert_eq!(historical_result.group_version, 2);
+    assert_eq!(historical_result.decision_status, "suppressed");
+    assert_eq!(
+        historical_result.removed_preview_ids,
+        vec![historical_preview_id]
+    );
+    assert_eq!(historical_result.upserted_preview_ids.len(), 1);
+    assert_eq!(historical_result.upserted_preview_items.len(), 1);
+    let historical_replacement_id = historical_result.upserted_preview_ids[0];
+    assert!(get_preview_bill_by_id(pool, historical_preview_id, user)?.is_none());
+    let historical_replacement =
+        get_preview_bill_by_id(pool, historical_replacement_id, user)?.expect("replacement");
+    assert_eq!(historical_replacement.preview_type, "收入");
+    assert_eq!(historical_replacement.preview_amount_cents, 5100);
+    assert!(!historical_replacement.preview_selected);
+    assert_eq!(
+        historical_replacement
+            .preview_matching_feedback
+            .pointer("/annotation/status"),
+        Some(&json!("pending_reclassification"))
+    );
+    assert!(get_import_history_materializations_by_session(pool, session_id, user)?.is_empty());
+    assert_eq!(
+        applied_decision_group_mutation(apply_import_decision_group_command(
+            pool,
+            user,
+            &historical_command,
+        )?),
+        historical_result
+    );
+    let historical_group = sqlx::query(
+        "SELECT decision_status, base_preview_row_id, signal_payload FROM import_decision_groups WHERE id=$1 AND user_id=$2",
+    )
+    .bind(historical_group_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(
+        historical_group.try_get::<String, _>("decision_status")?,
+        "suppressed"
+    );
+    assert_eq!(
+        historical_group.try_get::<Option<i64>, _>("base_preview_row_id")?,
+        Some(historical_replacement_id)
+    );
+    let historical_signal_payload: Value = historical_group.try_get("signal_payload")?;
+    assert_eq!(
+        historical_signal_payload.pointer("/reclassification/status"),
+        Some(&json!("pending"))
+    );
+    let historical_members = sqlx::query(
+        "SELECT preview_row_id, standard_row_id, history_bill_id FROM import_decision_group_members WHERE group_id=$1 ORDER BY id",
+    )
+    .bind(historical_group_id)
+    .fetch_all(pool)
+    .await?;
+    assert!(historical_members
+        .iter()
+        .find(|member| member
+            .try_get::<Option<i64>, _>("history_bill_id")
+            .ok()
+            .flatten()
+            .is_some())
+        .expect("history member")
+        .try_get::<Option<i64>, _>("preview_row_id")?
+        .is_none());
+    assert_eq!(
+        historical_members
+            .iter()
+            .find(|member| {
+                member
+                    .try_get::<Option<i64>, _>("standard_row_id")
+                    .ok()
+                    .flatten()
+                    == Some(historical_standard_id)
+            })
+            .expect("import member")
+            .try_get::<Option<i64>, _>("preview_row_id")?,
+        Some(historical_replacement_id)
+    );
+
+    let same_batch_result = applied_decision_group_mutation(apply_import_decision_group_command(
+        pool,
+        user,
+        &ImportDecisionGroupCommand {
+            operation_id: "same-batch-reject".to_string(),
+            session_id: session_id.to_string(),
+            group_id: same_batch_group_id,
+            decision: "rejected".to_string(),
+            expected_group_version: 1,
+            expected_preview_versions: vec![ImportDecisionPreviewVersion {
+                preview_row_id: same_batch_preview_id,
+                version: 1,
+            }],
+        },
+    )?);
+    assert_eq!(same_batch_result.group_version, 2);
+    assert_eq!(same_batch_result.decision_status, "rejected");
+    assert_eq!(
+        same_batch_result.removed_preview_ids,
+        vec![same_batch_preview_id]
+    );
+    assert_eq!(same_batch_result.upserted_preview_ids.len(), 2);
+    assert_eq!(same_batch_result.upserted_preview_items.len(), 2);
+    assert!(get_preview_bill_by_id(pool, same_batch_preview_id, user)?.is_none());
+    let outgoing_replacement =
+        get_preview_bill_by_id(pool, same_batch_result.upserted_preview_ids[0], user)?
+            .expect("outgoing replacement");
+    let incoming_replacement =
+        get_preview_bill_by_id(pool, same_batch_result.upserted_preview_ids[1], user)?
+            .expect("incoming replacement");
+    assert_eq!(outgoing_replacement.preview_type, "支出");
+    assert_eq!(outgoing_replacement.category_id, Some(category_id));
+    assert_eq!(
+        outgoing_replacement.preview_source_account_id,
+        Some(account_id)
+    );
+    assert_eq!(incoming_replacement.preview_type, "收入");
+    assert_eq!(incoming_replacement.category_id, None);
+    assert_eq!(incoming_replacement.preview_source_account_id, None);
+    assert_eq!(
+        outgoing_replacement
+            .preview_matching_feedback
+            .pointer("/annotation/manual_fields/category_id"),
+        Some(&json!(true))
+    );
+    assert_eq!(
+        incoming_replacement
+            .preview_matching_feedback
+            .pointer("/annotation/manual_fields"),
+        Some(&json!({
+            "category_id": false,
+            "source_account_id": false,
+            "destination_account_id": false
+        }))
+    );
+    for replacement in [&outgoing_replacement, &incoming_replacement] {
+        assert_eq!(
+            replacement
+                .preview_matching_feedback
+                .pointer("/transfer/state"),
+            Some(&json!("rejected"))
+        );
+    }
+    let same_batch_group = sqlx::query(
+        "SELECT base_preview_row_id, signal_payload FROM import_decision_groups WHERE id=$1 AND user_id=$2",
+    )
+    .bind(same_batch_group_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(
+        same_batch_group.try_get::<Option<i64>, _>("base_preview_row_id")?,
+        Some(same_batch_result.upserted_preview_ids[0])
+    );
+    let same_batch_signal_payload: Value = same_batch_group.try_get("signal_payload")?;
+    assert_eq!(
+        same_batch_signal_payload.pointer("/reclassification/preview_ids"),
+        Some(&json!(same_batch_result.upserted_preview_ids))
+    );
+    let same_batch_member_preview_ids = sqlx::query_scalar::<_, Option<i64>>(
+        "SELECT preview_row_id FROM import_decision_group_members WHERE group_id=$1 ORDER BY id",
+    )
+    .bind(same_batch_group_id)
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    assert_eq!(
+        same_batch_member_preview_ids,
+        same_batch_result.upserted_preview_ids
+    );
+    let session_preview_count: i64 = sqlx::query_scalar(
+        "SELECT total_preview FROM import_sessions WHERE user_id=$1 AND session_key=$2",
+    )
+    .bind(user_id)
+    .bind(session_id)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(session_preview_count, 3);
+
+    let rollback_preview_id = insert_preview_bill(
+        pool,
+        session_id,
+        user,
+        &preview_draft(
+            "2026-07-11 12:00:00+08",
+            "转账",
+            6200,
+            None,
+            None,
+            None,
+            true,
+        ),
+    )?;
+    insert_import_decision_groups_batch(
+        pool,
+        session_id,
+        user,
+        &[
+            ImportDecisionGroupDraft {
+                group_type: "historical_transfer".to_string(),
+                group_key: "historical-invalid-preview-count".to_string(),
+                decision_status: "pending".to_string(),
+                base_preview_row_id: None,
+                signal_payload: json!({}),
+                members: vec![
+                    ImportDecisionGroupMemberDraft {
+                        preview_row_id: None,
+                        standard_row_id: None,
+                        history_bill_id: Some(history_bill_id),
+                        member_role: "history_outgoing".to_string(),
+                        parser_name: "history_db".to_string(),
+                        metadata: json!({}),
+                    },
+                    ImportDecisionGroupMemberDraft {
+                        preview_row_id: None,
+                        standard_row_id: Some(historical_standard_id),
+                        history_bill_id: None,
+                        member_role: "import_incoming".to_string(),
+                        parser_name: "history-import".to_string(),
+                        metadata: json!({}),
+                    },
+                ],
+            },
+            ImportDecisionGroupDraft {
+                group_type: "same_batch_transfer".to_string(),
+                group_key: "same-batch-invalid-preview-count".to_string(),
+                decision_status: "pending".to_string(),
+                base_preview_row_id: None,
+                signal_payload: json!({}),
+                members: vec![
+                    ImportDecisionGroupMemberDraft {
+                        preview_row_id: None,
+                        standard_row_id: Some(outgoing_standard_id),
+                        history_bill_id: None,
+                        member_role: "outgoing".to_string(),
+                        parser_name: "outgoing-parser".to_string(),
+                        metadata: json!({}),
+                    },
+                    ImportDecisionGroupMemberDraft {
+                        preview_row_id: None,
+                        standard_row_id: Some(incoming_standard_id),
+                        history_bill_id: None,
+                        member_role: "incoming".to_string(),
+                        parser_name: "incoming-parser".to_string(),
+                        metadata: json!({}),
+                    },
+                ],
+            },
+            ImportDecisionGroupDraft {
+                group_type: "same_batch_transfer".to_string(),
+                group_key: "same-batch-invalid-member-count".to_string(),
+                decision_status: "pending".to_string(),
+                base_preview_row_id: Some(rollback_preview_id),
+                signal_payload: json!({}),
+                members: vec![ImportDecisionGroupMemberDraft {
+                    preview_row_id: Some(rollback_preview_id),
+                    standard_row_id: Some(outgoing_standard_id),
+                    history_bill_id: None,
+                    member_role: "outgoing".to_string(),
+                    parser_name: "outgoing-parser".to_string(),
+                    metadata: json!({}),
+                }],
+            },
+        ],
+    )?;
+    for (group_key, expected_error, preview_versions) in [
+        (
+            "historical-invalid-preview-count",
+            "historical rejection requires one materialized preview",
+            Vec::new(),
+        ),
+        (
+            "same-batch-invalid-preview-count",
+            "same-batch transfer rejection requires exactly one materialized preview",
+            Vec::new(),
+        ),
+        (
+            "same-batch-invalid-member-count",
+            "same-batch transfer rejection requires outgoing and incoming standard rows",
+            vec![ImportDecisionPreviewVersion {
+                preview_row_id: rollback_preview_id,
+                version: 1,
+            }],
+        ),
+    ] {
+        let group_id = import_decision_group_id(pool, user_id, session_id, group_key).await?;
+        let error = apply_import_decision_group_command(
+            pool,
+            user,
+            &ImportDecisionGroupCommand {
+                operation_id: format!("rollback-{group_key}"),
+                session_id: session_id.to_string(),
+                group_id,
+                decision: "reject".to_string(),
+                expected_group_version: 1,
+                expected_preview_versions: preview_versions,
+            },
+        )
+        .expect_err("invalid rejection shape must roll back");
+        assert!(
+            error.to_string().contains(expected_error),
+            "unexpected rejection error: {error}"
+        );
+        let persisted = sqlx::query(
+            "SELECT version, decision_status FROM import_decision_groups WHERE id=$1 AND user_id=$2",
+        )
+        .bind(group_id)
+        .bind(user_id)
+        .fetch_one(pool)
+        .await?;
+        assert_eq!(persisted.try_get::<i64, _>("version")?, 1);
+        assert_eq!(
+            persisted.try_get::<String, _>("decision_status")?,
+            "pending"
+        );
+    }
+    assert!(get_preview_bill_by_id(pool, rollback_preview_id, user)?.is_some());
+    assert_eq!(
+        import_preview_version(pool, user_id, rollback_preview_id).await?,
+        1
+    );
+    let rejected_operation_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)::BIGINT FROM import_confirm_operations WHERE user_id=$1 AND operation_kind='decision_group'",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(rejected_operation_count, 2);
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+fn applied_decision_group_mutation(
+    result: ImportDecisionGroupCommandResult,
+) -> ImportDecisionGroupMutation {
+    match result {
+        ImportDecisionGroupCommandResult::Applied(mutation) => mutation,
+        other => panic!("expected applied decision group mutation, got {other:?}"),
+    }
+}
+
+async fn import_preview_version(
+    pool: &PostgresPool,
+    user_id: i64,
+    preview_id: i64,
+) -> Result<i64, Box<dyn Error>> {
+    Ok(
+        sqlx::query_scalar(
+            "SELECT version FROM import_preview_rows WHERE id = $1 AND user_id = $2",
+        )
+        .bind(preview_id)
+        .bind(user_id)
+        .fetch_one(pool)
+        .await?,
+    )
+}
+
+async fn import_decision_group_id(
+    pool: &PostgresPool,
+    user_id: i64,
+    session_id: &str,
+    group_key: &str,
+) -> Result<i64, Box<dyn Error>> {
+    Ok(sqlx::query_scalar(
+        r#"
+        SELECT groups.id
+        FROM import_decision_groups groups
+        JOIN import_sessions sessions ON sessions.id = groups.session_id
+        WHERE groups.user_id = $1 AND sessions.session_key = $2 AND groups.group_key = $3
+        "#,
+    )
+    .bind(user_id)
+    .bind(session_id)
+    .bind(group_key)
+    .fetch_one(pool)
+    .await?)
 }
 
 fn preview_draft(

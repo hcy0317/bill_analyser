@@ -108,7 +108,14 @@ fn value_to_i64(raw_value: Option<&Value>, default: i64) -> Result<i64, RuntimeE
 }
 
 fn frontend_amount_cents(raw_value: Option<&Value>) -> Result<i64, RuntimeError> {
-    value_to_i64(raw_value, 0)
+    let value = value_to_i64(raw_value, 0)?;
+    if value == i64::MIN {
+        return Err(RuntimeError::new(
+            ErrorCode::InvalidInput,
+            "money amount is outside the supported range",
+        ));
+    }
+    Ok(value)
 }
 
 fn json_value_is_truthy(value: &Value) -> bool {

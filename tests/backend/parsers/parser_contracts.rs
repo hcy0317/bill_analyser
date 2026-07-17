@@ -2,11 +2,16 @@ use bill_analyser_parsers::{
     aggregate_description, build_parser_tags, detect_dedicated_import_bytes, normalize_amount_text,
     normalize_parser_tags, normalize_transaction_type, parse_dedicated_import_bytes,
     parse_dedicated_import_bytes_with_decision, parser_registry, parser_source_label,
-    post_process_raw_bills, resolve_parser_tags, serialize_parser_tags, RawBill, StandardBill,
+    post_process_raw_bills, resolve_parser_tags, serialize_parser_tags,
+    validate_dedicated_spreadsheet_payload, RawBill, SpreadsheetValidationErrorKind, StandardBill,
 };
 use serde::Deserialize;
 use serde_json::json;
-use std::path::{Path, PathBuf};
+use std::{
+    io::{Cursor, Write},
+    path::{Path, PathBuf},
+};
+use zip::{write::SimpleFileOptions, ZipWriter};
 
 #[derive(Debug, Deserialize)]
 struct ParserGoldenCase {
@@ -500,6 +505,77 @@ fn dedicated_rust_parser_rejects_generic_csv_fixture() {
 }
 
 #[test]
+fn dedicated_auto_rejects_xlsx_archive_budget_before_parser_materialization() {
+    let bytes = xlsx_with_archive_entry_count(513);
+    let result = parse_dedicated_import_bytes_with_decision("bounded-invalid.xlsx", &bytes, "auto");
+
+    assert!(result.parsed.is_none());
+    assert_eq!(result.decision.status, "no_match");
+    assert!(
+        result.decision.reason.contains("expansion limit"),
+        "stage1 must expose the bounded rejection instead of entering calamine: {}",
+        result.decision.reason
+    );
+}
+
+#[test]
+fn dedicated_auto_rejects_out_of_budget_xlsx_cell_and_expanded_strings() {
+    let far_reference = bounded_invalid_xlsx(
+        "A1:A1",
+        r#"<row r="1"><c r="XFD1048576"><v>1</v></c></row>"#,
+        None,
+    );
+    let far_result =
+        parse_dedicated_import_bytes_with_decision("far-reference.xlsx", &far_reference, "auto");
+    assert!(far_result.parsed.is_none());
+    assert_eq!(
+        far_result.decision.reason,
+        "Import preview worksheet cell reference exceeds the row or column limit"
+    );
+
+    let shared_value = "x".repeat(16 * 1024);
+    let mut repeated_cells = String::new();
+    for index in 0..4_097usize {
+        let row = index / 128 + 1;
+        let column = index % 128 + 1;
+        repeated_cells.push_str(&format!(
+            "<c r=\"{}{}\" t=\"s\"><v>0</v></c>",
+            xlsx_column_name(column),
+            row
+        ));
+    }
+    let repeated = bounded_invalid_xlsx(
+        "A1:DX33",
+        &repeated_cells,
+        Some(&format!("<sst><si><t>{shared_value}</t></si></sst>")),
+    );
+    let repeated_result =
+        parse_dedicated_import_bytes_with_decision("repeated-shared.xlsx", &repeated, "auto");
+    assert!(repeated_result.parsed.is_none());
+    assert_eq!(
+        repeated_result.decision.reason,
+        "Import preview worksheet exceeds the byte limit"
+    );
+}
+
+#[test]
+fn dedicated_validation_rejects_binary_xls_before_third_party_parsing() {
+    let error = validate_dedicated_spreadsheet_payload(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1")
+        .expect_err("legacy binary XLS must fail closed");
+
+    assert_eq!(error.kind(), SpreadsheetValidationErrorKind::Unsupported);
+    assert!(error.message().contains("convert the file to XLSX or CSV"));
+
+    let decision =
+        detect_dedicated_import_bytes("legacy.xls", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", "auto");
+    assert_eq!(
+        decision.error_code.as_deref(),
+        Some("unsupported_legacy_xls")
+    );
+    assert_eq!(decision.error_code(), Some("unsupported_legacy_xls"));
+}
+
+#[test]
 fn dedicated_parser_detector_records_exactly_one_no_match_and_conflict_evidence() {
     let wechat_bytes =
         std::fs::read(import_sample_path("wechat_statement_sample.csv")).expect("fixture reads");
@@ -691,4 +767,81 @@ fn import_sample_path(filename: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../tests/fixtures/import_samples")
         .join(filename)
+}
+
+fn xlsx_with_archive_entry_count(entry_count: usize) -> Vec<u8> {
+    let cursor = Cursor::new(Vec::new());
+    let mut writer = ZipWriter::new(cursor);
+    let options = SimpleFileOptions::default();
+    for index in 0..entry_count {
+        writer
+            .start_file(format!("entry-{index}.xml"), options)
+            .expect("start bounded invalid XLSX entry");
+        writer
+            .write_all(b"<x/>")
+            .expect("write bounded invalid XLSX entry");
+    }
+    writer
+        .finish()
+        .expect("finish bounded invalid XLSX")
+        .into_inner()
+}
+
+fn bounded_invalid_xlsx(
+    dimension: &str,
+    sheet_data: &str,
+    shared_strings: Option<&str>,
+) -> Vec<u8> {
+    let cursor = Cursor::new(Vec::new());
+    let mut writer = ZipWriter::new(cursor);
+    let options = SimpleFileOptions::default();
+    for (name, contents) in [
+        ("[Content_Types].xml", "<Types/>"),
+        (
+            "xl/workbook.xml",
+            r#"<workbook><sheets><sheet name="Sheet1" r:id="rId1"/></sheets></workbook>"#,
+        ),
+        (
+            "xl/_rels/workbook.xml.rels",
+            r#"<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>"#,
+        ),
+    ] {
+        writer.start_file(name, options).expect("start XLSX entry");
+        writer
+            .write_all(contents.as_bytes())
+            .expect("write XLSX entry");
+    }
+    writer
+        .start_file("xl/worksheets/sheet1.xml", options)
+        .expect("start worksheet");
+    writer
+        .write_all(
+            format!(
+                r#"<worksheet><dimension ref="{dimension}"/><sheetData>{sheet_data}</sheetData></worksheet>"#
+            )
+            .as_bytes(),
+        )
+        .expect("write worksheet");
+    if let Some(shared_strings) = shared_strings {
+        writer
+            .start_file("xl/sharedStrings.xml", options)
+            .expect("start shared strings");
+        writer
+            .write_all(shared_strings.as_bytes())
+            .expect("write shared strings");
+    }
+    writer.finish().expect("finish XLSX").into_inner()
+}
+
+fn xlsx_column_name(mut column: usize) -> String {
+    let mut output = String::new();
+    while column > 0 {
+        let remainder = (column - 1) % 26;
+        output.insert(
+            0,
+            char::from(b'A' + u8::try_from(remainder).unwrap_or_default()),
+        );
+        column = (column - 1) / 26;
+    }
+    output
 }

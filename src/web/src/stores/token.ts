@@ -10,11 +10,66 @@ import type {
     TokenInfoResponse
 } from '@/models/token.ts';
 
-import { isObject, isString } from '@/lib/common.ts';
-import { updateCurrentToken, updateCurrentRefreshToken } from '@/lib/userstate.ts';
+import { isObject } from '@/lib/common.ts';
 
 import logger from '@/lib/logger.ts';
 import services from '@/lib/services.ts';
+
+const tokenFailureCodes = new Set([
+    'ERR_BAD_RESPONSE',
+    'ERR_CANCELED',
+    'ERR_NETWORK',
+    'ECONNABORTED',
+    'ETIMEDOUT'
+]);
+
+interface TokenStoreFailure {
+    message: 'Token refresh failed' | 'Token revoke failed';
+    route: 'tokens/refresh' | 'tokens/:id';
+    code?: string;
+    status?: number;
+    noRefreshToken?: true;
+}
+
+function getTokenStoreFailure(
+    reason: unknown,
+    operation: 'refresh' | 'revoke'
+): Readonly<TokenStoreFailure> {
+    const failure: TokenStoreFailure = operation === 'refresh'
+        ? { message: 'Token refresh failed', route: 'tokens/refresh' }
+        : { message: 'Token revoke failed', route: 'tokens/:id' };
+
+    if (typeof reason !== 'object' || reason === null) {
+        return Object.freeze(failure);
+    }
+
+    try {
+        const errorRecord = reason as Record<string, unknown>;
+        const code = errorRecord['code'];
+        if (typeof code === 'string' && tokenFailureCodes.has(code)) {
+            failure.code = code;
+        }
+
+        let status = errorRecord['status'];
+        if (operation === 'revoke' && (typeof status !== 'number' || !Number.isInteger(status))) {
+            const response = errorRecord['response'];
+            if (typeof response === 'object' && response !== null) {
+                status = (response as Record<string, unknown>)['status'];
+            }
+        }
+        if (typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599) {
+            failure.status = status;
+        }
+
+        if (operation === 'refresh' && errorRecord['noRefreshToken'] === true) {
+            failure.noRefreshToken = true;
+        }
+    } catch {
+        return Object.freeze(failure);
+    }
+
+    return Object.freeze(failure);
+}
 
 /** 中文说明：token store 负责列出、生成、撤销 API/MCP token 和登录 session。 */
 export const useTokensStore = defineStore('tokens', () => {
@@ -54,21 +109,10 @@ export const useTokensStore = defineStore('tokens', () => {
                 const data = response.data;
 
                 if (!data || !data.success || !data.result) {
-                    logger.error('[TokenStore] Token refresh failed: invalid response');
-                    reject({ message: 'Invalid token refresh response' });
+                    const failure = getTokenStoreFailure(undefined, 'refresh');
+                    logger.error('[TokenStore] Token refresh failed', failure);
+                    reject(failure);
                     return;
-                }
-
-                // 关键修复：立即更新 Token 到存储，确保后续请求能获取到最新 Token
-                if (data.result.newToken) {
-                    logger.info(`[TokenStore] Updating token immediately, length=${data.result.newToken.length}`);
-                    updateCurrentToken(data.result.newToken);
-
-                    if (data.result.refreshToken && isString(data.result.refreshToken)) {
-                        updateCurrentRefreshToken(data.result.refreshToken);
-                    }
-                } else {
-                    logger.error('[TokenStore] No newToken in refresh response');
                 }
 
                 // 更新应用设置和用户信息
@@ -85,16 +129,20 @@ export const useTokensStore = defineStore('tokens', () => {
                     revokeToken({
                         tokenId: data.result.oldTokenId,
                         ignoreError: true
-                    }).catch(err => {
-                        logger.warn('[TokenStore] Failed to revoke old token', err);
+                    }).catch(error => {
+                        logger.warn(
+                            '[TokenStore] Failed to revoke old token',
+                            getTokenStoreFailure(error, 'revoke')
+                        );
                     });
                 }
 
                 logger.info('[TokenStore] Token refresh completed successfully');
                 resolve(data.result);
             }).catch(error => {
-                logger.error('[TokenStore] Token refresh failed', error);
-                reject(error);
+                const failure = getTokenStoreFailure(error, 'refresh');
+                logger.error('[TokenStore] Token refresh failed', failure);
+                reject(failure);
             });
         });
     }
@@ -147,15 +195,9 @@ export const useTokensStore = defineStore('tokens', () => {
 
                 resolve(data.result);
             }).catch(error => {
-                logger.error('failed to revoke token', error);
-
-                if (error.response && error.response.data && error.response.data.message) {
-                    reject({ error: error.response.data });
-                } else if (!error.processed) {
-                    reject({ message: 'Unable to logout from this session' });
-                } else {
-                    reject(error);
-                }
+                const failure = getTokenStoreFailure(error, 'revoke');
+                logger.error('[TokenStore] Token revoke failed', failure);
+                reject(failure);
             });
         });
     }
