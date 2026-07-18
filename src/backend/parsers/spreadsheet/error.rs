@@ -2,7 +2,6 @@
 pub enum SpreadsheetValidationErrorKind {
     Invalid,
     TooLarge,
-    Unsupported,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -22,13 +21,6 @@ impl SpreadsheetValidationError {
     pub(super) fn too_large(message: &'static str) -> Self {
         Self {
             kind: SpreadsheetValidationErrorKind::TooLarge,
-            message,
-        }
-    }
-
-    pub(super) fn unsupported(message: &'static str) -> Self {
-        Self {
-            kind: SpreadsheetValidationErrorKind::Unsupported,
             message,
         }
     }

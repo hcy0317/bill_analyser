@@ -7,7 +7,6 @@ fn spreadsheet_validation_error_response(
     let status_code = match error.kind() {
         bill_analyser_parsers::SpreadsheetValidationErrorKind::Invalid => 400,
         bill_analyser_parsers::SpreadsheetValidationErrorKind::TooLarge => 413,
-        bill_analyser_parsers::SpreadsheetValidationErrorKind::Unsupported => 415,
     };
     import_v2_error_response(status_code, error.message())
 }

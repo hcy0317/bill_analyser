@@ -62,10 +62,12 @@ fn preview_maps_supported_and_semantic_spreadsheet_errors() {
         .expect_err("malformed spreadsheet");
     assert_eq!(malformed.status_code, 400);
 
-    let ole = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1legacy-binary-xls";
-    let unsupported = import_file_preview_payload("statement.xls", ole, None, "auto")
-        .expect_err("legacy OLE preview");
-    assert_eq!(unsupported.status_code, 415);
+    let xls =
+        include_bytes!("../../../../../../tests/fixtures/import_samples/abc_statement_sample.xls");
+    let payload = import_file_preview_payload("statement.xls", xls, None, "auto")
+        .expect("binary XLS preview");
+    assert_eq!(payload["headers"][0], "交易日期");
+    assert_eq!(payload["totalRows"], 2);
 }
 
 #[test]

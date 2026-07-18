@@ -66,5 +66,5 @@ async fn direct_preview_preserves_envelope_and_status_contract() {
         1024 * 1024,
     )
     .await;
-    assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }

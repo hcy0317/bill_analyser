@@ -22,9 +22,9 @@ fn spreadsheet_error_kinds_map_to_stable_http_envelopes() {
             bill_analyser_parsers::validate_spreadsheet_payload(
                 b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1",
             )
-            .expect_err("legacy OLE spreadsheet"),
-            415,
-            "Legacy binary XLS preview is not supported; convert the file to XLSX or CSV",
+            .expect_err("truncated binary XLS"),
+            400,
+            "Import preview spreadsheet content is invalid",
         ),
     ];
 

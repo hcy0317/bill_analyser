@@ -11,7 +11,7 @@
 
 ## 工作流
 
-1. 在 `bill-analyser-parsers` 中新增 parser 或收紧已有 parser；dedicated parser 按来源放在 `src/backend/parsers/dedicated/<ParserName>.rs`，共享 CSV/XLS/HTML helper 放在 `dedicated/common.rs`。
+1. 在 `bill-analyser-parsers` 中新增 parser 或收紧已有 parser；dedicated parser 按来源放在 `src/backend/parsers/dedicated/<ParserName>.rs`，共享 CSV/XLS/HTML helper 放在 `dedicated/common.rs`；二进制 XLS 必须先通过 `spreadsheet/xls.rs` 的统一资源预算校验。
 2. 更新 parser registry metadata、parser-local 识别判定、字段 normalization 和 parser tags。
 3. 添加 golden fixture，覆盖 provider 识别、金额、时间、账户、收支类型和 tags。
 4. 如 HTTP 上传入口受影响，同步更新 import runtime contract。

@@ -1,5 +1,7 @@
 mod error;
 mod html;
+mod xls;
+mod xls_preflight;
 mod xlsx;
 
 pub use error::{SpreadsheetValidationError, SpreadsheetValidationErrorKind};
@@ -23,7 +25,7 @@ pub struct SpreadsheetPreviewRows {
     pub total_rows: usize,
 }
 
-/// 为通用列映射预览解析一个受统一资源预算约束的 HTML/XLSX 表格。
+/// 为通用列映射预览解析一个受统一资源预算约束的 HTML/XLS/XLSX 表格。
 pub fn parse_spreadsheet_preview_rows(
     bytes: &[u8],
 ) -> Result<SpreadsheetPreviewRows, SpreadsheetValidationError> {
@@ -52,9 +54,7 @@ fn parse_spreadsheet_rows_with_limit(
         return html::parse_rows(bytes, materialized_row_limit);
     }
     if bytes.starts_with(OLE_MAGIC) {
-        return Err(SpreadsheetValidationError::unsupported(
-            "Legacy binary XLS preview is not supported; convert the file to XLSX or CSV",
-        ));
+        return xls::parse_rows(bytes, materialized_row_limit);
     }
     if !bytes.starts_with(b"PK\x03\x04") {
         return Err(SpreadsheetValidationError::invalid(
@@ -64,23 +64,21 @@ fn parse_spreadsheet_rows_with_limit(
     xlsx::parse_rows(bytes, materialized_row_limit)
 }
 
-/// 在通用预览前验证上传内容；legacy OLE/BIFF XLS 保持不支持。
+/// 在通用预览前验证上传内容，包括受统一预算约束的 OLE/BIFF XLS。
 pub fn validate_spreadsheet_payload(bytes: &[u8]) -> Result<(), SpreadsheetValidationError> {
     parse_spreadsheet_preview_rows(bytes).map(|_| ())
 }
 
 /// 在 dedicated parser 选择前执行统一资源边界校验。
 ///
-/// HTML/XLSX 继续使用受限解析；legacy binary XLS 暂时失败关闭，避免在第三方
-/// 解析器无法证明完整资源边界时继续物化。HTML 表格形式的 `.xls` 导出不受影响。
+/// HTML/XLSX 使用各自的受限解析；OLE/BIFF XLS 在交给 dedicated parser 前
+/// 先完整遍历首个工作表并执行统一行、列、单元格和物化字节预算。
 pub fn validate_dedicated_spreadsheet_payload(
     bytes: &[u8],
 ) -> Result<(), SpreadsheetValidationError> {
     validate_input_size(bytes)?;
     if bytes.starts_with(OLE_MAGIC) {
-        return Err(SpreadsheetValidationError::unsupported(
-            "Legacy binary XLS is not supported; convert the file to XLSX or CSV",
-        ));
+        return xls::parse_preview_rows(bytes).map(|_| ());
     }
     if looks_like_html_spreadsheet(bytes) {
         return html::parse_preview_rows(bytes).map(|_| ());
@@ -144,9 +142,8 @@ mod tests {
             )
         );
 
-        let error = validate_spreadsheet_payload(OLE_MAGIC).expect_err("legacy XLS");
-        assert_eq!(error.kind(), SpreadsheetValidationErrorKind::Unsupported);
-        assert!(error.message().contains("Legacy binary XLS"));
+        let error = validate_spreadsheet_payload(OLE_MAGIC).expect_err("truncated XLS");
+        assert_eq!(error.kind(), SpreadsheetValidationErrorKind::Invalid);
 
         let error = validate_spreadsheet_payload(b"not-a-spreadsheet").expect_err("spoofed input");
         assert_eq!(error.kind(), SpreadsheetValidationErrorKind::Invalid);

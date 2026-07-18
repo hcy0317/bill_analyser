@@ -70,7 +70,7 @@ mod response_payload_tests {
     }
 
     #[test]
-    fn unmatched_payload_exposes_stable_unsupported_legacy_code_beside_reason() {
+    fn unmatched_payload_maps_malformed_binary_xls_to_invalid_spreadsheet() {
         let result = parse_multipart_import_file(ImportMultipartFileParseInput {
             index: 0,
             original_name: "legacy.xls".to_string(),
@@ -86,11 +86,11 @@ mod response_payload_tests {
 
         assert_eq!(
             payload.get("error_code").and_then(Value::as_str),
-            Some("unsupported_legacy_xls")
+            Some("invalid_spreadsheet")
         );
         assert_eq!(
             payload.get("errorCode").and_then(Value::as_str),
-            Some("unsupported_legacy_xls")
+            Some("invalid_spreadsheet")
         );
         assert!(payload.get("reason").and_then(Value::as_str).is_some());
     }

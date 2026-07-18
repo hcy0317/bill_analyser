@@ -229,7 +229,6 @@ fn no_match_decision_with_code(
 
 fn spreadsheet_error_code(kind: SpreadsheetValidationErrorKind) -> &'static str {
     match kind {
-        SpreadsheetValidationErrorKind::Unsupported => "unsupported_legacy_xls",
         SpreadsheetValidationErrorKind::TooLarge => "spreadsheet_too_large",
         SpreadsheetValidationErrorKind::Invalid => "invalid_spreadsheet",
     }

@@ -559,20 +559,26 @@ fn dedicated_auto_rejects_out_of_budget_xlsx_cell_and_expanded_strings() {
 }
 
 #[test]
-fn dedicated_validation_rejects_binary_xls_before_third_party_parsing() {
-    let error = validate_dedicated_spreadsheet_payload(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1")
-        .expect_err("legacy binary XLS must fail closed");
+fn dedicated_validation_accepts_binary_xls_within_resource_limits() {
+    let mut bytes = std::fs::read(import_sample_path("abc_statement_sample.xls"))
+        .expect("binary XLS fixture reads");
 
-    assert_eq!(error.kind(), SpreadsheetValidationErrorKind::Unsupported);
-    assert!(error.message().contains("convert the file to XLSX or CSV"));
+    validate_dedicated_spreadsheet_payload(&bytes).expect("bounded binary XLS is supported");
+    let parsed =
+        parse_dedicated_import_bytes("交易明细_9316_20230827_20250827.xls", &bytes, "auto")
+            .expect("ABC binary XLS should match its dedicated parser");
+    assert_eq!(parsed.parser_id, "abc");
+    assert_eq!(parsed.bills.len(), 2);
 
-    let decision =
-        detect_dedicated_import_bytes("legacy.xls", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", "auto");
-    assert_eq!(
-        decision.error_code.as_deref(),
-        Some("unsupported_legacy_xls")
-    );
-    assert_eq!(decision.error_code(), Some("unsupported_legacy_xls"));
+    let dimensions = bytes
+        .windows(4)
+        .position(|window| window == [0x00, 0x02, 0x0e, 0x00])
+        .expect("BIFF8 Dimensions record");
+    bytes[dimensions + 8..dimensions + 12].copy_from_slice(&65_536u32.to_le_bytes());
+    bytes[dimensions + 14..dimensions + 16].copy_from_slice(&256u16.to_le_bytes());
+    let error = validate_dedicated_spreadsheet_payload(&bytes)
+        .expect_err("hostile XLS dimensions must fail before calamine allocation");
+    assert_eq!(error.kind(), SpreadsheetValidationErrorKind::TooLarge);
 }
 
 #[test]
