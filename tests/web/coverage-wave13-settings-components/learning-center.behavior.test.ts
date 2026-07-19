@@ -86,8 +86,11 @@ jest.mock('@/views/desktop/pairingcenter/components/learning-center/useLearningC
         llmProviderOptions: actualVue.computed(() => []),
         llmReasoningDepthOptions: actualVue.computed(() => []),
         llmCredentialModeOptions: actualVue.computed(() => []),
+        llmOAuthCredentialModeOptions: actualVue.computed(() => []),
+        llmConnectionMode: actualVue.ref('api'),
         addConfigDialog: actualVue.ref(false),
         addConfigSaving: actualVue.ref(false),
+        testingConfigId: actualVue.ref(null),
         autofillFieldsLocked: actualVue.ref(false),
         newConfigForm: actualVue.ref({}),
         selectedLLMProviderOption: actualVue.computed(() => null),
@@ -100,7 +103,7 @@ jest.mock('@/views/desktop/pairingcenter/components/learning-center/useLearningC
         llmIndeterminate: actualVue.computed(() => false),
         unlockAutofillFields: jest.fn(), closeAddConfigDialog: jest.fn(),
         loadLLMConfigs: mockLoadLlmConfigs, openAddConfigDialog: jest.fn(), saveNewConfig: jest.fn(),
-        llmProviderLabel: jest.fn(), handleActivateConfig: jest.fn(), handleDeleteConfig: jest.fn(),
+        llmProviderLabel: jest.fn(), handleActivateConfig: jest.fn(), handleTestConfig: jest.fn(), handleDeleteConfig: jest.fn(),
         loadLLMCandidates: mockLoadLlmCandidates, handleLLMGenerate: jest.fn(), handleLLMBatchAccept: jest.fn(),
         handleLLMAccept: jest.fn(), handleLLMReject: jest.fn(),
     }),
@@ -160,6 +163,15 @@ describe('LearningCenterPanel production behavior', () => {
         expect(source).toContain('<script setup lang="ts">');
         expect(source).toContain('useExternalTemplateBindings(');
         expect(template.match(/<Teleport defer/g)).toHaveLength(4);
+        expect(template).toContain('<v-tabs v-model="llmConnectionMode"');
+        expect(template).toContain('<v-window v-model="llmConnectionMode"');
+        expect(template).toContain('<v-window-item value="api">');
+        expect(template).toContain('<v-window-item value="oauth">');
+        expect(template).not.toContain('newConfigForm.token_endpoint');
+        expect(template).not.toContain('newConfigForm.refresh_headers');
+        expect(template).not.toContain('newConfigForm.refresh_body');
+        expect(template).not.toContain('newConfigForm.refresh_params');
+        expect(template).toContain('class="llm-config-dialog-actions');
     });
 
     test('scopes loading to the active tab and projects error, header, suggestion, and rule filter state', () => {

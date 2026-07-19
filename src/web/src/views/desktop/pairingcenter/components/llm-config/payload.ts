@@ -21,31 +21,20 @@ function parseOptionalJsonObject(text: string, label: string): Record<string, un
 }
 
 /**
- * 根据表单构造 credential_config payload，只提交用户实际填写的 JSON 和 token 字段。
+ * 根据接入方式构造 credential_config payload；OAuth 只提交用户粘贴的完整 JSON。
  */
 export function buildCredentialConfigPayload(form: LLMConfigForm): Record<string, unknown> {
+    const credentialMode = form.credential_mode || 'api_key';
     const payload: Record<string, unknown> = {
-        credential_mode: form.credential_mode || 'api_key',
+        credential_mode: credentialMode,
     };
+    if (credentialMode === 'api_key') {
+        return payload;
+    }
+
     const credentialJson = parseOptionalJsonObject(form.credential_json, 'Credential JSON');
     if (Object.keys(credentialJson).length > 0) {
         payload['credential_json'] = credentialJson;
-    }
-    const tokenEndpoint = form.token_endpoint.trim();
-    if (tokenEndpoint) {
-        payload['token_endpoint'] = tokenEndpoint;
-    }
-    const refreshHeaders = parseOptionalJsonObject(form.refresh_headers, 'Refresh Headers');
-    if (Object.keys(refreshHeaders).length > 0) {
-        payload['refresh_headers'] = refreshHeaders;
-    }
-    const refreshBody = parseOptionalJsonObject(form.refresh_body, 'Refresh Body');
-    if (Object.keys(refreshBody).length > 0) {
-        payload['refresh_body'] = refreshBody;
-    }
-    const refreshParams = parseOptionalJsonObject(form.refresh_params, 'Refresh Params');
-    if (Object.keys(refreshParams).length > 0) {
-        payload['refresh_params'] = refreshParams;
     }
 
     return payload;

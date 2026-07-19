@@ -350,6 +350,26 @@ mod preview_mutation_helper_tests {
     }
 
     #[test]
+    fn llm_suggestion_parser_accepts_minimal_identity_output() {
+        let suggestion = llm_suggestion_from_value(&json!({
+            "preview_id": 9,
+            "type": "expense",
+            "category_id": 55,
+            "source_account_id": 7,
+            "destination_account_id": null,
+            "confidence": 0.91,
+            "reason": "merchant keyword"
+        }))
+        .expect("minimal llm suggestion");
+
+        assert_eq!(suggestion.suggested_type, "支出");
+        assert_eq!(suggestion.suggested_category_id, Some(55));
+        assert_eq!(suggestion.resolved_source_account_id, Some(7));
+        assert_eq!(suggestion.resolved_destination_account_id, None);
+        assert_eq!(suggestion.reason, "merchant keyword");
+    }
+
+    #[test]
     fn llm_review_expected_state_parser_keeps_desktop_status_and_category_aliases() {
         let payload = json!({
             "expected_state": {

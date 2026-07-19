@@ -137,6 +137,8 @@ pub async fn llm_rule_synthesis_runtime_handler(
                 source_bill_ids: Vec::new(),
                 suggested_main_category: main_category,
                 suggested_sub_category: sub_category,
+                suggested_account_id: None,
+                suggested_account_name: String::new(),
                 suggested_rule_expression: expression,
                 confidence: confidence_from_value(&value),
                 llm_provider: provider_response.provider.clone(),

@@ -498,3 +498,63 @@ pub async fn llm_config_activate_runtime_handler(
         Err(error) => route_response(db_error_response(error)),
     }
 }
+
+/// 使用当前用户保存的指定配置执行一次最小 provider 探测，不改变激活状态或运行时覆盖。
+#[tracing::instrument(level = "debug", skip_all)]
+pub async fn llm_config_test_runtime_handler(
+    State(state): State<HttpAppState>,
+    Path(config_id): Path<i64>,
+    headers: HeaderMap,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let user_id_value = match user_id_i64_value(user_id) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    if let Err(response) = reserve_llm_rate_limit(user_id_value, 1) {
+        return route_response(response);
+    }
+    let runtime = match open_postgres_runtime(&state) {
+        Ok(runtime) => runtime,
+        Err(response) => return route_response(response),
+    };
+    let saved_config = match get_postgres_llm_config(runtime.pool(), config_id, user_id_value).await {
+        Ok(Some(config)) => config,
+        Ok(None) => return route_response(llm_not_found_response("config_not_found")),
+        Err(error) => return route_response(db_error_response(error)),
+    };
+    let runtime_config = build_runtime_llm_config_from_saved_config(&saved_config);
+    let mut provider = match llm_provider_context_from_config(&runtime_config) {
+        Ok(provider) => provider,
+        Err(response) => return route_response(response),
+    };
+    provider.system_prompt.clear();
+    provider.temperature = 0.0;
+    provider.max_tokens = 16;
+    provider.reasoning_depth.clear();
+
+    let started_at = Instant::now();
+    match execute_llm_provider_request(
+        &state,
+        &provider,
+        "Reply with exactly this tiny JSON object: {\"ok\":true}",
+    )
+    .await
+    {
+        Ok(response) => route_response(ImportV2RouteResponse {
+            status_code: 200,
+            body: json!({
+                "success": true,
+                "data": {
+                    "provider": response.provider,
+                    "model": response.model,
+                    "latency_ms": started_at.elapsed().as_millis(),
+                },
+            }),
+        }),
+        Err(response) => route_response(response),
+    }
+}

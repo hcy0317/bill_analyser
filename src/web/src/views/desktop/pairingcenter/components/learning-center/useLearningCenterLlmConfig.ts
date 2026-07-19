@@ -53,9 +53,11 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
     const defaultLLMProviderOption = llmProviderOptions[0] as LLMProviderOption;
     const llmReasoningDepthOptions = createLLMReasoningDepthOptions(tt);
     const llmCredentialModeOptions = createLLMCredentialModeOptions(tt);
+    const llmOAuthCredentialModeOptions = llmCredentialModeOptions.filter(option => option.value !== 'api_key');
 
     const addConfigDialog = ref(false);
     const addConfigSaving = ref(false);
+    const testingConfigId = ref<number | null>(null);
     const autofillNonce = ref(Date.now());
     const autofillFieldsLocked = ref(false);
     const autofillUnlockTimer = ref<number | null>(null);
@@ -64,6 +66,17 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
     const selectedLLMProviderOption = computed<LLMProviderOption>(() => (
         llmProviderOptions.find(option => option.value === newConfigForm.value.provider) ?? defaultLLMProviderOption
     ));
+
+    const llmConnectionMode = computed<'api' | 'oauth'>({
+        get: () => newConfigForm.value.credential_mode === 'api_key' ? 'api' : 'oauth',
+        set: (mode) => {
+            if (mode === 'api') {
+                newConfigForm.value.credential_mode = 'api_key';
+            } else if (newConfigForm.value.credential_mode === 'api_key') {
+                newConfigForm.value.credential_mode = 'session_json';
+            }
+        },
+    });
 
     const baseUrlFieldLabel = computed(() => (
         selectedLLMProviderOption.value.requiresBaseUrl ? tt('Base URL') : tt('Base URL (optional)')
@@ -76,10 +89,6 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
         apiKey: `llm-config-credential-${autofillNonce.value}`,
         baseUrl: `llm-config-endpoint-${autofillNonce.value}`,
         credentialJson: `llm-config-credential-json-${autofillNonce.value}`,
-        tokenEndpoint: `llm-config-token-endpoint-${autofillNonce.value}`,
-        refreshHeaders: `llm-config-refresh-headers-${autofillNonce.value}`,
-        refreshBody: `llm-config-refresh-body-${autofillNonce.value}`,
-        refreshParams: `llm-config-refresh-params-${autofillNonce.value}`,
         temperature: `llm-config-temperature-${autofillNonce.value}`,
         maxTokens: `llm-config-max-tokens-${autofillNonce.value}`,
         systemPrompt: `llm-config-system-prompt-${autofillNonce.value}`,
@@ -195,7 +204,7 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
             name: form.name.trim(),
             provider: form.provider,
             model: form.model.trim(),
-            api_key: form.api_key.trim(),
+            api_key: form.credential_mode === 'api_key' ? form.api_key.trim() : '',
             base_url: form.base_url.trim(),
             credential_config: credentialConfig,
             advanced_settings: buildAdvancedSettingsPayload(form),
@@ -242,6 +251,26 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
             await loadLLMConfigs();
         } catch (error: unknown) {
             setError(getRequestErrorMessage(error, 'Failed to activate config'));
+        }
+    }
+
+    /** 使用服务端保存的密钥执行最小请求，验证端点、认证和模型是否共同可用。 */
+    async function handleTestConfig(configId: number) {
+        testingConfigId.value = configId;
+        try {
+            const resp = await services.testLLMConfig(configId);
+            if (!resp.data?.success) {
+                setError(getPayloadErrorMessage(resp.data, 'Failed to test LLM config'));
+                return;
+            }
+            const latencyMs = Number(resp.data?.result?.latency_ms ?? 0);
+            showInfoMessage('LLM connection test succeeded', {
+                latency: latencyMs > 0 ? `${latencyMs} ms` : undefined,
+            });
+        } catch (error: unknown) {
+            setError(getRequestErrorMessage(error, 'Failed to test LLM config'));
+        } finally {
+            testingConfigId.value = null;
         }
     }
 
@@ -363,8 +392,11 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
         llmProviderOptions,
         llmReasoningDepthOptions,
         llmCredentialModeOptions,
+        llmOAuthCredentialModeOptions,
+        llmConnectionMode,
         addConfigDialog,
         addConfigSaving,
+        testingConfigId,
         autofillFieldsLocked,
         newConfigForm,
         selectedLLMProviderOption,
@@ -382,6 +414,7 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
         saveNewConfig,
         llmProviderLabel,
         handleActivateConfig,
+        handleTestConfig,
         handleDeleteConfig,
         loadLLMCandidates,
         handleLLMGenerate,

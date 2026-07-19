@@ -21,6 +21,7 @@ pub use llm_config::{
     copy_runtime_llm_config, normalize_llm_advanced_settings, safe_llm_config_payload,
 };
 pub use llm_prompts::{
+    build_llm_account_rule_induction_prompt, build_llm_category_rule_induction_prompt,
     build_llm_classification_prompt, build_llm_import_preview_recommendation_prompt,
     build_llm_rule_expression_synthesis_prompt, build_llm_rule_induction_prompt,
     parse_llm_json_array_response, render_llm_prompt_template,

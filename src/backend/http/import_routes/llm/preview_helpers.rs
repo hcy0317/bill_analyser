@@ -176,6 +176,7 @@ fn preview_row_prompt_value(row: &ImportPreviewRow) -> Value {
         "counterparty": row.preview_counterparty,
         "description": row.preview_description,
         "payment_method": row.preview_payment_method,
+        "parser_id": row.preview_parser_id,
         "main_category": row.preview_main_category,
         "sub_category": row.preview_sub_category,
     })
@@ -213,28 +214,6 @@ fn load_llm_memory_prompt_context(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-async fn load_existing_category_paths(
-    connection: &Connection,
-    user_id: i64,
-) -> Result<Vec<String>, ImportV2RouteResponse> {
-    Ok(load_existing_category_values(connection, user_id).await?
-        .into_iter()
-        .filter_map(|value| {
-            let id = value.get("id").and_then(Value::as_i64)?;
-            let category_type = value.get("type").and_then(Value::as_str).unwrap_or_default();
-            let path = value
-                .get("path")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .trim();
-            if path.is_empty() {
-                return None;
-            }
-            Some(format!("ID={id} | {category_type} | {path}"))
-        })
-        .collect())
-}
-
 #[tracing::instrument(level = "debug", skip_all)]
 async fn load_existing_category_values(
     connection: &Connection,
@@ -270,13 +249,15 @@ async fn load_existing_category_values(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-async fn load_existing_account_names(
+async fn load_existing_account_values(
     connection: &Connection,
     user_id: i64,
-) -> Result<Vec<String>, ImportV2RouteResponse> {
-    Ok(load_account_id_map(connection, user_id).await?
-        .into_keys()
-        .collect::<Vec<_>>())
+) -> Result<Vec<Value>, ImportV2RouteResponse> {
+    Ok(load_account_id_map(connection, user_id)
+        .await?
+        .into_iter()
+        .map(|(name, id)| json!({"id": id, "name": name}))
+        .collect())
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -336,6 +317,18 @@ fn fill_llm_suggestion_account_ids(value: Value, account_ids: &BTreeMap<String, 
     let Some(mut object) = value.as_object().cloned() else {
         return value;
     };
+    let requested_source_account_id = first_value(
+        &object,
+        &["source_account_id", "sourceAccountId", "resolved_source_account_id", "resolvedSourceAccountId"],
+    )
+    .and_then(value_to_i64)
+    .filter(|requested| account_ids.values().any(|allowed| allowed == requested));
+    let requested_destination_account_id = first_value(
+        &object,
+        &["destination_account_id", "destinationAccountId", "resolved_destination_account_id", "resolvedDestinationAccountId"],
+    )
+    .and_then(value_to_i64)
+    .filter(|requested| account_ids.values().any(|allowed| allowed == requested));
     for key in [
         "resolved_source_account_id",
         "resolvedSourceAccountId",
@@ -374,7 +367,39 @@ fn fill_llm_suggestion_account_ids(value: Value, account_ids: &BTreeMap<String, 
             }
         }
     }
+    if let Some(account_id) = requested_source_account_id {
+        object.insert("resolved_source_account_id".to_string(), json!(account_id));
+    }
+    if let Some(account_id) = requested_destination_account_id {
+        object.insert("resolved_destination_account_id".to_string(), json!(account_id));
+    }
     Value::Object(object)
+}
+
+fn restrict_llm_suggestion_to_missing_identities(
+    suggestion: &mut ImportPreviewLlmSuggestion,
+    missing: LlmPreviewMissingIdentity,
+) {
+    if !missing.category {
+        suggestion.suggested_type.clear();
+        suggestion.suggested_category_id = None;
+        suggestion.suggested_main_category.clear();
+        suggestion.suggested_sub_category.clear();
+    }
+    if !missing.source_account {
+        suggestion.suggested_source_account.clear();
+        suggestion.resolved_source_account_id = None;
+    }
+    if !missing.destination_account {
+        suggestion.suggested_destination_account.clear();
+        suggestion.resolved_destination_account_id = None;
+    }
+}
+
+fn preview_row_needs_llm_identity(row: &ImportPreviewRow) -> bool {
+    row.category_id.is_none()
+        || row.preview_source_account_id.is_none()
+        || (row.preview_type == "转账" && row.preview_destination_account_id.is_none())
 }
 
 fn llm_preview_recommendation_item(
@@ -455,5 +480,41 @@ mod action_scope_tests {
             action_scope_filter_hash(&filters).unwrap(),
             action_scope_filter_hash(&ImportPreviewQueryFilters::default()).unwrap()
         );
+    }
+
+    #[test]
+    fn llm_account_ids_are_whitelisted_against_current_user_accounts() {
+        let accounts = BTreeMap::from([("工资卡".to_string(), 7_i64)]);
+        let allowed = fill_llm_suggestion_account_ids(
+            json!({"source_account_id": 7, "destination_account_id": 999}),
+            &accounts,
+        );
+        assert_eq!(allowed["resolved_source_account_id"], 7);
+        assert!(allowed.get("resolved_destination_account_id").is_none());
+        assert!(allowed.get("source_account_id").is_none());
+        assert!(allowed.get("destination_account_id").is_none());
+    }
+
+    #[test]
+    fn llm_recommendation_only_fills_missing_identities() {
+        let mut suggestion = ImportPreviewLlmSuggestion {
+            suggested_type: "支出".to_string(),
+            suggested_category_id: Some(42),
+            resolved_source_account_id: Some(7),
+            resolved_destination_account_id: Some(8),
+            ..ImportPreviewLlmSuggestion::default()
+        };
+        restrict_llm_suggestion_to_missing_identities(
+            &mut suggestion,
+            LlmPreviewMissingIdentity {
+                category: false,
+                source_account: true,
+                destination_account: false,
+            },
+        );
+        assert!(suggestion.suggested_type.is_empty());
+        assert_eq!(suggestion.suggested_category_id, None);
+        assert_eq!(suggestion.resolved_source_account_id, Some(7));
+        assert_eq!(suggestion.resolved_destination_account_id, None);
     }
 }

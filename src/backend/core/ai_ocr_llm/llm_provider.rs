@@ -105,6 +105,9 @@ fn is_llm_provider_creatable(provider: &str) -> bool {
             | "openrouter"
             | "openai_compatible"
             | "azure"
+            | "qwen"
+            | "siliconflow"
+            | "zhipu"
     )
 }
 
@@ -117,6 +120,9 @@ fn default_llm_base_url(provider: &str) -> Option<&'static str> {
         "xai" => Some("https://api.x.ai/v1"),
         "google" => Some("https://generativelanguage.googleapis.com/v1beta/openai"),
         "openrouter" => Some("https://openrouter.ai/api/v1"),
+        "qwen" => Some("https://dashscope.aliyuncs.com/compatible-mode/v1"),
+        "siliconflow" => Some("https://api.siliconflow.cn/v1"),
+        "zhipu" => Some("https://open.bigmodel.cn/api/paas/v4"),
         _ => None,
     }
 }
@@ -248,10 +254,19 @@ fn llm_url_is_allowlisted(parsed: &Url) -> bool {
 }
 
 fn llm_url_matches_openai_compatible_default(parsed: &Url) -> bool {
-    ["openai", "deepseek", "xai", "google", "openrouter"]
-        .iter()
-        .filter_map(|provider| default_llm_base_url(provider))
-        .any(|default_url| llm_url_origin_matches(parsed, default_url))
+    [
+        "openai",
+        "deepseek",
+        "xai",
+        "google",
+        "openrouter",
+        "qwen",
+        "siliconflow",
+        "zhipu",
+    ]
+    .iter()
+    .filter_map(|provider| default_llm_base_url(provider))
+    .any(|default_url| llm_url_origin_matches(parsed, default_url))
 }
 
 fn llm_url_is_local_plain_http_endpoint(parsed: &Url) -> bool {
@@ -311,6 +326,9 @@ fn default_llm_model(provider: &str) -> Option<&'static str> {
         "xai" => Some("grok-3-mini"),
         "google" => Some("gemini-2.0-flash"),
         "openrouter" => Some("openai/gpt-4o-mini"),
+        "qwen" => Some("qwen-plus"),
+        "siliconflow" => Some("deepseek-ai/DeepSeek-V3"),
+        "zhipu" => Some("glm-4-flash"),
         _ => None,
     }
 }

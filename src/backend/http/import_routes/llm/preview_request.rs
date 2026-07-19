@@ -56,7 +56,7 @@ pub async fn llm_preview_recommend_runtime_handler(
             Ok(scope) => scope,
             Err(response) => return route_response(response),
         };
-        let rows = match selected_preview_rows_for_llm(
+        let mut rows = match selected_preview_rows_for_llm(
             runtime.connection(),
             &action_scope,
             &session_id,
@@ -90,6 +90,26 @@ pub async fn llm_preview_recommend_runtime_handler(
             {
                 return route_response(db_error_response(error));
             }
+            rows = match selected_preview_rows_for_llm(
+                runtime.connection(),
+                &action_scope,
+                &session_id,
+                user_id,
+                limit,
+            ) {
+                Ok(rows) => rows,
+                Err(response) => return route_response(response),
+            };
+        }
+        rows.retain(preview_row_needs_llm_identity);
+        if rows.is_empty() {
+            return route_response(ImportV2RouteResponse {
+                status_code: 200,
+                body: bill_analyser_core::build_llm_preview_recommend_response(
+                    &session_id,
+                    Vec::new(),
+                ),
+            });
         }
         let config = match effective_llm_runtime_config(&state, user_id_value).await {
             Ok(config) => config,
@@ -99,11 +119,11 @@ pub async fn llm_preview_recommend_runtime_handler(
             Ok(provider) => provider,
             Err(response) => return route_response(response),
         };
-        let categories = match load_existing_category_paths(runtime.connection(), user_id_value).await {
+        let categories = match load_existing_category_values(runtime.connection(), user_id_value).await {
             Ok(categories) => categories,
             Err(response) => return route_response(response),
         };
-        let accounts = match load_existing_account_names(runtime.connection(), user_id_value).await {
+        let accounts = match load_existing_account_values(runtime.connection(), user_id_value).await {
             Ok(accounts) => accounts,
             Err(response) => return route_response(response),
         };
@@ -131,6 +151,20 @@ pub async fn llm_preview_recommend_runtime_handler(
             prompt,
             selected_preview_ids: rows.iter().map(|row| row.id).collect(),
             account_ids,
+            missing_identities: rows
+                .iter()
+                .map(|row| {
+                    (
+                        row.id,
+                        LlmPreviewMissingIdentity {
+                            category: row.category_id.is_none(),
+                            source_account: row.preview_source_account_id.is_none(),
+                            destination_account: row.preview_type == "转账"
+                                && row.preview_destination_account_id.is_none(),
+                        },
+                    )
+                })
+                .collect(),
         }
     };
 
@@ -175,9 +209,12 @@ pub async fn llm_preview_recommend_runtime_handler(
             continue;
         }
         let suggestion_value = fill_llm_suggestion_account_ids(value, &prepared.account_ids);
-        let Some(suggestion) = llm_suggestion_from_value(&suggestion_value) else {
+        let Some(mut suggestion) = llm_suggestion_from_value(&suggestion_value) else {
             continue;
         };
+        if let Some(missing) = prepared.missing_identities.get(&preview_id) {
+            restrict_llm_suggestion_to_missing_identities(&mut suggestion, *missing);
+        }
         let result = match apply_preview_llm_recommendation(
             runtime.connection_mut(),
             &bill_analyser_db::ImportPreviewLlmApplyRequest {

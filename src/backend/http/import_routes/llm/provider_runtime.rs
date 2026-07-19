@@ -29,13 +29,26 @@ struct LlmPreviewPrepared {
     prompt: String,
     selected_preview_ids: Vec<i64>,
     account_ids: BTreeMap<String, i64>,
+    missing_identities: BTreeMap<i64, LlmPreviewMissingIdentity>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LlmPreviewMissingIdentity {
+    category: bool,
+    source_account: bool,
+    destination_account: bool,
 }
 
 #[derive(Debug, Clone)]
 struct RuleInductionGroup {
+    candidate_type: &'static str,
+    category_id: Option<i64>,
     category_name: String,
     main_category: String,
     sub_category: String,
+    account_id: Option<i64>,
+    account_name: String,
+    account_role: String,
     source_ids: Vec<i64>,
     transactions: Vec<Value>,
 }
@@ -276,9 +289,13 @@ async fn execute_llm_provider_request(
         match response {
             Ok(response) => {
                 let status = response.status();
+                let raw_text = read_limited_llm_provider_body(response).await?;
                 if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                    let detail = llm_provider_error_diagnostic(&raw_text, &context)
+                        .map(|detail| format!(": {detail}"))
+                        .unwrap_or_default();
                     return Err(llm_contract_error_response(
-                        "Rate limit exceeded",
+                        &format!("Rate limit exceeded{detail}"),
                         "LLM_RATE_LIMITED",
                         429,
                     ));
@@ -294,7 +311,6 @@ async fn execute_llm_provider_request(
                     return Err(llm_relogin_required_response());
                 }
                 if status.is_success() {
-                    let raw_text = read_limited_llm_provider_body(response).await?;
                     let raw_response = serde_json::from_str::<Value>(&raw_text).map_err(|_| {
                         llm_contract_error_response(
                             "LLM provider returned invalid JSON",
@@ -305,6 +321,10 @@ async fn execute_llm_provider_request(
                     return llm_provider_runtime_response(&context, raw_response);
                 }
                 last_error = format!("provider status {}", status.as_u16());
+                if let Some(detail) = llm_provider_error_diagnostic(&raw_text, &context) {
+                    last_error.push_str(": ");
+                    last_error.push_str(&detail);
+                }
                 if !status.is_server_error() || attempt == 2 {
                     break;
                 }
@@ -330,6 +350,81 @@ async fn execute_llm_provider_request(
         "LLM_PROVIDER_UNAVAILABLE",
         503,
     ))
+}
+
+fn llm_provider_error_diagnostic(
+    raw_text: &str,
+    context: &LlmProviderRequestContext,
+) -> Option<String> {
+    let body = serde_json::from_str::<Value>(raw_text).ok()?;
+    let error = body.get("error").unwrap_or(&body);
+    let message = error
+        .get("message")
+        .or_else(|| body.get("message"))
+        .and_then(Value::as_str)
+        .or_else(|| error.as_str());
+    let code = error
+        .get("code")
+        .or_else(|| body.get("code"))
+        .and_then(|value| value.as_str().map(str::to_string).or_else(|| value.as_i64().map(|item| item.to_string())));
+    let mut secrets = vec![context.api_key.as_str()];
+    collect_provider_secret_values(&context.credential_config, &mut secrets);
+    let message = message.and_then(|value| sanitize_llm_provider_error_text(value, 240, &secrets));
+    let code = code
+        .as_deref()
+        .and_then(|value| sanitize_llm_provider_error_text(value, 64, &secrets));
+    match (message, code) {
+        (Some(message), Some(code)) => Some(format!("{message} (code: {code})")),
+        (Some(message), None) => Some(message),
+        (None, Some(code)) => Some(format!("provider error code: {code}")),
+        (None, None) => None,
+    }
+}
+
+fn collect_provider_secret_values<'a>(value: &'a Value, secrets: &mut Vec<&'a str>) {
+    let Some(object) = value.as_object() else {
+        return;
+    };
+    for (key, value) in object {
+        let normalized_key = key.to_ascii_lowercase();
+        if (normalized_key.contains("secret")
+            || normalized_key.contains("token")
+            || normalized_key.contains("password")
+            || normalized_key.contains("api_key"))
+            && value.as_str().is_some_and(|text| !text.trim().is_empty())
+        {
+            secrets.push(value.as_str().unwrap_or_default());
+        }
+        if value.is_object() {
+            collect_provider_secret_values(value, secrets);
+        }
+    }
+}
+
+fn sanitize_llm_provider_error_text(
+    value: &str,
+    max_chars: usize,
+    secrets: &[&str],
+) -> Option<String> {
+    let mut sanitized = value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    for secret in secrets
+        .iter()
+        .map(|secret| secret.trim())
+        .filter(|secret| secret.chars().count() >= 4)
+    {
+        sanitized = sanitized.replace(secret, "[REDACTED]");
+    }
+    if sanitized.is_empty() {
+        return None;
+    }
+    let mut truncated = sanitized.chars().take(max_chars).collect::<String>();
+    if sanitized.chars().count() > max_chars {
+        truncated.push('…');
+    }
+    Some(truncated)
 }
 
 fn llm_relogin_required_response() -> ImportV2RouteResponse {
@@ -569,4 +664,57 @@ fn reserve_llm_rate_limit(user_id: i64, slots: usize) -> Result<(), ImportV2Rout
         bucket.push_back(now);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod provider_runtime_tests {
+    use super::*;
+
+    fn context_with_secrets() -> LlmProviderRequestContext {
+        LlmProviderRequestContext {
+            config: LlmProviderConfigContract {
+                provider: "qwen".to_string(),
+                normalized_provider: "qwen".to_string(),
+                provider_kind: "openai_compatible".to_string(),
+                base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
+                model: "qwen-plus".to_string(),
+                provider_name: "qwen".to_string(),
+            },
+            api_key: "secret-api-key".to_string(),
+            credential_config: json!({"nested": {"refresh_token": "secret-refresh"}}),
+            config_id: Some(1),
+            user_id: Some(2),
+            system_prompt: String::new(),
+            temperature: 0.0,
+            max_tokens: 16,
+            reasoning_depth: String::new(),
+        }
+    }
+
+    #[test]
+    fn provider_error_diagnostic_extracts_code_and_redacts_known_credentials() {
+        let diagnostic = llm_provider_error_diagnostic(
+            r#"{"error":{"message":"bad secret-api-key and secret-refresh\nrequest","code":"invalid_auth"}}"#,
+            &context_with_secrets(),
+        )
+        .expect("provider diagnostic");
+
+        assert_eq!(
+            diagnostic,
+            "bad [REDACTED] and [REDACTED] request (code: invalid_auth)"
+        );
+        assert!(!diagnostic.contains("secret"));
+    }
+
+    #[test]
+    fn provider_error_diagnostic_ignores_non_json_and_truncates_messages() {
+        assert!(llm_provider_error_diagnostic("upstream html", &context_with_secrets()).is_none());
+        let diagnostic = llm_provider_error_diagnostic(
+            &json!({"message": "x".repeat(300)}).to_string(),
+            &context_with_secrets(),
+        )
+        .expect("truncated diagnostic");
+        assert_eq!(diagnostic.chars().count(), 241);
+        assert!(diagnostic.ends_with('…'));
+    }
 }

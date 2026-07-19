@@ -40,6 +40,9 @@ export function toLLMCandidates(result: unknown): LLMCandidateItem[] {
         const categoryName = typeof record['category_name'] === 'string' && record['category_name']
             ? record['category_name']
             : [mainCategory, subCategory].filter(Boolean).join('/');
+        const accountName = typeof record['suggested_account_name'] === 'string'
+            ? record['suggested_account_name']
+            : '';
         const suggestedRuleExpression = typeof record['suggested_rule_expression'] === 'string'
             ? record['suggested_rule_expression']
             : '';
@@ -83,8 +86,11 @@ export function toLLMCandidates(result: unknown): LLMCandidateItem[] {
             target_category: typeof record['target_category'] === 'string'
                 ? record['target_category']
                 : categoryName || undefined,
+            target_name: accountName || categoryName || undefined,
             suggested_main_category: mainCategory || undefined,
             suggested_sub_category: subCategory || undefined,
+            suggested_account_id: Number(record['suggested_account_id'] || 0) || undefined,
+            suggested_account_name: accountName || undefined,
             suggested_rule_expression: suggestedRuleExpression || undefined,
         };
     });

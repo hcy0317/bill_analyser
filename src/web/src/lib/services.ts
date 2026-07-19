@@ -1825,6 +1825,12 @@ export default {
         });
     },
 
+    testLLMConfig: (configId: number): ApiResponsePromise<any> => {
+        return axios.post(`llm/configs/${configId}/test`).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
     // ── LLM Preview Recommend (A5 黄色推荐) ──────────
 
     llmPreviewRecommend: ({ sessionId, previewIds, previewUpdates, actionScope, limit }: LLMPreviewRecommendRequest): ApiResponsePromise<any> => {

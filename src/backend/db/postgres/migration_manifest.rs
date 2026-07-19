@@ -194,6 +194,8 @@ const IMPORT_CONFIG_INDEXES: &[&str] = &[
     "uq_import_configs_user_format_default",
     "idx_import_configs_user_format_list",
 ];
+const LLM_ACCOUNT_RULE_CANDIDATE_TABLES: &[&str] = &["llm_candidates"];
+const LLM_ACCOUNT_RULE_CANDIDATE_INDEXES: &[&str] = &[];
 
 const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
     PostgresMigrationDescriptor {
@@ -349,5 +351,12 @@ const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
         description: "persist user-scoped import mapping templates with deterministic defaults",
         required_tables: IMPORT_CONFIG_TABLES,
         required_indexes: IMPORT_CONFIG_INDEXES,
+    },
+    PostgresMigrationDescriptor {
+        version: 23,
+        file_name: "0023_llm_account_rule_candidates.sql",
+        description: "add canonical account targets to LLM rule candidates",
+        required_tables: LLM_ACCOUNT_RULE_CANDIDATE_TABLES,
+        required_indexes: LLM_ACCOUNT_RULE_CANDIDATE_INDEXES,
     },
 ];

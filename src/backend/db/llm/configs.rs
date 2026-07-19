@@ -86,7 +86,7 @@ pub async fn create_postgres_llm_config(
     .fetch_one(pool)
     .await?;
     let config_id: i64 = row.try_get("id")?;
-    get_postgres_llm_config_by_id(pool, config_id, user_id)
+    get_postgres_llm_config(pool, config_id, user_id)
         .await?
         .ok_or_else(|| {
             DbError::InvalidOperation("created llm config could not be reloaded".to_string())
@@ -107,7 +107,7 @@ pub async fn update_postgres_llm_config(
         operation = "update_postgres_llm_config",
         "business operation entered"
     );
-    let Some(existing) = get_postgres_llm_config_by_id(pool, config_id, user_id).await? else {
+    let Some(existing) = get_postgres_llm_config(pool, config_id, user_id).await? else {
         return Ok(None);
     };
     if update.is_active == Some(true) {
@@ -180,7 +180,7 @@ pub async fn update_postgres_llm_config(
     .execute(pool)
     .await?;
 
-    get_postgres_llm_config_by_id(pool, config_id, user_id).await
+    get_postgres_llm_config(pool, config_id, user_id).await
 }
 
 /// 删除指定用户可见的 LLM 配置，返回是否真实删除了数据库记录。
@@ -211,7 +211,7 @@ pub async fn activate_postgres_llm_config(
     config_id: i64,
     user_id: i64,
 ) -> DbResult<bool> {
-    if get_postgres_llm_config_by_id(pool, config_id, user_id)
+    if get_postgres_llm_config(pool, config_id, user_id)
         .await?
         .is_none()
     {

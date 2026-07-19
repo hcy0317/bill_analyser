@@ -317,6 +317,15 @@ pub(super) const ROUTES: &[EndpointOwnership] = &[
         notes: "Rust import_db_runtime owns saved LLM config activation and process-local runtime override clearing.",
     },
     EndpointOwnership {
+        method: "POST",
+        pattern: "/api/llm/configs/{config_id}/test",
+        domain: "ai-learning-llm",
+        state: RuntimeState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::CurrentSuccessData,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust import_db_runtime owns user-scoped saved LLM config connectivity tests without activation or secret disclosure.",
+    },
+    EndpointOwnership {
         method: "GET",
         pattern: "/api/llm/candidates",
         domain: "ai-learning-llm",

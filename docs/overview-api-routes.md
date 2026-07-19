@@ -7,6 +7,7 @@
 - `auth_routes/`：login/register/token/profile/cloud/external-auth/system/user-data/2FA/step-up/OAuth2 disabled-safe 合同。
 - `bill_routes/`：账单 CRUD、批量写入、图片、导出、recurring、reconciliation、分类 quick actions。
 - `import_routes/`：parser-first 上传、JSON parse、未匹配文件列映射、session、preview、dedup、confirm、learning、LLM/OCR 入口。
+- LLM saved config 除 CRUD/activate 外提供 `POST /api/llm/configs/{config_id}/test`，按当前用户读取服务端保存的密钥执行最小 provider 请求；该探测不会激活配置或返回凭据。
 - `taxonomy_routes/`：账户、账户识别规则、标签、分类、分类规则、模板、设置包、settings encryption status。
 - `budget_routes.rs` facade + `budget_routes/`：预算 CRUD/export/execution/forecast/snapshot/import。
 - `statistics_routes/`：分类统计、资产趋势、饼图、top merchants、amounts、Analyzer、洞察、汇率。

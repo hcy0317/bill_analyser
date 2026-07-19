@@ -155,18 +155,13 @@
     border: 0;
 }
 
-.llm-config-advanced-fields {
-    border-top: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
-    margin-top: 8px;
-    padding-top: 12px;
+.llm-config-dialog-content {
+    max-height: min(64vh, 640px);
+    overflow-y: auto;
 }
 
-.llm-config-number-field {
-    flex: 1 1 180px;
-}
-
-.llm-config-json-field {
-    flex: 1 1 220px;
+.llm-config-dialog-actions {
+    align-items: center;
 }
 
 .v-table :deep(td) {

@@ -161,9 +161,10 @@ pub use llm::{
     accept_postgres_llm_candidate, activate_postgres_llm_config, count_postgres_llm_candidates,
     create_postgres_llm_candidate, create_postgres_llm_config, default_llm_runtime_config,
     delete_postgres_llm_config, effective_postgres_llm_config_from_saved,
-    get_postgres_active_llm_config, get_postgres_llm_candidate_by_id, list_postgres_llm_candidates,
-    list_postgres_llm_configs, reject_postgres_llm_candidate, update_postgres_llm_candidate_status,
-    update_postgres_llm_config, LlmCandidateDraft, LlmConfigDraft, LlmConfigUpdate,
+    get_postgres_active_llm_config, get_postgres_llm_candidate_by_id, get_postgres_llm_config,
+    list_postgres_llm_candidates, list_postgres_llm_configs, reject_postgres_llm_candidate,
+    update_postgres_llm_candidate_status, update_postgres_llm_config, LlmCandidateDraft,
+    LlmConfigDraft, LlmConfigUpdate,
 };
 pub use matching::postgres_reads::{
     create_postgres_manual_matching_pair, delete_postgres_manual_matching_pair,

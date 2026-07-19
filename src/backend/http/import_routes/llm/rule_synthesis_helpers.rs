@@ -4,54 +4,99 @@
 
 fn rule_induction_groups(
     rows: Vec<ImportPreviewRow>,
+    account_names: &BTreeMap<i64, String>,
 ) -> Result<Vec<RuleInductionGroup>, ImportV2RouteResponse> {
-    let mut groups: BTreeMap<(String, String), Vec<ImportPreviewRow>> = BTreeMap::new();
-    for row in rows {
+    let mut category_groups: BTreeMap<(Option<i64>, String, String), Vec<ImportPreviewRow>> =
+        BTreeMap::new();
+    let mut account_groups: BTreeMap<(i64, String), Vec<ImportPreviewRow>> = BTreeMap::new();
+    for row in &rows {
+        let has_keyword_evidence = !row.preview_counterparty.trim().is_empty()
+            || !row.preview_description.trim().is_empty()
+            || !row.preview_payment_method.trim().is_empty()
+            || !row.preview_parser_id.trim().is_empty();
+        if !has_keyword_evidence {
+            continue;
+        }
         if row.preview_main_category.trim().is_empty() && row.preview_sub_category.trim().is_empty()
         {
-            continue;
+        } else {
+            category_groups
+                .entry((
+                    row.category_id,
+                    row.preview_main_category.trim().to_string(),
+                    row.preview_sub_category.trim().to_string(),
+                ))
+                .or_default()
+                .push(row.clone());
         }
-        if row.preview_counterparty.trim().is_empty()
-            && row.preview_description.trim().is_empty()
-            && row.preview_payment_method.trim().is_empty()
-        {
-            continue;
+        for (account_id, role) in [
+            (row.preview_source_account_id, "source"),
+            (row.preview_destination_account_id, "destination"),
+        ] {
+            if let Some(account_id) = account_id.filter(|id| account_names.contains_key(id)) {
+                account_groups
+                    .entry((account_id, role.to_string()))
+                    .or_default()
+                    .push(row.clone());
+            }
         }
-        groups
-            .entry((
-                row.preview_main_category.trim().to_string(),
-                row.preview_sub_category.trim().to_string(),
-            ))
-            .or_default()
-            .push(row);
     }
-    if groups.is_empty() {
+    if category_groups.is_empty() && account_groups.is_empty() {
         return Err(llm_contract_error_response(
-            "Selected preview rows do not contain enough categorized evidence",
+            "Selected preview rows do not contain enough manually classified or accounted evidence",
             "PREVIEW_SELECTION_INSUFFICIENT",
             422,
         ));
     }
-    if groups.len() > 10 {
+    if category_groups.len() + account_groups.len() > 20 {
         return Err(llm_contract_error_response(
-            "Selected preview rows contain too many category groups",
+            "Selected preview rows contain too many category or account groups",
             "PREVIEW_SELECTION_TOO_LARGE",
             422,
         ));
     }
-    Ok(groups
+    let mut groups = category_groups
         .into_iter()
-        .map(|((main_category, sub_category), rows)| {
+        .filter_map(|((category_id, main_category, sub_category), rows)| {
+            let category_id = category_id.filter(|id| *id > 0)?;
             let category_name = category_path(&main_category, &sub_category);
-            RuleInductionGroup {
+            Some(RuleInductionGroup {
+                candidate_type: "rule_induction",
+                category_id: Some(category_id),
                 category_name,
                 main_category,
                 sub_category,
+                account_id: None,
+                account_name: String::new(),
+                account_role: String::new(),
                 source_ids: rows.iter().map(|row| row.id).collect(),
                 transactions: rows.iter().map(preview_row_prompt_value).collect(),
-            }
+            })
         })
-        .collect())
+        .collect::<Vec<_>>();
+    groups.extend(account_groups.into_iter().filter_map(|((account_id, role), rows)| {
+        let account_name = account_names.get(&account_id)?.clone();
+        Some(RuleInductionGroup {
+            candidate_type: "account_rule_induction",
+            category_id: None,
+            category_name: String::new(),
+            main_category: String::new(),
+            sub_category: String::new(),
+            account_id: Some(account_id),
+            account_name,
+            account_role: role,
+            source_ids: rows.iter().map(|row| row.id).collect(),
+            transactions: rows.iter().map(preview_row_prompt_value).collect(),
+        })
+    }));
+    if groups.is_empty() {
+        return Err(llm_contract_error_response(
+            "Selected preview rows do not contain canonical category or account identities",
+            "PREVIEW_SELECTION_INSUFFICIENT",
+            422,
+        ));
+    }
+    Ok(groups)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -563,6 +608,40 @@ async fn postgres_rule_candidate_duplicate(
     .map_err(db_error_response)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
+async fn postgres_account_rule_candidate_duplicate(
+    pool: &bill_analyser_db::PostgresPool,
+    user_id: i64,
+    account_id: i64,
+    expression: &str,
+) -> Result<bool, ImportV2RouteResponse> {
+    let expression = expression.trim();
+    let expression_json = json!({"expression": expression, "regex_enabled": false});
+    if sqlx::query(
+        "SELECT 1 FROM account_rules WHERE user_id = $1 AND account_id = $2 AND rule_expression = $3 LIMIT 1",
+    )
+    .bind(user_id)
+    .bind(account_id)
+    .bind(expression_json)
+    .fetch_optional(pool)
+    .await
+    .map_err(db_error_response)?
+    .is_some()
+    {
+        return Ok(true);
+    }
+    sqlx::query(
+        "SELECT 1 FROM llm_candidates WHERE user_id = $1 AND status = 'pending' AND type = 'account_rule_induction' AND suggested_account_id = $2 AND suggested_rule_expression = $3 LIMIT 1",
+    )
+    .bind(user_id)
+    .bind(account_id)
+    .bind(expression)
+    .fetch_optional(pool)
+    .await
+    .map(|row| row.is_some())
+    .map_err(db_error_response)
+}
+
 fn category_path(main_category: &str, sub_category: &str) -> String {
     let main_category = main_category.trim();
     let sub_category = sub_category.trim();
@@ -572,5 +651,61 @@ fn category_path(main_category: &str, sub_category: &str) -> String {
         sub_category.to_string()
     } else {
         format!("{main_category}/{sub_category}")
+    }
+}
+
+#[cfg(test)]
+mod two_layer_rule_induction_tests {
+    use super::*;
+
+    fn preview_row() -> ImportPreviewRow {
+        ImportPreviewRow {
+            id: 9,
+            session_id: "session".to_string(),
+            user_id: 1,
+            preview_date: "2026-07-19".to_string(),
+            preview_type: "支出".to_string(),
+            preview_amount_cents: 1800,
+            preview_destination_amount_cents: 0,
+            category_id: Some(42),
+            preview_main_category: "餐饮".to_string(),
+            preview_sub_category: "咖啡".to_string(),
+            preview_source_account_id: Some(7),
+            preview_destination_account_id: None,
+            preview_counterparty: "星巴克".to_string(),
+            preview_payment_method: "银行卡".to_string(),
+            preview_description: "拿铁".to_string(),
+            preview_parser_id: "wechat".to_string(),
+            preview_parser_tags: Vec::new(),
+            preview_recurring_id: None,
+            preview_recurring_name: String::new(),
+            preview_recurring_candidate_count: 0,
+            preview_recurring_match_score: 0.0,
+            preview_recurring_match_reasons: String::new(),
+            preview_recurring_matched_date: String::new(),
+            preview_selected: true,
+            dedup_type: String::new(),
+            dedup_source_ids: Vec::new(),
+            preview_matching_feedback: json!({}),
+            created_at: String::new(),
+        }
+    }
+
+    #[test]
+    fn manually_edited_rows_produce_category_and_account_rule_groups() {
+        let groups = rule_induction_groups(
+            vec![preview_row()],
+            &BTreeMap::from([(7_i64, "工资卡".to_string())]),
+        )
+        .expect("two-layer groups");
+
+        assert!(groups.iter().any(|group| {
+            group.candidate_type == "rule_induction" && group.category_id == Some(42)
+        }));
+        assert!(groups.iter().any(|group| {
+            group.candidate_type == "account_rule_induction"
+                && group.account_id == Some(7)
+                && group.account_role == "source"
+        }));
     }
 }

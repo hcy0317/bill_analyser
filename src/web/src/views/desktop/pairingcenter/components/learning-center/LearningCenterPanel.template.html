@@ -423,6 +423,12 @@
                                                         <v-icon v-if="cfg.is_active" :icon="mdiCheck" color="success" size="small" />
                                                     </td>
                                                     <td class="text-center">
+                                                        <v-btn size="x-small" variant="text" color="secondary"
+                                                               :loading="testingConfigId === cfg.id"
+                                                               :disabled="testingConfigId !== null && testingConfigId !== cfg.id"
+                                                               @click="handleTestConfig(cfg.id)">
+                                                            {{ tt('Test') }}
+                                                        </v-btn>
                                                         <v-btn v-if="!cfg.is_active" size="x-small" variant="text" color="primary"
                                                                @click="handleActivateConfig(cfg.id)">
                                                             {{ tt('Activate') }}
@@ -510,7 +516,7 @@
                                             </th>
                                             <th>{{ tt('Type') }}</th>
                                             <th>{{ tt('Rule Content') }}</th>
-                                            <th>{{ tt('Target Category') }}</th>
+                                            <th>{{ tt('Target') }}</th>
                                             <th>{{ tt('Confidence') }}</th>
                                             <th>{{ tt('Status') }}</th>
                                             <th class="text-center">{{ tt('Actions') }}</th>
@@ -534,7 +540,7 @@
                                                 <div class="text-body-2 font-weight-medium">{{ candidate.rule_content || candidate.expression || '-' }}</div>
                                                 <div v-if="candidate.reason" class="text-caption text-grey">{{ candidate.reason }}</div>
                                             </td>
-                                            <td>{{ candidate.category_name || candidate.target_category || '-' }}</td>
+                                            <td>{{ candidate.target_name || candidate.category_name || candidate.target_category || '-' }}</td>
                                             <td>
                                                 <v-chip size="x-small" :color="confidenceColor(candidate.confidence ?? 0)">
                                                     {{ ((candidate.confidence || 0) * 100).toFixed(0) }}%
@@ -602,7 +608,11 @@
     </v-dialog>
 
     <!-- Add Config Dialog -->
-    <v-dialog v-model="addConfigDialog" max-width="800" persistent>
+    <v-dialog v-model="addConfigDialog"
+              class="llm-config-dialog"
+              width="calc(100vw - 32px)"
+              max-width="720"
+              persistent>
         <v-card class="pa-2 pa-sm-4 pa-md-8">
             <template #title>
                 <div class="d-flex align-center justify-center">
@@ -616,179 +626,134 @@
                 </div>
             </template>
             <form autocomplete="off" @submit.prevent="saveNewConfig">
-                <v-card-text class="mt-md-4 pt-0">
-                    <input class="llm-config-autofill-decoy"
-                           type="text"
-                           name="username"
-                           autocomplete="username"
-                           tabindex="-1"
-                           aria-hidden="true" />
-                    <input class="llm-config-autofill-decoy"
-                           type="password"
-                           name="password"
-                           autocomplete="current-password"
-                           tabindex="-1"
-                           aria-hidden="true" />
-                    <v-text-field v-model="newConfigForm.name" :label="tt('Name')"
-                                  :name="llmConfigFieldNames.name"
-                                  :readonly="autofillFieldsLocked"
-                                  autocomplete="off"
-                                  data-lpignore="true"
-                                  data-1p-ignore="true"
-                                  @focus="unlockAutofillFields"
-                                  density="compact" class="mb-3" placeholder="My OpenAI Config" />
-                    <v-select v-model="newConfigForm.provider" :label="tt('Provider')"
-                              :items="llmProviderOptions"
-                              item-title="title"
-                              item-value="value"
-                              :name="llmConfigFieldNames.provider"
-                              autocomplete="off"
-                              density="compact" class="mb-3" />
-                    <v-text-field v-model="newConfigForm.model" :label="tt('Model')"
-                                  :name="llmConfigFieldNames.model"
-                                  :readonly="autofillFieldsLocked"
-                                  autocomplete="off"
-                                  data-lpignore="true"
-                                  data-1p-ignore="true"
-                                  @focus="unlockAutofillFields"
-                                  density="compact" class="mb-3"
-                                  :placeholder="selectedLLMProviderOption.modelPlaceholder" />
-                    <v-text-field v-model="newConfigForm.api_key" label="API Key"
-                                  :name="llmConfigFieldNames.apiKey"
-                                  :readonly="autofillFieldsLocked"
-                                  autocomplete="new-password"
-                                  data-lpignore="true"
-                                  data-1p-ignore="true"
-                                  @focus="unlockAutofillFields"
-                                  density="compact" class="mb-3" type="password"
-                                  :placeholder="selectedLLMProviderOption.apiKeyPlaceholder" />
-                    <v-text-field v-model="newConfigForm.base_url" :label="baseUrlFieldLabel"
-                                  :name="llmConfigFieldNames.baseUrl"
-                                  :readonly="autofillFieldsLocked"
-                                  autocomplete="off"
-                                  data-lpignore="true"
-                                  data-1p-ignore="true"
-                                  @focus="unlockAutofillFields"
-                                  density="compact"
-                                  :placeholder="selectedLLMProviderOption.baseUrlPlaceholder" />
-                    <v-select v-model="newConfigForm.credential_mode"
-                              :label="tt('Credential Mode')"
-                              :items="llmCredentialModeOptions"
-                              item-title="title"
-                              item-value="value"
-                              autocomplete="off"
-                              density="compact"
-                              class="mb-3" />
-                    <v-textarea v-model="newConfigForm.credential_json"
-                                :label="tt('Credential JSON')"
-                                :name="llmConfigFieldNames.credentialJson"
-                                autocomplete="off"
-                                data-lpignore="true"
-                                data-1p-ignore="true"
-                                density="compact"
-                                rows="3"
-                                auto-grow
-                                class="mb-3" />
-                    <v-text-field v-model="newConfigForm.token_endpoint"
-                                  :label="tt('Token Endpoint')"
-                                  :name="llmConfigFieldNames.tokenEndpoint"
-                                  autocomplete="off"
-                                  density="compact"
-                                  class="mb-3"
-                                  placeholder="https://provider.example.com/oauth/token" />
-                    <div class="d-flex flex-wrap ga-3">
-                        <v-textarea v-model="newConfigForm.refresh_headers"
-                                    :label="tt('Refresh Headers')"
-                                    :name="llmConfigFieldNames.refreshHeaders"
-                                    autocomplete="off"
-                                    density="compact"
-                                    rows="2"
-                                    auto-grow
-                                    class="llm-config-json-field mb-3" />
-                        <v-textarea v-model="newConfigForm.refresh_body"
-                                    :label="tt('Refresh Body')"
-                                    :name="llmConfigFieldNames.refreshBody"
-                                    autocomplete="off"
-                                    density="compact"
-                                    rows="2"
-                                    auto-grow
-                                    class="llm-config-json-field mb-3" />
-                        <v-textarea v-model="newConfigForm.refresh_params"
-                                    :label="tt('Refresh Params')"
-                                    :name="llmConfigFieldNames.refreshParams"
-                                    autocomplete="off"
-                                    density="compact"
-                                    rows="2"
-                                    auto-grow
-                                    class="llm-config-json-field mb-3" />
-                    </div>
-                    <v-switch v-model="newConfigForm.advancedMode"
-                              :label="tt('Advanced Mode')"
-                              color="primary"
-                              density="compact"
-                              hide-details
-                              class="mb-2" />
+                <v-card-text class="llm-config-dialog-content mt-md-4 pt-0">
+                    <input class="llm-config-autofill-decoy" type="text" name="username"
+                           autocomplete="username" tabindex="-1" aria-hidden="true" />
+                    <input class="llm-config-autofill-decoy" type="password" name="password"
+                           autocomplete="current-password" tabindex="-1" aria-hidden="true" />
+
+                    <v-row>
+                        <v-col cols="12">
+                            <v-text-field v-model="newConfigForm.name" :label="tt('Name')"
+                                          :name="llmConfigFieldNames.name" :readonly="autofillFieldsLocked"
+                                          autocomplete="off" data-lpignore="true" data-1p-ignore="true"
+                                          @focus="unlockAutofillFields" density="comfortable"
+                                          variant="outlined" hide-details placeholder="My OpenAI Config" />
+                        </v-col>
+                        <v-col cols="12" md="6">
+                            <v-select v-model="newConfigForm.provider" :label="tt('Provider')"
+                                      :items="llmProviderOptions" item-title="title" item-value="value"
+                                      :name="llmConfigFieldNames.provider" autocomplete="off"
+                                      density="comfortable" variant="outlined" hide-details />
+                        </v-col>
+                        <v-col cols="12" md="6">
+                            <v-text-field v-model="newConfigForm.model" :label="tt('Model')"
+                                          :name="llmConfigFieldNames.model" :readonly="autofillFieldsLocked"
+                                          autocomplete="off" data-lpignore="true" data-1p-ignore="true"
+                                          @focus="unlockAutofillFields" density="comfortable"
+                                          variant="outlined" hide-details
+                                          :placeholder="selectedLLMProviderOption.modelPlaceholder" />
+                        </v-col>
+                        <v-col cols="12">
+                            <v-text-field v-model="newConfigForm.base_url" :label="baseUrlFieldLabel"
+                                          :name="llmConfigFieldNames.baseUrl" :readonly="autofillFieldsLocked"
+                                          autocomplete="off" data-lpignore="true" data-1p-ignore="true"
+                                          @focus="unlockAutofillFields" density="comfortable"
+                                          variant="outlined" hide-details
+                                          :placeholder="selectedLLMProviderOption.baseUrlPlaceholder" />
+                        </v-col>
+                    </v-row>
+
+                    <v-tabs v-model="llmConnectionMode" grow class="mt-2 mb-4">
+                        <v-tab value="api">{{ tt('API Mode') }}</v-tab>
+                        <v-tab value="oauth">{{ tt('OAuth Mode') }}</v-tab>
+                    </v-tabs>
+
+                    <v-window v-model="llmConnectionMode" class="disable-tab-transition">
+                        <v-window-item value="api">
+                            <v-text-field v-model="newConfigForm.api_key" label="API Key"
+                                          :name="llmConfigFieldNames.apiKey" :readonly="autofillFieldsLocked"
+                                          autocomplete="new-password" data-lpignore="true" data-1p-ignore="true"
+                                          @focus="unlockAutofillFields" density="comfortable"
+                                          variant="outlined" type="password" hide-details
+                                          :placeholder="selectedLLMProviderOption.apiKeyPlaceholder" />
+                        </v-window-item>
+                        <v-window-item value="oauth">
+                            <v-row>
+                                <v-col cols="12" md="5">
+                                    <v-select v-model="newConfigForm.credential_mode"
+                                              :label="tt('Credential Format')"
+                                              :items="llmOAuthCredentialModeOptions"
+                                              item-title="title" item-value="value" autocomplete="off"
+                                              density="comfortable" variant="outlined" hide-details />
+                                </v-col>
+                                <v-col cols="12">
+                                    <v-textarea v-model="newConfigForm.credential_json"
+                                                :label="tt('Credential JSON')"
+                                                :name="llmConfigFieldNames.credentialJson"
+                                                :hint="tt('Paste the complete credential JSON. Token refresh settings are detected automatically.')"
+                                                persistent-hint autocomplete="off"
+                                                data-lpignore="true" data-1p-ignore="true"
+                                                density="comfortable" variant="outlined"
+                                                rows="6" auto-grow />
+                                </v-col>
+                            </v-row>
+                        </v-window-item>
+                    </v-window>
+
+                    <v-switch v-model="newConfigForm.advancedMode" :label="tt('Advanced Mode')"
+                              color="primary" density="compact" hide-details class="my-2" />
                     <v-expand-transition>
-                        <div v-if="newConfigForm.advancedMode" class="llm-config-advanced-fields">
-                            <v-select v-model="newConfigForm.reasoning_depth"
-                                      :label="tt('Reasoning Depth')"
-                                      :items="llmReasoningDepthOptions"
-                                      item-title="title"
-                                      item-value="value"
-                                      autocomplete="off"
-                                      density="compact"
-                                      class="mb-3" />
-                            <div class="d-flex flex-wrap ga-3">
+                        <v-row v-if="newConfigForm.advancedMode">
+                            <v-col cols="12">
+                                <v-select v-model="newConfigForm.reasoning_depth"
+                                          :label="tt('Reasoning Depth')" :items="llmReasoningDepthOptions"
+                                          item-title="title" item-value="value" autocomplete="off"
+                                          density="comfortable" variant="outlined" hide-details />
+                            </v-col>
+                            <v-col cols="12" md="6">
                                 <v-text-field v-model="newConfigForm.temperature"
-                                              :label="tt('Temperature')"
-                                              :name="llmConfigFieldNames.temperature"
-                                              type="number"
-                                              min="0"
-                                              max="2"
-                                              step="0.1"
-                                              density="compact"
-                                              class="llm-config-number-field mb-3" />
+                                              :label="tt('Temperature')" :name="llmConfigFieldNames.temperature"
+                                              type="number" min="0" max="2" step="0.1"
+                                              density="comfortable" variant="outlined" hide-details />
+                            </v-col>
+                            <v-col cols="12" md="6">
                                 <v-text-field v-model="newConfigForm.max_tokens"
-                                              :label="tt('Max Tokens')"
-                                              :name="llmConfigFieldNames.maxTokens"
-                                              type="number"
-                                              min="1"
-                                              step="1"
-                                              density="compact"
-                                              class="llm-config-number-field mb-3" />
-                            </div>
-                            <v-textarea v-model="newConfigForm.system_prompt"
-                                        :label="tt('System Prompt')"
-                                        :name="llmConfigFieldNames.systemPrompt"
-                                        autocomplete="off"
-                                        density="compact"
-                                        rows="2"
-                                        auto-grow
-                                        class="mb-3" />
-                            <v-textarea v-model="newConfigForm.classification_prompt_template"
-                                        :label="tt('Classification Prompt Template')"
-                                        :name="llmConfigFieldNames.classificationPrompt"
-                                        autocomplete="off"
-                                        density="compact"
-                                        rows="2"
-                                        auto-grow
-                                        class="mb-3" />
-                            <v-textarea v-model="newConfigForm.rule_prompt_template"
-                                        :label="tt('Rule Prompt Template')"
-                                        :name="llmConfigFieldNames.rulePrompt"
-                                        autocomplete="off"
-                                        density="compact"
-                                        rows="2"
-                                        auto-grow />
-                        </div>
+                                              :label="tt('Max Tokens')" :name="llmConfigFieldNames.maxTokens"
+                                              type="number" min="1" step="1"
+                                              density="comfortable" variant="outlined" hide-details />
+                            </v-col>
+                            <v-col cols="12">
+                                <v-textarea v-model="newConfigForm.system_prompt"
+                                            :label="tt('System Prompt')" :name="llmConfigFieldNames.systemPrompt"
+                                            autocomplete="off" density="comfortable" variant="outlined"
+                                            rows="2" auto-grow hide-details />
+                            </v-col>
+                            <v-col cols="12">
+                                <v-textarea v-model="newConfigForm.classification_prompt_template"
+                                            :label="tt('Classification Prompt Template')"
+                                            :name="llmConfigFieldNames.classificationPrompt"
+                                            autocomplete="off" density="comfortable" variant="outlined"
+                                            rows="2" auto-grow hide-details />
+                            </v-col>
+                            <v-col cols="12">
+                                <v-textarea v-model="newConfigForm.rule_prompt_template"
+                                            :label="tt('Rule Prompt Template')"
+                                            :name="llmConfigFieldNames.rulePrompt"
+                                            autocomplete="off" density="comfortable" variant="outlined"
+                                            rows="2" auto-grow hide-details />
+                            </v-col>
+                        </v-row>
                     </v-expand-transition>
                 </v-card-text>
-                <v-card-actions>
-                    <v-spacer />
-                    <v-btn variant="text" type="button" @click="closeAddConfigDialog">{{ tt('Cancel') }}</v-btn>
-                    <v-btn color="primary" variant="tonal" :loading="addConfigSaving"
-                           type="submit">{{ tt('Save') }}</v-btn>
-                </v-card-actions>
+                <v-card-text class="overflow-y-visible">
+                    <div class="llm-config-dialog-actions w-100 d-flex justify-center mt-2 mt-sm-4 mt-md-6 ga-4">
+                        <v-btn variant="tonal" type="button" :disabled="addConfigSaving"
+                               @click="closeAddConfigDialog">{{ tt('Cancel') }}</v-btn>
+                        <v-btn color="primary" :loading="addConfigSaving"
+                               type="submit">{{ tt('Save') }}</v-btn>
+                    </div>
+                </v-card-text>
             </form>
         </v-card>
     </v-dialog>

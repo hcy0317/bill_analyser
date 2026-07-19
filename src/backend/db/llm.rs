@@ -42,6 +42,8 @@ pub struct LlmCandidateDraft {
     pub source_bill_ids: Vec<i64>,
     pub suggested_main_category: String,
     pub suggested_sub_category: String,
+    pub suggested_account_id: Option<i64>,
+    pub suggested_account_name: String,
     pub suggested_rule_expression: String,
     pub confidence: f64,
     pub llm_provider: String,
@@ -67,7 +69,7 @@ pub fn default_llm_runtime_config() -> Value {
 
 /// 在 user_id 边界内按 id 读取 LLM 配置，供 CRUD 写后回读和存在性检查复用。
 #[tracing::instrument(level = "debug", skip_all)]
-async fn get_postgres_llm_config_by_id(
+pub async fn get_postgres_llm_config(
     pool: &PostgresPool,
     config_id: i64,
     user_id: i64,
@@ -151,6 +153,8 @@ fn llm_candidate_from_row(row: sqlx::postgres::PgRow) -> DbResult<Value> {
         "source_bill_ids": source_bill_ids,
         "suggested_main_category": row_text(&row, "suggested_main_category")?,
         "suggested_sub_category": row_text(&row, "suggested_sub_category")?,
+        "suggested_account_id": row.try_get::<Option<i64>, _>("suggested_account_id")?,
+        "suggested_account_name": row_text(&row, "suggested_account_name")?,
         "suggested_rule_expression": row_text(&row, "suggested_rule_expression")?,
         "confidence": row.try_get::<Option<f64>, _>("confidence")?.unwrap_or(0.0),
         "llm_provider": row_text(&row, "llm_provider")?,
@@ -218,6 +222,88 @@ fn should_materialize_rule_candidate(candidate: &Value) -> bool {
             .get("suggested_rule_expression")
             .and_then(Value::as_str)
             .is_some_and(|expression| !expression.trim().is_empty())
+}
+
+fn should_materialize_account_rule_candidate(candidate: &Value) -> bool {
+    candidate.get("type").and_then(Value::as_str) == Some("account_rule_induction")
+        && candidate
+            .get("suggested_account_id")
+            .and_then(Value::as_i64)
+            .is_some_and(|account_id| account_id > 0)
+        && candidate
+            .get("suggested_rule_expression")
+            .and_then(Value::as_str)
+            .is_some_and(|expression| !expression.trim().is_empty())
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn create_postgres_account_rule_for_llm_candidate(
+    pool: &PostgresPool,
+    candidate: &Value,
+    user_id: i64,
+) -> DbResult<Option<i64>> {
+    let Some(account_id) = candidate
+        .get("suggested_account_id")
+        .and_then(Value::as_i64)
+        .filter(|account_id| *account_id > 0)
+    else {
+        return Ok(None);
+    };
+    let expression = text_field(candidate, "suggested_rule_expression");
+    if bill_analyser_core::category_rules::compile_rule_expression(expression.trim(), false)
+        .is_empty
+    {
+        return Ok(None);
+    }
+    let account_name = sqlx::query(
+        "SELECT name FROM accounts WHERE id = $1 AND user_id = $2 AND is_active = true",
+    )
+    .bind(account_id)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?
+    .map(|row| row.try_get::<String, _>("name"))
+    .transpose()?;
+    let Some(account_name) = account_name else {
+        return Ok(None);
+    };
+    let expression_json = rule_expression_json(expression.trim(), false);
+    if sqlx::query(
+        "SELECT 1 FROM account_rules WHERE user_id = $1 AND account_id = $2 AND rule_expression = $3 LIMIT 1",
+    )
+    .bind(user_id)
+    .bind(account_id)
+    .bind(&expression_json)
+    .fetch_optional(pool)
+    .await?
+    .is_some()
+    {
+        return Ok(None);
+    }
+    let row = sqlx::query(
+        r#"
+        INSERT INTO account_rules (
+            user_id, account_id, name, rule_expression, regex_enabled,
+            priority, enabled, source, source_key, created_at, updated_at
+        )
+        VALUES ($1, $2, $3, $4, false, 50, true, 'llm', $5, now(), now())
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(account_id)
+    .bind(format!("LLM induced: {account_name}"))
+    .bind(expression_json)
+    .bind(format!(
+        "llm_candidate:{}",
+        candidate
+            .get("id")
+            .and_then(Value::as_i64)
+            .unwrap_or_default()
+    ))
+    .fetch_one(pool)
+    .await?;
+    row.try_get("id").map(Some).map_err(Into::into)
 }
 
 /// 将审核通过的规则类 LLM 候选写入 category_rules，去重并绑定当前用户分类。

@@ -741,6 +741,10 @@
     },
     {
       "method": "POST",
+      "pattern": "/api/llm/configs/{config_id}/test"
+    },
+    {
+      "method": "POST",
       "pattern": "/api/llm/preview-recommend"
     },
     {

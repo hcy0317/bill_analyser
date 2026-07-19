@@ -61,7 +61,7 @@ pub async fn llm_analyze_transactions_runtime_handler(
                 Ok(scope) => scope,
                 Err(response) => return route_response(response),
             };
-            let rows = match selected_preview_rows_for_llm(
+            let mut rows = match selected_preview_rows_for_llm(
                 runtime.connection(),
                 &action_scope,
                 session_id,
@@ -98,6 +98,16 @@ pub async fn llm_analyze_transactions_runtime_handler(
                 ) {
                     return route_response(db_error_response(error));
                 }
+                rows = match selected_preview_rows_for_llm(
+                    runtime.connection(),
+                    &action_scope,
+                    session_id,
+                    user_id,
+                    limit,
+                ) {
+                    Ok(rows) => rows,
+                    Err(response) => return route_response(response),
+                };
             }
             let config = match effective_llm_runtime_config(&state, user_id_value).await {
                 Ok(config) => config,
@@ -107,7 +117,14 @@ pub async fn llm_analyze_transactions_runtime_handler(
                 Ok(provider) => provider,
                 Err(response) => return route_response(response),
             };
-            let groups = match rule_induction_groups(rows) {
+            let account_names = match load_account_id_map(runtime.connection(), user_id_value).await {
+                Ok(accounts) => accounts
+                    .into_iter()
+                    .map(|(name, id)| (id, name))
+                    .collect::<BTreeMap<_, _>>(),
+                Err(response) => return route_response(response),
+            };
+            let groups = match rule_induction_groups(rows, &account_names) {
                 Ok(groups) => groups,
                 Err(response) => return route_response(response),
             };
@@ -165,13 +182,30 @@ pub async fn llm_analyze_transactions_runtime_handler(
             rule_prompt_template,
         } => {
             for group in groups {
-                let default_prompt =
-                    build_llm_rule_induction_prompt(&group.category_name, &group.transactions);
+                let default_prompt = if let Some(account_id) = group.account_id {
+                    build_llm_account_rule_induction_prompt(
+                        account_id,
+                        &group.account_name,
+                        &group.account_role,
+                        &group.transactions,
+                    )
+                } else {
+                    build_llm_category_rule_induction_prompt(
+                        group.category_id.unwrap_or_default(),
+                        &group.category_name,
+                        &group.transactions,
+                    )
+                };
+                let template_target = if group.account_id.is_some() {
+                    &group.account_name
+                } else {
+                    &group.category_name
+                };
                 let prompt = render_llm_prompt_template(
                     &rule_prompt_template,
                     &default_prompt,
                     &group.transactions,
-                    &group.category_name,
+                    template_target,
                 );
                 let provider_response =
                     match execute_llm_provider_request(&state, &provider, &prompt).await {
@@ -208,15 +242,25 @@ pub async fn llm_analyze_transactions_runtime_handler(
                     {
                         continue;
                     }
-                    if match postgres_rule_candidate_duplicate(
-                        postgres_runtime.pool(),
-                        user_id_value,
-                        &group.main_category,
-                        &group.sub_category,
-                        &expression,
-                    )
-                    .await
-                    {
+                    let duplicate_result = if let Some(account_id) = group.account_id {
+                        postgres_account_rule_candidate_duplicate(
+                            postgres_runtime.pool(),
+                            user_id_value,
+                            account_id,
+                            &expression,
+                        )
+                        .await
+                    } else {
+                        postgres_rule_candidate_duplicate(
+                            postgres_runtime.pool(),
+                            user_id_value,
+                            &group.main_category,
+                            &group.sub_category,
+                            &expression,
+                        )
+                        .await
+                    };
+                    if match duplicate_result {
                         Ok(duplicate) => duplicate,
                         Err(response) => return route_response(response),
                     } {
@@ -226,10 +270,12 @@ pub async fn llm_analyze_transactions_runtime_handler(
                         postgres_runtime.pool(),
                         &LlmCandidateDraft {
                             user_id: user_id_value,
-                            candidate_type: "rule_induction".to_string(),
+                            candidate_type: group.candidate_type.to_string(),
                             source_bill_ids: group.source_ids.clone(),
                             suggested_main_category: group.main_category.clone(),
                             suggested_sub_category: group.sub_category.clone(),
+                            suggested_account_id: group.account_id,
+                            suggested_account_name: group.account_name.clone(),
                             suggested_rule_expression: expression,
                             confidence: confidence_from_value(&value),
                             llm_provider: provider_response.provider.clone(),
@@ -323,6 +369,8 @@ pub async fn llm_analyze_transactions_runtime_handler(
                         source_bill_ids: vec![bill_id],
                         suggested_main_category: main_category_from_llm_value(&value),
                         suggested_sub_category: sub_category_from_llm_value(&value),
+                        suggested_account_id: None,
+                        suggested_account_name: String::new(),
                         suggested_rule_expression: String::new(),
                         confidence: confidence_from_value(&value),
                         llm_provider: provider_response.provider.clone(),

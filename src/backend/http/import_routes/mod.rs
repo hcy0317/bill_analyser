@@ -27,12 +27,14 @@ use bill_analyser_core::{
     amount_cents_bucket, attach_import_preview_matching_payload, build_composite_match_features,
     build_import_learning_recommendation_key, build_import_learning_vector_recall_queries,
     build_import_preview_filter_index_item, build_learning_rule_result_summary,
-    build_llm_candidate_list_response, build_llm_candidate_reject_response,
+    build_llm_account_rule_induction_prompt, build_llm_candidate_list_response,
+    build_llm_candidate_reject_response, build_llm_category_rule_induction_prompt,
     build_llm_classification_prompt, build_llm_config_get_response,
     build_llm_contract_error_response, build_llm_import_preview_recommendation_prompt,
     build_llm_provider_config, build_llm_rule_expression_synthesis_prompt,
-    build_llm_rule_induction_prompt, build_ocr_config_success_response, build_ocr_error_response,
-    build_ocr_recognition_success_response_with_context, build_unknown_ocr_provider_response,
+    build_ocr_config_success_response, build_ocr_error_response,
+    build_ocr_recognition_success_response_with_context,
+    build_runtime_llm_config_from_saved_config, build_unknown_ocr_provider_response,
     category_rules::{
         compile_rule_expression, match_compiled_rule_lowercase_text, CompiledRuleDto,
     },
@@ -68,8 +70,8 @@ use bill_analyser_db::{
     get_import_decision_groups_by_session, get_import_group_reclassification_state,
     get_import_history_candidate_bills_for_session, get_import_learning_lifecycle_view,
     get_import_preview_category_by_id, get_import_session, get_import_standard_rows_by_session,
-    get_llm_memory_events, get_postgres_llm_candidate_by_id, get_preview_bill_by_id,
-    get_preview_by_session, get_preview_filter_index_by_session,
+    get_llm_memory_events, get_postgres_llm_candidate_by_id, get_postgres_llm_config,
+    get_preview_bill_by_id, get_preview_by_session, get_preview_filter_index_by_session,
     get_unprocessed_templates_for_dedup, has_import_learning_feature_vector_sources,
     init_import_staging_schema, insert_import_decision_groups_batch,
     insert_import_history_materializations_batch, insert_preview_bills_batch,
@@ -202,6 +204,7 @@ pub const IMPORT_SKELETON_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("PUT", "/api/llm/configs/{config_id}"),
     ("DELETE", "/api/llm/configs/{config_id}"),
     ("POST", "/api/llm/configs/{config_id}/activate"),
+    ("POST", "/api/llm/configs/{config_id}/test"),
     ("GET", "/api/llm/candidates"),
     ("GET", "/api/llm/candidates/{candidate_id}"),
     ("POST", "/api/llm/candidates/{candidate_id}/accept"),
@@ -323,6 +326,10 @@ pub fn import_runtime_router() -> Router<HttpAppState> {
         .route(
             "/api/llm/configs/:config_id/activate",
             post(llm_config_activate_runtime_handler),
+        )
+        .route(
+            "/api/llm/configs/:config_id/test",
+            post(llm_config_test_runtime_handler),
         )
         .route(
             "/api/llm/candidates",

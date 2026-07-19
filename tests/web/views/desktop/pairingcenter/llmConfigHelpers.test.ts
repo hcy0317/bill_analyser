@@ -28,6 +28,9 @@ describe('LLM config helper contracts', () => {
             'openai',
             'claude',
             'deepseek',
+            'qwen',
+            'siliconflow',
+            'zhipu',
             'ollama',
             'xai',
             'google',
@@ -43,33 +46,36 @@ describe('LLM config helper contracts', () => {
             requiresBaseUrl: true,
             modelPlaceholder: 'deployment-name',
         });
+        expect(options.find(option => option.value === 'qwen')).toMatchObject({
+            modelPlaceholder: 'qwen-plus',
+            baseUrlPlaceholder: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        });
         expect(getLLMProviderLabel('anthropic', options)).toBe('Claude (Anthropic)');
         expect(getLLMProviderLabel('openai-compatible', options)).toBe('OpenAI-compatible');
         expect(getLLMProviderLabel('unknown-provider', options)).toBe('unknown-provider');
     });
 
-    test('builds credential payload only from explicit JSON and token fields', () => {
+    test('builds OAuth credential payload from one pasted JSON document', () => {
         const payload = buildCredentialConfigPayload(makeForm({
             credential_mode: 'refresh_token',
-            credential_json: '{"refresh_token":"refresh-secret"}',
-            token_endpoint: '  https://auth.example.test/token  ',
-            refresh_headers: '{"Authorization":"Bearer refresh-secret"}',
-            refresh_body: '',
-            refresh_params: '{"grant_type":"refresh_token"}',
+            credential_json: '{"refresh_token":"refresh-secret","token_endpoint":"https://auth.example.test/token"}',
         }));
 
         expect(payload).toEqual({
             credential_mode: 'refresh_token',
-            credential_json: { refresh_token: 'refresh-secret' },
-            token_endpoint: 'https://auth.example.test/token',
-            refresh_headers: { Authorization: 'Bearer refresh-secret' },
-            refresh_params: { grant_type: 'refresh_token' },
+            credential_json: {
+                refresh_token: 'refresh-secret',
+                token_endpoint: 'https://auth.example.test/token',
+            },
         });
         expect(buildCredentialConfigPayload(makeForm())).toEqual({ credential_mode: 'api_key' });
-        expect(() => buildCredentialConfigPayload(makeForm({ credential_json: '[]' })))
+        expect(buildCredentialConfigPayload(makeForm({ credential_mode: 'api_key', credential_json: '{"access_token":"stale-token"}' })))
+            .toEqual({ credential_mode: 'api_key' });
+        expect(() => buildCredentialConfigPayload(makeForm({
+            credential_mode: 'session_json',
+            credential_json: '[]',
+        })))
             .toThrow('Credential JSON must be a JSON object');
-        expect(() => buildCredentialConfigPayload(makeForm({ refresh_headers: '"plain"' })))
-            .toThrow('Refresh Headers must be a JSON object');
     });
 
     test('builds advanced settings only when advanced mode is enabled', () => {
@@ -131,6 +137,13 @@ describe('LLM config helper contracts', () => {
                     status: 'accepted',
                     llm_response_raw: '{not-json',
                 },
+                {
+                    id: 9,
+                    type: 'account_rule_induction',
+                    suggested_account_id: 17,
+                    suggested_account_name: '工资卡',
+                    suggested_rule_expression: 'OR={工资,薪资}',
+                },
             ],
         });
 
@@ -149,6 +162,12 @@ describe('LLM config helper contracts', () => {
             id: 8,
             status: 'accepted',
             reason: '',
+        });
+        expect(candidates[2]).toMatchObject({
+            id: 9,
+            target_name: '工资卡',
+            suggested_account_id: 17,
+            suggested_account_name: '工资卡',
         });
         expect(toLLMCandidates(null)).toEqual([]);
     });

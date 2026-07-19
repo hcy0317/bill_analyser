@@ -28,10 +28,6 @@ export interface LLMConfigForm {
     base_url: string;
     credential_mode: string;
     credential_json: string;
-    token_endpoint: string;
-    refresh_headers: string;
-    refresh_body: string;
-    refresh_params: string;
     advancedMode: boolean;
     reasoning_depth: string;
     temperature: string;
@@ -63,6 +59,9 @@ export interface LLMCandidateItem {
     target_category?: string;
     suggested_main_category?: string;
     suggested_sub_category?: string;
+    suggested_account_id?: number;
+    suggested_account_name?: string;
+    target_name?: string;
     suggested_rule_expression?: string;
 }
 

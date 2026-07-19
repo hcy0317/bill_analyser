@@ -32,8 +32,9 @@ pub mod weaviate_derived;
 
 pub use adapters::{api, category, transaction};
 pub use ai_ocr_llm::{
-    build_llm_analysis_response, build_llm_candidate_list_response,
-    build_llm_candidate_reject_response, build_llm_classification_prompt,
+    build_llm_account_rule_induction_prompt, build_llm_analysis_response,
+    build_llm_candidate_list_response, build_llm_candidate_reject_response,
+    build_llm_category_rule_induction_prompt, build_llm_classification_prompt,
     build_llm_config_get_response, build_llm_contract_error_response,
     build_llm_import_preview_recommendation_prompt, build_llm_preview_recommend_response,
     build_llm_provider_config, build_llm_rule_expression_synthesis_prompt,

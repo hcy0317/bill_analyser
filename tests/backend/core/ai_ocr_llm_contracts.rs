@@ -1,7 +1,8 @@
 use bill_analyser_core::account_rules::AccountRuleCandidate;
 use bill_analyser_core::ai_ocr_llm::{
-    build_llm_analysis_response, build_llm_candidate_list_response,
-    build_llm_candidate_reject_response, build_llm_classification_prompt,
+    build_llm_account_rule_induction_prompt, build_llm_analysis_response,
+    build_llm_candidate_list_response, build_llm_candidate_reject_response,
+    build_llm_category_rule_induction_prompt, build_llm_classification_prompt,
     build_llm_config_get_response, build_llm_contract_error_response,
     build_llm_import_preview_recommendation_prompt, build_llm_preview_recommend_response,
     build_llm_provider_config, build_llm_rule_expression_synthesis_prompt,
@@ -395,6 +396,9 @@ fn llm_provider_alias_defaults_match_current_factory() {
     assert!(llm_available_providers().contains(&"anthropic".to_string()));
     assert!(llm_available_providers().contains(&"openai-compatible".to_string()));
     assert!(llm_available_providers().contains(&"azure-openai".to_string()));
+    assert!(llm_available_providers().contains(&"qwen".to_string()));
+    assert!(llm_available_providers().contains(&"siliconflow".to_string()));
+    assert!(llm_available_providers().contains(&"zhipu".to_string()));
     assert_eq!(normalize_llm_provider_name("anthropic"), "claude");
     assert_eq!(
         normalize_llm_provider_name("openai-compatible"),
@@ -423,6 +427,21 @@ fn llm_provider_alias_defaults_match_current_factory() {
             "https://openrouter.ai/api/v1",
             "openai/gpt-4o-mini",
         ),
+        (
+            "qwen",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "qwen-plus",
+        ),
+        (
+            "siliconflow",
+            "https://api.siliconflow.cn/v1",
+            "deepseek-ai/DeepSeek-V3",
+        ),
+        (
+            "zhipu",
+            "https://open.bigmodel.cn/api/paas/v4",
+            "glm-4-flash",
+        ),
     ] {
         let config = build_llm_provider_config(
             provider_name,
@@ -433,6 +452,12 @@ fn llm_provider_alias_defaults_match_current_factory() {
         assert_eq!(config.provider_name, provider_name);
         assert_eq!(config.base_url, base_url);
         assert_eq!(config.model, model);
+        let explicit_default_origin = build_llm_provider_config(
+            provider_name,
+            Some(&json!({"base_url": format!("{base_url}/"), "model": model})),
+        )
+        .expect("explicit provider default origin is SSRF-safe");
+        assert_eq!(explicit_default_origin.provider_name, provider_name);
     }
 
     let default_openai_compatible = build_llm_provider_config(
@@ -842,9 +867,17 @@ fn llm_provider_generation_prompt_and_json_array_contracts_are_stable() {
     assert!(rule_prompt.contains("OR={关键词1,关键词2}"));
 
     let preview_prompt = build_llm_import_preview_recommendation_prompt(
-        &transactions,
-        &["餐饮/咖啡".to_string()],
-        &["现金".to_string()],
+        &[json!({
+            "id": 1,
+            "date": "2026-05-01",
+            "amount_cents": 1850,
+            "type": "支出",
+            "counterparty": "cafe",
+            "description": "latte",
+            "payment_method": "现金",
+        })],
+        &[json!({"id": 42, "type": "支出", "path": "餐饮/咖啡"})],
+        &[json!({"id": 7, "name": "现金"})],
         &[
             json!({
                 "decision": "accept",
@@ -858,11 +891,33 @@ fn llm_provider_generation_prompt_and_json_array_contracts_are_stable() {
     assert!(preview_prompt.contains("已有分类体系"));
     assert!(preview_prompt.contains("已有账户"));
     assert!(preview_prompt.contains("历史记忆"));
+    assert!(preview_prompt.contains("\"amount_cents\":1850"));
+    assert!(preview_prompt.contains("\"category_id\""));
+    assert!(preview_prompt.contains("\"source_account_id\""));
+    assert!(preview_prompt.contains("\"destination_account_id\""));
+    assert!(!preview_prompt.contains("suggested_main_category"));
+    assert!(!preview_prompt.contains("suggested_source_account"));
 
     let preview_prompt_without_context =
         build_llm_import_preview_recommendation_prompt(&transactions, &[], &[], &[]);
     assert!(!preview_prompt_without_context.contains("已有分类体系"));
     assert!(!preview_prompt_without_context.contains("历史记忆（你过去"));
+
+    let category_rule_prompt =
+        build_llm_category_rule_induction_prompt(42, "餐饮/咖啡", &transactions);
+    assert!(category_rule_prompt.contains("target_category_id"));
+    assert!(category_rule_prompt.contains("\"target_category_id\":42"));
+    assert!(category_rule_prompt.contains("\"target_category_path\":\"餐饮/咖啡\""));
+    assert!(category_rule_prompt.contains("rule_expression"));
+    assert!(!category_rule_prompt.contains("target_account_id"));
+
+    let account_rule_prompt =
+        build_llm_account_rule_induction_prompt(7, "现金", "source", &transactions);
+    assert!(account_rule_prompt.contains("target_account_id"));
+    assert!(account_rule_prompt.contains("\"target_account_id\":7"));
+    assert!(account_rule_prompt.contains("\"account_role\":\"source\""));
+    assert!(account_rule_prompt.contains("rule_expression"));
+    assert!(!account_rule_prompt.contains("suggested_main_category"));
 
     let prompt = build_llm_rule_expression_synthesis_prompt(
         &json!({

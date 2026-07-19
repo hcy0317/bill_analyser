@@ -1,10 +1,10 @@
 use std::{env, error::Error, str::FromStr};
 
 use bill_analyser_db::{
-    count_postgres_llm_candidates, create_postgres_llm_candidate, create_postgres_llm_config,
-    effective_postgres_llm_config_from_saved, list_postgres_llm_candidates,
-    list_postgres_llm_configs, run_postgres_migrations, LlmCandidateDraft, LlmConfigDraft,
-    PostgresPool,
+    accept_postgres_llm_candidate, count_postgres_llm_candidates, create_postgres_llm_candidate,
+    create_postgres_llm_config, effective_postgres_llm_config_from_saved, get_postgres_llm_config,
+    list_postgres_llm_candidates, list_postgres_llm_configs, run_postgres_migrations,
+    LlmCandidateDraft, LlmConfigDraft, PostgresPool,
 };
 use serde_json::json;
 use sqlx::{postgres::PgConnectOptions, postgres::PgPoolOptions, Executor, Row};
@@ -66,6 +66,13 @@ async fn llm_runtime_tables_round_trip_after_postgres_migrations() -> Result<(),
     .await?;
     assert_eq!(config["is_active"], true);
     assert_eq!(list_postgres_llm_configs(&pool, user_id).await?.len(), 1);
+    let config_id = config["id"].as_i64().expect("saved config id");
+    assert!(get_postgres_llm_config(&pool, config_id, user_id)
+        .await?
+        .is_some());
+    assert!(get_postgres_llm_config(&pool, config_id, user_id + 1)
+        .await?
+        .is_none());
 
     let effective = effective_postgres_llm_config_from_saved(&pool, user_id).await?;
     assert_eq!(effective["enabled"], true);
@@ -80,6 +87,8 @@ async fn llm_runtime_tables_round_trip_after_postgres_migrations() -> Result<(),
             source_bill_ids: vec![1, 2],
             suggested_main_category: "餐饮".to_string(),
             suggested_sub_category: "咖啡".to_string(),
+            suggested_account_id: None,
+            suggested_account_name: String::new(),
             suggested_rule_expression: String::new(),
             confidence: 0.82,
             llm_provider: "openai".to_string(),
@@ -105,6 +114,53 @@ async fn llm_runtime_tables_round_trip_after_postgres_migrations() -> Result<(),
             .await?,
         1
     );
+
+    let account_id: i64 = sqlx::query(
+        "INSERT INTO accounts (user_id, name, account_type) VALUES ($1, $2, 'bank') RETURNING id",
+    )
+    .bind(user_id)
+    .bind("工资卡")
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let account_candidate = create_postgres_llm_candidate(
+        &pool,
+        &LlmCandidateDraft {
+            user_id,
+            candidate_type: "account_rule_induction".to_string(),
+            source_bill_ids: vec![9, 10],
+            suggested_main_category: String::new(),
+            suggested_sub_category: String::new(),
+            suggested_account_id: Some(account_id),
+            suggested_account_name: "工资卡".to_string(),
+            suggested_rule_expression: "OR={工资,薪资}".to_string(),
+            confidence: 0.9,
+            llm_provider: "openai".to_string(),
+            llm_model: "gpt-test".to_string(),
+            llm_response_raw: "{\"target_account_id\":1}".to_string(),
+        },
+    )
+    .await?;
+    assert_eq!(account_candidate["suggested_account_id"], account_id);
+    assert_eq!(account_candidate["suggested_account_name"], "工资卡");
+    let accepted = accept_postgres_llm_candidate(
+        &pool,
+        account_candidate["id"]
+            .as_i64()
+            .expect("account candidate id"),
+        user_id,
+    )
+    .await?
+    .expect("accepted account candidate");
+    assert!(accepted["created_account_rule_id"].as_i64().is_some());
+    let account_rule_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)::BIGINT FROM account_rules WHERE user_id = $1 AND account_id = $2",
+    )
+    .bind(user_id)
+    .bind(account_id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(account_rule_count, 1);
 
     pool.close().await;
     admin_pool

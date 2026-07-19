@@ -120,6 +120,12 @@ async fn assembled_import_router_exposes_import_preview_config_and_learning_upda
             StatusCode::UNAUTHORIZED,
         ),
         (
+            Method::POST,
+            "/api/llm/configs/1/test",
+            "",
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
             Method::PUT,
             "/api/bills/import/learning-rules/1",
             "{}",

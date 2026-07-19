@@ -106,6 +106,7 @@ export const RUST_ROUTE_OWNERSHIP: readonly RustRouteOwnership[] = [
     {"method":"PUT","pattern":"/api/llm/configs/{config_id}","domain":"ai-learning-llm","state":"rust_owned_verified"},
     {"method":"DELETE","pattern":"/api/llm/configs/{config_id}","domain":"ai-learning-llm","state":"rust_owned_verified"},
     {"method":"POST","pattern":"/api/llm/configs/{config_id}/activate","domain":"ai-learning-llm","state":"rust_owned_verified"},
+    {"method":"POST","pattern":"/api/llm/configs/{config_id}/test","domain":"ai-learning-llm","state":"rust_owned_verified"},
     {"method":"GET","pattern":"/api/llm/candidates","domain":"ai-learning-llm","state":"rust_owned_verified"},
     {"method":"GET","pattern":"/api/llm/candidates/{candidate_id}","domain":"ai-learning-llm","state":"rust_owned_verified"},
     {"method":"POST","pattern":"/api/llm/candidates/{candidate_id}/accept","domain":"ai-learning-llm","state":"rust_owned_verified"},

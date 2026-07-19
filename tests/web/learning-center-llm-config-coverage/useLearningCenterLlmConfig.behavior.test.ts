@@ -15,6 +15,7 @@ const mockServices = {
     getLLMCandidates: jest.fn<(...args: any[]) => Promise<any>>(),
     getLLMConfigs: jest.fn<(...args: any[]) => Promise<any>>(),
     rejectLLMCandidate: jest.fn<(...args: any[]) => Promise<any>>(),
+    testLLMConfig: jest.fn<(...args: any[]) => Promise<any>>(),
 };
 
 let mockCredentialShouldThrow = false;
@@ -158,6 +159,8 @@ describe('useLearningCenterLlmConfig state and computed contracts', () => {
         expect(state.llmProviderOptions.map(option => option.value)).toContain('openai_compatible');
         expect(state.llmReasoningDepthOptions).toContainEqual({ title: 'tt:High', value: 'high' });
         expect(state.llmCredentialModeOptions).toContainEqual({ title: 'tt:API Key', value: 'api_key' });
+        expect(state.llmOAuthCredentialModeOptions).not.toContainEqual(expect.objectContaining({ value: 'api_key' }));
+        expect(state.llmConnectionMode.value).toBe('api');
         expect(state.selectedLLMProviderOption.value.value).toBe('openai');
         expect(state.baseUrlFieldLabel.value).toBe('tt:Base URL (optional)');
         expect(state.llmConfigFieldNames.value).toMatchObject({
@@ -165,7 +168,7 @@ describe('useLearningCenterLlmConfig state and computed contracts', () => {
             apiKey: expect.stringMatching(/^llm-config-credential-/),
             rulePrompt: expect.stringMatching(/^llm-config-rule-prompt-/),
         });
-        expect(new Set(Object.values(state.llmConfigFieldNames.value)).size).toBe(15);
+        expect(new Set(Object.values(state.llmConfigFieldNames.value)).size).toBe(11);
         expect(state.llmStatusOptions.value).toStrictEqual([
             { title: 'tt:All', value: '' },
             { title: 'tt:Pending', value: 'pending' },
@@ -181,6 +184,13 @@ describe('useLearningCenterLlmConfig state and computed contracts', () => {
         expect(state.baseUrlFieldLabel.value).toBe('tt:Base URL');
         state.newConfigForm.value.provider = 'missing-provider';
         expect(state.selectedLLMProviderOption.value.value).toBe('openai');
+
+        state.llmConnectionMode.value = 'oauth';
+        expect(state.newConfigForm.value.credential_mode).toBe('session_json');
+        expect(state.llmConnectionMode.value).toBe('oauth');
+        state.newConfigForm.value.credential_mode = 'access_token';
+        state.llmConnectionMode.value = 'api';
+        expect(state.newConfigForm.value.credential_mode).toBe('api_key');
     });
 
     test('filters candidates and implements writable select-all and indeterminate state', () => {
@@ -353,6 +363,31 @@ describe('useLearningCenterLlmConfig saved configuration actions', () => {
         expect(JSON.stringify(state.llmSavedConfigs.value)).not.toContain('not-a-real-key');
     });
 
+    test('keeps API key and OAuth credential payloads isolated when saving', async () => {
+        const state = createComposable();
+        Object.assign(state.newConfigForm.value, {
+            name: 'OAuth config',
+            provider: 'openai',
+            model: 'gpt-test',
+            api_key: 'stale-api-key',
+            credential_mode: 'refresh_token',
+            credential_json: '{"refresh_token":"refresh-secret","token_endpoint":"https://auth.example.test/token"}',
+        });
+
+        await state.saveNewConfig();
+
+        expect(mockServices.createLLMConfig).toHaveBeenCalledWith(expect.objectContaining({
+            api_key: '',
+            credential_config: {
+                credential_mode: 'refresh_token',
+                credential_json: {
+                    refresh_token: 'refresh-secret',
+                    token_endpoint: 'https://auth.example.test/token',
+                },
+            },
+        }));
+    });
+
     test('marks later configs inactive and enforces name, base-url, and credential early returns', async () => {
         const state = createComposable();
         state.llmSavedConfigs.value = [{ id: 1, name: 'existing', provider: 'openai', model: 'm' }];
@@ -384,6 +419,7 @@ describe('useLearningCenterLlmConfig saved configuration actions', () => {
         expect(mockServices.createLLMConfig).not.toHaveBeenCalled();
 
         state.newConfigForm.value.provider = 'openai';
+        state.newConfigForm.value.credential_mode = 'session_json';
         state.newConfigForm.value.credential_json = '[]';
         await state.saveNewConfig();
         expect(mockSetError).toHaveBeenCalledWith('Credential JSON must be a JSON object');
@@ -445,6 +481,39 @@ describe('useLearningCenterLlmConfig saved configuration actions', () => {
         await state.handleDeleteConfig(7);
         expect(mockGetRequestErrorMessage).toHaveBeenCalledWith(deletionFailure, 'Failed to delete config');
         expect(mockSetError).toHaveBeenCalledWith('request:Failed to delete config');
+    });
+
+    test('tests a saved config without activating it and reports sanitized failures', async () => {
+        const state = createComposable();
+        mockServices.testLLMConfig.mockResolvedValueOnce(successResponse({ latency_ms: 42 }));
+
+        await state.handleTestConfig(8);
+
+        expect(mockServices.testLLMConfig).toHaveBeenCalledWith(8);
+        expect(mockServices.activateLLMConfig).not.toHaveBeenCalled();
+        expect(mockShowInfoMessage).toHaveBeenCalledWith(
+            'LLM connection test succeeded',
+            { latency: '42 ms' },
+        );
+        expect(state.testingConfigId.value).toBeNull();
+
+        mockServices.testLLMConfig.mockResolvedValueOnce(failedResponse({ code: 'invalid-model' }));
+        await state.handleTestConfig(9);
+        expect(mockGetPayloadErrorMessage).toHaveBeenCalledWith(
+            expect.objectContaining({ success: false }),
+            'Failed to test LLM config',
+        );
+        expect(mockSetError).toHaveBeenCalledWith('payload:Failed to test LLM config');
+
+        const requestFailure = { secret: 'credential-canary' };
+        mockServices.testLLMConfig.mockRejectedValueOnce(requestFailure);
+        await state.handleTestConfig(10);
+        expect(mockGetRequestErrorMessage).toHaveBeenCalledWith(
+            requestFailure,
+            'Failed to test LLM config',
+        );
+        expect(mockSetError).toHaveBeenCalledWith('request:Failed to test LLM config');
+        expect(mockSetError.mock.calls.flat().join(' ')).not.toContain('credential-canary');
     });
 });
 

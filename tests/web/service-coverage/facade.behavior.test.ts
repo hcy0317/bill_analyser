@@ -626,6 +626,7 @@ describe('services budget, learning, recurring, rules, and LLM facade', () => {
         await invoke('updateLLMSavedConfig', 1, { name: 'renamed' });
         await invoke('deleteLLMConfig', 1);
         await invoke('activateLLMConfig', 2);
+        await invoke('testLLMConfig', 3);
         await invoke('llmPreviewRecommend', {
             sessionId: 'session-1', previewIds: ['preview-1'], previewUpdates: {}, actionScope: 'selected', limit: 4
         });
@@ -656,7 +657,7 @@ describe('services budget, learning, recurring, rules, and LLM facade', () => {
             'llm/config', 'llm/analyze-transactions', 'llm/analyze-transactions',
             'llm/rule-synthesis', 'llm/rule-synthesis',
             'llm/candidates/1/accept', 'llm/candidates/2/reject',
-            'llm/configs', 'llm/configs/2/activate',
+            'llm/configs', 'llm/configs/2/activate', 'llm/configs/3/test',
             'llm/preview-recommend', 'llm/preview-recommend',
             'llm/preview-recommend/accept', 'llm/preview-recommend/reject'
         ]);

@@ -18,7 +18,8 @@ pub async fn list_postgres_llm_candidates(
     let mut builder = QueryBuilder::<Postgres>::new(
         "
         SELECT id, user_id, type, source_bill_ids, suggested_main_category,
-               suggested_sub_category, suggested_rule_expression, confidence,
+               suggested_sub_category, suggested_account_id, suggested_account_name,
+               suggested_rule_expression, confidence,
                llm_provider, llm_model, llm_response_raw, status, created_at, reviewed_at
         FROM llm_candidates
         WHERE user_id = ",
@@ -78,7 +79,8 @@ pub async fn get_postgres_llm_candidate_by_id(
     let row = sqlx::query(
         "
         SELECT id, user_id, type, source_bill_ids, suggested_main_category,
-               suggested_sub_category, suggested_rule_expression, confidence,
+               suggested_sub_category, suggested_account_id, suggested_account_name,
+               suggested_rule_expression, confidence,
                llm_provider, llm_model, llm_response_raw, status, created_at, reviewed_at
         FROM llm_candidates
         WHERE id = $1 AND user_id = $2
@@ -115,10 +117,11 @@ pub async fn create_postgres_llm_candidate(
         "
         INSERT INTO llm_candidates (
             user_id, type, source_bill_ids, suggested_main_category,
-            suggested_sub_category, suggested_rule_expression, confidence,
+            suggested_sub_category, suggested_account_id, suggested_account_name,
+            suggested_rule_expression, confidence,
             llm_provider, llm_model, llm_response_raw, status, created_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', now())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending', now())
         RETURNING id
         ",
     )
@@ -127,6 +130,8 @@ pub async fn create_postgres_llm_candidate(
     .bind(source_bill_ids)
     .bind(draft.suggested_main_category.trim())
     .bind(draft.suggested_sub_category.trim())
+    .bind(draft.suggested_account_id)
+    .bind(draft.suggested_account_name.trim())
     .bind(draft.suggested_rule_expression.trim())
     .bind(draft.confidence)
     .bind(draft.llm_provider.trim())
@@ -198,6 +203,12 @@ pub async fn accept_postgres_llm_candidate(
             create_postgres_rule_for_llm_candidate(pool, &candidate, user_id).await?
         {
             result.insert("created_rule_id".to_string(), json!(rule_id));
+        }
+    } else if should_materialize_account_rule_candidate(&candidate) {
+        if let Some(rule_id) =
+            create_postgres_account_rule_for_llm_candidate(pool, &candidate, user_id).await?
+        {
+            result.insert("created_account_rule_id".to_string(), json!(rule_id));
         }
     }
     Ok(Some(Value::Object(result)))
