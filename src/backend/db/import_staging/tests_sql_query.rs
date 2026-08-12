@@ -215,6 +215,8 @@ fn preview_sql_query_builder_preserves_invalid_sentinel_semantics() {
     assert!(sql.contains("lower(p.transaction_type) IN ('收入'"));
     assert!(sql.contains("p.category_id IS NULL"));
     assert!(sql.contains("NOT EXISTS (SELECT 1 FROM categories c"));
+    assert!(sql.contains("preview_matching_feedback,annotation,manual_fields,category_id"));
+    assert!(sql.contains("= 'true'::jsonb"));
     assert!(sql.contains("NOT EXISTS (SELECT 1 FROM accounts a"));
     assert!(sql.contains("jsonb_array_length"));
     assert!(sql.contains("p.transfer_target_account_id IS NULL"));

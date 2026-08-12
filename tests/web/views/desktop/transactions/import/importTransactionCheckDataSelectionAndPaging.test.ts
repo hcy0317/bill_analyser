@@ -147,7 +147,14 @@ for (const componentPath of [
 }
 
 import { ImportTransaction } from '@/models/imported_transaction.ts';
+import { PreviewPageRequestCoordinator } from '@/views/desktop/transactions/import/import-dialog/previewPageRequestCoordinator.ts';
 import ImportTransactionCheckDataTab from '@/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue';
+
+function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>(done => { resolve = done; });
+    return { promise, resolve };
+}
 
 type TransactionOptions = {
     id: number;
@@ -309,6 +316,72 @@ describe('desktop import selection, paging, and edit contracts', () => {
                 sortDirection: 'desc',
                 filters: expect.objectContaining({ signal: 'learning' })
             });
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
+    test('an edit made after a page request remains authoritative over its stale response', () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const transaction = createTransaction({
+            id: 12,
+            categoryId: '',
+            categoryName: 'Unrecognized category'
+        });
+        try {
+            const bindings = createBindings({
+                transactions: [transaction],
+                serverPaged: true,
+                sessionId: 'stale-page-session',
+                total: 1
+            });
+
+            transaction.categoryId = '8';
+            bindings.onTransactionDataDraftChange(transaction);
+
+            transaction.categoryId = '';
+            transaction.actualCategoryName = '';
+            transaction.originalCategoryName = 'Stale missing category';
+            bindings.rehydrateCurrentPageDrafts();
+
+            expect(transaction.categoryId).toBe('8');
+            expect(transaction.actualCategoryName).toBe('Cafe');
+            expect(bindings.hasMissingCategoryIssue(transaction)).toBe(false);
+
+            const withoutPreviewId = createTransaction({ id: 14 });
+            delete (withoutPreviewId as ImportTransaction & { _previewId?: number })._previewId;
+            const draftCount = bindings.serverPagedDrafts.value.size;
+            bindings.cacheServerPagedDraft(withoutPreviewId);
+            expect(bindings.serverPagedDrafts.value.size).toBe(draftCount);
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
+    test('a stale page replacement keeps the active editor bound to the current row object', () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const original = createTransaction({ id: 13, comment: 'draft' });
+        const replacement = createTransaction({ id: 13, comment: 'server' });
+        try {
+            const bindings = createBindings({
+                transactions: [original],
+                serverPaged: true,
+                sessionId: 'editor-rebind-session',
+                total: 1
+            });
+
+            bindings.editTransaction(original);
+            bindings.rebindEditingTransactionToCurrentPage([replacement]);
+
+            expect(bindings.editingTransaction.value).not.toBe(original);
+            expect(bindings.editingTransaction.value._previewId).toBe(13);
+            expect(bindings.editingTransaction.value.comment).toBe('server');
+            expect(bindings.editingTags.value).toEqual(replacement.tagIds);
+
+            bindings.editingTransaction.value.comment = 'committed draft';
+            bindings.commitEditingTransactionDraft();
+            expect(bindings.editingTransaction.value).toBeNull();
+            expect(bindings.serverPagedDrafts.value.get(13).comment).toBe('committed draft');
         } finally {
             warnSpy.mockRestore();
         }
@@ -537,6 +610,7 @@ describe('desktop import selection, paging, and edit contracts', () => {
             });
             bindings.snackbar.value = { showError: mockShowError, showMessage: mockShowMessage };
             bindings.filters.value.category = 'Cafe';
+            await Promise.resolve();
             emit.mockClear();
             mockFetch.mockResolvedValueOnce({
                 ok: true,
@@ -569,12 +643,12 @@ describe('desktop import selection, paging, and edit contracts', () => {
                 }
             );
             expect(bindings.previewMetadata.value.counts.selected).toBe(8);
-            expect(emit).toHaveBeenCalledWith('requestPage', 1, 10, {
-                sortBy: null,
-                sortDirection: null,
-                filters: { category: '8' },
-                replaceActive: true
-            });
+            expect(emit).not.toHaveBeenCalledWith(
+                'requestPage',
+                expect.anything(),
+                expect.anything(),
+                expect.anything()
+            );
 
             mockFetch.mockResolvedValueOnce({ ok: false, text: async () => 'selection conflict' });
             await bindings.selectNone();
@@ -597,6 +671,231 @@ describe('desktop import selection, paging, and edit contracts', () => {
             await bindings.selectInvert();
             expect(mockFetch).toHaveBeenCalledTimes(fetchCallsBeforeBusyAction);
             expect([first.selected, second.selected]).toEqual([true, true]);
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
+    test('selection invalidates an older page response before the PUT completes without issuing another GET', async () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const coordinator = new PreviewPageRequestCoordinator();
+        const staleResponse = deferred<string>();
+        let renderedPage = 'current';
+        const staleHandle = coordinator.begin('selection-race?page=1')!;
+        const staleRun = staleResponse.promise.then(value => {
+            if (coordinator.isCurrent(staleHandle)) {
+                renderedPage = value;
+            }
+            coordinator.finish(staleHandle);
+        });
+        const emit = jest.fn((event: string) => {
+            if (event === 'invalidatePageRequest') {
+                coordinator.abort();
+            }
+        });
+        const row = createTransaction({ id: 49, selected: false });
+        try {
+            const bindings = createBindings({
+                transactions: [row],
+                emit,
+                serverPaged: true,
+                sessionId: 'selection-race',
+                total: 1,
+                metadata: { counts: { total: 1, selected: 0 } }
+            });
+            const selectionResponse = deferred<any>();
+            mockFetch.mockImplementationOnce(() => selectionResponse.promise);
+
+            const selectionRun = bindings.selectAll();
+            staleResponse.resolve('stale');
+            await staleRun;
+
+            expect(staleHandle.controller.signal.aborted).toBe(true);
+            expect(renderedPage).toBe('current');
+            expect(row.selected).toBe(true);
+
+            selectionResponse.resolve({
+                ok: true,
+                json: async () => ({
+                    success: true,
+                    data: { metadata: { counts: { total: 1, selected: 1 } } }
+                })
+            });
+            await selectionRun;
+
+            expect(row.selected).toBe(true);
+            expect(bindings.previewMetadata.value.counts.selected).toBe(1);
+            expect(emit).toHaveBeenCalledWith('invalidatePageRequest');
+            expect(mockFetch).toHaveBeenCalledTimes(1);
+            expect(mockFetch.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ method: 'PUT' }));
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
+    test('conditional server selection submits validity drafts in the same request', async () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const edited = createTransaction({
+            id: 43,
+            categoryId: '',
+            sourceAccountId: 'wallet',
+            selected: false
+        });
+        try {
+            const bindings = createBindings({
+                transactions: [edited],
+                serverPaged: true,
+                sessionId: 'conditional/selection',
+                total: 1,
+                metadata: { counts: { total: 1, selected: 0 } }
+            });
+            edited.categoryId = '8';
+            edited.isManuallyAnnotated = true;
+            bindings.onTransactionDataDraftChange(edited);
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    success: true,
+                    data: { metadata: { counts: { total: 1, selected: 1 } } }
+                })
+            });
+
+            await bindings.selectAllValid();
+
+            expect(mockFetch).toHaveBeenCalledTimes(1);
+            const request = mockFetch.mock.calls[0]?.[1];
+            expect(JSON.parse(request.body)).toEqual({
+                selectionAction: 'select_valid',
+                filters: {},
+                preview_updates: [expect.objectContaining({
+                    id: 43,
+                    category_id: 8,
+                    is_manually_annotated: true
+                })]
+            });
+            expect(edited.selected).toBe(true);
+            expect(bindings.previewMetadata.value.counts.selected).toBe(1);
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
+    test('conditional server selection also submits validity drafts cached from another page', async () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const currentPage = createTransaction({ id: 44, selected: false });
+        const previousPage = createTransaction({
+            id: 45,
+            categoryId: '',
+            sourceAccountId: 'wallet',
+            selected: false
+        });
+        try {
+            const bindings = createBindings({
+                transactions: [currentPage],
+                serverPaged: true,
+                sessionId: 'cross-page/selection',
+                total: 2,
+                metadata: { counts: { total: 2, selected: 0 } }
+            });
+            bindings.serverPagedDraftBaselines.value = new Map([[
+                45,
+                bindings.captureImportPreviewEditableDraftState(previousPage)
+            ]]);
+            previousPage.categoryId = '8';
+            previousPage.isManuallyAnnotated = true;
+            bindings.serverPagedDrafts.value = new Map([[45, previousPage]]);
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    success: true,
+                    data: { metadata: { counts: { total: 2, selected: 2 } } }
+                })
+            });
+
+            await bindings.selectAllValid();
+
+            expect(mockFetch).toHaveBeenCalledTimes(1);
+            const request = mockFetch.mock.calls[0]?.[1];
+            expect(JSON.parse(request.body).preview_updates).toEqual([
+                expect.objectContaining({
+                    id: 45,
+                    category_id: 8,
+                    is_manually_annotated: true
+                })
+            ]);
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
+    test('server selection keeps non-selection drafts cached from another page', async () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const currentPage = createTransaction({ id: 46, selected: false });
+        const previousPage = createTransaction({ id: 47, selected: false, comment: 'before edit' });
+        try {
+            const bindings = createBindings({
+                transactions: [currentPage],
+                serverPaged: true,
+                sessionId: 'draft-preserving/selection',
+                total: 2,
+                metadata: { counts: { total: 2, selected: 0 } }
+            });
+            bindings.serverPagedDraftBaselines.value = new Map([[
+                47,
+                bindings.captureImportPreviewEditableDraftState(previousPage)
+            ]]);
+            previousPage.comment = 'edited on previous page';
+            previousPage.selected = true;
+            bindings.serverPagedDrafts.value = new Map([[47, previousPage]]);
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    success: true,
+                    data: { metadata: { counts: { total: 2, selected: 2 } } }
+                })
+            });
+
+            await bindings.selectAll();
+
+            expect(bindings.serverPagedDrafts.value.get(47)?.comment).toBe('edited on previous page');
+            expect(bindings.serverPagedDrafts.value.get(47)?.selected).toBe(true);
+            expect(bindings.serverPagedDraftBaselines.value.has(47)).toBe(true);
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
+    test('a second conditional selection includes edits made after the first selection succeeds', async () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const edited = createTransaction({ id: 48, categoryId: '', sourceAccountId: 'wallet' });
+        try {
+            const bindings = createBindings({
+                transactions: [edited],
+                serverPaged: true,
+                sessionId: 'repeat/conditional-selection',
+                total: 1,
+                metadata: { counts: { total: 1, selected: 0 } }
+            });
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ success: true, data: { metadata: { counts: { total: 1, selected: 1 } } } })
+            });
+            await bindings.selectAll();
+
+            edited.categoryId = '8';
+            edited.isManuallyAnnotated = true;
+            bindings.onTransactionDataDraftChange(edited);
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ success: true, data: { metadata: { counts: { total: 1, selected: 1 } } } })
+            });
+            await bindings.selectAllValid();
+
+            expect(mockFetch).toHaveBeenCalledTimes(2);
+            const request = mockFetch.mock.calls[1]?.[1];
+            expect(JSON.parse(request.body).preview_updates).toEqual([
+                expect.objectContaining({ id: 48, category_id: 8, is_manually_annotated: true })
+            ]);
         } finally {
             warnSpy.mockRestore();
         }

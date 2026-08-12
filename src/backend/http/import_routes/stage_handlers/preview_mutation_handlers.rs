@@ -101,6 +101,7 @@ pub async fn import_reclassify_runtime_handler(
         Err(response) => return route_response(response),
     };
     let mut patches = Vec::with_capacity(update_items.len());
+    let mut target_ids = Vec::with_capacity(update_items.len());
     for item in update_items {
         let preview_id = match preview_id_from_payload(item) {
             Ok(preview_id) => preview_id,
@@ -122,7 +123,10 @@ pub async fn import_reclassify_runtime_handler(
             Ok(patch) => patch,
             Err(response) => return route_response(response),
         });
+        target_ids.push(preview_id);
     }
+    target_ids.sort_unstable();
+    target_ids.dedup();
     let updated = match update_preview_bills_batch(
         runtime.connection_mut(),
         &session_id,
@@ -132,7 +136,12 @@ pub async fn import_reclassify_runtime_handler(
         Ok(updated) => updated,
         Err(error) => return route_response(db_error_response(error)),
     };
-    let mut preview = match get_preview_by_session(runtime.connection(), &session_id, user_id, false) {
+    let preview = if target_ids.is_empty() {
+        get_preview_by_session(runtime.connection(), &session_id, user_id, false)
+    } else {
+        get_preview_by_ids(runtime.connection(), &session_id, &target_ids, user_id)
+    };
+    let mut preview = match preview {
         Ok(preview) => preview,
         Err(error) => return route_response(db_error_response(error)),
     };
@@ -166,7 +175,11 @@ pub async fn import_reclassify_runtime_handler(
     ) {
         return route_response(db_error_response(error));
     }
-    preview = match get_preview_by_session(runtime.connection(), &session_id, user_id, false) {
+    preview = match if target_ids.is_empty() {
+        get_preview_by_session(runtime.connection(), &session_id, user_id, false)
+    } else {
+        get_preview_by_ids(runtime.connection(), &session_id, &target_ids, user_id)
+    } {
         Ok(preview) => preview,
         Err(error) => return route_response(db_error_response(error)),
     };

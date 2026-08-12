@@ -29,4 +29,5 @@
 - Rust 结构 ratchet 由 `scripts/check-rust-backend-structure.mjs` 提供，前端结构 ratchet 由 `npm run structure:check` 提供；两者都在 Gitea required jobs 中执行。
 - PR closeout、changed-line coverage 与结构门禁 backlog 证据格式见 [CI 证据与覆盖率归一化](governance-ci-coverage.md)。
 - 调整启动、CI、agent 或 docs 入口时，运行 `node scripts/check-rust-only-source-tree.mjs --self-test` 和正式 gate，确认没有重新加入 Python source、manifest 或旧 sidecar 路径。
+- 调整一键启动或进程管理入口时，运行 `.\scripts\dev.ps1 check`，从真实 launcher 验证后端健康、前端 HTTP、日志捕获和 manifest 精确清理。
 - 改动 `.gitea/workflows/ci.yml` 时同步检查 Gitea Actions 语法与缓存体量。

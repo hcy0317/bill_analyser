@@ -57,8 +57,8 @@
     {
       "path": "src/lib/services.ts",
       "kind": "ts",
-      "lines": 1883,
-      "reason": "legacy oversized file tracked by the frontend structure ratchet; D10 governance baseline after shared services facade split and comment-pass"
+      "lines": 1889,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet; D10 governance baseline after shared services facade split and comment-pass; base main drift calibration to the unchanged 1889-line facade"
     },
     {
       "path": "src/views/desktop/transactions/ListPage.vue",

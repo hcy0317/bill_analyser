@@ -326,3 +326,168 @@ async fn postgres_transfer_signal_projection_keeps_accepted_evidence_visible(
     test_db.cleanup().await?;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn preview_metadata_combines_transfer_signal_with_missing_category_filter(
+) -> Result<(), Box<dyn Error>> {
+    let Some(test_db) =
+        postgres_test_support::isolated_postgres_database("preview_transfer_missing_category")
+            .await?
+    else {
+        return Ok(());
+    };
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "preview-transfer-missing-category").await?;
+    let scoped_user = UserId::new(user_id as u64).expect("positive user id");
+    let account_id = insert_account(pool, user_id, "Transfer Signal Wallet").await?;
+    let session_id = "preview-transfer-missing-category-session";
+    create_import_session(
+        pool,
+        &ImportSessionDraft {
+            session_id: session_id.to_string(),
+            user_id: scoped_user,
+            file_count: 1,
+        },
+    )?;
+
+    let preview_id = insert_preview_bill(
+        pool,
+        session_id,
+        scoped_user,
+        &ImportPreviewDraft {
+            preview_date: "2026-07-13 11:00:00".to_string(),
+            preview_type: "支出".to_string(),
+            preview_amount_cents: 2_588,
+            preview_destination_amount_cents: 0,
+            category_id: None,
+            preview_source_account_id: Some(account_id),
+            preview_counterparty: "transfer candidate".to_string(),
+            preview_payment_method: "fixture account".to_string(),
+            preview_description: "transfer signal missing category".to_string(),
+            preview_parser_id: "metadata-fixture".to_string(),
+            preview_selected: true,
+            preview_matching_feedback: json!({
+                "transfer": {
+                    "review_status": "pending",
+                    "candidate_type": "transfer"
+                }
+            }),
+            ..ImportPreviewDraft::default()
+        },
+    )?;
+
+    let page = query_preview_page_by_session(
+        pool,
+        session_id,
+        scoped_user,
+        &ImportPreviewPageRequest {
+            page: 1,
+            page_size: 10,
+            filters: ImportPreviewQueryFilters {
+                signal: Some("transfer".to_string()),
+                category: Some("__invalid__".to_string()),
+                ..ImportPreviewQueryFilters::default()
+            },
+            ..ImportPreviewPageRequest::default()
+        },
+    )?;
+
+    assert_eq!(page.total, 1);
+    assert_eq!(
+        page.rows.iter().map(|row| row.id).collect::<Vec<_>>(),
+        vec![preview_id]
+    );
+    assert_eq!(page.metadata.counts.total, 1);
+    assert_eq!(page.metadata.counts.selected, 0);
+    assert_eq!(page.metadata.counts.selected_invalid, 0);
+    assert_eq!(page.metadata.counts.signals.get("transfer"), Some(&1));
+    assert_eq!(page.metadata.selection_hash, preview_id_snapshot_hash(&[]));
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn preview_needs_review_respects_manually_owned_active_category_type_mismatch(
+) -> Result<(), Box<dyn Error>> {
+    let Some(test_db) =
+        postgres_test_support::isolated_postgres_database("preview_manual_category_ownership")
+            .await?
+    else {
+        return Ok(());
+    };
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "preview-manual-category-owner").await?;
+    let scoped_user = UserId::new(user_id as u64).expect("positive user id");
+    let account_id = insert_account(pool, user_id, "Manual Category Wallet").await?;
+    let expense_category_id = insert_category(pool, user_id, "Manual Expense Category").await?;
+    let session_id = "preview-manual-category-session";
+    create_import_session(
+        pool,
+        &ImportSessionDraft {
+            session_id: session_id.to_string(),
+            user_id: scoped_user,
+            file_count: 1,
+        },
+    )?;
+
+    let preview_id = insert_preview_bill(
+        pool,
+        session_id,
+        scoped_user,
+        &ImportPreviewDraft {
+            preview_date: "2026-07-13 12:00:00".to_string(),
+            preview_type: "收入".to_string(),
+            preview_amount_cents: 1_688,
+            category_id: Some(expense_category_id),
+            preview_source_account_id: Some(account_id),
+            preview_counterparty: "manual category fixture".to_string(),
+            preview_payment_method: "fixture account".to_string(),
+            preview_description: "manual category type mismatch".to_string(),
+            preview_parser_id: "metadata-fixture".to_string(),
+            preview_selected: true,
+            preview_matching_feedback: json!({
+                "annotation": {
+                    "is_manually_annotated": true,
+                    "manual_fields": {"category_id": true}
+                }
+            }),
+            ..ImportPreviewDraft::default()
+        },
+    )?;
+
+    let no_issues = query_preview_page_by_session(
+        pool,
+        session_id,
+        scoped_user,
+        &ImportPreviewPageRequest {
+            filters: ImportPreviewQueryFilters {
+                annotation: Some("no-issues".to_string()),
+                ..ImportPreviewQueryFilters::default()
+            },
+            ..ImportPreviewPageRequest::default()
+        },
+    )?;
+    let needs_review = query_preview_page_by_session(
+        pool,
+        session_id,
+        scoped_user,
+        &ImportPreviewPageRequest {
+            filters: ImportPreviewQueryFilters {
+                annotation: Some("needs-review".to_string()),
+                ..ImportPreviewQueryFilters::default()
+            },
+            ..ImportPreviewPageRequest::default()
+        },
+    )?;
+
+    assert_eq!(
+        no_issues.rows.iter().map(|row| row.id).collect::<Vec<_>>(),
+        vec![preview_id]
+    );
+    assert_eq!(no_issues.metadata.counts.selected_invalid, 0);
+    assert!(needs_review.rows.is_empty());
+
+    test_db.cleanup().await?;
+    Ok(())
+}

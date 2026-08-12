@@ -51,4 +51,24 @@ describe('decision preview replacement', () => {
             { id: 4, previewId: 51 },
         ]);
     });
+
+    test('non-server-paged replacement updates matching preview ids in place', () => {
+        const currentRows = [
+            { id: 1, previewId: 41 },
+            { id: 2, previewId: 42 },
+            { id: 3, previewId: 43 },
+        ] as never[];
+        const upsertedRows = [{ id: 20, previewId: 42 }] as never[];
+
+        expect(applyNonServerPagedReplacement(
+            currentRows,
+            [42],
+            upsertedRows,
+            row => (row as unknown as { previewId: number | null }).previewId,
+        )).toEqual([
+            { id: 1, previewId: 41 },
+            { id: 20, previewId: 42 },
+            { id: 3, previewId: 43 },
+        ]);
+    });
 });

@@ -1181,6 +1181,99 @@ fn one_click_launcher_repairs_missing_compose_host_port_bindings() {
 }
 
 #[test]
+fn one_click_startup_is_supervised_and_exposes_managed_commands() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let launcher_source =
+        fs::read_to_string(repo_root.join("一键启动.ps1")).expect("one-click launcher source");
+    let dev_source =
+        fs::read_to_string(repo_root.join("scripts/dev.ps1")).expect("managed dev command source");
+    let process_manifest_source =
+        fs::read_to_string(repo_root.join("scripts/process-manifest.ps1"))
+            .expect("process manifest helper source");
+    let process_manifest_contract =
+        fs::read_to_string(repo_root.join("tests/scripts/process_manifest_contract.ps1"))
+            .expect("process manifest contract source");
+    let live_gate = fs::read_to_string(repo_root.join("scripts/verify_one_click_start.ps1"))
+        .expect("one-click live gate source");
+    let batch_source =
+        fs::read_to_string(repo_root.join("一键启动.bat")).expect("one-click batch source");
+
+    assert!(launcher_source.contains("[switch]$Headless"));
+    assert!(launcher_source.contains("[string]$ProcessManifestPath"));
+    assert!(launcher_source.contains("Start-StartupChildProcess"));
+    assert!(launcher_source.contains("$ChildProcess.Process.HasExited"));
+    assert!(launcher_source.contains("Write-StartupLogTail"));
+    assert!(launcher_source.contains("listener_processes"));
+    assert!(launcher_source.contains("Stop-StartupOwnedProcesses"));
+
+    for command in ["start", "status", "logs", "stop", "check"] {
+        assert!(
+            dev_source.contains(&format!("\"{command}\"")),
+            "managed dev command must expose {command}"
+        );
+    }
+    assert!(dev_source.contains("ProcessManifestPath"));
+    assert!(dev_source.contains("RequiredServices"));
+    assert!(dev_source.contains("$requiredPorts"));
+    assert!(process_manifest_source.contains("Test-ProcessIdentity"));
+    assert!(process_manifest_source.contains("process_start_time"));
+    assert!(process_manifest_contract.contains("ConvertTo-Json | ConvertFrom-Json"));
+    assert!(batch_source.contains("-Headless"));
+    assert!(batch_source.contains("DEV_MANIFEST"));
+
+    assert!(live_gate.contains("-Headless"));
+    assert!(live_gate.contains("-ProcessManifestPath"));
+    assert!(live_gate.contains("Assert-BackendHealth"));
+    assert!(live_gate.contains("Assert-FrontendReady"));
+}
+
+#[test]
+fn one_click_launchers_find_installed_pwsh_without_explorer_path() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let batch_source =
+        fs::read_to_string(repo_root.join("一键启动.bat")).expect("one-click batch source");
+    let shell_helper = fs::read_to_string(repo_root.join("scripts/powershell-runtime.ps1"))
+        .expect("PowerShell runtime helper source");
+
+    assert!(batch_source.contains(r#"%ProgramFiles%\PowerShell\7\pwsh.exe"#));
+    assert!(batch_source.contains(r#"if exist "%PWSH_EXE%""#));
+    assert!(batch_source.contains("where pwsh"));
+    assert!(batch_source.contains(r#""%PWSH_EXE%" -NoProfile"#));
+
+    assert!(shell_helper.contains("function Get-BillAnalyserPowerShell7Path"));
+    assert!(shell_helper
+        .contains("[System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName"));
+    assert!(shell_helper.contains(r#"$env:ProgramFiles"#));
+    assert!(shell_helper.contains("Get-Command pwsh"));
+
+    for entrypoint in [
+        "一键启动.ps1",
+        "scripts/dev.ps1",
+        "scripts/verify_one_click_start.ps1",
+    ] {
+        let source = fs::read_to_string(repo_root.join(entrypoint))
+            .unwrap_or_else(|error| panic!("{entrypoint} source: {error}"));
+        assert!(source.contains("powershell-runtime.ps1"));
+        assert!(source.contains("Get-BillAnalyserPowerShell7Path"));
+    }
+}
+
+#[test]
+fn one_click_stop_batch_uses_manifest_owned_shutdown() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let stop_batch =
+        fs::read_to_string(repo_root.join("一键结束.bat")).expect("one-click stop batch source");
+
+    assert!(stop_batch.contains(r#"%ProgramFiles%\PowerShell\7\pwsh.exe"#));
+    assert!(stop_batch.contains("where pwsh"));
+    assert!(stop_batch.contains(r#"scripts\dev.ps1"#));
+    assert!(stop_batch.contains(r#""%DEV_SCRIPT%" stop"#));
+    assert!(stop_batch.contains("pause"));
+    assert!(!stop_batch.contains("taskkill"));
+    assert!(!stop_batch.contains("docker compose"));
+}
+
+#[test]
 fn domain_db_invariant_ids_match_public_writer_policy_helpers() {
     for (domain, policy) in [
         ("database-schema", database_schema_db_writer_policy()),

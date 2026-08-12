@@ -2,7 +2,7 @@
 // 维护重点：只实现 Postgres 当前运行态；不读取历史 non-Postgres 数据，不提供历史 staging schema 路径。
 // 不变式：外部 session key 映射到 Postgres import_sessions.id，所有查询必须 user scoped。
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::future::Future;
 
 use bill_analyser_core::{

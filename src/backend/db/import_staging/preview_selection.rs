@@ -278,6 +278,39 @@ pub fn update_session_preview_selection_by_query(
     })
 }
 
+/// 在同一 session 锁事务内应用预览草稿并执行条件选择，避免两阶段部分提交。
+pub fn apply_preview_patches_and_update_selection_by_query(
+    pool: &PostgresPool,
+    session_id: &str,
+    user_id: UserId,
+    patches: &[ImportPreviewPatch],
+    mode: ImportPreviewSelectionMode,
+    target: ImportPreviewSelectionTarget,
+    request: &ImportPreviewPageRequest,
+) -> DbResult<ImportPreviewSelectionMutationResult> {
+    block_on_db(async move {
+        let user_id = user_id_i64(user_id)?;
+        let mut tx = pool.begin().await?;
+        let session_db_id =
+            lock_active_import_session_on_tx(&mut tx, session_id, user_id).await?;
+        let applied_preview_updates =
+            apply_preview_patches_on_tx(&mut tx, session_db_id, user_id, patches).await?;
+        if applied_preview_updates != patches.len() {
+            return Err(DbError::InvalidOperation(
+                "preview patch is outside this session".to_string(),
+            ));
+        }
+        let mut query =
+            build_preview_selection_update_query(session_db_id, user_id, mode, target, request);
+        let updated_selection = query.build().execute(&mut *tx).await?.rows_affected();
+        tx.commit().await?;
+        Ok(ImportPreviewSelectionMutationResult {
+            applied_preview_updates,
+            updated_selection: usize::try_from(updated_selection).unwrap_or(usize::MAX),
+        })
+    })
+}
+
 fn build_preview_selection_update_query(
     session_db_id: i64,
     user_id: i64,

@@ -182,7 +182,7 @@
                             :disabled="loading || submitting"
                             :session-id="serverSessionId"
                             @reclassified="handleReclassified"
-                            @request-page="onCheckDataPageRequested"
+                            @invalidate-page-request="abortPendingPreviewPageRequest" @request-page="onCheckDataPageRequested"
                         />
                     </decision-preview-replacement-bridge>
                 </v-window-item>
@@ -1375,7 +1375,7 @@ function onReclassified(previewData: ImportPreviewRecord[], removedPreviewIds: n
         const page = importTransactionCheckDataTab.value?.getCurrentPreviewPage?.() || 1;
         const pageSize = importTransactionCheckDataTab.value?.getCurrentPreviewPageSize?.() || 10;
         const requestOptions = importTransactionCheckDataTab.value?.getCurrentServerPagedRequestOptions?.() || {};
-        void fetchPreviewPage(page, pageSize, requestOptions);
+        void fetchPreviewPage(page, pageSize, { ...requestOptions, replaceActive: true });
     })) return;
 
     if (!previewData || previewData.length === 0) {

@@ -57,8 +57,11 @@ fn push_preview_current_review_condition_with_joins(
     push_preview_category_required_type_condition(query, alias);
     query.push(" AND (");
     query.push(alias);
-    query.push(".category_id IS NULL OR c.id IS NULL OR ");
+    query.push(".category_id IS NULL OR c.id IS NULL OR (");
     push_preview_category_type_mismatch_condition(query, alias, "c");
+    query.push(" AND NOT ");
+    push_preview_manual_category_ownership_condition(query, alias);
+    query.push(")");
     query.push(")) OR (");
     query.push(alias);
     query.push(".account_id IS NULL OR source_account.id IS NULL) OR (");
@@ -96,7 +99,18 @@ fn push_preview_missing_category_condition(query: &mut QueryBuilder<'_, Postgres
     query.push(alias);
     query.push(".category_id AND c.is_active = true AND ");
     push_preview_category_type_mismatch_condition(query, alias, "c");
+    query.push(" AND NOT ");
+    push_preview_manual_category_ownership_condition(query, alias);
     query.push(")))");
+}
+
+fn push_preview_manual_category_ownership_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+) {
+    query.push("COALESCE((");
+    query.push(alias);
+    query.push(".preview_payload#>'{preview_matching_feedback,annotation,manual_fields,category_id}') = 'true'::jsonb, false)");
 }
 
 fn push_preview_missing_source_account_condition(

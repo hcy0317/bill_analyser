@@ -67,7 +67,7 @@
             <v-checkbox density="compact"
                         :color="!item.valid ? 'error' : 'primary'"
                         :disabled="!!disabled"
-                        v-model="item.selected"></v-checkbox>
+                        v-model="item.selected" @update:model-value="cacheServerPagedDraft(item)"></v-checkbox>
         </template>
         <template #item.valid="{ item }">
             <div class="d-flex align-center ga-1">
@@ -197,7 +197,7 @@
                               :show-currency="true"
                               :disabled="!!disabled"
                               :placeholder="tt('Amount')"
-                              v-model="item.sourceAmountCents"/>
+                              v-model="item.sourceAmountCents" @update:model-value="onTransactionDataDraftChange(item)"/>
                 <v-icon class="icon-with-direction mx-1" size="13" :icon="mdiArrowRight" v-if="requiresDestinationAccount(item) && item.sourceAccountId !== item.destinationAccountId"></v-icon>
                 <amount-input density="compact" variant="plain"
                               persistent-placeholder
@@ -205,7 +205,7 @@
                               :show-currency="true"
                               :disabled="!!disabled"
                               :placeholder="tt('Destination Amount')"
-                              v-model="item.destinationAmountCents"
+                              v-model="item.destinationAmountCents" @update:model-value="onTransactionDataDraftChange(item)"
                               v-if="requiresDestinationAccount(item) && item.sourceAccountId !== item.destinationAccountId"/>
             </div>
         </template>
@@ -301,7 +301,7 @@
                     :placeholder="tt('None')"
                     :items="allTags"
                     :no-data-text="tt('No available tag')"
-                    v-model="editingTags"
+                    v-model="editingTags" @update:model-value="cacheEditingTagsDraft(item)"
                 >
                     <template #chip="{ props, index }">
                         <v-chip :class="{ 'font-italic': !isTagValid(editingTags, index) }"
@@ -333,7 +333,7 @@
                               persistent-placeholder
                               :placeholder="tt('Counterparty')"
                               :disabled="!!disabled"
-                              v-model="item.counterparty" />
+                              v-model="item.counterparty" @update:model-value="onTransactionDataDraftChange(item)" />
             </div>
         </template>
         <!-- v6.32新增: 支付方式列 -->
@@ -345,7 +345,7 @@
                               persistent-placeholder
                               :placeholder="tt('Payment Method')"
                               :disabled="!!disabled"
-                              v-model="item.paymentMethod" />
+                              v-model="item.paymentMethod" @update:model-value="onTransactionDataDraftChange(item)" />
             </div>
         </template>
         <template #item.comment="{ item }">
@@ -358,7 +358,7 @@
                               persistent-placeholder
                               :placeholder="tt('Description')"
                               :disabled="!!disabled"
-                              v-model="item.comment" />
+                              v-model="item.comment" @update:model-value="onTransactionDataDraftChange(item)" />
             </div>
         </template>
         <template #bottom>
@@ -834,13 +834,10 @@ import {
 import {
     getImportPreviewTransactionTypeNumber
 } from '../importPreviewTransaction.ts';
-import {
-    buildImportPreviewUpdateFromTransaction
-} from '../importPreviewUpdates.ts';
+import { buildImportPreviewUpdateFromTransaction, getPreviewUpdateId } from '../importPreviewUpdates.ts';
 import {
     clearResolvedImportPreviewReviewState
 } from '../importPreviewReviewState.ts';
-import { cloneImportPreviewDraftTransaction } from '../importPreviewDrafts.ts';
 import { buildImportPreviewActionScope, hashImportPreviewSelectionIds } from '../actionScope.ts';
 import { buildSelectionPatch } from '../selectionActionCoordinator.ts';
 import { buildCanonicalPreviewPageRequestKey } from '../import-dialog/previewPageQuery.ts';
@@ -917,6 +914,19 @@ import {
     resolveSignalStatusAuthority,
     useImportCheckDataSignals
 } from '../check-data-tab/useImportCheckDataSignals.ts';
+import {
+    applyImportPreviewEditableDraftDeltas,
+    cacheServerPagedDraftState,
+    captureImportPreviewEditableDraftState as captureImportPreviewEditableDraftStateValue,
+    cloneImportTransaction as cloneImportTransactionValue,
+    hasServerPagedValidityDraftChanges as hasServerPagedValidityDraftStateChanges,
+    mergeImportPreviewEditableDraftBaseline,
+    reconcileServerPagedDraftStateAfterSelection,
+    resolveServerPagedEditingTransaction,
+    shouldPersistValidityDraftsForSelection,
+    type ImportPreviewEditableDraftState,
+    type ServerPagedSelectionAction
+} from '../check-data-tab/serverPagedDraftState.ts';
 
 import { useSettingsStore } from '@/stores/setting.ts';
 import { useUserStore } from '@/stores/user.ts';
@@ -988,31 +998,6 @@ type CategoryEditDialogType = InstanceType<typeof CategoryEditDialog>;
 type AccountEditDialogType = InstanceType<typeof AccountEditDialog>;
 type TransactionEditDialogType = InstanceType<typeof TransactionEditDialog>;
 
-const importPreviewEditableDraftKeys = [
-    'selected',
-    'type',
-    'categoryId',
-    'sourceAmountCents',
-    'destinationAmountCents',
-    'sourceAccountId',
-    'destinationAccountId',
-    'tagIds',
-    'counterparty',
-    'paymentMethod',
-    'comment',
-    'isManuallyAnnotated',
-    'recurringTemplateId',
-    'recurringTemplateName',
-    'recurringCandidateCount',
-    'recurringMatchScore',
-    'recurringMatchReasons',
-    'recurringMatchedDate'
-] as const;
-
-type ImportPreviewEditableDraftKey = typeof importPreviewEditableDraftKeys[number];
-type ImportPreviewEditableDraftValue = string | number | boolean | string[];
-type ImportPreviewEditableDraftState = Record<ImportPreviewEditableDraftKey, ImportPreviewEditableDraftValue>;
-
 const props = defineProps<{
     importTransactions?: ImportTransaction[]
     disabled?: boolean;
@@ -1025,6 +1010,7 @@ const props = defineProps<{
 // v6.55: 定义事件，用于通知父组件数据刷新
 const emit = defineEmits<{
     (e: 'reclassified', data: ImportPreviewRecord[], removedPreviewIds?: number[]): void;
+    (e: 'invalidatePageRequest'): void;
     (
         e: 'requestPage',
         page: number,
@@ -1379,11 +1365,18 @@ function onTransactionTypeChange(item: ImportTransaction): void {
     }
     updateTransactionData(item);
     syncActionableSuggestionDraftState(item);
+    cacheServerPagedDraft(item);
 }
 
 function onTransactionDataDraftChange(item: ImportTransaction): void {
     updateTransactionData(item);
     syncActionableSuggestionDraftState(item);
+    cacheServerPagedDraft(item);
+}
+
+function cacheEditingTagsDraft(item: ImportTransaction): void {
+    item.tagIds = [...editingTags.value];
+    onTransactionDataDraftChange(item);
 }
 
 function getRecurringDecisionMessageKey(cleared: boolean): string {
@@ -2158,6 +2151,7 @@ function commitEditingTransactionDraft(): void {
     editingTransaction.value.tagIds = editingTags.value;
     updateTransactionData(editingTransaction.value);
     syncActionableSuggestionDraftState(editingTransaction.value);
+    cacheServerPagedDraft(editingTransaction.value);
     editingTags.value = [];
     editingTransaction.value = null;
 }
@@ -2803,13 +2797,6 @@ const {
     getPrimaryRecurringReason,
     formatAmountWithCurrency: formatAmountToLocalizedNumeralsWithCurrency
 });
-type ServerPagedSelectionAction = 'select_all'
-    | 'select_valid'
-    | 'select_invalid'
-    | 'select_needs_annotation'
-    | 'select_none'
-    | 'invert';
-
 const {
     getAnnotationListTitle,
     getAnnotationIssues,
@@ -2848,7 +2835,7 @@ const availableAccounts = computed<Account[]>(() => allVisibleAccounts.value);
  * 2. 按照 dedup_type 分离账单
  * 3. 对不同类型使用不同的分类规则
  * 4. 更新预览表中的分类和账户信息
- * 5. 返回更新后的完整预览数据
+ * 5. 非空 preview_updates 只返回目标预览行；空数组仍返回完整预览数据
  */
 async function reclassifySelected(): Promise<void> {
     if (editingTransaction.value) {
@@ -2904,7 +2891,12 @@ async function reclassifySelected(): Promise<void> {
         // 通知父组件使用新数据
         // 父组件 ImportDialog.vue 监听 @reclassified 事件并更新 importTransactions
         if (result.data?.preview && result.data.preview.length > 0) {
-            emit('reclassified', result.data.preview);
+            const reclassifiedPreviewIds = Array.from(new Set(
+                previewUpdates
+                    .map(getPreviewUpdateId)
+                    .filter((previewId): previewId is number => previewId !== null)
+            ));
+            emit('reclassified', result.data.preview, reclassifiedPreviewIds);
             snackbar.value?.showMessage('format.misc.youHaveUpdatedTransactions', {
                 count: getDisplayCount(result.data.preview.length)
             });
@@ -2920,11 +2912,9 @@ async function reclassifySelected(): Promise<void> {
     }
 }
 
-function buildPreviewUpdates(options: { selectedOnly: boolean }): Record<string, unknown>[] {
-    cacheCurrentPageDrafts();
-    const transactions = getTrackedTransactionsForSelection().filter(transaction => (
-        !options.selectedOnly || transaction.selected
-    ));
+function buildPreviewUpdatesForTransactions(
+    transactions: ImportTransaction[]
+): Record<string, unknown>[] {
     const validAccountIds = new Set(allVisibleAccounts.value.map(account => String(account.id)));
 
     return transactions.map(transaction => {
@@ -2944,12 +2934,61 @@ function buildPreviewUpdates(options: { selectedOnly: boolean }): Record<string,
     }).filter(item => !!item.id);
 }
 
+function captureImportPreviewEditableDraftState(
+    transaction: ImportTransaction
+): ImportPreviewEditableDraftState {
+    return captureImportPreviewEditableDraftStateValue(transaction);
+}
+
+function buildPreviewUpdates(options: { selectedOnly: boolean }): Record<string, unknown>[] {
+    cacheCurrentPageDrafts();
+    const transactions = getTrackedTransactionsForSelection().filter(transaction => (
+        !options.selectedOnly || transaction.selected
+    ));
+    return buildPreviewUpdatesForTransactions(transactions);
+}
+
 function buildSelectedPreviewUpdates(): Record<string, unknown>[] {
     return buildPreviewUpdates({ selectedOnly: true });
 }
 
 function buildTrackedPreviewUpdates(): Record<string, unknown>[] {
     return buildPreviewUpdates({ selectedOnly: false });
+}
+
+function hasServerPagedValidityDraftChanges(transaction: ImportTransaction): boolean {
+    return hasServerPagedValidityDraftStateChanges(
+        transaction,
+        serverPagedDraftBaselines.value,
+        getPreviewId
+    );
+}
+
+function buildConditionalSelectionPreviewUpdates(
+    action: ServerPagedSelectionAction
+): Record<string, unknown>[] {
+    if (!shouldPersistValidityDraftsForSelection(action)) {
+        return [];
+    }
+    return buildPreviewUpdatesForTransactions(
+        getTrackedTransactionsForSelection().filter(hasServerPagedValidityDraftChanges)
+    );
+}
+
+function reconcileServerPagedDraftsAfterSelection(
+    persistedPreviewUpdates: Record<string, unknown>[]
+): void {
+    const state = reconcileServerPagedDraftStateAfterSelection({
+        persistedPreviewUpdates,
+        drafts: serverPagedDrafts.value,
+        transactions: importTransactions.value,
+        baselines: serverPagedDraftBaselines.value,
+        getPreviewId
+    });
+    serverPagedDrafts.value = state.drafts;
+    serverPagedDraftBaselines.value = state.baselines;
+    serverPagedSelectionBaselines.value = new Map();
+    recordServerPagedSelectionBaselines(Array.from(state.drafts.values()));
 }
 
 function getTrackedTransactionByPreviewId(previewId: number): ImportTransaction | null {
@@ -3612,85 +3651,7 @@ function buildServerPreviewQueryFilters(): ImportPreviewServerQueryFilters {
 }
 
 function cloneImportTransaction(transaction: ImportTransaction): ImportTransaction {
-    return cloneImportPreviewDraftTransaction(getPreviewState(transaction));
-}
-
-function cloneImportPreviewEditableDraftValue(
-    value: ImportPreviewEditableDraftValue
-): ImportPreviewEditableDraftValue {
-    return Array.isArray(value) ? [...value] : value;
-}
-
-function captureImportPreviewEditableDraftState(
-    transaction: ImportTransaction
-): ImportPreviewEditableDraftState {
-    return {
-        selected: !!transaction.selected,
-        type: transaction.type,
-        categoryId: String(transaction.categoryId || ''),
-        sourceAmountCents: transaction.sourceAmountCents,
-        destinationAmountCents: transaction.destinationAmountCents,
-        sourceAccountId: String(transaction.sourceAccountId || ''),
-        destinationAccountId: String(transaction.destinationAccountId || ''),
-        tagIds: [...(transaction.tagIds || [])],
-        counterparty: String(transaction.counterparty || ''),
-        paymentMethod: String(transaction.paymentMethod || ''),
-        comment: String(transaction.comment || ''),
-        isManuallyAnnotated: !!transaction.isManuallyAnnotated,
-        recurringTemplateId: String(transaction.recurringTemplateId || ''),
-        recurringTemplateName: String(transaction.recurringTemplateName || ''),
-        recurringCandidateCount: Number(transaction.recurringCandidateCount || 0),
-        recurringMatchScore: Number(transaction.recurringMatchScore || 0),
-        recurringMatchReasons: String(transaction.recurringMatchReasons || ''),
-        recurringMatchedDate: String(transaction.recurringMatchedDate || '')
-    };
-}
-
-function isImportPreviewEditableDraftValueEqual(
-    left: ImportPreviewEditableDraftValue,
-    right: ImportPreviewEditableDraftValue
-): boolean {
-    if (Array.isArray(left) || Array.isArray(right)) {
-        return Array.isArray(left)
-            && Array.isArray(right)
-            && left.length === right.length
-            && left.every((value, index) => value === right[index]);
-    }
-    return left === right;
-}
-
-function applyImportPreviewEditableDraftDeltas(
-    transaction: ImportTransaction,
-    draftState: ImportPreviewEditableDraftState,
-    baselineState: ImportPreviewEditableDraftState
-): void {
-    const target = transaction as unknown as Record<ImportPreviewEditableDraftKey, ImportPreviewEditableDraftValue>;
-    for (const key of importPreviewEditableDraftKeys) {
-        if (!isImportPreviewEditableDraftValueEqual(draftState[key], baselineState[key])) {
-            target[key] = cloneImportPreviewEditableDraftValue(draftState[key]);
-        }
-    }
-}
-
-function mergeImportPreviewEditableDraftBaseline(
-    serverState: ImportPreviewEditableDraftState,
-    draftState: ImportPreviewEditableDraftState,
-    baselineState: ImportPreviewEditableDraftState
-): ImportPreviewEditableDraftState {
-    const nextBaseline = Object.fromEntries(
-        importPreviewEditableDraftKeys.map(key => [
-            key,
-            cloneImportPreviewEditableDraftValue(serverState[key])
-        ])
-    ) as ImportPreviewEditableDraftState;
-    for (const key of importPreviewEditableDraftKeys) {
-        if (!isImportPreviewEditableDraftValueEqual(draftState[key], baselineState[key])) {
-            Object.assign(nextBaseline, {
-                [key]: cloneImportPreviewEditableDraftValue(baselineState[key])
-            });
-        }
-    }
-    return nextBaseline;
+    return cloneImportTransactionValue(transaction);
 }
 
 function recordServerPagedDraftBaselines(transactions: ImportTransaction[]): void {
@@ -3722,6 +3683,12 @@ function cacheCurrentPageDrafts(): void {
         nextDrafts.set(previewId, cloneImportTransaction(transaction));
     }
     serverPagedDrafts.value = nextDrafts;
+}
+
+function cacheServerPagedDraft(transaction: ImportTransaction): void {
+    serverPagedDrafts.value = cacheServerPagedDraftState(
+        serverPagedMode.value, serverPagedDrafts.value, transaction, getPreviewId
+    );
 }
 
 function rehydrateCurrentPageDrafts(): Set<number> {
@@ -3776,6 +3743,17 @@ function rehydrateCurrentPageDrafts(): Set<number> {
     serverPagedDraftBaselines.value = nextBaselines;
     serverPagedDrafts.value = nextDrafts;
     return rehydratedPreviewIds;
+}
+
+function rebindEditingTransactionToCurrentPage(transactions: ImportTransaction[]): void {
+    const binding = resolveServerPagedEditingTransaction(
+        editingTransaction.value, transactions, getPreviewId
+    );
+    if (!binding) {
+        return;
+    }
+    editingTransaction.value = binding.transaction;
+    editingTags.value = binding.tags;
 }
 
 function getTrackedTransactionsForSelection(): ImportTransaction[] {
@@ -3997,6 +3975,7 @@ watch(
         recordServerPagedSelectionBaselines(transactions || []);
         recordServerPagedDraftBaselines(transactions || []);
         const rehydratedPreviewIds = rehydrateCurrentPageDrafts();
+        rebindEditingTransactionToCurrentPage(transactions || []);
         (transactions || []).forEach(transaction => {
             const previewId = getPreviewId(transaction);
             if (previewId !== null && rehydratedPreviewIds.has(previewId)) {
@@ -4640,6 +4619,8 @@ async function applyServerPagedSelection(action: ServerPagedSelectionAction): Pr
         transaction,
         selected: transaction.selected
     }));
+    emit('invalidatePageRequest');
+    const previewUpdates = buildConditionalSelectionPreviewUpdates(action);
     applySelectionActionToLocalTransactions(action, importTransactions.value);
     serverPagedSelectionBusy.value = true;
     try {
@@ -4656,7 +4637,8 @@ async function applyServerPagedSelection(action: ServerPagedSelectionAction): Pr
                 headers,
                 body: JSON.stringify({
                     selectionAction: action,
-                    filters: buildServerPreviewQueryFilters()
+                    filters: buildServerPreviewQueryFilters(),
+                    ...(previewUpdates.length > 0 ? { preview_updates: previewUpdates } : {})
                 })
             }
         );
@@ -4670,15 +4652,7 @@ async function applyServerPagedSelection(action: ServerPagedSelectionAction): Pr
         }
 
         serverPagedSelectionMetadataOverride.value = result.data?.metadata || null;
-        serverPagedDrafts.value = new Map();
-        serverPagedDraftBaselines.value = new Map();
-        serverPagedSelectionBaselines.value = new Map();
-        recordServerPagedSelectionBaselines(importTransactions.value);
-        emitServerPagedRequest(currentPage.value, countPerPage.value, {
-            cacheDrafts: false,
-            force: true,
-            replaceActive: true
-        });
+        reconcileServerPagedDraftsAfterSelection(previewUpdates);
     } catch (error) {
         for (const { transaction, selected } of selectionSnapshot) {
             transaction.selected = selected;
@@ -4805,6 +4779,7 @@ function editTransaction(transaction: ImportTransaction): void {
         editingTransaction.value.isManuallyAnnotated = true;
         updateTransactionData(editingTransaction.value);
         syncActionableSuggestionDraftState(editingTransaction.value);
+        cacheServerPagedDraft(editingTransaction.value);
     }
 
     if (editingTransaction.value === transaction) {

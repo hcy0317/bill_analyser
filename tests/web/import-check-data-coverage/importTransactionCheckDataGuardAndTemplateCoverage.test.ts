@@ -619,7 +619,27 @@ describe('ImportTransactionCheckDataTab guard and template coverage', () => {
         row.type = 5;
         await actionByHandlerText('onTransactionTypeChange', 'onUpdate:modelValue').handler(5);
         row.categoryId = 'investment-parent';
-        await actionByHandlerText('onTransactionDataDraftChange', 'onUpdate:modelValue').handler('investment-parent');
+        const draftActions = mockUiActions.filter(candidate => (
+            candidate.event === 'onUpdate:modelValue'
+            && [
+                'cacheServerPagedDraft',
+                'onTransactionDataDraftChange',
+                'cacheEditingTagsDraft'
+            ].some(handlerName => String(candidate.handler).includes(handlerName))
+        ));
+        expect(draftActions).toHaveLength(10);
+        for (const action of draftActions) {
+            await action.handler('investment-parent');
+        }
+        const textModelAssignments = mockUiActions.filter(candidate => (
+            candidate.component === 'v-text-field'
+            && candidate.event === 'onUpdate:modelValue'
+            && !draftActions.includes(candidate)
+        ));
+        expect(textModelAssignments.length).toBeGreaterThanOrEqual(3);
+        for (const action of textModelAssignments) {
+            await action.handler('edited text');
+        }
         await actionByHandlerText('quickCreatePrimaryCategory', 'onPrimaryAction').handler();
         await actionByHandlerText('quickCreateSecondaryCategory', 'onSecondaryAction').handler('expense-parent');
         await actionByHandlerText("quickCreateAccount(item, 'source'", 'onSecondaryAction').handler('wallet');

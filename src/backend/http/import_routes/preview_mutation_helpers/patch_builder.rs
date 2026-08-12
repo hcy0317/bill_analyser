@@ -322,6 +322,26 @@ fn build_preview_patch_from_payload_with_category_lookup(
     Ok(patch)
 }
 
+fn build_preview_patch_from_payload_with_loaded_categories(
+    preview_id: i64,
+    object: &Map<String, Value>,
+    categories: &HashMap<i64, ImportPreviewCategoryLookup>,
+) -> Result<ImportPreviewPatch, ImportV2RouteResponse> {
+    let mut patch = build_preview_patch_from_payload(preview_id, object)?;
+    let Some(value) = first_value(object, &["categoryId", "category_id"]) else {
+        return Ok(patch);
+    };
+    let Some(category_id) = value_to_i64(value).filter(|value| *value > 0) else {
+        clear_category_id_on_preview_patch(&mut patch);
+        return Ok(patch);
+    };
+    let Some(category) = categories.get(&category_id).cloned() else {
+        return Err(import_v2_error_response(400, "Invalid category"));
+    };
+    apply_loaded_category_to_preview_patch(&mut patch, category_id, category.into());
+    Ok(patch)
+}
+
 #[tracing::instrument(level = "debug", skip_all)]
 fn apply_category_id_to_preview_patch(
     connection: &Connection,

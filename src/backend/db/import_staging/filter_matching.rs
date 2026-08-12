@@ -47,6 +47,47 @@ pub fn get_import_preview_category_by_id(
     })
 }
 
+pub fn get_import_preview_categories_by_ids(
+    pool: &PostgresPool,
+    user_id: UserId,
+    category_ids: &[i64],
+) -> DbResult<HashMap<i64, ImportPreviewCategoryLookup>> {
+    block_on_db(async move {
+        if category_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let mut query = QueryBuilder::<Postgres>::new(
+            "SELECT id, name, category_type, path FROM categories WHERE user_id = ",
+        );
+        query.push_bind(user_id_i64(user_id)?);
+        query.push(" AND is_active = true AND id IN (");
+        let mut separated = query.separated(", ");
+        for category_id in category_ids {
+            separated.push_bind(category_id);
+        }
+        separated.push_unseparated(")");
+        let rows = query.build().fetch_all(pool).await?;
+        rows.into_iter()
+            .map(|row| {
+                let category_id = row.try_get::<i64, _>("id")?;
+                let name = row.try_get::<String, _>("name")?;
+                let path = row
+                    .try_get::<Option<String>, _>("path")?
+                    .unwrap_or_default();
+                let category_type = row.try_get::<Option<String>, _>("category_type")?;
+                Ok((
+                    category_id,
+                    import_preview_category_lookup_from_values(
+                        &name,
+                        &path,
+                        category_type.as_deref(),
+                    ),
+                ))
+            })
+            .collect()
+    })
+}
+
 fn import_preview_category_lookup_sql() -> &'static str {
     r#"
         SELECT name, category_type, path

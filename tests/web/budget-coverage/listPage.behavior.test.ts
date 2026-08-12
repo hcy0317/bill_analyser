@@ -307,7 +307,11 @@ describe('desktop budget ListPage production-loaded behavior', () => {
     test('setup exposes the budget page orchestration surface', () => {
         const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
         try {
-            mockBudgetStore.allBudgets = [createBudget()];
+            const now = new Date();
+            mockBudgetStore.allBudgets = [createBudget({
+                startDate: dateOnly(new Date(now.getFullYear(), now.getMonth(), 1)),
+                endDate: dateOnly(new Date(now.getFullYear(), now.getMonth() + 1, 0))
+            })];
             const bindings = setupPage();
             expect(bindings.reload).toEqual(expect.any(Function));
             expect(bindings.filteredBudgets.value).toHaveLength(1);

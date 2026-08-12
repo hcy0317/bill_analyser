@@ -9,12 +9,15 @@ param(
     [switch]$BackendOnly,      # 仅启动后端
     [switch]$FrontendOnly,     # 仅启动前端
     [switch]$NoAutoStop,       # 不自动停止旧进程
-    [switch]$NoBrowser         # 不自动打开浏览器
+    [switch]$NoBrowser,        # 不自动打开浏览器
+    [switch]$Headless,         # 后台启动子进程并记录日志
+    [string]$ProcessManifestPath # 记录本次启动拥有的子进程和监听进程
 )
 
 # 设置控制台编码为UTF-8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
+. (Join-Path $PSScriptRoot "scripts\powershell-runtime.ps1")
 
 # 颜色定义
 function Write-Info { param($msg) Write-Host $msg -ForegroundColor Cyan }
@@ -24,17 +27,7 @@ function Write-Err { param($msg) Write-Host $msg -ForegroundColor Red }
 function Write-Gray { param($msg) Write-Host $msg -ForegroundColor Gray }
 
 function Get-PreferredShell {
-    $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
-    if ($pwshCmd) {
-        return $pwshCmd.Source
-    }
-
-    $powershellCmd = Get-Command powershell -ErrorAction SilentlyContinue
-    if ($powershellCmd) {
-        return $powershellCmd.Source
-    }
-
-    return $null
+    return Get-BillAnalyserPowerShell7Path
 }
 
 function Get-NpmCommand {
@@ -488,9 +481,17 @@ $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $ProjectRoot "scripts\http-bind.ps1")
 Set-Location $ProjectRoot
 $ShellExe = Get-PreferredShell
+$script:StartupProcessEntries = @()
+$script:StartupProcessManifestPath = $ProcessManifestPath
+$script:StartupProcessManifestCreatedAt = (Get-Date).ToUniversalTime().ToString("o")
+$script:StartupLogRoot = if ($ProcessManifestPath) {
+    Join-Path (Split-Path -Parent $ProcessManifestPath) "logs"
+} else {
+    Join-Path $ProjectRoot ".git\ai\startup-gate\logs"
+}
 
 if (-not $ShellExe) {
-    Write-Err "未找到 PowerShell 可执行文件（pwsh 或 powershell）"
+    Write-Err "未找到 PowerShell 7 可执行文件（pwsh.exe）"
     exit 1
 }
 
@@ -567,6 +568,173 @@ function Test-HttpEndpoint {
     }
 }
 
+function Write-StartupProcessManifest {
+    if ([string]::IsNullOrWhiteSpace($script:StartupProcessManifestPath)) {
+        return
+    }
+
+    $manifestDir = Split-Path -Parent $script:StartupProcessManifestPath
+    if ($manifestDir) {
+        New-Item -ItemType Directory -Force -Path $manifestDir | Out-Null
+    }
+
+    [pscustomobject]@{
+        created_at = $script:StartupProcessManifestCreatedAt
+        updated_at = (Get-Date).ToUniversalTime().ToString("o")
+        project_root = $ProjectRoot
+        backend_url = $BackendBaseUrl
+        frontend_url = $FrontendUrl
+        entries = @($script:StartupProcessEntries)
+    } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $script:StartupProcessManifestPath -Encoding UTF8
+}
+
+function Write-StartupLogTail {
+    param([object]$Child)
+
+    if ($null -eq $Child) {
+        return
+    }
+
+    foreach ($logPath in @($Child.StdoutLog, $Child.StderrLog)) {
+        if ([string]::IsNullOrWhiteSpace($logPath) -or -not (Test-Path -LiteralPath $logPath)) {
+            continue
+        }
+
+        Write-Warn "  $($Child.Name) 日志尾部: $logPath"
+        Get-Content -LiteralPath $logPath -Tail 80 -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Gray "    $_"
+        }
+    }
+}
+
+function Get-ListenerPidsForPort {
+    param([int]$Port)
+
+    return @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess |
+        Where-Object { $_ -gt 0 } |
+        Sort-Object -Unique)
+}
+
+function Get-ProcessIdentity {
+    param(
+        [int]$ProcessId,
+        [int]$Port = 0
+    )
+
+    $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    if (-not $process) {
+        return $null
+    }
+
+    $processPath = $null
+    try { $processPath = $process.Path } catch { $processPath = $null }
+
+    $startTime = $null
+    try { $startTime = $process.StartTime.ToUniversalTime().ToString("o") } catch { $startTime = $null }
+
+    return [pscustomobject]@{
+        pid = $process.Id
+        process_name = $process.ProcessName
+        process_path = $processPath
+        process_start_time = $startTime
+        port = $Port
+    }
+}
+
+function Update-StartupChildListenerPids {
+    param(
+        [object]$Child,
+        [int]$Port
+    )
+
+    if ($null -eq $Child -or $null -eq $Child.ManifestEntry) {
+        return
+    }
+
+    $listenerPids = @(Get-ListenerPidsForPort -Port $Port)
+    $Child.ManifestEntry.listener_pids = $listenerPids
+    $Child.ManifestEntry.listener_processes = @($listenerPids |
+        ForEach-Object { Get-ProcessIdentity -ProcessId $_ -Port $Port } |
+        Where-Object { $null -ne $_ })
+    Write-StartupProcessManifest
+}
+
+function Start-StartupChildProcess {
+    param(
+        [string]$Name,
+        [string]$ScriptPath
+    )
+
+    $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $ScriptPath)
+    $processArgs = @{
+        FilePath = $ShellExe
+        ArgumentList = $arguments
+        WorkingDirectory = $ProjectRoot
+        PassThru = $true
+        WindowStyle = "Normal"
+    }
+
+    $stdoutLog = $null
+    $stderrLog = $null
+    if ($Headless) {
+        New-Item -ItemType Directory -Force -Path $script:StartupLogRoot | Out-Null
+        $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+        $stdoutLog = Join-Path $script:StartupLogRoot "$Name-$stamp.out.log"
+        $stderrLog = Join-Path $script:StartupLogRoot "$Name-$stamp.err.log"
+        $processArgs.WindowStyle = "Hidden"
+        $processArgs.RedirectStandardOutput = $stdoutLog
+        $processArgs.RedirectStandardError = $stderrLog
+    }
+
+    $process = Start-Process @processArgs
+    $entry = [pscustomobject]@{
+        name = $Name
+        script = $ScriptPath
+        pid = $process.Id
+        process_name = $process.ProcessName
+        process_path = $ShellExe
+        process_start_time = $process.StartTime.ToUniversalTime().ToString("o")
+        stdout_log = $stdoutLog
+        stderr_log = $stderrLog
+        listener_pids = @()
+        listener_processes = @()
+        started_at = (Get-Date).ToUniversalTime().ToString("o")
+    }
+    $script:StartupProcessEntries += $entry
+    Write-StartupProcessManifest
+
+    return [pscustomobject]@{
+        Name = $Name
+        Process = $process
+        StdoutLog = $stdoutLog
+        StderrLog = $stderrLog
+        ManifestEntry = $entry
+    }
+}
+
+function Stop-StartupOwnedProcesses {
+    foreach ($entry in @($script:StartupProcessEntries)) {
+        foreach ($processId in @($entry.listener_pids) + @($entry.pid)) {
+            if (-not $processId -or [int]$processId -le 0) {
+                continue
+            }
+
+            $process = Get-Process -Id ([int]$processId) -ErrorAction SilentlyContinue
+            if (-not $process) {
+                continue
+            }
+
+            try {
+                Stop-Process -Id ([int]$processId) -Force -ErrorAction Stop
+                Write-Gray "  已清理本次启动的 $($entry.name) 进程 (PID: $processId)"
+            } catch {
+                Write-Warn "  无法清理本次启动的 PID ${processId}: $_"
+            }
+        }
+    }
+}
+
 # ============================================================
 # 函数：等待 HTTP 服务就绪
 # ============================================================
@@ -574,7 +742,8 @@ function Wait-ForHttpEndpoint {
     param(
         [string]$Url,
         [int]$TimeoutSeconds = 30,
-        [string]$ServiceName
+        [string]$ServiceName,
+        [object]$ChildProcess
     )
     
     $startTime = Get-Date
@@ -589,6 +758,15 @@ function Wait-ForHttpEndpoint {
             return $true
         }
 
+        if ($null -ne $ChildProcess -and $null -ne $ChildProcess.Process) {
+            $ChildProcess.Process.Refresh()
+            if ($ChildProcess.Process.HasExited) {
+                Write-Err "  ✗ $ServiceName 子进程已退出 (PID: $($ChildProcess.Process.Id), ExitCode: $($ChildProcess.Process.ExitCode))"
+                Write-StartupLogTail -Child $ChildProcess
+                return $false
+            }
+        }
+
         $elapsedSeconds = [int]((Get-Date) - $startTime).TotalSeconds
         if ($elapsedSeconds -gt 0 -and ($elapsedSeconds % 15) -eq 0 -and $elapsedSeconds -ne $lastProgressSecond) {
             Write-Gray "  - 已等待 $elapsedSeconds 秒，继续检查 $ServiceName..."
@@ -598,8 +776,11 @@ function Wait-ForHttpEndpoint {
     }
     
     Write-Err "  ✗ $ServiceName 启动超时"
+    Write-StartupLogTail -Child $ChildProcess
     return $false
 }
+
+Write-StartupProcessManifest
 
 # ============================================================
 # 步骤1: 清理旧进程
@@ -636,14 +817,20 @@ if (-not $FrontendOnly) {
     # 启动后端（在新窗口中）
     $backendScript = Join-Path $ProjectRoot "start_backend.ps1"
     if (Test-Path $backendScript) {
-        Start-Process $ShellExe -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $backendScript -WorkingDirectory $ProjectRoot -WindowStyle Normal
-        Write-Gray "  后端服务器窗口已启动"
+        $backendChild = Start-StartupChildProcess -Name "backend" -ScriptPath $backendScript
+        if ($Headless) {
+            Write-Gray "  后端服务器后台进程已启动 (PID: $($backendChild.Process.Id))"
+        } else {
+            Write-Gray "  后端服务器窗口已启动"
+        }
         
         # 等待后端就绪
-        if (Wait-ForHttpEndpoint -Url $BackendHealthUrl -TimeoutSeconds $BackendStartupTimeoutSeconds -ServiceName "后端服务器") {
+        if (Wait-ForHttpEndpoint -Url $BackendHealthUrl -TimeoutSeconds $BackendStartupTimeoutSeconds -ServiceName "后端服务器" -ChildProcess $backendChild) {
             $backendStarted = $true
+            Update-StartupChildListenerPids -Child $backendChild -Port $BackendPort
         } else {
             Write-Err "  ✗ 后端服务器启动失败"
+            Stop-StartupOwnedProcesses
             exit 1
         }
     } else {
@@ -690,14 +877,20 @@ if (-not $BackendOnly) {
     # 启动前端（在新窗口中）
     $frontendScript = Join-Path $ProjectRoot "start_frontend.ps1"
     if (Test-Path $frontendScript) {
-        Start-Process $ShellExe -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $frontendScript -WorkingDirectory $ProjectRoot -WindowStyle Normal
-        Write-Gray "  前端服务器窗口已启动"
+        $frontendChild = Start-StartupChildProcess -Name "frontend" -ScriptPath $frontendScript
+        if ($Headless) {
+            Write-Gray "  前端服务器后台进程已启动 (PID: $($frontendChild.Process.Id))"
+        } else {
+            Write-Gray "  前端服务器窗口已启动"
+        }
         
         # 等待前端就绪
-        if (Wait-ForHttpEndpoint -Url $FrontendUrl -TimeoutSeconds $FrontendStartupTimeoutSeconds -ServiceName "前端服务器") {
+        if (Wait-ForHttpEndpoint -Url $FrontendUrl -TimeoutSeconds $FrontendStartupTimeoutSeconds -ServiceName "前端服务器" -ChildProcess $frontendChild) {
             $frontendStarted = $true
+            Update-StartupChildListenerPids -Child $frontendChild -Port $FrontendPort
         } else {
             Write-Err "  ✗ 前端服务器启动失败"
+            Stop-StartupOwnedProcesses
             exit 1
         }
     } else {

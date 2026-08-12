@@ -206,3 +206,27 @@ fn preview_metadata_materializes_expensive_signal_projection_once() {
         assert!(sql.contains(projected_column), "missing {projected_column}");
     }
 }
+
+#[test]
+fn preview_metadata_scans_projected_scope_once_for_core_aggregates() {
+    let mut query = build_preview_metadata_aggregate_query(
+        1,
+        2,
+        &ImportPreviewQueryFilters {
+            signal: Some("transfer".to_string()),
+            category: Some("__invalid__".to_string()),
+            ..ImportPreviewQueryFilters::default()
+        },
+    );
+    let sql = query.build().sql().to_string();
+
+    assert_eq!(
+        sql.matches("FROM preview_scope p").count(),
+        4,
+        "counts, the full selection snapshot, and all six signal counts must share one scan; only the three bounded facet aggregates may rescan preview_scope"
+    );
+    assert!(
+        sql.contains("COUNT(*) FILTER (WHERE TRUE"),
+        "core preview metadata must use conditional aggregation instead of scalar subquery rescans"
+    );
+}

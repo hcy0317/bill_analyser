@@ -37,9 +37,29 @@ export function applyNonServerPagedReplacement(
     getPreviewId: (row: ImportTransaction) => number | null,
 ): ImportTransaction[] {
     const removed = new Set(removedPreviewIds);
-    const remainingRows = currentRows.filter(row => {
+    const upsertedByPreviewId = new Map<number, ImportTransaction>();
+    for (const row of upsertedRows) {
         const previewId = getPreviewId(row);
-        return previewId === null || !removed.has(previewId);
+        if (previewId !== null) {
+            upsertedByPreviewId.set(previewId, row);
+        }
+    }
+    const consumedPreviewIds = new Set<number>();
+    const remainingRows = currentRows.flatMap(row => {
+        const previewId = getPreviewId(row);
+        if (previewId === null || !removed.has(previewId)) {
+            return [row];
+        }
+        const replacement = upsertedByPreviewId.get(previewId);
+        if (!replacement) {
+            return [];
+        }
+        consumedPreviewIds.add(previewId);
+        return [replacement];
     });
-    return [...remainingRows, ...upsertedRows];
+    const appendedRows = upsertedRows.filter(row => {
+        const previewId = getPreviewId(row);
+        return previewId === null || !consumedPreviewIds.has(previewId);
+    });
+    return [...remainingRows, ...appendedRows];
 }

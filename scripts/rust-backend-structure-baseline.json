@@ -9,5 +9,30 @@
   },
   "generatedBy": "scripts/check-rust-backend-structure.mjs --print-baseline",
   "countMode": "non-comment-non-observability-rust-lines",
-  "files": []
+  "files": [
+    {
+      "path": "src/backend/parsers/spreadsheet/xls_preflight.rs",
+      "kind": "rust",
+      "area": "parsers",
+      "lines": 719,
+      "physicalLines": 778,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/http/import_routes/llm/provider_runtime.rs",
+      "kind": "rust",
+      "area": "http",
+      "lines": 681,
+      "physicalLines": 720,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
+    },
+    {
+      "path": "src/backend/http/import_routes/llm/rule_synthesis_helpers.rs",
+      "kind": "rust",
+      "area": "http",
+      "lines": 669,
+      "physicalLines": 711,
+      "reason": "existing oversized Rust backend file tracked by the structure ratchet"
+    }
+  ]
 }

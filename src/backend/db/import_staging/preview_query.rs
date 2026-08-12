@@ -498,81 +498,52 @@ fn build_preview_metadata_aggregate_query_with_prefix(
     query.push_bind(session_db_id);
     query.push(" AND p.user_id = ");
     query.push_bind(user_id);
-    query.push(") SELECT ");
-
-    query.push("(SELECT COUNT(*)::BIGINT");
-    push_preview_metadata_scope(&mut query, session_db_id, user_id, filters);
-    query.push(") AS total_count, ");
+    query.push("), core_aggregates AS (SELECT ");
+    query.push("COUNT(*) FILTER (WHERE TRUE");
+    push_preview_metadata_query_predicates(&mut query, filters, "p");
+    query.push(")::BIGINT AS total_count, ");
 
     let mut selected_filters = filters.clone();
     selected_filters.selected_only = true;
-    query.push("(SELECT COUNT(*)::BIGINT");
-    push_preview_metadata_scope(&mut query, session_db_id, user_id, &selected_filters);
-    query.push(") AS selected_count, ");
+    query.push("COUNT(*) FILTER (WHERE TRUE");
+    push_preview_metadata_query_predicates(&mut query, &selected_filters, "p");
+    query.push(")::BIGINT AS selected_count, ");
 
     let mut selected_invalid_filters = selected_filters;
     selected_invalid_filters.annotation = Some("needs-review".to_string());
-    query.push("(SELECT COUNT(*)::BIGINT");
-    push_preview_metadata_scope(
-        &mut query,
-        session_db_id,
-        user_id,
-        &selected_invalid_filters,
-    );
-    query.push(") AS selected_invalid, ");
+    query.push("COUNT(*) FILTER (WHERE TRUE");
+    push_preview_metadata_query_predicates(&mut query, &selected_invalid_filters, "p");
+    query.push(")::BIGINT AS selected_invalid, ");
 
-    query.push("COALESCE((SELECT array_agg(p.id ORDER BY p.id)");
-    push_preview_metadata_scope(
-        &mut query,
-        session_db_id,
-        user_id,
-        &ImportPreviewQueryFilters {
-            selected_only: true,
-            ..ImportPreviewQueryFilters::default()
-        },
-    );
-    query.push("), ARRAY[]::BIGINT[]) AS selected_ids, ");
-
-    push_preview_signal_counts_aggregate(&mut query, session_db_id, user_id, filters);
-    query.push(" AS signal_counts, ");
+    query.push("COALESCE(array_agg(p.id ORDER BY p.id) FILTER (WHERE p.selected = true), ARRAY[]::BIGINT[]) AS selected_ids, ");
+    push_preview_signal_counts_aggregate(&mut query, filters);
+    query.push(" AS signal_counts FROM preview_scope p) SELECT core_aggregates.total_count, core_aggregates.selected_count, core_aggregates.selected_invalid, core_aggregates.selected_ids, core_aggregates.signal_counts, ");
     push_preview_category_facets_aggregate(&mut query, session_db_id, user_id, filters);
     query.push(" AS category_facets, ");
     push_preview_account_facets_aggregate(&mut query, session_db_id, user_id, filters);
     query.push(" AS account_facets, ");
     push_preview_tag_facets_aggregate(&mut query, session_db_id, user_id, filters);
-    query.push(" AS tag_facets");
+    query.push(" AS tag_facets FROM core_aggregates");
     query
-}
-
-fn push_preview_metadata_scope(
-    query: &mut QueryBuilder<'_, Postgres>,
-    _session_db_id: i64,
-    _user_id: i64,
-    filters: &ImportPreviewQueryFilters,
-) {
-    query.push(" FROM preview_scope p WHERE TRUE");
-    push_preview_metadata_query_predicates(query, filters, "p");
 }
 
 fn push_preview_signal_counts_aggregate(
     query: &mut QueryBuilder<'_, Postgres>,
-    session_db_id: i64,
-    user_id: i64,
     filters: &ImportPreviewQueryFilters,
 ) {
-    query.push("COALESCE((SELECT jsonb_object_agg(signal_rows.family, signal_rows.count) FROM (");
+    query.push("jsonb_build_object(");
     for (index, family) in IMPORT_PREVIEW_VISIBLE_SIGNAL_FAMILIES.iter().enumerate() {
         if index > 0 {
-            query.push(" UNION ALL ");
+            query.push(", ");
         }
         let mut signal_filters = filters.clone();
         signal_filters.signal = Some((*family).to_string());
-        query.push("SELECT ");
         query.push_bind((*family).to_string());
-        query.push(" AS family, COUNT(*)::BIGINT AS count");
-        push_preview_metadata_scope(query, session_db_id, user_id, &signal_filters);
+        query.push(", COUNT(*) FILTER (WHERE TRUE");
+        push_preview_metadata_query_predicates(query, &signal_filters, "p");
+        query.push(")::BIGINT");
     }
-    query.push(") signal_rows), '{}'::jsonb)");
+    query.push(")");
 }
 
 fn push_preview_category_facets_aggregate(

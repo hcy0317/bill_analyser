@@ -14,6 +14,7 @@ Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预
 - 前端工程：`src/web`
 - 当前 API 主链：`REST /api/...`
 - HTTP bind：Rust 与 `start_backend.ps1`、`一键启动.ps1`、`停止服务器.ps1` 共享 IP/`localhost` + 非零端口解析合同；wildcard 监听使用 loopback 做健康探测，停止脚本只定位配置端口的监听 PID。
+- 本地托管入口：`scripts/dev.ps1` 提供 `start/status/logs/stop/check`；后台启动复用 `一键启动.ps1`，以 manifest 记录 wrapper、监听 PID、路径和启动时间，停止时校验进程身份。`一键启动.bat` 是 PowerShell 7 双击启动入口，`一键结束.bat` 是双击托管停止入口；两者共享同一套日志与 manifest，停止默认保留 PostgreSQL 和 Weaviate 容器。
 
 本地启动要求 PostgreSQL 与 Weaviate 同时可达。PostgreSQL 是唯一业务数据库；Weaviate 是导入 learning recall 与派生向量索引的必需服务。
 
@@ -63,7 +64,7 @@ Rust HTTP 主入口在开始监听前会运行 PostgreSQL migrations。DB build 
 
 ## 导入链路
 
-导入链路由 Rust 完成 parser-first 上传、JSON parse、session/source/template/standard-row staging、dedup、转账 materialization、分类规则、recurring/learning/LLM decision、账户规则匹配、preview page、preview update/reclassify、confirm 与 cleanup。多文件 staging 与 preview row 落库使用分块批量写入；导入首屏只等待 preview row 和历史改写物化完成，decision group 证据在 preview 可操作后后台 best-effort 物化，不阻塞用户进入预览。preview 分页、筛选、排序、facets 和跨页选择由 PostgreSQL 在 `import_preview_rows` 上执行，跨页选择会保留“全部/有效/无效/需标注”子集语义，前端只保留当前页交互草稿。preview page metadata 的选择计数、无效选择计数、六类信号计数和三类 facets 由一条有界 PostgreSQL aggregate query 返回；`selection_hash` 始终按当前用户、当前 session 的完整已选 preview id 有序快照计算，不受当前页或筛选缩小。前端表头与菜单筛选共用 trim/空值省略后的 canonical page query 签名，等价 watcher 触发只提交一次请求；显式选择 mutation 等失效动作仍可强制刷新。三项 LLM/学习动作会先 flush 跨页选择差量：存在选择时携带同一非空 `selection_hash` 且只处理选择集，无选择时携带当前 canonical filters 的 `all_matching` 快照。预览信号筛选按信号列可见 family 计算：parser 只匹配没有平台重复、转账匹配、历史改写、learning 和 LLM 可见信号的 parser 行；`signal=transfer` 只匹配 `preview_matching_feedback.transfer` 这类转账匹配反馈，不把普通 `transaction_type=转账` 或仅有 transfer-like dedup 文本的行当作转账匹配信号；其他信号筛选分别匹配对应可见 family。预览分类的 canonical `category_id` 会贯穿 draft、payload、mutation、筛选、confirm 和最终 bill 创建；前端预览以当前用户可见分类表中的 canonical id 为合法性依据，不再因为本地类型缓存不一致把已存在分类显示为非法；后端写入 preview 和 confirm 前仍校验分类、来源账户与目标账户来自当前用户 active 主数据，`0`、不存在、非当前用户、inactive、类型不匹配、转账同账户和 `__none__`/`__invalid__` sentinel 都不会作为有效身份写入 preview 或正式账单。
+导入链路由 Rust 完成 parser-first 上传、JSON parse、session/source/template/standard-row staging、dedup、转账 materialization、分类规则、recurring/learning/LLM decision、账户规则匹配、preview page、preview update/reclassify、confirm 与 cleanup。多文件 staging 与 preview row 落库使用分块批量写入；导入首屏只等待 preview row 和历史改写物化完成，decision group 证据在 preview 可操作后后台 best-effort 物化，不阻塞用户进入预览。preview 分页、筛选、排序、facets 和跨页选择由 PostgreSQL 在 `import_preview_rows` 上执行，跨页选择会保留“全部/有效/无效/需标注”子集语义，前端只保留当前页交互草稿。preview page metadata 的选择计数、无效选择计数、六类信号计数和完整选择快照在一次 core conditional aggregate 中计算，三类 facets 各自做有界聚合，不再为每个 core 指标重复扫描相同 preview scope；`selection_hash` 始终按当前用户、当前 session 的完整已选 preview id 有序快照计算，不受当前页或筛选缩小。前端表头与菜单筛选共用 trim/空值省略后的 canonical page query 签名，等价 watcher 触发只提交一次请求；服务端分页模式会在字段变化时立即缓存当前行草稿，迟到的分页响应先恢复草稿并把编辑器重绑到当前行对象，跨页选择 mutation 直接消费响应 metadata，不再额外请求同一页；“选有效/选无效/需标注”会在同一次 mutation 中先落库已浏览页面中影响有效性判定的草稿，再按更新后的数据库状态执行集合选择。三项 LLM/学习动作会先 flush 跨页选择差量：存在选择时携带同一非空 `selection_hash` 且只处理选择集，无选择时携带当前 canonical filters 的 `all_matching` 快照。预览信号筛选按信号列可见 family 计算：parser 只匹配没有平台重复、转账匹配、历史改写、learning 和 LLM 可见信号的 parser 行；`signal=transfer` 只匹配 `preview_matching_feedback.transfer` 这类转账匹配反馈，不把普通 `transaction_type=转账` 或仅有 transfer-like dedup 文本的行当作转账匹配信号；其他信号筛选分别匹配对应可见 family。预览分类的 canonical `category_id` 会贯穿 draft、payload、mutation、筛选、confirm 和最终 bill 创建；前端预览以当前用户可见分类表中的 canonical id 为合法性依据，不再因为本地类型缓存不一致把已存在分类显示为非法；用户明确写入当前用户 active 分类后，SQL 的 needs-review 与 missing-category 投影会尊重 `manual_fields.category_id` 归属，不会仅因修改前的类型投影再次提示缺少分类，缺失、不存在或 inactive 分类仍然无效。reclassify 携带非空 `preview_updates` 时只读取、重算、写回并返回目标 preview id；空更新继续保留整 session 重新分类语义，非分页前端按目标 preview id 原位合并局部响应。confirm 仍在事务内执行最终分类、来源账户和目标账户身份校验，`0`、不存在、非当前用户、inactive、无法归一的类型组合、转账同账户和 `__none__`/`__invalid__` sentinel 都不会写入正式账单。
 
 预览筛选只包含六个 canonical family，顺序固定为 `parser`、`platform_duplicate`、`transfer`、`history`、`learning`、`llm`。Rust `ImportPreviewSignalFamily` 是权威定义，TypeScript 保留受合同测试约束的显式镜像。family membership、`matching.<family>` 投影、筛选命中和 `metadata.counts.signals` 计数复用同一语义；六个计数键始终存在，包括零值。审核状态按 family 收紧：`needs_review` 只属于 learning 的合法状态，并在轻量索引和界面展示中归一为 `pending`；LLM 与 transfer 不接受 `needs_review`。所有 family 遇到未知的非空审核状态都会 fail-closed，不进入对应筛选、索引或计数；状态为空但携带该 family 的有效 evidence 时，仍按现有证据规则判断信号。`recurring`、`reconciliation` 与 `identity_validation` 只作为行级辅助信号展示，不进入筛选 family、索引或六类计数。分页预览、完整预览和轻量索引都保留同一 matching 语义，其中完整预览不会丢失 `matching.llm`。
 
@@ -84,6 +85,10 @@ LLM memory 查询按 `created_at DESC, id DESC` 返回，前端仅采用每个 p
 导入 staging 写入前统一规范化账单日期文本：常规日期/时间、银行 Excel 日期序列，以及“日期 + 小数日时间”会转换为标准 `YYYY-MM-DD HH:MM:SS` 文本再进入 PostgreSQL 时间字段。
 
 账户识别以 `account_rules` 为权威；前端账户 DTO 不包含别名字段，账户规则以账户、表达式、优先级、启停状态为当前合同。`account_rules` 当前迁移后 schema 不再包含旧 `account_role_scope`、`transaction_type_scope` 与 `field_scope` 持久化列；旧 payload、query 或 settings bundle 中携带这些字段时只在 API/导入边界产生兼容 warning 并被忽略。导入运行时按稳定后的账单类型、账户角色和上下文字段包决定匹配目标；非正则账户规则只匹配规范化后的完整 token，避免“本行”误匹配“本行POS”等渠道文本。账户 API 在 DTO 边界把恢复数据或旧式数据中缺失的账户类型、账户分类归一成当前前端分类合同；缺失分类会优先保留显式值，再按账户名称、图标和旧式类型推断，不用统一现金兜底覆盖已恢复账户。
+
+条件选择携带的草稿与集合更新在同一个 session 锁事务内执行。单次 mutation 最多接受 500 个唯一 preview 草稿 ID，写入前批量校验 session scope 和当前用户 active 分类；越界、跨会话或事务内部分应用都会整体拒绝。
+
+跨页选择会在发出 mutation 前先使此前在途的 preview page generation 失效，成功后直接消费 mutation metadata，不追加分页 GET；服务端分页 reclassify 刷新会替换旧 generation，迟到响应不能覆盖新状态。
 
 ## 分类与规则中心
 
@@ -155,6 +160,7 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35
+.\scripts\dev.ps1 check
 ```
 
 ```powershell

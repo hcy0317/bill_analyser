@@ -42,6 +42,12 @@ pub struct ImportPreviewPatch {
     pub clear_llm_decision: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImportPreviewSelectionMutationResult {
+    pub applied_preview_updates: usize,
+    pub updated_selection: usize,
+}
+
 impl ImportPreviewPatch {
     pub fn new(preview_id: i64) -> Self {
         Self {

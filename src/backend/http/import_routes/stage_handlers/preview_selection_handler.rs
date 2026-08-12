@@ -69,6 +69,65 @@ pub async fn import_preview_selection_runtime_handler(
         Ok(action) => action,
         Err(response) => return route_response(response),
     };
+    let update_items = match preview_update_items_from_payload(&payload) {
+        Ok(update_items) => update_items,
+        Err(response) => return route_response(response),
+    };
+    let mut update_by_preview_id = BTreeMap::new();
+    for item in update_items {
+        let preview_id = match preview_id_from_payload(item) {
+            Ok(preview_id) => preview_id,
+            Err(response) => return route_response(response),
+        };
+        update_by_preview_id.insert(preview_id, item);
+    }
+    if update_by_preview_id.len() > 500 {
+        return route_response(preview_selection_too_large_response());
+    }
+    let preview_ids = update_by_preview_id.keys().copied().collect::<Vec<_>>();
+    let scoped_previews = match get_preview_by_ids(
+        runtime.connection(),
+        &session_id,
+        &preview_ids,
+        user_id,
+    ) {
+        Ok(previews) => previews,
+        Err(error) => return route_response(db_error_response(error)),
+    };
+    if scoped_previews.len() != preview_ids.len() {
+        return route_response(import_v2_error_response(
+            400,
+            "Preview update is outside this session",
+        ));
+    }
+    let category_ids = update_by_preview_id
+        .values()
+        .filter_map(|item| first_value(item, &["categoryId", "category_id"]))
+        .filter_map(value_to_i64)
+        .filter(|category_id| *category_id > 0)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let categories = match get_import_preview_categories_by_ids(
+        runtime.connection(),
+        user_id,
+        &category_ids,
+    ) {
+        Ok(categories) => categories,
+        Err(error) => return route_response(db_error_response(error)),
+    };
+    let mut patches = Vec::with_capacity(update_by_preview_id.len());
+    for (preview_id, item) in update_by_preview_id {
+        let patch = match build_preview_patch_from_payload_with_loaded_categories(
+            preview_id,
+            item,
+            &categories,
+        ) {
+            Ok(patch) => patch,
+            Err(response) => return route_response(response),
+        };
+        patches.push(patch);
+    }
     let filters = import_preview_query_filters_from_payload(object);
     let selection_request = ImportPreviewPageRequest {
         page: 1,
@@ -100,15 +159,16 @@ pub async fn import_preview_selection_runtime_handler(
             ImportPreviewSelectionTarget::All,
         ),
     };
-    let updated = match update_session_preview_selection_by_query(
+    let mutation = match apply_preview_patches_and_update_selection_by_query(
         runtime.connection(),
         &session_id,
         user_id,
+        &patches,
         selection_mode,
         selection_target,
         &selection_request,
     ) {
-        Ok(updated) => updated,
+        Ok(result) => result,
         Err(error) => return route_response(db_error_response(error)),
     };
     let metadata = match query_preview_page_by_session(
@@ -129,7 +189,8 @@ pub async fn import_preview_selection_runtime_handler(
     };
 
     route_response(import_v2_data_response(json!({
-        "updated": updated,
+        "updated": mutation.updated_selection,
+        "applied_preview_updates": mutation.applied_preview_updates,
         "selectionAction": action,
         "metadata": metadata,
     })))

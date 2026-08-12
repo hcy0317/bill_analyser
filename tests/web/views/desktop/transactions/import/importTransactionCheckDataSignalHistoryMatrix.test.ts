@@ -585,7 +585,7 @@ describe('desktop import async action branch matrix', () => {
         expect(JSON.parse(reclassifyRequest.body)).toEqual({
             preview_updates: [expect.objectContaining({ id: 61 })]
         });
-        expect(success.emit).toHaveBeenCalledWith('reclassified', [{ id: 61 }]);
+        expect(success.emit).toHaveBeenCalledWith('reclassified', [{ id: 61 }], [61]);
         expect(mockShowMessage).toHaveBeenCalledWith(
             'format.misc.youHaveUpdatedTransactions',
             { count: '1' }

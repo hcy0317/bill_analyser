@@ -82,10 +82,11 @@ cd ..\..
 ### 启动服务
 
 ```powershell
-.\一键启动.ps1
+.\一键启动.bat
+.\一键结束.bat
 ```
 
-一键启动脚本会按端口清理已有服务，先通过 `docker compose -f docker-compose.postgres.yml up -d postgres weaviate` 确保必需服务运行，再构建并启动 Rust HTTP 后端、启动 Vite 前端，并分别等待后端健康检查和前端首页可访问。
+一键启动入口要求 PowerShell 7。它会按端口清理已有服务，先通过 `docker compose -f docker-compose.postgres.yml up -d postgres weaviate` 确保必需服务运行，再构建并启动 Rust HTTP 后端、启动 Vite 前端，并分别等待后端健康检查和前端首页可访问。前后端在后台运行，日志和进程清单写入 `.git/ai/dev-services`；子进程提前退出时，启动器会立即显示日志尾部，不再盲等完整超时时间。
 
 常用参数：
 
@@ -94,6 +95,16 @@ cd ..\..
 .\一键启动.ps1 -FrontendOnly  # 只启动前端
 .\一键启动.ps1 -NoAutoStop    # 不自动停止已有服务
 .\一键启动.ps1 -NoBrowser     # 启动完成后不自动打开浏览器
+```
+
+更适合日常开发的托管命令：
+
+```powershell
+.\scripts\dev.ps1 start       # 后台启动并记录进程身份与日志
+.\scripts\dev.ps1 status      # 检查托管进程和 HTTP 就绪状态
+.\scripts\dev.ps1 logs        # 查看前后端最近日志
+.\scripts\dev.ps1 stop        # 只停止清单中身份匹配的进程
+.\scripts\dev.ps1 check       # 真实启动、健康检查并精确清理
 ```
 
 也可以分别启动：
@@ -159,8 +170,11 @@ npm run dev
 ### 停止服务
 
 ```powershell
-.\停止服务器.ps1
+.\一键结束.bat
+.\scripts\dev.ps1 stop
 ```
+
+`一键结束.bat` 是可双击的托管停止入口，内部调用 `dev.ps1 stop`，只停止本次 manifest 中身份匹配的前后端进程，保留 PostgreSQL 和 Weaviate 容器以加快下次启动。旧入口或手动启动的服务仍可使用 `.\停止服务器.ps1` 按配置端口停止。
 
 ## 开发指南
 
