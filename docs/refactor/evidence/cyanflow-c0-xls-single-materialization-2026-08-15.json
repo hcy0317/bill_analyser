@@ -1,6 +1,6 @@
 {
-  "schema_version": "cyanflow-c0-xls-single-materialization.v1",
-  "generated_at": "2026-08-15T15:33:41+08:00",
+  "schema_version": "cyanflow-c0-xls-single-materialization.v2",
+  "generated_at": "2026-08-15T16:20:28+08:00",
   "workflow": {
     "driver": "cyanflow",
     "activity": "performance",
@@ -8,8 +8,11 @@
   },
   "source": {
     "base_head_sha": "ff29b7ebaa3173bb9869e0f12a47e873ac7f3d90",
-    "state": "implementation worktree on base head",
-    "accepted_as_exact_main": false
+    "pull_request": 281,
+    "merge_commit_sha": "80269554153b21f122fa03b4d9a9484134439e8c",
+    "exact_main_head_sha": "80269554153b21f122fa03b4d9a9484134439e8c",
+    "state": "three consecutive exact-main runs after squash merge",
+    "accepted_as_exact_main": true
   },
   "corpus": {
     "manifest_sha256": "0a3b595c268413d7f404d823c6a0d0456d0e81b655e47c3c3f92e412b2c4c838",
@@ -41,6 +44,60 @@
       "total_ms": 7568
     }
   },
+  "exact_main": {
+    "required_consecutive_runs": 3,
+    "completed_consecutive_runs": 3,
+    "threshold_ms": 60000,
+    "slowest_preview_operable_ms": 22860,
+    "minimum_margin_ms": 37140,
+    "runs": [
+      {
+        "run_id": "c0-exact-main-8026955-1-20260815",
+        "head_sha": "80269554153b21f122fa03b4d9a9484134439e8c",
+        "corpus_manifest_sha256": "0a3b595c268413d7f404d823c6a0d0456d0e81b655e47c3c3f92e412b2c4c838",
+        "file_count": 64,
+        "parsed_row_count": 15041,
+        "preview_row_count": 13082,
+        "unmatched_file_count": 0,
+        "preview_operable_ms": 12560,
+        "stage1_parser_ms": 1581,
+        "stage1_total_ms": 4254,
+        "stage2_total_ms": 7763,
+        "strict_cleanup": "success",
+        "database_cleanup": "success"
+      },
+      {
+        "run_id": "c0-exact-main-8026955-2-20260815",
+        "head_sha": "80269554153b21f122fa03b4d9a9484134439e8c",
+        "corpus_manifest_sha256": "0a3b595c268413d7f404d823c6a0d0456d0e81b655e47c3c3f92e412b2c4c838",
+        "file_count": 64,
+        "parsed_row_count": 15041,
+        "preview_row_count": 13082,
+        "unmatched_file_count": 0,
+        "preview_operable_ms": 22860,
+        "stage1_parser_ms": 3395,
+        "stage1_total_ms": 7578,
+        "stage2_total_ms": 14480,
+        "strict_cleanup": "success",
+        "database_cleanup": "success"
+      },
+      {
+        "run_id": "c0-exact-main-8026955-3-20260815",
+        "head_sha": "80269554153b21f122fa03b4d9a9484134439e8c",
+        "corpus_manifest_sha256": "0a3b595c268413d7f404d823c6a0d0456d0e81b655e47c3c3f92e412b2c4c838",
+        "file_count": 64,
+        "parsed_row_count": 15041,
+        "preview_row_count": 13082,
+        "unmatched_file_count": 0,
+        "preview_operable_ms": 21416,
+        "stage1_parser_ms": 3133,
+        "stage1_total_ms": 7055,
+        "stage2_total_ms": 13566,
+        "strict_cleanup": "success",
+        "database_cleanup": "success"
+      }
+    ]
+  },
   "architecture": {
     "prepared_spreadsheet_per_file": 1,
     "full_row_materializations_per_dedicated_spreadsheet": 1,
@@ -56,8 +113,10 @@
   "gate": {
     "worktree": "pass",
     "performance_target": "pass",
-    "exact_main": "pending",
-    "three_consecutive_exact_main_runs": "not_started",
-    "c0_exit": "pending"
+    "exact_main": "pass",
+    "three_consecutive_exact_main_runs": "pass",
+    "c0_performance_exit": "pass",
+    "recognition_quality": "pending",
+    "c0_exit": "pending_recognition_quality"
   }
 }
