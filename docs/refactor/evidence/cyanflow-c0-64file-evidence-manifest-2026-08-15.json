@@ -1,0 +1,158 @@
+{
+  "schema_version": "cyanflow-c0-evidence-manifest.v1",
+  "generated_at": "2026-08-15T01:30:57.7829662+08:00",
+  "workflow": {
+    "driver": "cyanflow",
+    "activity": "research",
+    "verification": "affected_surface",
+    "scope": "C0 evidence and governance only",
+    "business_code_modified": false
+  },
+  "repository": {
+    "workspace": "C:/Users/hcy/Programs/Github/bill_analyser",
+    "branch": "main",
+    "head_sha": "345c095d7bd2421532a3c2f74184d408768b925c",
+    "head_committed_at": "2026-08-13T04:44:10+08:00",
+    "head_subject": "fix(runtime): 稳定导入预览与本地开发启停 (#272)"
+  },
+  "codebase_memory": {
+    "project_key": "bill_analyser-d7309f0e9eab-rc71a677a33b8",
+    "session_preflight": "refreshed",
+    "readonly_queries_completed": [
+      "get_graph_schema",
+      "get_architecture",
+      "search_graph",
+      "search_code",
+      "query_graph",
+      "get_code_snippet",
+      "trace_path"
+    ],
+    "graph_counts": {
+      "nodes": 15801,
+      "edges": 65562,
+      "routes": 210,
+      "rust_files": 628,
+      "typescript_files": 308,
+      "vue_files": 193
+    },
+    "limitation": "同名短符号产生跨域假连接，最终结论均以当前工作区源码复核。"
+  },
+  "corpus": {
+    "root": "bills/",
+    "git_status": "ignored by .gitignore:486",
+    "privacy": "不记录文件名；摘要计算时使用实际相对路径，但工件只保存集合哈希。",
+    "algorithm": "SHA-256 lowercase hexadecimal",
+    "ordering": "case-insensitive relative path ascending",
+    "record_format": "<relative-path>\\t<size-bytes>\\t<content-sha256>, joined with LF and no trailing LF",
+    "file_count": 64,
+    "total_bytes": 3678128,
+    "extensions": {
+      ".csv": {
+        "count": 14,
+        "bytes": 1757817
+      },
+      ".xls": {
+        "count": 11,
+        "bytes": 1398156
+      },
+      ".xlsx": {
+        "count": 39,
+        "bytes": 522155
+      }
+    },
+    "path_set_sha256": "a20b46644915c6b7bffb244081e76f9375aec5f7f5c7abd1663f3b4e1d402082",
+    "content_set_sha256": "5c064fada7c331c3ce73d900d6e8a0b19b7ff62acbbba1f120b559fd1a91c5a6",
+    "corpus_manifest_sha256": "0a3b595c268413d7f404d823c6a0d0456d0e81b655e47c3c3f92e412b2c4c838"
+  },
+  "historical_run": {
+    "acceptance_role": "symptom evidence only",
+    "accepted_as_current_baseline": false,
+    "reason": "日志启动时间早于当前 HEAD 提交，且没有同次 binary-to-source 证明、脱敏用户配置快照和完整 browser marker。",
+    "backend_log": {
+      "path": ".git/ai/dev-services/logs/backend-20260813-035529.out.log",
+      "bytes": 57792,
+      "last_write_utc": "2026-08-13T16:31:05.7661238Z",
+      "sha256": "5fa515454e9e02e0c5b9de87ac914d1c37e243cebc93903b1f70e93a433b2565"
+    },
+    "stage1": {
+      "file_count": 64,
+      "matched_file_count": 64,
+      "unmatched_file_count": 0,
+      "raw_transaction_count": 15041,
+      "standardized_row_count": 15041,
+      "elapsed_staging_ms": 4064,
+      "elapsed_total_ms": 141359
+    },
+    "stage2": {
+      "raw_transaction_count": 15041,
+      "preview_count": 13082,
+      "dedup_group_count": 1951,
+      "category_missing_count": 2384,
+      "transfer_candidate_count": 142,
+      "learning_candidate_count": 0,
+      "elapsed_total_ms": 30798,
+      "elapsed_dedup_ms": 10482,
+      "elapsed_intelligence_ms": 10923,
+      "elapsed_preview_insert_ms": 6562,
+      "decision_groups_deferred": true
+    }
+  },
+  "current_runtime": {
+    "observed_at": "2026-08-15T01:30:57.7829662+08:00",
+    "status_command": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 status",
+    "managed_process_count": 0,
+    "backend": "down",
+    "frontend": "down",
+    "service_manifest": {
+      "path": ".git/ai/dev-services/services.manifest.json",
+      "bytes": 2276,
+      "last_write_utc": "2026-08-12T19:56:06.1003264Z",
+      "sha256": "1d4aebe9f20835b3b95b80851a09cb15c129fabf3efaca0ae175b94486dc59fa"
+    },
+    "binary": {
+      "path": "target/debug/bill_http_server.exe",
+      "bytes": 51393536,
+      "last_write_utc": "2026-08-12T18:52:14.4216976Z",
+      "sha256": "aa509faa8c2dd8c78732a025e8be58896f4ddf5daba332e1770c6aa7e214ceaf",
+      "source_head_attribution": false
+    }
+  },
+  "configuration": {
+    "tracked_config_file_count": 22,
+    "tracked_config_set_sha256": "3f5f9ce2628337e0e52be07d605f87e2864c83222dda22f70fee1f56e66aee0b",
+    "user_settings_snapshot": "missing",
+    "postgres_snapshot": "missing",
+    "weaviate_snapshot": "missing",
+    "llm_snapshot": "missing",
+    "secret_policy": "不得把连接串、token 或原始用户设置写入 C0 工件。"
+  },
+  "browser": {
+    "marker": "missing",
+    "trace": "missing",
+    "network_timing": "missing",
+    "operable_first_screen_timestamp": "missing"
+  },
+  "gate": {
+    "artifact_status": "assembled",
+    "c0_exit": "blocked",
+    "fail_closed_reasons": [
+      "当前服务未运行，未执行当前 HEAD 的 64 文件导入。",
+      "现有 binary 早于当前 HEAD，不能证明历史日志对应当前源码。",
+      "缺少同次脱敏 PostgreSQL/Weaviate/LLM/user-settings 快照。",
+      "缺少同次 browser marker、trace 和 operable-first-screen 时间。"
+    ],
+    "required_next_evidence": [
+      "在明确授权的独立切片中从当前 HEAD 构建并记录 binary SHA。",
+      "以本清单 corpus_manifest_sha256 对 64 文件做一次真实导入。",
+      "记录同次服务配置状态、阶段日志和 browser marker。",
+      "至少完成一次可复跑基线后再决定 C1 是否放行；性能最终验收仍要求连续三次。"
+    ]
+  },
+  "reproduction": {
+    "repository_sha": "git rev-parse HEAD",
+    "runtime_status": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 status",
+    "historical_log_hash": "Get-FileHash -Algorithm SHA256 .git/ai/dev-services/logs/backend-20260813-035529.out.log",
+    "binary_hash": "Get-FileHash -Algorithm SHA256 target/debug/bill_http_server.exe",
+    "corpus_digest_note": "按 corpus.algorithm、ordering 和 record_format 重算；不要输出或提交原始文件名和内容。"
+  }
+}

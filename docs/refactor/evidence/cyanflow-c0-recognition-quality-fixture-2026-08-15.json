@@ -1,0 +1,156 @@
+{
+  "schema_version": "cyanflow-recognition-quality-fixture.v1",
+  "generated_at": "2026-08-15T01:30:57.7829662+08:00",
+  "repository_head": "345c095d7bd2421532a3c2f74184d408768b925c",
+  "purpose": "冻结重构必须保留或补齐的识别与信号语义；本文件不包含用户账单内容。",
+  "status_values": [
+    "covered",
+    "partial",
+    "missing"
+  ],
+  "scenarios": [
+    {
+      "id": "parser-exactly-one",
+      "contract": "每个文件最多由一个 dedicated parser 获得写权；no_match 进入 generic mapping，conflict 不得任意选择 parser。",
+      "expected": {
+        "matched": "one selected_parser_id",
+        "no_match": "no selected_parser_id",
+        "conflict": "no selected_parser_id and all candidates retained as evidence"
+      },
+      "current_evidence": [
+        "src/backend/parsers/dedicated/selection.rs:26",
+        "tests/backend/parsers/parser_contracts.rs:585"
+      ],
+      "coverage_status": "covered",
+      "required_before": "C3"
+    },
+    {
+      "id": "generic-unmatched-column-mapping",
+      "contract": "dedicated parser no_match 后必须保留 generic unmatched parser/列映射路径，不能把文件静默丢弃。",
+      "expected": {
+        "no_match": "generic mapping remains available",
+        "data_loss": false
+      },
+      "current_evidence": [
+        "tests/backend/parsers/parser_contracts.rs:601",
+        "src/web/src/lib/services/importPreview.ts:94"
+      ],
+      "coverage_status": "partial",
+      "gap": "已有 detector no_match 与前端 mapping 请求，但缺少贯穿 HTTP -> parser -> standardized rows 的单一合同 fixture。",
+      "required_before": "C3"
+    },
+    {
+      "id": "missing-category-derived-issue",
+      "contract": "分类为空、失效或类型不匹配且无人工 ownership 时产生 missing-category issue；合法分类 ack 后同一 effective row 不再显示该 issue。",
+      "expected": {
+        "server_authority": "typed identity facts and active taxonomy",
+        "draft_authority": "current-frame provisional delta only",
+        "long_lived_frontend_cache": false
+      },
+      "current_evidence": [
+        "src/backend/db/import_staging/identity_validation.rs:80",
+        "src/backend/db/import_staging/preview_predicates/identity.rs:86",
+        "src/web/src/views/desktop/transactions/import/check-data-tab/useImportCheckDataAnnotations.ts:22",
+        "tests/web/coverage-wave17-import-signals/importPreviewReviewState.behavior.test.ts:83"
+      ],
+      "coverage_status": "partial",
+      "gap": "前端仍有 revision 驱动的 annotation summary 与 persisted matching 清理逻辑，尚无同 tick + ack + 翻页 + 刷新 + 重进的完整 browser fixture。",
+      "required_before": "C1"
+    },
+    {
+      "id": "manual-category-ownership",
+      "contract": "活跃分类即使与交易类型不匹配，只要 category_id 为人工 ownership 就保留；失效或不存在的分类不能被 ownership 伪装为合法。",
+      "expected": {
+        "active_mismatch_manual": "preserved",
+        "inactive_or_missing_manual": "rejected"
+      },
+      "current_evidence": [
+        "src/backend/db/import_staging/tests_identity_validation.rs:61",
+        "tests/backend/db/preview_metadata_postgres.rs:411"
+      ],
+      "coverage_status": "covered",
+      "required_before": "C2"
+    },
+    {
+      "id": "likely-transfer-family-overlap",
+      "contract": "疑似转账推荐同时属于 transfer 与 learning；family 非互斥，parser-only 例外。",
+      "expected": {
+        "visible_families": [
+          "transfer",
+          "learning"
+        ],
+        "transfer_filter": true,
+        "learning_filter": true
+      },
+      "current_evidence": [
+        "tests/web/views/desktop/transactions/import/checkDataMatching.test.ts:212",
+        "tests/web/views/desktop/transactions/import/checkDataMatching.test.ts:504"
+      ],
+      "coverage_status": "partial",
+      "gap": "前端能同时渲染两个 pending family，但缺少从 canonical likely-transfer 来源到后端 counts、分页 filter 和 desktop/mobile 的端到端双 membership fixture。",
+      "required_before": "C2"
+    },
+    {
+      "id": "transfer-accept-field-protection",
+      "contract": "疑似转账 accept 保留合法分类、来源/目标账户和所有人工字段。",
+      "expected": {
+        "manual_fields_preserved": true,
+        "valid_category_preserved": true,
+        "valid_source_account_preserved": true,
+        "valid_destination_account_preserved": true
+      },
+      "current_evidence": [
+        "tests/backend/db/import_staging.rs:4306",
+        "tests/web/views/desktop/transactions/import/importLifecycleSfc.test.ts:945"
+      ],
+      "coverage_status": "partial",
+      "gap": "现有测试覆盖 accepted lifecycle，但没有用同一 fixture 锁定四类字段在 accept 前后的逐字段相等。",
+      "required_before": "C2"
+    },
+    {
+      "id": "transfer-reject-two-row-recompute",
+      "contract": "疑似转账 reject 撤销 pair 后原子恢复两行，并重新计算两行的非人工字段；禁止用简单清空代替重算。",
+      "expected": {
+        "replacement_row_count": 2,
+        "atomic": true,
+        "manual_fields_preserved": true,
+        "non_manual_fields": "recomputed"
+      },
+      "current_evidence": [
+        "src/backend/db/import_staging/materialization_ledger/rejections.rs:106",
+        "tests/backend/db/import_staging.rs:5741"
+      ],
+      "coverage_status": "partial",
+      "gap": "当前 DB 路径原子拆成两行并保留人工字段，但非人工分类/账户被置空并标记 pending reclassification；尚未证明同一操作内完成重算。",
+      "required_before": "C2"
+    },
+    {
+      "id": "unknown-signal-state-fail-closed",
+      "contract": "未知 signal/decision state 不得变成 accepted 或可确认；必须保留证据、进入 review 并可观测。",
+      "expected": {
+        "actionable": false,
+        "confirmable": false,
+        "needs_review": true,
+        "evidence_preserved": true
+      },
+      "current_evidence": [
+        "src/backend/core/import_pipeline/filter_index/projection.rs:75"
+      ],
+      "coverage_status": "missing",
+      "gap": "未找到跨 Rust projector、SQL filter 和前端 selector 的 unknown-state 合同测试。",
+      "required_before": "C2"
+    }
+  ],
+  "gate": {
+    "fixture_inventory_complete": true,
+    "all_contracts_executable": false,
+    "blocking_scenarios": [
+      "generic-unmatched-column-mapping",
+      "missing-category-derived-issue",
+      "likely-transfer-family-overlap",
+      "transfer-accept-field-protection",
+      "transfer-reject-two-row-recompute",
+      "unknown-signal-state-fail-closed"
+    ]
+  }
+}
