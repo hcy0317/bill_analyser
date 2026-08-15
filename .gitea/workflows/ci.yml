@@ -155,9 +155,6 @@ jobs:
       - name: Run Rust clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Run Rust tests
-        run: cargo test --workspace
-
       - name: Run assembled runtime route ownership contract
         run: cargo test -p bill-analyser-http --test runtime_route_ownership_contract -- --nocapture
 
@@ -171,7 +168,7 @@ jobs:
             cargo install cargo-llvm-cov --locked
           fi
 
-      - name: Run Rust coverage
+      - name: Run Rust workspace tests with coverage
         run: cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35
 
       - name: Enforce Rust changed-line coverage

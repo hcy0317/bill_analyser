@@ -47,6 +47,7 @@ const FRONTEND_COVERAGE_BLOCK = [
 const LOCAL_RUST_BUSINESS_DIFF_GUARD = 'git -c gc.auto=0 diff --quiet "${mergeBase}...${head}" -- src/backend';
 const LOCAL_FRONTEND_BUSINESS_DIFF_GUARD = 'git -c gc.auto=0 diff --quiet "${mergeBase}...${head}" -- src/web/src';
 const ROUTE_COMMAND = 'cargo test -p bill-analyser-http --test runtime_route_ownership_contract -- --nocapture';
+const RUST_WORKSPACE_COVERAGE_COMMAND = 'cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35';
 const RUST_ONLY_COMMAND = 'node scripts/check-rust-only-source-tree.mjs';
 const FRONTEND_COVERAGE_SCRIPT = 'cross-env CI=1 COVERAGE_GATE=1 TS_NODE_PROJECT="./tsconfig.jest.json" jest --maxWorkers=50% --coverage';
 const E2E_SUPERVISOR_COMMAND = 'npm --prefix src/web run e2e:ci:smoke';
@@ -248,6 +249,20 @@ function stepIndex(job, name) {
     return job.steps.findIndex(step => step?.name === name);
 }
 
+function validateSingleRustWorkspaceExecutor(job) {
+    const executors = job.steps.filter(step => {
+        const command = normalizeCommand(step?.run);
+        return /(?:^|\n)cargo test --workspace(?:\s|$)/.test(command)
+            || /(?:^|\n)cargo llvm-cov --workspace(?:\s|$)/.test(command);
+    });
+    if (executors.length !== 1) {
+        throw new Error('backend-ci must contain exactly one full Rust workspace test executor; duplicate full Rust workspace test executor detected');
+    }
+    if (executors[0]?.name !== 'Run Rust workspace tests with coverage') {
+        throw new Error('backend-ci full Rust workspace test executor must be Run Rust workspace tests with coverage');
+    }
+}
+
 function validateCheckout(job, jobId) {
     const checkout = job.steps.find(step => step?.uses === 'https://github.com/actions/checkout@v4');
     if (!checkout) {
@@ -351,6 +366,7 @@ function validateLocalCiScript(text) {
         'node scripts/check-gitea-workflow.mjs',
         'node scripts/check-rust-backend-structure.mjs',
         ROUTE_COMMAND,
+        RUST_WORKSPACE_COVERAGE_COMMAND,
         LOCAL_RUST_BUSINESS_DIFF_GUARD,
         RUST_COVERAGE,
         'npm --prefix src/web run structure:check',
@@ -365,6 +381,9 @@ function validateLocalCiScript(text) {
         if (!text.includes(fragment)) {
             throw new Error(`scripts/run_ci_local.ps1 is missing: ${fragment}`);
         }
+    }
+    if (text.includes('cargo test --workspace')) {
+        throw new Error('scripts/run_ci_local.ps1 has a duplicate full Rust workspace test executor');
     }
     requireFragments({
         name: 'Rust changed-line coverage',
@@ -440,8 +459,11 @@ function validateWorkflow(workflow) {
     requiredStep(backend, 'backend-ci', 'Resolve immutable CI diff refs', RESOLVER_COMMAND);
     requiredStep(backend, 'backend-ci', 'Run Rust backend structure check', 'node scripts/check-rust-backend-structure.mjs');
     requiredStep(backend, 'backend-ci', 'Run assembled runtime route ownership contract', ROUTE_COMMAND);
+    requiredStep(backend, 'backend-ci', 'Run Rust workspace tests with coverage', RUST_WORKSPACE_COVERAGE_COMMAND);
+    validateSingleRustWorkspaceExecutor(backend);
     const rustCoverage = requiredStep(backend, 'backend-ci', 'Enforce Rust changed-line coverage');
     requireFragments(rustCoverage, 'backend-ci', [READ_MERGE_BASE, READ_HEAD, RUST_COVERAGE_BLOCK]);
+    validateCleanupOrder(backend, 'backend-ci', 'Run Rust workspace tests with coverage', 'Enforce Rust changed-line coverage');
     validateCleanupOrder(backend, 'backend-ci', 'Enforce Rust changed-line coverage', 'Trim backend caches before cache save');
 
     requiredStep(frontend, 'frontend-ci', 'Resolve immutable CI diff refs', RESOLVER_COMMAND);
@@ -464,6 +486,7 @@ function validateWorkflow(workflow) {
     return {
         jobs: Object.keys(workflow.jobs),
         route_command: ROUTE_COMMAND,
+        rust_workspace_test_executor: RUST_WORKSPACE_COVERAGE_COMMAND,
         immutable_resolver_command: RESOLVER_COMMAND,
     };
 }
@@ -485,6 +508,7 @@ function workflowFixture() {
                     { name: 'Resolve immutable CI diff refs', run: RESOLVER_COMMAND },
                     { name: 'Run Rust backend structure check', run: 'node scripts/check-rust-backend-structure.mjs' },
                     { name: 'Run assembled runtime route ownership contract', run: ROUTE_COMMAND },
+                    { name: 'Run Rust workspace tests with coverage', run: RUST_WORKSPACE_COVERAGE_COMMAND },
                     {
                         name: 'Enforce Rust changed-line coverage',
                         run: [READ_MERGE_BASE, READ_HEAD, RUST_COVERAGE_BLOCK].join('\n'),
@@ -622,6 +646,15 @@ function selfTest(parser) {
         value.jobs['backend-ci'].steps.find(step => step.name === 'Run assembled runtime route ownership contract').run += ' --ignored';
     }, /command drift/);
     expectWorkflowFailure(fixture, value => {
+        value.jobs['backend-ci'].steps = value.jobs['backend-ci'].steps.filter(step => step.name !== 'Run Rust workspace tests with coverage');
+    }, /workspace tests with coverage/);
+    expectWorkflowFailure(fixture, value => {
+        value.jobs['backend-ci'].steps.find(step => step.name === 'Run Rust workspace tests with coverage').run += ' --drift';
+    }, /command drift/);
+    expectWorkflowFailure(fixture, value => {
+        value.jobs['backend-ci'].steps.push({ name: 'Run Rust tests', run: 'cargo test --workspace' });
+    }, /duplicate full Rust workspace test executor/);
+    expectWorkflowFailure(fixture, value => {
         value.jobs['backend-ci'].steps.find(step => step.uses).with['fetch-depth'] = 1;
     }, /fetch-depth/);
     expectWorkflowFailure(fixture, value => {
@@ -659,7 +692,7 @@ function selfTest(parser) {
     }, /src\/web\/src/);
     expectWorkflowFailure(fixture, value => {
         value.jobs['backend-ci'].steps.reverse();
-    }, /must run Enforce Rust changed-line coverage before/);
+    }, /must run (?:Run Rust workspace tests with coverage|Enforce Rust changed-line coverage) before/);
     expectWorkflowFailure(fixture, value => {
         value.jobs['repo-governance'].steps.find(step => step.name === 'Install locked workflow checker dependencies').run = 'npm install js-yaml';
     }, /command drift/);
@@ -744,6 +777,13 @@ function selfTest(parser) {
     assert.throws(
         () => validateLocalCiScript(localCiText.replace(ROUTE_COMMAND, 'cargo test --workspace')),
         /runtime_route_ownership_contract/,
+    );
+    assert.throws(
+        () => validateLocalCiScript(localCiText.replace(
+            RUST_WORKSPACE_COVERAGE_COMMAND,
+            `${RUST_WORKSPACE_COVERAGE_COMMAND}\n    Invoke-RepoCommand "Duplicate Rust tests" "cargo test --workspace"`,
+        )),
+        /duplicate full Rust workspace test executor/,
     );
     assert.throws(
         () => validateLocalCiScript(localCiText.replace(LOCAL_RUST_BUSINESS_DIFF_GUARD, LOCAL_RUST_BUSINESS_DIFF_GUARD.replace('src/backend', 'tests/backend'))),

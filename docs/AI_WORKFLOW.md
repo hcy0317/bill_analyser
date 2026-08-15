@@ -84,6 +84,8 @@
 
 - 先读 `.agents/skills/gitea-ci-cache-discipline/SKILL.md`
 - 补 YAML 解析、Rust-only source tree gate 和受影响 CI 本地等价命令
+- 后端 PR job 以 `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 作为唯一的全工作区测试执行器；该命令执行完整 workspace tests 并生成覆盖率，不再额外串行执行一次 `cargo test --workspace`
+- focused route ownership 契约保持独立阻断；`scripts/check-gitea-workflow.mjs` 必须拒绝新增第二个全工作区测试执行器
 
 ### `.github/**` / `.agents/**` / `.claude/**` / `scripts/**`
 
