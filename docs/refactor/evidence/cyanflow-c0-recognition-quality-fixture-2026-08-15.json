@@ -1,7 +1,7 @@
 {
   "schema_version": "cyanflow-recognition-quality-fixture.v1",
-  "generated_at": "2026-08-15T23:58:48+08:00",
-  "repository_head": "cd5b499bc634378f6a8577788a6c4e5ee39cc73f",
+  "generated_at": "2026-08-16T06:53:09+08:00",
+  "repository_head": "cc19668ec3bd5440716e3b31993284acdfc7ea2d",
   "purpose": "冻结重构必须保留或补齐的识别与信号语义；本文件不包含用户账单内容。",
   "runtime_baseline_observation": {
     "corpus_manifest_sha256": "0a3b595c268413d7f404d823c6a0d0456d0e81b655e47c3c3f92e412b2c4c838",
@@ -129,10 +129,32 @@
       },
       "current_evidence": [
         "src/backend/db/import_staging/materialization_ledger/rejections.rs:106",
+        "src/backend/http/import_routes/stage_handlers/preview_mutation_handlers.rs:242",
+        "src/backend/http/import_routes/stage_handlers/recurring_transfer_handlers.rs:455",
+        "src/backend/http/import_routes/stage_handlers/tests/runtime/transfer_decisions.rs:101",
+        "src/backend/http/import_routes/stage_handlers/tests/runtime/reclassification_handlers.rs:38",
         "tests/backend/db/import_staging.rs:5741"
       ],
-      "coverage_status": "partial",
-      "gap": "当前 DB 路径原子拆成两行并保留人工字段，但非人工分类/账户被置空并标记 pending reclassification；尚未证明同一操作内完成重算。",
+      "verification": {
+        "verified_at": "2026-08-16T06:53:09+08:00",
+        "environment": "isolated PostgreSQL 16 on localhost",
+        "focused_discovery_count": 2,
+        "focused_tests": [
+          {
+            "name": "import_routes::tests::same_batch_transfer_reject_reclassification_preserves_manual_identity_fields",
+            "executed": 1,
+            "passed": 1,
+            "skipped": 0
+          },
+          {
+            "name": "import_routes::tests::dematerialized_reclassification_covers_claim_finish_replay_and_state_errors",
+            "executed": 1,
+            "passed": 1,
+            "skipped": 0
+          }
+        ]
+      },
+      "coverage_status": "covered",
       "required_before": "C2"
     },
     {
@@ -167,8 +189,7 @@
     "fixture_inventory_complete": true,
     "all_contracts_executable": false,
     "blocking_scenarios": [
-      "generic-unmatched-column-mapping",
-      "transfer-reject-two-row-recompute"
+      "generic-unmatched-column-mapping"
     ]
   }
 }
