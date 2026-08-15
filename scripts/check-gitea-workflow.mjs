@@ -14,10 +14,38 @@ const defaultRepoRoot = path.resolve(scriptDir, '..');
 const RESOLVER_COMMAND = 'node scripts/resolve-ci-diff-refs.mjs resolve --event-name "$GITHUB_EVENT_NAME" --event-path "$GITHUB_EVENT_PATH" --remote origin --default-base refs/heads/main --out .omx/ultragoal/evidence/ci-diff-refs.json';
 const READ_MERGE_BASE = 'MERGE_BASE_SHA="$(node scripts/resolve-ci-diff-refs.mjs read --input .omx/ultragoal/evidence/ci-diff-refs.json --field merge_base_sha)"';
 const READ_HEAD = 'HEAD_SHA="$(node scripts/resolve-ci-diff-refs.mjs read --input .omx/ultragoal/evidence/ci-diff-refs.json --field head_sha)"';
+const RUST_BUSINESS_DIFF_GUARD = 'git -c gc.auto=0 diff --quiet "$MERGE_BASE_SHA...$HEAD_SHA" -- src/backend || rust_business_diff_exit=$?';
 const RUST_DIFF = 'git -c gc.auto=0 diff --unified=0 "$MERGE_BASE_SHA...$HEAD_SHA" -- src/backend tests/backend > .omx/ultragoal/evidence/rust-changed.diff';
 const RUST_COVERAGE = 'node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .omx/ultragoal/evidence/rust-changed.diff --threshold 90 --require-matched-files --require-executable-lines';
+const RUST_COVERAGE_BLOCK = [
+    'rust_business_diff_exit=0',
+    RUST_BUSINESS_DIFF_GUARD,
+    'if [ "$rust_business_diff_exit" -eq 0 ]; then',
+    'echo "Rust business source unchanged; changed-line coverage not applicable."',
+    'elif [ "$rust_business_diff_exit" -eq 1 ]; then',
+    RUST_DIFF,
+    RUST_COVERAGE,
+    'else',
+    'exit "$rust_business_diff_exit"',
+    'fi',
+].join('\n');
+const FRONTEND_BUSINESS_DIFF_GUARD = 'git -c gc.auto=0 diff --quiet "$MERGE_BASE_SHA...$HEAD_SHA" -- src/web/src || frontend_business_diff_exit=$?';
 const FRONTEND_DIFF = 'git -c gc.auto=0 diff --unified=0 "$MERGE_BASE_SHA...$HEAD_SHA" -- src/web tests/web > .omx/ultragoal/evidence/frontend-changed.diff';
 const FRONTEND_COVERAGE = 'node scripts/governance-normalizers.mjs changed-coverage --lcov src/web/coverage/lcov.info --diff .omx/ultragoal/evidence/frontend-changed.diff --threshold 90 --require-matched-files --require-executable-lines';
+const FRONTEND_COVERAGE_BLOCK = [
+    'frontend_business_diff_exit=0',
+    FRONTEND_BUSINESS_DIFF_GUARD,
+    'if [ "$frontend_business_diff_exit" -eq 0 ]; then',
+    'echo "Frontend business source unchanged; changed-line coverage not applicable."',
+    'elif [ "$frontend_business_diff_exit" -eq 1 ]; then',
+    FRONTEND_DIFF,
+    FRONTEND_COVERAGE,
+    'else',
+    'exit "$frontend_business_diff_exit"',
+    'fi',
+].join('\n');
+const LOCAL_RUST_BUSINESS_DIFF_GUARD = 'git -c gc.auto=0 diff --quiet "${mergeBase}...${head}" -- src/backend';
+const LOCAL_FRONTEND_BUSINESS_DIFF_GUARD = 'git -c gc.auto=0 diff --quiet "${mergeBase}...${head}" -- src/web/src';
 const ROUTE_COMMAND = 'cargo test -p bill-analyser-http --test runtime_route_ownership_contract -- --nocapture';
 const RUST_ONLY_COMMAND = 'node scripts/check-rust-only-source-tree.mjs';
 const E2E_SUPERVISOR_COMMAND = 'npm --prefix src/web run e2e:ci:smoke';
@@ -314,8 +342,10 @@ function validateLocalCiScript(text) {
         'node scripts/check-gitea-workflow.mjs',
         'node scripts/check-rust-backend-structure.mjs',
         ROUTE_COMMAND,
+        LOCAL_RUST_BUSINESS_DIFF_GUARD,
         RUST_COVERAGE,
         'npm --prefix src/web run structure:check',
+        LOCAL_FRONTEND_BUSINESS_DIFF_GUARD,
         FRONTEND_COVERAGE,
         'trim_ci_caches.ps1',
         '[scriptblock]::Create($Command)',
@@ -327,6 +357,28 @@ function validateLocalCiScript(text) {
             throw new Error(`scripts/run_ci_local.ps1 is missing: ${fragment}`);
         }
     }
+    requireFragments({
+        name: 'Rust changed-line coverage',
+        run: text,
+    }, 'local-ci', [
+        LOCAL_RUST_BUSINESS_DIFF_GUARD,
+        '$rustBusinessDiffExit = $LASTEXITCODE',
+        'if ($rustBusinessDiffExit -eq 0)',
+        'elseif ($rustBusinessDiffExit -eq 1)',
+        RUST_COVERAGE,
+        'else { exit $rustBusinessDiffExit }',
+    ]);
+    requireFragments({
+        name: 'Frontend changed-line coverage',
+        run: text,
+    }, 'local-ci', [
+        LOCAL_FRONTEND_BUSINESS_DIFF_GUARD,
+        '$frontendBusinessDiffExit = $LASTEXITCODE',
+        'if ($frontendBusinessDiffExit -eq 0)',
+        'elseif ($frontendBusinessDiffExit -eq 1)',
+        FRONTEND_COVERAGE,
+        'else { exit $frontendBusinessDiffExit }',
+    ]);
     const trim = text.lastIndexOf('trim_ci_caches.ps1');
     for (const gate of [RUST_COVERAGE, FRONTEND_COVERAGE]) {
         const gateIndex = text.indexOf(gate);
@@ -380,13 +432,13 @@ function validateWorkflow(workflow) {
     requiredStep(backend, 'backend-ci', 'Run Rust backend structure check', 'node scripts/check-rust-backend-structure.mjs');
     requiredStep(backend, 'backend-ci', 'Run assembled runtime route ownership contract', ROUTE_COMMAND);
     const rustCoverage = requiredStep(backend, 'backend-ci', 'Enforce Rust changed-line coverage');
-    requireFragments(rustCoverage, 'backend-ci', [READ_MERGE_BASE, READ_HEAD, RUST_DIFF, RUST_COVERAGE]);
+    requireFragments(rustCoverage, 'backend-ci', [READ_MERGE_BASE, READ_HEAD, RUST_COVERAGE_BLOCK]);
     validateCleanupOrder(backend, 'backend-ci', 'Enforce Rust changed-line coverage', 'Trim backend caches before cache save');
 
     requiredStep(frontend, 'frontend-ci', 'Resolve immutable CI diff refs', RESOLVER_COMMAND);
     requiredStep(frontend, 'frontend-ci', 'Run frontend structure check', 'npm --prefix src/web run structure:check');
     const frontendCoverage = requiredStep(frontend, 'frontend-ci', 'Enforce frontend changed-line coverage');
-    requireFragments(frontendCoverage, 'frontend-ci', [READ_MERGE_BASE, READ_HEAD, FRONTEND_DIFF, FRONTEND_COVERAGE]);
+    requireFragments(frontendCoverage, 'frontend-ci', [READ_MERGE_BASE, READ_HEAD, FRONTEND_COVERAGE_BLOCK]);
     validateCleanupOrder(frontend, 'frontend-ci', 'Enforce frontend changed-line coverage', 'Trim frontend caches before cache save');
 
     requiredStep(governance, 'repo-governance', 'Install locked workflow checker dependencies', 'npm ci --prefix src/web');
@@ -426,7 +478,7 @@ function workflowFixture() {
                     { name: 'Run assembled runtime route ownership contract', run: ROUTE_COMMAND },
                     {
                         name: 'Enforce Rust changed-line coverage',
-                        run: [READ_MERGE_BASE, READ_HEAD, RUST_DIFF, RUST_COVERAGE].join('\n'),
+                        run: [READ_MERGE_BASE, READ_HEAD, RUST_COVERAGE_BLOCK].join('\n'),
                     },
                     { name: 'Trim backend caches before cache save', run: 'true' },
                 ],
@@ -439,7 +491,7 @@ function workflowFixture() {
                     { name: 'Run frontend structure check', run: 'npm --prefix src/web run structure:check' },
                     {
                         name: 'Enforce frontend changed-line coverage',
-                        run: [READ_MERGE_BASE, READ_HEAD, FRONTEND_DIFF, FRONTEND_COVERAGE].join('\n'),
+                        run: [READ_MERGE_BASE, READ_HEAD, FRONTEND_COVERAGE_BLOCK].join('\n'),
                     },
                     { name: 'Trim frontend caches before cache save', run: 'true' },
                 ],
@@ -565,6 +617,18 @@ function selfTest(parser) {
         value.jobs['frontend-ci'].steps.find(step => step.name === 'Enforce frontend changed-line coverage').run = 'echo skipped';
     }, /missing required command/);
     expectWorkflowFailure(fixture, value => {
+        const step = value.jobs['backend-ci'].steps.find(item => item.name === 'Enforce Rust changed-line coverage');
+        step.run = step.run.replace(RUST_BUSINESS_DIFF_GUARD, RUST_BUSINESS_DIFF_GUARD.replace('src/backend', 'tests/backend'));
+    }, /src\/backend/);
+    expectWorkflowFailure(fixture, value => {
+        const step = value.jobs['backend-ci'].steps.find(item => item.name === 'Enforce Rust changed-line coverage');
+        step.run = step.run.replace(`${RUST_BUSINESS_DIFF_GUARD}\n`, '');
+    }, /src\/backend/);
+    expectWorkflowFailure(fixture, value => {
+        const step = value.jobs['frontend-ci'].steps.find(item => item.name === 'Enforce frontend changed-line coverage');
+        step.run = step.run.replace(FRONTEND_BUSINESS_DIFF_GUARD, FRONTEND_BUSINESS_DIFF_GUARD.replace('src/web/src', 'src/web/e2e'));
+    }, /src\/web\/src/);
+    expectWorkflowFailure(fixture, value => {
         value.jobs['backend-ci'].steps.reverse();
     }, /must run Enforce Rust changed-line coverage before/);
     expectWorkflowFailure(fixture, value => {
@@ -651,6 +715,18 @@ function selfTest(parser) {
     assert.throws(
         () => validateLocalCiScript(localCiText.replace(ROUTE_COMMAND, 'cargo test --workspace')),
         /runtime_route_ownership_contract/,
+    );
+    assert.throws(
+        () => validateLocalCiScript(localCiText.replace(LOCAL_RUST_BUSINESS_DIFF_GUARD, LOCAL_RUST_BUSINESS_DIFF_GUARD.replace('src/backend', 'tests/backend'))),
+        /src\/backend/,
+    );
+    assert.throws(
+        () => validateLocalCiScript(localCiText.replace(LOCAL_RUST_BUSINESS_DIFF_GUARD, '')),
+        /src\/backend/,
+    );
+    assert.throws(
+        () => validateLocalCiScript(localCiText.replace(LOCAL_FRONTEND_BUSINESS_DIFF_GUARD, LOCAL_FRONTEND_BUSINESS_DIFF_GUARD.replace('src/web/src', 'src/web/e2e'))),
+        /src\/web\/src/,
     );
 
     console.log('PASS Gitea workflow checker self-tests');

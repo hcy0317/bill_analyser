@@ -178,8 +178,16 @@ jobs:
         run: |
           MERGE_BASE_SHA="$(node scripts/resolve-ci-diff-refs.mjs read --input .omx/ultragoal/evidence/ci-diff-refs.json --field merge_base_sha)"
           HEAD_SHA="$(node scripts/resolve-ci-diff-refs.mjs read --input .omx/ultragoal/evidence/ci-diff-refs.json --field head_sha)"
-          git -c gc.auto=0 diff --unified=0 "$MERGE_BASE_SHA...$HEAD_SHA" -- src/backend tests/backend > .omx/ultragoal/evidence/rust-changed.diff
-          node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .omx/ultragoal/evidence/rust-changed.diff --threshold 90 --require-matched-files --require-executable-lines
+          rust_business_diff_exit=0
+          git -c gc.auto=0 diff --quiet "$MERGE_BASE_SHA...$HEAD_SHA" -- src/backend || rust_business_diff_exit=$?
+          if [ "$rust_business_diff_exit" -eq 0 ]; then
+            echo "Rust business source unchanged; changed-line coverage not applicable."
+          elif [ "$rust_business_diff_exit" -eq 1 ]; then
+            git -c gc.auto=0 diff --unified=0 "$MERGE_BASE_SHA...$HEAD_SHA" -- src/backend tests/backend > .omx/ultragoal/evidence/rust-changed.diff
+            node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .omx/ultragoal/evidence/rust-changed.diff --threshold 90 --require-matched-files --require-executable-lines
+          else
+            exit "$rust_business_diff_exit"
+          fi
 
       - name: Trim backend caches before cache save
         id: backend-cache-trim
@@ -283,8 +291,16 @@ jobs:
         run: |
           MERGE_BASE_SHA="$(node scripts/resolve-ci-diff-refs.mjs read --input .omx/ultragoal/evidence/ci-diff-refs.json --field merge_base_sha)"
           HEAD_SHA="$(node scripts/resolve-ci-diff-refs.mjs read --input .omx/ultragoal/evidence/ci-diff-refs.json --field head_sha)"
-          git -c gc.auto=0 diff --unified=0 "$MERGE_BASE_SHA...$HEAD_SHA" -- src/web tests/web > .omx/ultragoal/evidence/frontend-changed.diff
-          node scripts/governance-normalizers.mjs changed-coverage --lcov src/web/coverage/lcov.info --diff .omx/ultragoal/evidence/frontend-changed.diff --threshold 90 --require-matched-files --require-executable-lines
+          frontend_business_diff_exit=0
+          git -c gc.auto=0 diff --quiet "$MERGE_BASE_SHA...$HEAD_SHA" -- src/web/src || frontend_business_diff_exit=$?
+          if [ "$frontend_business_diff_exit" -eq 0 ]; then
+            echo "Frontend business source unchanged; changed-line coverage not applicable."
+          elif [ "$frontend_business_diff_exit" -eq 1 ]; then
+            git -c gc.auto=0 diff --unified=0 "$MERGE_BASE_SHA...$HEAD_SHA" -- src/web tests/web > .omx/ultragoal/evidence/frontend-changed.diff
+            node scripts/governance-normalizers.mjs changed-coverage --lcov src/web/coverage/lcov.info --diff .omx/ultragoal/evidence/frontend-changed.diff --threshold 90 --require-matched-files --require-executable-lines
+          else
+            exit "$frontend_business_diff_exit"
+          fi
 
       - name: Build frontend
         working-directory: src/web
