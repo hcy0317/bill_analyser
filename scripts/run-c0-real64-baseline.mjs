@@ -33,6 +33,7 @@ const RAW_URL_PATTERN = /\b[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s"'`]+/gu;
 const WINDOWS_ABSOLUTE_PATH_PATTERN = /(?:\b[A-Za-z]:[\\/]|\\\\)[^\r\n\t"'`]+/gu;
 const APPLICATION_SESSION_KEY_PATTERN = /(?:session.?id|import.?session)/iu;
 const APPLICATION_SESSION_ROUTE_PATTERN = /(\/api\/bills\/import\/v2\/(?:preview|confirm|session)\/)[A-Za-z0-9._-]+/gu;
+const UNREDACTED_APPLICATION_SESSION_ASSIGNMENT_PATTERN = /(\b(?:session[_-]?id|import[_-]?session)\s*[:=]\s*)(?!\[REDACTED_SESSION\])[^\s,;]+/giu;
 
 function parseArgs(argv) {
     if (argv.length === 0) return { selfTest: false };
@@ -230,6 +231,7 @@ function redactC0Text(value, privateValues) {
     result = result.replace(RAW_URL_PATTERN, '[REDACTED_URL]');
     result = result.replace(WINDOWS_ABSOLUTE_PATH_PATTERN, '[REDACTED_PATH]');
     result = result.replace(APPLICATION_SESSION_ROUTE_PATTERN, '$1[REDACTED_SESSION]');
+    result = result.replace(UNREDACTED_APPLICATION_SESSION_ASSIGNMENT_PATTERN, '$1[REDACTED_SESSION]');
     return result;
 }
 
@@ -268,8 +270,10 @@ function assertC0TextPrivacy(text, entryName, privateValues) {
     if (text.includes(repoRoot) || text.includes(repoRoot.replace(/\\/gu, '/'))) {
         throw new Error(`C0 artifact ${entryName} contains the repository absolute path.`);
     }
-    if (regexMatches(RAW_URL_PATTERN, text) || regexMatches(WINDOWS_ABSOLUTE_PATH_PATTERN, text)) {
-        throw new Error(`C0 artifact ${entryName} contains a raw URL or absolute path.`);
+    if (regexMatches(RAW_URL_PATTERN, text)
+        || regexMatches(WINDOWS_ABSOLUTE_PATH_PATTERN, text)
+        || regexMatches(UNREDACTED_APPLICATION_SESSION_ASSIGNMENT_PATTERN, text)) {
+        throw new Error(`C0 artifact ${entryName} contains a raw URL, absolute path, or session identity.`);
     }
 }
 
@@ -411,7 +415,7 @@ async function selfTest() {
         });
         fs.writeFileSync(
             path.join(config.runDirectory, 'privacy-fixture.log'),
-            `private-a.csv ${repoRoot} https://example.test/private`,
+            `private-a.csv ${repoRoot} https://example.test/private session_id=application-session-secret`,
             'utf8',
         );
         sanitizeC0Artifacts(config, ['private-a.csv']);
