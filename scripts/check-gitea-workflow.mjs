@@ -48,6 +48,7 @@ const LOCAL_RUST_BUSINESS_DIFF_GUARD = 'git -c gc.auto=0 diff --quiet "${mergeBa
 const LOCAL_FRONTEND_BUSINESS_DIFF_GUARD = 'git -c gc.auto=0 diff --quiet "${mergeBase}...${head}" -- src/web/src';
 const ROUTE_COMMAND = 'cargo test -p bill-analyser-http --test runtime_route_ownership_contract -- --nocapture';
 const RUST_ONLY_COMMAND = 'node scripts/check-rust-only-source-tree.mjs';
+const FRONTEND_COVERAGE_SCRIPT = 'cross-env CI=1 COVERAGE_GATE=1 TS_NODE_PROJECT="./tsconfig.jest.json" jest --maxWorkers=50% --coverage';
 const E2E_SUPERVISOR_COMMAND = 'npm --prefix src/web run e2e:ci:smoke';
 const E2E_SETUP_STEPS = [
     'Checkout E2E source',
@@ -65,6 +66,14 @@ function normalizeCommand(value) {
         .map(line => line.trim())
         .filter(Boolean)
         .join('\n');
+}
+
+function validateFrontendTestScripts(packageJson) {
+    const actual = normalizeCommand(packageJson?.scripts?.['test:coverage']);
+    if (actual !== FRONTEND_COVERAGE_SCRIPT) {
+        throw new Error('src/web test:coverage must run exactly one coverage-enabled Jest command');
+    }
+    return { test_coverage: actual };
 }
 
 function listJsonFiles(directory, prefix) {
@@ -583,6 +592,26 @@ function selfTest(parser) {
     validateWorkflow(roundTrip);
     assert.throws(() => parser.load('jobs:\n  broken: [\n'), /unexpected end|unexpected end of the stream|missed comma/i);
 
+    validateFrontendTestScripts({ scripts: { 'test:coverage': FRONTEND_COVERAGE_SCRIPT } });
+    assert.throws(
+        () => validateFrontendTestScripts({
+            scripts: { 'test:coverage': `npm run test && ${FRONTEND_COVERAGE_SCRIPT}` },
+        }),
+        /exactly one coverage-enabled Jest command/,
+    );
+    assert.throws(
+        () => validateFrontendTestScripts({
+            scripts: { 'test:coverage': FRONTEND_COVERAGE_SCRIPT.replace('COVERAGE_GATE=1 ', '') },
+        }),
+        /exactly one coverage-enabled Jest command/,
+    );
+    assert.throws(
+        () => validateFrontendTestScripts({
+            scripts: { 'test:coverage': FRONTEND_COVERAGE_SCRIPT.replace(' --coverage', '') },
+        }),
+        /exactly one coverage-enabled Jest command/,
+    );
+
     expectWorkflowFailure(fixture, value => {
         value.jobs['backend-ci'].steps = value.jobs['backend-ci'].steps.filter(step => step.name !== 'Run assembled runtime route ownership contract');
     }, /assembled runtime route ownership/);
@@ -752,6 +781,9 @@ function main(argv = process.argv.slice(2)) {
     const activeFiles = validateActiveConfigs();
     const result = validateWorkflow(parseWorkflow(lockedYaml.parser));
     validateLocalCiScript(fs.readFileSync(path.join(defaultRepoRoot, 'scripts', 'run_ci_local.ps1'), 'utf8'));
+    const frontendTestScripts = validateFrontendTestScripts(JSON.parse(
+        fs.readFileSync(path.join(defaultRepoRoot, 'src', 'web', 'package.json'), 'utf8'),
+    ));
     console.log(JSON.stringify({
         status: 'passed',
         yaml_parser: {
@@ -759,6 +791,7 @@ function main(argv = process.argv.slice(2)) {
             package_json_path: path.relative(defaultRepoRoot, lockedYaml.packageJsonPath).replace(/\\/g, '/'),
         },
         active_configs: activeFiles,
+        frontend_test_scripts: frontendTestScripts,
         ...result,
     }, null, 2));
 }
@@ -776,6 +809,7 @@ export {
     activeConfigInventory,
     loadLockedYaml,
     validateActiveConfigs,
+    validateFrontendTestScripts,
     validateLocalCiScript,
     validateRequiredE2e,
     validateWorkflow,
