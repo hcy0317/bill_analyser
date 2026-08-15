@@ -1,10 +1,10 @@
 # Bill Analyser 模块化架构重构 C0 基线
 
-> 状态：`C0_ARTIFACTS_ASSEMBLED / C0_EXIT_BLOCKED`<br>
+> 状态：`C0_RUNTIME_BASELINE_CAPTURED / C0_EXIT_BLOCKED`<br>
 > 日期：2026-08-15<br>
 > 工作流：Cyaness -> Cyanflow `flow / research / affected_surface`<br>
-> 当前 HEAD：`345c095d7bd2421532a3c2f74184d408768b925c`<br>
-> 范围：只读证据与治理工件；未修改业务源码、数据库 migration、配置或用户数据
+> 当前 HEAD：`8f85d92c4c68f06116c3bca4d81d963edebeb2e5`<br>
+> 范围：C0 证据、隔离真实运行基线与治理工件；未修改业务源码、数据库 migration、配置或用户数据
 > 上游共识：`docs/refactor/cyanflow-project-modular-architecture-consensus-2026-08-15.md`
 
 ## 1. C0 结论
@@ -30,8 +30,8 @@
 | Core transport | 未直接 import Axum/http crate，但 `core/import_pipeline/responses.rs` 定义 `ImportV2RouteResponse { status_code, body }` | 这是语义上的 transport ownership，不能因关键词门禁为 0 就宣称无债务 |
 | DB transport | 未直接 import Axum，但 confirm DB 类型/编排保存 `http_status`、`response_schema_version`、`success_envelope` | 记为 DB 持有 HTTP envelope，而不是“DB transport keyword=0” |
 | Import weak DTO | 旧路径 `src/web/src/models/importPreview.ts` 已不存在 | 重新扫描当前 feature：17 个生产文件、67 行 `Record<string, unknown/any>` 命中，另有 13 行 `any` 词法命中 |
-| 64 文件性能 | 历史日志仍有 Stage 1 `141,359ms`、Stage 2 `30,798ms`、缺少分类 `2,384` | 日志早于当前 HEAD 且无同次 browser/config provenance，只能作为症状证据 |
-| 现有 binary | `target/debug/bill_http_server.exe` 存在，但时间早于当前 HEAD | 不归因到当前源码，不作为性能基线 |
+| 64 文件性能 | exact-main `8f85d92c4` 的同次 browser 运行：parse `73,065ms`、dedup 累计 `81,903ms`、首屏可操作 `81,991ms` | 当前可复跑基线已成立，但超过 `60,000ms` 目标；历史 `141,359ms + 30,798ms` 只保留为症状证据 |
+| 当前 binary | `target/debug/bill_http_server.exe` 由同一 exact-main runner 构建，SHA-256 为 `a586557e...ebd49f65` | source HEAD、binary、corpus、配置、browser marker 与 cleanup 已在同次运行绑定 |
 
 机器可读 provenance：`docs/refactor/evidence/cyanflow-c0-64file-evidence-manifest-2026-08-15.json`。
 
@@ -166,15 +166,17 @@ C0 只冻结规则，不在本切片修改 CI 脚本。实施 ratchet 时扩展�
 | Architecture debt baseline | PASS | 当前 HEAD 重新计数，已区分词法、语义与 test-only |
 | 64-file corpus identity | PASS | 64 文件、3,678,128 bytes、三类集合 SHA 已固化且不泄露文件名 |
 | Historical symptom evidence | PASS | 日志 hash 与 Stage 1/2/缺少分类计数已固化 |
-| Current reproducible performance baseline | BLOCKED | 服务 down；binary 早于 HEAD；没有当前 build -> corpus -> config -> browser 同次链 |
+| Current reproducible performance baseline | PASS | exact-main build -> isolated runtime -> corpus -> browser -> cleanup 同次链已记录 |
+| 60 秒 performance target | FAIL | 首屏可操作 `81,991ms`，超过目标 `60,000ms`；且尚未达到连续三次要求 |
 | Recognition fixture inventory | PASS | 8 个合同已登记，缺口显式 fail-closed |
 | Recognition fixture executable completeness | BLOCKED | 6 个 scenario 仍 partial/missing，不能用于 C2 cutover |
-| Browser marker | BLOCKED | 未发现可归因到当前 HEAD 与本 corpus 的 marker/trace |
-| User/runtime config provenance | BLOCKED | 未保存脱敏 user/PostgreSQL/Weaviate/LLM snapshot |
-| C1 authorization | NOT GRANTED | 本轮只授权 C0 evidence/governance，不进入业务实现 |
+| Browser marker | PASS | marker、sanitized trace、两次 canonical preview request timing 与 operable-first-screen 均已记录 |
+| User/runtime config provenance | PASS | 独立 PostgreSQL、run-scoped Weaviate、dedicated E2E defaults、LLM disabled 均已脱敏记录 |
+| Cleanup/privacy | PASS | 15 个工件隐私违规 0；临时数据库 0；owned listener 0 |
+| C1 authorization | BLOCKED BY C0 GATES | 用户已授权自治后续切片，但性能与 recognition gate 未通过，不进入 C1 |
 
 ## 9. 下一动作
 
-下一动作不是直接进入 C1，而是一个独立、可回滚的 `C0-runtime-baseline` 切片：从当前 HEAD 构建，启动仓库唯一运行入口，使用本 manifest 的 64 文件 corpus 做一次真实浏览器导入，记录同次 binary SHA、脱敏配置状态、阶段日志、browser marker 和 operable-first-screen 时间，然后停止服务并复核没有用户数据或配置被写入仓库。
+下一动作不是直接进入 C1，而是独立、可回滚的 `C0-performance-profile` 切片：保持同一 64 文件 corpus、隔离数据库、run-scoped Weaviate 和 operable marker，补齐 parse/dedup 内部阶段的互斥计时、I/O/CPU/RSS 与查询计数，先证明 `73,065ms -> 81,903ms` 累计窗口的主瓶颈，再选择最小优化点。不得用减少识别、延后必需 signal 或 same-file cache 伪造提速。
 
-该动作会启动服务、执行真实导入并产生数据库/本地运行态写入，超出本轮只读/治理授权。得到明确授权和可清理测试用户/session 方案前，C0 Exit 保持 `BLOCKED`，C1 不放行。
+性能优化后仍须在 exact main 上连续三次 `<=60,000ms`；recognition fixture 的 5 个 partial 与 1 个 missing scenario 也必须补齐。两类 gate 都通过前，C0 Exit 保持 `BLOCKED`，C1 不放行。

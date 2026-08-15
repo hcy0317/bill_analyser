@@ -1,8 +1,16 @@
 {
   "schema_version": "cyanflow-recognition-quality-fixture.v1",
-  "generated_at": "2026-08-15T01:30:57.7829662+08:00",
-  "repository_head": "345c095d7bd2421532a3c2f74184d408768b925c",
+  "generated_at": "2026-08-15T12:42:23.0168127+08:00",
+  "repository_head": "8f85d92c4c68f06116c3bca4d81d963edebeb2e5",
   "purpose": "冻结重构必须保留或补齐的识别与信号语义；本文件不包含用户账单内容。",
+  "runtime_baseline_observation": {
+    "corpus_manifest_sha256": "0a3b595c268413d7f404d823c6a0d0456d0e81b655e47c3c3f92e412b2c4c838",
+    "file_count": 64,
+    "matched_file_count": 64,
+    "unmatched_file_count": 0,
+    "parsed_row_count": 15041,
+    "scope": "证明当前 corpus 没有 unmatched 文件；不替代 no-match/conflict、signal lifecycle 或 browser interaction fixture。"
+  },
   "status_values": [
     "covered",
     "partial",
