@@ -9,6 +9,7 @@ import {
     serializeSignalCacheValue,
     useImportCheckDataSignals
 } from '@/views/desktop/transactions/import/check-data-tab/useImportCheckDataSignals.ts';
+import { matchesImportPreviewSignalFilter } from '@/views/desktop/transactions/import/checkDataMatching.ts';
 
 function createTransaction(matching: Record<string, unknown> = {}): ImportTransaction {
     return ImportTransaction.of({
@@ -78,6 +79,28 @@ describe('useImportCheckDataSignals', () => {
 
         transaction.matching!.learning.score = 0.75;
         expect(signals.getImportPreviewSignalViewModel(transaction)).not.toBe(first);
+    });
+
+    test('projects likely transfer into transfer and read-only learning families', () => {
+        const transaction = createTransaction({
+            transfer: {
+                candidate_type: 'transfer',
+                review_status: 'pending',
+                learning_level: 'green',
+                reason: 'paired account movement'
+            },
+            learning: {
+                review_status: 'skipped',
+                reason: 'transfer preview is protected from learning type/category overrides'
+            }
+        });
+
+        const viewModel = createSignals(transaction).getImportPreviewSignalViewModel(transaction);
+
+        expect(viewModel.transferSuggestion?.status).toBe('pending');
+        expect(viewModel.learning).toMatchObject({ status: 'pending', actions: [] });
+        expect(matchesImportPreviewSignalFilter(viewModel, 'transfer')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(viewModel, 'learning')).toBe(true);
     });
 
     test('builds row identities and complete history rewrite acknowledgements', () => {

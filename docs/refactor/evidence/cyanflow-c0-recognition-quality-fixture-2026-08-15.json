@@ -93,11 +93,13 @@
         "learning_filter": true
       },
       "current_evidence": [
-        "tests/web/views/desktop/transactions/import/checkDataMatching.test.ts:212",
-        "tests/web/views/desktop/transactions/import/checkDataMatching.test.ts:504"
+        "src/backend/db/import_staging/tests_patch_lookup.rs:145",
+        "tests/backend/db/preview_metadata_postgres.rs:331",
+        "tests/web/views/desktop/transactions/import/checkDataMatching.test.ts:231",
+        "tests/web/views/desktop/transactions/import/useImportCheckDataSignals.test.ts:84",
+        "tests/web/views/desktop/transactions/import/importLifecycleSfc.test.ts:1785"
       ],
-      "coverage_status": "partial",
-      "gap": "前端能同时渲染两个 pending family，但缺少从 canonical likely-transfer 来源到后端 counts、分页 filter 和 desktop/mobile 的端到端双 membership fixture。",
+      "coverage_status": "covered",
       "required_before": "C2"
     },
     {
@@ -166,7 +168,6 @@
     "all_contracts_executable": false,
     "blocking_scenarios": [
       "generic-unmatched-column-mapping",
-      "likely-transfer-family-overlap",
       "transfer-reject-two-row-recompute"
     ]
   }

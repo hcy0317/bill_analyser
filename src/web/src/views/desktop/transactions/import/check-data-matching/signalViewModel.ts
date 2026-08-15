@@ -1,4 +1,4 @@
-import type { ImportCheckMatchingContextSummary, ImportCheckMatchingDedupTitleOptions, ImportPreviewSignalDecision, ImportPreviewSignalReviewView, ImportPreviewSignalState, ImportPreviewSignalStatus, ImportPreviewSignalViewModel, ImportPreviewSignalViewModelOptions, ImportPreviewVisibleSignalFilterValue } from './types.ts';
+import type { ImportCheckMatchingContextSummary, ImportCheckMatchingDedupTitleOptions, ImportPreviewSignalDecision, ImportPreviewSignalReviewView, ImportPreviewSignalState, ImportPreviewSignalStatus, ImportPreviewSignalViewModel, ImportPreviewSignalViewModelOptions } from './types.ts';
 
 import {
     isCanonicalTruthy as isImportPreviewCanonicalTruthy,
@@ -11,13 +11,13 @@ import { getImportCheckMatchingContextSummary, getImportCheckMatchingDedupLabel,
 
 import { buildHistoryRewriteSignalView } from './historyRewrite.ts';
 import { importPreviewSignalStatusIsUnknown, type ImportPreviewStatusFamily } from './signalStatus.ts';
+import { buildLearningActionProjection, buildTransferActionProjection, resolveTransferLearningMembership } from './transferLearningProjection.ts';
 
 import { buildSignalTitle, buildSourceRowLookup, dedupeTextItems, DEFAULT_SOURCE_ROLE_LABELS, formatConfidencePercent, formatInfoLine, getParserContextDisplayLabels, getParserDisplayLabel, getParserIdFromTag, getSignalInfoLabels, getSourceChainDisplayLabels, getSourceContextFromLookupValue, getSourceDisplayLabel, isTransferLikeDedupType, isVisibleDedupType, normalizeDedupType, normalizeLearningAccountRoute, normalizeLearningCategoryPath, normalizeLearningRecommendationLabel, normalizeLLMCategoryPath, sortSourceChain } from './shared.ts';
 
 
 
 // 信号视图模型只负责 UI 可见 chip/action/detail 的派生，不直接修改导入预览业务状态。
-
 function trimImportPreviewSignalText(value: string): string {
     return trimCanonicalImportPreviewSignalText(value);
 }
@@ -374,7 +374,7 @@ export function buildImportPreviewSignalViewModel(
         state.learningRejectedCount,
         state.learningAutoAppliedCount,
     ];
-    const learningStatus = normalizeMeaningfulSignalStatus(
+    const independentLearningStatus = normalizeMeaningfulSignalStatus(
         'learning',
         learningStatusAlias,
         state.learningSuppressed,
@@ -386,6 +386,11 @@ export function buildImportPreviewSignalViewModel(
         learningNumericEvidence,
         !!state.learningStatusAuthoritative
     );
+    const {
+        transferLearningLevel,
+        transferOwnsLearningMembership,
+        learningStatus
+    } = resolveTransferLearningMembership(state, transferStatus, independentLearningStatus);
     const llmNumericEvidence = [
         state.llmConfidence,
         state.llmSuggestedCategoryId,
@@ -456,19 +461,10 @@ export function buildImportPreviewSignalViewModel(
             detailLines: dedupDetailLines
         }
         : reconciliationDedup;
-    const transferLearningLevel = (state.transferLearningLevel || '').trim().toLowerCase();
-    const transferPendingActions = transferLearningLevel === 'yellow'
-        ? []
-        : [
-            { decision: 'accept', labelKey: 'Accept', color: 'warning' } as ImportPreviewSignalDecision,
-            { decision: 'reject', labelKey: 'Reject', color: 'error' } as ImportPreviewSignalDecision
-        ];
-    const transferReviewedActions = transferLearningLevel === 'blue'
-        ? [
-            { decision: 'clear', labelKey: 'Clear', color: 'warning' } as ImportPreviewSignalDecision,
-            { decision: 'reject', labelKey: 'Reject', color: 'error' } as ImportPreviewSignalDecision
-        ]
-        : [{ decision: 'clear', labelKey: 'Clear', color: 'warning' } as ImportPreviewSignalDecision];
+    const {
+        pendingActions: transferPendingActions,
+        reviewedActions: transferReviewedActions
+    } = buildTransferActionProjection(transferLearningLevel);
     const transferSuggestion = buildReviewView(
         transferStatus,
         state.transferTitle,
@@ -481,26 +477,24 @@ export function buildImportPreviewSignalViewModel(
         transferReviewedActions,
         transferDetailLines
     );
-    const learningDetailLines = buildLearningDetailLines(state, options);
-    const normalizedLearningMode = (state.learningMode || '').trim().toLowerCase();
-    const normalizedLearningSignalState = (state.learningSignalState || '').trim().toLowerCase();
-    const isGreenLearning = normalizedLearningSignalState === 'green'
-        || normalizedLearningSignalState === 'auto_applied'
-        || normalizedLearningMode === 'green'
-        || isImportPreviewCanonicalTruthy(state.learningAutoApplied);
-    const learningReviewedActions = isGreenLearning
-        ? [{ decision: 'reject', labelKey: 'Reject Learning Suggestion', color: 'error' } as ImportPreviewSignalDecision]
-        : [];
+    const learningDetailLines = transferOwnsLearningMembership
+        ? transferDetailLines
+        : buildLearningDetailLines(state, options);
+    const {
+        isGreenLearning,
+        pendingActions: learningPendingActions,
+        reviewedActions: learningReviewedActions
+    } = buildLearningActionProjection(state, transferOwnsLearningMembership);
     const learning = buildReviewView(
         learningStatus,
-        buildSignalTitle(learningDetailLines, state.learningTitle),
+        buildSignalTitle(
+            learningDetailLines,
+            transferOwnsLearningMembership ? state.transferTitle : state.learningTitle
+        ),
         isGreenLearning ? 'Learning Auto Apply' : 'Learning Suggestion',
         isGreenLearning ? 'Learning Applied' : 'Learning Suggestion Accepted',
         'Learning Suggestion Rejected',
-        [
-            { decision: 'accept', labelKey: 'Apply Suggestion', color: isGreenLearning ? 'success' : 'secondary' },
-            { decision: 'reject', labelKey: 'Reject Learning Suggestion', color: 'error' }
-        ],
+        learningPendingActions,
         undefined,
         state.learningSummary,
         learningReviewedActions,
@@ -555,46 +549,4 @@ export function buildImportPreviewSignalViewModel(
             || !!llm
             || !!recurring
     };
-}
-
-// 信号筛选只消费可见模型，避免把普通交易类型、隐藏 dedup 文本或未授权转账误判成可筛选信号。
-export function matchesImportPreviewSignalFilter(
-    viewModel: ImportPreviewSignalViewModel,
-    filter: ImportPreviewVisibleSignalFilterValue | null
-): boolean {
-    if (filter === null) {
-        return true;
-    }
-
-    const normalizedDedupType = normalizeDedupType(viewModel.dedup?.dedupType);
-    if (filter === 'parser') {
-        return !!viewModel.parser
-            && normalizedDedupType !== 'platform_bank'
-            && viewModel.transferSuggestion?.status !== 'pending'
-            && !viewModel.historyRewrite
-            && !viewModel.learning
-            && !viewModel.llm;
-    }
-
-    if (filter === 'platform_duplicate') {
-        return normalizedDedupType === 'platform_bank';
-    }
-
-    if (filter === 'transfer') {
-        return viewModel.transferSuggestion?.status === 'pending';
-    }
-
-    if (filter === 'history') {
-        return !!viewModel.historyRewrite;
-    }
-
-    if (filter === 'learning') {
-        return !!viewModel.learning;
-    }
-
-    if (filter === 'llm') {
-        return !!viewModel.llm;
-    }
-
-    return false;
 }

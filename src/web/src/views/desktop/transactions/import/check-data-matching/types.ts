@@ -130,7 +130,9 @@ export interface ImportPreviewHistoryRewriteAcknowledgement {
 export interface ImportPreviewSignalState extends ImportCheckMatchingContextState {
     transferStatus?: ImportPreviewRawSignalStatus;
     transferTitle?: string;
+    transferCandidateType?: string;
     transferLearningLevel?: string;
+    transferSuppressed?: ImportPreviewRawFlag;
     transferPairOrder?: string;
     transferSourceChain?: ImportMatchingSourcePayload[];
     investmentStatus?: ImportPreviewSignalStatus | null;

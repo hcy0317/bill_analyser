@@ -228,6 +228,40 @@ describe('checkDataMatching helpers', () => {
         expect(viewModel.investment).toBeNull();
     });
 
+    test('keeps accepted transfer-derived learning membership visible and read-only', () => {
+        const viewModel = buildImportPreviewSignalViewModel({
+            transferStatus: 'accepted',
+            transferTitle: 'paired account movement',
+            transferCandidateType: 'transfer',
+            transferLearningLevel: 'blue',
+            learningStatus: 'skipped',
+            learningTitle: 'transfer preview is protected from learning type/category overrides'
+        });
+
+        expect(viewModel.learning).toMatchObject({ status: 'accepted', actions: [] });
+        expect(matchesImportPreviewSignalFilter(viewModel, 'learning')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(viewModel, 'transfer')).toBe(false);
+    });
+
+    test('does not turn suppressed transfer or parser-only evidence into learning membership', () => {
+        const suppressed = buildImportPreviewSignalViewModel({
+            transferStatus: 'pending',
+            transferCandidateType: 'transfer',
+            transferLearningLevel: 'green',
+            transferSuppressed: true,
+            learningStatus: 'skipped',
+            learningTitle: 'transfer preview is protected from learning type/category overrides'
+        });
+        const parserOnly = buildImportPreviewSignalViewModel({
+            parserId: 'wechat'
+        });
+
+        expect(suppressed.learning).toBeNull();
+        expect(matchesImportPreviewSignalFilter(suppressed, 'learning')).toBe(false);
+        expect(parserOnly.learning).toBeNull();
+        expect(parserOnly.parser?.parserId).toBe('wechat');
+    });
+
     test('builds yellow llm suggestion signals with warning review actions and detail lines', () => {
         const viewModel = buildImportPreviewSignalViewModel({
             llmStatus: 'pending',

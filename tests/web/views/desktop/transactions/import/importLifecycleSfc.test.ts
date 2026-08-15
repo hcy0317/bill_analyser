@@ -1782,6 +1782,50 @@ describe('P3 import lifecycle production SFC coverage', () => {
         }
     });
 
+    test('mobile likely transfer belongs to transfer and read-only learning filters', () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        try {
+            const bindings = (ImportPreviewPage as any).setup(
+                {
+                    f7route: { query: { sessionId: 'session-mobile-overlap' } },
+                    f7router: { back: jest.fn() }
+                },
+                { expose: jest.fn() }
+            );
+            const [row] = bindings.normalizeRows([{
+                id: 92,
+                preview_selected: true,
+                preview_parser_id: 'wechat',
+                transfer_suggestion_level: 'green',
+                transfer_suggestion_reason: 'paired account movement',
+                learning_recommendation_reason: 'transfer preview is protected from learning type/category overrides',
+                matching: {
+                    parser: { id: 'wechat', tags: ['wallet'] },
+                    transfer: {
+                        candidate_type: 'transfer',
+                        review_status: 'pending',
+                        learning_level: 'green',
+                        reason: 'paired account movement'
+                    },
+                    learning: {
+                        review_status: 'skipped',
+                        reason: 'transfer preview is protected from learning type/category overrides'
+                    }
+                }
+            }]);
+            bindings.rows.value = [row];
+
+            expect(row.signal.transferSuggestion?.status).toBe('pending');
+            expect(row.signal.learning).toMatchObject({ status: 'pending', actions: [] });
+            bindings.signalFilter.value = 'transfer';
+            expect(bindings.filteredRows.value).toEqual([row]);
+            bindings.signalFilter.value = 'learning';
+            expect(bindings.filteredRows.value).toEqual([row]);
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
     test('mobile fallback, confirmation, and failure branches always clear busy state', async () => {
         const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
         const back = jest.fn();

@@ -328,6 +328,110 @@ async fn postgres_transfer_signal_projection_keeps_accepted_evidence_visible(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn likely_transfer_counts_and_filters_as_transfer_and_learning() -> Result<(), Box<dyn Error>>
+{
+    let Some(test_db) =
+        postgres_test_support::isolated_postgres_database("transfer_learning_overlap").await?
+    else {
+        return Ok(());
+    };
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "preview-transfer-learning-overlap").await?;
+    let scoped_user = UserId::new(user_id as u64).expect("positive user id");
+    let account_id = insert_account(pool, user_id, "Transfer Learning Wallet").await?;
+    let category_id = insert_category(pool, user_id, "Transfer Learning Category").await?;
+    let session_id = "preview-transfer-learning-overlap-session";
+    create_import_session(
+        pool,
+        &ImportSessionDraft {
+            session_id: session_id.to_string(),
+            user_id: scoped_user,
+            file_count: 1,
+        },
+    )?;
+
+    let likely_transfer_id = insert_preview_bill(
+        pool,
+        session_id,
+        scoped_user,
+        &ImportPreviewDraft {
+            preview_date: "2026-07-13 10:00:00".to_string(),
+            preview_type: "支出".to_string(),
+            preview_amount_cents: 2_188,
+            category_id: Some(category_id),
+            preview_source_account_id: Some(account_id),
+            preview_description: "likely transfer overlap".to_string(),
+            preview_parser_id: "wechat".to_string(),
+            preview_selected: true,
+            preview_matching_feedback: json!({
+                "transfer": {
+                    "review_status": "pending",
+                    "candidate_type": "transfer",
+                    "learning_level": "green"
+                },
+                "learning": {
+                    "review_status": "skipped",
+                    "reason": "transfer preview is protected from learning type/category overrides"
+                }
+            }),
+            ..ImportPreviewDraft::default()
+        },
+    )?;
+    insert_preview_bill(
+        pool,
+        session_id,
+        scoped_user,
+        &ImportPreviewDraft {
+            preview_date: "2026-07-13 11:00:00".to_string(),
+            preview_type: "支出".to_string(),
+            preview_amount_cents: 688,
+            category_id: Some(category_id),
+            preview_source_account_id: Some(account_id),
+            preview_description: "parser only".to_string(),
+            preview_parser_id: "wechat".to_string(),
+            preview_selected: true,
+            ..ImportPreviewDraft::default()
+        },
+    )?;
+
+    let all_rows = query_preview_page_by_session(
+        pool,
+        session_id,
+        scoped_user,
+        &ImportPreviewPageRequest {
+            page: 1,
+            page_size: 10,
+            ..ImportPreviewPageRequest::default()
+        },
+    )?;
+    assert_eq!(all_rows.metadata.counts.signals.get("transfer"), Some(&1));
+    assert_eq!(all_rows.metadata.counts.signals.get("learning"), Some(&1));
+    assert_eq!(all_rows.metadata.counts.signals.get("parser"), Some(&1));
+
+    for family in ["transfer", "learning"] {
+        let page = query_preview_page_by_session(
+            pool,
+            session_id,
+            scoped_user,
+            &ImportPreviewPageRequest {
+                page: 1,
+                page_size: 10,
+                filters: ImportPreviewQueryFilters {
+                    signal: Some(family.to_string()),
+                    ..ImportPreviewQueryFilters::default()
+                },
+                ..ImportPreviewPageRequest::default()
+            },
+        )?;
+        assert_eq!(page.total, 1, "{family} filter total");
+        assert_eq!(page.rows[0].id, likely_transfer_id, "{family} filter row");
+    }
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn preview_metadata_combines_transfer_signal_with_missing_category_filter(
 ) -> Result<(), Box<dyn Error>> {
     let Some(test_db) =

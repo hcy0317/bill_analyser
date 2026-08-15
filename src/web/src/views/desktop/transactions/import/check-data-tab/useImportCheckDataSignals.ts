@@ -236,6 +236,9 @@ export function useImportCheckDataSignals(options: ImportCheckDataSignalsOptions
             String(!!item.isManuallyAnnotated),
             getImportPreviewTransferSignalStatus(item) || '',
             getImportPreviewTransferSignalTitle(item),
+            item.matching?.transfer.candidate_type || '',
+            item.transferSuggestionLevel || '',
+            String(item.matching?.transfer.suppressed ?? ''),
             item.matching?.transfer.pair_order || '',
             serializeSourceChain(item.matching?.transfer.source_chain),
             serializeSignalCacheValue(learningPayload?.review_status),
@@ -285,14 +288,12 @@ export function useImportCheckDataSignals(options: ImportCheckDataSignalsOptions
 
         const learningPayload = item.matching?.learning;
         const llmPayload = options.getLLMMatchingPayload(item);
-        const learningStatusAuthority = item.isTransferProtectedLearningSkip()
-            ? { status: null, authoritative: true }
-            : resolveSignalStatusAuthority(
-                learningPayload?.review_status,
-                learningPayload?.status,
-                learningPayload?.lifecycle_status,
-                learningPayload?.signal_state
-            );
+        const learningStatusAuthority = resolveSignalStatusAuthority(
+            learningPayload?.review_status,
+            learningPayload?.status,
+            learningPayload?.lifecycle_status,
+            learningPayload?.signal_state
+        );
         const llmStatusAuthority = resolveSignalStatusAuthority(
             llmPayload.review_status,
             llmPayload.status,
@@ -325,7 +326,9 @@ export function useImportCheckDataSignals(options: ImportCheckDataSignalsOptions
             isManuallyAnnotated: item.isManuallyAnnotated,
             transferStatus: getImportPreviewTransferSignalStatus(item),
             transferTitle: getImportPreviewTransferSignalTitle(item),
+            transferCandidateType: item.matching?.transfer.candidate_type,
             transferLearningLevel: item.transferSuggestionLevel,
+            transferSuppressed: item.matching?.transfer.suppressed,
             transferPairOrder: item.matching?.transfer.pair_order,
             transferSourceChain: item.matching?.transfer.source_chain,
             learningStatus: learningStatusAuthority.authoritative
