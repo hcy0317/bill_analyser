@@ -13,6 +13,7 @@ import {
     openImportSignalDialog,
     openSignalFilterMenu,
     patchImportSignalPreview,
+    patchImportSignalPreviewMissingCategory,
     previewRowsFromEnvelope,
     refreshPreviewThroughFilter,
     rowIncludesMarker,
@@ -405,6 +406,87 @@ test.describe('desktop import signal system', () => {
         }
     });
 
+    test('keeps a resolved missing category cleared across acknowledgement, paging, reload, and re-entry', async ({ page, request }) => {
+        test.setTimeout(60_000);
+        const session = await createCleanE2ESession(request);
+        try {
+            const { sessionId, context } = await stageDesktopSignalFixture(page, session);
+            patchImportSignalPreviewMissingCategory(sessionId);
+
+            const parserEnvelope = await refreshPreviewThroughFilter(page, 'Parser');
+            const missingCategoryRow = previewRowsFromEnvelope(parserEnvelope)
+                .find(row => rowIncludesMarker(row, IMPORT_SIGNAL_MARKERS.parser));
+            const previewId = Number(missingCategoryRow?.['id']);
+            expect(previewId).toBeGreaterThan(0);
+
+            const table = page.getByTestId('desktop.import.preview.table');
+            const row = table.getByRole('row').filter({ hasText: IMPORT_SIGNAL_MARKERS.parser });
+            await expect(row.getByTitle('Missing Category')).toBeVisible();
+
+            const editButton = row.getByRole('cell').nth(1).getByRole('button');
+            await editButton.click();
+            const editingRow = table.getByRole('row').filter({ has: page.getByRole('combobox') });
+            await expect(editingRow).toHaveCount(1);
+            const categorySelect = editingRow.getByRole('cell').nth(5).getByRole('combobox').first();
+            await categorySelect.click();
+            const categoryMenu = page.locator('.two-column-select-menu');
+            await categoryMenu.getByText(context.expensePrimaryCategory.name, { exact: true }).click();
+            await categoryMenu.getByText(context.expenseCategory.name, { exact: true }).click();
+
+            await expect(editingRow.getByTitle('Missing Category')).toHaveCount(0);
+            await editingRow.getByRole('cell').nth(1).getByRole('button').click();
+
+            const acknowledged = await session.client.put<{ previewItem?: Record<string, unknown> }>(
+                `bills/import/v2/preview/${encodeURIComponent(sessionId)}/update`,
+                {
+                    id: previewId,
+                    categoryId: Number(context.expenseCategory.id),
+                    responseMode: 'preview-item'
+                }
+            );
+            expect(Number(acknowledged.previewItem?.['category_id'])).toBe(Number(context.expenseCategory.id));
+            expect(JSON.stringify(acknowledged.previewItem?.['preview_matching_feedback'] || {}))
+                .not.toContain('missing_category');
+
+            const signalMenu = await openSignalFilterMenu(page);
+            const allResponsePromise = page.waitForResponse(response => (
+                response.request().method() === 'GET'
+                && response.url().includes(`/api/bills/import/v2/preview/${encodeURIComponent(sessionId)}`)
+                && !response.url().includes('signal=')
+            ));
+            await signalMenu.getByRole('group', { name: 'Signals' }).getByText('All', { exact: true }).click();
+            expect((await allResponsePromise).ok(), 'all rows reload after category acknowledgement').toBe(true);
+            await expect(row).toContainText(context.expenseCategory.name);
+            await expect(row.getByTitle('Missing Category')).toHaveCount(0);
+
+            const nextPageResponse = page.waitForResponse(response => (
+                response.request().method() === 'GET'
+                && response.url().includes(`/api/bills/import/v2/preview/${encodeURIComponent(sessionId)}`)
+                && response.url().includes('page=2')
+            ));
+            await table.getByRole('button', { name: '2', exact: true }).click();
+            expect((await nextPageResponse).ok(), 'server-paged preview reaches page two').toBe(true);
+            const previousPageResponse = page.waitForResponse(response => (
+                response.request().method() === 'GET'
+                && response.url().includes(`/api/bills/import/v2/preview/${encodeURIComponent(sessionId)}`)
+                && response.url().includes('page=1')
+            ));
+            await table.getByRole('button', { name: '1', exact: true }).click();
+            expect((await previousPageResponse).ok(), 'server-paged preview returns to page one').toBe(true);
+            await expect(row).toContainText(context.expenseCategory.name);
+            await expect(row.getByTitle('Missing Category')).toHaveCount(0);
+
+            await reopenDesktopSignalSessionAfterReload(page, session, sessionId);
+            const reloadedRow = page.getByTestId('desktop.import.preview.table')
+                .getByRole('row')
+                .filter({ hasText: IMPORT_SIGNAL_MARKERS.parser });
+            await expect(reloadedRow).toContainText(context.expenseCategory.name);
+            await expect(reloadedRow.getByTitle('Missing Category')).toHaveCount(0);
+        } finally {
+            await cleanupE2ESession(session);
+        }
+    });
+
     test('accepts a learning candidate, then confirms with replay and conflict outcomes', async ({ page, request }) => {
         const session = await createCleanE2ESession(request);
         try {
@@ -479,7 +561,7 @@ test.describe('desktop import signal system', () => {
 async function stageDesktopSignalFixture(
     page: Parameters<typeof openImportSignalDialog>[0],
     session: Awaited<ReturnType<typeof createCleanE2ESession>>
-): Promise<{ sessionId: string }> {
+): Promise<{ sessionId: string; context: Awaited<ReturnType<typeof createImportSignalFixtureContext>> }> {
     const fixtureContext = await createImportSignalFixtureContext(session.client, session.env);
     await openImportSignalDialog(page, session.env);
     const dedupResponsePromise = page.waitForResponse(response => (
@@ -495,7 +577,7 @@ async function stageDesktopSignalFixture(
     expect(dedup.after_dedup).toBe(IMPORT_SIGNAL_ROW_COUNT);
     await expect(page.getByTestId('desktop.import.preview.table')).toBeVisible();
     patchImportSignalPreview(dedup.session_id, fixtureContext);
-    return { sessionId: dedup.session_id };
+    return { sessionId: dedup.session_id, context: fixtureContext };
 }
 
 async function previewPage(

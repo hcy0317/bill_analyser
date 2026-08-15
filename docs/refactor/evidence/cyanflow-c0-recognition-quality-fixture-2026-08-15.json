@@ -1,7 +1,7 @@
 {
   "schema_version": "cyanflow-recognition-quality-fixture.v1",
-  "generated_at": "2026-08-15T17:35:00+08:00",
-  "repository_head": "526b8b710adfbfec09d8e5bec9f9e203507e4055",
+  "generated_at": "2026-08-15T18:12:46+08:00",
+  "repository_head": "6f4b5849bb62d0c0c75e0e932051cb40f1662115",
   "purpose": "冻结重构必须保留或补齐的识别与信号语义；本文件不包含用户账单内容。",
   "runtime_baseline_observation": {
     "corpus_manifest_sha256": "0a3b595c268413d7f404d823c6a0d0456d0e81b655e47c3c3f92e412b2c4c838",
@@ -61,10 +61,10 @@
         "src/web/src/views/desktop/transactions/import/check-data-tab/useImportCheckDataAnnotations.ts:22",
         "src/web/src/views/desktop/transactions/import/check-data-tab/serverPagedDraftState.ts:114",
         "tests/web/views/desktop/transactions/import/serverPagedDraftState.test.ts:41",
-        "tests/web/coverage-wave17-import-signals/importPreviewReviewState.behavior.test.ts:83"
+        "tests/web/coverage-wave17-import-signals/importPreviewReviewState.behavior.test.ts:83",
+        "src/web/e2e/tests/import-signal-system.desktop.spec.ts:409"
       ],
-      "coverage_status": "partial",
-      "gap": "公共 overlay seam 已锁定同 tick 派生、服务端 ack baseline 收敛与翻页不复活；前端仍有 revision 驱动的 annotation summary 兼容层，尚无刷新 + 重进页面的真实 browser fixture。",
+      "coverage_status": "covered",
       "required_before": "C1"
     },
     {
@@ -156,7 +156,6 @@
     "all_contracts_executable": false,
     "blocking_scenarios": [
       "generic-unmatched-column-mapping",
-      "missing-category-derived-issue",
       "likely-transfer-family-overlap",
       "transfer-accept-field-protection",
       "transfer-reject-two-row-recompute",

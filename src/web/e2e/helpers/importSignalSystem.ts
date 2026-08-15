@@ -62,6 +62,7 @@ interface Entity {
 
 export interface ImportSignalFixtureContext {
     readonly account: Entity;
+    readonly expensePrimaryCategory: Entity;
     readonly expenseCategory: Entity;
 }
 
@@ -124,7 +125,7 @@ export async function createImportSignalFixtureContext(
         comment: suffix,
         clientSessionId: suffix
     }), accountName);
-    const expenseCategory = entityFromResponse(await client.post<Record<string, unknown>>('categories', {
+    const expensePrimaryCategory = entityFromResponse(await client.post<Record<string, unknown>>('categories', {
         name: expenseName,
         type: 3,
         parentId: '0',
@@ -135,7 +136,19 @@ export async function createImportSignalFixtureContext(
         ruleExpression: '',
         clientSessionId: suffix
     }), expenseName);
-    return { account, expenseCategory };
+    const expenseCategoryName = `${expenseName} Detail`;
+    const expenseCategory = entityFromResponse(await client.post<Record<string, unknown>>('categories', {
+        name: expenseCategoryName,
+        type: 3,
+        parentId: String(expensePrimaryCategory.id),
+        icon: '1',
+        color: '#e03131',
+        comment: suffix,
+        displayOrder: 0,
+        ruleExpression: '',
+        clientSessionId: suffix
+    }), expenseCategoryName);
+    return { account, expensePrimaryCategory, expenseCategory };
 }
 
 export function patchImportSignalPreview(
@@ -256,6 +269,47 @@ WHERE preview.session_id = target_session.id
     runFixtureSql(sql);
 }
 
+export function patchImportSignalPreviewMissingCategory(
+    sessionId: string,
+    marker: string = IMPORT_SIGNAL_MARKERS.parser
+): void {
+    const identityFeedback = JSON.stringify({
+        review_status: 'requires_identity_review',
+        issues: [{ field: 'category_id', reason: 'missing_category', value: null }]
+    });
+    const sql = `
+WITH target_session AS (
+    SELECT id
+    FROM import_sessions
+    WHERE session_key = ${sqlLiteral(sessionId)}
+)
+UPDATE import_preview_rows AS preview
+SET category_id = NULL,
+    preview_payload = jsonb_set(
+        preview.preview_payload
+            - 'category_id'
+            - 'categoryId'
+            - 'preview_category_id'
+            || jsonb_build_object(
+                'preview_main_category', '',
+                'preview_sub_category', ''
+            ),
+        '{preview_matching_feedback}',
+        COALESCE(preview.preview_payload->'preview_matching_feedback', '{}'::jsonb)
+            || jsonb_build_object(
+                'annotation', jsonb_build_object('status', 'missing_category'),
+                'identity_validation', ${sqlLiteral(identityFeedback)}::jsonb
+            ),
+        true
+    ),
+    updated_at = now()
+FROM target_session
+WHERE preview.session_id = target_session.id
+  AND preview.merchant = ${sqlLiteral(marker)};
+`;
+    runFixtureSql(sql);
+}
+
 export async function openImportSignalDialog(page: Page, env: E2EEnvironment): Promise<void> {
     await page.goto(desktopRoute('/transaction/list?pageType=0&dateType=7', env), {
         waitUntil: 'domcontentloaded'
@@ -339,12 +393,13 @@ function signalFamilyForLabel(label: string): string {
 function runFixtureSql(sql: string): void {
     const container = process.env['E2E_POSTGRES_CONTAINER']?.trim() || 'bill-analyser-postgres';
     const database = process.env['E2E_POSTGRES_DATABASE']?.trim() || 'bill_analyser_e2e';
+    const user = process.env['E2E_POSTGRES_USER']?.trim() || 'bill_analyser';
     if (!/(e2e|test)/iu.test(database)) {
         throw new Error('E2E_POSTGRES_DATABASE must name a dedicated e2e/test database.');
     }
     const result = spawnSync('docker', [
         'exec', '-i', container,
-        'psql', '-U', 'bill_analyser', '-d', database,
+        'psql', '-U', user, '-d', database,
         '-v', 'ON_ERROR_STOP=1', '-q'
     ], {
         encoding: 'utf8',
