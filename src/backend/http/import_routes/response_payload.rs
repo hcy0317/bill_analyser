@@ -25,6 +25,30 @@ fn import_stage_elapsed_ms(started_at: Instant) -> u128 {
     started_at.elapsed().as_millis()
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct ImportParseServerTiming {
+    multipart_ms: u128,
+    parser_ms: u128,
+    staging_ms: u128,
+    total_ms: u128,
+}
+
+fn attach_import_parse_server_timing(
+    response: &mut Response,
+    timing: ImportParseServerTiming,
+) {
+    let value = format!(
+        "multipart;dur={}, parser;dur={}, staging;dur={}, total;dur={}",
+        timing.multipart_ms, timing.parser_ms, timing.staging_ms, timing.total_ms
+    );
+    if let Ok(value) = axum::http::HeaderValue::from_str(&value) {
+        response.headers_mut().insert(
+            axum::http::HeaderName::from_static("server-timing"),
+            value,
+        );
+    }
+}
+
 #[derive(Debug)]
 struct ImportParseRuntimeInput {
     session_id: String,
@@ -171,6 +195,7 @@ fn import_parse_json_runtime_response(
             require_existing_session,
         },
         Instant::now(),
+        ImportParseServerTiming::default(),
     )
 }
 
@@ -193,13 +218,14 @@ async fn import_parse_multipart_runtime_response(
         Ok(form) => form,
         Err(response) => return route_response(response),
     };
+    let multipart_elapsed_ms = import_stage_elapsed_ms(_multipart_started_at);
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
         operation = "import_parse_multipart_runtime_response",
         user_id = user_id.get(),
         body_bytes = body.len(),
-        elapsed_ms = import_stage_elapsed_ms(_multipart_started_at),
+        elapsed_ms = multipart_elapsed_ms,
         "stage1 multipart parsed"
     );
     let session_id = form
@@ -222,11 +248,13 @@ async fn import_parse_multipart_runtime_response(
     let mut unmatched_files = Vec::new();
     let mut first_detected_parser_id: Option<String> = None;
 
+    let parser_started_at = Instant::now();
     let parse_results =
         match parse_multipart_import_files_bounded(file_parts, &requested_parser).await {
             Ok(parse_results) => parse_results,
             Err(response) => return route_response(response),
         };
+    let parser_elapsed_ms = import_stage_elapsed_ms(parser_started_at);
 
     for result in parse_results {
         let _file_index = result.index;
@@ -348,6 +376,11 @@ async fn import_parse_multipart_runtime_response(
             require_existing_session: false,
         },
         request_started_at,
+        ImportParseServerTiming {
+            multipart_ms: multipart_elapsed_ms,
+            parser_ms: parser_elapsed_ms,
+            ..ImportParseServerTiming::default()
+        },
     )
 }
 
@@ -357,6 +390,7 @@ fn persist_import_parse_runtime_response(
     user_id: UserId,
     input: ImportParseRuntimeInput,
     _request_started_at: Instant,
+    timing: ImportParseServerTiming,
 ) -> Response {
     let mut runtime = match open_runtime(state) {
         Ok(runtime) => runtime,
@@ -408,13 +442,22 @@ fn persist_import_parse_runtime_response(
     if !staging_result.session_found {
         return route_response(import_session_not_found_response());
     }
-    route_response(import_stage_parse_success(ImportStageParseData {
+    let mut response = route_response(import_stage_parse_success(ImportStageParseData {
         session_id: input.session_id,
         parsed_count: staging_result.inserted_count,
         files: input.files,
         unmatched_files: input.unmatched_files,
         errors: Vec::new(),
-    }))
+    }));
+    attach_import_parse_server_timing(
+        &mut response,
+        ImportParseServerTiming {
+            staging_ms: _staging_elapsed_ms,
+            total_ms: _total_elapsed_ms,
+            ..timing
+        },
+    );
+    response
 }
 
 fn required_session_id_from_payload(

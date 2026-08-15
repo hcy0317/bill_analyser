@@ -24,6 +24,8 @@ export interface PreviewRequestEvidence {
     readonly serverTiming: string;
 }
 
+export type ServerTimingEvidence = Readonly<Record<string, number>>;
+
 const FORBIDDEN_KEY_PATTERN = /(?:session.?id|original.?name|file.?name|description|directory|(?:^|_)path$|url)/iu;
 const ABSOLUTE_WINDOWS_PATH_PATTERN = /^(?:[A-Za-z]:[\\/]|\\\\)/u;
 const URL_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//u;
@@ -83,6 +85,29 @@ export function toPreviewRequestEvidence(
         elapsedMs,
         serverTiming
     };
+}
+
+export function parseServerTimingEvidence(
+    value: string,
+    requiredMetrics: readonly string[]
+): ServerTimingEvidence {
+    const metrics: Record<string, number> = {};
+    for (const item of value.split(',')) {
+        const match = /^\s*([a-z][a-z0-9-]*)\s*;\s*dur=([0-9]+(?:\.[0-9]+)?)\s*$/u.exec(item);
+        if (!match) continue;
+        const name = match[1];
+        const duration = Number(match[2]);
+        if (!name || !Number.isFinite(duration) || duration < 0 || name in metrics) {
+            throw new Error('Server-Timing evidence contains an invalid or duplicate metric.');
+        }
+        metrics[name] = duration;
+    }
+    for (const name of requiredMetrics) {
+        if (!(name in metrics)) {
+            throw new Error(`Server-Timing evidence is missing ${name}.`);
+        }
+    }
+    return metrics;
 }
 
 export function assertEvidencePrivacy(value: unknown, privateValues: readonly string[] = []): void {

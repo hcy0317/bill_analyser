@@ -9,6 +9,7 @@ import { openSignalFilterMenu } from '../helpers/importSignalSystem';
 import {
     assertEvidencePrivacy,
     buildCorpusEvidence,
+    parseServerTimingEvidence,
     resolveC0EvidenceDirectory,
     toPreviewRequestEvidence,
     type PreviewRequestEvidence,
@@ -152,12 +153,20 @@ test.describe('Cyanflow C0 real 64-file import preview', () => {
             const parseData = unwrapData(parseEnvelope);
             const sessionId = String(parseData['session_id'] || '');
             expect(sessionId).not.toBe('');
+            const stage1Timing = parseServerTimingEvidence(
+                parseResponse.headers()['server-timing'] || '',
+                ['multipart', 'parser', 'staging', 'total']
+            );
 
             const dedupResponse = await dedupResponsePromise;
             dedupElapsedMs = Date.now() - parseStartedAt;
             expect(dedupResponse.ok(), 'real64 dedup request').toBe(true);
             const dedupEnvelope = await dedupResponse.json() as Record<string, unknown>;
             const dedupData = unwrapData(dedupEnvelope);
+            const stage2Timing = parseServerTimingEvidence(
+                dedupResponse.headers()['server-timing'] || '',
+                ['dedup', 'intelligence', 'preview-insert', 'response', 'total']
+            );
 
             const previewTable = page.getByTestId('desktop.import.preview.table');
             await expect(previewTable).toBeVisible({ timeout: 120_000 });
@@ -204,6 +213,10 @@ test.describe('Cyanflow C0 real 64-file import preview', () => {
                     elapsedMs: dedupElapsedMs,
                     afterDedup: dedupData['after_dedup'],
                     previewCount: dedupData['preview_count']
+                },
+                profile: {
+                    stage1: stage1Timing,
+                    stage2: stage2Timing
                 },
                 previewRequests,
                 browser: {

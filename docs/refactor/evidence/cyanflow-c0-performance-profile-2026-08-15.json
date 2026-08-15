@@ -1,0 +1,86 @@
+{
+  "schema_version": "cyanflow-c0-performance-profile.v1",
+  "generated_at": "2026-08-15T13:46:20.9808678+08:00",
+  "workflow": {
+    "driver": "cyanflow",
+    "activity": "performance",
+    "verification": "affected_surface"
+  },
+  "source": {
+    "base_head_sha": "ed401d1894f35c74c2e47a099831cf3b4c4bc7fc",
+    "state": "instrumentation worktree on base head",
+    "accepted_as_exact_main_performance_baseline": false,
+    "reason": "Server-Timing instrumentation was not committed when the profile run executed; exact-main acceptance remains the previously merged C0 baseline."
+  },
+  "run": {
+    "run_id": "c0-profile-headers-ed401d-20260815",
+    "artifact_root": ".cyaness/evidence/c0-real64/c0-profile-headers-ed401d-20260815",
+    "corpus_manifest_sha256": "0a3b595c268413d7f404d823c6a0d0456d0e81b655e47c3c3f92e412b2c4c838",
+    "file_count": 64,
+    "parsed_row_count": 15041,
+    "preview_row_count": 13082,
+    "unmatched_file_count": 0,
+    "browser": {
+      "parse_elapsed_ms": 137405,
+      "dedup_elapsed_from_submit_ms": 151446,
+      "operable_first_screen_elapsed_ms": 151627,
+      "performance_target_ms": 60000,
+      "performance_target_met": false
+    },
+    "stage1": {
+      "multipart_ms": 43,
+      "parser_ms": 132883,
+      "staging_ms": 3291,
+      "total_ms": 136865,
+      "parser_share_percent": 97.09
+    },
+    "stage2": {
+      "dedup_ms": 6599,
+      "intelligence_ms": 1292,
+      "preview_insert_ms": 4180,
+      "response_ms": 0,
+      "total_ms": 13899
+    },
+    "same_process_prior_pass": {
+      "stage1_total_ms": 71850,
+      "stage2_total_ms": 7682,
+      "stage1_repeat_amplification": 1.9
+    },
+    "cleanup": {
+      "strict_cleanup": "success",
+      "database_cleanup": "success",
+      "privacy_scan_violation_count": 0
+    }
+  },
+  "diagnosis": {
+    "primary_bottleneck": "dedicated spreadsheet parser",
+    "excluded_primary_bottlenecks": [
+      "multipart transport",
+      "PostgreSQL stage1 staging",
+      "preview GET",
+      "frontend operable marker"
+    ],
+    "structural_causes": [
+      "per-file blocking workers are awaited serially",
+      "spreadsheet validation and dedicated parsing reopen the same workbook",
+      "remaining registry parsers reopen binary XLS files to preserve conflict detection"
+    ]
+  },
+  "next_slice": {
+    "id": "C0-xls-single-materialization",
+    "preserve": [
+      "exactly-one/no_match/conflict decision",
+      "spreadsheet resource budgets",
+      "parser output and tags",
+      "hostile spreadsheet fail-closed behavior",
+      "sequential compressed-workbook admission until memory permits exist"
+    ],
+    "target": "prepare a bounded spreadsheet once per uploaded file and reuse it across validation and registry parser detection"
+  },
+  "gate": {
+    "c0_exit": "blocked",
+    "performance_profile": "pass",
+    "performance_target": "fail",
+    "three_consecutive_exact_main_runs": "not_started"
+  }
+}

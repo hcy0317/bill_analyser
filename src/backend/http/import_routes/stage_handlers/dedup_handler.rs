@@ -1,4 +1,33 @@
 /// 执行导入 stage2 主编排：dedup、历史 materialization、规则/learning/recall、preview 写入与异步 decision group 物化。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ImportDedupServerTiming {
+    dedup_ms: u128,
+    intelligence_ms: u128,
+    preview_insert_ms: u128,
+    response_ms: u128,
+    total_ms: u128,
+}
+
+fn attach_import_dedup_server_timing(
+    response: &mut Response,
+    timing: ImportDedupServerTiming,
+) {
+    let value = format!(
+        "dedup;dur={}, intelligence;dur={}, preview-insert;dur={}, response;dur={}, total;dur={}",
+        timing.dedup_ms,
+        timing.intelligence_ms,
+        timing.preview_insert_ms,
+        timing.response_ms,
+        timing.total_ms
+    );
+    if let Ok(value) = axum::http::HeaderValue::from_str(&value) {
+        response.headers_mut().insert(
+            axum::http::HeaderName::from_static("server-timing"),
+            value,
+        );
+    }
+}
+
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_dedup_runtime_handler(
     State(state): State<HttpAppState>,
@@ -359,7 +388,7 @@ pub async fn import_dedup_runtime_handler(
         elapsed_stage2_baseline_ms = intelligence_stats.elapsed_stage2_baseline_ns / 1_000_000,
         "import stage2 summary"
     );
-    route_response(import_stage_dedup_success(ImportStageDedupData {
+    let mut response = route_response(import_stage_dedup_success(ImportStageDedupData {
         session_id,
         preview,
         preview_included: include_preview,
@@ -382,5 +411,46 @@ pub async fn import_dedup_runtime_handler(
             "database_candidates": database_candidate_count,
             "provider_bypassed": false,
         }),
-    }))
+    }));
+    attach_import_dedup_server_timing(
+        &mut response,
+        ImportDedupServerTiming {
+            dedup_ms: _dedup_elapsed_ms,
+            intelligence_ms: _intelligence_elapsed_ms,
+            preview_insert_ms: _preview_insert_elapsed_ms,
+            response_ms: _api_response_elapsed_ms,
+            total_ms: _total_elapsed_ms,
+        },
+    );
+    response
+}
+
+#[cfg(test)]
+mod dedup_server_timing_tests {
+    use super::*;
+
+    #[test]
+    fn stage2_response_exposes_component_server_timing() {
+        let mut response = route_response(import_v2_data_response(json!({})));
+        attach_import_dedup_server_timing(
+            &mut response,
+            ImportDedupServerTiming {
+                dedup_ms: 12,
+                intelligence_ms: 34,
+                preview_insert_ms: 56,
+                response_ms: 7,
+                total_ms: 89,
+            },
+        );
+
+        assert_eq!(
+            response
+                .headers()
+                .get("server-timing")
+                .and_then(|value| value.to_str().ok()),
+            Some(
+                "dedup;dur=12, intelligence;dur=34, preview-insert;dur=56, response;dur=7, total;dur=89"
+            )
+        );
+    }
 }

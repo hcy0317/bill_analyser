@@ -36,6 +36,94 @@ mod response_payload_tests {
         );
     }
 
+    #[test]
+    fn stage1_response_exposes_component_server_timing() {
+        let mut response = route_response(import_v2_data_response(json!({})));
+        attach_import_parse_server_timing(
+            &mut response,
+            ImportParseServerTiming {
+                multipart_ms: 12,
+                parser_ms: 34,
+                staging_ms: 56,
+                total_ms: 78,
+            },
+        );
+
+        assert_eq!(
+            response
+                .headers()
+                .get("server-timing")
+                .and_then(|value| value.to_str().ok()),
+            Some("multipart;dur=12, parser;dur=34, staging;dur=56, total;dur=78")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stage1_json_runtime_response_attaches_server_timing_after_staging() {
+        let postgres_url = std::env::var("BILL_ANALYSER_TEST_POSTGRES_URL")
+            .expect("BILL_ANALYSER_TEST_POSTGRES_URL is required for the staging response test");
+        let state = HttpAppState::new(
+            crate::config::HttpShellConfig::default()
+                .with_postgres_url(postgres_url)
+                .expect("test postgres URL")
+                .with_trusted_user_header_secret("import-test-secret"),
+        )
+        .expect("test state");
+        let runtime = state
+            .open_postgres_repository_runtime("stage1-server-timing-test")
+            .expect("postgres runtime");
+        bill_analyser_db::run_postgres_migrations(runtime.pool())
+            .await
+            .expect("postgres migrations");
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        let username = format!("stage1-timing-{nonce}");
+        let user_id: i64 = sqlx::query_scalar(
+            "INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(&username)
+        .bind(format!("{username}@example.test"))
+        .fetch_one(runtime.pool())
+        .await
+        .expect("insert test user");
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            TRUSTED_USER_SECRET_HEADER,
+            axum::http::HeaderValue::from_static("import-test-secret"),
+        );
+        headers.insert(
+            "x-user-id",
+            axum::http::HeaderValue::from_str(&user_id.to_string()).expect("user header"),
+        );
+        let payload = json!({
+            "bills": [{
+                "date": "2026-08-15 12:00:00",
+                "amount": "12.34",
+                "transaction_type": "支出",
+                "description": "stage1 timing contract"
+            }]
+        });
+
+        let response = import_parse_json_runtime_response(&state, &headers, &payload, false);
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let timing = response
+            .headers()
+            .get("server-timing")
+            .and_then(|value| value.to_str().ok())
+            .expect("stage1 server timing header");
+        for metric in ["multipart", "parser", "staging", "total"] {
+            assert!(
+                timing
+                    .split(',')
+                    .any(|entry| entry.trim().starts_with(&format!("{metric};dur="))),
+                "missing {metric} metric in {timing}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn bounded_multipart_parse_preserves_order_and_defaults_missing_filename() {
         let body = include_bytes!(
