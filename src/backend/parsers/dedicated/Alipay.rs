@@ -5,19 +5,20 @@
 use crate::{post_process_raw_bills, RawBill, StandardBill};
 
 use super::common::{csv_records_from_text, decode_text, file_suffix, get, RowMap};
+use super::types::DedicatedParserInput;
 
 /// 解析支付宝导出文件，只接受 CSV/TXT 来源并返回标准化后的账单。
 #[tracing::instrument(level = "debug", skip_all)]
-pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
+pub(super) fn parse(input: &DedicatedParserInput<'_>) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
         operation = "parse",
         "business operation entered"
     );
-    let suffix = file_suffix(filename);
+    let suffix = file_suffix(input.filename());
     match suffix.as_str() {
-        "csv" | "txt" => parse_csv(bytes),
+        "csv" | "txt" => parse_csv(input.bytes()),
         _ => Vec::new(),
     }
 }

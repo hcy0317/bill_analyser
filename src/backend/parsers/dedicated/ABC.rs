@@ -5,24 +5,24 @@
 use crate::{post_process_raw_bills, RawBill, StandardBill};
 
 use super::common::{
-    contains_all_text, csv_records_from_text, decode_text, file_suffix, get,
-    html_payload_contains_any, parse_amount, positive_amount_text, rows_to_maps,
-    sheet_or_html_rows, RowMap,
+    contains_all_text, csv_records_from_text, decode_text, file_suffix, get, parse_amount,
+    positive_amount_text, rows_to_maps, RowMap,
 };
+use super::types::DedicatedParserInput;
 
 /// 解析农业银行导出文件，按扩展名分派文本或表格解析分支。
 #[tracing::instrument(level = "debug", skip_all)]
-pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
+pub(super) fn parse(input: &DedicatedParserInput<'_>) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
         operation = "parse",
         "business operation entered"
     );
-    let suffix = file_suffix(filename);
+    let suffix = file_suffix(input.filename());
     match suffix.as_str() {
-        "csv" | "txt" => parse_csv(bytes),
-        "xlsx" | "xls" => parse_sheet(bytes),
+        "csv" | "txt" => parse_csv(input.bytes()),
+        "xlsx" | "xls" => parse_sheet(input),
         _ => Vec::new(),
     }
 }
@@ -54,40 +54,28 @@ fn parse_csv(bytes: &[u8]) -> Vec<StandardBill> {
 
 /// 解析农业银行 Excel/HTML 表格，先用来源关键词排除非农行文件。
 #[tracing::instrument(level = "debug", skip_all)]
-fn parse_sheet(bytes: &[u8]) -> Vec<StandardBill> {
+fn parse_sheet(input: &DedicatedParserInput<'_>) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
         operation = "parse_sheet",
         "business operation entered"
     );
-    if html_payload_contains_any(
-        bytes,
-        &[
-            "农业银行",
-            "农业银⾏",
-            "交易⽇期",
-            "收入金额",
-            "支出金额",
-            "对⼿信息",
-        ],
-    ) == Some(false)
-    {
+    let Some(spreadsheet) = input.spreadsheet() else {
         return Vec::new();
-    }
-    let rows = sheet_or_html_rows(bytes);
+    };
+    let rows = spreadsheet.rows();
     if rows.is_empty() {
         return Vec::new();
     }
-    let content = rows.iter().flatten().cloned().collect::<Vec<_>>().join(" ");
-    if !content.contains("农业银行")
-        && !content.contains("农业银⾏")
-        && !contains_all_text(&content, &["交易日期", "交易时间", "交易金额"])
-        && !contains_all_text(&content, &["交易日期", "交易时间", "收入金额", "支出金额"])
+    if !spreadsheet.contains("农业银行")
+        && !spreadsheet.contains("农业银⾏")
+        && !spreadsheet.contains_all(&["交易日期", "交易时间", "交易金额"])
+        && !spreadsheet.contains_all(&["交易日期", "交易时间", "收入金额", "支出金额"])
     {
         return Vec::new();
     }
-    let maps = rows_to_maps(&rows, |row| {
+    let maps = rows_to_maps(rows, |row| {
         let text = row.join(",");
         text.contains("交易日期") || text.contains("记账日期") || text.contains("交易⽇期")
     });

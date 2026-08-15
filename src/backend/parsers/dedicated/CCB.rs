@@ -5,51 +5,48 @@
 use crate::{post_process_raw_bills, RawBill, StandardBill};
 
 use super::common::{
-    compact_date, compact_time, contains_all_text, file_suffix, get, html_payload_contains_any,
-    parse_amount, positive_amount_text, row_contains_all, rows_to_maps, sheet_or_html_rows, RowMap,
+    compact_date, compact_time, file_suffix, get, parse_amount, positive_amount_text,
+    row_contains_all, rows_to_maps, RowMap,
 };
+use super::types::DedicatedParserInput;
 
 /// 解析建设银行导出文件，目前只接受 Excel/HTML 表格来源。
 #[tracing::instrument(level = "debug", skip_all)]
-pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
+pub(super) fn parse(input: &DedicatedParserInput<'_>) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
         operation = "parse",
         "business operation entered"
     );
-    let suffix = file_suffix(filename);
+    let suffix = file_suffix(input.filename());
     match suffix.as_str() {
-        "xlsx" | "xls" => parse_sheet_or_html(bytes),
+        "xlsx" | "xls" => parse_sheet_or_html(input),
         _ => Vec::new(),
     }
 }
 
 /// 解析建设银行 Excel/HTML 表格，使用银行名称和记账日/收支列确认来源。
 #[tracing::instrument(level = "debug", skip_all)]
-fn parse_sheet_or_html(bytes: &[u8]) -> Vec<StandardBill> {
+fn parse_sheet_or_html(input: &DedicatedParserInput<'_>) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
         operation = "parse_sheet_or_html",
         "business operation entered"
     );
-    if html_payload_contains_any(
-        bytes,
-        &["建设银行", "China Construction Bank", "记账日", "对方户名"],
-    ) == Some(false)
+    let Some(spreadsheet) = input.spreadsheet() else {
+        return Vec::new();
+    };
+    if !spreadsheet.contains("建设银行")
+        && !spreadsheet.contains("China Construction Bank")
+        && !spreadsheet.contains_all(&["记账日", "交易日期", "支出", "收入"])
     {
         return Vec::new();
     }
-    let rows = sheet_or_html_rows(bytes);
-    let content = rows.iter().flatten().cloned().collect::<Vec<_>>().join(" ");
-    if !content.contains("建设银行")
-        && !content.contains("China Construction Bank")
-        && !contains_all_text(&content, &["记账日", "交易日期", "支出", "收入"])
-    {
-        return Vec::new();
-    }
-    let maps = rows_to_maps(&rows, |row| row_contains_all(row, &["记账日", "交易日期"]));
+    let maps = rows_to_maps(spreadsheet.rows(), |row| {
+        row_contains_all(row, &["记账日", "交易日期"])
+    });
     post_process_raw_bills("ccb", &maps.iter().filter_map(raw_ccb).collect::<Vec<_>>())
 }
 

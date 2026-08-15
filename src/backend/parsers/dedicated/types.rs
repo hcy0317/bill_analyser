@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::StandardBill;
+use crate::{spreadsheet::PreparedSpreadsheet, StandardBill};
 
 /// dedicated parser 成功解析后的结果，保留 parser id、标准账单和选择决策证据。
 #[derive(Debug, Clone, PartialEq)]
@@ -51,7 +51,40 @@ pub struct DedicatedParserCandidate {
 /// 单个来源 parser 的内部注册项，保持 parser id 与解析函数绑定。
 pub(super) struct DedicatedParser {
     pub(super) id: &'static str,
-    pub(super) parse: fn(&str, &[u8]) -> Vec<StandardBill>,
+    pub(super) parse: for<'a> fn(&DedicatedParserInput<'a>) -> Vec<StandardBill>,
+}
+
+/// 单次 dedicated 选择流程共享的只读 parser 输入。
+pub(super) struct DedicatedParserInput<'a> {
+    filename: &'a str,
+    bytes: &'a [u8],
+    spreadsheet: Option<&'a PreparedSpreadsheet>,
+}
+
+impl<'a> DedicatedParserInput<'a> {
+    pub(super) fn new(
+        filename: &'a str,
+        bytes: &'a [u8],
+        spreadsheet: Option<&'a PreparedSpreadsheet>,
+    ) -> Self {
+        Self {
+            filename,
+            bytes,
+            spreadsheet,
+        }
+    }
+
+    pub(super) fn filename(&self) -> &str {
+        self.filename
+    }
+
+    pub(super) fn bytes(&self) -> &[u8] {
+        self.bytes
+    }
+
+    pub(super) fn spreadsheet(&self) -> Option<&PreparedSpreadsheet> {
+        self.spreadsheet
+    }
 }
 
 /// 已命中的 dedicated parser 结果，选择阶段用它同时携带候选证据和账单。

@@ -5,24 +5,24 @@
 use crate::{post_process_raw_bills, RawBill, StandardBill};
 
 use super::common::{
-    contains_all_text, csv_records_from_text, decode_text, file_suffix, get,
-    html_payload_contains_any, parse_amount, positive_amount_text, rows_to_maps,
-    sheet_or_html_rows, RowMap,
+    contains_all_text, csv_records_from_text, decode_text, file_suffix, get, parse_amount,
+    positive_amount_text, rows_to_maps, RowMap,
 };
+use super::types::DedicatedParserInput;
 
 /// 解析民生银行导出文件，按扩展名分派 CSV/TXT 或 Excel/HTML 表格分支。
 #[tracing::instrument(level = "debug", skip_all)]
-pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
+pub(super) fn parse(input: &DedicatedParserInput<'_>) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
         operation = "parse",
         "business operation entered"
     );
-    let suffix = file_suffix(filename);
+    let suffix = file_suffix(input.filename());
     match suffix.as_str() {
-        "csv" | "txt" => parse_csv(bytes),
-        "xlsx" | "xls" => parse_sheet_or_html(bytes),
+        "csv" | "txt" => parse_csv(input.bytes()),
+        "xlsx" | "xls" => parse_sheet_or_html(input),
         _ => Vec::new(),
     }
 }
@@ -57,35 +57,23 @@ fn parse_csv(bytes: &[u8]) -> Vec<StandardBill> {
 
 /// 解析民生银行 Excel/HTML 表格，兼容个人账户对账单导出字段。
 #[tracing::instrument(level = "debug", skip_all)]
-fn parse_sheet_or_html(bytes: &[u8]) -> Vec<StandardBill> {
+fn parse_sheet_or_html(input: &DedicatedParserInput<'_>) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
         operation = "parse_sheet_or_html",
         "business operation entered"
     );
-    if html_payload_contains_any(
-        bytes,
-        &[
-            "民生银行",
-            "个人账户对账单",
-            "账户余额",
-            "支出金额",
-            "存入金额",
-        ],
-    ) == Some(false)
+    let Some(spreadsheet) = input.spreadsheet() else {
+        return Vec::new();
+    };
+    if !spreadsheet.contains("民生银行")
+        && !spreadsheet.contains("个人账户对账单")
+        && !spreadsheet.contains_all(&["交易时间", "支出金额", "存入金额", "账户余额"])
     {
         return Vec::new();
     }
-    let rows = sheet_or_html_rows(bytes);
-    let content = rows.iter().flatten().cloned().collect::<Vec<_>>().join(" ");
-    if !content.contains("民生银行")
-        && !content.contains("个人账户对账单")
-        && !contains_all_text(&content, &["交易时间", "支出金额", "存入金额", "账户余额"])
-    {
-        return Vec::new();
-    }
-    let maps = rows_to_maps(&rows, |row| {
+    let maps = rows_to_maps(spreadsheet.rows(), |row| {
         let text = row.join(",");
         text.contains("交易日期") || text.contains("记账日期") || text.contains("交易时间")
     });

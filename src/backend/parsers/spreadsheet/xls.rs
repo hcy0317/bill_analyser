@@ -19,6 +19,13 @@ pub(super) fn parse_rows(
     materialized_row_limit: usize,
 ) -> Result<SpreadsheetPreviewRows, SpreadsheetValidationError> {
     super::xls_preflight::validate(bytes)?;
+    parse_calamine_rows(bytes, materialized_row_limit)
+}
+
+pub(super) fn parse_calamine_rows(
+    bytes: &[u8],
+    materialized_row_limit: usize,
+) -> Result<SpreadsheetPreviewRows, SpreadsheetValidationError> {
     let range = std::panic::catch_unwind(AssertUnwindSafe(|| {
         let cursor = Cursor::new(bytes);
         let mut workbook = open_workbook_auto_from_rs(cursor).map_err(|_| invalid())?;

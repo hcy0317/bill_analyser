@@ -1,0 +1,63 @@
+{
+  "schema_version": "cyanflow-c0-xls-single-materialization.v1",
+  "generated_at": "2026-08-15T15:33:41+08:00",
+  "workflow": {
+    "driver": "cyanflow",
+    "activity": "performance",
+    "verification": "affected_surface"
+  },
+  "source": {
+    "base_head_sha": "ff29b7ebaa3173bb9869e0f12a47e873ac7f3d90",
+    "state": "implementation worktree on base head",
+    "accepted_as_exact_main": false
+  },
+  "corpus": {
+    "manifest_sha256": "0a3b595c268413d7f404d823c6a0d0456d0e81b655e47c3c3f92e412b2c4c838",
+    "file_count": 64
+  },
+  "parity": {
+    "old_file_count": 64,
+    "new_file_count": 64,
+    "changed_file_count": 0,
+    "parsed_row_count": 15041,
+    "preview_row_count": 13082,
+    "unmatched_file_count": 0
+  },
+  "performance": {
+    "run_id": "c0-xls-worktree-parity-20260815-2",
+    "artifact_root": ".cyaness/evidence/c0-real64/c0-xls-worktree-parity-20260815-2",
+    "preview_operable_ms": 12221,
+    "stage1": {
+      "multipart_ms": 54,
+      "parser_ms": 1600,
+      "staging_ms": 2162,
+      "total_ms": 4116
+    },
+    "stage2": {
+      "dedup_ms": 2991,
+      "intelligence_ms": 624,
+      "preview_insert_ms": 2959,
+      "response_ms": 0,
+      "total_ms": 7568
+    }
+  },
+  "architecture": {
+    "prepared_spreadsheet_per_file": 1,
+    "full_row_materializations_per_dedicated_spreadsheet": 1,
+    "registry_conflict_detection_preserved": true,
+    "compressed_workbook_parallelism_added": false,
+    "xlsx_bounded_scan_before_calamine": true
+  },
+  "cleanup": {
+    "strict_cleanup": "success",
+    "database_cleanup": "success",
+    "privacy_scan_violation_count": 0
+  },
+  "gate": {
+    "worktree": "pass",
+    "performance_target": "pass",
+    "exact_main": "pending",
+    "three_consecutive_exact_main_runs": "not_started",
+    "c0_exit": "pending"
+  }
+}

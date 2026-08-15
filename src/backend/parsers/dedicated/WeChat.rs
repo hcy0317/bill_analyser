@@ -4,24 +4,22 @@
 
 use crate::{post_process_raw_bills, RawBill, StandardBill};
 
-use super::common::{
-    csv_records_from_text, decode_text, file_suffix, get, html_payload_contains_any, rows_to_maps,
-    sheet_or_html_rows, RowMap,
-};
+use super::common::{csv_records_from_text, decode_text, file_suffix, get, rows_to_maps, RowMap};
+use super::types::DedicatedParserInput;
 
 /// 解析微信支付导出文件，按扩展名分派 CSV/TXT 或 Excel/HTML 表格分支。
 #[tracing::instrument(level = "debug", skip_all)]
-pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
+pub(super) fn parse(input: &DedicatedParserInput<'_>) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
         operation = "parse",
         "business operation entered"
     );
-    let suffix = file_suffix(filename);
+    let suffix = file_suffix(input.filename());
     match suffix.as_str() {
-        "csv" | "txt" => parse_csv(filename, bytes),
-        "xlsx" | "xls" => parse_sheet_or_html(bytes),
+        "csv" | "txt" => parse_csv(input.filename(), input.bytes()),
+        "xlsx" | "xls" => parse_sheet_or_html(input),
         _ => Vec::new(),
     }
 }
@@ -90,27 +88,27 @@ fn raw_wechat(row: &RowMap) -> Option<RawBill> {
 
 /// 解析微信 Excel 或 HTML 表格导出，要求前几行包含微信账单标记。
 #[tracing::instrument(level = "debug", skip_all)]
-fn parse_sheet_or_html(bytes: &[u8]) -> Vec<StandardBill> {
+fn parse_sheet_or_html(input: &DedicatedParserInput<'_>) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
         operation = "parse_sheet_or_html",
         "business operation entered"
     );
-    if html_payload_contains_any(bytes, &["微信支付账单", "交易对方", "金额(元)", "收/支"])
-        == Some(false)
-    {
+    let Some(spreadsheet) = input.spreadsheet() else {
         return Vec::new();
-    }
-    let rows = sheet_or_html_rows(bytes);
-    if !rows
+    };
+    if !spreadsheet
+        .rows()
         .iter()
         .take(5)
         .any(|row| row.join(" ").contains("微信支付账单"))
     {
         return Vec::new();
     }
-    let maps = rows_to_maps(&rows, |row| row_text_like_header(&row.join(",")));
+    let maps = rows_to_maps(spreadsheet.rows(), |row| {
+        row_text_like_header(&row.join(","))
+    });
     post_process_raw_bills(
         "wechat",
         &maps.iter().filter_map(raw_wechat).collect::<Vec<_>>(),

@@ -5,24 +5,24 @@
 use crate::{post_process_raw_bills, RawBill, StandardBill};
 
 use super::common::{
-    contains_all_text, csv_records_from_text, decode_text, file_suffix, get,
-    html_payload_contains_any, parse_amount, positive_amount_text, rows_to_maps,
-    sheet_or_html_rows, RowMap,
+    contains_all_text, csv_records_from_text, decode_text, file_suffix, get, parse_amount,
+    positive_amount_text, rows_to_maps, RowMap,
 };
+use super::types::DedicatedParserInput;
 
 /// 解析工商银行导出文件，按扩展名分派 CSV/TXT 或 Excel/HTML 表格分支。
 #[tracing::instrument(level = "debug", skip_all)]
-pub(super) fn parse(filename: &str, bytes: &[u8]) -> Vec<StandardBill> {
+pub(super) fn parse(input: &DedicatedParserInput<'_>) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
         operation = "parse",
         "business operation entered"
     );
-    let suffix = file_suffix(filename);
+    let suffix = file_suffix(input.filename());
     match suffix.as_str() {
-        "csv" | "txt" => parse_csv(bytes),
-        "xlsx" | "xls" => parse_sheet_or_html(bytes),
+        "csv" | "txt" => parse_csv(input.bytes()),
+        "xlsx" | "xls" => parse_sheet_or_html(input),
         _ => Vec::new(),
     }
 }
@@ -65,37 +65,27 @@ fn row_text_like_header(line: &str) -> bool {
 
 /// 解析工商银行 Excel/HTML 表格导出，使用银行名称或交易附言列确认来源。
 #[tracing::instrument(level = "debug", skip_all)]
-fn parse_sheet_or_html(bytes: &[u8]) -> Vec<StandardBill> {
+fn parse_sheet_or_html(input: &DedicatedParserInput<'_>) -> Vec<StandardBill> {
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
         operation = "parse_sheet_or_html",
         "business operation entered"
     );
-    if html_payload_contains_any(
-        bytes,
-        &[
-            "中国工商银行",
-            "工商银行",
-            "ICBC",
-            "收入/支出金额",
-            "交易附言",
-        ],
-    ) == Some(false)
+    let Some(spreadsheet) = input.spreadsheet() else {
+        return Vec::new();
+    };
+    if !spreadsheet.contains("中国工商银行")
+        && !spreadsheet.contains("工商银行")
+        && !spreadsheet.contains("ICBC")
+        && !spreadsheet.contains("收入/支出金额")
+        && !spreadsheet.contains("交易附言")
     {
         return Vec::new();
     }
-    let rows = sheet_or_html_rows(bytes);
-    let content = rows.iter().flatten().cloned().collect::<Vec<_>>().join(" ");
-    if !content.contains("中国工商银行")
-        && !content.contains("工商银行")
-        && !content.contains("ICBC")
-        && !content.contains("收入/支出金额")
-        && !content.contains("交易附言")
-    {
-        return Vec::new();
-    }
-    let maps = rows_to_maps(&rows, |row| row_text_like_header(&row.join(",")));
+    let maps = rows_to_maps(spreadsheet.rows(), |row| {
+        row_text_like_header(&row.join(","))
+    });
     post_process_raw_bills(
         "icbc",
         &maps.iter().filter_map(raw_icbc).collect::<Vec<_>>(),

@@ -41,6 +41,14 @@ pub(super) fn parse_rows(
     parse_worksheet_rows(&worksheet, &shared_strings, materialized_row_limit)
 }
 
+pub(super) fn parse_dedicated_rows(
+    bytes: &[u8],
+    materialized_row_limit: usize,
+) -> Result<SpreadsheetPreviewRows, SpreadsheetValidationError> {
+    parse_rows(bytes, 0)?;
+    super::xls::parse_calamine_rows(bytes, materialized_row_limit)
+}
+
 fn validate_archive(bytes: &[u8]) -> Result<BTreeSet<String>, SpreadsheetValidationError> {
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|_| invalid())?;
     if archive.len() > MAX_SPREADSHEET_ARCHIVE_ENTRIES {

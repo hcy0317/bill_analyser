@@ -1,5 +1,6 @@
 use crate::{
-    parser_source_label, validate_dedicated_spreadsheet_payload, SpreadsheetValidationErrorKind,
+    parser_source_label, spreadsheet::prepare_dedicated_spreadsheet_payload,
+    SpreadsheetValidationErrorKind,
 };
 
 use super::{
@@ -8,8 +9,8 @@ use super::{
     registry::AUTO_PARSERS,
     types::{
         DedicatedParseResult, DedicatedParseSelectionResult, DedicatedParser,
-        DedicatedParserCandidate, DedicatedParserDecision, DedicatedParserMatch,
-        DedicatedParserSelection,
+        DedicatedParserCandidate, DedicatedParserDecision, DedicatedParserInput,
+        DedicatedParserMatch, DedicatedParserSelection,
     },
 };
 
@@ -83,24 +84,30 @@ fn select_dedicated_import_bytes(
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    if matches!(suffix.as_str(), "xls" | "xlsx") {
-        if let Err(error) = validate_dedicated_spreadsheet_payload(bytes) {
-            return DedicatedParserSelection {
-                decision: no_match_decision_with_code(
-                    requested,
-                    error.message(),
-                    Some(spreadsheet_error_code(error.kind())),
-                ),
-                selected: None,
-            };
+    let prepared_spreadsheet = if matches!(suffix.as_str(), "xls" | "xlsx") {
+        match prepare_dedicated_spreadsheet_payload(bytes) {
+            Ok(prepared) => Some(prepared),
+            Err(error) => {
+                return DedicatedParserSelection {
+                    decision: no_match_decision_with_code(
+                        requested,
+                        error.message(),
+                        Some(spreadsheet_error_code(error.kind())),
+                    ),
+                    selected: None,
+                };
+            }
         }
-    }
+    } else {
+        None
+    };
+    let input = DedicatedParserInput::new(filename, bytes, prepared_spreadsheet.as_ref());
 
     let matches = if requested.is_empty() || requested == "auto" {
         let auto_candidates = auto_parser_candidates(filename, bytes);
         let mut matches = auto_candidates
             .iter()
-            .filter_map(|parser| parse_with_parser(parser, filename, bytes))
+            .filter_map(|parser| parse_with_parser(parser, &input))
             .collect::<Vec<_>>();
         if auto_candidates.len() != AUTO_PARSERS.len() {
             matches.extend(
@@ -111,12 +118,12 @@ fn select_dedicated_import_bytes(
                             .iter()
                             .any(|candidate| candidate.id == parser.id)
                     })
-                    .filter_map(|parser| parse_with_parser(parser, filename, bytes)),
+                    .filter_map(|parser| parse_with_parser(parser, &input)),
             );
         }
         matches
     } else if let Some(parser) = AUTO_PARSERS.iter().find(|parser| parser.id == requested) {
-        parse_with_parser(parser, filename, bytes)
+        parse_with_parser(parser, &input)
             .into_iter()
             .collect::<Vec<_>>()
     } else {
@@ -133,10 +140,9 @@ fn select_dedicated_import_bytes(
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_with_parser(
     parser: &DedicatedParser,
-    filename: &str,
-    bytes: &[u8],
+    input: &DedicatedParserInput<'_>,
 ) -> Option<DedicatedParserMatch> {
-    let bills = (parser.parse)(filename, bytes);
+    let bills = (parser.parse)(input);
     if bills.is_empty() {
         None
     } else {
