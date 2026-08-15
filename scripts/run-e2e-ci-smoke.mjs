@@ -138,6 +138,7 @@ function createConfig({
     negativeMode = null,
     evidenceRoot = defaultEvidenceRoot,
     runId = null,
+    commands = COMMANDS,
     controlled = false,
     authStoragePath = path.join(webRoot, 'e2e', '.auth', 'e2e-user.json'),
     timeouts = DEFAULT_TIMEOUTS,
@@ -182,6 +183,7 @@ function createConfig({
         runDirectory,
         headSha: resolveHeadSha(),
         expectedPrefix,
+        commands: { ...COMMANDS, ...commands },
         runtimeEnv,
         authStoragePath,
         timeouts: { ...DEFAULT_TIMEOUTS, ...timeouts },
@@ -1163,6 +1165,7 @@ async function runSupervisor(config, adapters) {
     let rustHandle = null;
     let primaryError = null;
     let cleanupError = null;
+    const commands = config.commands ?? COMMANDS;
 
     try {
         const postgresEndpoint = parseControlledPostgresEndpoint(config.runtimeEnv.BILL_ANALYSER_POSTGRES_URL);
@@ -1176,7 +1179,7 @@ async function runSupervisor(config, adapters) {
         await recorder.runPhase(
             'start-rust',
             { healthMs: config.timeouts.rustHealthMs, commandMs: config.timeouts.commandMs },
-            { buildCommand: COMMANDS.build, rustCommand: COMMANDS.rust },
+            { buildCommand: commands.build, rustCommand: commands.rust },
             async () => {
                 await adapters.build(controller.signal);
                 rustHandle = await adapters.startRust(controller.signal);
@@ -1188,13 +1191,13 @@ async function runSupervisor(config, adapters) {
         await recorder.runPhase(
             'desktop-smoke',
             { commandMs: config.timeouts.commandMs },
-            { command: COMMANDS.desktop },
+            { command: commands.desktop },
             () => adapters.desktop(controller.signal),
         );
         await recorder.runPhase(
             'mobile-smoke',
             { commandMs: config.timeouts.commandMs },
-            { command: COMMANDS.mobile },
+            { command: commands.mobile },
             () => adapters.mobile(controller.signal),
         );
     } catch (error) {
@@ -1240,6 +1243,7 @@ function createRealAdapters(config) {
         : path.join('target', 'debug', 'bill_http_server');
     const postgresEndpoint = parseControlledPostgresEndpoint(config.runtimeEnv.BILL_ANALYSER_POSTGRES_URL);
     const weaviateEndpoint = parseControlledWeaviateEndpoint(config.runtimeEnv.BILL_ANALYSER_WEAVIATE_ENDPOINT);
+    const commands = config.commands ?? COMMANDS;
     return {
         async waitDependencies(signal) {
             await Promise.all([
@@ -1265,7 +1269,7 @@ function createRealAdapters(config) {
                 timeoutMs: config.timeouts.commandMs,
                 signal,
                 logPath: buildLog,
-                label: COMMANDS.build,
+                label: commands.build,
             });
         },
         async startRust() {
@@ -1297,7 +1301,7 @@ function createRealAdapters(config) {
                 timeoutMs: config.timeouts.commandMs,
                 signal,
                 logPath: desktopLog,
-                label: COMMANDS.desktop,
+                label: commands.desktop,
             });
         },
         mobile(signal) {
@@ -1307,7 +1311,7 @@ function createRealAdapters(config) {
                 timeoutMs: config.timeouts.commandMs,
                 signal,
                 logPath: mobileLog,
-                label: COMMANDS.mobile,
+                label: commands.mobile,
             });
         },
         cleanup() {
@@ -1625,6 +1629,7 @@ async function runControlledScenario({
     mode = null,
     evidenceRoot,
     runId,
+    commands = COMMANDS,
     forceDesktopTimeout = false,
     forceCleanupFailure = false,
 }) {
@@ -1632,6 +1637,7 @@ async function runControlledScenario({
         negativeMode: mode,
         evidenceRoot,
         runId,
+        commands,
         controlled: true,
         authStoragePath: path.join(evidenceRoot, 'auth', `${runId}.json`),
         timeouts: {
@@ -1738,6 +1744,19 @@ async function selfTest() {
         const success = await runControlledScenario({ evidenceRoot: root, runId: 'self-test-success' });
         await success.promise;
         validateScenarioEvidence(success.config);
+
+        const customDesktopCommand = 'npm --prefix src/web run e2e -- --project=desktop-chromium e2e/tests/import-preview-fixes.real64.desktop.spec.ts';
+        const customCommandScenario = await runControlledScenario({
+            evidenceRoot: root,
+            runId: 'self-test-custom-command',
+            commands: { ...COMMANDS, desktop: customDesktopCommand },
+        });
+        await customCommandScenario.promise;
+        const customCommandPhases = readJson(path.join(customCommandScenario.config.runDirectory, 'phase-evidence.json'));
+        assert.equal(
+            customCommandPhases.phases.find(phase => phase.name === 'desktop-smoke').details.command,
+            customDesktopCommand,
+        );
 
         for (const [mode, expectedPhase] of expectedPhases) {
             const scenario = await runControlledScenario({
@@ -1904,4 +1923,5 @@ export {
     runCommand,
     runSupervisor,
     selfTest,
+    writeArtifactIndex,
 };

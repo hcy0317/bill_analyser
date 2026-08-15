@@ -21,6 +21,7 @@
 - 浏览器人工实测矩阵见 [浏览器功能实测矩阵](browser-functional-test-matrix.md)，覆盖桌面端、移动端、登录/健康检查/导航冒烟、账单导入预览确认、主数据 CRUD、预算、统计、设置、备份和外部能力边界。
 - 核心浏览器自动化见 [浏览器功能自动化](browser-functional-test-automation.md)，采用“专用测试账号 + fixture 导入 + 开始/结束清理”的模式，优先覆盖登录、导入预览确认、账单列表与统计联动，并在桌面端和移动端分别运行。
 - `src/web` 下存在 Playwright desktop/mobile projects 与 specs，通过 `npm run e2e` 运行；无后端时可先跑 `npm run e2e -- --list` 验证配置和测试发现，完整运行要求本地 Rust/PostgreSQL/Weaviate health 为 `ok`。Gitea `e2e-ci` job 以独立 PostgreSQL/Weaviate services 和单一 `run-e2e-ci-smoke.mjs` supervisor 执行固定 specs、PID/state/phase 记录与严格 cleanup；依赖、spec、进程树或清理失败都会使 job 失败。
+- C0 真实 64 文件基线通过 `npm --prefix src/web run e2e:c0:real64` 执行。runner 复用同一 E2E supervisor，为每次运行创建并最终强制删除唯一 PostgreSQL 数据库，同时沿用 run-scoped Weaviate 前缀和严格账号/进程清理。脱敏证据仅写入 `.cyaness/evidence/c0-real64/<run-id>/`，保留 commit、二进制摘要、阶段耗时、聚合语料摘要和清理结果，不写原始文件名、账单描述、绝对路径、原始 URL、应用 session id 或用户 LLM 配置。数据库清理失败与基线失败同等阻断。
 
 ## 仓库治理
 

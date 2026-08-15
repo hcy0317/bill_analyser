@@ -21,6 +21,7 @@
     "test:watch": "cross-env TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --watch",
     "e2e": "playwright test",
     "e2e:ci:smoke": "node ../../scripts/run-e2e-ci-smoke.mjs",
+    "e2e:c0:real64": "node ../../scripts/run-c0-real64-baseline.mjs",
     "e2e:check": "tsc --noEmit --project tsconfig.e2e.json",
     "e2e:headed": "playwright test --headed",
     "e2e:ui": "playwright test --ui",

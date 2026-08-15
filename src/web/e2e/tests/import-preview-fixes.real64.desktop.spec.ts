@@ -6,15 +6,23 @@ import { expect, test } from '@playwright/test';
 
 import { getE2EEnvironment } from '../helpers/env';
 import { openSignalFilterMenu } from '../helpers/importSignalSystem';
+import {
+    assertEvidencePrivacy,
+    buildCorpusEvidence,
+    resolveC0EvidenceDirectory,
+    toPreviewRequestEvidence,
+    type PreviewRequestEvidence,
+    type Real64CorpusFile
+} from '../helpers/real64Evidence';
 import { desktopRoute } from '../helpers/routes';
 import { cleanupE2ESession, createCleanE2ESession } from '../helpers/session';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 const REAL64_DIR = path.join(REPO_ROOT, 'bills');
-const EVIDENCE_DIR = path.join(REPO_ROOT, '.omx', 'context');
 const LEGACY_BINARY_XLS_FILE_NAME = '交易明细_9316_20230827_20250827.xls';
+const EXPECTED_CORPUS_MANIFEST_SHA256 = '0a3b595c268413d7f404d823c6a0d0456d0e81b655e47c3c3f92e412b2c4c838';
 
-test.describe('G019 real 64-file import preview', () => {
+test.describe('Cyanflow C0 real 64-file import preview', () => {
     test.describe.configure({ mode: 'serial', retries: 0, timeout: 240_000 });
 
     test('parses the binary XLS file and continues into dedup', async ({ page, request }) => {
@@ -58,13 +66,27 @@ test.describe('G019 real 64-file import preview', () => {
             expect((await dedupResponsePromise).ok(), 'real64 dedup request').toBe(true);
             expect(dedupRequestCount).toBeGreaterThan(0);
 
-            mkdirSync(EVIDENCE_DIR, { recursive: true });
-            writeFileSync(path.join(EVIDENCE_DIR, 'g019-real64-binary-xls.json'), JSON.stringify({
+            const evidenceDir = evidenceDirectory();
+            const evidence = {
+                schemaVersion: 1,
                 generatedAt: new Date().toISOString(),
-                corpusCount: manifest.files.length,
-                parsedCount: parseData['parsed_count'],
-                unmatchedFiles
-            }, null, 2));
+                corpus: buildCorpusEvidence(manifest.files),
+                parse: {
+                    parsedCount: parseData['parsed_count'],
+                    unmatchedFileCount: unmatchedFiles.length,
+                    legacyBinaryXlsMatched: !unmatchedFiles.some(file => (
+                        String(file['original_name'] || '') === LEGACY_BINARY_XLS_FILE_NAME
+                    ))
+                },
+                dedup: { requestObserved: dedupRequestCount > 0 }
+            };
+            assertEvidencePrivacy(evidence, manifest.files.map(file => file.name));
+            mkdirSync(evidenceDir, { recursive: true });
+            writeFileSync(
+                path.join(evidenceDir, 'c0-real64-binary-xls.json'),
+                `${JSON.stringify(evidence, null, 2)}\n`,
+                'utf8'
+            );
         } finally {
             await cleanupE2ESession(session);
         }
@@ -75,11 +97,13 @@ test.describe('G019 real 64-file import preview', () => {
         const manifest = buildReal64Manifest();
         const compatibleFiles = manifest.files;
         expect(compatibleFiles).toHaveLength(64);
-        const previewRequests: Array<Record<string, unknown>> = [];
+        const previewRequests: PreviewRequestEvidence[] = [];
         const requestStartedAt = new Map<string, number>();
+        let legacyFilterIndexRequestCount = 0;
         let parseStartedAt = 0;
         let parseElapsedMs = 0;
         let dedupElapsedMs = 0;
+        let previewOperableElapsedMs = 0;
 
         page.on('request', requestValue => {
             const url = requestValue.url();
@@ -90,13 +114,14 @@ test.describe('G019 real 64-file import preview', () => {
         page.on('response', response => {
             const url = response.url();
             if (!url.includes('/api/bills/import/v2/preview/')) return;
-            previewRequests.push({
-                method: response.request().method(),
+            if (url.includes('filter-index')) legacyFilterIndexRequestCount += 1;
+            previewRequests.push(toPreviewRequestEvidence(
                 url,
-                status: response.status(),
-                elapsedMs: Date.now() - (requestStartedAt.get(url) || Date.now()),
-                serverTiming: response.headers()['server-timing'] || ''
-            });
+                response.request().method(),
+                response.status(),
+                Date.now() - (requestStartedAt.get(url) || Date.now()),
+                response.headers()['server-timing'] || ''
+            ));
         });
 
         try {
@@ -134,10 +159,15 @@ test.describe('G019 real 64-file import preview', () => {
             const dedupEnvelope = await dedupResponse.json() as Record<string, unknown>;
             const dedupData = unwrapData(dedupEnvelope);
 
-            await expect(page.getByTestId('desktop.import.preview.table')).toBeVisible({ timeout: 120_000 });
-            await page.screenshot({
-                path: path.join(EVIDENCE_DIR, 'g019-real64-preview.png'),
-                fullPage: true
+            const previewTable = page.getByTestId('desktop.import.preview.table');
+            await expect(previewTable).toBeVisible({ timeout: 120_000 });
+            previewOperableElapsedMs = Date.now() - parseStartedAt;
+            const evidenceDir = evidenceDirectory();
+            mkdirSync(evidenceDir, { recursive: true });
+            await page.getByTestId('desktop.import.dialog').screenshot({
+                path: path.join(evidenceDir, 'c0-real64-preview-redacted.png'),
+                mask: [previewTable],
+                maskColor: '#202124'
             });
 
             const requestsBeforeFilter = previewRequests.length;
@@ -154,31 +184,21 @@ test.describe('G019 real 64-file import preview', () => {
             await expect(page.getByTestId('desktop.import.preview.table')).toBeVisible();
 
             const filterRequests = previewRequests.slice(requestsBeforeFilter)
-                .filter(item => String(item['url']).includes('signal=parser'));
+                .filter(item => item.signal === 'parser');
             expect(filterRequests).toHaveLength(1);
-            expect(previewRequests.some(item => String(item['url']).includes('filter-index'))).toBe(false);
+            expect(legacyFilterIndexRequestCount).toBe(0);
 
-            mkdirSync(EVIDENCE_DIR, { recursive: true });
-            writeFileSync(path.join(EVIDENCE_DIR, 'g019-real64-browser.json'), JSON.stringify({
+            const browserEvidence = {
+                schemaVersion: 1,
                 generatedAt: new Date().toISOString(),
-                sessionId,
-                corpus: {
-                    directory: REAL64_DIR,
-                    count: manifest.files.length,
-                    uploadedCompatibleCount: compatibleFiles.length,
-                    binaryXlsFile: LEGACY_BINARY_XLS_FILE_NAME,
-                    totalBytes: manifest.totalBytes,
-                    extensions: manifest.extensions,
-                    files: manifest.files.map(file => ({
-                        name: file.name,
-                        bytes: file.bytes,
-                        sha256: file.sha256
-                    }))
-                },
+                corpus: buildCorpusEvidence(manifest.files),
+                upload: { fileCount: compatibleFiles.length },
                 parse: {
                     elapsedMs: parseElapsedMs,
                     parsedCount: parseData['parsed_count'],
-                    unmatchedFiles: parseData['unmatched_files'] || []
+                    unmatchedFileCount: Array.isArray(parseData['unmatched_files'])
+                        ? parseData['unmatched_files'].length
+                        : 0
                 },
                 dedup: {
                     elapsedMs: dedupElapsedMs,
@@ -186,8 +206,35 @@ test.describe('G019 real 64-file import preview', () => {
                     previewCount: dedupData['preview_count']
                 },
                 previewRequests,
-                parserFilterCanonicalRequestCount: filterRequests.length
-            }, null, 2));
+                browser: {
+                    previewOperableElapsedMs,
+                    parserFilterCanonicalRequestCount: filterRequests.length,
+                    legacyFilterIndexRequestCount
+                }
+            };
+            const browserTrace = {
+                schemaVersion: 1,
+                events: [
+                    { name: 'upload-started', elapsedMs: 0 },
+                    { name: 'parse-completed', elapsedMs: parseElapsedMs },
+                    { name: 'dedup-completed', elapsedMs: dedupElapsedMs },
+                    { name: 'preview-operable', elapsedMs: previewOperableElapsedMs },
+                    { name: 'parser-filter-applied', elapsedMs: Date.now() - parseStartedAt }
+                ]
+            };
+            const privateFileNames = manifest.files.map(file => file.name);
+            assertEvidencePrivacy(browserEvidence, privateFileNames);
+            assertEvidencePrivacy(browserTrace, privateFileNames);
+            writeFileSync(
+                path.join(evidenceDir, 'c0-real64-browser.json'),
+                `${JSON.stringify(browserEvidence, null, 2)}\n`,
+                'utf8'
+            );
+            writeFileSync(
+                path.join(evidenceDir, 'c0-real64-browser-trace.json'),
+                `${JSON.stringify(browserTrace, null, 2)}\n`,
+                'utf8'
+            );
         } finally {
             await cleanupE2ESession(session);
         }
@@ -195,9 +242,7 @@ test.describe('G019 real 64-file import preview', () => {
 });
 
 function buildReal64Manifest(): {
-    files: Array<{ path: string; name: string; bytes: number; sha256: string }>;
-    totalBytes: number;
-    extensions: Record<string, number>;
+    files: Real64CorpusFile[];
 } {
     const files = readdirSync(REAL64_DIR)
         .map(name => path.join(REAL64_DIR, name))
@@ -213,16 +258,12 @@ function buildReal64Manifest(): {
             };
         });
     expect(files).toHaveLength(64);
-    const extensions = files.reduce<Record<string, number>>((counts, file) => {
-        const extension = path.extname(file.name).toLowerCase();
-        counts[extension] = (counts[extension] || 0) + 1;
-        return counts;
-    }, {});
-    return {
-        files,
-        totalBytes: files.reduce((sum, file) => sum + file.bytes, 0),
-        extensions
-    };
+    expect(buildCorpusEvidence(files).corpusManifestSha256).toBe(EXPECTED_CORPUS_MANIFEST_SHA256);
+    return { files };
+}
+
+function evidenceDirectory(): string {
+    return resolveC0EvidenceDirectory(REPO_ROOT, process.env['E2E_REAL64_EVIDENCE_DIR']);
 }
 
 function unwrapData(envelope: Record<string, unknown>): Record<string, unknown> {

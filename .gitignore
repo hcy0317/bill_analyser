@@ -489,6 +489,7 @@ output/*
 uploads/*
 tests/.runtime/
 .omx/
+.cyaness/evidence/
 coverage.json
 
 # Playwright browser E2E artifacts
