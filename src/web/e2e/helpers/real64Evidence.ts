@@ -27,6 +27,11 @@ export interface PreviewRequestEvidence {
 const FORBIDDEN_KEY_PATTERN = /(?:session.?id|original.?name|file.?name|description|directory|(?:^|_)path$|url)/iu;
 const ABSOLUTE_WINDOWS_PATH_PATTERN = /^(?:[A-Za-z]:[\\/]|\\\\)/u;
 const URL_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//u;
+const CORPUS_NAME_COLLATOR = new Intl.Collator('zh-CN', {
+    usage: 'sort',
+    sensitivity: 'variant',
+    numeric: false
+});
 
 export function buildCorpusEvidence(files: readonly Real64CorpusFile[]): Real64CorpusEvidence {
     const sorted = [...files].sort((left, right) => compareNames(left.name, right.name));
@@ -137,7 +142,6 @@ export function resolveC0EvidenceDirectory(repoRoot: string, configured: string 
 function compareNames(left: string, right: string): number {
     const normalizedLeft = left.replace(/\\/gu, '/').toLowerCase();
     const normalizedRight = right.replace(/\\/gu, '/').toLowerCase();
-    if (normalizedLeft < normalizedRight) return -1;
-    if (normalizedLeft > normalizedRight) return 1;
-    return left < right ? -1 : left > right ? 1 : 0;
+    return CORPUS_NAME_COLLATOR.compare(normalizedLeft, normalizedRight)
+        || CORPUS_NAME_COLLATOR.compare(left, right);
 }

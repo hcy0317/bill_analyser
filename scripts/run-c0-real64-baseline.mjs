@@ -15,6 +15,7 @@ import {
     createRealAdapters,
     emitFailureDiagnostic,
     redactSensitiveText,
+    resolveNpmInvocation,
     runCommand,
     runSupervisor,
     writeArtifactIndex,
@@ -27,6 +28,11 @@ const REAL64_SPEC = 'e2e/tests/import-preview-fixes.real64.desktop.spec.ts';
 const REAL64_DESKTOP_COMMAND = `npm --prefix src/web run e2e -- --project=desktop-chromium ${REAL64_SPEC}`;
 const DATABASE_PREFIX = 'bill_analyser_c0_test_';
 const DEFAULT_POSTGRES_CONTAINER = 'bill-analyser-postgres';
+const C0_TEXT_ARTIFACT_EXTENSIONS = new Set(['.json', '.log', '.md', '.txt']);
+const RAW_URL_PATTERN = /\b[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s"'`]+/gu;
+const WINDOWS_ABSOLUTE_PATH_PATTERN = /(?:\b[A-Za-z]:[\\/]|\\\\)[^\r\n\t"'`]+/gu;
+const APPLICATION_SESSION_KEY_PATTERN = /(?:session.?id|import.?session)/iu;
+const APPLICATION_SESSION_ROUTE_PATTERN = /(\/api\/bills\/import\/v2\/(?:preview|confirm|session)\/)[A-Za-z0-9._-]+/gu;
 
 function parseArgs(argv) {
     if (argv.length === 0) return { selfTest: false };
@@ -177,7 +183,6 @@ function createC0Config({ runId, evidenceRoot = C0_EVIDENCE_ROOT, postgresUrl, d
 
 function createC0Adapters(config, databaseName) {
     const adapters = createRealAdapters(config);
-    const executable = process.platform === 'win32' ? 'npm.cmd' : 'npm';
     return {
         ...adapters,
         async build(signal) {
@@ -185,10 +190,11 @@ function createC0Adapters(config, databaseName) {
             writeRuntimeProvenance(config, databaseName);
         },
         desktop(signal) {
-            return runCommand(executable, [
+            const invocation = resolveNpmInvocation([
                 '--prefix', 'src/web', 'run', 'e2e', '--',
                 '--project=desktop-chromium', REAL64_SPEC,
-            ], {
+            ], { npmExecPath: config.runtimeEnv.npm_execpath });
+            return runCommand(invocation.command, invocation.args, {
                 cwd: repoRoot,
                 env: config.runtimeEnv,
                 timeoutMs: config.timeouts.commandMs,
@@ -211,6 +217,111 @@ function hashText(value) {
 function writeJson(target, value) {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+function redactC0Text(value, privateValues) {
+    let result = String(value);
+    for (const privateValue of [...privateValues].filter(Boolean).sort((left, right) => right.length - left.length)) {
+        result = result.replaceAll(privateValue, '[REDACTED_PRIVATE_VALUE]');
+    }
+    for (const repoPath of [repoRoot, repoRoot.replace(/\\/gu, '/'), repoRoot.replace(/\\/gu, '\\\\')]) {
+        result = result.replaceAll(repoPath, '[REDACTED_REPO]');
+    }
+    result = result.replace(RAW_URL_PATTERN, '[REDACTED_URL]');
+    result = result.replace(WINDOWS_ABSOLUTE_PATH_PATTERN, '[REDACTED_PATH]');
+    result = result.replace(APPLICATION_SESSION_ROUTE_PATTERN, '$1[REDACTED_SESSION]');
+    return result;
+}
+
+function sanitizeC0JsonValue(value, privateValues, key = '') {
+    if (APPLICATION_SESSION_KEY_PATTERN.test(key)) {
+        return '[REDACTED_SESSION]';
+    }
+    if (typeof value === 'string') {
+        return redactC0Text(value, privateValues);
+    }
+    if (Array.isArray(value)) {
+        return value.map(item => sanitizeC0JsonValue(item, privateValues));
+    }
+    if (value && typeof value === 'object') {
+        return Object.fromEntries(
+            Object.entries(value).map(([childKey, child]) => [
+                childKey,
+                sanitizeC0JsonValue(child, privateValues, childKey),
+            ]),
+        );
+    }
+    return value;
+}
+
+function regexMatches(pattern, value) {
+    pattern.lastIndex = 0;
+    const matches = pattern.test(value);
+    pattern.lastIndex = 0;
+    return matches;
+}
+
+function assertC0TextPrivacy(text, entryName, privateValues) {
+    if (privateValues.some(privateValue => privateValue && text.includes(privateValue))) {
+        throw new Error(`C0 artifact ${entryName} contains a private corpus identity.`);
+    }
+    if (text.includes(repoRoot) || text.includes(repoRoot.replace(/\\/gu, '/'))) {
+        throw new Error(`C0 artifact ${entryName} contains the repository absolute path.`);
+    }
+    if (regexMatches(RAW_URL_PATTERN, text) || regexMatches(WINDOWS_ABSOLUTE_PATH_PATTERN, text)) {
+        throw new Error(`C0 artifact ${entryName} contains a raw URL or absolute path.`);
+    }
+}
+
+function assertC0JsonPrivacy(value, entryName, privateValues, key = '') {
+    if (APPLICATION_SESSION_KEY_PATTERN.test(key) && value !== '[REDACTED_SESSION]') {
+        throw new Error(`C0 artifact ${entryName} contains an application session identity.`);
+    }
+    if (typeof value === 'string') {
+        assertC0TextPrivacy(value, entryName, privateValues);
+        return;
+    }
+    if (Array.isArray(value)) {
+        value.forEach(item => assertC0JsonPrivacy(item, entryName, privateValues));
+        return;
+    }
+    if (value && typeof value === 'object') {
+        for (const [childKey, child] of Object.entries(value)) {
+            assertC0JsonPrivacy(child, entryName, privateValues, childKey);
+        }
+    }
+}
+
+function assertC0ArtifactPrivacy(config, privateValues) {
+    for (const entry of fs.readdirSync(config.runDirectory, { withFileTypes: true })) {
+        const extension = path.extname(entry.name).toLowerCase();
+        if (!entry.isFile() || !C0_TEXT_ARTIFACT_EXTENSIONS.has(extension)) {
+            continue;
+        }
+        const text = fs.readFileSync(path.join(config.runDirectory, entry.name), 'utf8');
+        if (extension === '.json') {
+            assertC0JsonPrivacy(JSON.parse(text), entry.name, privateValues);
+        } else {
+            assertC0TextPrivacy(text, entry.name, privateValues);
+        }
+    }
+}
+
+function sanitizeC0Artifacts(config, privateValues = null) {
+    const identities = privateValues ?? fs.readdirSync(path.join(repoRoot, 'bills'));
+    for (const entry of fs.readdirSync(config.runDirectory, { withFileTypes: true })) {
+        if (!entry.isFile() || !C0_TEXT_ARTIFACT_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
+            continue;
+        }
+        const target = path.join(config.runDirectory, entry.name);
+        if (path.extname(entry.name).toLowerCase() === '.json') {
+            const parsed = JSON.parse(fs.readFileSync(target, 'utf8'));
+            writeJson(target, sanitizeC0JsonValue(parsed, identities));
+        } else {
+            fs.writeFileSync(target, redactC0Text(fs.readFileSync(target, 'utf8'), identities), 'utf8');
+        }
+    }
+    assertC0ArtifactPrivacy(config, identities);
 }
 
 function writeRuntimeProvenance(config, databaseName) {
@@ -292,6 +403,25 @@ async function selfTest() {
         assert.equal(config.commands.desktop, REAL64_DESKTOP_COMMAND);
         assert.equal(config.runtimeEnv.E2E_REAL64_EVIDENCE_DIR, config.runDirectory);
         assert.equal(config.runtimeEnv.E2E_ALLOW_SHARED_LOCAL_DATABASE, 'false');
+        writeJson(path.join(config.runDirectory, 'privacy-fixture.json'), {
+            endpoint: 'http://127.0.0.1:5000/api/private',
+            authStoragePath: 'C:\\private\\e2e-user.json',
+            command: path.join(repoRoot, 'target', 'debug', 'bill_http_server.exe'),
+            sessionId: 'application-session-secret',
+        });
+        fs.writeFileSync(
+            path.join(config.runDirectory, 'privacy-fixture.log'),
+            `private-a.csv ${repoRoot} https://example.test/private`,
+            'utf8',
+        );
+        sanitizeC0Artifacts(config, ['private-a.csv']);
+        const sanitized = fs.readFileSync(path.join(config.runDirectory, 'privacy-fixture.json'), 'utf8')
+            + fs.readFileSync(path.join(config.runDirectory, 'privacy-fixture.log'), 'utf8');
+        assert.equal(sanitized.includes('private-a.csv'), false);
+        assert.equal(sanitized.includes(repoRoot), false);
+        assert.equal(sanitized.includes('http://'), false);
+        assert.equal(sanitized.includes('https://'), false);
+        assert.equal(sanitized.includes('application-session-secret'), false);
     } finally {
         fs.rmSync(temporary, { recursive: true, force: true });
     }
@@ -313,6 +443,7 @@ async function main(argv = process.argv.slice(2)) {
     let config = null;
     let primaryError = null;
     let cleanupError = null;
+    let evidenceError = null;
     let databaseCreated = false;
 
     try {
@@ -338,21 +469,26 @@ async function main(argv = process.argv.slice(2)) {
             }
         }
         if (config) {
-            writeDatabaseCleanupEvidence(
-                config,
-                databaseName,
-                cleanupError ? 'failure' : 'success',
-                cleanupError,
-            );
-            writeArtifactIndex(config);
+            try {
+                writeDatabaseCleanupEvidence(
+                    config,
+                    databaseName,
+                    cleanupError ? 'failure' : 'success',
+                    cleanupError,
+                );
+                sanitizeC0Artifacts(config);
+                writeArtifactIndex(config);
+            } catch (error) {
+                evidenceError = error;
+            }
         }
     }
 
-    if (primaryError && cleanupError) {
-        throw new AggregateError([primaryError, cleanupError], 'C0 baseline and database cleanup both failed');
+    const failures = [primaryError, cleanupError, evidenceError].filter(Boolean);
+    if (failures.length > 1) {
+        throw new AggregateError(failures, 'C0 baseline finalization encountered multiple failures');
     }
-    if (cleanupError) throw cleanupError;
-    if (primaryError) throw primaryError;
+    if (failures.length === 1) throw failures[0];
     console.log(JSON.stringify({
         status: 'passed',
         runId: config.runId,

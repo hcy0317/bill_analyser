@@ -38,6 +38,17 @@ describe('C0 real64 evidence contract', () => {
         expect(JSON.stringify(evidence)).not.toContain('/private/bills');
     });
 
+    test('corpus digest uses explicit zh-CN collation instead of the host locale', () => {
+        const evidence = buildCorpusEvidence([
+            { path: '/fixture/second.csv', name: '账单乙.csv', bytes: 2, sha256: 'b'.repeat(64) },
+            { path: '/fixture/first.csv', name: '账单甲.csv', bytes: 1, sha256: 'a'.repeat(64) }
+        ]);
+
+        expect(evidence.corpusManifestSha256).toBe(
+            '72b79d1db1619ac8fdf5972dadad52265ef94591d5a2cdceb3237e2d427c9662'
+        );
+    });
+
     test('preview request evidence removes host and session identity', () => {
         const evidence = toPreviewRequestEvidence(
             'http://127.0.0.1:5000/api/bills/import/v2/preview/session-secret?page=1&signal=parser',
@@ -109,7 +120,9 @@ describe('C0 real64 evidence contract', () => {
         expect(source).toContain('DROP DATABASE IF EXISTS');
         expect(source).toContain('WITH (FORCE)');
         expect(source).toContain('writeArtifactIndex');
-        expect(source).toContain('await adapters.build(signal);\n            writeRuntimeProvenance(config, databaseName);');
+        expect(source).toMatch(
+            /await adapters\.build\(signal\);\s+writeRuntimeProvenance\(config, databaseName\);/u
+        );
         expect(packageManifest.scripts?.['e2e:c0:real64']).toBe(
             'node ../../scripts/run-c0-real64-baseline.mjs'
         );

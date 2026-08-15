@@ -2,6 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -102,6 +103,11 @@ function sanitizeRunId(value) {
     return sanitized.slice(0, 96);
 }
 
+function weaviatePrefixForRunId(runId) {
+    const digest = createHash('sha256').update(runId).digest('hex').slice(0, 32);
+    return `BillAnalyserE2E_${digest}`;
+}
+
 function mergeNoProxy(...values) {
     const entries = [];
     const seen = new Set();
@@ -147,7 +153,7 @@ function createConfig({
     const effectiveRunId = negativeMode && !runId
         ? sanitizeRunId(`${baseRunId}-${negativeMode}`)
         : baseRunId;
-    const expectedPrefix = `BillAnalyserE2E${effectiveRunId}`;
+    const expectedPrefix = weaviatePrefixForRunId(effectiveRunId);
     const runDirectory = path.join(evidenceRoot, effectiveRunId);
     const postgresUrl = process.env['BILL_ANALYSER_POSTGRES_URL']?.trim() || DEFAULT_POSTGRES_URL;
     const weaviateEndpoint = process.env['BILL_ANALYSER_WEAVIATE_ENDPOINT']?.trim() || DEFAULT_WEAVIATE_ENDPOINT;
@@ -430,8 +436,28 @@ function appendCapped(target, chunks) {
     fs.writeFileSync(target, output);
 }
 
-function executable(name) {
-    return process.platform === 'win32' ? `${name}.cmd` : name;
+function executable(name, platform = process.platform) {
+    return platform === 'win32' ? `${name}.exe` : name;
+}
+
+function resolveNpmInvocation(args, {
+    platform = process.platform,
+    nodeExecutable = process.execPath,
+    npmExecPath = process.env.npm_execpath,
+} = {}) {
+    if (platform !== 'win32') {
+        return { command: 'npm', args: [...args] };
+    }
+    const pathApi = path.win32;
+    const npmCli = npmExecPath?.trim()
+        || pathApi.join(pathApi.dirname(nodeExecutable), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+    if (!pathApi.isAbsolute(nodeExecutable) || !pathApi.isAbsolute(npmCli)) {
+        throw new SupervisorError('Windows npm invocation requires absolute node and npm-cli paths');
+    }
+    if (pathApi.basename(npmCli).toLowerCase() !== 'npm-cli.js') {
+        throw new SupervisorError('Windows npm invocation must target npm-cli.js');
+    }
+    return { command: nodeExecutable, args: [npmCli, ...args] };
 }
 
 function isProcessGroupAlive(groupId) {
@@ -770,7 +796,6 @@ function delay(milliseconds, signal = null) {
             return;
         }
         signal?.addEventListener('abort', onAbort, { once: true });
-        timer.unref?.();
     });
 }
 
@@ -1295,7 +1320,11 @@ function createRealAdapters(config) {
             });
         },
         desktop(signal) {
-            return runCommand(executable('npm'), ['--prefix', 'src/web', 'run', 'e2e', '--', '--project=desktop-chromium', 'e2e/tests/desktop.route-smoke.spec.ts'], {
+            const invocation = resolveNpmInvocation([
+                '--prefix', 'src/web', 'run', 'e2e', '--',
+                '--project=desktop-chromium', 'e2e/tests/desktop.route-smoke.spec.ts',
+            ], { npmExecPath: config.runtimeEnv.npm_execpath });
+            return runCommand(invocation.command, invocation.args, {
                 cwd: repoRoot,
                 env: config.runtimeEnv,
                 timeoutMs: config.timeouts.commandMs,
@@ -1305,7 +1334,11 @@ function createRealAdapters(config) {
             });
         },
         mobile(signal) {
-            return runCommand(executable('npm'), ['--prefix', 'src/web', 'run', 'e2e', '--', '--project=mobile-chromium', 'e2e/tests/mobile.route-smoke.spec.ts'], {
+            const invocation = resolveNpmInvocation([
+                '--prefix', 'src/web', 'run', 'e2e', '--',
+                '--project=mobile-chromium', 'e2e/tests/mobile.route-smoke.spec.ts',
+            ], { npmExecPath: config.runtimeEnv.npm_execpath });
+            return runCommand(invocation.command, invocation.args, {
                 cwd: repoRoot,
                 env: config.runtimeEnv,
                 timeoutMs: config.timeouts.commandMs,
@@ -1658,6 +1691,30 @@ async function runControlledScenario({
 }
 
 async function selfTest() {
+    const delayStartedAt = Date.now();
+    await delay(20);
+    assert.ok(Date.now() - delayStartedAt >= 10, 'awaited delay must keep the event loop alive');
+
+    assert.equal(executable('cargo', 'win32'), 'cargo.exe');
+    assert.deepEqual(resolveNpmInvocation(['--version'], {
+        platform: 'win32',
+        nodeExecutable: 'C:\\node\\node.exe',
+        npmExecPath: 'C:\\node\\node_modules\\npm\\bin\\npm-cli.js',
+    }), {
+        command: 'C:\\node\\node.exe',
+        args: ['C:\\node\\node_modules\\npm\\bin\\npm-cli.js', '--version'],
+    });
+    assert.deepEqual(resolveNpmInvocation(['--version'], { platform: 'linux' }), {
+        command: 'npm',
+        args: ['--version'],
+    });
+    const weaviatePrefixConfig = createConfig({
+        runId: 'dev-windows-runner-fix-with-hyphens-and-an-intentionally-long-suffix-20260815',
+        controlled: true,
+    });
+    assert.match(weaviatePrefixConfig.expectedPrefix, /^[A-Za-z][A-Za-z0-9_]+$/u);
+    assert.ok(weaviatePrefixConfig.expectedPrefix.length <= 64);
+
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bill-e2e-supervisor-'));
     const expectedPhases = new Map([
         ['missing-postgres', 'dependency-readiness'],
@@ -1920,6 +1977,7 @@ export {
     mergeNoProxy,
     parseArgs,
     redactSensitiveText,
+    resolveNpmInvocation,
     runCommand,
     runSupervisor,
     selfTest,
