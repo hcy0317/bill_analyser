@@ -4249,6 +4249,10 @@ async fn real_postgres_transfer_and_recurring_decisions_cover_success_conflict_a
     let pool = &test_db.pool;
     let user_id = insert_user(pool, "import-preview-decision-coverage").await?;
     let scoped_user_id = UserId::new(user_id as u64).expect("positive user id");
+    let category_id =
+        insert_category(pool, user_id, "转账接受分类", "transfer", "测试/转账接受").await?;
+    let source_account_id = insert_account(pool, user_id, "转账接受来源账户").await?;
+    let destination_account_id = insert_account(pool, user_id, "转账接受目标账户").await?;
     let session_id = "import-preview-decision-session";
     create_import_session(
         pool,
@@ -4269,10 +4273,30 @@ async fn real_postgres_transfer_and_recurring_decisions_cover_success_conflict_a
         "recurring clear",
         "recurring stale",
     ] {
-        let mut draft = preview_draft("2026-07-10 13:00:00", "支出", -2468, None, None, None, true);
+        let mut draft = if description == "transfer accept" {
+            preview_draft(
+                "2026-07-10 13:00:00",
+                "转账",
+                -2468,
+                Some(category_id),
+                Some(source_account_id),
+                Some(destination_account_id),
+                true,
+            )
+        } else {
+            preview_draft("2026-07-10 13:00:00", "支出", -2468, None, None, None, true)
+        };
         draft.preview_description = description.to_string();
         if description.starts_with("transfer") {
             draft.preview_matching_feedback = json!({
+                "annotation": {
+                    "is_manually_annotated": description == "transfer accept",
+                    "manual_fields": {
+                        "category_id": description == "transfer accept",
+                        "source_account_id": description == "transfer accept",
+                        "destination_account_id": description == "transfer accept"
+                    }
+                },
                 "transfer": {
                     "review_status": "pending",
                     "candidate_type": "transfer",
@@ -4303,25 +4327,57 @@ async fn real_postgres_transfer_and_recurring_decisions_cover_success_conflict_a
             .id
     };
 
+    let accepted_preview_id = id_for("transfer accept");
+    let accepted_before = get_preview_bill_by_id(pool, accepted_preview_id, scoped_user_id)?
+        .expect("transfer accept preview before decision");
+    assert_eq!(accepted_before.category_id, Some(category_id));
+    assert_eq!(
+        accepted_before.preview_source_account_id,
+        Some(source_account_id)
+    );
+    assert_eq!(
+        accepted_before.preview_destination_account_id,
+        Some(destination_account_id)
+    );
+    let manual_fields_before = accepted_before
+        .preview_matching_feedback
+        .pointer("/annotation/manual_fields")
+        .cloned()
+        .expect("manual ownership before transfer accept");
+
     let accepted = apply_preview_transfer_decision(
         pool,
         session_id,
-        id_for("transfer accept"),
+        accepted_preview_id,
         scoped_user_id,
         ImportPreviewDecision::Accept,
         Some(&ImportPreviewExpectedState {
             session_id: Some(session_id.to_string()),
-            preview_type: Some("支出".to_string()),
-            preview_main_category: Some(String::new()),
-            preview_sub_category: Some(String::new()),
+            preview_type: Some(accepted_before.preview_type.clone()),
+            preview_main_category: Some(accepted_before.preview_main_category.clone()),
+            preview_sub_category: Some(accepted_before.preview_sub_category.clone()),
             ..ImportPreviewExpectedState::default()
         }),
     )?;
     assert!(!accepted.state_conflict);
+    let accepted_preview = accepted.preview.expect("accepted transfer preview");
+    assert_eq!(accepted_preview.category_id, accepted_before.category_id);
     assert_eq!(
-        accepted
-            .preview
-            .expect("accepted transfer preview")
+        accepted_preview.preview_source_account_id,
+        accepted_before.preview_source_account_id
+    );
+    assert_eq!(
+        accepted_preview.preview_destination_account_id,
+        accepted_before.preview_destination_account_id
+    );
+    assert_eq!(
+        accepted_preview
+            .preview_matching_feedback
+            .pointer("/annotation/manual_fields"),
+        Some(&manual_fields_before)
+    );
+    assert_eq!(
+        accepted_preview
             .preview_matching_feedback
             .pointer("/transfer/review_status"),
         Some(&json!("accepted"))
