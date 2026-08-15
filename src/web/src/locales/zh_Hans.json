@@ -2812,6 +2812,7 @@
     "Missing Source Account": "缺少来源账户",
     "Missing Destination Account": "缺少目标账户",
     "Review Transfer Accounts": "需检查转账账户",
+    "Unknown Signal State": "未知信号状态",
     "No Annotation Issues": "无标注问题",
     "Needs Review or Manually Annotated": "待标注与已人工标注",
     "No AI Annotation Issues": "无AI标注问题",

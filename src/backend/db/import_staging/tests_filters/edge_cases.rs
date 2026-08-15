@@ -54,6 +54,10 @@ fn preview_learning_first_nonempty_status_authority() {
 fn preview_signal_filters_fail_closed_for_unknown_nonempty_review_statuses() {
     for (family, evidence) in [
         ("transfer", json!({"candidate_type": "transfer", "score": 0.9})),
+        (
+            "history",
+            json!({"planned_operation": "update_history", "history_bill_id": 9}),
+        ),
         ("learning", json!({"score": 0.9, "summary": "actionable"})),
         ("llm", json!({"confidence": 0.9, "reason": "actionable"})),
     ] {
@@ -61,12 +65,20 @@ fn preview_signal_filters_fail_closed_for_unknown_nonempty_review_statuses() {
             let mut section = evidence.as_object().cloned().expect("object evidence");
             section.insert("review_status".to_string(), json!(review_status));
             let mut row = preview_row(450);
-            row.preview_matching_feedback =
-                Value::Object(Map::from_iter([(family.to_string(), Value::Object(section))]));
+            row.category_id = Some(21);
+            let feedback_key = if family == "history" {
+                "reconciliation"
+            } else {
+                family
+            };
+            row.preview_matching_feedback = Value::Object(Map::from_iter([(
+                feedback_key.to_string(),
+                Value::Object(section),
+            )]));
 
             assert!(
                 apply_preview_filters(
-                    vec![row],
+                    vec![row.clone()],
                     &ImportPreviewQueryFilters {
                         signal: Some(family.to_string()),
                         ..ImportPreviewQueryFilters::default()
@@ -75,8 +87,49 @@ fn preview_signal_filters_fail_closed_for_unknown_nonempty_review_statuses() {
                 .is_empty(),
                 "{family} must fail closed for non-canonical review_status={review_status:?}"
             );
+            assert_eq!(
+                apply_preview_filters(
+                    vec![row.clone()],
+                    &ImportPreviewQueryFilters {
+                        annotation: Some("needs-review".to_string()),
+                        ..ImportPreviewQueryFilters::default()
+                    },
+                )
+                .len(),
+                1,
+                "{family} unknown status must enter review"
+            );
+            assert!(
+                apply_preview_filters(
+                    vec![row],
+                    &ImportPreviewQueryFilters {
+                        annotation: Some("no-issues".to_string()),
+                        ..ImportPreviewQueryFilters::default()
+                    },
+                )
+                .is_empty(),
+                "{family} unknown status must not be reported as issue-free"
+            );
         }
     }
+
+    let mut transfer_learning = preview_row(452);
+    transfer_learning.category_id = Some(21);
+    transfer_learning.preview_matching_feedback = json!({
+        "transfer": {
+            "candidate_type": "transfer",
+            "learning_level": "blue",
+            "review_status": "__invalid_status__"
+        }
+    });
+    assert!(apply_preview_filters(
+        vec![transfer_learning],
+        &ImportPreviewQueryFilters {
+            signal: Some("learning".to_string()),
+            ..ImportPreviewQueryFilters::default()
+        },
+    )
+    .is_empty());
 }
 
 #[test]

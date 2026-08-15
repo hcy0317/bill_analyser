@@ -396,11 +396,22 @@ fn preview_transfer_learning_signal_matches(row: &ImportPreviewRow) -> bool {
     let status = resolve_first_nonempty_status(transfer);
     has_candidate
         && !status.is_empty()
+        && IMPORT_PREVIEW_SIGNAL_CANONICAL_STATUSES.contains(&status.as_str())
         && !IMPORT_PREVIEW_SIGNAL_SUPPRESSED_STATUSES.contains(&status.as_str())
 }
 
 fn preview_history_signal_matches(row: &ImportPreviewRow) -> bool {
     let reconciliation = row.preview_matching_feedback.get("reconciliation");
+    if reconciliation
+        .and_then(Value::as_object)
+        .is_some_and(|section| {
+            let status = resolve_first_nonempty_status(section);
+            !status.is_empty()
+                && !IMPORT_PREVIEW_SIGNAL_CANONICAL_STATUSES.contains(&status.as_str())
+        })
+    {
+        return false;
+    }
     let planned_operation = reconciliation
         .and_then(|value| value.get("planned_operation"))
         .and_then(Value::as_str)
@@ -534,6 +545,9 @@ fn preview_requires_review(preview: &ImportPreviewRow) -> bool {
         || preview_has_missing_destination_account_issue(preview)
         || preview_has_same_transfer_accounts_issue(preview)
         || preview_has_identity_validation_issue(preview)
+        || import_preview_matching_feedback_has_unknown_signal_status(
+            &preview.preview_matching_feedback,
+        )
 }
 
 fn preview_has_missing_category_issue(preview: &ImportPreviewRow) -> bool {

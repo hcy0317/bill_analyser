@@ -46,6 +46,8 @@ fn push_preview_current_review_condition(query: &mut QueryBuilder<'_, Postgres>,
     push_preview_same_transfer_accounts_condition(query, alias);
     query.push(" OR ");
     push_preview_identity_feedback_condition(query, alias);
+    query.push(" OR ");
+    push_preview_unknown_signal_status_condition(query, alias);
     query.push(")");
 }
 
@@ -72,6 +74,8 @@ fn push_preview_current_review_condition_with_joins(
     push_preview_same_transfer_accounts_condition(query, alias);
     query.push(" OR ");
     push_preview_identity_feedback_condition(query, alias);
+    query.push(" OR ");
+    push_preview_unknown_signal_status_condition(query, alias);
     query.push(")");
 }
 

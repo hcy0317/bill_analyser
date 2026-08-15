@@ -113,6 +113,9 @@ export interface ImportMatchingReconciliationPayload {
     candidate_id?: string;
     candidate_type?: string;
     status?: string;
+    review_status?: string;
+    lifecycle_status?: string;
+    signal_state?: string;
     existing_bill_id?: number | null;
     group_id?: number | null;
     score?: number;

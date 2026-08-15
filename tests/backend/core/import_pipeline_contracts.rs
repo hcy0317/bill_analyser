@@ -4,7 +4,8 @@ use bill_analyser_core::{
     attach_import_preview_matching_payload, build_import_history_rewrite_ack_token,
     build_import_history_rewrite_operation_id, build_import_preview_filter_index_item,
     build_import_preview_matching_payload, coerce_preview_selected_value,
-    expected_preview_state_is_valid, import_preview_index_success, import_preview_page_success,
+    expected_preview_state_is_valid, import_preview_index_success,
+    import_preview_matching_feedback_has_unknown_signal_status, import_preview_page_success,
     import_preview_signal_value_is_truthy, import_session_cancel_missing_response,
     import_session_cancel_success_response, import_session_not_found_response,
     import_session_success, import_stage_confirm_success, import_stage_dedup_success,
@@ -86,20 +87,62 @@ fn signal_index_projection_fails_closed_for_unknown_nonempty_statuses() {
         ("llm", resolve_import_preview_llm_signal_status),
         ("transfer", resolve_import_preview_transfer_signal_status),
     ] {
-        let preview = json!({
-            "preview_type": "支出",
-            "preview_matching_feedback": {
-                (family): {
-                    "review_status": "__invalid_status__",
-                    "score": 0.91,
-                    "confidence": 0.91,
-                    "candidate_type": "transfer",
-                    "summary": "actionable"
+        for status_field in [
+            "review_status",
+            "status",
+            "lifecycle_status",
+            "signal_state",
+        ] {
+            let preview = json!({
+                "preview_type": "支出",
+                "preview_matching_feedback": {
+                    (family): {
+                        (status_field): "__invalid_status__",
+                        "score": 0.91,
+                        "confidence": 0.91,
+                        "candidate_type": "transfer",
+                        "summary": "actionable"
+                    }
                 }
-            }
-        });
-        assert_eq!(resolver(preview.as_object().unwrap()), None, "{family}");
+            });
+            assert_eq!(
+                resolver(preview.as_object().unwrap()),
+                None,
+                "{family}.{status_field}"
+            );
+            assert!(
+                import_preview_matching_feedback_has_unknown_signal_status(
+                    &preview["preview_matching_feedback"]
+                ),
+                "{family}.{status_field}"
+            );
+        }
     }
+
+    assert!(!import_preview_matching_feedback_has_unknown_signal_status(
+        &json!({"transfer": {"review_status": "pending", "status": "__ignored__"}})
+    ));
+
+    let history = json!({
+        "id": 91,
+        "preview_type": "支出",
+        "preview_matching_feedback": {
+            "reconciliation": {
+                "status": "__invalid_status__",
+                "planned_operation": "update_history",
+                "history_bill_id": 9
+            }
+        }
+    });
+    let history_index = build_import_preview_filter_index_item(
+        history.as_object().unwrap(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    );
+    assert_eq!(history_index.history_status, None);
+    assert!(import_preview_matching_feedback_has_unknown_signal_status(
+        &history["preview_matching_feedback"]
+    ));
 }
 
 #[test]
@@ -133,6 +176,13 @@ fn needs_review_is_learning_specific_and_does_not_leak_to_other_signal_families(
         assert_eq!(
             resolver(preview.as_object().unwrap()).as_deref(),
             expected,
+            "{family}"
+        );
+        assert_eq!(
+            import_preview_matching_feedback_has_unknown_signal_status(
+                &preview["preview_matching_feedback"]
+            ),
+            family != "learning",
             "{family}"
         );
     }

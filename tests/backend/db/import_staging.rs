@@ -520,6 +520,15 @@ async fn real_postgres_signal_filters_fail_closed_for_unknown_review_statuses(
     let pool = &test_db.pool;
     let user_id = insert_user(pool, "import-invalid-signal-status").await?;
     let scoped_user_id = UserId::new(user_id as u64).expect("positive user id");
+    let account_id = insert_account(pool, user_id, "未知状态测试账户").await?;
+    let category_id = insert_category(
+        pool,
+        user_id,
+        "未知状态测试分类",
+        "expense",
+        "测试/未知状态",
+    )
+    .await?;
     let session_id = "invalid-signal-status-session";
     create_import_session(
         pool,
@@ -621,6 +630,36 @@ async fn real_postgres_signal_filters_fail_closed_for_unknown_review_statuses(
             "transfer",
             json!({"review_status": "needs_review", "candidate_type": "transfer", "score": 0.91}),
         ),
+        (
+            "history invalid",
+            "reconciliation",
+            json!({"status": "pending", "planned_operation": "update_history"}),
+        ),
+        (
+            "history blank",
+            "reconciliation",
+            json!({"status": "", "planned_operation": "update_history"}),
+        ),
+        (
+            "history pending",
+            "reconciliation",
+            json!({"status": "pending", "planned_operation": "update_history"}),
+        ),
+        (
+            "history accepted",
+            "reconciliation",
+            json!({"status": "accepted", "planned_operation": "update_history"}),
+        ),
+        (
+            "history rejected",
+            "reconciliation",
+            json!({"status": "rejected", "planned_operation": "update_history"}),
+        ),
+        (
+            "history needs review",
+            "reconciliation",
+            json!({"status": "needs_review", "planned_operation": "update_history"}),
+        ),
     ];
     let mut drafts = Vec::new();
     for (index, (description, family, section)) in cases.iter().enumerate() {
@@ -628,8 +667,8 @@ async fn real_postgres_signal_filters_fail_closed_for_unknown_review_statuses(
             "2026-07-10 10:00:00",
             "支出",
             -100 - index as i64,
-            None,
-            None,
+            Some(category_id),
+            Some(account_id),
             None,
             true,
         );
@@ -659,12 +698,13 @@ async fn real_postgres_signal_filters_fail_closed_for_unknown_review_statuses(
         ("learning invalid", "learning"),
         ("llm invalid", "llm"),
         ("transfer invalid", "transfer"),
+        ("history invalid", "reconciliation"),
     ] {
         sqlx::query(
             r#"UPDATE import_preview_rows
                SET preview_payload = jsonb_set(
                    preview_payload,
-                   ARRAY['preview_matching_feedback', $3, 'review_status'],
+                   ARRAY['preview_matching_feedback', $3, $4],
                    to_jsonb('__invalid_status__'::text),
                    true
                )
@@ -673,8 +713,64 @@ async fn real_postgres_signal_filters_fail_closed_for_unknown_review_statuses(
         .bind(id_for(description))
         .bind(user_id)
         .bind(family)
+        .bind(if family == "reconciliation" {
+            "status"
+        } else {
+            "review_status"
+        })
         .execute(pool)
         .await?;
+    }
+
+    for (description, family) in [
+        ("learning invalid", "learning"),
+        ("llm invalid", "llm"),
+        ("transfer invalid", "transfer"),
+        ("history invalid", "reconciliation"),
+    ] {
+        let preview_id = id_for(description);
+        let needs_review = query_preview_page_by_session(
+            pool,
+            session_id,
+            scoped_user_id,
+            &ImportPreviewPageRequest {
+                preview_ids: vec![preview_id],
+                filters: ImportPreviewQueryFilters {
+                    annotation: Some("needs-review".to_string()),
+                    ..ImportPreviewQueryFilters::default()
+                },
+                ..ImportPreviewPageRequest::default()
+            },
+        )?;
+        assert_eq!(needs_review.total, 1, "{family} unknown must enter review");
+        assert_eq!(
+            needs_review.rows[0]
+                .preview_matching_feedback
+                .pointer(&format!(
+                    "/{family}/{}",
+                    if family == "reconciliation" {
+                        "status"
+                    } else {
+                        "review_status"
+                    }
+                )),
+            Some(&json!("__invalid_status__")),
+            "{family} evidence must remain observable"
+        );
+        let no_issues = query_preview_page_by_session(
+            pool,
+            session_id,
+            scoped_user_id,
+            &ImportPreviewPageRequest {
+                preview_ids: vec![preview_id],
+                filters: ImportPreviewQueryFilters {
+                    annotation: Some("no-issues".to_string()),
+                    ..ImportPreviewQueryFilters::default()
+                },
+                ..ImportPreviewPageRequest::default()
+            },
+        )?;
+        assert_eq!(no_issues.total, 0, "{family} unknown is not issue-free");
     }
 
     let all_ids = seeded.rows.iter().map(|row| row.id).collect::<Vec<_>>();
@@ -696,6 +792,15 @@ async fn real_postgres_signal_filters_fail_closed_for_unknown_review_statuses(
         (
             "transfer",
             vec!["transfer blank", "transfer pending", "transfer accepted"],
+        ),
+        (
+            "history",
+            vec![
+                "history blank",
+                "history pending",
+                "history accepted",
+                "history rejected",
+            ],
         ),
     ] {
         let expected_ids = expected_descriptions
@@ -734,6 +839,62 @@ async fn real_postgres_signal_filters_fail_closed_for_unknown_review_statuses(
     assert_eq!(refreshed.metadata.counts.signals.get("learning"), Some(&5));
     assert_eq!(refreshed.metadata.counts.signals.get("llm"), Some(&4));
     assert_eq!(refreshed.metadata.counts.signals.get("transfer"), Some(&3));
+    assert_eq!(refreshed.metadata.counts.signals.get("history"), Some(&4));
+
+    for (description, evidence_path) in [
+        ("transfer invalid", "/transfer/review_status"),
+        ("history invalid", "/reconciliation/status"),
+    ] {
+        let selected_unknown_id = id_for(description);
+        sqlx::query(
+            r#"UPDATE import_preview_rows
+               SET selected = (id = $3),
+                   preview_payload = jsonb_set(
+                       preview_payload,
+                       '{preview_selected}',
+                       to_jsonb(id = $3),
+                       true
+                   )
+               WHERE session_id = (
+                   SELECT id FROM import_sessions WHERE session_key = $1 AND user_id = $2
+               ) AND user_id = $2"#,
+        )
+        .bind(session_id)
+        .bind(user_id)
+        .bind(selected_unknown_id)
+        .execute(pool)
+        .await?;
+        let selected_page = query_preview_page_by_session(
+            pool,
+            session_id,
+            scoped_user_id,
+            &ImportPreviewPageRequest {
+                page_size: 100,
+                ..ImportPreviewPageRequest::default()
+            },
+        )?;
+        assert_eq!(selected_page.metadata.counts.selected, 1, "{description}");
+        assert_eq!(
+            selected_page.metadata.counts.selected_invalid, 1,
+            "{description}"
+        );
+        let confirm_error = confirm_preview_to_bills(pool, session_id, scoped_user_id)
+            .expect_err("unknown signal status must block confirm");
+        assert!(
+            confirm_error.to_string().contains("requires review"),
+            "unexpected confirm error for {description}: {confirm_error}"
+        );
+        assert_eq!(count_user_bills(pool, user_id).await?, 0);
+        let session =
+            get_import_session(pool, session_id, scoped_user_id)?.expect("session remains");
+        assert_ne!(session.status, "confirmed");
+        let retained = get_preview_bill_by_id(pool, selected_unknown_id, scoped_user_id)?
+            .expect("failed confirm retains selected preview");
+        assert_eq!(
+            retained.preview_matching_feedback.pointer(evidence_path),
+            Some(&json!("__invalid_status__"))
+        );
+    }
 
     test_db.cleanup().await?;
     Ok(())

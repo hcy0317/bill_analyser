@@ -54,7 +54,7 @@ mod tests {
     #[test]
     fn postgres_manifest_points_to_existing_initial_schema() {
         let manifest = postgres_migration_manifest();
-        assert_eq!(manifest.len(), 23);
+        assert_eq!(manifest.len(), 24);
         assert_eq!(manifest[0].version, 1);
         assert_eq!(manifest[0].file_name, POSTGRES_INITIAL_SCHEMA_FILE);
         for (index, descriptor) in manifest.iter().enumerate() {
@@ -311,6 +311,20 @@ mod tests {
         assert!(migration.contains("FUNCTION import_preview_signal_flags"));
         assert!(migration.contains("FUNCTION import_preview_meaningful_feedback"));
         assert!(migration.contains("IMMUTABLE"));
+        assert!(migration.contains("PARALLEL SAFE"));
+    }
+
+    #[test]
+    fn import_preview_signal_status_migration_fails_closed_unknown_states() {
+        let migration = fs::read_to_string(
+            postgres_migrations_dir().join("0024_import_preview_signal_status_fail_closed.sql"),
+        )
+        .unwrap();
+
+        assert!(migration.contains("CREATE OR REPLACE FUNCTION import_preview_signal_flags"));
+        assert!(migration.contains("canonical_statuses TEXT[]"));
+        assert!(migration.contains("reconciliation_status = ANY(canonical_statuses)"));
+        assert!(migration.contains("transfer_status = ANY(canonical_statuses)"));
         assert!(migration.contains("PARALLEL SAFE"));
     }
 

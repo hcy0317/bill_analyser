@@ -7,6 +7,7 @@ import {
     collectImportTransactionSelectionSummary,
     type ImportTransactionSelectionSummary
 } from '../checkDataSelection.ts';
+import { importPreviewMatchingHasUnknownSignalStatus } from '../check-data-matching/signalStatus.ts';
 
 type MatchingAnnotationPayload = Record<string, unknown> | string | null | undefined;
 
@@ -56,6 +57,9 @@ export function useImportCheckDataAnnotations(options: ImportCheckDataAnnotation
         }
         if (hasTransferAccountReviewIssue(item)) {
             reasons.push(options.translate('Review Transfer Accounts'));
+        }
+        if (importPreviewMatchingHasUnknownSignalStatus(item.matching)) {
+            reasons.push(options.translate('Unknown Signal State'));
         }
         return reasons;
     }

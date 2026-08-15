@@ -1,9 +1,13 @@
 import type { ImportTransaction } from '@/models/imported_transaction.ts';
 
 import type { ImportPreviewSignalStatus } from './checkDataMatching.ts';
+import { importPreviewSignalSectionHasUnknownStatus } from './check-data-matching/signalStatus.ts';
 
 export function getImportPreviewTransferSignalStatus(item: ImportTransaction): ImportPreviewSignalStatus | null {
     const reviewStatus = item.getTransferSuggestionReviewStatus();
+    if (importPreviewSignalSectionHasUnknownStatus('transfer', item.matching?.transfer)) {
+        return null;
+    }
     if (reviewStatus === 'pending') {
         return item.matching?.transfer?.suppressed ? null : 'pending';
     }

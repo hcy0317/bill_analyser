@@ -1,6 +1,7 @@
 import type { ImportCheckMatchingDedupTitleOptions, ImportPreviewHistoryRewriteAcknowledgement, ImportPreviewHistoryRewriteAcknowledgementOperation, ImportPreviewSignalReviewView, ImportPreviewSignalState } from './types.ts';
 
 import { buildSignalTitle, dedupeTextItems, HISTORY_REWRITE_NOTICE, HISTORY_REWRITE_OPERATION_LABELS, normalizePositiveInteger, normalizeTextValue } from './shared.ts';
+import { importPreviewSignalStatusIsUnknown } from './signalStatus.ts';
 
 
 
@@ -56,6 +57,9 @@ export function buildHistoryRewriteSignalView(
     state: ImportPreviewSignalState,
     options: ImportCheckMatchingDedupTitleOptions
 ): ImportPreviewSignalReviewView | null {
+    if (importPreviewSignalStatusIsUnknown('history', state.reconciliationStatus)) {
+        return null;
+    }
     const plannedOperation = normalizeTextValue(state.reconciliationPlannedOperation);
     const hasHistoryRewriteMarker = isImportPreviewHistoryRewriteOperation(plannedOperation)
         || !!state.reconciliationDestructiveAckRequired;

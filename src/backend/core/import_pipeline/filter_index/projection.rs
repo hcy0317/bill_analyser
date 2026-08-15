@@ -273,12 +273,12 @@ pub fn build_import_preview_filter_index_item(
         .and_then(|section| section.get("destructive_ack_required"))
         .map(import_preview_signal_value_is_truthy)
         .unwrap_or(false);
-    let history_status =
-        if !history_planned_operation.is_empty() || history_destructive_ack_required {
-            Some("pending".to_string())
-        } else {
-            None
-        };
+    let history_has_unknown_status = reconciliation.is_some_and(|section| {
+        matching_section_has_unknown_review_status(section, IMPORT_PREVIEW_SIGNAL_CANONICAL_STATUSES)
+    });
+    let history_status = (!history_has_unknown_status
+        && (!history_planned_operation.is_empty() || history_destructive_ack_required))
+        .then(|| "pending".to_string());
 
     ImportPreviewFilterIndexItem {
         id: integer_field_from_map(preview_item, "id"),

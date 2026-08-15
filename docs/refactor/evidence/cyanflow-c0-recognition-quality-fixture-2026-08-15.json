@@ -143,10 +143,21 @@
         "evidence_preserved": true
       },
       "current_evidence": [
-        "src/backend/core/import_pipeline/filter_index/projection.rs:75"
+        "src/backend/core/import_pipeline/filter_index/signal_values.rs:31",
+        "src/backend/core/import_pipeline/filter_index/projection.rs:276",
+        "src/backend/db/postgres/migrations/0024_import_preview_signal_status_fail_closed.sql:1",
+        "src/backend/db/import_staging/preview_predicates/feedback.rs:20",
+        "src/backend/db/import_staging/confirm/orchestration.rs:209",
+        "src/backend/db/import_staging/tests_filters/edge_cases.rs:54",
+        "tests/backend/core/import_pipeline_contracts.rs:80",
+        "tests/backend/db/import_staging.rs:517",
+        "src/web/src/views/desktop/transactions/import/check-data-matching/signalStatus.ts:1",
+        "tests/web/views/desktop/transactions/import/signalStatus.test.ts:12",
+        "tests/web/views/desktop/transactions/import/importPreviewSignalAdapter.test.ts:153",
+        "tests/web/views/desktop/transactions/import/useImportCheckDataSignals.test.ts:151",
+        "tests/web/views/desktop/transactions/import/useImportCheckDataAnnotations.test.ts:118"
       ],
-      "coverage_status": "missing",
-      "gap": "未找到跨 Rust projector、SQL filter 和前端 selector 的 unknown-state 合同测试。",
+      "coverage_status": "covered",
       "required_before": "C2"
     }
   ],
@@ -156,8 +167,7 @@
     "blocking_scenarios": [
       "generic-unmatched-column-mapping",
       "likely-transfer-family-overlap",
-      "transfer-reject-two-row-recompute",
-      "unknown-signal-state-fail-closed"
+      "transfer-reject-two-row-recompute"
     ]
   }
 }

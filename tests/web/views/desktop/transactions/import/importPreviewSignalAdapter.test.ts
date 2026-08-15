@@ -149,4 +149,24 @@ describe('import preview signal adapter', () => {
         expect(transaction.hasTransferSuggestion()).toBe(false);
         expect(getImportPreviewTransferSignalStatus(transaction)).toBeNull();
     });
+
+    test('fails closed for an unknown non-empty transfer review status', () => {
+        const transaction = importTransaction({
+            matching: matchingPayload({
+                transfer: {
+                    candidate_type: 'cash_transfer',
+                    score: 0.9,
+                    level: 'high',
+                    reason: 'future lifecycle evidence',
+                    review_status: '__future_unknown__',
+                    reviewed_type: '',
+                    suppressed: false
+                }
+            })
+        });
+
+        expect(transaction.hasTransferSuggestion()).toBe(true);
+        expect(getImportPreviewTransferSignalStatus(transaction)).toBeNull();
+        expect(getImportPreviewTransferSignalTitle(transaction)).toBe('future lifecycle evidence');
+    });
 });

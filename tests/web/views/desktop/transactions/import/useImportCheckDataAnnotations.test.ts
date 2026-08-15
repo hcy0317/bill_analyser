@@ -114,4 +114,58 @@ describe('useImportCheckDataAnnotations', () => {
         transaction.matching!.annotation = { is_manually_annotated: false };
         expect(annotations.hasCurrentPersistedMatchingAnnotationIssue(transaction)).toBe(false);
     });
+
+    test('marks unknown signal statuses for review without discarding their evidence', () => {
+        const transaction = createTransaction({
+            categoryId: 'transfer',
+            sourceAccountId: 'source',
+            destinationAccountId: 'destination',
+            matching: {
+                transfer: {
+                    review_status: '__future_unknown__',
+                    candidate_type: 'cash_transfer',
+                    reason: 'transfer evidence'
+                },
+                learning: {
+                    review_status: '__future_unknown__',
+                    reason: 'learning evidence'
+                },
+                llm: {
+                    review_status: '__future_unknown__',
+                    reason: 'LLM evidence'
+                },
+                reconciliation: {
+                    status: '__future_unknown__',
+                    planned_operation: 'update_history',
+                    reason: 'history evidence'
+                }
+            }
+        });
+        const annotations = createAnnotations([transaction]);
+
+        expect(annotations.getAnnotationIssues(transaction)).toStrictEqual(['Unknown Signal State']);
+        expect(annotations.needsAnnotation(transaction)).toBe(true);
+        expect(annotations.importTransactionSelectionSummary.value.selectedAnnotationCount).toBe(1);
+        expect(transaction.matching?.transfer.reason).toBe('transfer evidence');
+        expect(transaction.matching?.learning.reason).toBe('learning evidence');
+        expect(transaction.matching?.llm?.reason).toBe('LLM evidence');
+        expect(transaction.matching?.reconciliation?.reason).toBe('history evidence');
+    });
+
+    test('marks an isolated unknown history decision for review', () => {
+        const transaction = createTransaction({
+            categoryId: 'transfer',
+            sourceAccountId: 'source',
+            destinationAccountId: 'destination',
+            matching: {
+                reconciliation: {
+                    status: '__future_unknown__',
+                    planned_operation: 'update_history'
+                }
+            }
+        });
+
+        expect(createAnnotations([transaction]).getAnnotationIssues(transaction))
+            .toStrictEqual(['Unknown Signal State']);
+    });
 });

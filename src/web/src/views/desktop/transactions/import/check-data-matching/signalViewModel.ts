@@ -10,6 +10,7 @@ import {
 import { getImportCheckMatchingContextSummary, getImportCheckMatchingDedupLabel, getImportCheckMatchingDedupTitle, getImportCheckMatchingParserTagsText, hasImportCheckMatchingDedupContext } from './context.ts';
 
 import { buildHistoryRewriteSignalView } from './historyRewrite.ts';
+import { importPreviewSignalStatusIsUnknown, type ImportPreviewStatusFamily } from './signalStatus.ts';
 
 import { buildSignalTitle, buildSourceRowLookup, dedupeTextItems, DEFAULT_SOURCE_ROLE_LABELS, formatConfidencePercent, formatInfoLine, getParserContextDisplayLabels, getParserDisplayLabel, getParserIdFromTag, getSignalInfoLabels, getSourceChainDisplayLabels, getSourceContextFromLookupValue, getSourceDisplayLabel, isTransferLikeDedupType, isVisibleDedupType, normalizeDedupType, normalizeLearningAccountRoute, normalizeLearningCategoryPath, normalizeLearningRecommendationLabel, normalizeLLMCategoryPath, sortSourceChain } from './shared.ts';
 
@@ -263,6 +264,7 @@ export function buildReviewView(
 }
 
 function normalizeMeaningfulSignalStatus(
+    family: ImportPreviewStatusFamily,
     status: ImportPreviewSignalStatus | string | null | undefined,
     suppressed: unknown,
     textEvidence: Array<string | null | undefined>,
@@ -280,6 +282,9 @@ function normalizeMeaningfulSignalStatus(
     }
 
     const normalizedStatus = String(status || '').trim().toLowerCase();
+    if (importPreviewSignalStatusIsUnknown(family, normalizedStatus)) {
+        return null;
+    }
     if (normalizedStatus === 'none' || normalizedStatus === 'suppressed') {
         return null;
     }
@@ -370,6 +375,7 @@ export function buildImportPreviewSignalViewModel(
         state.learningAutoAppliedCount,
     ];
     const learningStatus = normalizeMeaningfulSignalStatus(
+        'learning',
         learningStatusAlias,
         state.learningSuppressed,
         [
@@ -385,6 +391,7 @@ export function buildImportPreviewSignalViewModel(
         state.llmSuggestedCategoryId,
     ];
     const llmStatus = normalizeMeaningfulSignalStatus(
+        'llm',
         llmStatusAlias,
         state.llmSuppressed,
         [

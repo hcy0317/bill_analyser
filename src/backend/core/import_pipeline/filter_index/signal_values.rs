@@ -26,6 +26,26 @@ pub fn import_preview_recommendation_feedback_family_is_meaningful(
     }
 }
 
+/// 中文说明：只要 transfer、history、learning 或 LLM 的权威状态字段包含非空未知值，
+/// 该预览行就必须进入人工复核，不能继续作为可操作信号或被确认。
+pub fn import_preview_matching_feedback_has_unknown_signal_status(feedback: &Value) -> bool {
+    [
+        ("transfer", IMPORT_PREVIEW_SIGNAL_CANONICAL_STATUSES),
+        ("reconciliation", IMPORT_PREVIEW_SIGNAL_CANONICAL_STATUSES),
+        ("learning", IMPORT_PREVIEW_LEARNING_CANONICAL_STATUSES),
+        ("llm", IMPORT_PREVIEW_SIGNAL_CANONICAL_STATUSES),
+    ]
+    .into_iter()
+    .any(|(family, canonical_statuses)| {
+        feedback
+            .get(family)
+            .and_then(Value::as_object)
+            .is_some_and(|section| {
+                matching_section_has_unknown_review_status(section, canonical_statuses)
+            })
+    })
+}
+
 fn learning_matching_section_is_meaningful(section: &Map<String, Value>) -> bool {
     if matching_section_is_suppressed_or_none(section) {
         return false;

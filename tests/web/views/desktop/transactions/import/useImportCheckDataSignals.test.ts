@@ -147,4 +147,39 @@ describe('useImportCheckDataSignals', () => {
         expect(serializeSignalCacheValue(undefined)).toBe('<undefined>');
         expect(serializeSignalCacheValue(42)).toBe('42');
     });
+
+    test('does not expose actions for unknown authoritative learning and LLM statuses', () => {
+        const transaction = createTransaction({
+            learning: {
+                review_status: '__future_unknown__',
+                score: 0.91,
+                reason: 'learning evidence'
+            },
+            llm: {
+                review_status: '__future_unknown__',
+                confidence: 0.88,
+                reason: 'LLM evidence'
+            }
+        });
+
+        const viewModel = createSignals(transaction).getImportPreviewSignalViewModel(transaction);
+
+        expect(viewModel.learning).toBeNull();
+        expect(viewModel.llm).toBeNull();
+    });
+
+    test('does not expose a history rewrite for an unknown reconciliation status', () => {
+        const transaction = createTransaction({
+            reconciliation: {
+                status: '__future_unknown__',
+                planned_operation: 'update_history',
+                destructive_ack_required: true,
+                history_bill_id: 9
+            }
+        });
+
+        const viewModel = createSignals(transaction).getImportPreviewSignalViewModel(transaction);
+
+        expect(viewModel.historyRewrite).toBeNull();
+    });
 });

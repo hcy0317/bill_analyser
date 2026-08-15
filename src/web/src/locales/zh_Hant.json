@@ -2599,6 +2599,7 @@
     "Missing Source Account": "缺少來源帳戶",
     "Missing Destination Account": "缺少目標帳戶",
     "Review Transfer Accounts": "需檢查轉帳帳戶",
+    "Unknown Signal State": "未知訊號狀態",
     "No Annotation Issues": "無標註問題",
     "Needs Review or Manually Annotated": "待標註與已人工標註",
     "No AI Annotation Issues": "無AI標註問題",

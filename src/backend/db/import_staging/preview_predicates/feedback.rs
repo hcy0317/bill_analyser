@@ -17,6 +17,34 @@ fn push_preview_feedback_resolved_status_expr(
     query.push(", '')");
 }
 
+fn push_preview_unknown_signal_status_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    alias: &str,
+) {
+    query.push("(");
+    for (index, (family, canonical_statuses)) in [
+        ("transfer", IMPORT_PREVIEW_SIGNAL_CANONICAL_STATUSES),
+        ("reconciliation", IMPORT_PREVIEW_SIGNAL_CANONICAL_STATUSES),
+        ("learning", IMPORT_PREVIEW_LEARNING_CANONICAL_STATUSES),
+        ("llm", IMPORT_PREVIEW_SIGNAL_CANONICAL_STATUSES),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if index > 0 {
+            query.push(" OR ");
+        }
+        query.push("(");
+        push_preview_feedback_resolved_status_expr(query, alias, family);
+        query.push(" <> '' AND ");
+        push_preview_feedback_resolved_status_expr(query, alias, family);
+        query.push(" NOT IN (");
+        push_sql_string_list(query, canonical_statuses);
+        query.push("))");
+    }
+    query.push(")");
+}
+
 fn push_preview_meaningful_feedback_condition(
     query: &mut QueryBuilder<'_, Postgres>,
     alias: &str,

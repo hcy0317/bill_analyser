@@ -252,6 +252,10 @@ fn push_preview_transfer_learning_signal_condition(
     push_preview_feedback_resolved_status_expr(query, alias, "transfer");
     query.push(" <> '' AND ");
     push_preview_feedback_resolved_status_expr(query, alias, "transfer");
+    query.push(" IN (");
+    push_sql_string_list(query, IMPORT_PREVIEW_SIGNAL_CANONICAL_STATUSES);
+    query.push(") AND ");
+    push_preview_feedback_resolved_status_expr(query, alias, "transfer");
     query.push(" NOT IN (");
     push_sql_string_list(query, IMPORT_PREVIEW_SIGNAL_SUPPRESSED_STATUSES);
     query.push("))");
@@ -269,6 +273,12 @@ fn push_preview_llm_signal_condition(query: &mut QueryBuilder<'_, Postgres>, ali
 
 fn push_preview_history_signal_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
     query.push("(");
+    push_preview_feedback_resolved_status_expr(query, alias, "reconciliation");
+    query.push(" = '' OR ");
+    push_preview_feedback_resolved_status_expr(query, alias, "reconciliation");
+    query.push(" IN (");
+    push_sql_string_list(query, IMPORT_PREVIEW_SIGNAL_CANONICAL_STATUSES);
+    query.push(")) AND (");
     push_preview_feedback_text_expr(query, alias, "reconciliation", "planned_operation");
     query.push(" IN (");
     push_sql_string_list(query, IMPORT_PREVIEW_HISTORY_OPERATION_NAMES);

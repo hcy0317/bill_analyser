@@ -206,6 +206,32 @@ fn confirm_import_command_in_transaction(
         apply_confirm_command_mutations(&mut tx, session.id, user_id, command).await?;
         let previews =
             load_selected_preview_rows_for_confirm(&mut tx, session.id, user_id).await?;
+        let unknown_state_errors = previews
+            .iter()
+            .filter(|preview| {
+                import_preview_matching_feedback_has_unknown_signal_status(
+                    &preview.preview_matching_feedback,
+                )
+            })
+            .map(|preview| format!("preview {} has an unknown signal state", preview.id))
+            .collect::<Vec<_>>();
+        if !unknown_state_errors.is_empty() {
+            tracing::warn!(
+                domain = "import_confirm",
+                operation = "validation",
+                outcome = "failed",
+                validation_kind = "unknown_signal_state",
+                session_key = %command.session_id,
+                request_session_version,
+                session_version = session.version,
+                validation_error_count = unknown_state_errors.len(),
+                "import confirmation validation failed"
+            );
+            return Err(DbError::InvalidOperation(format!(
+                "import preview requires review: {}",
+                unknown_state_errors.join("; ")
+            )));
+        }
         let history_plans = match validate_history_acknowledgement(
             &command.session_id,
             &previews,

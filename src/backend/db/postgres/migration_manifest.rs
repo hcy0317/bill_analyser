@@ -196,6 +196,8 @@ const IMPORT_CONFIG_INDEXES: &[&str] = &[
 ];
 const LLM_ACCOUNT_RULE_CANDIDATE_TABLES: &[&str] = &["llm_candidates"];
 const LLM_ACCOUNT_RULE_CANDIDATE_INDEXES: &[&str] = &[];
+const IMPORT_PREVIEW_SIGNAL_STATUS_TABLES: &[&str] = &["import_preview_rows"];
+const IMPORT_PREVIEW_SIGNAL_STATUS_INDEXES: &[&str] = &[];
 
 const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
     PostgresMigrationDescriptor {
@@ -358,5 +360,12 @@ const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
         description: "add canonical account targets to LLM rule candidates",
         required_tables: LLM_ACCOUNT_RULE_CANDIDATE_TABLES,
         required_indexes: LLM_ACCOUNT_RULE_CANDIDATE_INDEXES,
+    },
+    PostgresMigrationDescriptor {
+        version: 24,
+        file_name: "0024_import_preview_signal_status_fail_closed.sql",
+        description: "fail closed unknown import preview signal statuses in database projections",
+        required_tables: IMPORT_PREVIEW_SIGNAL_STATUS_TABLES,
+        required_indexes: IMPORT_PREVIEW_SIGNAL_STATUS_INDEXES,
     },
 ];

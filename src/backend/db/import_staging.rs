@@ -6,7 +6,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::future::Future;
 
 use bill_analyser_core::{
-    build_transfer_source_snapshot, import_preview_recommendation_feedback_family_is_meaningful,
+    build_transfer_source_snapshot, import_preview_matching_feedback_has_unknown_signal_status,
+    import_preview_recommendation_feedback_family_is_meaningful,
     import_preview_signal_value_is_truthy, is_import_preview_visible_signal_family,
     learning_lifecycle_is_auto_eligible, learning_lifecycle_signal_state, normalize_bill_date_text,
     normalize_history_operation, resolve_first_nonempty_status, strict_decimal_is_positive,
