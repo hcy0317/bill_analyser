@@ -915,7 +915,7 @@ import {
     useImportCheckDataSignals
 } from '../check-data-tab/useImportCheckDataSignals.ts';
 import {
-    applyImportPreviewEditableDraftDeltas,
+    applyImportPreviewEditableDraftOverlay,
     cacheServerPagedDraftState,
     captureImportPreviewEditableDraftState as captureImportPreviewEditableDraftStateValue,
     cloneImportTransaction as cloneImportTransactionValue,
@@ -3719,9 +3719,13 @@ function rehydrateCurrentPageDrafts(): Set<number> {
         const authoritativeLearningBaseline = buildLearningDecisionBaseline(transaction);
         const incomingServerState = captureImportPreviewEditableDraftState(transaction);
         const draftState = captureImportPreviewEditableDraftState(draft);
-        applyImportPreviewEditableDraftDeltas(transaction, draftState, baselineState);
-        updateTransactionData(transaction);
         transaction.matching = authoritativeMatching;
+        applyImportPreviewEditableDraftOverlay(
+            transaction,
+            draftState,
+            baselineState,
+            updateTransactionData
+        );
 
         const transactionPreviewState = getPreviewState(transaction);
         transactionPreviewState._previewDecisionBaseline = authoritativeTransferBaseline;

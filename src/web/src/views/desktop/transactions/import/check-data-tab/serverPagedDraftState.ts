@@ -111,6 +111,16 @@ export function applyImportPreviewEditableDraftDeltas(
     }
 }
 
+export function applyImportPreviewEditableDraftOverlay(
+    transaction: ImportTransaction,
+    draftState: ImportPreviewEditableDraftState,
+    baselineState: ImportPreviewEditableDraftState,
+    reconcileDerivedState: (transaction: ImportTransaction) => void
+): void {
+    applyImportPreviewEditableDraftDeltas(transaction, draftState, baselineState);
+    reconcileDerivedState(transaction);
+}
+
 export function mergeImportPreviewEditableDraftBaseline(
     serverState: ImportPreviewEditableDraftState,
     draftState: ImportPreviewEditableDraftState,
@@ -123,7 +133,13 @@ export function mergeImportPreviewEditableDraftBaseline(
         ])
     ) as ImportPreviewEditableDraftState;
     for (const key of importPreviewEditableDraftKeys) {
-        if (!isImportPreviewEditableDraftValueEqual(draftState[key], baselineState[key])) {
+        const draftChanged = !isImportPreviewEditableDraftValueEqual(
+            draftState[key], baselineState[key]
+        );
+        const serverAcknowledgedDraft = isImportPreviewEditableDraftValueEqual(
+            serverState[key], draftState[key]
+        );
+        if (draftChanged && !serverAcknowledgedDraft) {
             Object.assign(nextBaseline, {
                 [key]: cloneImportPreviewEditableDraftValue(baselineState[key])
             });
