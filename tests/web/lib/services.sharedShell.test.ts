@@ -767,11 +767,28 @@ describe('services shared runtime shell', () => {
             previewIds: [7, 9],
             signal: 'transfer'
         });
+        const historyRewriteAcknowledgement = {
+            acknowledged: true as const,
+            selected_preview_ids: [7],
+            operations: [{
+                preview_id: 7,
+                operation_id: 'rewrite-7',
+                planned_operation: 'replace_history_bill',
+                history_bill_id: 70,
+                history_bill_version: 2,
+                acknowledgement_token: 'ack-7'
+            }],
+            selection_scope: {
+                mode: 'visible-preview',
+                selected_count: 1,
+                history_rewrite_count: 1
+            }
+        };
         await services.confirmImportPreview({
             sessionId: 'session/a',
             previewUpdates: [{ id: 7, type: '支出' }],
             preserveUnpatchedSelection: true,
-            historyRewriteAcknowledgement: { acknowledged: true }
+            historyRewriteAcknowledgement
         });
 
         expect(mockAxiosGet).toHaveBeenCalledWith('bills/import/v2/preview/session%2Fa', {
@@ -789,7 +806,7 @@ describe('services shared runtime shell', () => {
                 session_id: 'session/a',
                 preserve_unpatched_selection: true,
                 preview_updates: [{ id: 7, type: '支出' }],
-                history_rewrite_acknowledgement: { acknowledged: true }
+                history_rewrite_acknowledgement: historyRewriteAcknowledgement
             },
             expect.objectContaining({
                 timeout: expect.any(Number)

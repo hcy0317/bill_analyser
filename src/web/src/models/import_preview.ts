@@ -91,6 +91,47 @@ export interface ImportPreviewPatchPayload {
     selected?: boolean;
 }
 
+export interface ImportPreviewHistoryRewriteSelectionScope {
+    mode?: string;
+    preserve_unpatched_selection?: boolean;
+    selected_visible_history_rewrite_count?: number;
+    selected_visible_count?: number;
+    selected_count?: number;
+    history_rewrite_count?: number;
+}
+
+export interface ImportPreviewHistoryRewriteAcknowledgementOperation {
+    preview_id: number;
+    operation_id: string;
+    planned_operation: string;
+    history_bill_id: number;
+    history_bill_version: number;
+    acknowledgement_token: string;
+}
+
+export interface ImportPreviewHistoryRewriteAcknowledgement {
+    acknowledged: true;
+    selected_preview_ids: number[];
+    operations: ImportPreviewHistoryRewriteAcknowledgementOperation[];
+    selection_scope: ImportPreviewHistoryRewriteSelectionScope;
+}
+
+export interface ImportPreviewConfirmCommand {
+    sessionId: string;
+    previewUpdates?: ImportPreviewPatchPayload[];
+    preserveUnpatchedSelection?: boolean;
+    expectedSessionVersion?: number;
+    historyRewriteAcknowledgement?: ImportPreviewHistoryRewriteAcknowledgement | null;
+}
+
+export interface ImportPreviewConfirmPayload {
+    session_id: string;
+    preserve_unpatched_selection: boolean;
+    preview_updates: ImportPreviewPatchPayload[];
+    expected_session_version?: number;
+    history_rewrite_acknowledgement?: ImportPreviewHistoryRewriteAcknowledgement;
+}
+
 export interface ImportPreviewPageData {
     preview: ImportPreviewRecord[];
     total: number;

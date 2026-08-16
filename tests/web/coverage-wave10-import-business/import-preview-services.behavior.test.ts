@@ -19,6 +19,7 @@ jest.mock('axios', () => ({
 
 import { TransactionType } from '@/core/transaction.ts';
 import services from '@/lib/services/importPreview.ts';
+import type { ImportPreviewHistoryRewriteAcknowledgement } from '@/models/import_preview.ts';
 
 function dataEnvelope<T>(data: T, success = true): Record<string, unknown> {
     return { status: 200, data: { success, data } };
@@ -443,7 +444,23 @@ describe('import preview lifecycle service behavior', () => {
             preview_updates: []
         }, expect.objectContaining({ timeout: 1_800_000 }));
 
-        const acknowledgement = { token: 'ack-token' };
+        const acknowledgement: ImportPreviewHistoryRewriteAcknowledgement = {
+            acknowledged: true,
+            selected_preview_ids: [4],
+            operations: [{
+                preview_id: 4,
+                operation_id: 'rewrite-4',
+                planned_operation: 'replace_history_bill',
+                history_bill_id: 40,
+                history_bill_version: 3,
+                acknowledgement_token: 'ack-token'
+            }],
+            selection_scope: {
+                mode: 'visible-preview',
+                selected_count: 1,
+                history_rewrite_count: 1
+            }
+        };
         await services.confirmImportPreview({
             sessionId: 's2',
             previewUpdates: [{ id: 4 }],

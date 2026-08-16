@@ -2,6 +2,8 @@ import axios from 'axios';
 
 import { DEFAULT_IMPORT_API_TIMEOUT } from '@/consts/api.ts';
 import type {
+    ImportPreviewConfirmCommand,
+    ImportPreviewConfirmPayload,
     ImportConfirmResult,
     ImportSessionSummary,
     ImportSessionVersionConflict
@@ -69,14 +71,8 @@ const importSessionServices = {
         preserveUnpatchedSelection,
         expectedSessionVersion,
         historyRewriteAcknowledgement
-    }: {
-        sessionId: string,
-        previewUpdates?: Record<string, unknown>[],
-        preserveUnpatchedSelection?: boolean,
-        expectedSessionVersion?: number,
-        historyRewriteAcknowledgement?: unknown | null
-    }): ApiResponsePromise<ImportConfirmResult> => {
-        const payload: Record<string, unknown> = {
+    }: ImportPreviewConfirmCommand): ApiResponsePromise<ImportConfirmResult> => {
+        const payload: ImportPreviewConfirmPayload = {
             session_id: sessionId,
             preserve_unpatched_selection: !!preserveUnpatchedSelection,
             preview_updates: previewUpdates || []

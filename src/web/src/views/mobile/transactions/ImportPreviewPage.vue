@@ -149,6 +149,7 @@ import type { Router } from 'framework7/types';
 import { useI18n } from '@/locales/helpers.ts';
 import { hideLoading, showLoading, useI18nUIComponents } from '@/lib/ui/mobile.ts';
 import services from '@/lib/services.ts';
+import type { ImportPreviewPatchPayload } from '@/models/import_preview.ts';
 import {
     type ImportPreviewRecord
 } from '@/views/desktop/transactions/import/importPreview.ts';
@@ -323,13 +324,12 @@ function historyOperation(row: MobileImportPreviewRow): ImportPreviewHistoryRewr
     });
 }
 
-function buildPreviewUpdates(): Record<string, unknown>[] {
+function buildPreviewUpdates(): ImportPreviewPatchPayload[] {
     return rows.value.map(row => ({
         id: row.id,
         selected: row.selected
     }));
 }
-
 function buildHistoryAcknowledgement(): ImportPreviewHistoryRewriteAcknowledgement | null {
     return buildImportPreviewHistoryRewriteAcknowledgement({
         selectedPreviewIds: selectedRows.value.map(row => row.id),

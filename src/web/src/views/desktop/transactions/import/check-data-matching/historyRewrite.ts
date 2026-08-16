@@ -1,4 +1,4 @@
-import type { ImportCheckMatchingDedupTitleOptions, ImportPreviewHistoryRewriteAcknowledgement, ImportPreviewHistoryRewriteAcknowledgementOperation, ImportPreviewSignalReviewView, ImportPreviewSignalState } from './types.ts';
+import type { ImportCheckMatchingDedupTitleOptions, ImportPreviewHistoryRewriteAcknowledgement, ImportPreviewHistoryRewriteAcknowledgementOperation, ImportPreviewHistoryRewriteSelectionScope, ImportPreviewSignalReviewView, ImportPreviewSignalState } from './types.ts';
 
 import { buildSignalTitle, dedupeTextItems, HISTORY_REWRITE_NOTICE, HISTORY_REWRITE_OPERATION_LABELS, normalizePositiveInteger, normalizeTextValue } from './shared.ts';
 import { importPreviewSignalStatusIsUnknown } from './signalStatus.ts';
@@ -120,7 +120,7 @@ export function buildImportPreviewHistoryRewriteAcknowledgement({
 }: {
     selectedPreviewIds: Array<number | string | null | undefined>;
     operations: ImportPreviewHistoryRewriteAcknowledgementOperation[];
-    selectionScope: Record<string, unknown>;
+    selectionScope: ImportPreviewHistoryRewriteSelectionScope;
 }): ImportPreviewHistoryRewriteAcknowledgement | null {
     const normalizedSelectedIds = selectedPreviewIds
         .map(previewId => normalizePositiveInteger(previewId))

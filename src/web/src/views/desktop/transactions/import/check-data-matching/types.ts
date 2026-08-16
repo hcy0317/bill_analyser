@@ -1,4 +1,9 @@
 import type { ImportHistoryBillSummaryPayload, ImportMatchingSourcePayload } from '@/models/import_matching.ts';
+import type {
+    ImportPreviewHistoryRewriteAcknowledgement as ImportPreviewHistoryRewriteAcknowledgementContract,
+    ImportPreviewHistoryRewriteAcknowledgementOperation as ImportPreviewHistoryRewriteAcknowledgementOperationContract,
+    ImportPreviewHistoryRewriteSelectionScope as ImportPreviewHistoryRewriteSelectionScopeContract
+} from '@/models/import_preview.ts';
 import type { ImportPreviewStateSignalFamily } from '@/models/import_preview_state.ts';
 
 export interface ImportCheckMatchingContextState {
@@ -113,21 +118,10 @@ export const IMPORT_PREVIEW_VISIBLE_SIGNAL_FILTERS = [
 
 export type ImportPreviewVisibleSignalFilterValue = typeof IMPORT_PREVIEW_VISIBLE_SIGNAL_FILTERS[number];
 
-export interface ImportPreviewHistoryRewriteAcknowledgementOperation {
-    preview_id: number;
-    operation_id: string;
-    planned_operation: string;
-    history_bill_id: number;
-    history_bill_version: number;
-    acknowledgement_token: string;
-}
-
-export interface ImportPreviewHistoryRewriteAcknowledgement {
-    acknowledged: true;
-    selected_preview_ids: number[];
-    operations: ImportPreviewHistoryRewriteAcknowledgementOperation[];
-    selection_scope: Record<string, unknown>;
-}
+export type ImportPreviewHistoryRewriteAcknowledgementOperation =
+    ImportPreviewHistoryRewriteAcknowledgementOperationContract;
+export type ImportPreviewHistoryRewriteAcknowledgement = ImportPreviewHistoryRewriteAcknowledgementContract;
+export type ImportPreviewHistoryRewriteSelectionScope = ImportPreviewHistoryRewriteSelectionScopeContract;
 
 export interface ImportPreviewSignalState extends ImportCheckMatchingContextState {
     transferStatus?: ImportPreviewRawSignalStatus;
